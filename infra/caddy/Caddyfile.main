@@ -1,0 +1,35 @@
+# Caddy-Konfiguration für heizung.hotel-sonnblick.at (Produktion)
+
+{
+    email hotelsonnblick@gmail.com
+}
+
+heizung.hotel-sonnblick.at {
+    encode zstd gzip
+
+    @api {
+        path /api/* /openapi.json /docs /redoc /health
+    }
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    reverse_proxy web:3000
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/main.access.log {
+            roll_size 50mb
+            roll_keep 20
+        }
+        format json
+    }
+}

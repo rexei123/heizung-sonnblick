@@ -1,0 +1,40 @@
+# Caddy-Konfiguration für test.heizung.hotel-sonnblick.at
+# Let's Encrypt wird automatisch gezogen — DNS muss vorher auf den Test-Server zeigen.
+
+{
+    email hotelsonnblick@gmail.com
+    # Staging-ACME lässt sich bei Bedarf hier einschalten:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+test.heizung.hotel-sonnblick.at {
+    encode zstd gzip
+
+    # API unter /api und /openapi.json
+    @api {
+        path /api/* /openapi.json /docs /redoc /health
+    }
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    # Alles andere → Next.js
+    reverse_proxy web:3000
+
+    # Security-Header
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/test.access.log {
+            roll_size 50mb
+            roll_keep 10
+        }
+        format json
+    }
+}
