@@ -59,6 +59,8 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: always
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}
     ports:
       - "80:80"
       - "443:443"
