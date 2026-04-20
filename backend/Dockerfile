@@ -19,13 +19,18 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY tests ./tests
 
+# Entrypoint (führt beim Start automatisch alembic upgrade head aus)
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Non-Root
 RUN useradd -m -u 1000 app && chown -R app:app /app
 USER app
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "heizung.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,10 @@
+[Unit]
+Description=Heizung Sonnblick Deploy-Pull
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/heizung-sonnblick/infra/deploy/deploy-pull.sh
+# Fehler loggen aber Timer nicht killen — nächster Lauf versucht es neu.
+SuccessExitStatus=0 1

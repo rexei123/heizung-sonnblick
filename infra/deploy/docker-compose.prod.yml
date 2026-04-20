@@ -1,8 +1,15 @@
-# Produktions-Compose
-# Wird in /opt/heizung-sonnblick deployt und vom deploy.sh-Skript gestartet.
+# Produktions-Compose (Pull-basiert)
 #
-# Stage wird über die Env-Variable ${STAGE} gesteuert (test|main).
-# Das passende Caddyfile wird per Bind-Mount eingehängt.
+# Zieht fertige Images aus GHCR statt lokal zu bauen.
+# Kein docker build auf den Prod-Hosts mehr.
+#
+# Gesteuert über .env im selben Verzeichnis:
+#   STAGE=test|main              -> wählt Caddyfile
+#   IMAGE_TAG=develop|main|<sha> -> wählt Image-Version
+#   PUBLIC_HOSTNAME=…            -> Caddy + Frontend
+#   POSTGRES_*                   -> DB-Credentials
+#
+# Aktualisierung: deploy-pull.sh (siehe Nachbardatei).
 
 services:
   db:
@@ -30,9 +37,8 @@ services:
       retries: 5
 
   api:
-    build:
-      context: ../../backend
-      dockerfile: Dockerfile
+    image: ghcr.io/rexei123/heizung-api:${IMAGE_TAG:-develop}
+    pull_policy: always
     restart: always
     env_file: .env
     depends_on:
@@ -45,9 +51,8 @@ services:
       - "8000"
 
   web:
-    build:
-      context: ../../frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/rexei123/heizung-web:${IMAGE_TAG:-develop}
+    pull_policy: always
     restart: always
     environment:
       NEXT_PUBLIC_API_BASE_URL: https://${PUBLIC_HOSTNAME}
