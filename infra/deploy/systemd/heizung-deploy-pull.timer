@@ -1,0 +1,13 @@
+[Unit]
+Description=Heizung Sonnblick Deploy-Pull alle 5 Minuten
+
+[Timer]
+# 2 Min nach Boot zum ersten Mal, danach alle 5 Min.
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=heizung-deploy-pull.service
+# Verpasste Läufe (z. B. während Neustart) sofort nachholen.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
