@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from heizung.config import get_settings
 from heizung.db import Base
 
+# Modelle importieren, damit sie sich in Base.metadata registrieren.
+import heizung.models  # noqa: F401
+
 # Alembic-Konfiguration
 config = context.config
 if config.config_file_name is not None:

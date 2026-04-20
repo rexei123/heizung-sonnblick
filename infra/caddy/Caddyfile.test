@@ -1,5 +1,8 @@
-# Caddy-Konfiguration für test.heizung.hotel-sonnblick.at
-# Let's Encrypt wird automatisch gezogen — DNS muss vorher auf den Test-Server zeigen.
+﻿# Caddy-Konfiguration für Test-Umgebung
+# Hostname wird per Env-Variable PUBLIC_HOSTNAME aus .env gezogen.
+# Übergangsphase: nip.io-Hostname (z. B. 157-90-17-150.nip.io)
+# Produktivbetrieb: test.heizung.hotel-sonnblick.at (sobald DNS gesetzt)
+# Let's Encrypt wird automatisch gezogen.
 
 {
     email hotelsonnblick@gmail.com
@@ -7,7 +10,7 @@
     # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-test.heizung.hotel-sonnblick.at {
+{$PUBLIC_HOSTNAME} {
     encode zstd gzip
 
     # API unter /api und /openapi.json

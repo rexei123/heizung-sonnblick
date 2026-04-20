@@ -11,10 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Python-Dependencies
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e ".[dev]"
+COPY src ./src
+RUN pip install --no-cache-dir ".[dev]"
 
 # Quellcode und Migrationen
-COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY tests ./tests

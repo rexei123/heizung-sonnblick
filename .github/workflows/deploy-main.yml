@@ -1,8 +1,10 @@
-name: Deploy Main
+﻿name: Deploy Main
 
+# Manueller Trigger statt Auto-Push: Production geht nur per expliziten Klick raus.
+# Im GitHub-UI: Actions → Deploy Main → Run workflow.
+# Begründung: GitHub Free unterstützt Required Reviewers für private Repos nicht.
+# Manueller workflow_dispatch erfüllt dieselbe Schutzfunktion gratis.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -12,7 +14,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Environment "main" hat required reviewer — keine Produktion ohne Freigabe.
     environment: main
     steps:
       - uses: actions/checkout@v4
