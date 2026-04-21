@@ -12,4 +12,14 @@ test.describe('Smoke-Tests', () => {
     const main = page.locator('main, [role="main"], body');
     await expect(main.first()).toBeVisible();
   });
+
+  test('GET /api/health liefert 200 und gueltiges JSON', async ({ request }) => {
+    const res = await request.get('/api/health');
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, service: 'web' });
+    expect(typeof body.ts).toBe('string');
+    // ts ist ein parsbarer ISO-Timestamp
+    expect(Number.isNaN(Date.parse(body.ts))).toBe(false);
+  });
 });

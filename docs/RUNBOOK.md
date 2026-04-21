@@ -146,24 +146,82 @@ docker compose logs api 2>&1 | grep -E 'alembic|upgrade'
 
 ---
 
-## 6. Git auf Server (HTTPS + PAT)
+## 6. Git auf Server (read-only, ohne PAT)
 
-Remote-URL-Format (verbindlich, KEINE SSH Deploy Keys):
+Das Repo ist **public**. Serverseitiger `git fetch` braucht **keinen** Token:
 
 ```bash
 cd /opt/heizung-sonnblick
 git config --global --add safe.directory /opt/heizung-sonnblick
-git remote set-url origin https://<PAT>@github.com/rexei123/heizung-sonnblick.git
+git remote set-url origin https://github.com/rexei123/heizung-sonnblick.git
 git fetch origin
 git reset --hard origin/main   # bzw. origin/develop auf Test
 ```
 
-### 6.1 PAT rotieren
+Schreibzugriffe (Push/Merge) passieren **nicht** auf dem Server. Produktiv-Deploy läuft ausschließlich über GHCR-Pull — siehe §5 und §6.1.
 
-1. Alten PAT auf GitHub widerrufen
-2. Neuen PAT mit Scope `repo` generieren
-3. Auf beiden Servern die `set-url`-Zeile oben mit neuem PAT laufen lassen
-4. Auch in `/opt/heizung-sonnblick/infra/deploy/.env` aktualisieren (falls eingetragen für GHCR-Login)
+### 6.1 GHCR-PAT rotieren (getestetes Verfahren, Sprint 1)
+
+**Zweck:** Der Pull-Deploy-Service `heizung-deploy-pull.service` macht `docker compose pull` und liest Credentials aus `/root/.docker/config.json`. Dieser Eintrag muss einen gültigen GHCR-Token enthalten.
+
+**Wichtig:**
+- **Classic PAT** zwingend (Fine-grained PATs unterstützen GHCR nicht).
+- **Scope:** ausschließlich `read:packages`.
+- **Ablauf:** Name-Konvention `heizung-ghcr-pull-YYYY-MM`, Expiration 90 Tage, ins Kalender-Reminder setzen.
+
+**Rotations-Skripte im Repo-Root (`sprint1.3.ps1`, `sprint1.4.ps1`, `sprint1.5.ps1`) bleiben als Vorlage für zukünftige Rotationen erhalten.**
+
+#### Ablauf
+
+1. **Neuen Token erstellen:** https://github.com/settings/tokens → Generate new token (classic) → Scope **nur** `read:packages` → Name `heizung-ghcr-pull-YYYY-MM` → Token kopieren.
+
+2. **Token in PowerShell-Session laden (nie auf Disk, nie in Argv):**
+
+   ```powershell
+   $secure = Read-Host -AsSecureString "Neuen PAT einfuegen"
+   $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+   $env:NEW_PAT = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+   [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+   ```
+
+3. **Rotation auf Test-Server (heizung-test):**
+
+   ```powershell
+   .\sprint1.3.ps1
+   ```
+
+   Tut intern: `docker login ghcr.io -u rexei123 --password-stdin` via SSH+stdin-Pipe, Test-Pull `heizung-api:develop` + `heizung-web:develop`, Verifikation `/root/.docker/config.json`.
+
+4. **Rotation auf Main-Server (heizung-main):**
+
+   ```powershell
+   .\sprint1.4.ps1
+   ```
+
+   Identisch, nur Ziel `100.82.254.20` und Tag `:main`.
+
+5. **Verifikation Deploy-Timer beider Server:**
+
+   ```powershell
+   .\sprint1.5.ps1
+   ```
+
+   Triggert `heizung-deploy-pull.service` manuell und prüft `Result=success`, `ExecMainStatus=0`, Log ohne `Pull fehlgeschlagen`.
+
+6. **Alten Token widerrufen:** https://github.com/settings/tokens → alten Token (vorige Rotation) löschen. Ab jetzt ist die alte Credential überall tot.
+
+7. **Session-Variable aufräumen:**
+
+   ```powershell
+   Remove-Item Env:NEW_PAT
+   ```
+
+#### Troubleshooting
+
+- **`Host key verification failed`** beim ersten SSH auf einen Server nach Server-Neuaufbau → `ssh-keygen -R <IP>` und Skript nochmal starten. Die Skripte haben `StrictHostKeyChecking=accept-new`, akzeptieren also den neuen Key beim zweiten Versuch.
+- **Skript hängt bei `docker login`** → Tailscale nicht verbunden. `tailscale status` in separater Konsole prüfen, ggf. `tailscale up`.
+- **`systemctl is-active` liefert `inactive` / ExitCode 4** → Unit-Name falsch. Korrekter Name ist `heizung-deploy-pull.timer` / `heizung-deploy-pull.service` (nicht `heizung-deploy`).
+- **PAT in `.env` eintragen?** Nein. Der PAT liegt ausschließlich in `/root/.docker/config.json` nach Login. Die `.env` kennt keinen GHCR-Token.
 
 ---
 
@@ -233,6 +291,4 @@ Caddy holt automatisch Let's Encrypt-Zertifikat via HTTP-01.
 ## Anhang: Lessons Learned 2026-04-20
 
 - Hetzner Web Console (noVNC) hat US-Keyboard-Mapping → `|`, `:`, `"` werden zerlegt. Nur für kurze Single-Word-Commands nutzen.
-- Hetzner Cloud Firewall ist für diesen Account NICHT konfiguriert — Blockaden kommen server-seitig (UFW).
-- Rescue-Modus ist nach einem Reboot verbraucht, Server bootet normal zurück.
-- `ssh-heizung`-Key in Hetzner gilt sowohl für Rescue-Auth als auch produktiven SSH-Zugang.
+- Hetzner Cloud Firewall ist für diesen Accoun
