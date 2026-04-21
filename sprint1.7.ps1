@@ -87,7 +87,12 @@ git push -u origin $branch
 Assert-ExitCode "git push" $LASTEXITCODE
 
 Write-Host "--- [7/8] Pull Request ---" -ForegroundColor Yellow
+# gh pr view schreibt "not found" auf stderr -> unter $ErrorActionPreference=Stop
+# wird das zum Skript-Abbruch. Deshalb temporaer auf Continue schalten.
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $prExists = gh pr view $branch --json number --jq .number 2>$null
+$ErrorActionPreference = $prev
 if ($prExists) {
   Write-Host "PR existiert bereits (#$prExists). Ueberspringe PR-Anlage." -ForegroundColor DarkYellow
 } else {
