@@ -1,0 +1,35 @@
+name: Frontend CI
+
+# Spiegel-Workflow zu frontend-ci.yml.
+#
+# Hintergrund: Branch-Protection erwartet die Required Checks
+# "lint-and-build" + "e2e". Der echte frontend-ci.yml hat jedoch
+# Path-Filter (frontend/**), läuft also bei reinen Doku- oder
+# backend-PRs nie an. Required Checks bleiben "pending" -> PR
+# kann nie gemergt werden (Deadlock).
+#
+# Lösung (GitHub-sanktioniert): Zweiter Workflow mit identischem
+# name + Job-Namen, invertierte Path-Filter, sofort-grün. So sieht
+# GitHub immer beide Required Checks als success, egal welche
+# Dateien geändert wurden.
+#
+# Referenz: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks
+
+on:
+  pull_request:
+    paths-ignore:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: No frontend changes — build skipped (reported as success)
+        run: echo "No frontend changes in this PR. Skipping build."
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: No frontend changes — E2E skipped (reported as success)
+        run: echo "No frontend changes in this PR. Skipping E2E."
