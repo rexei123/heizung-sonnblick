@@ -67,7 +67,7 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - ✅ **1.4 Rotation `heizung-main`** via `sprint1.4.ps1` (Test-Pull `:main` ok)
 - ✅ **1.5 Verifikation Deploy-Timer** via `sprint1.5.ps1` (beide Server: `Result=success`)
 - ✅ **1.6 Alter PAT `claude-sprint2-push` gelöscht** auf GitHub
-- 🔄 **1.7 Doku-Update:** RUNBOOK §6.1 neu geschrieben (korrektes GHCR-Verfahren statt alter Git-HTTPS-Version), dieser Status-Eintrag, Feature-Brief `docs/features/2026-04-21-sprint1-pat-rotation.md` — **erster Durchlauf durch Branch-Protection nach Sprint 0**
+- 🔄 **1.7 Doku-Update + CI-Deadlock-Fix:** RUNBOOK §6.1 neu geschrieben, dieser Status-Eintrag, Feature-Brief `docs/features/2026-04-21-sprint1-pat-rotation.md`, neuer Spiegel-Workflow `.github/workflows/frontend-ci-skip.yml` gegen Required-Check-Deadlock — **erster Durchlauf durch Branch-Protection nach Sprint 0**
 
 **Lessons Learned:**
 - Fine-grained PATs unterstützen GHCR nicht → Classic PAT zwingend, Scope minimal halten.
@@ -75,6 +75,7 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - PS 5.1 auf .NET Framework 4.x hat kein `ProcessStartInfo.StandardInputEncoding` → UTF-8-Bytes direkt auf `StandardInput.BaseStream` schreiben.
 - Tailscale-Disconnect lässt SSH mit `BatchMode=yes` wortlos hängen → vor Rotation Tailscale-Status prüfen.
 - Unit-Name auf Servern ist `heizung-deploy-pull`, nicht `heizung-deploy`.
+- **Branch-Protection + Path-Filter = Deadlock:** Required Status Checks (`lint-and-build`, `e2e`) erwarten Reports, die bei `paths: frontend/**` nie kommen, wenn der PR außerhalb von `frontend/` spielt. Lösung: Spiegel-Workflow mit gleichem `name`/Job-Namen und `paths-ignore` meldet Success für alle Nicht-Frontend-PRs. Bei Frontend-PRs läuft weiterhin die echte CI.
 
 ---
 
