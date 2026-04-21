@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-21, laufender Sprint 0 (Baseline). Letzte Aktualisierung bei Sprint 0.5.
+Stand: 2026-04-21. Sprint 0 (Baseline) und Sprint 1 (GHCR-PAT-Rotation) abgeschlossen.
 
 ---
 
@@ -41,7 +41,7 @@ Stand: 2026-04-21, laufender Sprint 0 (Baseline). Letzte Aktualisierung bei Spri
 
 ---
 
-## 2a. Sprint 0 Baseline (2026-04-21, laufend)
+## 2a. Sprint 0 Baseline (2026-04-21, abgeschlossen)
 
 Ziel: Arbeits-Framework einführen und technische Blocker für den neuen 5-Phasen-Workflow beseitigen. Branch: `chore/sprint0-baseline`.
 
@@ -49,21 +49,40 @@ Ziel: Arbeits-Framework einführen und technische Blocker für den neuen 5-Phase
 - ✅ **0.2 Branch-Sync:** `develop` auf Stand `main` gezogen (content-equal, Force-Push)
 - ✅ **0.3 Repo-Cleanup:** Rescue-Leftovers entfernt, `.gitignore` gehärtet — Commit `89457a2`
 - ✅ **0.4 Playwright E2E:** `@playwright/test` 1.48.2, `playwright.config.ts`, 2 Smoke-Tests, neuer CI-Job `e2e` — Commit `d1a36e6`
-- 🔄 **0.5 STATUS-Update:** läuft (dieser Commit)
-- ⏳ **0.6 Merge & Tag:** PR `chore/sprint0-baseline → main`, CI grün, Deploy-Test Staging, Tag `v0.1.0-baseline`, Branch-Protection auf `main`
+- ✅ **0.5 STATUS-Update + Framework:** Commit `44d8110`
+- ✅ **0.6 Merge & Tag:** PR `chore/sprint0-baseline → main`, CI grün, Merge, Tag `v0.1.0-baseline`, Branch-Protection auf `main` + `develop` aktiv (klassische Regeln, Repo public)
 
 **Parallel eingeführt:**
 - `docs/SPEC-FRAMEWORK.md` — verbindliche Regeln (Code, Security, DoD, Doku-Pflicht)
 - `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit expliziten User-Gates
-- `docs/features/2026-04-21-sprint0-baseline.md` — Feature-Brief dieses Sprints
+- `docs/features/2026-04-21-sprint0-baseline.md` — Feature-Brief Sprint 0
+
+## 2b. Sprint 1 GHCR-PAT-Rotation (2026-04-21, abgeschlossen)
+
+Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzierbar machen. Branch: `chore/sprint1-pat-rotation`.
+
+- ✅ **1.1 Plan & Freigabe**
+- ✅ **1.2 Neuen Classic PAT erstellt** (Scope nur `read:packages`; Fine-grained nicht möglich, da GHCR kein Packages-Scope für Fine-grained anbietet)
+- ✅ **1.3 Rotation `heizung-test`** via `sprint1.3.ps1` (docker-login via SSH+stdin, Test-Pull `:develop` ok)
+- ✅ **1.4 Rotation `heizung-main`** via `sprint1.4.ps1` (Test-Pull `:main` ok)
+- ✅ **1.5 Verifikation Deploy-Timer** via `sprint1.5.ps1` (beide Server: `Result=success`)
+- ✅ **1.6 Alter PAT `claude-sprint2-push` gelöscht** auf GitHub
+- 🔄 **1.7 Doku-Update:** RUNBOOK §6.1 neu geschrieben (korrektes GHCR-Verfahren statt alter Git-HTTPS-Version), dieser Status-Eintrag, Feature-Brief `docs/features/2026-04-21-sprint1-pat-rotation.md` — **erster Durchlauf durch Branch-Protection nach Sprint 0**
+
+**Lessons Learned:**
+- Fine-grained PATs unterstützen GHCR nicht → Classic PAT zwingend, Scope minimal halten.
+- PS 5.1 hat kein `ConvertFrom-SecureString -AsPlainText` → BSTR-Marshalling für Session-Env-Variable.
+- PS 5.1 auf .NET Framework 4.x hat kein `ProcessStartInfo.StandardInputEncoding` → UTF-8-Bytes direkt auf `StandardInput.BaseStream` schreiben.
+- Tailscale-Disconnect lässt SSH mit `BatchMode=yes` wortlos hängen → vor Rotation Tailscale-Status prüfen.
+- Unit-Name auf Servern ist `heizung-deploy-pull`, nicht `heizung-deploy`.
 
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
-- ⚠️ **PAT-Rotation nötig:** Der GitHub-PAT wurde heute im Chat exponiert. Muss neu generiert und auf beiden Servern + in GHA-Secrets aktualisiert werden. Der alte Token ist weiterhin gültig, bis er manuell widerrufen wird.
-- ⚠️ **UFW auf Main deaktiviert:** Musste während der Rescue-Aktion deaktiviert werden, um Lockout zu beheben. Neu aktivieren mit RUNBOOK §8 (Reihenfolge zwingend: `ufw allow in on tailscale0` + `ufw allow 80/443` VOR `ufw enable`).
+- ✅ **PAT-Rotation erledigt** (Sprint 1, 2026-04-21): Neuer Classic PAT mit Scope `read:packages`, alter Token `claude-sprint2-push` widerrufen, Verfahren in RUNBOOK §6.1 dokumentiert.
+- ⚠️ **UFW auf Main deaktiviert:** Musste während der Rescue-Aktion deaktiviert werden, um Lockout zu beheben. Neu aktivieren mit RUNBOOK §8 (Reihenfolge zwingend: `ufw allow in on tailscale0` + `ufw allow 80/443` VOR `ufw enable`). — Sprint 2.
 
 ### 3.2 Operations
 - ℹ️ **`web`-Container zeigt `(unhealthy)`** trotz funktionierender App (auf Test und Main). Healthcheck im Dockerfile oder docker-compose.yml muss überprüft werden. Kosmetisch, kein Funktionsproblem.
@@ -109,15 +128,14 @@ Ziel: Arbeits-Framework einführen und technische Blocker für den neuen 5-Phase
 
 ## 6. Nächste Schritte
 
-**Unmittelbar (Abschluss Sprint 0):**
-1. Sprint 0.6 — PR, CI-Grün, Staging-Smoke, Merge auf `main`, Tag `v0.1.0-baseline`, GitHub-Branch-Protection auf `main` aktivieren (User-Aktion)
+**Unmittelbar (Abschluss Sprint 1):**
+1. Sprint 1.7 — PR `chore/sprint1-pat-rotation → main`, CI grün, Merge (erster echter Durchlauf durch Branch-Protection)
 
-**Sprint 3 (inhaltlich, nach Abschluss Sprint 0):**
-1. **PAT rotieren** — Sicherheitshygiene, 10 Min Arbeit
+**Danach der Reihe nach:**
+1. **Healthcheck für web-Container fixen** — Next.js liefert `/api/health` oder bauen wir es
 2. **UFW auf Main re-aktivieren** nach RUNBOOK §8
-3. **Healthcheck für web-Container fixen** — Next.js liefert `/api/health` oder bauen wir es
-4. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
-5. **Regel-Engine** (8 Kernregeln) implementieren — startet mit Frostschutz + belegungsabhängige Temperatur
+3. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
+4. **Regel-Engine** (8 Kernregeln) implementieren — startet mit Frostschutz + belegungsabhängige Temperatur
 
 ---
 
