@@ -46,3 +46,11 @@ logs/
 # Caddy state (nur in Entwicklung)
 infra/caddy/data/
 infra/caddy/config/
+
+# SSH public keys (gehoeren nicht ins Repo)
+*.pub
+
+
+# Sprint-0 Einmal-Scripts
+sprint0*.ps1
+
