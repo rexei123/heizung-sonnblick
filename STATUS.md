@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-20, Ende Sprint 2. Erstellt beim Session-Wechsel.
+Stand: 2026-04-21, laufender Sprint 0 (Baseline). Letzte Aktualisierung bei Sprint 0.5.
 
 ---
 
@@ -41,6 +41,24 @@ Stand: 2026-04-20, Ende Sprint 2. Erstellt beim Session-Wechsel.
 
 ---
 
+## 2a. Sprint 0 Baseline (2026-04-21, laufend)
+
+Ziel: Arbeits-Framework einführen und technische Blocker für den neuen 5-Phasen-Workflow beseitigen. Branch: `chore/sprint0-baseline`.
+
+- ✅ **0.1 Line-Endings:** `.gitattributes` mit LF/CRLF-Regeln eingeführt — Commit `71e54b0`
+- ✅ **0.2 Branch-Sync:** `develop` auf Stand `main` gezogen (content-equal, Force-Push)
+- ✅ **0.3 Repo-Cleanup:** Rescue-Leftovers entfernt, `.gitignore` gehärtet — Commit `89457a2`
+- ✅ **0.4 Playwright E2E:** `@playwright/test` 1.48.2, `playwright.config.ts`, 2 Smoke-Tests, neuer CI-Job `e2e` — Commit `d1a36e6`
+- 🔄 **0.5 STATUS-Update:** läuft (dieser Commit)
+- ⏳ **0.6 Merge & Tag:** PR `chore/sprint0-baseline → main`, CI grün, Deploy-Test Staging, Tag `v0.1.0-baseline`, Branch-Protection auf `main`
+
+**Parallel eingeführt:**
+- `docs/SPEC-FRAMEWORK.md` — verbindliche Regeln (Code, Security, DoD, Doku-Pflicht)
+- `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit expliziten User-Gates
+- `docs/features/2026-04-21-sprint0-baseline.md` — Feature-Brief dieses Sprints
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -52,8 +70,8 @@ Stand: 2026-04-20, Ende Sprint 2. Erstellt beim Session-Wechsel.
 - ℹ️ **DNS-Umschaltung:** Externer IT muss `test.heizung.hotel-sonnblick.at` → `157.90.17.150` und `heizung.hotel-sonnblick.at` → `157.90.30.116` setzen. Dann auf Servern nur `PUBLIC_HOSTNAME` in `/opt/heizung-sonnblick/infra/deploy/.env` ändern und `docker compose up -d caddy` (Let's Encrypt holt sich Zertifikat automatisch).
 
 ### 3.3 Cleanup
-- 🧹 Zwei Dateien im Working Tree, die entfernt werden sollten: `fix-ssh.sh`, `fix2.sh` (Reste vom Rescue-Debakel). `Remove-Item C:\Users\User\dev\heizung-sonnblick\fix-ssh.sh, C:\Users\User\dev\heizung-sonnblick\fix2.sh -Force`
-- 🧹 Cowork-Workspace sollte dauerhaft von Google Drive (`G:\Meine Ablage\...`) auf `C:\Users\User\dev\heizung-sonnblick` umgestellt werden. Drive-Sync ist unzuverlässig und sorgte heute mehrfach für Probleme.
+- ✅ Rescue-Leftovers entfernt (`fix-ssh.sh`, `fix2.sh`, `setup-ssh.sh`, `erich.pub`) — Sprint 0.3, Commit `89457a2`
+- ✅ Cowork-Workspace auf lokales Repo `C:\Users\User\dev\heizung-sonnblick` umgestellt (Google-Drive-Sync-Problematik eliminiert)
 
 ---
 
@@ -65,10 +83,12 @@ Stand: 2026-04-20, Ende Sprint 2. Erstellt beim Session-Wechsel.
 - Seed-Daten: 45 Zimmer + Raumtypen eingespielt
 - Unit-Tests grün
 
-### Frontend (Next.js + Tailwind + shadcn/ui)
+### Frontend (Next.js 14.2 App Router + Tailwind)
 - Grundgerüst mit Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
 - AppShell mit 200 px Sidebar
 - Caddy-Reverse-Proxy konfiguriert
+- **Hinweis:** shadcn/ui ist derzeit **nicht** installiert. Runtime-Deps sind `next`, `react`, `react-dom`, `clsx`, `tailwind-merge`. Einführung von shadcn/ui wird separat entschieden, wenn erste Komponenten es brauchen.
+- Playwright E2E eingerichtet (Smoke-Tests) + CI-Job `e2e` in `.github/workflows/frontend-ci.yml`
 
 ### Infrastruktur
 - Docker Compose: api, web, postgres, redis, caddy (5 Container pro Umgebung)
@@ -87,10 +107,12 @@ Stand: 2026-04-20, Ende Sprint 2. Erstellt beim Session-Wechsel.
 
 ---
 
-## 6. Nächste Schritte (Vorschlag Sprint 3)
+## 6. Nächste Schritte
 
-Prioritäten in vorgeschlagener Reihenfolge:
+**Unmittelbar (Abschluss Sprint 0):**
+1. Sprint 0.6 — PR, CI-Grün, Staging-Smoke, Merge auf `main`, Tag `v0.1.0-baseline`, GitHub-Branch-Protection auf `main` aktivieren (User-Aktion)
 
+**Sprint 3 (inhaltlich, nach Abschluss Sprint 0):**
 1. **PAT rotieren** — Sicherheitshygiene, 10 Min Arbeit
 2. **UFW auf Main re-aktivieren** nach RUNBOOK §8
 3. **Healthcheck für web-Container fixen** — Next.js liefert `/api/health` oder bauen wir es
