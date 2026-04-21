@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-21. Sprint 0 (Baseline) und Sprint 1 (GHCR-PAT-Rotation) abgeschlossen.
+Stand: 2026-04-21 (Abend). Sprint 0 (Baseline), Sprint 1 (GHCR-PAT-Rotation) und Sprint 2 (Web-Healthcheck) auf Main abgeschlossen. Test-Verifikation steht für morgen früh an.
 
 ---
 
@@ -67,7 +67,8 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - ✅ **1.4 Rotation `heizung-main`** via `sprint1.4.ps1` (Test-Pull `:main` ok)
 - ✅ **1.5 Verifikation Deploy-Timer** via `sprint1.5.ps1` (beide Server: `Result=success`)
 - ✅ **1.6 Alter PAT `claude-sprint2-push` gelöscht** auf GitHub
-- 🔄 **1.7 Doku-Update + CI-Deadlock-Fix:** RUNBOOK §6.1 neu geschrieben, dieser Status-Eintrag, Feature-Brief `docs/features/2026-04-21-sprint1-pat-rotation.md`, neuer Spiegel-Workflow `.github/workflows/frontend-ci-skip.yml` gegen Required-Check-Deadlock — **erster Durchlauf durch Branch-Protection nach Sprint 0**
+- ✅ **1.7 Doku-Update + CI-Deadlock-Fix:** RUNBOOK §6.1 neu geschrieben, dieser Status-Eintrag, Feature-Brief `docs/features/2026-04-21-sprint1-pat-rotation.md`, neuer Spiegel-Workflow `.github/workflows/frontend-ci-skip.yml` gegen Required-Check-Deadlock — **erster Durchlauf durch Branch-Protection nach Sprint 0** (PR #2)
+- ✅ **1.8 Abschluss:** Tag `v0.1.1-pat-rotation` gesetzt, Session-Variable `NEW_PAT` entfernt
 
 **Lessons Learned:**
 - Fine-grained PATs unterstützen GHCR nicht → Classic PAT zwingend, Scope minimal halten.
@@ -77,16 +78,33 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - Unit-Name auf Servern ist `heizung-deploy-pull`, nicht `heizung-deploy`.
 - **Branch-Protection + Path-Filter = Deadlock:** Required Status Checks (`lint-and-build`, `e2e`) erwarten Reports, die bei `paths: frontend/**` nie kommen, wenn der PR außerhalb von `frontend/` spielt. Lösung: Spiegel-Workflow mit gleichem `name`/Job-Namen und `paths-ignore` meldet Success für alle Nicht-Frontend-PRs. Bei Frontend-PRs läuft weiterhin die echte CI.
 
+## 2c. Sprint 2 Web-Container-Healthcheck (2026-04-21, Main abgeschlossen, Test offen)
+
+Ziel: `docker compose ps` meldet `web` als `healthy` auf beiden Servern. Branch: `fix/sprint2-web-healthcheck`.
+
+- ✅ **2.1 Feature-Brief** `docs/features/2026-04-21-sprint2-web-healthcheck.md`
+- ✅ **2.2 `/api/health`-Route** angelegt (`frontend/src/app/api/health/route.ts`, `force-static`, ohne DB/API-Abhängigkeit)
+- ✅ **2.3 Dockerfile-HEALTHCHECK** von `wget --spider` auf `node -e fetch` umgestellt (Node 20 natives `fetch`, keine externen Binaries, `start-period` 30s → 15s)
+- ✅ **2.4 Playwright-Smoke** für `/api/health` (Status 200, JSON-Schema) — lokal grün, CI grün
+- ✅ **2.5 PR #3 durch Branch-Protection gemergt** — Main deployed, verifiziert: `deploy-web-1 Up X minutes (healthy)`
+- ✅ **Sync-PR #4 main → develop gemergt** — `:develop`-Image wird neu gebaut, Test-Server zieht binnen 5 Min
+- ⏳ **Test-Verifikation:** morgen früh — Build + Timer-Pull + Container-Recreate braucht Zeit
+
+**Lessons Learned:**
+- Default-SSH-Key `id_ed25519` ist nicht derselbe wie `id_ed25519_heizung`. Für die Hotel-Server immer explizit `-i $HOME\.ssh\id_ed25519_heizung` oder via `~/.ssh/config` mappen (siehe RUNBOOK §2).
+- `docker compose ps` mit vorgeschaltetem `cd` liefert leere Tabelle, wenn der Compose-Kontext nicht greift — zur Sicherheit zusätzlich `docker ps -a` prüfen.
+- Branch-Modell: main fließt nach develop, nicht umgekehrt. Nach Merge auf main immer zeitnah Sync-PR main → develop, sonst hängt Test hinter Produktiv.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
 - ✅ **PAT-Rotation erledigt** (Sprint 1, 2026-04-21): Neuer Classic PAT mit Scope `read:packages`, alter Token `claude-sprint2-push` widerrufen, Verfahren in RUNBOOK §6.1 dokumentiert.
-- ⚠️ **UFW auf Main deaktiviert:** Musste während der Rescue-Aktion deaktiviert werden, um Lockout zu beheben. Neu aktivieren mit RUNBOOK §8 (Reihenfolge zwingend: `ufw allow in on tailscale0` + `ufw allow 80/443` VOR `ufw enable`). — Sprint 2.
+- ⚠️ **UFW auf Main deaktiviert:** Musste während der Rescue-Aktion deaktiviert werden, um Lockout zu beheben. Neu aktivieren mit RUNBOOK §8 (Reihenfolge zwingend: `ufw allow in on tailscale0` + `ufw allow 80/443` VOR `ufw enable`). — Sprint 3.
 
 ### 3.2 Operations
-- ℹ️ **`web`-Container zeigt `(unhealthy)`** trotz funktionierender App (auf Test und Main). Healthcheck im Dockerfile oder docker-compose.yml muss überprüft werden. Kosmetisch, kein Funktionsproblem.
+- ✅ **Web-Container-Healthcheck gefixt** (Sprint 2, 2026-04-21): Dedizierte `/api/health`-Route + `node -e fetch`-HEALTHCHECK. Main verifiziert healthy. Test-Verifikation steht morgen früh an (Sprint 2.6).
 - ℹ️ **DNS-Umschaltung:** Externer IT muss `test.heizung.hotel-sonnblick.at` → `157.90.17.150` und `heizung.hotel-sonnblick.at` → `157.90.30.116` setzen. Dann auf Servern nur `PUBLIC_HOSTNAME` in `/opt/heizung-sonnblick/infra/deploy/.env` ändern und `docker compose up -d caddy` (Let's Encrypt holt sich Zertifikat automatisch).
 
 ### 3.3 Cleanup
@@ -129,14 +147,19 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 
 ## 6. Nächste Schritte
 
-**Unmittelbar (Abschluss Sprint 1):**
-1. Sprint 1.7 — PR `chore/sprint1-pat-rotation → main`, CI grün, Merge (erster echter Durchlauf durch Branch-Protection)
+**Unmittelbar (morgen früh, Sprint 2.6):**
+1. `docker ps` auf heizung-test → `web=healthy` verifizieren
+2. Tag `v0.1.2-web-healthcheck` setzen + pushen
+3. Sprint 2 final abschließen
 
 **Danach der Reihe nach:**
-1. **Healthcheck für web-Container fixen** — Next.js liefert `/api/health` oder bauen wir es
-2. **UFW auf Main re-aktivieren** nach RUNBOOK §8
-3. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
-4. **Regel-Engine** (8 Kernregeln) implementieren — startet mit Frostschutz + belegungsabhängige Temperatur
+1. **Sprint 3 — UFW auf Main re-aktivieren** nach RUNBOOK §8
+2. **Sprint 4 — LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
+3. **Sprint 5 — Regel-Engine** (8 Kernregeln) implementieren — startet mit Frostschutz + belegungsabhängige Temperatur
+
+**Aufzuräumen bei Gelegenheit:**
+- CI-Housekeeping: Skip-Mirror-Workflow lässt bei gemischten PRs einen zusätzlichen Grün-Check mitlaufen — redundant, aber nicht schädlich. Fix wäre eine Conditional-Skip-Logik im echten Workflow statt Parallel-Mirror.
+- `~/.ssh/config`-Eintrag für `heizung-test`/`heizung-main` mit `IdentityFile id_ed25519_heizung`, damit `-i`-Flag entfällt.
 
 ---
 
