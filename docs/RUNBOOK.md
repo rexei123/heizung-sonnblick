@@ -1,6 +1,6 @@
 # RUNBOOK — Heizungssteuerung Hotel Sonnblick
 
-Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-20.
+Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-22.
 
 **Regel Nr. 1:** Bei Rescue-Einsatz IMMER den kompletten Fix-Block aus §3 in einem Shot ausführen. Niemals inkrementell fixen.
 
@@ -237,22 +237,78 @@ MagicDNS ist aktiv — Hostnames `heizung-test`, `heizung-main`, `work02` sind d
 
 ---
 
-## 8. UFW-Hardening (Pflicht-Reihenfolge)
+## 8. UFW-Hardening
 
-**WICHTIG:** Reihenfolge zwingend. Falsche Reihenfolge → Lockout → Rescue.
+**Stand 2026-04-22:** UFW aktiv auf `heizung-main` und `heizung-test` mit identischem Regelwerk:
+
+```
+22/tcp (OpenSSH)      ALLOW IN   Anywhere       # Fallback für Tailscale-Ausfall (Entscheidung B)
+80/tcp                ALLOW IN   Anywhere       # Caddy HTTP (ACME)
+443/tcp               ALLOW IN   Anywhere       # Caddy HTTPS
+Anywhere on tailscale0 ALLOW IN  Anywhere       # Tailscale-Interface
+# + v6-Pendants
+```
+
+**Entscheidung B (2026-04-22, Sprint 3):** Port 22 bleibt public offen als Fallback. Absicherung: `PermitRootLogin prohibit-password` + Schlüssel `id_ed25519_heizung`. Kein Passwort-Login möglich.
+
+### 8.1 Re-Aktivierungs-Reihenfolge (Pflicht)
+
+**WICHTIG:** Reihenfolge zwingend. Falsche Reihenfolge → Lockout → Rescue-Mode (§3). **Immer mit `at`-Watchdog** aus 8.2 arbeiten, sobald der `ufw --force enable`-Schritt beteiligt ist.
 
 ```bash
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow in on tailscale0           # 1. Tailscale zuerst
-ufw allow 80/tcp                     # 2. Caddy HTTP
-ufw allow 443/tcp                    # 3. Caddy HTTPS
-# Port 22 bewusst NICHT öffentlich — SSH nur über Tailscale
-ufw --force enable                   # 4. Aktivieren
+ufw allow 22/tcp                     # 2. SSH-Fallback (Entscheidung B)
+ufw allow 80/tcp                     # 3. Caddy HTTP
+ufw allow 443/tcp                    # 4. Caddy HTTPS
+ufw --force enable                   # 5. Aktivieren
 ufw status verbose                   # Kontrolle
 ```
 
-Falls SSH über Public-IP als Fallback behalten werden soll: zusätzlich `ufw allow 22/tcp` VOR `ufw enable`.
+### 8.2 `at`-Watchdog bei UFW-Enable über Remote-SSH
+
+Vor jedem `ufw --force enable` setzen. Bei Fehlkonfiguration wird UFW nach 5 Min automatisch deaktiviert, bevor die Session hängen bleibt.
+
+```bash
+# Watchdog setzen
+echo 'ufw --force disable' | at now + 5 minutes
+atq                                  # Kontrolle: Job-ID registriert
+
+# … UFW-Regeln setzen + enable …
+
+# Watchdog wieder entfernen nach erfolgreicher Verifikation
+for j in $(atq | awk '{print $1}'); do atrm $j; done
+atq                                  # sollte leer sein
+```
+
+Falls UFW zwischendurch hängt und der Watchdog zuschlägt: Verbindung bleibt, UFW ist dann `inactive`. Regeln prüfen, korrigieren, neuen Watchdog setzen, erneut aktivieren.
+
+### 8.3 Verifikation nach Enable
+
+```powershell
+# 1. SSH via Tailscale (Primär-Pfad)
+ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-main "uptime"
+
+# 2. Caddy HTTPS öffentlich erreichbar
+(Invoke-WebRequest https://heizung.<domain>/ -Method Head -UseBasicParsing).StatusCode   # erwartet 200
+
+# 3. Port 22 public (Fallback-Zugang)
+Test-NetConnection <public-ip> -Port 22   # erwartet TcpTestSucceeded = True
+```
+
+### 8.4 Rein additive Änderungen (ohne Watchdog)
+
+Für `ufw allow …`-Ergänzungen oder `ufw delete …` an **bereits aktiven** Regelwerken ohne `enable`-Toggle ist **kein** Watchdog nötig — kein Cutoff-Risiko:
+
+```bash
+ufw allow in on tailscale0           # Beispiel: fehlende Regel nachziehen
+ufw status verbose
+```
+
+### 8.5 SSH-Key-Pfad-Hinweis
+
+Der Default-Key `~/.ssh/id_ed25519` funktioniert **nicht** mit den Heizungs-Servern. Immer explizit `-i $HOME\.ssh\id_ed25519_heizung` angeben (oder `~/.ssh/config`-Eintrag setzen).
 
 ---
 
