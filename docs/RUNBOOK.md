@@ -10,8 +10,8 @@ Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-22.
 
 | Rolle | Hetzner | Public-IP / Hostname | Tailscale | GHCR-Tag | Branch |
 |---|---|---|---|---|---|
-| Test | CPX22 | `157.90.17.150` / `157-90-17-150.nip.io` | `heizung-test` = `100.82.226.57` | `develop` | `develop` |
-| Main | CPX32 | `157.90.30.116` / `157-90-30-116.nip.io` | `heizung-main` = `100.82.254.20` | `main` | `main` |
+| Test | CPX22 | `157.90.17.150` / `heizung-test.hoteltec.at` | `heizung-test` = `100.82.226.57` | `develop` | `develop` |
+| Main | CPX32 | `157.90.30.116` / `heizung.hoteltec.at` | `heizung-main` = `100.82.254.20` | `main` | `main` |
 | Entwickler-Client | — | — | `work02` = `100.78.38.29` | — | — |
 
 **SSH-Key lokal:** `$HOME\.ssh\id_ed25519_heizung` (Pubkey in Hetzner als `ssh-heizung` registriert, gilt auch im Rescue-Modus).
@@ -312,24 +312,73 @@ Der Default-Key `~/.ssh/id_ed25519` funktioniert **nicht** mit den Heizungs-Serv
 
 ---
 
-## 9. DNS-Umschaltung auf echte Domain
+## 9. Domain & DNS (hoteltec.at)
 
-Wenn externer IT die DNS-Records gesetzt hat:
+**Stand 2026-04-22 (Sprint 4):** Produktiv unter `hoteltec.at`, LE-Zertifikate laufen.
 
-- Test: `test.heizung.hotel-sonnblick.at` → `157.90.17.150`
-- Main: `heizung.hotel-sonnblick.at` → `157.90.30.116`
+| Rolle | Hostname | IP |
+|---|---|---|
+| Main | `heizung.hoteltec.at` | `157.90.30.116` |
+| Test | `heizung-test.hoteltec.at` | `157.90.17.150` |
 
-Auf beiden Servern:
+**DNS-Hosting:** Hetzner Online / konsoleH (NICHT Hetzner Cloud DNS).
+Admin-Konsole: https://console.hetzner.com/ → Domain `hoteltec.at` → DNS-Records.
+Nameserver: `ns1.your-server.de`, `ns.second-ns.com`, `ns3.second-ns.de`.
+
+A-Records (TTL 300):
+
+| Name | Wert |
+|---|---|
+| `heizung` | `157.90.30.116` |
+| `heizung-test` | `157.90.17.150` |
+
+### 9.1 Neue Subdomain hinzufügen / Server umschalten
+
+1. **DNS setzen** in konsoleH (Link oben), A-Record anlegen, TTL 300.
+2. **Propagation verifizieren** (lokal):
+   ```powershell
+   nslookup neue-subdomain.hoteltec.at
+   ```
+   Erst wenn die richtige IP kommt, weiter — sonst Let's-Encrypt-Rate-Limit-Risiko.
+3. **Port 80 offen?** (für ACME HTTP-01):
+   ```bash
+   ufw status | grep 80
+   ```
+4. **`.env` auf dem Server anpassen:**
+   ```bash
+   cd /opt/heizung-sonnblick/infra/deploy
+   nano .env                          # PUBLIC_HOSTNAME=...
+   docker compose -f docker-compose.prod.yml up -d caddy
+   docker compose -f docker-compose.prod.yml logs -f caddy
+   ```
+   Warten auf `certificate obtained successfully` (typisch 10–30 Sek).
+5. **Verifikation (lokal):**
+   ```powershell
+   (Invoke-WebRequest https://neue-subdomain.hoteltec.at/ -Method Head -UseBasicParsing).StatusCode
+   # erwartet 200
+   ```
+
+### 9.2 Rollback bei Cert-Fehler
 
 ```bash
 cd /opt/heizung-sonnblick/infra/deploy
-# .env bearbeiten: PUBLIC_HOSTNAME=test.heizung.hotel-sonnblick.at (bzw. heizung...)
+# .env: alten PUBLIC_HOSTNAME wiederherstellen
 nano .env
-docker compose up -d caddy
-docker compose logs -f caddy         # auf „certificate obtained" warten
+docker compose -f docker-compose.prod.yml up -d caddy
 ```
 
-Caddy holt automatisch Let's Encrypt-Zertifikat via HTTP-01.
+Das `caddy_data`-Volume ist persistent — das alte Zertifikat wird reused, kein erneuter ACME-Call nötig.
+
+### 9.3 Frontend-API-Aufrufe
+
+Frontend ruft **immer relativ** (`/api/...`), nie absolut. Grund: `NEXT_PUBLIC_*`-Env-Vars werden zur Build-Zeit in den Client-Bundle gebacken — ein Hostname-Wechsel würde sonst einen Rebuild erfordern. Caddy routet `/api/*` intern an den FastAPI-Container.
+
+### 9.4 Let's-Encrypt-Rate-Limits (Merkposten)
+
+- 5 fehlgeschlagene Validierungen/h pro Account
+- 50 Certs/Woche pro eTLD+1 (hier `hoteltec.at`)
+
+Bei wiederholten Versuchen ohne propagiertes DNS → rate-limited. Deshalb: **immer erst `nslookup`, dann Caddy starten.**
 
 ---
 

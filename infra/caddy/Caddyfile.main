@@ -1,7 +1,6 @@
 ﻿# Caddy-Konfiguration für Main-Umgebung (Produktion)
 # Hostname wird per Env-Variable PUBLIC_HOSTNAME aus .env gezogen.
-# Übergangsphase: nip.io-Hostname (z. B. 157-90-30-116.nip.io)
-# Produktivbetrieb: heizung.hotel-sonnblick.at (sobald DNS gesetzt)
+# Produktivbetrieb: heizung.hoteltec.at (seit Sprint 4, 2026-04-22)
 
 {
     email hotelsonnblick@gmail.com
