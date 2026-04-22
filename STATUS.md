@@ -1,27 +1,29 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-22. Sprint 0 (Baseline), Sprint 1 (GHCR-PAT-Rotation), Sprint 2 (Web-Healthcheck) und Sprint 3 (UFW-Reaktivierung) abgeschlossen.
+Stand: 2026-04-22. Sprint 0 (Baseline), Sprint 1 (GHCR-PAT-Rotation), Sprint 2 (Web-Healthcheck), Sprint 3 (UFW-Reaktivierung) und Sprint 4 (Domain-Umschaltung hoteltec.at) abgeschlossen.
 
 ---
 
 ## 1. Was läuft produktiv
 
 ### Test-System
-- **URL:** https://157-90-17-150.nip.io
+- **URL:** https://heizung-test.hoteltec.at
 - **Hetzner:** CPX22, `157.90.17.150`
 - **Tailscale:** `heizung-test` = `100.82.226.57`
 - **Branch:** `develop`, **GHCR-Tag:** `develop`
 - **Deploy-Mode:** GHCR Pull-Deploy via systemd-Timer, 5-Min-Intervall
 - **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
 - **Status:** ✅ Läuft, alle Container up, `web` (healthy)
 
 ### Main-System
-- **URL:** https://157-90-30-116.nip.io
+- **URL:** https://heizung.hoteltec.at
 - **Hetzner:** CPX32, `157.90.30.116`
 - **Tailscale:** `heizung-main` = `100.82.254.20`
 - **Branch:** `main`, **GHCR-Tag:** `main`
 - **Deploy-Mode:** Identisch zu Test (Pull-Deploy + Auto-Migration)
 - **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
 - **Status:** ✅ Läuft, alle Container up, `web` (healthy), Auto-Migration erfolgreich gelaufen
 
 ### Entwicklungs-Client
@@ -124,6 +126,32 @@ Ziel: UFW auf `heizung-main` wieder aktivieren, Test-Server konsistent bringen. 
 - Bei rein additiven Änderungen (`ufw allow …` ohne `enable`-Toggle) ist Watchdog verzichtbar.
 - `systemctl is-active tailscaled` kann `inactive` liefern, obwohl Tailscale läuft — `tailscale status` ist die verlässliche Quelle.
 
+## 2f. Sprint 4 Domain-Umschaltung auf hoteltec.at (2026-04-22, abgeschlossen)
+
+Ziel: nip.io-Übergangshostnamen durch eigene Hetzner-Domain ersetzen. Branch: `feat/sprint4-domain-hoteltec`.
+
+- ✅ **4.1 Feature-Brief** `docs/features/2026-04-22-sprint4-domain-hoteltec.md`
+- ✅ **4.2 DNS-Records** in Hetzner konsoleH (Zone `hoteltec.at`, bestehend auf Robot-Nameservern `ns1.your-server.de` / `ns.second-ns.com` / `ns3.second-ns.de`):
+  - `heizung.hoteltec.at` A `157.90.30.116` TTL 300
+  - `heizung-test.hoteltec.at` A `157.90.17.150` TTL 300
+- ✅ **4.3 DNS-Propagation** via `nslookup … 8.8.8.8` (sofortig verfügbar)
+- ✅ **4.4 Test-Server umgeschaltet:** `.env PUBLIC_HOSTNAME=heizung-test.hoteltec.at`, Caddy neu, Let's-Encrypt-Cert über HTTP-01 geholt, HTTPS 200
+- ✅ **4.5 Main-Server umgeschaltet:** analog mit `heizung.hoteltec.at`, HTTPS 200
+- ✅ **4.6 Repo-Updates:** `.env.example` neue Defaults, Caddyfile-Kommentare aktualisiert, STATUS + RUNBOOK §9 neu geschrieben
+- ✅ **4.7 PR + Merge + Tag** `v0.1.4-domain-hoteltec`
+
+**Neuer DNS-Stand:**
+- DNS-Hosting: Hetzner Online / konsoleH (URL `https://console.hetzner.com/projects/<id>/dns/<zone-id>/records`)
+- Auth-NS: `helium.ns.hetzner.de`, `robotns3.second-ns.com`, `ns3.second-ns.de`
+- Zertifikate: Let's Encrypt via Caddy HTTP-01, Auto-Renewal beim Container-Lifecycle
+- Haupt-Domain (`@`): unberührt, zeigt auf Hetzner Webspace-Default `88.198.219.246`
+
+**Lessons Learned:**
+- Hetzner hat zwei DNS-Welten: Hetzner Cloud DNS (`dns.hetzner.com`, Nameserver `hydrogen/helium/oxygen.ns.hetzner.com`) und Hetzner Online / konsoleH (über `console.hetzner.com/projects/<id>/dns`, Nameserver `ns1.your-server.de` + `ns.second-ns.com` + `ns3.second-ns.de`). Die Domain lag schon auf konsoleH — dort weiterpflegen spart 24-48 h NS-Propagation.
+- `NEXT_PUBLIC_API_BASE_URL` wird zur Build-Zeit in den Client-Bundle gemixt. Regel: **API-Calls im Frontend immer relativ** (`/api/...`), dann ist Hostname-Umschaltung unkritisch.
+- Caddy-Recreate über `docker compose up -d caddy` bei geänderter `.env` startet auch dependente Services neu (web, api) — kurzer Container-Zyklus, akzeptabel.
+- HTTP-01-Challenge braucht Port 80 frei — UFW-Regel aus Sprint 3 hat das bereits abgedeckt.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -134,7 +162,7 @@ Ziel: UFW auf `heizung-main` wieder aktivieren, Test-Server konsistent bringen. 
 
 ### 3.2 Operations
 - ✅ **`web`-Container-Healthcheck gefixt** (Sprint 2, 2026-04-22): dedizierter `/api/health`-Endpoint + `node -e "fetch(...)"`-Probe.
-- ℹ️ **DNS-Umschaltung:** Externer IT muss `test.heizung.hotel-sonnblick.at` → `157.90.17.150` und `heizung.hotel-sonnblick.at` → `157.90.30.116` setzen. Dann auf Servern nur `PUBLIC_HOSTNAME` in `/opt/heizung-sonnblick/infra/deploy/.env` ändern und `docker compose up -d caddy` (Let's Encrypt holt sich Zertifikat automatisch).
+- ✅ **DNS-Umschaltung erledigt** (Sprint 4, 2026-04-22): Beide Server unter `*.hoteltec.at` mit Let's-Encrypt-Zertifikaten.
 
 ### 3.3 Cleanup
 - ✅ Rescue-Leftovers entfernt (`fix-ssh.sh`, `fix2.sh`, `setup-ssh.sh`, `erich.pub`) — Sprint 0.3, Commit `89457a2`
@@ -177,16 +205,15 @@ Ziel: UFW auf `heizung-main` wieder aktivieren, Test-Server konsistent bringen. 
 ## 6. Nächste Schritte
 
 **Unmittelbar:**
-1. **DNS-Umschaltung auf eigene Hetzner-Domain** (Hetzner DNS Console) — Vorab-Klärung: exakter Domain-Name, Subdomain-Struktur (`heizung.…` + `test.heizung.…`), MX für E-Mail?, Hetzner DNS Hosting vs. Registrar-DNS, bestehender Webspace/Redirect?
-
-**Danach der Reihe nach:**
 1. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
 2. **Regel-Engine** (8 Kernregeln) implementieren — Start mit Frostschutz + belegungsabhängige Temperatur
 
 **Backlog (nicht dringend):**
-- Caddy: separater öffentlich erreichbarer Health-Endpoint (aktuell routet `/api/*` auf Backend, der frontend-interne `/api/health` ist von extern nicht getrennt adressierbar)
+- Caddy: separater öffentlich erreichbarer Health-Endpoint (aktuell routet `/api/*` auf Backend, der frontend-interne `/api/health` ist von extern nicht getrennt adressierbar — z. B. auf `/_health` umbiegen)
+- Caddyfile formatieren (`caddy fmt --overwrite` — Warnung im Log, kosmetisch)
 - CI-Mirror-Redundanz (`frontend-ci-skip.yml`) aufräumen wenn Branch-Protection-Matcher smarter wird
 - `~/.ssh/config`-Einträge für `heizung-test`/`heizung-main` auf dem Entwickler-Client (spart `-i …`-Flag)
+- heizung-test: Kernel-Update ausstehend (`*** System restart required ***`)
 
 ---
 
@@ -229,3 +256,4 @@ Secrets liegen in:
 | `v0.1.1-pat-rotation` | Sprint 1 (GHCR-PAT-Rotation, RUNBOOK §6.1) | 2026-04-21 |
 | `v0.1.2-web-healthcheck` | Sprint 2 (`/api/health` + Dockerfile-HEALTHCHECK) | 2026-04-22 |
 | `v0.1.3-ufw-reactivation` | Sprint 3 (UFW aktiv auf beiden Servern + RUNBOOK §8 aktualisiert) | 2026-04-22 |
+| `v0.1.4-domain-hoteltec` | Sprint 4 (Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS) | 2026-04-22 |
