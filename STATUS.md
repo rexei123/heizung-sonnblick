@@ -1,26 +1,30 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-21. Sprint 0 (Baseline) und Sprint 1 (GHCR-PAT-Rotation) abgeschlossen.
+Stand: 2026-04-28. Sprints 0 (Baseline), 1 (GHCR-PAT-Rotation), 2 (Web-Healthcheck), 3 (UFW-Reaktivierung), 4 (Domain hoteltec.at) und 5 (LoRaWAN-Foundation lokal) abgeschlossen.
 
 ---
 
 ## 1. Was läuft produktiv
 
 ### Test-System
-- **URL:** https://157-90-17-150.nip.io
+- **URL:** https://heizung-test.hoteltec.at
 - **Hetzner:** CPX22, `157.90.17.150`
 - **Tailscale:** `heizung-test` = `100.82.226.57`
 - **Branch:** `develop`, **GHCR-Tag:** `develop`
 - **Deploy-Mode:** GHCR Pull-Deploy via systemd-Timer, 5-Min-Intervall
-- **Status:** ✅ Läuft, alle Container up
+- **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
+- **Status:** ✅ Läuft, alle Container up, `web` (healthy)
 
 ### Main-System
-- **URL:** https://157-90-30-116.nip.io
+- **URL:** https://heizung.hoteltec.at
 - **Hetzner:** CPX32, `157.90.30.116`
 - **Tailscale:** `heizung-main` = `100.82.254.20`
 - **Branch:** `main`, **GHCR-Tag:** `main`
 - **Deploy-Mode:** Identisch zu Test (Pull-Deploy + Auto-Migration)
-- **Status:** ✅ Läuft, alle Container up, Auto-Migration erfolgreich gelaufen
+- **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
+- **Status:** ✅ Läuft, alle Container up, `web` (healthy), Auto-Migration erfolgreich gelaufen
 
 ### Entwicklungs-Client
 - **Hostname:** `work02` (Tailscale = `100.78.38.29`)
@@ -77,17 +81,128 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - Unit-Name auf Servern ist `heizung-deploy-pull`, nicht `heizung-deploy`.
 - **Branch-Protection + Path-Filter = Deadlock:** Required Status Checks (`lint-and-build`, `e2e`) erwarten Reports, die bei `paths: frontend/**` nie kommen, wenn der PR außerhalb von `frontend/` spielt. Lösung: Spiegel-Workflow mit gleichem `name`/Job-Namen und `paths-ignore` meldet Success für alle Nicht-Frontend-PRs. Bei Frontend-PRs läuft weiterhin die echte CI.
 
+## 2c. Sprint 1.8 Abschluss (2026-04-21, abgeschlossen)
+
+- ✅ PR `#2` `chore/sprint1-pat-rotation → main` gemerged
+- ✅ Tag `v0.1.1-pat-rotation` gesetzt
+- ✅ Feature-Branch entfernt
+
+## 2d. Sprint 2 Web-Container-Healthcheck (2026-04-22, abgeschlossen)
+
+Ziel: `(unhealthy)`-Anzeige des `web`-Containers beheben. Branch: `fix/web-healthcheck-sprint2`.
+
+- ✅ **2.1 Feature-Brief** `docs/features/2026-04-22-web-healthcheck.md`
+- ✅ **2.2 `/api/health`-Route** in Next.js App Router (`frontend/src/app/api/health/route.ts`) — liefert JSON `{ ok, service: "web", ts }` mit `Cache-Control: no-store`
+- ✅ **2.3 Dockerfile-HEALTHCHECK** umgestellt auf `node -e "fetch(...)"` (kein `wget`/`curl` im Image nötig)
+- ✅ **2.4 Playwright-Smoke** für `/api/health` ergänzt (Status 200 + JSON-Shape + parsebarer ISO-Timestamp)
+- ✅ **2.5 PR #3 gemerged**, Deploy auf Main — `web`-Container nach 6 Min `(healthy)`
+- ✅ **2.6 Sync-PR #4** main → develop → Test-Server — `(healthy)` nach 19 h, Tag `v0.1.2-web-healthcheck`
+
+**Lessons Learned:**
+- Test-Server zieht `:develop`, Main `:main` — Fix auf `main` wirkt auf Test erst nach Sync-PR `main → develop`.
+- Sync-PRs `main → develop` bewusst als **Merge-Commit** (nicht Squash), damit die Commit-Historie erhalten bleibt.
+- HEALTHCHECK mit `node -e "fetch(...)"` statt `wget`/`curl` spart System-Deps im Image.
+
+## 2e. Sprint 3 UFW-Reaktivierung (2026-04-22, abgeschlossen)
+
+Ziel: UFW auf `heizung-main` wieder aktivieren, Test-Server konsistent bringen. Kein Branch — reine Server-Ops nach RUNBOOK §8.
+
+- ✅ **3.1 Feature-Brief** `docs/features/2026-04-22-ufw-reactivation.md`
+- ✅ **3.2 Ist-Zustand:** Main UFW inaktiv; Test UFW aktiv, aber `tailscale0`-Regel fehlte
+- ✅ **3.3 Main aktiviert** mit `at`-Watchdog (5 Min Auto-Disable): Reihenfolge nach RUNBOOK §8 → `ufw --force enable`
+- ✅ **3.4 Verifikation Main:** SSH via Tailscale ok, Caddy HTTPS `/` → 200, Port 22 public offen (Fallback, Entscheidung B)
+- ✅ **3.5 Watchdog entfernt** (`atq` geleert, UFW bleibt aktiv bestätigt)
+- ✅ **3.6 Test-Server gegengeprüft:** `ufw allow in on tailscale0` nachgezogen, damit Regelwerk identisch zu Main
+
+**Entscheidung B (2026-04-22):** Port 22 bleibt auf beiden Servern **öffentlich offen** als Fallback für Tailscale-Ausfall. Absicherung über `PermitRootLogin prohibit-password` + `id_ed25519_heizung`.
+
+**Stand beide Server nach Sprint 3:**
+- UFW aktiv, default deny incoming / allow outgoing
+- Ports 22, 80, 443 offen (v4+v6)
+- `tailscale0`-Interface: allow in (v4+v6)
+
+**Lessons Learned:**
+- `at`-Watchdog (`echo 'ufw --force disable' | at now + 5 minutes`) ist bei `ufw enable` über Remote-SSH zwingend. Ohne Watchdog = potenzieller Rescue-Einsatz.
+- Bei rein additiven Änderungen (`ufw allow …` ohne `enable`-Toggle) ist Watchdog verzichtbar.
+- `systemctl is-active tailscaled` kann `inactive` liefern, obwohl Tailscale läuft — `tailscale status` ist die verlässliche Quelle.
+
+## 2f. Sprint 4 Domain-Umschaltung auf hoteltec.at (2026-04-22, abgeschlossen)
+
+Ziel: nip.io-Übergangshostnamen durch eigene Hetzner-Domain ersetzen. Branch: `feat/sprint4-domain-hoteltec`.
+
+- ✅ **4.1 Feature-Brief** `docs/features/2026-04-22-sprint4-domain-hoteltec.md`
+- ✅ **4.2 DNS-Records** in Hetzner konsoleH (Zone `hoteltec.at`, bestehend auf Robot-Nameservern `ns1.your-server.de` / `ns.second-ns.com` / `ns3.second-ns.de`):
+  - `heizung.hoteltec.at` A `157.90.30.116` TTL 300
+  - `heizung-test.hoteltec.at` A `157.90.17.150` TTL 300
+- ✅ **4.3 DNS-Propagation** via `nslookup … 8.8.8.8` (sofortig verfügbar)
+- ✅ **4.4 Test-Server umgeschaltet:** `.env PUBLIC_HOSTNAME=heizung-test.hoteltec.at`, Caddy neu, Let's-Encrypt-Cert über HTTP-01 geholt, HTTPS 200
+- ✅ **4.5 Main-Server umgeschaltet:** analog mit `heizung.hoteltec.at`, HTTPS 200
+- ✅ **4.6 Repo-Updates:** `.env.example` neue Defaults, Caddyfile-Kommentare aktualisiert, STATUS + RUNBOOK §9 neu geschrieben
+- ✅ **4.7 PR + Merge + Tag** `v0.1.4-domain-hoteltec`
+
+**Neuer DNS-Stand:**
+- DNS-Hosting: Hetzner Online / konsoleH (URL `https://console.hetzner.com/projects/<id>/dns/<zone-id>/records`)
+- Auth-NS: `helium.ns.hetzner.de`, `robotns3.second-ns.com`, `ns3.second-ns.de`
+- Zertifikate: Let's Encrypt via Caddy HTTP-01, Auto-Renewal beim Container-Lifecycle
+- Haupt-Domain (`@`): unberührt, zeigt auf Hetzner Webspace-Default `88.198.219.246`
+
+**Lessons Learned:**
+- Hetzner hat zwei DNS-Welten: Hetzner Cloud DNS (`dns.hetzner.com`, Nameserver `hydrogen/helium/oxygen.ns.hetzner.com`) und Hetzner Online / konsoleH (über `console.hetzner.com/projects/<id>/dns`, Nameserver `ns1.your-server.de` + `ns.second-ns.com` + `ns3.second-ns.de`). Die Domain lag schon auf konsoleH — dort weiterpflegen spart 24-48 h NS-Propagation.
+- `NEXT_PUBLIC_API_BASE_URL` wird zur Build-Zeit in den Client-Bundle gemixt. Regel: **API-Calls im Frontend immer relativ** (`/api/...`), dann ist Hostname-Umschaltung unkritisch.
+- Caddy-Recreate über `docker compose up -d caddy` bei geänderter `.env` startet auch dependente Services neu (web, api) — kurzer Container-Zyklus, akzeptabel.
+- HTTP-01-Challenge braucht Port 80 frei — UFW-Regel aus Sprint 3 hat das bereits abgedeckt.
+
+## 2g. Sprint 5 LoRaWAN-Foundation (2026-04-27/28, abgeschlossen)
+
+Ziel: Komplette LoRaWAN-Datenpipeline lokal lauffaehig — ChirpStack v4 + Mosquitto + Mock-Uplink + FastAPI-MQTT-Subscriber + TimescaleDB-Persistenz + REST-API. Hardware-unabhaengig, vorbereitet fuer Sprint 6 (Hotel-LAN + echtes Pairing). Branch: `feat/sprint5-lorawan-foundation`.
+
+- ✅ **5.1 Feature-Brief** `docs/features/2026-04-27-sprint5-lorawan-foundation.md`
+- ✅ **5.2 ADR** AE-13 bis AE-18 (ChirpStack-Container, Mosquitto, Vicki-JS-Codec, MQTT-Lifespan-Subscriber, JSONB-Hypertable-Verwendung von `sensor_reading`)
+- ✅ **5.3 Compose-Stack** um `mosquitto`, `chirpstack-postgres`, `chirpstack` erweitert. Konfig in `infra/mosquitto/`, `infra/chirpstack/`. Postgres-Init mit `pg_trgm`-Extension. Anonymous-Mode lokal (Bind 127.0.0.1), ACL bleibt fuer Test-Server-Sprint
+- ✅ **5.4 ChirpStack initialisiert** (UI-Schritte): Tenant „Hotel Sonnblick", Application „heizung", DeviceProfile „MClimate Vicki" mit JS-Codec aus `infra/chirpstack/codecs/mclimate-vicki.js`, Gateway `simulator-gw-1`, Device `vicki-sim-001` (DevEUI `0011223344556677`)
+- ✅ **5.5 Mock-Uplink** ueber `mosquitto_pub` aufs Application-Topic statt voller LoRaWAN-Frame-Simulation (chirpstack-simulator-Tool ist in v4 nicht mehr gepflegt). Test-Payload `infra/chirpstack/test-uplinks/vicki-status-001.json`
+- ✅ **5.6 FastAPI MQTT-Subscriber** `heizung.services.mqtt_subscriber` als Lifespan-Background-Task. `aiomqtt` 2.x, Reconnect-Loop mit Exponential Backoff, Pydantic-Validierung, Persist via `INSERT ... ON CONFLICT (time, device_id) DO NOTHING`
+- ✅ **5.7 Datenmodell**: bestehende `sensor_reading`-Hypertable um `fcnt`-Spalte erweitert (Migration 0002). KEINE neue `uplinks`-Tabelle - vorhandenes Schema deckt LoRaWAN-Telemetrie ab
+- ✅ **5.8 REST-API** `GET /api/v1/devices/{device_id}/sensor-readings?from=&to=&limit=` (max 1000, time DESC), neuer Router-Aggregator unter `heizung.api.v1`
+- ✅ **5.9 Unit-Tests** fuer Subscriber-Helpers + Pydantic-Schema (17 neue Tests, 27 total grün)
+- ✅ **5.10 PR + Merge + Tag** `v0.1.5-lorawan-foundation`
+
+**Gates erreicht:**
+- Gate 3 (5.5): Mock-Uplink in Mosquitto sichtbar
+- Gate 4 (5.6+5.7): Reading in TimescaleDB persistiert (`SELECT FROM sensor_reading` zeigt korrekte Werte)
+- Gate 5 (5.10): Tag gesetzt, lokales `docker compose up` fuehrt zum sauberen Stand
+
+**Lessons Learned:**
+- ChirpStack v4 verlangt `pg_trgm`-Postgres-Extension, sonst stoppt Migration ohne Crash. Loesung: `infra/chirpstack/postgres-init/01-extensions.sql` als Init-Skript im Postgres-Container.
+- Region-Config in v4: `regions.gateway.backend` ist Struct (`enabled = "mqtt"`), nicht String.
+- Mosquitto auf Windows-Bind-Mount: passwd-File-Permissions sind klassisches Problem. Lokal mit `allow_anonymous true` + Bind nur 127.0.0.1 umgangen; Test-Server bekommt ACL via Linux-Bind-Mount sauber hin.
+- Linenden in `backend/docker-entrypoint.sh` waren CRLF (Windows-Editor) - `exec` im Linux-Container scheiterte. `.gitattributes` greift nur bei git-Operationen, lokales Editieren kann Format brechen. Fix: `sed -i 's/\r$//'` plus Hinweis im Backlog.
+- ChirpStack v4 hat den offiziellen `chirpstack-simulator` faktisch eingestellt. Pragmatik: direktes `mosquitto_pub` aufs Application-Topic mit dem bereits decoded JSON. ChirpStack ist fuer den Mock-Test Bystander; End-to-End mit Codec + Gateway-Frames kommt mit echter Hardware in Sprint 6.
+- Dockerfile war auf `pip install .` (non-editable) - neue Submodules wie `api/v1/` brauchten Image-Rebuild. Auf `pip install -e ".[dev]"` umgestellt; jetzt reicht `docker compose restart api` fuer Code-Aenderungen, `build` nur bei Dependency-Aenderungen.
+- Stdlib-Logging in FastAPI/Uvicorn: ohne expliziten `logging.basicConfig()` werden `logger.info()`-Aufrufe verschluckt. In `heizung.main` jetzt gesetzt.
+- TimescaleDB-Constraint: jeder UNIQUE-Index muss die Partition-Spalte (`time`) enthalten. Idempotenz wird ueber den bestehenden Composite-PK `(time, device_id)` plus `ON CONFLICT DO NOTHING` erreicht; kein zusaetzliches partial-UNIQUE noetig.
+
+**Lokale Stack-Erweiterung:**
+
+| Service | Port (lokal) | Zweck |
+|---|---|---|
+| `mosquitto` | 127.0.0.1:1883 | MQTT-Broker fuer ChirpStack ↔ FastAPI |
+| `chirpstack-postgres` | intern | Eigenes DB-Volume `chirpstack_db`, getrennt von Heizung-DB |
+| `chirpstack` | 8080, 8081 | LoRaWAN-NS, Web-UI auf `http://localhost:8080` (admin/admin) |
+
+**Deployment-Status:** lokal auf `work02` lauffaehig. **NICHT** auf heizung-test/main deployed - das ist Sprint 6 zusammen mit Hotel-LAN-Setup und echter Hardware.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
 - ✅ **PAT-Rotation erledigt** (Sprint 1, 2026-04-21): Neuer Classic PAT mit Scope `read:packages`, alter Token `claude-sprint2-push` widerrufen, Verfahren in RUNBOOK §6.1 dokumentiert.
-- ⚠️ **UFW auf Main deaktiviert:** Musste während der Rescue-Aktion deaktiviert werden, um Lockout zu beheben. Neu aktivieren mit RUNBOOK §8 (Reihenfolge zwingend: `ufw allow in on tailscale0` + `ufw allow 80/443` VOR `ufw enable`). — Sprint 2.
+- ✅ **UFW reaktiviert** (Sprint 3, 2026-04-22): Beide Server aktiv mit identischem Regelwerk, Port 22 per Entscheidung B öffentlich als Fallback.
 
 ### 3.2 Operations
-- ℹ️ **`web`-Container zeigt `(unhealthy)`** trotz funktionierender App (auf Test und Main). Healthcheck im Dockerfile oder docker-compose.yml muss überprüft werden. Kosmetisch, kein Funktionsproblem.
-- ℹ️ **DNS-Umschaltung:** Externer IT muss `test.heizung.hotel-sonnblick.at` → `157.90.17.150` und `heizung.hotel-sonnblick.at` → `157.90.30.116` setzen. Dann auf Servern nur `PUBLIC_HOSTNAME` in `/opt/heizung-sonnblick/infra/deploy/.env` ändern und `docker compose up -d caddy` (Let's Encrypt holt sich Zertifikat automatisch).
+- ✅ **`web`-Container-Healthcheck gefixt** (Sprint 2, 2026-04-22): dedizierter `/api/health`-Endpoint + `node -e "fetch(...)"`-Probe.
+- ✅ **DNS-Umschaltung erledigt** (Sprint 4, 2026-04-22): Beide Server unter `*.hoteltec.at` mit Let's-Encrypt-Zertifikaten.
 
 ### 3.3 Cleanup
 - ✅ Rescue-Leftovers entfernt (`fix-ssh.sh`, `fix2.sh`, `setup-ssh.sh`, `erich.pub`) — Sprint 0.3, Commit `89457a2`
@@ -123,20 +238,22 @@ Ziel: exponierten PAT ersetzen, Scope minimieren, Rotations-Verfahren reproduzie
 - `docs/STRATEGIE.md` — Gesamtkonzept, Architektur, Roadmap
 - `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
 - `docs/Design-Strategie-2.0.1.docx` — UI-Richtlinie (verbindlich)
-- `docs/RUNBOOK.md` — Troubleshooting, Rescue-Mode, SSH-Fehlerbilder, UFW-Hardening (NEU heute)
+- `docs/RUNBOOK.md` — Troubleshooting, Rescue-Mode, SSH-Fehlerbilder, UFW-Hardening, GHCR-PAT-Rotation
 
 ---
 
 ## 6. Nächste Schritte
 
-**Unmittelbar (Abschluss Sprint 1):**
-1. Sprint 1.7 — PR `chore/sprint1-pat-rotation → main`, CI grün, Merge (erster echter Durchlauf durch Branch-Protection)
+**Unmittelbar:**
+1. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
+2. **Regel-Engine** (8 Kernregeln) implementieren — Start mit Frostschutz + belegungsabhängige Temperatur
 
-**Danach der Reihe nach:**
-1. **Healthcheck für web-Container fixen** — Next.js liefert `/api/health` oder bauen wir es
-2. **UFW auf Main re-aktivieren** nach RUNBOOK §8
-3. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
-4. **Regel-Engine** (8 Kernregeln) implementieren — startet mit Frostschutz + belegungsabhängige Temperatur
+**Backlog (nicht dringend):**
+- Caddy: separater öffentlich erreichbarer Health-Endpoint (aktuell routet `/api/*` auf Backend, der frontend-interne `/api/health` ist von extern nicht getrennt adressierbar — z. B. auf `/_health` umbiegen)
+- Caddyfile formatieren (`caddy fmt --overwrite` — Warnung im Log, kosmetisch)
+- CI-Mirror-Redundanz (`frontend-ci-skip.yml`) aufräumen wenn Branch-Protection-Matcher smarter wird
+- `~/.ssh/config`-Einträge für `heizung-test`/`heizung-main` auf dem Entwickler-Client (spart `-i …`-Flag)
+- heizung-test: Kernel-Update ausstehend (`*** System restart required ***`)
 
 ---
 
@@ -168,3 +285,16 @@ Secrets liegen in:
 - Servern: `/opt/heizung-sonnblick/infra/deploy/.env`
 - GitHub Actions: Repository Secrets
 - Keine Secrets in Git, keine Secrets in diesem Bericht.
+
+---
+
+## 9. Tags
+
+| Tag | Sprint | Datum |
+|---|---|---|
+| `v0.1.0-baseline` | Sprint 0 (Repo-Hygiene + Playwright + Branch-Protection) | 2026-04-21 |
+| `v0.1.1-pat-rotation` | Sprint 1 (GHCR-PAT-Rotation, RUNBOOK §6.1) | 2026-04-21 |
+| `v0.1.2-web-healthcheck` | Sprint 2 (`/api/health` + Dockerfile-HEALTHCHECK) | 2026-04-22 |
+| `v0.1.3-ufw-reactivation` | Sprint 3 (UFW aktiv auf beiden Servern + RUNBOOK §8 aktualisiert) | 2026-04-22 |
+| `v0.1.4-domain-hoteltec` | Sprint 4 (Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS) | 2026-04-22 |
+| `v0.1.5-lorawan-foundation` | Sprint 5 (LoRaWAN-Pipeline lokal: ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API) | 2026-04-28 |

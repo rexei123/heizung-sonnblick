@@ -1,7 +1,6 @@
 ﻿# Caddy-Konfiguration für Test-Umgebung
 # Hostname wird per Env-Variable PUBLIC_HOSTNAME aus .env gezogen.
-# Übergangsphase: nip.io-Hostname (z. B. 157-90-17-150.nip.io)
-# Produktivbetrieb: test.heizung.hotel-sonnblick.at (sobald DNS gesetzt)
+# Produktivbetrieb: heizung-test.hoteltec.at (seit Sprint 4, 2026-04-22)
 # Let's Encrypt wird automatisch gezogen.
 
 {

@@ -12,12 +12,14 @@ from decimal import Decimal
 
 from sqlalchemy import (
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Index,
     Numeric,
     String,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +55,4 @@ class ControlCommand(Base):
     sent_to_gateway_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (
-        Index("ix_control_command_device_issued", "device_id", "issued_at"),
-    )
+    __table_args__ = (Index("ix_control_command_device_issued", "device_id", "issued_at"),)

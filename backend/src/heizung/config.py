@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     openmeteo_latitude: float = 47.272
     openmeteo_longitude: float = 12.753
 
+    # --- LoRaWAN / MQTT (Sprint 5) ---
+    mqtt_host: str = "mosquitto"
+    mqtt_port: int = 1883
+    mqtt_user: str | None = None
+    mqtt_password: str | None = None
+    mqtt_topic: str = "application/+/device/+/event/up"
+    mqtt_client_id: str = "heizung-api-subscriber"
+    mqtt_enabled: bool = True
+
     @model_validator(mode="after")
     def _reject_default_secrets_in_production(self) -> "Settings":
         if self.environment == "production" and self.secret_key == "change-me-in-production":
