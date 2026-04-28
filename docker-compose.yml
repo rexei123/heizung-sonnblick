@@ -70,9 +70,10 @@ services:
     restart: unless-stopped
     command: -c /etc/chirpstack
     environment:
-      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD:-changeme}
-      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET:-please-change-this-secret-min-32-chars}
-      POSTGRES_DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD:-chirpstack}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+      CHIRPSTACK__POSTGRESQL__DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD:-chirpstack}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+      CHIRPSTACK__API__SECRET: ${CHIRPSTACK_API_SECRET:-please-change-this-secret-min-32-chars}
+      CHIRPSTACK__INTEGRATION__MQTT__USERNAME: chirpstack
+      CHIRPSTACK__INTEGRATION__MQTT__PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD:-changeme}
     volumes:
       - ./infra/chirpstack/configuration:/etc/chirpstack:ro
     depends_on:

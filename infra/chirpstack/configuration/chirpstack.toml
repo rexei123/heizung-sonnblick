@@ -6,10 +6,10 @@
   json = false
 
 [postgresql]
-  # DSN wird komplett als Env-Var gesetzt. ChirpStack v4 macht keine
-  # Inline-Substitution von ${VAR} mitten in einem String - nur wenn das
-  # gesamte Feld eine Env-Var ist.
-  dsn = "${POSTGRES_DSN}"
+  # ChirpStack v4 macht KEINE ${VAR}-Substitution in TOML.
+  # Stattdessen: env-var CHIRPSTACK__POSTGRESQL__DSN setzt diesen Wert ueber.
+  # Hier nur Default fuer lokale Dev (anonymous Postgres auf chirpstack-postgres).
+  dsn = "postgres://chirpstack:chirpstack@chirpstack-postgres:5432/chirpstack?sslmode=disable"
   max_open_connections = 10
   min_idle_connections = 0
 
@@ -23,8 +23,9 @@
   enabled_regions = ["eu868"]
 
 [api]
+  # Override via CHIRPSTACK__API__SECRET in compose.
   bind = "0.0.0.0:8080"
-  secret = "${CHIRPSTACK_API_SECRET}"
+  secret = "you-can-never-buy-the-internet"
 
 [gateway]
   client_cert_lifetime = "12months"
@@ -33,10 +34,13 @@
   enabled = ["mqtt"]
 
 [integration.mqtt]
+  # Override via CHIRPSTACK__INTEGRATION__MQTT__USERNAME / __PASSWORD in compose.
   event_topic = "application/{{application_id}}/device/{{dev_eui}}/event/{{event}}"
   command_topic = "application/{{application_id}}/device/{{dev_eui}}/command/{{command}}"
   json = true
   server = "tcp://mosquitto:1883"
+  username = ""
+  password = ""
   qos = 1
   clean_session = true
   client_id = "chirpstack-integration"
