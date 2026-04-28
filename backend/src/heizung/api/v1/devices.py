@@ -27,19 +27,19 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 )
 async def list_sensor_readings(
     device_id: int,
-    from_: datetime | None = Query(
+    from_: datetime | None = Query(  # noqa: B008  (FastAPI-Idiom: Query in default)
         default=None,
         alias="from",
         description="Start-Zeit (inklusive, ISO 8601). Default: keine Untergrenze.",
     ),
-    to: datetime | None = Query(
+    to: datetime | None = Query(  # noqa: B008
         default=None,
         description="End-Zeit (exklusive, ISO 8601). Default: keine Obergrenze.",
     ),
-    limit: int = Query(
+    limit: int = Query(  # noqa: B008
         default=100, ge=1, le=1000, description="Max. Anzahl Eintraege."
     ),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session),  # noqa: B008  (FastAPI-Idiom: Depends in default)
 ) -> list[SensorReading]:
     # Device-Existenz pruefen, damit 404 statt leerem Array fuer falsche IDs.
     device = await session.get(Device, device_id)

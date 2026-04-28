@@ -175,11 +175,10 @@ async def _seed_rooms(session: AsyncSession, dz: RoomType) -> None:
 
 
 async def seed() -> None:
-    async with SessionLocal() as session:
-        async with session.begin():
-            room_types = await _seed_room_types(session)
-            await _seed_global_rule(session)
-            await _seed_rooms(session, room_types["Doppelzimmer"])
+    async with SessionLocal() as session, session.begin():
+        room_types = await _seed_room_types(session)
+        await _seed_global_rule(session)
+        await _seed_rooms(session, room_types["Doppelzimmer"])
     logger.info("Seed fertig.")
 
 

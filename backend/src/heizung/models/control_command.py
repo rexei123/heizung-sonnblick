@@ -12,12 +12,14 @@ from decimal import Decimal
 
 from sqlalchemy import (
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Index,
     Numeric,
     String,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

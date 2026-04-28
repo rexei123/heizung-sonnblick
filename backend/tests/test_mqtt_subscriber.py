@@ -20,7 +20,6 @@ from heizung.services.mqtt_subscriber import (
     _to_decimal,
 )
 
-
 # ---------------------------------------------------------------------------
 # _battery_pct_from_volts
 # ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ def test_chirpstack_uplink_validates_full_payload() -> None:
     assert uplink.rxInfo[0].snr == 7.5
 
 
-def test_chirpstack_uplink_rejects_missing_devEui() -> None:
+def test_chirpstack_uplink_rejects_missing_dev_eui() -> None:
     with pytest.raises(ValidationError):
         ChirpStackUplink.model_validate({"fCnt": 1})
 

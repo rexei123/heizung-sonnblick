@@ -19,13 +19,15 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Integer,
     Numeric,
     Time,
     UniqueConstraint,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

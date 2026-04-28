@@ -18,6 +18,7 @@ Skalierung > 1 Replica: separater Worker-Container in spaeterem Sprint.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -234,9 +235,7 @@ async def stop_subscriber() -> None:
     if _task is None:
         return
     _task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await _task
-    except asyncio.CancelledError:
-        pass
     _task = None
     logger.info("MQTT-Subscriber-Task gestoppt")
