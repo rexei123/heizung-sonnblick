@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, SmallInteger, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from heizung.db import Base
@@ -31,6 +31,11 @@ class SensorReading(Base):
         primary_key=True,
         nullable=False,
     )
+
+    # LoRaWAN Frame Counter — fuer idempotenten MQTT-Replay-Schutz
+    # (UNIQUE auf (time, device_id, fcnt) plus ON CONFLICT DO NOTHING im Subscriber).
+    # Nullable, weil Bestandsdaten aus Sprint 0/2 keinen fcnt hatten.
+    fcnt: Mapped[int | None] = mapped_column(Integer)
 
     temperature: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     setpoint: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))

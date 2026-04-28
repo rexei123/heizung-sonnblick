@@ -1,6 +1,6 @@
 # RUNBOOK — Heizungssteuerung Hotel Sonnblick
 
-Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-22.
+Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-28.
 
 **Regel Nr. 1:** Bei Rescue-Einsatz IMMER den kompletten Fix-Block aus §3 in einem Shot ausführen. Niemals inkrementell fixen.
 
@@ -382,7 +382,96 @@ Bei wiederholten Versuchen ohne propagiertes DNS → rate-limited. Deshalb: **im
 
 ---
 
-## 10. Notfall-Links
+## 10. LoRaWAN-Pipeline (lokale Entwicklung)
+
+**Stand 2026-04-28 (Sprint 5):** ChirpStack v4 + Mosquitto + FastAPI-MQTT-Subscriber lauffaehig auf `work02`. Test-/Main-Server haben den Stack noch NICHT - das ist Sprint 6 zusammen mit Hotel-LAN + echter Hardware.
+
+### 10.1 Stack-Topologie lokal
+
+```
+[mosquitto_pub / Mock-Uplink]
+          |
+          v MQTT (127.0.0.1:1883, anonymous)
+[mosquitto] ---- [chirpstack v4] -- [chirpstack-postgres]
+          |            |
+          |            +-- Web-UI: http://localhost:8080  (admin/admin)
+          |
+          v Subscribe application/+/device/+/event/up
+[FastAPI api] -- aiomqtt -- _persist_uplink() -- INSERT sensor_reading
+          |
+          v REST: GET /api/v1/devices/{id}/sensor-readings
+```
+
+### 10.2 Stack hochfahren (Erstinstallation)
+
+```powershell
+cd C:\Users\User\dev\heizung-sonnblick
+cp .env.example .env   # Falls noch nicht vorhanden
+# Mosquitto-Auth ist lokal anonymous; .env-Variablen MQTT_*_PASSWORD koennen leer bleiben.
+docker compose up -d
+# Nach ~30 Sek alle Services ready
+docker compose ps
+```
+
+ChirpStack-Initialisierung (einmalig, in der Web-UI):
+- Tenant „Hotel Sonnblick" (Default umbenennen oder neu)
+- Application „heizung"
+- DeviceProfile „MClimate Vicki" mit Codec aus `infra/chirpstack/codecs/mclimate-vicki.js`
+- Gateway + Device anlegen, Application Key vergeben
+
+(Wiederholbar: Bootstrap-Skript noch nicht implementiert - Sprint 6 oder spaeter.)
+
+### 10.3 Mock-Uplink senden (Pipeline testen)
+
+```powershell
+docker run --rm --network heizung-sonnblick_default -v "${PWD}/infra/chirpstack/test-uplinks:/data:ro" eclipse-mosquitto:2 mosquitto_pub -h mosquitto -p 1883 -t "application/<app-id>/device/<dev-eui>/event/up" -f /data/vicki-status-001.json
+```
+
+Verifikation:
+```powershell
+docker compose exec db psql -U heizung -d heizung -c "SELECT time, device_id, fcnt, temperature, setpoint FROM sensor_reading ORDER BY time DESC LIMIT 5;"
+(Invoke-WebRequest -UseBasicParsing http://localhost:8000/api/v1/devices/1/sensor-readings).Content
+```
+
+### 10.4 MQTT live mitlauschen
+
+```powershell
+docker compose exec mosquitto mosquitto_sub -h localhost -p 1883 -t 'application/#' -v
+```
+
+### 10.5 Subscriber-Logs
+
+```powershell
+docker compose logs -f api | Select-String -Pattern "uplink|MQTT"
+```
+
+### 10.6 Troubleshooting
+
+- **„relation 'user' does not exist" beim ChirpStack-Login:** `pg_trgm`-Extension fehlt. Fix:
+  ```powershell
+  docker compose exec chirpstack-postgres psql -U chirpstack -d chirpstack -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+  docker compose exec chirpstack-postgres psql -U chirpstack -d chirpstack -c "DROP TABLE IF EXISTS __diesel_schema_migrations;"
+  docker compose restart chirpstack
+  ```
+  Bei frischer Installation greift jetzt `infra/chirpstack/postgres-init/01-extensions.sql` automatisch.
+- **Mosquitto „Unable to open pwfile":** auf Windows-Bind-Mount sind die Permissions fuer Container-User `mosquitto` unzugaenglich. Dev-Loesung: `allow_anonymous true` in `infra/mosquitto/config/mosquitto.conf` (bereits aktiv).
+- **„exec docker-entrypoint.sh: no such file":** Linenden im Backend-Entrypoint sind CRLF. Fix:
+  ```powershell
+  docker compose run --rm api sed -i 's/\r$//' /app/docker-entrypoint.sh
+  ```
+  Plus: nicht mit Editoren bearbeiten, die die `.gitattributes`-Regel ignorieren.
+- **API-Routes erscheinen nach Code-Aenderung nicht:** Image wurde mit `pip install .` (non-editable) gebaut, Code-Mount greift nicht. Seit Sprint 5 ist Dockerfile auf `pip install -e ".[dev]"` umgestellt → `docker compose restart api` reicht.
+
+### 10.7 Pipeline auf Test-/Main-Server (Sprint 6, geplant)
+
+- `docker-compose.prod.yml` um `mosquitto`, `chirpstack-postgres`, `chirpstack` erweitern
+- ACL + Passwd-File aktiv (Linux-Bind-Mount = keine Permission-Pannen)
+- Mosquitto/ChirpStack NUR via Tailscale-Interface erreichbar (kein Public-Listener)
+- Caddy-Routing fuer ChirpStack-UI nur intern oder als separate Subdomain mit Basic-Auth
+
+---
+
+## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
 - Tailscale Admin: https://login.tailscale.com/admin/machines
