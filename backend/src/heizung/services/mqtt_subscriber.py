@@ -233,4 +233,3 @@ async def stop_subscriber() -> None:
         await _task
     _task = None
     logger.info("MQTT-Subscriber-Task gestoppt")
-                                                    
