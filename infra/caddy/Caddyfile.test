@@ -44,13 +44,13 @@
     }
 }
 
-# --- ChirpStack-UI (nur Test-Stage, Basic-Auth, Sprint 6) ---
+# --- ChirpStack-UI (nur Test-Stage, Sprint 6) ---
+# Auth: ChirpStack-eigenes Login-Formular (admin/<starkes-pw>).
+# Caddy-Basic-Auth wurde verworfen, weil das ChirpStack-React-Frontend
+# Assets mit crossorigin laedt -> Browser sendet keinen Basic-Auth-Header
+# -> Caddy gibt 401 -> Frontend laedt nicht.
 {$CHIRPSTACK_HOSTNAME} {
     encode zstd gzip
-
-    basic_auth {
-        admin {$CHIRPSTACK_BASIC_AUTH_HASH}
-    }
 
     reverse_proxy chirpstack:8080
 
