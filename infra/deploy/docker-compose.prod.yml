@@ -6,8 +6,13 @@
 # Gesteuert über .env im selben Verzeichnis:
 #   STAGE=test|main              -> wählt Caddyfile
 #   IMAGE_TAG=develop|main|<sha> -> wählt Image-Version
-#   PUBLIC_HOSTNAME=…            -> Caddy + Frontend
-#   POSTGRES_*                   -> DB-Credentials
+#   PUBLIC_HOSTNAME=…            -> Caddy + Frontend (heizung-test.hoteltec.at / heizung.hoteltec.at)
+#   CHIRPSTACK_HOSTNAME=…        -> Caddy-Subdomain für ChirpStack-UI (cs-test.hoteltec.at, nur Test)
+#   CHIRPSTACK_BASIC_AUTH_HASH   -> bcrypt-Hash für ChirpStack-UI-Login
+#   POSTGRES_*                   -> Heizung-DB-Credentials
+#   CHIRPSTACK_DB_PASSWORD       -> ChirpStack-DB-Credentials
+#   MQTT_CHIRPSTACK_PASSWORD     -> Mosquitto-User chirpstack (publish)
+#   MQTT_HEIZUNG_PASSWORD        -> Mosquitto-User heizung-api (subscribe)
 #
 # Aktualisierung: deploy-pull.sh (siehe Nachbardatei).
 
@@ -36,16 +41,76 @@ services:
       timeout: 5s
       retries: 5
 
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: always
+    volumes:
+      - ../mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    # KEIN public Port-Mapping — Mosquitto nur intern im Docker-Network
+    # erreichbar (chirpstack + api). MQTT-Auth aktiv (passwd + ACL).
+    expose:
+      - "1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -u heizung-api -P ${MQTT_HEIZUNG_PASSWORD} -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  chirpstack-postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: chirpstack
+      POSTGRES_USER: chirpstack
+      POSTGRES_PASSWORD: ${CHIRPSTACK_DB_PASSWORD}
+    volumes:
+      - chirpstack_db:/var/lib/postgresql/data
+      - ../chirpstack/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirpstack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    restart: always
+    command: -c /etc/chirpstack
+    environment:
+      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET}
+    volumes:
+      - ../chirpstack/configuration:/etc/chirpstack:ro
+    depends_on:
+      chirpstack-postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    expose:
+      - "8080"
+      - "8081"
+
   api:
     image: ghcr.io/rexei123/heizung-api:${IMAGE_TAG:-develop}
     pull_policy: always
     restart: always
     env_file: .env
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USER: heizung-api
+      MQTT_PASSWORD: ${MQTT_HEIZUNG_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mosquitto:
+        condition: service_started
     # Kein Port-Mapping nach außen — nur Caddy spricht mit der API.
     expose:
       - "8000"
@@ -66,6 +131,8 @@ services:
     restart: always
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}
+      CHIRPSTACK_HOSTNAME: ${CHIRPSTACK_HOSTNAME:-}
+      CHIRPSTACK_BASIC_AUTH_HASH: ${CHIRPSTACK_BASIC_AUTH_HASH:-}
     ports:
       - "80:80"
       - "443:443"
@@ -80,6 +147,9 @@ services:
 
 volumes:
   db_data:
+  chirpstack_db:
+  mosquitto_data:
+  mosquitto_log:
   caddy_data:
   caddy_config:
   caddy_logs:
