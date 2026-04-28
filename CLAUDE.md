@@ -52,5 +52,4 @@ In dieser Reihenfolge:
 - Caddy: `/_health` als oeffentlicher Health-Endpoint trennen vom internen `/api/*`-Routing
 - CI-Mirror-Workflow `frontend-ci-skip.yml` aufraeumen, wenn Branch-Protection-Matcher smarter wird
 - ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup nach `docker compose down -v` (Sprint 6 oder spaeter)
-- README.md (Repo-Root) auf aktuellen Stand: Status-Header (Sprint 1 → Sprint 5), URL-Tabelle (`hoteltec.at`), Stack-Liste (LoRaWAN-Komponenten ergaenzen)
 - `.github/CODEOWNERS` einrichten, wenn weitere Mitwirkende dazukommen
