@@ -6,7 +6,10 @@
   json = false
 
 [postgresql]
-  dsn = "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+  # DSN wird komplett als Env-Var gesetzt. ChirpStack v4 macht keine
+  # Inline-Substitution von ${VAR} mitten in einem String - nur wenn das
+  # gesamte Feld eine Env-Var ist.
+  dsn = "${POSTGRES_DSN}"
   max_open_connections = 10
   min_idle_connections = 0
 
