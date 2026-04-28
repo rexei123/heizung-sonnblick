@@ -1,0 +1,52 @@
+{
+  "deduplicationId": "test-uplink-001",
+  "time": "2026-04-28T08:00:00.000Z",
+  "deviceInfo": {
+    "tenantId": "d667a84a-0028-4fd0-a5f4-0b3971bf18db",
+    "tenantName": "Hotel Sonnblick",
+    "applicationId": "13ca59f4-a3da-447d-82cc-9b8ea3289ee7",
+    "applicationName": "Heizung",
+    "deviceProfileId": "8717e341-9bbb-4328-b29b-e11f8be93c54",
+    "deviceProfileName": "MClimate Vicki",
+    "deviceName": "vicki-sim-001",
+    "devEui": "0011223344556677"
+  },
+  "devAddr": "01020304",
+  "adr": true,
+  "dr": 5,
+  "fCnt": 1,
+  "fPort": 1,
+  "confirmed": false,
+  "data": "AQkYKshkAA==",
+  "object": {
+    "command": 1,
+    "battery_voltage": 3.9,
+    "temperature": 24,
+    "target_temperature": 21.0,
+    "motor_range": 78,
+    "motor_position": 100,
+    "open_window_detected": false,
+    "child_lock": false,
+    "manual_override": false
+  },
+  "rxInfo": [
+    {
+      "gatewayId": "0102030405060708",
+      "rssi": -85,
+      "snr": 7.5,
+      "channel": 0,
+      "rfChain": 0,
+      "uplinkId": 12345
+    }
+  ],
+  "txInfo": {
+    "frequency": 868100000,
+    "modulation": {
+      "lora": {
+        "bandwidth": 125000,
+        "spreadingFactor": 7,
+        "codeRate": "CR_4_5"
+      }
+    }
+  }
+}

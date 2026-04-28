@@ -1,0 +1,9 @@
+# Beispiel-Passwortdatei. Echte Datei mit:
+#   docker run --rm -it eclipse-mosquitto:2 mosquitto_passwd -c /tmp/passwd chirpstack
+#   docker run --rm -it eclipse-mosquitto:2 mosquitto_passwd -b /tmp/passwd heizung-api <password>
+# erzeugen und als infra/mosquitto/config/passwd ablegen (gitignored).
+#
+# Format: <user>:<hash>
+# Beispiel-Hashes (NICHT verwenden, nur Format-Referenz):
+chirpstack:$7$101$dummy$dummyhash
+heizung-api:$7$101$dummy$dummyhash

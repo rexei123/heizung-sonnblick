@@ -1,0 +1,42 @@
+# ChirpStack v4 — Hauptkonfiguration (lokale Entwicklung)
+# Quelle: https://www.chirpstack.io/docs/chirpstack/configuration.html
+
+[logging]
+  level = "info"
+  json = false
+
+[postgresql]
+  dsn = "postgres://chirpstack:chirpstack@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+  max_open_connections = 10
+  min_idle_connections = 0
+
+[redis]
+  servers = ["redis://redis:6379/1"]
+  cluster = false
+  key_prefix = "cs:"
+
+[network]
+  net_id = "000000"
+  enabled_regions = ["eu868"]
+
+[api]
+  bind = "0.0.0.0:8080"
+  secret = "${CHIRPSTACK_API_SECRET}"
+
+[gateway]
+  client_cert_lifetime = "12months"
+
+[integration]
+  enabled = ["mqtt"]
+
+[integration.mqtt]
+  event_topic = "application/{{application_id}}/device/{{dev_eui}}/event/{{event}}"
+  command_topic = "application/{{application_id}}/device/{{dev_eui}}/command/{{command}}"
+  json = true
+  server = "tcp://mosquitto:1883"
+  qos = 1
+  clean_session = true
+  client_id = "chirpstack-integration"
+
+[monitoring]
+  bind = "0.0.0.0:8081"

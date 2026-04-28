@@ -21,6 +21,7 @@ import asyncio
 import logging
 from datetime import time
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +54,7 @@ _ORIENTATION_CYCLE: list[Orientation] = [
 
 async def _seed_room_types(session: AsyncSession) -> dict[str, RoomType]:
     """Standard-Raumtypen anlegen. Weitere Typen können im UI hinzugefügt werden."""
-    definitions = [
+    definitions: list[dict[str, Any]] = [
         {
             "name": "Doppelzimmer",
             "description": "Standard-Zweibettzimmer mit Bad.",
@@ -81,9 +82,7 @@ async def _seed_room_types(session: AsyncSession) -> dict[str, RoomType]:
     ]
     result: dict[str, RoomType] = {}
     for defn in definitions:
-        existing = await session.scalar(
-            select(RoomType).where(RoomType.name == defn["name"])
-        )
+        existing = await session.scalar(select(RoomType).where(RoomType.name == defn["name"]))
         if existing:
             result[defn["name"]] = existing
             logger.info("RoomType '%s' existiert bereits — übersprungen.", defn["name"])
@@ -175,11 +174,10 @@ async def _seed_rooms(session: AsyncSession, dz: RoomType) -> None:
 
 
 async def seed() -> None:
-    async with SessionLocal() as session:
-        async with session.begin():
-            room_types = await _seed_room_types(session)
-            await _seed_global_rule(session)
-            await _seed_rooms(session, room_types["Doppelzimmer"])
+    async with SessionLocal() as session, session.begin():
+        room_types = await _seed_room_types(session)
+        await _seed_global_rule(session)
+        await _seed_rooms(session, room_types["Doppelzimmer"])
     logger.info("Seed fertig.")
 
 

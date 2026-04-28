@@ -10,9 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Python-Dependencies
+# Editable Install: src/ wird zur Laufzeit aus dem Volume gelesen (siehe
+# docker-compose.yml). Dadurch reicht "docker compose restart api" fuer
+# Code-Aenderungen; "docker compose build api" ist nur noch bei
+# pyproject-Aenderungen (neue Dependencies) noetig.
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir ".[dev]"
+RUN pip install --no-cache-dir -e ".[dev]"
 
 # Quellcode und Migrationen
 COPY alembic.ini ./

@@ -1,5 +1,7 @@
 # Entwicklungs-Compose.
-# Für Produktion siehe infra/deploy/docker-compose.prod.yml (folgt).
+# Für Produktion siehe infra/deploy/docker-compose.prod.yml.
+#
+# Sprint 5: LoRaWAN-Stack (mosquitto, chirpstack-postgres, chirpstack) ergänzt.
 
 services:
   db:
@@ -30,21 +32,88 @@ services:
       timeout: 5s
       retries: 5
 
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./infra/mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    # Bind nur an 127.0.0.1: Broker im Docker-Netz erreichbar + lokal von work02,
+    # aber NICHT vom LAN. Lokal ist allow_anonymous OK, kein LAN-Exposure.
+    ports:
+      - "127.0.0.1:1883:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  chirpstack-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chirpstack
+      POSTGRES_USER: chirpstack
+      POSTGRES_PASSWORD: ${CHIRPSTACK_DB_PASSWORD:-chirpstack}
+    volumes:
+      - chirpstack_db:/var/lib/postgresql/data
+      - ./infra/chirpstack/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirpstack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    restart: unless-stopped
+    command: -c /etc/chirpstack
+    environment:
+      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD:-changeme}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET:-please-change-this-secret-min-32-chars}
+    volumes:
+      - ./infra/chirpstack/configuration:/etc/chirpstack:ro
+    depends_on:
+      chirpstack-postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"  # Web-UI
+      - "8081:8081"  # Monitoring/Metrics
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8081/metrics > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USER: heizung-api
+      MQTT_PASSWORD: ${MQTT_HEIZUNG_PASSWORD:-changeme}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mosquitto:
+        condition: service_started
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/src:/app/src  # Hot-Reload
+      - ./backend/src:/app/src           # Hot-Reload fuer Code
+      - ./backend/alembic:/app/alembic   # Hot-Pickup neuer Migrations beim Container-Restart
+      - ./backend/tests:/app/tests       # Tests aus dem Repo, ohne Rebuild ausfuehrbar
     command: ["uvicorn", "heizung.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   web:
@@ -61,3 +130,6 @@ services:
 
 volumes:
   db_data:
+  chirpstack_db:
+  mosquitto_data:
+  mosquitto_log:

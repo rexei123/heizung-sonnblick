@@ -2,7 +2,7 @@
 
 ## Architektur-Entscheidungen
 
-**Version 1.0 · April 2026**
+**Version 1.1 · April 2026**
 **Status:** Freigegeben
 **Bezug:** Addendum zu STRATEGIE.md v1.0 (Strategiepapier Heizung)
 
@@ -154,6 +154,68 @@ Bei Widersprüchen zwischen STRATEGIE.md v1.0 und diesem Dokument gilt dieses Do
 
 ---
 
+## AE-13 · ChirpStack als eigenständiger Container
+
+**Kontext.** Das Milesight UG65 Gateway bringt einen eingebauten ChirpStack-LNS mit. Alternativ ist ein externer Provider (TTN, Helium) möglich. Der Container-Weg bedeutet zusätzlichen Service-Footprint.
+
+**Entscheidung.** ChirpStack v4 läuft als Docker-Container in unserer Compose-Stack — weder als Embedded-LNS auf dem Gateway noch als externer Provider. Das Gateway agiert nur als Packet-Forwarder und sendet Pakete via UDP/TCP an unseren ChirpStack.
+
+**Begründung.** Vendor-unabhängige Versionskontrolle, einheitliche Backup-Strategie über DB-Volumes, Wechsel auf zweites Gateway später trivial, kein Cloud-Lock-in (DSGVO), Web-UI über Caddy-Reverse-Proxy zentral erreichbar. Der RAM-Mehraufwand (ca. 150 MB) ist auf CPX22 unkritisch.
+
+---
+
+## AE-14 · Eigene Postgres-Instanz für ChirpStack
+
+**Kontext.** ChirpStack braucht Postgres als Backing Store. Die Heizung-Anwendung nutzt bereits TimescaleDB (Postgres-Derivat). Eine geteilte Instanz wäre denkbar.
+
+**Entscheidung.** ChirpStack bekommt eine eigene Postgres-Instanz (`chirpstack-postgres`, postgres:16-alpine), getrennt von der Heizungs-DB.
+
+**Begründung.** ChirpStack-Schema ist vendor-controlled und ändert sich bei Major-Updates. Eine geteilte DB würde Migration-Reihenfolgen koppeln und unsere Backup-Strategie verkomplizieren. Zwei Container sind sauberer trennbar bei Disaster-Recovery. Der Mehraufwand RAM/Disk ist marginal.
+
+---
+
+## AE-15 · Mosquitto v2 als MQTT-Broker mit ACL
+
+**Kontext.** ChirpStack publisht Uplinks per MQTT. FastAPI muss konsumieren. Optionen: HTTP-Webhook (synchron), eingebauter ChirpStack-Broker (nicht vorgesehen), externer Broker (Mosquitto, EMQX, RabbitMQ).
+
+**Entscheidung.** Eigenständiger Eclipse Mosquitto v2 Container. Anonymous-Login deaktiviert. Zwei User in der Passwort-Datei: `chirpstack` (Publish auf `application/#`) und `heizung-api` (Subscribe auf `application/+/device/+/event/up`). ACL via `acl_file` enforced.
+
+**Begründung.** Mosquitto ist ChirpStack-Standard, leichtgewichtig (<50 MB RAM), stabil, kein Vendor-Lock. Webhook wäre primitiver, würde aber Replay-Fähigkeit, mehrere Subscriber (Future: WebSocket-Push ans Frontend) und FastAPI-Hochverfügbarkeit blockieren. ACL-Trennung verhindert, dass kompromittierte API-Credentials Uplinks fälschen können.
+
+---
+
+## AE-16 · Vicki-Decoder als JS-Codec in ChirpStack
+
+**Kontext.** MClimate Vicki sendet binäre Payloads. Decoder kann (a) im FastAPI-Backend oder (b) als JS-Codec im ChirpStack-DeviceProfile laufen.
+
+**Entscheidung.** Decoder läuft als JS-Codec im DeviceProfile. FastAPI verlässt sich auf das vom ChirpStack decodierte `object`-Feld im Uplink-Event.
+
+**Begründung.** Hersteller-Codec ist in JS verfügbar (MClimate Open-Source-Repo), keine Re-Implementation nötig. Vereinheitlichte Codec-Logik über alle Konsumenten (auch ChirpStack-UI zeigt decoded Werte). Backend bleibt Codec-agnostisch — bei neuen Geräte-Typen reicht ein neues DeviceProfile, keine Backend-Änderung. Codec-Datei wird versioniert in `infra/chirpstack/codecs/` mit Source-URL und Commit-SHA.
+
+---
+
+## AE-17 · Uplinks als TimescaleDB-Hypertable mit JSONB-Payload
+
+**Kontext.** Sensor-Uplinks sind Zeitreihen (typisch 1× pro 15 Min × 130 Geräte = ~1 Mio Rows/Jahr). Schema-Optionen: normalisiert (Spalte pro Sensor-Wert), JSONB, oder Wide-Table.
+
+**Entscheidung.** Eine `uplinks`-Hypertable mit Kernfeldern (`device_id`, `ts`, `fcnt`, `rssi`, `snr`, `freq`) und einem `payload`-JSONB-Feld für die decoded Vicki-Werte. Chunk-Intervall 7 Tage. Eindeutigkeit via `UNIQUE (device_id, fcnt)` für idempotente Inserts.
+
+**Begründung.** JSONB hält uns offen für unterschiedliche Geräte-Typen ohne Migrations-Hölle. TimescaleDB komprimiert ältere Chunks automatisch (~10× Reduktion typisch). Kernfelder bleiben indizierbar/queryable. UNIQUE-Constraint via DevEUI+FrameCounter macht MQTT-Replays bei Reconnects unproblematisch.
+
+**Konsequenz.** Frontend-Queries auf Sensor-Werte (z. B. `payload->>'temperature'`) sind etwas teurer als Spaltenzugriffe — bei 1 Mio Rows/Jahr mit Indices auf `(device_id, ts DESC)` aber unkritisch. Bei Performance-Engpässen später materialized views.
+
+---
+
+## AE-18 · MQTT-Subscriber als FastAPI-Lifespan-Background-Task
+
+**Kontext.** Wer konsumiert MQTT? Optionen: separater Microservice (eigener Container), Celery-Worker, FastAPI-Background-Task, externes Tool wie Telegraf.
+
+**Entscheidung.** `aiomqtt`-Subscriber läuft als asyncio-Task im FastAPI-Lifespan. Reconnect-Loop mit Exponential Backoff. Persistente Sessions (`clean_session=False`, fixierte Client-ID `heizung-api-subscriber`), QoS 1.
+
+**Begründung.** Kein zusätzlicher Container, kein Celery-Overhead. FastAPI läuft sowieso 24/7. Async-Stack ist passend zu MQTT-IO. Bei Skalierung > 1 FastAPI-Instanz wird der Subscriber auf einen separaten Worker-Container ausgelagert (späterer Sprint, falls relevant) — bis dahin trägt die Persistent-Session-Semantik plus UNIQUE-Constraint.
+
+---
+
 ## Nicht-Entscheidungen (bewusst offen gelassen)
 
 Folgende Punkte werden erst bei Bedarf entschieden, nicht jetzt:
@@ -170,6 +232,7 @@ Folgende Punkte werden erst bei Bedarf entschieden, nicht jetzt:
 | Version | Datum | Änderung |
 |---|---|---|
 | 1.0 | April 2026 | Initiale Version vor Entwicklungsstart |
+| 1.1 | 2026-04-27 | AE-13 bis AE-18 ergänzt (Sprint 5: ChirpStack, Mosquitto, Vicki-Codec, Uplink-Hypertable, MQTT-Subscriber-Pattern) |
 
 ---
 
