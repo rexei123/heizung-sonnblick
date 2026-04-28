@@ -74,24 +74,42 @@ services:
       timeout: 5s
       retries: 5
 
+  # Init-Sidecar: rendert chirpstack.toml mit envsubst (expandiert ${VAR}-Platzhalter)
+  # in ein gemeinsames Named Volume. Laeuft einmalig vor chirpstack.
+  chirpstack-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    environment:
+      POSTGRES_DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+      MQTT_CHIRPSTACK_USER: chirpstack
+      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET}
+    volumes:
+      - ../chirpstack/configuration:/template:ro
+      - chirpstack_config_rendered:/output
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache gettext > /dev/null
+        envsubst < /template/chirpstack.toml > /output/chirpstack.toml
+        cp /template/region_eu868.toml /output/region_eu868.toml
+        echo "chirpstack-init: rendered configs to /output"
+        ls -la /output/
+
   chirpstack:
     image: chirpstack/chirpstack:4
     restart: always
     # Container nur internes Docker-Netz, kein Public-Port; Caddy davor.
-    # Root vermeidet Permission-Issues mit Bind-Mounted Configs auf Linux-Host
-    # (ChirpStack-User UID matcht Host-Owner nicht).
     user: "0:0"
     command: -c /etc/chirpstack
-    environment:
-      # ChirpStack v4 macht KEINE ${VAR}-Substitution in TOML.
-      # Stattdessen: CHIRPSTACK__SECTION__FIELD-Env-Vars ueberschreiben TOML-Werte.
-      CHIRPSTACK__POSTGRESQL__DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
-      CHIRPSTACK__API__SECRET: ${CHIRPSTACK_API_SECRET}
-      CHIRPSTACK__INTEGRATION__MQTT__USERNAME: chirpstack
-      CHIRPSTACK__INTEGRATION__MQTT__PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
     volumes:
-      - ../chirpstack/configuration:/etc/chirpstack:ro
+      - chirpstack_config_rendered:/etc/chirpstack:ro
     depends_on:
+      chirpstack-init:
+        condition: service_completed_successfully
       chirpstack-postgres:
         condition: service_healthy
       mosquitto:
@@ -156,6 +174,7 @@ services:
 volumes:
   db_data:
   chirpstack_db:
+  chirpstack_config_rendered:
   mosquitto_data:
   mosquitto_log:
   caddy_data:

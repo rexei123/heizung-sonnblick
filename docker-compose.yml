@@ -65,18 +65,39 @@ services:
       timeout: 5s
       retries: 5
 
+  # Init-Sidecar: rendert chirpstack.toml via envsubst (expandiert ${VAR}-Platzhalter).
+  chirpstack-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    environment:
+      POSTGRES_DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD:-chirpstack}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+      MQTT_CHIRPSTACK_USER: chirpstack
+      MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD:-changeme}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET:-please-change-this-secret-min-32-chars}
+    volumes:
+      - ./infra/chirpstack/configuration:/template:ro
+      - chirpstack_config_rendered:/output
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache gettext > /dev/null
+        envsubst < /template/chirpstack.toml > /output/chirpstack.toml
+        cp /template/region_eu868.toml /output/region_eu868.toml
+        echo "chirpstack-init: rendered configs"
+        ls -la /output/
+
   chirpstack:
     image: chirpstack/chirpstack:4
     restart: unless-stopped
     command: -c /etc/chirpstack
-    environment:
-      CHIRPSTACK__POSTGRESQL__DSN: "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD:-chirpstack}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
-      CHIRPSTACK__API__SECRET: ${CHIRPSTACK_API_SECRET:-please-change-this-secret-min-32-chars}
-      CHIRPSTACK__INTEGRATION__MQTT__USERNAME: chirpstack
-      CHIRPSTACK__INTEGRATION__MQTT__PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD:-changeme}
     volumes:
-      - ./infra/chirpstack/configuration:/etc/chirpstack:ro
+      - chirpstack_config_rendered:/etc/chirpstack:ro
     depends_on:
+      chirpstack-init:
+        condition: service_completed_successfully
       chirpstack-postgres:
         condition: service_healthy
       mosquitto:
@@ -133,5 +154,6 @@ services:
 volumes:
   db_data:
   chirpstack_db:
+  chirpstack_config_rendered:
   mosquitto_data:
   mosquitto_log:
