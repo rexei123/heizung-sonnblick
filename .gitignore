@@ -47,6 +47,9 @@ logs/
 infra/caddy/data/
 infra/caddy/config/
 
+# Mosquitto: Passwort-Datei mit gehashten Credentials (passwd.example bleibt im Repo)
+infra/mosquitto/config/passwd
+
 # SSH public keys (gehoeren nicht ins Repo)
 *.pub
 

@@ -20,7 +20,7 @@ def _enum_values(enum_cls: Iterable[enum.Enum]) -> list[str]:
     return [member.value for member in enum_cls]
 
 
-class RoomStatus(str, enum.Enum):
+class RoomStatus(enum.StrEnum):
     """Operativer Status eines Zimmers.
 
     OCCUPIED und RESERVED steuern Vorheizen/Absenken, CLEANING hält
@@ -35,7 +35,7 @@ class RoomStatus(str, enum.Enum):
     BLOCKED = "blocked"
 
 
-class HeatingZoneKind(str, enum.Enum):
+class HeatingZoneKind(enum.StrEnum):
     """Funktionaler Zonen-Typ. Steuert teilweise Regel-Defaults."""
 
     BEDROOM = "bedroom"
@@ -45,7 +45,7 @@ class HeatingZoneKind(str, enum.Enum):
     OTHER = "other"
 
 
-class Orientation(str, enum.Enum):
+class Orientation(enum.StrEnum):
     """Himmelsrichtung der Außenfassade. Für spätere KI-Optimierung
     (solare Gewinne bei Südzimmern)."""
 
@@ -59,12 +59,12 @@ class Orientation(str, enum.Enum):
     NORTH_WEST = "NW"
 
 
-class DeviceKind(str, enum.Enum):
+class DeviceKind(enum.StrEnum):
     THERMOSTAT = "thermostat"
     SENSOR = "sensor"
 
 
-class DeviceVendor(str, enum.Enum):
+class DeviceVendor(enum.StrEnum):
     """Hersteller — relevant für den passenden Treiber in der
     Geräte-Abstraktionsschicht."""
 
@@ -73,12 +73,12 @@ class DeviceVendor(str, enum.Enum):
     MANUAL = "manual"  # Platzhalter für manuelle Eingabe / Tests
 
 
-class OccupancySource(str, enum.Enum):
+class OccupancySource(enum.StrEnum):
     MANUAL = "manual"
     PMS = "pms"
 
 
-class RuleConfigScope(str, enum.Enum):
+class RuleConfigScope(enum.StrEnum):
     """Gültigkeitsbereich einer Regelkonfiguration.
 
     Auflösung bei Regel-Evaluierung: ROOM > ROOM_TYPE > GLOBAL > hardcoded.
@@ -89,7 +89,7 @@ class RuleConfigScope(str, enum.Enum):
     ROOM = "room"
 
 
-class CommandReason(str, enum.Enum):
+class CommandReason(enum.StrEnum):
     """Warum wurde ein Steuerbefehl erzeugt. Reine Audit-Information."""
 
     OCCUPIED_SETPOINT = "occupied_setpoint"

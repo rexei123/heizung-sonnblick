@@ -19,13 +19,15 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Integer,
     Numeric,
     Time,
     UniqueConstraint,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,9 +54,7 @@ class RuleConfig(Base):
         ),
         nullable=False,
     )
-    room_type_id: Mapped[int | None] = mapped_column(
-        ForeignKey("room_type.id", ondelete="CASCADE")
-    )
+    room_type_id: Mapped[int | None] = mapped_column(ForeignKey("room_type.id", ondelete="CASCADE"))
     room_id: Mapped[int | None] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"))
 
     # Temperatur-Sollwerte (NULL = erben)
@@ -101,7 +101,5 @@ class RuleConfig(Base):
             name="ck_rule_config_scope_consistency",
         ),
         # Ein Eintrag pro Scope-Objekt.
-        UniqueConstraint(
-            "scope", "room_type_id", "room_id", name="uq_rule_config_scope_target"
-        ),
+        UniqueConstraint("scope", "room_type_id", "room_id", name="uq_rule_config_scope_target"),
     )

@@ -64,9 +64,7 @@ def test_rule_config_check_constraint_present() -> None:
     from heizung.models import RuleConfig
 
     check_names = {
-        c.name
-        for c in RuleConfig.__table__.constraints
-        if isinstance(c, CheckConstraint)
+        c.name for c in RuleConfig.__table__.constraints if isinstance(c, CheckConstraint)
     }
     assert "ck_rule_config_scope_consistency" in check_names
 

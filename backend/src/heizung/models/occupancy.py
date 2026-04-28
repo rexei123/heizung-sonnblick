@@ -11,12 +11,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Index,
     Integer,
     String,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,9 +33,7 @@ class Occupancy(Base):
     __tablename__ = "occupancy"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    room_id: Mapped[int] = mapped_column(
-        ForeignKey("room.id", ondelete="CASCADE"), nullable=False
-    )
+    room_id: Mapped[int] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"), nullable=False)
 
     check_in: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     check_out: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
