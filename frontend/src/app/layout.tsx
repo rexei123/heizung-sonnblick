@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Roboto } from "next/font/google";
+
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 /**
@@ -32,7 +34,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de" className={roboto.variable}>
-      <body className="font-sans bg-bg text-text-primary antialiased">{children}</body>
+      <body className="font-sans bg-bg text-text-primary antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
