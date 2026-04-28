@@ -174,9 +174,7 @@ async def _consume_loop() -> None:
 
                 async for message in client.messages:
                     try:
-                        uplink = ChirpStackUplink.model_validate_json(
-                            message.payload  # type: ignore[arg-type]
-                        )
+                        uplink = ChirpStackUplink.model_validate_json(message.payload)
                     except ValidationError as e:
                         logger.warning(
                             "uplink-validierung fehlgeschlagen topic=%s err=%s",
@@ -235,3 +233,4 @@ async def stop_subscriber() -> None:
         await _task
     _task = None
     logger.info("MQTT-Subscriber-Task gestoppt")
+                                                    
