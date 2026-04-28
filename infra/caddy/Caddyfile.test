@@ -44,14 +44,22 @@
     }
 }
 
-# --- ChirpStack-UI (nur Test-Stage, Sprint 6) ---
-# Auth: ChirpStack-eigenes Login-Formular (admin/<starkes-pw>).
-# Caddy-Basic-Auth wurde verworfen, weil das ChirpStack-React-Frontend
-# Assets mit crossorigin laedt -> Browser sendet keinen Basic-Auth-Header
-# -> Caddy gibt 401 -> Frontend laedt nicht.
+# --- ChirpStack-UI + Gateway-Bridge (nur Test-Stage, Sprint 6) ---
+# Auth UI: ChirpStack-eigenes Login-Formular (admin/<starkes-pw>).
+# Auth Gateway: Basic-Station-Authentication via Bridge-Konfig (DevEUI-Match).
+# /router-info + /router-data sind Basic-Station-WebSocket-Endpoints fuer das UG65.
 {$CHIRPSTACK_HOSTNAME} {
     encode zstd gzip
 
+    # Basic-Station WebSocket-Routen zum gateway-bridge
+    @basic_station {
+        path /router* /api/gateway*
+    }
+    handle @basic_station {
+        reverse_proxy chirpstack-gateway-bridge:3001
+    }
+
+    # Default: ChirpStack-UI
     reverse_proxy chirpstack:8080
 
     header {

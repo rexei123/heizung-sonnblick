@@ -89,6 +89,40 @@ services:
         echo "chirpstack-init: rendered configs"
         ls -la /output/
 
+  chirpstack-gateway-bridge-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    environment:
+      MQTT_GATEWAY_BRIDGE_USER: ${MQTT_GATEWAY_BRIDGE_USER:-}
+      MQTT_GATEWAY_BRIDGE_PASSWORD: ${MQTT_GATEWAY_BRIDGE_PASSWORD:-}
+    volumes:
+      - ./infra/chirpstack-gateway-bridge:/template:ro
+      - gateway_bridge_config_rendered:/output
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache gettext > /dev/null
+        envsubst < /template/chirpstack-gateway-bridge.toml > /output/chirpstack-gateway-bridge.toml
+        echo "gateway-bridge-init: rendered config"
+
+  chirpstack-gateway-bridge:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    restart: unless-stopped
+    user: "0:0"
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml
+    volumes:
+      - gateway_bridge_config_rendered:/etc/chirpstack-gateway-bridge:ro
+    depends_on:
+      chirpstack-gateway-bridge-init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3001:3001"  # Lokal: WebSocket-Endpoint testbar via wscat
+
   chirpstack:
     image: chirpstack/chirpstack:4
     restart: unless-stopped
@@ -155,5 +189,6 @@ volumes:
   db_data:
   chirpstack_db:
   chirpstack_config_rendered:
+  gateway_bridge_config_rendered:
   mosquitto_data:
   mosquitto_log:
