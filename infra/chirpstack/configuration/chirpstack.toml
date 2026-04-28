@@ -6,7 +6,7 @@
   json = false
 
 [postgresql]
-  dsn = "postgres://chirpstack:chirpstack@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+  dsn = "postgres://chirpstack:${CHIRPSTACK_DB_PASSWORD}@chirpstack-postgres:5432/chirpstack?sslmode=disable"
   max_open_connections = 10
   min_idle_connections = 0
 

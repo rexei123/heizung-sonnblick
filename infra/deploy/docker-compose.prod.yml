@@ -81,6 +81,7 @@ services:
     environment:
       MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
       CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET}
+      CHIRPSTACK_DB_PASSWORD: ${CHIRPSTACK_DB_PASSWORD}
     volumes:
       - ../chirpstack/configuration:/etc/chirpstack:ro
     depends_on:
