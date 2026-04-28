@@ -81,9 +81,7 @@ async def _seed_room_types(session: AsyncSession) -> dict[str, RoomType]:
     ]
     result: dict[str, RoomType] = {}
     for defn in definitions:
-        existing = await session.scalar(
-            select(RoomType).where(RoomType.name == defn["name"])
-        )
+        existing = await session.scalar(select(RoomType).where(RoomType.name == defn["name"]))
         if existing:
             result[defn["name"]] = existing
             logger.info("RoomType '%s' existiert bereits — übersprungen.", defn["name"])

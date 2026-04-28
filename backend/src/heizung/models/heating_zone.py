@@ -35,9 +35,7 @@ class HeatingZone(Base):
     __tablename__ = "heating_zone"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    room_id: Mapped[int] = mapped_column(
-        ForeignKey("room.id", ondelete="CASCADE"), nullable=False
-    )
+    room_id: Mapped[int] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"), nullable=False)
 
     kind: Mapped[HeatingZoneKind] = mapped_column(
         SQLEnum(
@@ -53,9 +51,7 @@ class HeatingZone(Base):
 
     # Handtuchtrockner im Bad — wasserbasiert, eigene Logik:
     # bei Belegung an, sonst Frostschutz.
-    is_towel_warmer: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    is_towel_warmer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -70,6 +66,4 @@ class HeatingZone(Base):
     room: Mapped[Room] = relationship(back_populates="heating_zones")
     devices: Mapped[list[Device]] = relationship(back_populates="heating_zone")
 
-    __table_args__ = (
-        UniqueConstraint("room_id", "name", name="uq_heating_zone_room_name"),
-    )
+    __table_args__ = (UniqueConstraint("room_id", "name", name="uq_heating_zone_room_name"),)

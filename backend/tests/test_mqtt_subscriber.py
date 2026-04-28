@@ -109,9 +109,7 @@ def test_chirpstack_uplink_rejects_missing_dev_eui() -> None:
 
 def test_chirpstack_uplink_rejects_negative_fcnt() -> None:
     with pytest.raises(ValidationError):
-        ChirpStackUplink.model_validate(
-            {"deviceInfo": {"devEui": "00"}, "fCnt": -1}
-        )
+        ChirpStackUplink.model_validate({"deviceInfo": {"devEui": "00"}, "fCnt": -1})
 
 
 # ---------------------------------------------------------------------------

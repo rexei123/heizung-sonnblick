@@ -114,9 +114,7 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
     dev_eui = uplink.deviceInfo.devEui.lower()
 
     async with SessionLocal() as session:
-        result = await session.execute(
-            select(Device.id).where(Device.dev_eui == dev_eui)
-        )
+        result = await session.execute(select(Device.id).where(Device.dev_eui == dev_eui))
         device_id = result.scalar_one_or_none()
 
         if device_id is None:
@@ -201,9 +199,7 @@ async def _consume_loop() -> None:
             logger.info("MQTT-Subscriber beendet (CancelledError)")
             raise
         except aiomqtt.MqttError as e:
-            logger.warning(
-                "MQTT-Verbindung verloren, Reconnect in %.1fs: %s", backoff, e
-            )
+            logger.warning("MQTT-Verbindung verloren, Reconnect in %.1fs: %s", backoff, e)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
         except Exception:

@@ -48,6 +48,4 @@ class SensorReading(Base):
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)
 
-    __table_args__ = (
-        Index("ix_sensor_reading_device_time", "device_id", "time"),
-    )
+    __table_args__ = (Index("ix_sensor_reading_device_time", "device_id", "time"),)
