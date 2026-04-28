@@ -77,6 +77,10 @@ services:
   chirpstack:
     image: chirpstack/chirpstack:4
     restart: always
+    # Als root laufen lassen — analog zur offiziellen chirpstack-docker-Reference.
+    # Container ist nur internes Docker-Netz, kein Public-Port. Caddy davor.
+    # Vermeidet Permission-Issues mit Bind-Mounted Configs auf Linux-Host.
+    user: "0:0"
     command: -c /etc/chirpstack
     environment:
       MQTT_CHIRPSTACK_PASSWORD: ${MQTT_CHIRPSTACK_PASSWORD}
