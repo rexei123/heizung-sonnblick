@@ -2,7 +2,7 @@
 
 ## Architektur-Entscheidungen
 
-**Version 1.1 · April 2026**
+**Version 1.2 · April 2026**
 **Status:** Freigegeben
 **Bezug:** Addendum zu STRATEGIE.md v1.0 (Strategiepapier Heizung)
 
@@ -216,6 +216,80 @@ Bei Widersprüchen zwischen STRATEGIE.md v1.0 und diesem Dokument gilt dieses Do
 
 ---
 
+## AE-19 · Basic Station als Gateway-Protokoll (Sprint 6)
+
+**Kontext.** Das Milesight UG65 unterstuetzt zwei LoRaWAN-Gateway-Protokolle: klassisches Semtech-UDP-Packet-Forwarding (Port 1700, unverschluesselt) und Basic Station (TLS-WebSocket auf Port 443).
+
+**Entscheidung.** UG65 spricht Basic Station gegen `wss://cs-test.hoteltec.at:443/router-info`. Caddy macht TLS-Termination (Let's Encrypt) und reverse-proxiet zum `chirpstack-gateway-bridge`-Container intern.
+
+**Begruendung.** Verschluesselte Verbindung ohne UDP-Port-Forwarding; Hetzner-Cloud-Firewall + UFW koennen TCP/443 ohnehin zulassen; Basic Station ist ChirpStack-v4-Standard. Keine eingehenden Ports am Hotel-LAN noetig.
+
+---
+
+## AE-20 · ChirpStack-Konfig via envsubst-Sidecar
+
+**Kontext.** ChirpStack v4 substituiert KEINE `${VAR}`-Platzhalter in den TOML-Konfigs. Auch das offiziell dokumentierte env-Override-Pattern `CHIRPSTACK__SECTION__FIELD` greift in unserer Konstellation nicht zuverlaessig (zumindest nicht fuer `[postgresql] dsn`).
+
+**Entscheidung.** Ein `alpine`-Init-Sidecar laeuft vor dem ChirpStack-Container, liest die TOML-Templates aus dem Bind-Mount (`infra/chirpstack/configuration/`), expandiert `${VAR}`-Platzhalter mit `envsubst` und schreibt die fertige Konfig in ein Named Volume (`chirpstack_config_rendered`). ChirpStack mountet dieses Volume read-only.
+
+Selbes Muster fuer den `chirpstack-gateway-bridge`-Container.
+
+**Begruendung.** Robust und unabhaengig von ChirpStack-internen Substitutions-Mechanismen. Secrets bleiben in der `.env` und kommen ueber Compose-env in den Init-Container. ChirpStack sieht eine "fertig gerenderte" Konfig — keine Plaintext-Passwoerter im Image-Layer, keine Inline-Substitution-Fehler.
+
+---
+
+## AE-21 · shadcn/ui-Foundation aufgeschoben (Sprint 7)
+
+**Kontext.** Sprint 7 brauchte eine schnelle Frontend-Foundation. shadcn/ui haette Standard-Komponenten gebracht, aber der `init`-Prozess kollidiert mit dem in Sprint 0 etablierten Custom-Theme (CSS-Variablen-basiertes Design-System, Rosé + Heating-Farben, Roboto, Material Symbols Outlined).
+
+**Entscheidung.** Sprint 7 nutzt **Plain Tailwind** mit unseren Custom-Tokens. shadcn/ui-Einfuehrung wird als eigener Refactor-Sprint geplant, mit Backup-Strategie und manuellem Theme-Merge.
+
+**Begruendung.** Pragmatik: Sichtbarer Mehrwert (Devices-Liste + Detail-View) wichtiger als UI-Lib-Best-Practice. Der eigentliche Gewinn von shadcn (Source-basierte Komponenten, kein Vendor-Lock) bleibt jederzeit nachholbar.
+
+---
+
+## AE-22 · TanStack Query v5 als Server-State-Management
+
+**Kontext.** Frontend braucht Caching, Refetch-on-Focus, optimistic-Updates fuer die FastAPI-Aufrufe.
+
+**Entscheidung.** `@tanstack/react-query` v5 mit Devtools. Defaults: `staleTime: 30 s`, `refetchOnWindowFocus: true`, `retry: 1`. Pro Hook `refetchInterval: 30 s` fuer near-realtime-Updates auf der Detail-Seite (Reading-Daten, Device-Status).
+
+**Begruendung.** Industriestandard fuer React-Apps mit REST-Backend. Reduziert Boilerplate enorm gegenueber `useEffect+useState`. Mutations invalidieren nach Erfolg automatisch die Liste-Caches (z. B. POST `/devices` invalidiert `useDevices`).
+
+---
+
+## AE-23 · Recharts fuer Charts
+
+**Kontext.** Sprint 7 zeigt einen 24-h-Temperatur-Verlauf pro Geraet.
+
+**Entscheidung.** `recharts` als Chart-Library. Komponente `sensor-readings-chart.tsx` mit `"use client"`-Direktive (Recharts hat SSR-Hydration-Issues mit Next.js Server-Components).
+
+**Begruendung.** Tailwind-/CSS-Variable-kompatibel, gute TypeScript-Typen, Standard fuer React-TS-Projekte. Plain SVG selbst zu schreiben war fuer den Aufwand nicht gerechtfertigt.
+
+---
+
+## AE-24 · Next.js-Rewrite fuer API-Proxying
+
+**Kontext.** Frontend ruft `/api/v1/...` (relativ). In Production proxiet Caddy diese Pfade an FastAPI. Lokal lief bisher kein Caddy.
+
+**Entscheidung.** Next.js-Rewrite-Regel in `next.config.mjs`: `/api/v1/:path*` → `${API_PROXY_TARGET}/api/v1/:path*`. Default `http://api:8000` fuer Container-internen Service-Namen. Ueber Env-Variable `API_PROXY_TARGET` ueberschreibbar (z. B. `http://localhost:8000` fuer reines `npm run dev` ohne Compose).
+
+**Begruendung.** Frontend-Code bleibt identisch zwischen Lokal-Dev und Production (relative Pfade). Kein CORS-Setup im Backend noetig. Production-Caddy ueberschattet dieses Rewrite — schadet aber nicht.
+
+---
+
+## AE-25 · Design-Token-System mit flachem Mapping (Sprint 7)
+
+**Kontext.** Sprint-0-Tailwind-Config hatte CSS-Variablen-basiertes Theme, aber mit nested-Mapping (`bg.surface`, `bg.surface-alt`). Klassen wie `bg-surface` griffen nicht — Tailwind erwartete `bg-bg-surface`. Folge: Hover-States in den Sprint-7-Komponenten waren tot.
+
+**Entscheidung.** Tailwind-Token flach umgestellt: `surface`, `surface-alt`, `overlay`, `border`, `border-strong`, `border-focus` als Top-Level-Colors. Plus Schriftgroessen-Skala als CSS-Variablen (`--font-size-xs/sm/base/lg/xl/2xl/3xl`). Body nutzt `var(--font-size-base)`.
+
+**Begruendung.** Saubere Klassen-Konvention (`bg-surface` macht was es sagt). Globale Schriftgroessen-Skalierung ueber eine Variable (z. B. fuer User-Settings „kompakt/normal/groß"). Theme-Wechsel (Light/Dark) bleibt trivial nachholbar via `[data-theme]`-Selector.
+
+**Konsequenz.** AE-01 (Material Symbols als einziges Icon-Set) bleibt unveraendert. Roboto bleibt UI-Schrift. Dark-Mode ist nicht Teil von Sprint 7, aber das Design-System ist fundament-tauglich.
+
+---
+
 ## Nicht-Entscheidungen (bewusst offen gelassen)
 
 Folgende Punkte werden erst bei Bedarf entschieden, nicht jetzt:
@@ -233,7 +307,9 @@ Folgende Punkte werden erst bei Bedarf entschieden, nicht jetzt:
 |---|---|---|
 | 1.0 | April 2026 | Initiale Version vor Entwicklungsstart |
 | 1.1 | 2026-04-27 | AE-13 bis AE-18 ergänzt (Sprint 5: ChirpStack, Mosquitto, Vicki-Codec, Uplink-Hypertable, MQTT-Subscriber-Pattern) |
+| 1.2 | 2026-04-28 | AE-19 bis AE-25 ergänzt (Sprint 6: Basic Station + envsubst-Sidecar; Sprint 7: shadcn aufgeschoben, TanStack Query, Recharts, Rewrite-Proxy, Design-Tokens) |
 
 ---
 
 *Ende des Dokuments*
+                                                                                                                                                                                                                                               
