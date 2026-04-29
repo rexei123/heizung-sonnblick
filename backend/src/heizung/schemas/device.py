@@ -43,7 +43,10 @@ class DeviceCreate(BaseModel):
     @field_validator("dev_eui")
     @classmethod
     def _v_dev_eui(cls, v: str) -> str:
-        return _normalize_eui(v) or v  # type: ignore[return-value]
+        normalized = _normalize_eui(v)
+        # _normalize_eui validiert + lowercased; bei valid-Input nie None.
+        # `or v` ist Defensiv-Fallback, falls _normalize_eui sich aendert.
+        return normalized if normalized is not None else v
 
     @field_validator("app_eui")
     @classmethod
