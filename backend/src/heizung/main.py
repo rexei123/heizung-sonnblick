@@ -56,9 +56,7 @@ async def _dbapi_error_handler(_: Request, exc: DBAPIError) -> JSONResponse:
     Vorher: Path-Param ausserhalb int4-Range -> 500 Internal Server Error
     mit Stacktrace im Log. QA-Audit K-2.
     """
-    logging.getLogger(__name__).warning(
-        "db error: %s", str(exc).split("\n")[0][:200]
-    )
+    logging.getLogger(__name__).warning("db error: %s", str(exc).split("\n")[0][:200])
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": "Ungueltiger Anfrage-Parameter (Datenbank-Validierung)"},

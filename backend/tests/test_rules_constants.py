@@ -15,7 +15,7 @@ from heizung.rules.constants import (
 def test_frost_protection_is_10_celsius() -> None:
     """Wasserrohr-Frostschutz: 10 °C ist der vereinbarte Wert (STRATEGIE Regel 8).
     Aenderung erzwingt Code-Review."""
-    assert FROST_PROTECTION_C == Decimal("10.0")
+    assert Decimal("10.0") == FROST_PROTECTION_C
 
 
 def test_guest_override_bounds_consistent() -> None:
@@ -26,4 +26,4 @@ def test_guest_override_bounds_consistent() -> None:
 
 def test_guest_override_max_realistic() -> None:
     """Max-Override darf nicht ueber 30 °C (Hotel-Komfort + Gesundheit)."""
-    assert MAX_GUEST_OVERRIDE_C <= Decimal("30.0")
+    assert Decimal("30.0") >= MAX_GUEST_OVERRIDE_C

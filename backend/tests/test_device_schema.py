@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from heizung.models.enums import DeviceKind, DeviceVendor
 from heizung.schemas.device import DeviceCreate, DeviceUpdate
 
-
 # ---------------------------------------------------------------------------
 # DeviceCreate
 # ---------------------------------------------------------------------------
