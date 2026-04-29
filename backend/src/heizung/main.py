@@ -7,7 +7,9 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 
 from heizung import __version__
 from heizung.api.v1 import router as v1_router
@@ -45,6 +47,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(v1_router)
+
+
+@app.exception_handler(DBAPIError)
+async def _dbapi_error_handler(_: Request, exc: DBAPIError) -> JSONResponse:
+    """Faengt asyncpg/SQLAlchemy-Datenbank-Fehler ab und antwortet sauber.
+
+    Vorher: Path-Param ausserhalb int4-Range -> 500 Internal Server Error
+    mit Stacktrace im Log. QA-Audit K-2.
+    """
+    logging.getLogger(__name__).warning(
+        "db error: %s", str(exc).split("\n")[0][:200]
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "Ungueltiger Anfrage-Parameter (Datenbank-Validierung)"},
+    )
 
 
 @app.get("/health", tags=["system"])

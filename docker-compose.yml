@@ -158,6 +158,9 @@ services:
       MQTT_PORT: "1883"
       MQTT_USER: heizung-api
       MQTT_PASSWORD: ${MQTT_HEIZUNG_PASSWORD:-changeme}
+      # Lokal-Dev-Backdoor: erlaubt Default-Secrets in .env. Production-Compose
+      # setzt diese Variable bewusst NICHT — dort werden Secrets erzwungen.
+      ALLOW_DEFAULT_SECRETS: "1"
     depends_on:
       db:
         condition: service_healthy

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,17 @@ from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate
 from heizung.schemas.sensor_reading import SensorReadingRead
+
+# Postgres int4-Range. IDs > 2^31-1 wuerden DataError werfen → 500.
+# Mit Path-Validierung kommt FastAPI sauberer mit 422 zurueck.
+INT4_MAX = 2_147_483_647
+
+DeviceIdPath = Path(  # noqa: B008 (FastAPI-Idiom)
+    ...,
+    gt=0,
+    le=INT4_MAX,
+    description="Device-ID (positive Integer, Postgres int4-Range)",
+)
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -117,7 +128,7 @@ async def list_devices(
     summary="Einzelnes Geraet",
 )
 async def get_device(
-    device_id: int,
+    device_id: int = DeviceIdPath,
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     return await _get_or_404(session, device_id)
@@ -129,8 +140,8 @@ async def get_device(
     summary="Geraet partiell aktualisieren",
 )
 async def update_device(
-    device_id: int,
     payload: DeviceUpdate,
+    device_id: int = DeviceIdPath,
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     device = await _get_or_404(session, device_id)
@@ -158,7 +169,7 @@ async def update_device(
     summary="Zeitreihen-Readings eines Geraets",
 )
 async def list_sensor_readings(
-    device_id: int,
+    device_id: int = DeviceIdPath,
     from_: datetime | None = Query(  # noqa: B008
         default=None,
         alias="from",
