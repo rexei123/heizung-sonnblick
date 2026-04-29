@@ -2,7 +2,7 @@
 
 Eigenständige, cloud-basierte Heizungssteuerung für das Hotel Sonnblick Kaprun. Steuert LoRaWAN-Thermostate (MClimate Vicki, Milesight WT102) belegungsabhängig und ersetzt das bestehende Betterspace-System.
 
-**Status:** Sprint 5 abgeschlossen (LoRaWAN-Foundation lokal lauffähig). Nächster: Sprint 6 (Hardware + Hotel-LAN + ChirpStack-Deploy auf Test-Server).
+**Status:** Sprint 6 in Arbeit (Hardware-Pairing, ChirpStack auf Test-Server live), Sprint 7 in Arbeit (Frontend-Dashboard mit Geräteliste + Detail-View). QA-Audit-Fixes K-2, K-3, K-6 eingebaut.
 
 ## Systeme
 
@@ -101,6 +101,8 @@ docs/                     Strategiepapier, ADRs, RUNBOOK, Feature-Briefs, Workin
 | `v0.1.3-ufw-reactivation` | 3 | UFW aktiv auf beiden Servern |
 | `v0.1.4-domain-hoteltec` | 4 | Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS |
 | `v0.1.5-lorawan-foundation` | 5 | ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API |
+| _pending_ | 6 | UG65-Pairing, ChirpStack-Stack auf Test-Server, gateway-bridge, Devices-CRUD-API (Tag folgt nach erfolgreichem Vicki-Pairing) |
+| _pending_ | 7 | Frontend-Dashboard `/devices` + Detail-View mit Recharts, Design-System-Konsolidierung (Tag folgt zusammen mit Sprint 6) |
 
 ## Lizenz
 

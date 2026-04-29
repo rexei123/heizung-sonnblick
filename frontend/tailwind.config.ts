@@ -1,10 +1,22 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Tailwind-Konfiguration auf Basis der Design-Strategie 2.0.
+ * Tailwind-Konfiguration auf Basis der Design-Strategie 2.0.1.
  *
- * Alle Farb- und Layout-Tokens werden per CSS-Variable aus globals.css gezogen,
- * damit Theme-Wechsel (z. B. Dark-Mode) später ohne Rebuild funktionieren.
+ * Alle Farben, Radien, Shadows, Spacing-Tokens kommen aus CSS-Variablen
+ * in globals.css. Hier nur das Mapping CSS-Variable -> Tailwind-Utility.
+ *
+ * FLAT-Mapping fuer Surface- und Border-Tokens:
+ *   bg-surface         => var(--color-surface)
+ *   bg-surface-alt     => var(--color-surface-alt)
+ *   border-border      => var(--color-border)
+ *   border-border-strong => var(--color-border-strong)
+ *
+ * NESTED-Mapping fuer Text- und Brand-/Semantik-Farben (mit Sub-Tokens):
+ *   text-text-primary  => var(--color-text-primary)
+ *   bg-primary         => var(--color-primary)
+ *   bg-primary-soft    => var(--color-primary-soft)
+ *   text-primary       => var(--color-primary)
  */
 const config: Config = {
   content: [
@@ -17,8 +29,19 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-admin)", "system-ui", "sans-serif"],
       },
+      // Schriftgroessen via Tokens. Aenderung von --font-size-base
+      // skaliert die ganze App proportional.
+      fontSize: {
+        xs: "var(--font-size-xs)",
+        sm: "var(--font-size-sm)",
+        base: "var(--font-size-base)",
+        lg: "var(--font-size-lg)",
+        xl: "var(--font-size-xl)",
+        "2xl": "var(--font-size-2xl)",
+        "3xl": "var(--font-size-3xl)",
+      },
       colors: {
-        // Primärfarbe (Rosé)
+        // Brand: Rosé
         primary: {
           DEFAULT: "var(--color-primary)",
           hover: "var(--color-primary-hover)",
@@ -26,26 +49,22 @@ const config: Config = {
           soft: "var(--color-primary-soft)",
           "on-primary": "var(--color-on-primary)",
         },
-        // Textfarben
+        // Text — nested, damit `text-text-primary` semantisch klar ist.
         text: {
           primary: "var(--color-text-primary)",
           secondary: "var(--color-text-secondary)",
           tertiary: "var(--color-text-tertiary)",
           inverse: "var(--color-text-inverse)",
         },
-        // Hintergründe
-        bg: {
-          DEFAULT: "var(--color-bg)",
-          surface: "var(--color-surface)",
-          "surface-alt": "var(--color-surface-alt)",
-          overlay: "var(--color-overlay)",
-        },
-        // Border
-        border: {
-          DEFAULT: "var(--color-border)",
-          strong: "var(--color-border-strong)",
-          focus: "var(--color-border-focus)",
-        },
+        // Surfaces — flach, damit `bg-surface`, `bg-surface-alt` direkt greifen.
+        bg: "var(--color-bg)",
+        surface: "var(--color-surface)",
+        "surface-alt": "var(--color-surface-alt)",
+        overlay: "var(--color-overlay)",
+        // Borders — flach, damit `border-border`, `border-border-strong` greifen.
+        border: "var(--color-border)",
+        "border-strong": "var(--color-border-strong)",
+        "border-focus": "var(--color-border-focus)",
         // Semantik
         success: {
           DEFAULT: "var(--color-success)",
@@ -89,6 +108,9 @@ const config: Config = {
       spacing: {
         sidebar: "var(--layout-sidebar-width)",
         header: "var(--layout-header-height)",
+      },
+      maxWidth: {
+        content: "var(--layout-content-max)",
       },
       transitionDuration: {
         fast: "var(--motion-fast)",

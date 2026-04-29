@@ -1,0 +1,49 @@
+# ChirpStack Gateway Bridge — Basic Station Backend (Sprint 6)
+# Quelle: https://www.chirpstack.io/docs/chirpstack-gateway-bridge/configuration.html
+#
+# Bridge-Aufgabe: konvertiert Basic-Station-WebSocket-Frames vom UG65
+# in MQTT-Frames zum ChirpStack (via Mosquitto).
+# ${VAR}-Platzhalter werden vom gateway-bridge-init-Sidecar (envsubst)
+# zur Container-Start-Zeit expandiert.
+
+[general]
+  log_level = 4
+  log_to_syslog = false
+
+[backend]
+  type = "basic_station"
+
+[backend.basic_station]
+  bind = "0.0.0.0:3001"
+  # CA + TLS-Cert nicht noetig — Caddy macht das WSS-Termination davor.
+  # Bridge selbst spricht WS innerhalb des Docker-Netzes mit Caddy.
+  ca_cert = ""
+  tls_cert = ""
+  tls_key = ""
+  stats_interval = "30s"
+  ping_interval = "1m0s"
+  read_timeout = "1m5s"
+  write_timeout = "1s"
+  region = "EU868"
+  frequency_min = 863000000
+  frequency_max = 870000000
+
+[integration]
+  marshaler = "protobuf"
+
+[integration.mqtt]
+  event_topic_template = "eu868/gateway/{{ .GatewayID }}/event/{{ .EventType }}"
+  command_topic_template = "eu868/gateway/{{ .GatewayID }}/command/#"
+  state_topic_template = "eu868/gateway/{{ .GatewayID }}/state/{{ .StateType }}"
+  state_retained = true
+
+[integration.mqtt.auth]
+  type = "generic"
+
+[integration.mqtt.auth.generic]
+  servers = ["tcp://mosquitto:1883"]
+  username = "${MQTT_GATEWAY_BRIDGE_USER}"
+  password = "${MQTT_GATEWAY_BRIDGE_PASSWORD}"
+  qos = 0
+  clean_session = true
+  client_id = "chirpstack-gateway-bridge-eu868"

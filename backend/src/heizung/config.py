@@ -2,14 +2,22 @@
 
 Lädt Konfiguration aus Umgebungsvariablen bzw. ``.env``. Alle Felder sind
 typisiert. Ein Startup-Validator verhindert, dass das System mit
-Standard-Secrets in Produktion läuft.
+Standard-Secrets in irgendeinem Modus laeuft (QA-Audit K-3).
+
+Lokale Entwickler koennen die Validierung gezielt deaktivieren:
+  ALLOW_DEFAULT_SECRETS=1 (nur fuer reine Dev-Maschine)
 """
 
+import os
 from functools import lru_cache
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Default-Werte, die NIE in einem produktiven Setup landen duerfen.
+# Bei Aenderung hier auch die .env.example aktualisieren.
+_DEFAULT_SECRET_KEY: Final[str] = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -22,7 +30,7 @@ class Settings(BaseSettings):
     # --- Laufzeit ---
     environment: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
-    secret_key: str = Field(default="change-me-in-production", min_length=16)
+    secret_key: str = Field(default=_DEFAULT_SECRET_KEY, min_length=16)
 
     # --- Infrastruktur ---
     database_url: str = "postgresql+asyncpg://heizung:heizung_dev@localhost:5432/heizung"
@@ -42,11 +50,20 @@ class Settings(BaseSettings):
     mqtt_enabled: bool = True
 
     @model_validator(mode="after")
-    def _reject_default_secrets_in_production(self) -> "Settings":
-        if self.environment == "production" and self.secret_key == "change-me-in-production":
+    def _reject_default_secrets(self) -> "Settings":
+        """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.
+
+        Lokale Dev-Maschine kann via ALLOW_DEFAULT_SECRETS=1 abkuerzen.
+        Server-Setup MUSS echte Secrets setzen.
+        """
+        if os.getenv("ALLOW_DEFAULT_SECRETS") == "1":
+            return self
+
+        if self.secret_key == _DEFAULT_SECRET_KEY:
             raise ValueError(
-                "SECRET_KEY muss in Produktion explizit gesetzt werden. "
-                "Beispiel: openssl rand -hex 32"
+                "SECRET_KEY ist auf Default-Wert. Echtes Secret setzen "
+                "(`openssl rand -hex 32`) oder ALLOW_DEFAULT_SECRETS=1 "
+                "fuer lokale Dev-Maschine."
             )
         return self
 
