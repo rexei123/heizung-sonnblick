@@ -6,7 +6,9 @@
   json = false
 
 [postgresql]
-  dsn = "postgres://chirpstack:chirpstack@chirpstack-postgres:5432/chirpstack?sslmode=disable"
+  # ${VAR}-Platzhalter werden vom chirpstack-init-Sidecar (envsubst) zur
+  # Container-Start-Zeit expandiert, BEVOR ChirpStack die Config liest.
+  dsn = "${POSTGRES_DSN}"
   max_open_connections = 10
   min_idle_connections = 0
 
@@ -34,6 +36,8 @@
   command_topic = "application/{{application_id}}/device/{{dev_eui}}/command/{{command}}"
   json = true
   server = "tcp://mosquitto:1883"
+  username = "${MQTT_CHIRPSTACK_USER}"
+  password = "${MQTT_CHIRPSTACK_PASSWORD}"
   qos = 1
   clean_session = true
   client_id = "chirpstack-integration"

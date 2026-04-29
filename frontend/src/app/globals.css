@@ -6,8 +6,8 @@
  * Nur HIER werden konkrete Farb-, Radius-, Schatten- und Layout-Werte definiert.
  */
 
-/* Material Symbols (einziges Icon-Set lt. AE-01) */
-@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300..700,0..1,-50..200&display=block");
+/* Material Symbols werden via <link> in app/layout.tsx geladen.
+   Klassendefinition unten greift die Font-Family auf. */
 
 @tailwind base;
 @tailwind components;
@@ -57,6 +57,18 @@
   --color-heating-preheat: #f59e0b;
   --color-heating-frost: #7c3aed;
 
+  /* --- Schriftgrößen ---
+     Token-basiert. Eine Aenderung von --font-size-base skaliert die ganze App
+     (alle text-xs..text-3xl basieren auf diesen Variablen).
+     Aktueller Standard-Body: 14px (kompakte Hotelier-Sicht). */
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 32px;
+
   /* --- Radien --- */
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -90,7 +102,7 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text-primary);
   font-family: var(--font-admin), system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
