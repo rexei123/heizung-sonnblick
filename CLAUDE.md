@@ -7,8 +7,9 @@ Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 - **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
 - **Repo:** https://github.com/rexei123/heizung-sonnblick (public)
 - **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick` (synced mit Cowork-Mount)
-- **Aktueller Sprint:** Sprint 5 abgeschlossen 2026-04-28. Naechster: **Sprint 6 — Hardware + Hotel-LAN + ChirpStack-Deploy** (geplant, noch kein Brief).
+- **Aktueller Sprint:** **Sprint 6 in Arbeit** (Hardware-Pairing). Server-Stack vorbereitet, Pairing 2026-04-29 mit IT-Mitarbeiter geplant.
 - **Letzter Tag:** `v0.1.5-lorawan-foundation`
+- **Pairing-Tagesplan:** `docs/working/sprint6-pairing-anleitung.md` (zuerst lesen am Pairing-Tag!)
 - **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
 
 ## 2. Pflicht-Lektüre vor Sprint-Arbeit
