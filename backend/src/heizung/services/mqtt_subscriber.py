@@ -26,7 +26,7 @@ from typing import Any
 
 import aiomqtt
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from heizung.config import get_settings
@@ -110,7 +110,9 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
 
 
 async def _persist_uplink(uplink: ChirpStackUplink) -> None:
-    """DevEUI -> device_id auflösen, Reading idempotent inserten."""
+    """DevEUI -> device_id aufloesen, Reading idempotent inserten,
+    last_seen_at am Device aktualisieren (M-6 / QA-Audit 2026-04-29).
+    """
     dev_eui = uplink.deviceInfo.devEui.lower()
 
     async with SessionLocal() as session:
@@ -132,14 +134,26 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
             .on_conflict_do_nothing(index_elements=["time", "device_id"])
         )
         await session.execute(stmt)
+
+        # last_seen_at = uplink.time (vom Gateway, monotone Zeit) wenn vorhanden,
+        # sonst now() (Subscriber-Empfangszeit). Decreasing-Updates werden mit
+        # WHERE last_seen_at < new_value abgewehrt (Late-Arrivals nach Re-Sync).
+        seen_at = uplink.time or datetime.now(tz=UTC)
+        await session.execute(
+            update(Device)
+            .where(Device.id == device_id)
+            .where((Device.last_seen_at.is_(None)) | (Device.last_seen_at < seen_at))
+            .values(last_seen_at=seen_at)
+        )
         await session.commit()
 
         logger.info(
-            "uplink persistiert: dev_eui=%s fcnt=%s temp=%s setpoint=%s",
+            "uplink persistiert: dev_eui=%s fcnt=%s temp=%s setpoint=%s seen_at=%s",
             dev_eui,
             values["fcnt"],
             values["temperature"],
             values["setpoint"],
+            seen_at.isoformat(),
         )
 
 
