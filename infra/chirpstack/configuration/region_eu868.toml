@@ -35,6 +35,8 @@
         event_topic = "eu868/gateway/+/event/+"
         command_topic = "eu868/gateway/{{ gateway_id }}/command/{{ command }}"
         server = "tcp://mosquitto:1883"
+        username = "${MQTT_CHIRPSTACK_USER}"
+        password = "${MQTT_CHIRPSTACK_PASSWORD}"
         qos = 1
         clean_session = true
         client_id = "chirpstack-gw-eu868"

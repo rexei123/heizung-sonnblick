@@ -101,7 +101,10 @@ services:
         set -e
         apk add --no-cache gettext > /dev/null
         envsubst < /template/chirpstack.toml > /output/chirpstack.toml
-        cp /template/region_eu868.toml /output/region_eu868.toml
+        # Sprint 6.6.4: region_eu868.toml braucht jetzt envsubst, weil
+        # MQTT_CHIRPSTACK_USER/PASSWORD in [regions.gateway.backend.mqtt]
+        # fuer Auth gegen Mosquitto.
+        envsubst < /template/region_eu868.toml > /output/region_eu868.toml
         echo "chirpstack-init: rendered configs to /output"
         ls -la /output/
 
