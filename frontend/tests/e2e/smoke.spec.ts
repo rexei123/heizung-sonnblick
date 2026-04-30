@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+﻿import { test, expect } from '@playwright/test';
 
 test.describe('Smoke-Tests', () => {
   test('Startseite antwortet und liefert HTML', async ({ page }) => {
@@ -13,8 +13,8 @@ test.describe('Smoke-Tests', () => {
     await expect(main.first()).toBeVisible();
   });
 
-  test('GET /api/health liefert 200 und gueltiges JSON', async ({ request }) => {
-    const res = await request.get('/api/health');
+  test('GET /healthz liefert 200 und gueltiges JSON', async ({ request }) => {
+    const res = await request.get('/healthz');
     expect(res.status()).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, service: 'web' });
