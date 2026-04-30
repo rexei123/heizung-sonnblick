@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # Pull-basierter Deploy.
 #
 # Drei Phasen, idempotent:
@@ -13,7 +13,7 @@
 #
 # Annahmen:
 #   - /opt/heizung-sonnblick ist ein git-Checkout mit Remote `origin`.
-#   - Server hat KEINE lokalen Working-Tree-Änderungen am tracked
+#   - Server hat KEINE lokalen Working-Tree-Ã„nderungen am tracked
 #     Content. Untracked Files (z.B. infra/deploy/.env) sind ok.
 #   - Server ist mit `docker login ghcr.io` gegen GHCR authentifiziert.
 #
@@ -23,7 +23,7 @@
 #   2026-04-29  Sprint 6.6.2: git-Sync ergaenzt. Vorher pullte das
 #               Skript nur die App-Images (api, web), liess Working-
 #               Tree und Infra-Container (mosquitto, chirpstack, caddy)
-#               unangetastet — Compose-/Caddyfile-Aenderungen kamen so
+#               unangetastet â€” Compose-/Caddyfile-Aenderungen kamen so
 #               nie auf den Server.
 
 set -euo pipefail
@@ -74,7 +74,7 @@ fi
 # Phase 1: Working-Tree syncen
 # ---------------------------------------------------------------------
 
-log "git fetch origin/$TARGET_BRANCH …"
+log "git fetch origin/$TARGET_BRANCH â€¦"
 if ! git fetch --quiet origin "$TARGET_BRANCH"; then
     log "FEHLER: git fetch fehlgeschlagen."
     exit 1
@@ -95,7 +95,7 @@ NEW_SHA=$(git rev-parse "origin/$TARGET_BRANCH")
 
 if [ "$OLD_SHA" != "$NEW_SHA" ]; then
     OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $TARGET_BRANCH@$NEW_SHA …"
+    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $TARGET_BRANCH@$NEW_SHA â€¦"
     git checkout --quiet "$TARGET_BRANCH"
     git reset --hard --quiet "origin/$TARGET_BRANCH"
 else
@@ -103,14 +103,27 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# Phase 2: Images aus GHCR pullen
+# Phase 2: Images aus GHCR pullen (SHA-gepinnt)
 # ---------------------------------------------------------------------
+#
+# H-6 (QA-Audit 2026-04-29): GHCR-Tag develop/main mutiert bei jedem
+# CI-Push. Statt mutierenden Tag pinnen wir auf <branch>-<short-sha>.
+# build-images.yml taggt jedes Build entsprechend (metadata-action:
+# type=sha,prefix={{branch}}-,format=short).
+#
+# Vorteile:
+#   - Audit-Trail: Log enthaelt deploy-time Image-SHA.
+#   - Rollback: alter SHA bleibt in GHCR pullbar.
+#   - Keine Race-Condition zwischen git pull und docker pull.
+
+SHORT_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD)
+PINNED_TAG="${TARGET_BRANCH}-${SHORT_SHA}"
 
 cd "$COMPOSE_DIR"
 
-log "docker compose pull api web …"
-if ! docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
-    log "FEHLER: Image-Pull fehlgeschlagen (ggf. ghcr-Login pruefen)."
+log "docker compose pull api web (IMAGE_TAG=$PINNED_TAG) â€¦"
+if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
+    log "FEHLER: Image-Pull fehlgeschlagen (Tag $PINNED_TAG nicht in GHCR? CI-Build noch laufend?)."
     exit 1
 fi
 
@@ -121,15 +134,18 @@ fi
 # `up -d` ohne `--no-deps` und ohne `--force-recreate`:
 #   - Container werden NUR neu erstellt, wenn sich ihre Konfiguration
 #     (Compose-File) oder ihr Image-Digest geaendert hat.
-#   - Sonst bleiben sie laufen — kein unnoetiger Downtime.
+#   - Sonst bleiben sie laufen â€” kein unnoetiger Downtime.
 #
 # `--remove-orphans` raeumt Services auf, die im aktuellen Compose-
 # File nicht mehr existieren (z.B. wenn ein Service umbenannt wurde).
-log "docker compose up -d (alle Services) …"
-if ! docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; then
+#
+# IMAGE_TAG wird als Shell-env vorangestellt; docker compose
+# priorisiert Shell-env vor .env-Datei.
+log "docker compose up -d (IMAGE_TAG=$PINNED_TAG, alle Services) â€¦"
+if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; then
     log "FEHLER: docker compose up fehlgeschlagen."
     exit 1
 fi
 
-log "Aktiv: $(docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
-log "Fertig (HEAD=$NEW_SHA)."
+log "Aktiv: $(IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
+log "Fertig (HEAD=$NEW_SHA, IMAGE_TAG=$PINNED_TAG)."

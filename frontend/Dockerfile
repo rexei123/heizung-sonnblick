@@ -1,4 +1,4 @@
-# Multi-Stage-Build für Next.js (Standalone-Output)
+﻿# Multi-Stage-Build fÃ¼r Next.js (Standalone-Output)
 # Stage 1: Dependencies
 FROM node:20-alpine AS deps
 WORKDIR /app
@@ -32,9 +32,9 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# Healthcheck: prüft dedizierten /api/health (force-static) über Node's
-# natives fetch. Kein wget/curl nötig, keine SSR-Rendering-Abhängigkeit.
+# Healthcheck: prÃ¼ft dedizierten /healthz (force-static) Ã¼ber Node's
+# natives fetch. Kein wget/curl nÃ¶tig, keine SSR-Rendering-AbhÃ¤ngigkeit.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["node", "server.js"]
