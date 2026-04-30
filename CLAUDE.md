@@ -2,9 +2,9 @@
 
 Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 
-## 1. Identität & Stand
+## 1. IdentitÃ¤t & Stand
 
-- **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
+- **Projekt:** Heizungssteuerung fÃ¼r Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
 - **Repo:** https://github.com/rexei123/heizung-sonnblick (public)
 - **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick` (synced mit Cowork-Mount)
 - **Aktueller Sprint:** **Sprint 6 in Arbeit** (Hardware-Pairing). Server-Stack vorbereitet, Pairing 2026-04-29 mit IT-Mitarbeiter geplant.
@@ -12,41 +12,106 @@ Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 - **Pairing-Tagesplan:** `docs/working/sprint6-pairing-anleitung.md` (zuerst lesen am Pairing-Tag!)
 - **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
 
-## 2. Pflicht-Lektüre vor Sprint-Arbeit
+## 2. Pflicht-LektÃ¼re vor Sprint-Arbeit
 
 In dieser Reihenfolge:
 
-1. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags
-2. `docs/SPEC-FRAMEWORK.md` — verbindliche Code- und Doku-Regeln
-3. `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit User-Gates
-4. `docs/RUNBOOK.md` — Operations, Rescue, UFW, GHCR-PAT, Domain
-5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
-6. `docs/working/sprint5-execution-plan.md` — **wenn Sprint 5 läuft**
+1. `STATUS.md` â€” Gesamtstand, alle Sprints, aktuelle URLs, Tags
+2. `docs/SPEC-FRAMEWORK.md` â€” verbindliche Code- und Doku-Regeln
+3. `docs/WORKFLOW.md` â€” 5-Phasen-Feature-Flow mit User-Gates
+4. `docs/RUNBOOK.md` â€” Operations, Rescue, UFW, GHCR-PAT, Domain
+5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` â€” ADR-Log
+6. `docs/working/sprint5-execution-plan.md` â€” **wenn Sprint 5 lÃ¤uft**
 
 ## 3. Goldene Regeln
 
-1. **5-Phasen-Workflow:** Brief → Sprintplan → User-Gate → Execution → Tag. Keine Schritte überspringen.
-2. **Branch-Naming:** `feat/sprintN-<slug>` für Features, `chore/<slug>` für Wartung, `fix/<slug>` für Bugs.
+1. **5-Phasen-Workflow:** Brief â†’ Sprintplan â†’ User-Gate â†’ Execution â†’ Tag. Keine Schritte Ã¼berspringen.
+2. **Branch-Naming:** `feat/sprintN-<slug>` fÃ¼r Features, `chore/<slug>` fÃ¼r Wartung, `fix/<slug>` fÃ¼r Bugs.
 3. **Tag-Pattern:** `v0.<minor>.<sprint>-<slug>` (z. B. `v0.1.5-lorawan-foundation`).
-4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewünscht.
-5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergänzt.
+4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewÃ¼nscht.
+5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergÃ¤nzt.
 6. **Sprache:** Deutsch, Sie-Form, sachlich.
 7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)** oder **SSH (Server)** kennzeichnen.
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
-9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer über PR.
+9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer Ã¼ber PR.
 10. **Cowork-Mount = Windows-Repo:** Edits in `/sessions/.../mnt/heizung-sonnblick/` landen direkt in `C:\Users\User\dev\heizung-sonnblick\`.
 
 ## 4. Operations-Highlights
 
 - **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung` (zwingend `-i ...`-Flag, Default-Key passt nicht)
 - **Server-Hostnames:** `heizung-test`, `heizung-main` (Tailscale MagicDNS)
-- **Container-Stack:** api, web, db (timescaledb), redis, caddy — Compose-File: `docker-compose.prod.yml` (zwingend `-f`)
-- **Deploy:** GHCR Pull über systemd-Timer (5 Min), KEIN Push-Deploy
-- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` — NICHT Hetzner Cloud DNS
+- **Container-Stack:** api, web, db (timescaledb), redis, caddy â€” Compose-File: `docker-compose.prod.yml` (zwingend `-f`)
+- **Deploy:** GHCR Pull Ã¼ber systemd-Timer (5 Min), KEIN Push-Deploy
+- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` â€” NICHT Hetzner Cloud DNS
 - **UFW:** aktiv auf beiden Servern, Port 22/80/443 + tailscale0 erlaubt
-- **PAT-Type:** Classic PAT (Fine-grained unterstützt GHCR nicht)
+- **PAT-Type:** Classic PAT (Fine-grained unterstÃ¼tzt GHCR nicht)
 
-## 5. Aktuelle Backlog-Punkte
+## 5. Lessons Learned (Pflicht-Lektuere, NICHT ueberspringen)
+
+Diese Punkte sind harte Lehren aus echten Fehlern. Bei jedem Verstoss wiederholen sich Stunden-lange Hotfix-Spiralen.
+
+### 5.1 Iteration vs. Reflexion
+
+- EIN Thema -> EIN PR -> Merge -> Verifikation -> naechstes Thema. Niemals 2 Themen in einen PR. Niemals Folge-PR starten bevor der vorherige sauber durch ist.
+- Wenn ein Befehl scheitert: STOP, NACHDENKEN, DIAGNOSE. Nicht reaktiv den naechsten Befehl geben. Wurzel-Ursache klaeren, dann gezielt einen Schritt.
+- "Quick Fix" gibt es nicht. Jedes Item, das im Wartemodus zwischendrin "schnell mit reingenommen" wird, frisst 1+ Stunden.
+- Im Pairing-/Wartemodus KEINE Architektur-Aenderungen. Nur fertige, getestete, klar abgegrenzte Items.
+
+### 5.2 Cowork-Mount-Sandbox-Quirks (sehr wichtig)
+
+Der Cowork-Mount unter `/sessions/.../mnt/heizung-sonnblick/` ist NICHT 1:1 mit dem Windows-Repo synchron. Goldene Regel 10 (alte CLAUDE.md) ist eine Luege.
+
+Tatsaechliches Verhalten:
+
+- `Edit`/`Write`-Tool aus Sandbox kommt MEISTENS bei Windows an, aber NICHT immer. Neu erstellte Dateien werden mehrfach verschluckt. Bestehende Files werden meistens synced, aber manchmal mit eingestreuten Null-Bytes (binary diff statt text diff).
+- Sandbox-`git`-Operationen (commit, branch) landen NICHT im Windows-Repo. Sandbox hat eigenen git-Layer.
+- `.git/refs/heads/<subdir>/` im Cowork-Mount-FS hat Bugs: leere Sub-Directories werden als "existiert" gemeldet aber Schreiben schlaegt fehl. Branch-Naming `chore/<slug>` funktioniert nicht; Workaround: flacher Name wie `chore-<slug>`.
+- `.git/config` und `.git/refs/heads/<branch>` haben oft Null-Byte-Pollution. Symptom: `fatal: bad config line` oder `bad signature 0x00000000`.
+
+Konsequenz fuer Workflow:
+1. Alle Datei-Edits via Sandbox `Edit`/`Write`.
+2. SOFORT in PowerShell `git diff --stat <file>` verifizieren BEVOR weitere Schritte.
+3. Wenn Diff `Bin <X> -> <Y> bytes` zeigt: Null-Byte-Cleanup noetig (PowerShell `Get-Content -Raw` + `-replace ` + `[System.IO.File]::WriteAllText` mit `UTF8Encoding $false`).
+4. Branch + Commit + Push macht IMMER PowerShell, nie Sandbox-git.
+
+### 5.3 PowerShell + Bash-Skripte: Encoding-Toedlich
+
+- PS5 `Set-Content -Encoding UTF8` schreibt UTF-8 MIT BOM. Bash-Skripte mit BOM brechen mit `/bin/bash: not found`. PS7 waere OK, aber Standard-Win10/11 hat oft noch PS5.
+- PS5 + Edit-Tool double-encoding erzeugt Mojibake.
+- Sichere Pfade:
+  - Bash-Skripte ASCII-only (keine Umlaute, keine em-dashes, keine Ellipsen)
+  - Wenn Sonderzeichen noetig: `[System.IO.File]::WriteAllText((Resolve-Path X).Path, $content, (New-Object System.Text.UTF8Encoding $false))` statt Set-Content
+  - Single-quote here-string `@'...'@` statt `@"..."@`, damit PowerShell keine `$VAR` expandiert (wichtig fuer Bash-Skripte mit `$VAR`)
+
+### 5.4 CI + Image-Tagging muss man kennen BEVOR man Pinning-Logik baut
+
+`build-images.yml` taggt mit dem GitHub-push-event-SHA (= Merge-Commit auf der Ziel-Branch). Eine Logik in `deploy-pull.sh`, die `IMAGE_TAG` aus `git log -- backend/...` ableitet, findet aber den Source-Branch-Commit. Bei `gh pr merge --merge` sind das verschiedene SHAs -> Tag-Mismatch -> Pull schlaegt fehl.
+
+Konsequenz: SHA-Pinning (H-6) ist KEIN Quick-Fix. Erfordert sowohl `build-images.yml`-Anpassung (zusaetzlich Source-SHA taggen) als auch `deploy-pull`-Logik. Eigener Sprint, nicht im Pairing-Wartemodus.
+
+### 5.5 PR-Workflow-Reihenfolge
+
+Bei main-PR + Sync nach develop:
+1. PR auf main pushen
+2. CI durch (`gh pr checks <N> --watch`)
+3. Merge (`gh pr merge <N> --merge --delete-branch --admin`)
+4. Erst dann lokal `git checkout develop && git pull`
+5. Sync-Branch erstellen, mergen, pushen
+6. PR auf develop, CI, merge
+
+Wenn Sync-PR vor dem main-Merge erstellt wird: `No commits between` Fehler.
+
+### 5.6 Befehl-Trennung PowerShell vs. SSH
+
+Jeder Code-Block muss EINDEUTIG als PowerShell (lokal) oder SSH (Server) markiert sein. Ein User-Versehen (PowerShell-Befehle im SSH-Terminal) kostet Zeit + erzeugt Folge-Fehler (z.B. `git config user.email` wird auf dem Server gesetzt, `gh: command not found`).
+
+Empfehlung im Chat: jeden Code-Block mit explizitem Header oeffnen, z.B.:
+- `**PowerShell (Windows lokal):**`
+- `**SSH (heizung-test, root):**`
+
+---
+
+## 6. Aktuelle Backlog-Punkte
 
 - Caddy `fmt --overwrite` (kosmetisch, mit Sprint 6 wenn Caddy-Touch fuer ChirpStack-UI ohnehin)
 - `~/.ssh/config`-Eintraege auf work02
