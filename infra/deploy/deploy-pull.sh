@@ -105,27 +105,24 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# Phase 2: Images aus GHCR pullen (SHA-gepinnt)
+# Phase 2: Images aus GHCR pullen
 # ---------------------------------------------------------------------
 #
-# H-6 (QA-Audit 2026-04-29): GHCR-Tag develop/main mutiert bei jedem
-# CI-Push. Statt mutierenden Tag pinnen wir auf <branch>-<short-sha>.
-# build-images.yml taggt jedes Build entsprechend (metadata-action:
-# type=sha,prefix={{branch}}-,format=short).
+# IMAGE_TAG kommt aus .env (mutierender Tag develop/main).
 #
-# Vorteile:
-#   - Audit-Trail: Log enthaelt deploy-time Image-SHA.
-#   - Rollback: alter SHA bleibt in GHCR pullbar.
-#   - Keine Race-Condition zwischen git pull und docker pull.
-
-SHORT_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD)
-PINNED_TAG="${TARGET_BRANCH}-${SHORT_SHA}"
+# QA-Audit H-6 (SHA-Pinning) wurde mehrfach versucht (PRs #14 ... #20)
+# und wieder zurueckgebaut: build-images.yml taggt mit dem GitHub-push-
+# event-SHA (= Merge-Commit auf der Ziel-Branch). Eine deploy-Logik,
+# die den Tag aus dem lokalen git log ableitet, findet aber den
+# Source-Branch-Commit (anderer SHA bei `gh pr merge --merge`). Tag-
+# Mismatch -> Pull schlaegt fehl. H-6 ist auf einen eigenen Sprint
+# verschoben, der CI-Workflow + deploy-pull synchron anpasst.
 
 cd "$COMPOSE_DIR"
 
-log "docker compose pull api web (IMAGE_TAG=$PINNED_TAG) ..."
-if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
-    log "FEHLER: Image-Pull fehlgeschlagen (Tag $PINNED_TAG nicht in GHCR? CI-Build noch laufend?)."
+log "docker compose pull api web ..."
+if ! docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
+    log "FEHLER: Image-Pull fehlgeschlagen (ggf. ghcr-Login pruefen)."
     exit 1
 fi
 
@@ -140,14 +137,12 @@ fi
 #
 # `--remove-orphans` raeumt Services auf, die im aktuellen Compose-
 # File nicht mehr existieren (z.B. wenn ein Service umbenannt wurde).
-#
-# IMAGE_TAG wird als Shell-env vorangestellt; docker compose
-# priorisiert Shell-env vor .env-Datei.
-log "docker compose up -d (IMAGE_TAG=$PINNED_TAG, alle Services) ..."
-if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; then
+
+log "docker compose up -d (alle Services) ..."
+if ! docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; then
     log "FEHLER: docker compose up fehlgeschlagen."
     exit 1
 fi
 
-log "Aktiv: $(IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
-log "Fertig (HEAD=$NEW_SHA, IMAGE_TAG=$PINNED_TAG)."
+log "Aktiv: $(docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
+log "Fertig (HEAD=$NEW_SHA)."
