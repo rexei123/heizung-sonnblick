@@ -48,8 +48,11 @@ services:
       - ../mosquitto/config:/mosquitto/config:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
-    # KEIN public Port-Mapping — Mosquitto nur intern im Docker-Network
-    # erreichbar (chirpstack + api). MQTT-Auth aktiv (passwd + ACL).
+    # Sprint 6 Pairing: Port 1883 oeffentlich, damit UG65 (ChirpStack-v4-Modus)
+    # direkt MQTT publishen kann. Mosquitto laeuft aktuell anonymous, MQTT-
+    # Auth-Haertung (passwd+ACL) ist QA-Audit-Backlog (Sprint 8).
+    ports:
+      - "1883:1883"
     expose:
       - "1883"
     healthcheck:
