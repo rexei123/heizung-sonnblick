@@ -491,6 +491,85 @@ docker compose logs -f api | Select-String -Pattern "uplink|MQTT"
 
 ---
 
+## 10a. MQTT-Auth-Setup (Sprint 6.6.4, ab 2026-04-30)
+
+Mosquitto laeuft seit Sprint 6.6.4 mit `allow_anonymous false`, `password_file` und `acl_file`. Drei User: `chirpstack`, `gateway-ug65`, `heizung-api`.
+
+### 10a.1 Erst-Setup pro Server
+
+```bash
+# 1. .env aktualisieren (drei Passwoerter, jeweils mind. 32 Zeichen)
+cd /opt/heizung-sonnblick
+sudo openssl rand -hex 32     # Wert in MQTT_CHIRPSTACK_PASSWORD eintragen
+sudo openssl rand -hex 32     # Wert in MQTT_GATEWAY_UG65_PASSWORD eintragen
+sudo openssl rand -hex 32     # Wert in MQTT_HEIZUNG_PASSWORD eintragen
+sudo nano infra/deploy/.env
+
+# 2. passwd-Datei erzeugen (.env muss vorher gesetzt sein)
+set -a; . infra/deploy/.env; set +a
+sudo touch infra/mosquitto/config/passwd
+sudo docker run --rm -v "$PWD/infra/mosquitto/config:/conf" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -b /conf/passwd chirpstack "$MQTT_CHIRPSTACK_PASSWORD"
+sudo docker run --rm -v "$PWD/infra/mosquitto/config:/conf" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -b /conf/passwd gateway-ug65 "$MQTT_GATEWAY_UG65_PASSWORD"
+sudo docker run --rm -v "$PWD/infra/mosquitto/config:/conf" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -b /conf/passwd heizung-api "$MQTT_HEIZUNG_PASSWORD"
+
+# 3. Datei-Permissions: nur root + mosquitto-User darf lesen
+sudo chmod 0640 infra/mosquitto/config/passwd
+
+# 4. Mosquitto + abhaengige Container neu starten
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate \
+  mosquitto chirpstack chirpstack-gateway-bridge api
+
+# 5. Verifikation: Auth aktiv?
+sudo docker compose -f infra/deploy/docker-compose.prod.yml logs mosquitto --tail 20 | grep -i auth
+# Erwartung: keine "anonymous client" Eintraege
+sudo docker exec deploy-mosquitto-1 \
+  mosquitto_sub -h 127.0.0.1 -p 1883 -t '$SYS/#' -C 1 -W 3
+# Erwartung: Connection Refused (kein User+Pass) -> Auth funktioniert
+sudo docker exec deploy-mosquitto-1 \
+  mosquitto_sub -h 127.0.0.1 -p 1883 -u heizung-api -P "$MQTT_HEIZUNG_PASSWORD" -t '$SYS/#' -C 1 -W 3
+# Erwartung: ein $SYS-Topic-Wert
+```
+
+### 10a.2 UG65-Reconfigure
+
+UG65 Web-UI (LAN-IP) -> Application -> Packet Forwarder -> ID 1 -> Edit:
+
+- User Credentials: **ON**
+- Username: `gateway-ug65`
+- Password: <Wert aus `MQTT_GATEWAY_UG65_PASSWORD`>
+- Save -> System -> Reboot
+
+Verifikation: nach UG65-Reboot in der Mosquitto-Console:
+```bash
+sudo docker exec deploy-mosquitto-1 \
+  mosquitto_sub -h 127.0.0.1 -p 1883 -u heizung-api -P "$MQTT_HEIZUNG_PASSWORD" \
+  -t 'eu868/gateway/+/event/stats' -C 1 -W 60
+```
+
+### 10a.3 ChirpStack-Pruefung
+
+ChirpStack-UI -> Tenants -> Hotel Sonnblick -> Gateways: UG65 muss als "online" angezeigt werden, "Last seen" < 30 s.
+
+### 10a.4 Rollback
+
+Falls Auth-Setup einen Container blockiert: temporaer auf alte anonymous-Konfig zurueck:
+
+```bash
+sudo nano infra/deploy/docker-compose.prod.yml
+# Zeile entfernen: command: mosquitto -c /mosquitto/config/mosquitto.prod.conf
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
+```
+
+Zurueck-Schalten ohne Skript-Lauf: einmalig manuell. Nicht committen — der naechste deploy-pull bringt die Auth-Konfig zurueck.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
@@ -505,4 +584,4 @@ docker compose logs -f api | Select-String -Pattern "uplink|MQTT"
 ## Anhang: Lessons Learned 2026-04-20
 
 - Hetzner Web Console (noVNC) hat US-Keyboard-Mapping → `|`, `:`, `"` werden zerlegt. Nur für kurze Single-Word-Commands nutzen.
-- Hetzner Cloud Firewall ist für diesen Accoun
+- Hetzner Cloud Firewall ist für diesen Accoun                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
