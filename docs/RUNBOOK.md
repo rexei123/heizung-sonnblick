@@ -144,6 +144,26 @@ docker pull ghcr.io/rexei123/heizung-api:main       # bzw. :develop
 docker compose logs api 2>&1 | grep -E 'alembic|upgrade'
 ```
 
+### 5.6 Deploy-Pull-Skript: Phasen + Sync-Branch
+
+Seit Sprint 6.6.2 macht `infra/deploy/deploy-pull.sh` drei Phasen:
+
+1. **Working-Tree-Sync** — `git fetch + checkout + reset --hard` auf den passenden Branch (Mapping: `STAGE=test → develop`, `STAGE=main → main`, override via `DEPLOY_BRANCH` in `.env`). Holt damit Compose-, Caddy-, Mosquitto- und ChirpStack-Konfig vom Repo.
+2. **Image-Pull** — `docker compose pull api web` aus GHCR.
+3. **Container-Up** — `docker compose up -d --remove-orphans` ohne `--no-deps`. Recreate erfolgt nur bei Config- oder Image-Drift, sonst keine Down-Time.
+
+**Sicherheitsnetz:** Lokale Aenderungen am tracked Content (z.B. Hand-Hotfix per `vim` auf Server) brechen das Skript ab — kein silentes `reset --hard`. Untracked Files (`.env`) sind ok.
+
+**Wichtig fuer Hand-Hotfixes:** Wenn Sie auf einem Server temporaer am Working-Tree etwas anpassen muessen, danach `git stash` ODER systemd-Timer disablen, sonst macht der naechste Pull-Run einen Deploy-Abbruch und schickt die fehlende Aenderung nie aus.
+
+```bash
+# Hotfix-Workflow (Notfall)
+sudo systemctl stop heizung-deploy-pull.timer
+# ... Aenderung am Working-Tree ...
+# Spaeter: Aenderung in Repo bringen, dann
+sudo systemctl start heizung-deploy-pull.timer
+```
+
 ---
 
 ## 6. Git auf Server (read-only, ohne PAT)
