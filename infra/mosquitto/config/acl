@@ -1,16 +1,31 @@
-# MQTT ACL für LoRaWAN-Pipeline
+# MQTT ACL fuer LoRaWAN-Pipeline.
 # Format: https://mosquitto.org/man/mosquitto-conf-5.html
+#
+# Drei MQTT-User (Sprint 6.6.4 MQTT-Auth-Hardening):
+#   - chirpstack    : ChirpStack-Server + Gateway-Bridge
+#   - gateway-ug65  : Milesight UG65 (direkter MQTT-Push im ChirpStack-v4-Modus)
+#   - heizung-api   : FastAPI-Subscriber + Downlink-Publisher
 
-# ChirpStack: darf alles unter application/* publishen + lesen
+# ChirpStack: voller Zugriff auf alle relevanten Topic-Hierarchien
 user chirpstack
 topic readwrite application/#
 topic readwrite gateway/#
 topic readwrite eu868/#
+topic read $SYS/#
 
-# heizung-api: darf Uplinks lesen, Downlinks schreiben
+# UG65 Gateway (ChirpStack-v4-Modus): publish gateway-events,
+# subscribe auf Downlink-Commands.
+user gateway-ug65
+topic write eu868/gateway/+/event/+
+topic write gateway/+/state/+
+topic read eu868/gateway/+/command/+
+
+# heizung-api (FastAPI-Subscriber): lesen Application-Events,
+# schreiben Downlinks.
 user heizung-api
 topic read application/+/device/+/event/up
 topic read application/+/device/+/event/join
 topic read application/+/device/+/event/status
 topic read application/+/device/+/event/ack
 topic write application/+/device/+/command/down
+topic read $SYS/#
