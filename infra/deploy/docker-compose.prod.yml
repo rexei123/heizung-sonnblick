@@ -44,13 +44,16 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     restart: always
+    # Sprint 6.6.4: Production-Konfig mit Auth (passwd + ACL) statt
+    # anonymous. Drei User: chirpstack, gateway-ug65, heizung-api.
+    # Setup-Anleitung: RUNBOOK Abschnitt "MQTT-Auth-Setup".
+    command: mosquitto -c /mosquitto/config/mosquitto.prod.conf
     volumes:
       - ../mosquitto/config:/mosquitto/config:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     # Sprint 6 Pairing: Port 1883 oeffentlich, damit UG65 (ChirpStack-v4-Modus)
-    # direkt MQTT publishen kann. Mosquitto laeuft aktuell anonymous, MQTT-
-    # Auth-Haertung (passwd+ACL) ist QA-Audit-Backlog (Sprint 8).
+    # direkt MQTT publishen kann. Auth via passwd+ACL aktiv (Sprint 6.6.4).
     ports:
       - "1883:1883"
     expose:
