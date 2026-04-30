@@ -117,9 +117,29 @@ fi
 #   - Audit-Trail: Log enthaelt deploy-time Image-SHA.
 #   - Rollback: alter SHA bleibt in GHCR pullbar.
 #   - Keine Race-Condition zwischen git pull und docker pull.
+#
+# Wichtig: build-images.yml triggert nur bei Aenderungen unter backend/,
+# frontend/ oder .github/workflows/build-images.yml. Bei reinen Infra-,
+# Caddy-, Mosquitto- oder Doku-Commits gibt es KEIN neues Image fuer
+# den HEAD-SHA. Daher pinnen wir auf den SHA des letzten Commits, der
+# tatsaechlich einen Image-Build getriggert hat.
 
-SHORT_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD)
-PINNED_TAG="${TARGET_BRANCH}-${SHORT_SHA}"
+HEAD_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD)
+LAST_BUILD_SHA=$(git -C "$REPO_DIR" log -1 --pretty=format:%h -- \
+    backend/ frontend/ .github/workflows/build-images.yml)
+
+if [ -z "$LAST_BUILD_SHA" ]; then
+    log "FEHLER: kein Build-relevanter Commit gefunden (leeres git log?)."
+    exit 1
+fi
+
+if [ "$LAST_BUILD_SHA" = "$HEAD_SHA" ]; then
+    log "HEAD ist build-relevant: IMAGE_TAG=${TARGET_BRANCH}-${HEAD_SHA}."
+else
+    log "HEAD ist Infra-/Doku-only ($HEAD_SHA). Letzter Build-Commit: $LAST_BUILD_SHA."
+fi
+
+PINNED_TAG="${TARGET_BRANCH}-${LAST_BUILD_SHA}"
 
 cd "$COMPOSE_DIR"
 
