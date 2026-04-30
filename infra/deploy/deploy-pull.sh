@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Pull-basierter Deploy.
 #
 # Drei Phasen, idempotent:
@@ -7,13 +7,13 @@
 #      DEPLOY_BRANCH leitet sich aus STAGE in der .env ab:
 #         STAGE=test  ->  develop
 #         STAGE=main  ->  main
-#   2. App-Images aus GHCR pullen (api, web)
+#   2. App-Images aus GHCR pullen (api, web), IMAGE_TAG SHA-gepinnt.
 #   3. Container-Stand aktualisieren (alle Services, recreate nur
-#      bei Config- oder Image-Drift)
+#      bei Config- oder Image-Drift).
 #
 # Annahmen:
 #   - /opt/heizung-sonnblick ist ein git-Checkout mit Remote `origin`.
-#   - Server hat KEINE lokalen Working-Tree-Ã„nderungen am tracked
+#   - Server hat KEINE lokalen Working-Tree-Aenderungen am tracked
 #     Content. Untracked Files (z.B. infra/deploy/.env) sind ok.
 #   - Server ist mit `docker login ghcr.io` gegen GHCR authentifiziert.
 #
@@ -23,8 +23,10 @@
 #   2026-04-29  Sprint 6.6.2: git-Sync ergaenzt. Vorher pullte das
 #               Skript nur die App-Images (api, web), liess Working-
 #               Tree und Infra-Container (mosquitto, chirpstack, caddy)
-#               unangetastet â€” Compose-/Caddyfile-Aenderungen kamen so
+#               unangetastet. Compose-/Caddyfile-Aenderungen kamen so
 #               nie auf den Server.
+#   2026-04-29  H-6: IMAGE_TAG SHA-Pinning fuer Audit-Trail + Rollback.
+#   2026-04-30  ASCII-only Re-Save (PowerShell-Encoding-Fix).
 
 set -euo pipefail
 
@@ -74,7 +76,7 @@ fi
 # Phase 1: Working-Tree syncen
 # ---------------------------------------------------------------------
 
-log "git fetch origin/$TARGET_BRANCH â€¦"
+log "git fetch origin/$TARGET_BRANCH ..."
 if ! git fetch --quiet origin "$TARGET_BRANCH"; then
     log "FEHLER: git fetch fehlgeschlagen."
     exit 1
@@ -95,7 +97,7 @@ NEW_SHA=$(git rev-parse "origin/$TARGET_BRANCH")
 
 if [ "$OLD_SHA" != "$NEW_SHA" ]; then
     OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $TARGET_BRANCH@$NEW_SHA â€¦"
+    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $TARGET_BRANCH@$NEW_SHA ..."
     git checkout --quiet "$TARGET_BRANCH"
     git reset --hard --quiet "origin/$TARGET_BRANCH"
 else
@@ -121,7 +123,7 @@ PINNED_TAG="${TARGET_BRANCH}-${SHORT_SHA}"
 
 cd "$COMPOSE_DIR"
 
-log "docker compose pull api web (IMAGE_TAG=$PINNED_TAG) â€¦"
+log "docker compose pull api web (IMAGE_TAG=$PINNED_TAG) ..."
 if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
     log "FEHLER: Image-Pull fehlgeschlagen (Tag $PINNED_TAG nicht in GHCR? CI-Build noch laufend?)."
     exit 1
@@ -134,14 +136,14 @@ fi
 # `up -d` ohne `--no-deps` und ohne `--force-recreate`:
 #   - Container werden NUR neu erstellt, wenn sich ihre Konfiguration
 #     (Compose-File) oder ihr Image-Digest geaendert hat.
-#   - Sonst bleiben sie laufen â€” kein unnoetiger Downtime.
+#   - Sonst bleiben sie laufen, kein unnoetiger Downtime.
 #
 # `--remove-orphans` raeumt Services auf, die im aktuellen Compose-
 # File nicht mehr existieren (z.B. wenn ein Service umbenannt wurde).
 #
 # IMAGE_TAG wird als Shell-env vorangestellt; docker compose
 # priorisiert Shell-env vor .env-Datei.
-log "docker compose up -d (IMAGE_TAG=$PINNED_TAG, alle Services) â€¦"
+log "docker compose up -d (IMAGE_TAG=$PINNED_TAG, alle Services) ..."
 if ! IMAGE_TAG="$PINNED_TAG" docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; then
     log "FEHLER: docker compose up fehlgeschlagen."
     exit 1
