@@ -57,3 +57,16 @@ infra/mosquitto/config/passwd
 # Sprint-0 Einmal-Scripts
 sprint0*.ps1
 
+# Office-Dateien (enthalten oft Secrets, AppKeys, Passwoerter)
+# Beispiel: Produktkeys.xlsx mit LoRaWAN-AppKeys, ChirpStack-Admin-PW etc.
+# Niemals committen.
+*.xlsx
+*.xls
+*.xlsm
+*.docx
+*.doc
+*.pptx
+*.ppt
+# Doku-Ausnahme: das Strategie-Dokument soll im Repo bleiben
+!docs/Design-Strategie-2.0.1.docx
+
