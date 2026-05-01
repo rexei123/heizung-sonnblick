@@ -206,9 +206,18 @@ Ziel: Milesight UG65 Gateway im Hotel-LAN, ChirpStack-Stack auf `heizung-test` d
 - ✅ **6.6.2 deploy-pull-Skript Hardening** (PRs #14, #18, #24, #26): Drei-Phasen-Logik (git-Sync + Image-Pull + Container-Up), ASCII-only, Branch-Mapping aus STAGE in `.env`. **H-6 SHA-Pinning revertiert** wegen strukturellem Tag-Mismatch zwischen CI-Build-SHA und git-log-SHA — eigener Sprint, der `build-images.yml` und `deploy-pull` synchron anpasst.
 - ✅ **6.6.3 H-3 Healthz-Trennung**: Frontend-Healthcheck auf `/healthz` (K8s-Konvention, ausserhalb Caddy-`@api`-Matcher). `/health` bleibt Backend-Liveness. Beide extern erreichbar.
 - ✅ **6.10 Devices-CRUD-API** `POST/GET/PATCH /api/v1/devices` mit Pydantic-Validierung (DevEUI-Hex-Check + Lowercase-Normalisierung), 17 neue Schema-Tests
-- ⏳ **6.7 Vicki-Pairing** — wartet auf MClimate-Support (Vicki-EUI/AppKey nicht auf Geraet aufgedruckt)
-- ⏳ **6.8 Codec-Validierung gegen Realdaten**
-- ⏳ **6.9 PR + Merge + Tag** `v0.1.6-hardware-pairing`
+- ✅ **6.7 Vicki-Pairing** (2026-05-01): Vier MClimate Vicki TRV gepaired und liefern Telemetrie. Pipeline End-to-End verifiziert (Vicki -> UG65 -> Mosquitto -> ChirpStack -> Codec -> MQTT-Subscriber -> TimescaleDB -> API -> Frontend).
+  - `Vicki-001` DevEUI `70b3d52dd3034de4` (Serial MDC5419731K6UF), Setpoint 20°C, RSSI -95 dBm
+  - `Vicki-002` DevEUI `70b3d52dd3034de5` (Serial DJAM419732JL7E), Setpoint 21°C, RSSI -114 dBm (grenzwertig, naeher zum UG65 stellen)
+  - `Vicki-003` DevEUI `70b3d52dd3034d7b` (Serial VK5H419626LETG), Setpoint 21°C, RSSI -108 dBm
+  - `Vicki-004` DevEUI `70b3d52dd3034e53` (Serial N3TA419842RE3N), Setpoint 21°C, RSSI -96 dBm
+- ✅ **6.8 Codec-Validierung gegen Realdaten** (2026-05-01): Sprint-5-Foundation-Codec passte nicht. Iterationen:
+  - PR #38: offizieller MClimate-GitHub-Decoder uebernommen — scheiterte an strict-mode (globale Variablen ohne `var` -> ReferenceError in ChirpStack-Goja)
+  - PR #40: minimale strict-konforme Eigen-Implementierung fuer Periodic Reporting v1/v2 (Command 0x01/0x81). Verifiziert mit echtem Vicki-Frame (20°C Display matches Setpoint). snake_case-Aliase fuer FastAPI-Subscriber.
+- ✅ **6.9 PR + Merge + Tag** `v0.1.6-hardware-pairing`
+
+**Backlog (separat):**
+- WT101 Milesight-Thermostat (DevEUI `24E124714F493493`) ist im Hotel verfuegbar, aber Codec fehlt. Eigener Sprint nach v0.1.6.
 
 **Lessons Learned (bisher):**
 - ChirpStack v4 macht KEINE `${VAR}`-Substitution in TOML, auch nicht via `CHIRPSTACK__SECTION__FIELD`-Env-Vars (in unserer Konstellation nicht). Fix: Init-Sidecar mit `envsubst` rendert die TOML in ein Named Volume, das ChirpStack read-only mountet.
@@ -256,7 +265,7 @@ Ziel: Hotelier sieht auf einen Blick die LoRaWAN-Geräte mit aktuellen Reading-W
 - ✅ **Bonus: Design-System konsolidiert** (P1 + P2)
   - Tailwind-Token-Mapping flach gemacht: `bg-surface`, `bg-surface-alt`, `border-border` etc. funktionieren wie erwartet (vorher nested → Hover-States griffen nicht)
   - Schriftgrößen-Skala als CSS-Variable: `--font-size-xs/sm/base/lg/xl/2xl/3xl`. Body nutzt `var(--font-size-base)` → ganze App skaliert proportional bei einer Variable-Änderung.
-- ⏳ **7.8 Doku + PR + Tag** `v0.1.7-frontend-dashboard` — wird zusammen mit Sprint 6 (`v0.1.6-hardware-pairing`) gemerged, beide Tags auf demselben Merge-Commit.
+- ✅ **7.8 Doku + PR + Tag** `v0.1.7-frontend-dashboard` (2026-05-01) — gemeinsam mit `v0.1.6-hardware-pairing` auf demselben Merge-Commit gesetzt. Frontend zeigt vier Vicki-Devices live mit KPI-Karten + Recharts-Verlauf + 30s-Refresh.
 
 **Architektur-Entscheidungen (in ADR-Log nachzutragen):**
 - AE-21: shadcn/ui-Foundation aufgeschoben, Plain Tailwind reicht für Sprint 7

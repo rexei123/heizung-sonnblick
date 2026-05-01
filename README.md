@@ -101,8 +101,8 @@ docs/                     Strategiepapier, ADRs, RUNBOOK, Feature-Briefs, Workin
 | `v0.1.3-ufw-reactivation` | 3 | UFW aktiv auf beiden Servern |
 | `v0.1.4-domain-hoteltec` | 4 | Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS |
 | `v0.1.5-lorawan-foundation` | 5 | ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API |
-| _pending_ | 6 | UG65-Pairing, ChirpStack-Stack auf Test-Server, gateway-bridge, Devices-CRUD-API (Tag folgt nach erfolgreichem Vicki-Pairing) |
-| _pending_ | 7 | Frontend-Dashboard `/devices` + Detail-View mit Recharts, Design-System-Konsolidierung (Tag folgt zusammen mit Sprint 6) |
+| `v0.1.6-hardware-pairing` | 6 | UG65-Gateway, ChirpStack-Stack, Mosquitto-MQTT-Auth, deploy-pull-Hardening, vier MClimate-Vicki gepaired, Codec produktiv |
+| `v0.1.7-frontend-dashboard` | 7 | Frontend `/devices` + Detail-View mit Recharts, TanStack Query 30s-Refresh, Design-Tokens, /healthz-Trennung |
 
 ## Lizenz
 
