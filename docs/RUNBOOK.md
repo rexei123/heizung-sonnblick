@@ -570,6 +570,61 @@ Zurueck-Schalten ohne Skript-Lauf: einmalig manuell. Nicht committen — der nae
 
 ---
 
+## 10b. Basic-Auth fuer Heizung-API (Sprint 8a, K-1)
+
+Seit Sprint 8a sind `/api/*`, `/openapi.json`, `/docs` und `/redoc` auf `heizung.hoteltec.at` und `heizung-test.hoteltec.at` per HTTP-Basic-Auth geschuetzt. **Ein** Hotel-User: `hotel`. `/health` (Backend-Liveness) und `/healthz` (Frontend) bleiben public fuer Uptime-Monitoring.
+
+Browser cached Credentials nach erstem Login. TanStack-Query-Calls vom Frontend funktionieren ohne Code-Aenderung weil der Browser den `Authorization`-Header automatisch dranhaengt.
+
+### 10b.1 Hash erzeugen + .env setzen
+
+```bash
+# bcrypt-Hash erzeugen
+docker run --rm caddy:2 caddy hash-password --plaintext "<starkes-passwort>"
+# Output sieht so aus: $2a$14$xxxxxxxxxxxxxxxxxxxxxx...
+
+# In .env eintragen — JEDES $ verdoppeln (Compose-Interpolation):
+# HOTEL_BASIC_AUTH_HASH=$$2a$$14$$xxxxxxxxxxxxxxxxxxxxxx...
+sudo nano /opt/heizung-sonnblick/infra/deploy/.env
+```
+
+### 10b.2 Caddy neu starten
+
+```bash
+cd /opt/heizung-sonnblick
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate caddy
+sudo docker compose -f infra/deploy/docker-compose.prod.yml logs caddy --tail 10
+```
+
+### 10b.3 Verifikation
+
+```bash
+# Ohne Auth: 401
+curl -I https://heizung-test.hoteltec.at/api/v1/devices
+# HTTP/2 401
+
+# Mit Auth: 200
+curl -u hotel:<starkes-passwort> https://heizung-test.hoteltec.at/api/v1/devices
+
+# /health bleibt public
+curl https://heizung-test.hoteltec.at/health
+# {"status":"ok",...}
+```
+
+### 10b.4 Limitierung (Sprint 9-Backlog)
+
+Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-maessig nicht ideal. Sprint 9 oder spaeter: echte Session-Auth (NextAuth oder FastAPI-Users) mit User-Tabelle + Login-Form + Logout + Audit-Log.
+
+### 10b.5 Passwort-Rotation
+
+```bash
+# 1. Neues Hash erzeugen + in .env eintragen (siehe 10b.1)
+# 2. Caddy neu starten (siehe 10b.2)
+# 3. Browser-Cache loeschen (sonst nimmt der das alte Passwort)
+```
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
