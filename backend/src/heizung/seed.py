@@ -36,6 +36,7 @@ from heizung.models import (
     RoomType,
     RuleConfig,
     RuleConfigScope,
+    Scenario,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,11 +174,131 @@ async def _seed_rooms(session: AsyncSession, dz: RoomType) -> None:
     )
 
 
+async def _seed_system_scenarios(session: AsyncSession) -> None:
+    """8 System-Szenarien als Stammdaten anlegen (Sprint 8 / AE-27).
+
+    Diese Szenarien sind ``is_system=True`` — duerfen nicht via API
+    veraendert oder geloescht werden. Engine-Logik referenziert die
+    ``code``-Werte hart in heizung.rules (Sprint 9).
+    """
+    definitions: list[dict[str, Any]] = [
+        {
+            "code": "standard_setpoint",
+            "name": "Standard-Wunschtemperatur",
+            "description": (
+                "Belegungsabhaengiger Standard-Sollwert (R1). Bei besetzt "
+                "T_belegt, bei frei T_vacant — aus rule_config-Hierarchie."
+            ),
+            "default_active": True,
+            "default_parameters": None,
+        },
+        {
+            "code": "preheat_checkin",
+            "name": "Vorheizen vor Check-in",
+            "description": (
+                "Vor geplanter Anreise wird der Raum auf T_belegt vorgeheizt (R2). "
+                "Lead-Time aus rule_config.preheat_minutes_before_checkin (Default 90 Min)."
+            ),
+            "default_active": True,
+            "default_parameters": {"lead_minutes": 90},
+        },
+        {
+            "code": "checkout_setback",
+            "name": "Absenkung nach Check-out",
+            "description": (
+                "Nach bestaetigtem Check-out auf T_vacant absenken (R3). "
+                "Verzoegerung aus rule_config.setback_minutes_after_checkout."
+            ),
+            "default_active": True,
+            "default_parameters": {"delay_minutes": 30},
+        },
+        {
+            "code": "night_setback",
+            "name": "Nachtabsenkung",
+            "description": (
+                "In definiertem Nachtfenster auf T_night reduzieren (R4). "
+                "Default 00:00-06:00 auf 19 °C."
+            ),
+            "default_active": True,
+            "default_parameters": {"from_time": "00:00", "to_time": "06:00"},
+        },
+        {
+            "code": "day_setback",
+            "name": "Tagabsenkung",
+            "description": (
+                "In definiertem Tagfenster Offset oder Absoluttemp anwenden (R9, "
+                "Betterspace-konform). Default-Off — Hotelier muss bewusst aktivieren."
+            ),
+            "default_active": False,
+            "default_parameters": {
+                "from_time": "09:00",
+                "to_time": "15:00",
+                "offset_celsius": -2,
+            },
+        },
+        {
+            "code": "long_vacant",
+            "name": "Unbelegt-Langzeit-Absenkung",
+            "description": (
+                "Nach laengerer Leerstand-Phase auf T_long_vacant reduzieren (R7). "
+                "Schwelle aus rule_config.long_vacant_hours (Default 24h)."
+            ),
+            "default_active": True,
+            "default_parameters": {"after_hours": 24},
+        },
+        {
+            "code": "window_detection",
+            "name": "Fenster-offen-Erkennung",
+            "description": (
+                "Bei Vicki-Fenster-offen-Meldung Setpoint auf Frostschutz, "
+                "automatische Rueckkehr nach Schliessen (R5, AE-04)."
+            ),
+            "default_active": True,
+            "default_parameters": None,
+        },
+        {
+            "code": "temp_limits",
+            "name": "Temperaturgrenzen (Gast-Override-Cap)",
+            "description": (
+                "Manueller Gast-Override am Vicki wird auf [min, max] geclamped (R6, "
+                "AE-10). Grenzen aus rule_config.guest_override_min/max."
+            ),
+            "default_active": True,
+            "default_parameters": None,
+        },
+    ]
+    created = 0
+    skipped = 0
+    for defn in definitions:
+        existing = await session.scalar(select(Scenario).where(Scenario.code == defn["code"]))
+        if existing:
+            skipped += 1
+            continue
+        scenario = Scenario(
+            code=defn["code"],
+            name=defn["name"],
+            description=defn["description"],
+            is_system=True,
+            default_active=defn["default_active"],
+            parameter_schema=None,  # Validierung in Service-Layer (Sprint 10)
+            default_parameters=defn["default_parameters"],
+        )
+        session.add(scenario)
+        created += 1
+    await session.flush()
+    logger.info(
+        "System-Szenarien-Seed abgeschlossen: %d neu, %d uebersprungen.",
+        created,
+        skipped,
+    )
+
+
 async def seed() -> None:
     async with SessionLocal() as session, session.begin():
         room_types = await _seed_room_types(session)
         await _seed_global_rule(session)
         await _seed_rooms(session, room_types["Doppelzimmer"])
+        await _seed_system_scenarios(session)
     logger.info("Seed fertig.")
 
 
