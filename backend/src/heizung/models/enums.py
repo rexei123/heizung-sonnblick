@@ -95,10 +95,54 @@ class CommandReason(enum.StrEnum):
     OCCUPIED_SETPOINT = "occupied_setpoint"
     VACANT_SETPOINT = "vacant_setpoint"
     NIGHT_SETBACK = "night_setback"
+    DAY_SETBACK = "day_setback"
     PREHEAT_CHECKIN = "preheat_checkin"
     CHECKOUT_SETBACK = "checkout_setback"
     WINDOW_OPEN = "window_open"
     GUEST_OVERRIDE = "guest_override"
     LONG_VACANT = "long_vacant"
     FROST_PROTECTION = "frost_protection"
+    SUMMER_MODE = "summer_mode"
     MANUAL = "manual"
+    MANUAL_EVENT = "manual_event"
+
+
+class ScenarioScope(enum.StrEnum):
+    """Gueltigkeitsbereich einer Szenario-Aktivierung.
+
+    Aufloesung: ROOM > ROOM_TYPE > GLOBAL.
+    Analog zu RuleConfigScope, aber separat damit Engine die beiden
+    orthogonalen Konzepte (Settings vs. Szenarien) klar trennt.
+    """
+
+    GLOBAL = "global"
+    ROOM_TYPE = "room_type"
+    ROOM = "room"
+
+
+class ManualOverrideScope(enum.StrEnum):
+    """Gueltigkeitsbereich einer manuellen Setpoint-Aktion.
+
+    Bewusst keine GLOBAL-Stufe: ein "Temperatur jetzt fuer alle"-Befehl
+    ist gefaehrlich (kein Frostschutz auf Hotel-Ebene). Wenn jemand alles
+    setzen will, macht er es per Raumtyp-Bulk-Aktion.
+    """
+
+    ROOM_TYPE = "room_type"
+    ROOM = "room"
+
+
+class EventLogLayer(enum.StrEnum):
+    """Welche Engine-Pipeline-Schicht hat den Eintrag erzeugt.
+
+    Pro Engine-Evaluation entsteht ein Eintrag pro durchlaufener Schicht.
+    AUDIT auch wenn unveraendert: KI-Vorbereitung gemaess AE-08.
+    """
+
+    SUMMER_MODE_FAST_PATH = "summer_mode_fast_path"
+    BASE_TARGET = "base_target"
+    TEMPORAL_OVERRIDE = "temporal_override"
+    MANUAL_OVERRIDE = "manual_override"
+    GUEST_OVERRIDE = "guest_override"
+    WINDOW_SAFETY = "window_safety"
+    HARD_CLAMP = "hard_clamp"
