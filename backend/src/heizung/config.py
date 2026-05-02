@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     )
 
     # --- Laufzeit ---
-    environment: Literal["development", "test", "production"] = "development"
+    # ENVIRONMENT ist Pflichtfeld (QA-Audit H-5): kein Default, damit
+    # Server- oder Container-Setups nie versehentlich als "development"
+    # laufen, wenn die env-Var fehlt. Lokal in `.env` setzen, im Test-
+    # Run via conftest-Fixture, im Container via env_file.
+    environment: Literal["development", "test", "production"]
     log_level: str = "INFO"
     secret_key: str = Field(default=_DEFAULT_SECRET_KEY, min_length=16)
 
