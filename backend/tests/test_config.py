@@ -37,3 +37,23 @@ def test_allow_default_secrets_overrides_validator(
 def test_production_accepts_explicit_secret() -> None:
     s = Settings(environment="production", secret_key="a" * 32)
     assert s.environment == "production"
+
+
+def test_environment_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """QA-Audit H-5: ENVIRONMENT ist Pflichtfeld, kein stiller Default."""
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("ALLOW_DEFAULT_SECRETS", "1")
+    # _model_config ignoriert .env-Datei nicht komplett, daher ein
+    # Cwd-Wechsel nicht moeglich; pydantic raised wenn weder kwarg
+    # noch env_file noch env-Var einen Wert liefert.
+    with pytest.raises(ValueError, match="environment"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_environment_rejects_invalid_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Literal verhindert Tippfehler wie 'prod' oder 'dev'."""
+    monkeypatch.setenv("ALLOW_DEFAULT_SECRETS", "1")
+    with pytest.raises(ValueError):
+        Settings(environment="prod")  # type: ignore[arg-type]
