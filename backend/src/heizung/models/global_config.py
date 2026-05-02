@@ -41,12 +41,8 @@ class GlobalConfig(Base):
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Vienna")
 
     # Standard-Zeiten (Engine nutzt diese als Default fuer Vorheizen/Auszug)
-    default_checkin_time: Mapped[time] = mapped_column(
-        Time, nullable=False, default=time(14, 0)
-    )
-    default_checkout_time: Mapped[time] = mapped_column(
-        Time, nullable=False, default=time(11, 0)
-    )
+    default_checkin_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(14, 0))
+    default_checkout_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(11, 0))
 
     # Sommermodus (Layer 0 in der Engine)
     summer_mode_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

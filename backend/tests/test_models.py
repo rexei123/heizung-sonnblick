@@ -136,9 +136,7 @@ def test_scenario_assignment_scope_consistency_check() -> None:
     from heizung.models import ScenarioAssignment
 
     check_names = {
-        c.name
-        for c in ScenarioAssignment.__table__.constraints
-        if isinstance(c, CheckConstraint)
+        c.name for c in ScenarioAssignment.__table__.constraints if isinstance(c, CheckConstraint)
     }
     assert "ck_scenario_assignment_scope_consistency" in check_names
 
@@ -150,9 +148,7 @@ def test_manual_setpoint_event_temp_range() -> None:
     from heizung.models import ManualSetpointEvent
 
     check_names = {
-        c.name
-        for c in ManualSetpointEvent.__table__.constraints
-        if isinstance(c, CheckConstraint)
+        c.name for c in ManualSetpointEvent.__table__.constraints if isinstance(c, CheckConstraint)
     }
     assert "ck_manual_setpoint_event_temp_range" in check_names
     assert "ck_manual_setpoint_event_time_ordered" in check_names
@@ -164,9 +160,7 @@ def test_season_dates_ordered_check() -> None:
 
     from heizung.models import Season
 
-    check_names = {
-        c.name for c in Season.__table__.constraints if isinstance(c, CheckConstraint)
-    }
+    check_names = {c.name for c in Season.__table__.constraints if isinstance(c, CheckConstraint)}
     assert "ck_season_dates_ordered" in check_names
 
 

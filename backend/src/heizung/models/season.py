@@ -55,9 +55,7 @@ class Season(Base):
     )
 
     rule_configs: Mapped[list[RuleConfig]] = relationship(back_populates="season")
-    scenario_assignments: Mapped[list[ScenarioAssignment]] = relationship(
-        back_populates="season"
-    )
+    scenario_assignments: Mapped[list[ScenarioAssignment]] = relationship(back_populates="season")
 
     __table_args__ = (
         # starts_on darf nicht nach ends_on liegen

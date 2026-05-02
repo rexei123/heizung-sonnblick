@@ -56,9 +56,7 @@ class ManualSetpointEvent(Base):
         ),
         nullable=False,
     )
-    room_type_id: Mapped[int | None] = mapped_column(
-        ForeignKey("room_type.id", ondelete="CASCADE")
-    )
+    room_type_id: Mapped[int | None] = mapped_column(ForeignKey("room_type.id", ondelete="CASCADE"))
     room_id: Mapped[int | None] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"))
 
     target_setpoint_celsius: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)

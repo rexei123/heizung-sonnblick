@@ -63,9 +63,7 @@ class ScenarioAssignment(Base):
         ),
         nullable=False,
     )
-    room_type_id: Mapped[int | None] = mapped_column(
-        ForeignKey("room_type.id", ondelete="CASCADE")
-    )
+    room_type_id: Mapped[int | None] = mapped_column(ForeignKey("room_type.id", ondelete="CASCADE"))
     room_id: Mapped[int | None] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"))
 
     # Optional saisonal limitiert (NULL = ganzjaehrig)

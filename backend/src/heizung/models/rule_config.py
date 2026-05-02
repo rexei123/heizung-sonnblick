@@ -111,7 +111,10 @@ class RuleConfig(Base):
         # permanenter (season_id IS NULL) als auch saisonale Eintraege
         # nebeneinander existieren koennen.
         UniqueConstraint(
-            "scope", "room_type_id", "room_id", "season_id",
+            "scope",
+            "room_type_id",
+            "room_id",
+            "season_id",
             name="uq_rule_config_scope_target",
         ),
     )
