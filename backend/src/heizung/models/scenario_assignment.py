@@ -17,7 +17,7 @@ Anlegen, nicht in der DB.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -73,7 +73,7 @@ class ScenarioAssignment(Base):
 
     # Override-Parameter gegenueber scenario.default_parameters.
     # Validiert in der Service-Layer gegen scenario.parameter_schema.
-    parameters: Mapped[dict | None] = mapped_column(JSONB)
+    parameters: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

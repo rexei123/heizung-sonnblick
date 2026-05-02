@@ -16,7 +16,7 @@ passiert in der Pydantic-Layer beim Aktivieren (nicht hier in der DB).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -60,10 +60,10 @@ class Scenario(Base):
     #      "to_time":{"type":"string","format":"time"},
     #      "offset_celsius":{"type":"number","minimum":-10,"maximum":0}
     #   }, "required":["from_time","to_time","offset_celsius"]}
-    parameter_schema: Mapped[dict | None] = mapped_column(JSONB)
+    parameter_schema: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     # Default-Parameter (werden beim Anlegen einer Activation als Vorlage genommen).
-    default_parameters: Mapped[dict | None] = mapped_column(JSONB)
+    default_parameters: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -92,7 +93,7 @@ class EventLog(Base):
     )
 
     # Vollstaendiger Kontext-Snapshot fuer KI-Training (AE-08)
-    details: Mapped[dict | None] = mapped_column(JSONB)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (
         # Index fuer Lookup "alle Eintraege fuer Raum X im Zeitraum"
