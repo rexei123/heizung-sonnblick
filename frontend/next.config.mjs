@@ -9,6 +9,8 @@ const apiBase = process.env.API_PROXY_TARGET ?? "http://api:8000";
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // M-3 (QA-Audit): kein x-powered-by-Header (Info-Disclosure-Schutz).
+  poweredByHeader: false,
   experimental: {
     typedRoutes: true,
   },
