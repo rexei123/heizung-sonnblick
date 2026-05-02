@@ -80,3 +80,56 @@ export interface ApiError {
   status: number;
   detail: string | unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 8 Stammdaten — Spiegel zu backend/src/heizung/schemas/*.py
+// ---------------------------------------------------------------------------
+
+/**
+ * Raumtyp (Sprint 8.4). Hotelzimmer oder andere Einheiten (Tagungsraum, etc.).
+ * Default-Sollwerte werden in der Engine als Layer-1-Basis verwendet.
+ */
+export interface RoomType {
+  id: number;
+  name: string;
+  description: string | null;
+  is_bookable: boolean;
+  default_t_occupied: number;
+  default_t_vacant: number;
+  default_t_night: number;
+  max_temp_celsius: number | null;
+  min_temp_celsius: number | null;
+  treat_unoccupied_as_vacant_after_hours: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomTypeCreate {
+  name: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeUpdate {
+  name?: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeListQuery {
+  is_bookable?: boolean;
+  limit?: number;
+  offset?: number;
+}
