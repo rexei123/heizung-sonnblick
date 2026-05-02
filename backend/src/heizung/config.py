@@ -74,5 +74,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Singleton-Zugriff auf die Settings."""
-    return Settings()
+    """Singleton-Zugriff auf die Settings.
+
+    `Settings()` wird ohne kwargs aufgerufen — alle Felder kommen aus
+    Umgebungsvariablen bzw. .env. Mypy sieht das nicht und meckert
+    `environment` als fehlendes Required-Argument; wird per type-ignore
+    unterdrueckt.
+    """
+    return Settings()  # type: ignore[call-arg]
