@@ -112,12 +112,11 @@ def test_global_config_singleton_check_blocks_second_row(alembic_cfg) -> None:
 
     sync_url = TEST_DB_URL.replace("+asyncpg", "")
     engine = create_engine(sync_url)
-    with engine.connect() as conn:
-        with pytest.raises(IntegrityError):
-            conn.execute(
-                text("INSERT INTO global_config (id, hotel_name) VALUES (2, 'X')")
-            )
-            conn.commit()
+    with engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(
+            text("INSERT INTO global_config (id, hotel_name) VALUES (2, 'X')")
+        )
+        conn.commit()
 
 
 @pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
