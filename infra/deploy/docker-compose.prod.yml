@@ -206,6 +206,9 @@ services:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}
       CHIRPSTACK_HOSTNAME: ${CHIRPSTACK_HOSTNAME:-}
       CHIRPSTACK_BASIC_AUTH_HASH: ${CHIRPSTACK_BASIC_AUTH_HASH:-}
+      # K-1 (Sprint 8a): Basic-Auth fuer /api/* + /openapi.json + /docs.
+      # bcrypt-Hash, doppelte $$ in .env wegen Compose-Interpolation.
+      HOTEL_BASIC_AUTH_HASH: ${HOTEL_BASIC_AUTH_HASH}
     ports:
       - "80:80"
       - "443:443"

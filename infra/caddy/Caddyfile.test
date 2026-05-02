@@ -15,15 +15,33 @@
 {$PUBLIC_HOSTNAME} {
     encode zstd gzip
 
-    # API unter /api und /openapi.json
-    @api {
-        path /api/* /openapi.json /docs /redoc /health
+    # K-1 (QA-Audit 2026-04-29): API + Doku hinter Basic-Auth.
+    # Hotelweit ein User `hotel`, Passwort als bcrypt-Hash via
+    # HOTEL_BASIC_AUTH_HASH (in .env). Setup-Anleitung: RUNBOOK §10b.
+    # Browser cached die Credentials, Frontend-Client muss nichts
+    # explizit senden (Browser-Auto-Send via WWW-Authenticate).
+    #
+    # /health bleibt PUBLIC (externes Uptime-Monitoring), liefert nur
+    # Status ohne sensible Daten. Frontend-Healthcheck /healthz ist
+    # ohnehin ausserhalb dieses Blocks (geht an web:3000).
+    @api_public {
+        path /health
     }
-    handle @api {
+    handle @api_public {
         reverse_proxy api:8000
     }
 
-    # Alles andere → Next.js
+    @api_protected {
+        path /api/* /openapi.json /docs /redoc
+    }
+    handle @api_protected {
+        basicauth {
+            hotel {$HOTEL_BASIC_AUTH_HASH}
+        }
+        reverse_proxy api:8000
+    }
+
+    # Alles andere → Next.js (inkl. /healthz)
     reverse_proxy web:3000
 
     # Security-Header
