@@ -37,6 +37,7 @@ from heizung.models.enums import RuleConfigScope, _enum_values
 if TYPE_CHECKING:
     from heizung.models.room import Room
     from heizung.models.room_type import RoomType
+    from heizung.models.season import Season
 
 
 class RuleConfig(Base):
@@ -56,6 +57,10 @@ class RuleConfig(Base):
     )
     room_type_id: Mapped[int | None] = mapped_column(ForeignKey("room_type.id", ondelete="CASCADE"))
     room_id: Mapped[int | None] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"))
+
+    # Sprint 8 (AE-26): optional saisonal limitiert.
+    # NULL = permanente Settings, sonst gilt nur im Saison-Zeitraum.
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("season.id", ondelete="CASCADE"))
 
     # Temperatur-Sollwerte (NULL = erben)
     t_occupied: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
@@ -91,6 +96,7 @@ class RuleConfig(Base):
 
     room_type: Mapped[RoomType | None] = relationship(back_populates="rule_configs")
     room: Mapped[Room | None] = relationship(back_populates="rule_configs")
+    season: Mapped[Season | None] = relationship(back_populates="rule_configs")
 
     __table_args__ = (
         # Scope-Konsistenz: die richtige FK muss gesetzt/NULL sein.
@@ -100,6 +106,12 @@ class RuleConfig(Base):
             " OR (scope = 'room' AND room_id IS NOT NULL AND room_type_id IS NULL)",
             name="ck_rule_config_scope_consistency",
         ),
-        # Ein Eintrag pro Scope-Objekt.
-        UniqueConstraint("scope", "room_type_id", "room_id", name="uq_rule_config_scope_target"),
+        # Ein Eintrag pro Scope-Objekt + Saison-Variante.
+        # season_id ist Teil der Uniqueness damit pro Scope sowohl ein
+        # permanenter (season_id IS NULL) als auch saisonale Eintraege
+        # nebeneinander existieren koennen.
+        UniqueConstraint(
+            "scope", "room_type_id", "room_id", "season_id",
+            name="uq_rule_config_scope_target",
+        ),
     )

@@ -27,9 +27,11 @@ from heizung.models.enums import Orientation, RoomStatus, _enum_values
 
 if TYPE_CHECKING:
     from heizung.models.heating_zone import HeatingZone
+    from heizung.models.manual_setpoint_event import ManualSetpointEvent
     from heizung.models.occupancy import Occupancy
     from heizung.models.room_type import RoomType
     from heizung.models.rule_config import RuleConfig
+    from heizung.models.scenario_assignment import ScenarioAssignment
 
 
 class Room(Base):
@@ -88,6 +90,12 @@ class Room(Base):
         back_populates="room", cascade="all, delete-orphan"
     )
     rule_configs: Mapped[list[RuleConfig]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    scenario_assignments: Mapped[list[ScenarioAssignment]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    manual_setpoint_events: Mapped[list[ManualSetpointEvent]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )
 
