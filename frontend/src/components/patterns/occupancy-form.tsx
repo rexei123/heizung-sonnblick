@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * Belegungs-Anlege-Form (Sprint 8.11).
+ * Belegungs-Anlege-Form (Sprint 8.11, Sprint 8.15 Design-Fixes).
  */
 
 import { useState, type FormEvent } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useRooms } from "@/lib/api/hooks-rooms";
 import type { OccupancyCreate } from "@/lib/api/types";
 
@@ -78,7 +79,7 @@ export function OccupancyForm({
           required
           className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
         >
-          <option value="">— bitte waehlen —</option>
+          <option value="">— bitte wählen —</option>
           {(rooms.data ?? []).map((r) => (
             <option key={r.id} value={r.id}>
               {r.number}
@@ -158,7 +159,7 @@ export function OccupancyForm({
       {error ? (
         <div
           role="alert"
-          className="text-sm text-domain-heating-off bg-surface-alt border border-domain-heating-off rounded-md px-3 py-2"
+          className="text-sm text-error bg-error-soft border border-error rounded-md px-3 py-2"
         >
           {error}
         </div>
@@ -166,21 +167,19 @@ export function OccupancyForm({
 
       <div className="flex gap-2 justify-end">
         {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-border rounded-md text-text-secondary hover:bg-surface-alt"
-          >
+          <Button variant="secondary" onClick={onCancel}>
             Abbrechen
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           type="submit"
-          disabled={submitting || roomId === ""}
-          className="px-4 py-2 bg-primary text-on-primary rounded-md disabled:opacity-50"
+          variant="add"
+          icon="add"
+          loading={submitting}
+          disabled={roomId === ""}
         >
-          {submitting ? "Speichern…" : "Belegung anlegen"}
-        </button>
+          Belegung anlegen
+        </Button>
       </div>
     </form>
   );

@@ -1,20 +1,29 @@
 "use client";
 
 /**
- * Heizzonen-Liste fuer die Zimmer-Detail-Seite (Sprint 8.10).
- * Inline anlegen + loeschen (kein Edit, weil zu selten — Tab-Wechsel-Friction).
+ * Heizzonen-Liste fuer die Zimmer-Detail-Seite (Sprint 8.10, Sprint 8.15 Design-Fixes).
+ * Inline anlegen + löschen.
  */
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   useCreateHeatingZone,
   useDeleteHeatingZone,
   useHeatingZones,
 } from "@/lib/api/hooks-rooms";
-import type { ApiError, HeatingZoneKind } from "@/lib/api/types";
+import type { ApiError, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
 
 const KINDS: HeatingZoneKind[] = ["bedroom", "bathroom", "living", "hallway", "other"];
+const KIND_LABEL: Record<HeatingZoneKind, string> = {
+  bedroom: "Schlafzimmer",
+  bathroom: "Bad",
+  living: "Wohnen",
+  hallway: "Flur",
+  other: "Sonstige",
+};
 
 interface Props {
   roomId: number;
@@ -29,6 +38,7 @@ export function HeatingZoneList({ roomId }: Props) {
   const [kind, setKind] = useState<HeatingZoneKind>("bedroom");
   const [isTowel, setIsTowel] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<HeatingZone | null>(null);
 
   const handleAdd = async () => {
     setError(null);
@@ -42,15 +52,15 @@ export function HeatingZoneList({ roomId }: Props) {
     }
   };
 
-  const handleDelete = async (zoneId: number) => {
-    if (!confirm("Heizzone loeschen? Geraete bleiben erhalten (Zone-Zuordnung wird auf NULL).")) {
-      return;
-    }
+  const performDelete = async () => {
+    if (!confirmDelete) return;
     setError(null);
     try {
-      await deleteMut.mutateAsync(zoneId);
+      await deleteMut.mutateAsync(confirmDelete.id);
+      setConfirmDelete(null);
     } catch (e) {
       setError(toMessage(e));
+      setConfirmDelete(null);
     }
   };
 
@@ -60,7 +70,7 @@ export function HeatingZoneList({ roomId }: Props) {
         {list.isLoading ? (
           <p className="text-sm text-text-secondary">Lade…</p>
         ) : list.isError ? (
-          <p className="text-sm text-domain-heating-off">Fehler beim Laden.</p>
+          <p className="text-sm text-error">Fehler beim Laden.</p>
         ) : (list.data ?? []).length === 0 ? (
           <p className="text-sm text-text-secondary italic">
             Noch keine Heizzonen. Lege z.B. Schlafzimmer + Bad an.
@@ -79,16 +89,16 @@ export function HeatingZoneList({ roomId }: Props) {
                       <span className="text-xs text-text-tertiary">(Handtuchtrockner)</span>
                     ) : null}
                   </div>
-                  <div className="text-xs text-text-tertiary">{z.kind}</div>
+                  <div className="text-xs text-text-tertiary">{KIND_LABEL[z.kind]}</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(z.id)}
-                  className="text-xs text-domain-heating-off hover:underline"
+                <Button
+                  variant="destructive"
+                  icon="delete"
+                  onClick={() => setConfirmDelete(z)}
                   disabled={deleteMut.isPending}
                 >
-                  Loeschen
-                </button>
+                  Löschen
+                </Button>
               </li>
             ))}
           </ul>
@@ -97,7 +107,7 @@ export function HeatingZoneList({ roomId }: Props) {
 
       <div className="border-t border-border pt-4">
         <h3 className="text-sm font-medium text-text-primary mb-3">Neue Heizzone</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px_auto] gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_auto] gap-2">
           <input
             type="text"
             placeholder="Name (z.B. Schlafzimmer)"
@@ -113,18 +123,19 @@ export function HeatingZoneList({ roomId }: Props) {
           >
             {KINDS.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {KIND_LABEL[k]}
               </option>
             ))}
           </select>
-          <button
-            type="button"
+          <Button
+            variant="add"
+            icon="add"
             onClick={handleAdd}
-            disabled={createMut.isPending || !name.trim()}
-            className="px-4 py-2 bg-primary text-on-primary rounded-md disabled:opacity-50 text-sm"
+            loading={createMut.isPending}
+            disabled={!name.trim()}
           >
-            Hinzufuegen
-          </button>
+            Hinzufügen
+          </Button>
         </div>
         <label className="flex items-center gap-2 mt-2 text-sm text-text-primary">
           <input
@@ -138,12 +149,26 @@ export function HeatingZoneList({ roomId }: Props) {
         {error ? (
           <div
             role="alert"
-            className="mt-2 text-sm text-domain-heating-off bg-surface-alt border border-domain-heating-off rounded-md px-3 py-2"
+            className="mt-2 text-sm text-error bg-error-soft border border-error rounded-md px-3 py-2"
           >
             {error}
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Heizzone löschen?"
+        message={
+          confirmDelete
+            ? `Heizzone „${confirmDelete.name}“ wird endgültig entfernt. Geräte bleiben erhalten (Zone-Zuordnung wird auf NULL gesetzt).`
+            : ""
+        }
+        confirmLabel="Endgültig löschen"
+        loading={deleteMut.isPending}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

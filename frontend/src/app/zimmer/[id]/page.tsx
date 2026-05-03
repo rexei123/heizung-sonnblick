@@ -1,11 +1,8 @@
 "use client";
 
 /**
- * Zimmer-Detail (Sprint 8.10) mit Tabs:
- *   - Stammdaten (RoomForm)
- *   - Heizzonen (HeatingZoneList)
- *   - Geraete (Liste der Devices, die der Zone in diesem Zimmer zugeordnet sind)
- *   - Belegungen (Liste, anlegen + stornieren — Sprint 8.11 bringt eigene Seite)
+ * Zimmer-Detail (Sprint 8.10, Sprint 8.15 Design-Fixes).
+ * Tabs: Stammdaten / Heizzonen / Geräte.
  */
 
 import Link from "next/link";
@@ -14,6 +11,8 @@ import { useState } from "react";
 
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { RoomForm } from "@/components/patterns/room-form";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useDevices } from "@/lib/api/hooks";
 import {
   useDeleteRoom,
@@ -34,6 +33,7 @@ export default function ZimmerDetailPage() {
   const deleteMut = useDeleteRoom();
   const [tab, setTab] = useState<Tab>("stammdaten");
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleUpdate = async (payload: RoomCreate | RoomUpdate) => {
     setError(null);
@@ -44,112 +44,112 @@ export default function ZimmerDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const performDelete = async () => {
     if (!id) return;
-    if (
-      !confirm(
-        "Zimmer wirklich loeschen? Nur moeglich, wenn keine aktiven Belegungen existieren.",
-      )
-    ) {
-      return;
-    }
     setError(null);
     try {
       await deleteMut.mutateAsync(id);
       router.push("/zimmer" as never);
     } catch (e) {
       setError(toMessage(e));
+      setConfirmDelete(false);
     }
   };
 
   if (!id) {
-    return (
-          <div className="p-6">Ungueltige Zimmer-ID.</div>
-      );
+    return <div className="p-6">Ungültige Zimmer-ID.</div>;
   }
 
   if (room.isLoading) {
-    return (
-          <div className="p-6 text-text-secondary">Lade…</div>
-      );
+    return <div className="p-6 text-text-secondary">Lade…</div>;
   }
 
   if (room.isError || !room.data) {
     return (
-          <div className="p-6">
-          <p className="text-domain-heating-off mb-4">Zimmer nicht gefunden.</p>
-          <Link href={"/zimmer" as never} className="text-primary hover:underline">
-            ← Zur Liste
-          </Link>
-        </div>
-      );
+      <div className="p-6">
+        <p className="text-error mb-4">Zimmer nicht gefunden.</p>
+        <Link href={"/zimmer" as never} className="text-primary hover:underline">
+          ← Zur Liste
+        </Link>
+      </div>
+    );
   }
 
   return (
-      <div className="p-6 max-w-5xl mx-auto">
-        <div className="mb-4">
-          <Link
-            href={"/zimmer" as never}
-            className="text-sm text-text-secondary hover:text-primary flex items-center gap-1"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-              arrow_back
-            </span>
-            Zur Zimmerliste
-          </Link>
-        </div>
-
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-medium text-text-primary">
-              Zimmer {room.data.number}
-            </h1>
-            {room.data.display_name ? (
-              <p className="text-sm text-text-secondary mt-1">{room.data.display_name}</p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleteMut.isPending}
-            className="text-sm text-domain-heating-off hover:underline"
-          >
-            {deleteMut.isPending ? "Loesche…" : "Zimmer loeschen"}
-          </button>
-        </header>
-
-        <div className="border-b border-border mb-4 flex gap-4 text-sm">
-          {(["stammdaten", "zonen", "geraete"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`pb-2 -mb-px border-b-2 transition-colors ${
-                tab === t
-                  ? "border-primary text-primary font-medium"
-                  : "border-transparent text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {t === "stammdaten" ? "Stammdaten" : t === "zonen" ? "Heizzonen" : "Geraete"}
-            </button>
-          ))}
-        </div>
-
-        <div className="bg-surface border border-border rounded-md p-5">
-          {tab === "stammdaten" ? (
-            <RoomForm
-              initial={room.data}
-              onSubmit={handleUpdate}
-              submitting={updateMut.isPending}
-              error={error}
-            />
-          ) : tab === "zonen" ? (
-            <HeatingZoneList roomId={id} />
-          ) : (
-            <DevicesInRoom roomId={id} />
-          )}
-        </div>
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-4">
+        <Link
+          href={"/zimmer" as never}
+          className="text-sm text-text-secondary hover:text-primary flex items-center gap-1"
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+            arrow_back
+          </span>
+          Zur Zimmerliste
+        </Link>
       </div>
+
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-medium text-text-primary">
+            Zimmer {room.data.number}
+          </h1>
+          {room.data.display_name ? (
+            <p className="text-sm text-text-secondary mt-1">{room.data.display_name}</p>
+          ) : null}
+        </div>
+        <Button
+          variant="destructive"
+          icon="delete"
+          onClick={() => setConfirmDelete(true)}
+          disabled={deleteMut.isPending}
+        >
+          Zimmer löschen
+        </Button>
+      </header>
+
+      <div className="border-b border-border mb-4 flex gap-4 text-sm">
+        {(["stammdaten", "zonen", "geraete"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`pb-2 -mb-px border-b-2 transition-colors ${
+              tab === t
+                ? "border-primary text-primary font-medium"
+                : "border-transparent text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            {t === "stammdaten" ? "Stammdaten" : t === "zonen" ? "Heizzonen" : "Geräte"}
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-surface border border-border rounded-md p-5">
+        {tab === "stammdaten" ? (
+          <RoomForm
+            initial={room.data}
+            onSubmit={handleUpdate}
+            submitting={updateMut.isPending}
+            error={error}
+          />
+        ) : tab === "zonen" ? (
+          <HeatingZoneList roomId={id} />
+        ) : (
+          <DevicesInRoom roomId={id} />
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Zimmer löschen?"
+        message={`Zimmer „${room.data.number}“ wird endgültig entfernt. Nur möglich, wenn keine aktiven Belegungen existieren.`}
+        confirmLabel="Endgültig löschen"
+        loading={deleteMut.isPending}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    </div>
   );
 }
 
@@ -168,15 +168,15 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
   if (zones.data && zones.data.length === 0) {
     return (
       <p className="text-sm text-text-secondary italic">
-        Bitte zuerst Heizzonen anlegen, dann koennen Geraete zugeordnet werden.
+        Bitte zuerst Heizzonen anlegen, dann können Geräte zugeordnet werden.
       </p>
     );
   }
   if (devicesInRoom.length === 0) {
     return (
       <p className="text-sm text-text-secondary italic">
-        Noch keine Geraete den Zonen dieses Zimmers zugeordnet. Geraet-Zuordnung
-        erfolgt in der Geraete-Detailseite (PATCH heating_zone_id).
+        Noch keine Geräte den Zonen dieses Zimmers zugeordnet. Geräte-Zuordnung
+        erfolgt in der Geräte-Detailseite (PATCH heating_zone_id).
       </p>
     );
   }

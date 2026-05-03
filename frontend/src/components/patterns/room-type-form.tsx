@@ -1,17 +1,13 @@
 "use client";
 
 /**
- * Raumtyp-Form (Sprint 8.9).
- *
- * Universell fuer Anlegen + Bearbeiten. Bei `initial` undefined
- * = Anlege-Modus, sonst Edit-Modus mit vorausgefuellten Werten.
- *
- * Validierung folgt dem Backend-Schema (5-30 °C, max > min).
- * API-Validation-Errors werden im Form als Inline-Fehler dargestellt.
+ * Raumtyp-Form (Sprint 8.9, Sprint 8.15 Design-Fixes).
+ * Universell für Anlegen + Bearbeiten.
  */
 
 import { useState, type FormEvent } from "react";
 
+import { Button } from "@/components/ui/button";
 import type { RoomType, RoomTypeCreate, RoomTypeUpdate } from "@/lib/api/types";
 
 interface Props {
@@ -195,7 +191,7 @@ export function RoomTypeForm({
       {error ? (
         <div
           role="alert"
-          className="text-sm text-domain-heating-off bg-surface-alt border border-domain-heating-off rounded-md px-3 py-2"
+          className="text-sm text-error bg-error-soft border border-error rounded-md px-3 py-2"
         >
           {error}
         </div>
@@ -203,21 +199,19 @@ export function RoomTypeForm({
 
       <div className="flex gap-2 justify-end">
         {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-border rounded-md text-text-secondary hover:bg-surface-alt"
-          >
+          <Button variant="secondary" onClick={onCancel}>
             Abbrechen
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           type="submit"
-          disabled={submitting || !name.trim()}
-          className="px-4 py-2 bg-primary text-on-primary rounded-md disabled:opacity-50"
+          variant={initial ? "primary" : "add"}
+          icon={initial ? undefined : "add"}
+          loading={submitting}
+          disabled={!name.trim()}
         >
-          {submitting ? "Speichern…" : initial ? "Aktualisieren" : "Anlegen"}
-        </button>
+          {initial ? "Aktualisieren" : "Anlegen"}
+        </Button>
       </div>
     </form>
   );

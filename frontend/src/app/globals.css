@@ -41,15 +41,24 @@
   --color-border-strong: #c9ccd3;
   --color-border-focus: var(--color-primary);
 
-  /* --- Semantik --- */
-  --color-success: #2e7d4f;
-  --color-success-soft: #e1f3e9;
-  --color-warning: #b97309;
-  --color-warning-soft: #fdeed1;
-  --color-danger: #c5283d;
-  --color-danger-soft: #fbe2e6;
-  --color-info: #1f6fbf;
-  --color-info-soft: #e0eefb;
+  /* --- Semantik (Design-Strategie 2.0.1 §2.3) --- */
+  --color-success: #16a34a;
+  --color-success-soft: #f0fdf4;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #fffbeb;
+  --color-error: #e05252;
+  --color-error-soft: #fef2f2;
+  /* Aliase fuer Rueckwaerts-Kompat (Sprint 7/8-Code) */
+  --color-danger: var(--color-error);
+  --color-danger-soft: var(--color-error-soft);
+  --color-info: #3b82f6;
+  --color-info-soft: #eff6fb;
+
+  /* --- Add (gruen) — fuer "Neu anlegen"-Aktionen
+     (Design-Strategie 2.0.1 §6.1 "Add-Button"). */
+  --color-add: #16a34a;
+  --color-add-hover: #15803d;
+  --color-on-add: #ffffff;
 
   /* --- Domain: Heizung --- */
   --color-heating-on: #16a34a;
@@ -57,17 +66,17 @@
   --color-heating-preheat: #f59e0b;
   --color-heating-frost: #7c3aed;
 
-  /* --- Schriftgrößen ---
-     Token-basiert. Eine Aenderung von --font-size-base skaliert die ganze App
-     (alle text-xs..text-3xl basieren auf diesen Variablen).
-     Aktueller Standard-Body: 14px (kompakte Hotelier-Sicht). */
-  --font-size-xs: 11px;
-  --font-size-sm: 13px;
-  --font-size-base: 14px;
-  --font-size-lg: 16px;
+  /* --- Schriftgrößen (Design-Strategie 2.0.1 §3.2) ---
+     Verbindliche Skala. Alte Werte (14/13/11) waren zu klein und nicht
+     Strategie-konform. */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
   --font-size-xl: 20px;
   --font-size-2xl: 24px;
-  --font-size-3xl: 32px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
 
   /* --- Radien --- */
   --radius-sm: 4px;
