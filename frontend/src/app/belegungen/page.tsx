@@ -7,7 +7,6 @@
 
 import { useState } from "react";
 
-import { AppShell } from "@/components/patterns/app-shell";
 import { OccupancyForm } from "@/components/patterns/occupancy-form";
 import { useCancelOccupancy, useCreateOccupancy, useOccupancies } from "@/lib/api/hooks-occupancies";
 import { useRooms } from "@/lib/api/hooks-rooms";
@@ -72,7 +71,6 @@ export default function BelegungenPage() {
   };
 
   return (
-    <AppShell>
       <div className="p-6 max-w-6xl mx-auto">
         <header className="mb-6 flex items-center justify-between">
           <div>
@@ -134,7 +132,6 @@ export default function BelegungenPage() {
           cancelPending={cancelMut.isPending}
         />
       </div>
-    </AppShell>
   );
 }
 

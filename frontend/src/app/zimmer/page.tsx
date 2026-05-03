@@ -7,7 +7,6 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { AppShell } from "@/components/patterns/app-shell";
 import { RoomForm } from "@/components/patterns/room-form";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
@@ -62,8 +61,7 @@ export default function ZimmerPage() {
   };
 
   return (
-    <AppShell>
-      <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-medium text-text-primary">Zimmer</h1>
@@ -145,7 +143,6 @@ export default function ZimmerPage() {
 
         <RoomTable list={list.data ?? []} loading={list.isLoading} error={list.isError} />
       </div>
-    </AppShell>
   );
 }
 

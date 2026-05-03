@@ -12,7 +12,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { AppShell } from "@/components/patterns/app-shell";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { RoomForm } from "@/components/patterns/room-form";
 import { useDevices } from "@/lib/api/hooks";
@@ -65,35 +64,28 @@ export default function ZimmerDetailPage() {
 
   if (!id) {
     return (
-      <AppShell>
-        <div className="p-6">Ungueltige Zimmer-ID.</div>
-      </AppShell>
-    );
+          <div className="p-6">Ungueltige Zimmer-ID.</div>
+      );
   }
 
   if (room.isLoading) {
     return (
-      <AppShell>
-        <div className="p-6 text-text-secondary">Lade…</div>
-      </AppShell>
-    );
+          <div className="p-6 text-text-secondary">Lade…</div>
+      );
   }
 
   if (room.isError || !room.data) {
     return (
-      <AppShell>
-        <div className="p-6">
+          <div className="p-6">
           <p className="text-domain-heating-off mb-4">Zimmer nicht gefunden.</p>
           <Link href={"/zimmer" as never} className="text-primary hover:underline">
             ← Zur Liste
           </Link>
         </div>
-      </AppShell>
-    );
+      );
   }
 
   return (
-    <AppShell>
       <div className="p-6 max-w-5xl mx-auto">
         <div className="mb-4">
           <Link
@@ -158,7 +150,6 @@ export default function ZimmerDetailPage() {
           )}
         </div>
       </div>
-    </AppShell>
   );
 }
 

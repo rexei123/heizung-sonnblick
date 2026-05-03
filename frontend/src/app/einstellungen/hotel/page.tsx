@@ -10,7 +10,6 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { AppShell } from "@/components/patterns/app-shell";
 import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-config";
 import type { ApiError, GlobalConfigUpdate } from "@/lib/api/types";
 
@@ -80,7 +79,6 @@ export default function HotelSettingsPage() {
   };
 
   return (
-    <AppShell>
       <div className="p-6 max-w-3xl mx-auto">
         <header className="mb-6">
           <h1 className="text-2xl font-medium text-text-primary">Hotel-Stammdaten</h1>
@@ -168,7 +166,6 @@ export default function HotelSettingsPage() {
           </form>
         ) : null}
       </div>
-    </AppShell>
   );
 }
 
