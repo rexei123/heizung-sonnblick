@@ -37,26 +37,29 @@ from heizung.services.downlink_adapter import (
     ],
 )
 def test_encoding_setpoints(setpoint: int, expected_bytes: list[int]) -> None:
-    msg = json.loads(build_downlink_message(setpoint))
+    msg = json.loads(build_downlink_message(setpoint, "AABBCCDD11223344"))
     raw = base64.b64decode(msg["data"])
     assert list(raw) == expected_bytes
     assert msg["fPort"] == 1
     assert msg["confirmed"] is False
+    # Sprint 9.6 Fix: devEui muss im Payload sein (lowercase) und
+    # mit Topic-DevEUI matchen.
+    assert msg["devEui"] == "aabbccdd11223344"
 
 
 def test_setpoint_below_frost_protection_raises() -> None:
     with pytest.raises(DownlinkError, match="ausserhalb"):
-        build_downlink_message(9)
+        build_downlink_message(9, "00")
 
 
 def test_setpoint_above_max_raises() -> None:
     with pytest.raises(DownlinkError, match="ausserhalb"):
-        build_downlink_message(31)
+        build_downlink_message(31, "00")
 
 
 def test_non_int_setpoint_raises() -> None:
     with pytest.raises(DownlinkError, match="muss int sein"):
-        build_downlink_message(21.5)  # type: ignore[arg-type]
+        build_downlink_message(21.5, "00")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

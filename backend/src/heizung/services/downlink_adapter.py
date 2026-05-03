@@ -51,12 +51,20 @@ def _encode_setpoint_payload(setpoint_c: int) -> bytes:
     return bytes([VICKI_SETPOINT_COMMAND, (raw >> 8) & 0xFF, raw & 0xFF])
 
 
-def build_downlink_message(setpoint_c: int) -> str:
-    """Bauen das ChirpStack-JSON. Public, damit Tests es ohne MQTT pruefen koennen."""
+def build_downlink_message(setpoint_c: int, dev_eui: str) -> str:
+    """Bauen das ChirpStack-JSON. Public, damit Tests es ohne MQTT pruefen koennen.
+
+    Sprint 9.6 Live-Test-Fix: ChirpStack v4 verlangt ``devEui`` im Payload
+    (muss mit Topic-DevEUI uebereinstimmen). Ohne dieses Feld antwortet
+    ChirpStack mit:
+        WARN: Processing command error: Payload dev_eui does not match topic dev_eui
+    und der Downlink wird verworfen.
+    """
     payload_bytes = _encode_setpoint_payload(setpoint_c)
     payload_b64 = base64.b64encode(payload_bytes).decode("ascii")
     return json.dumps(
         {
+            "devEui": dev_eui.lower(),
             "data": payload_b64,
             "fPort": 1,
             "confirmed": False,
@@ -86,7 +94,7 @@ async def send_setpoint(dev_eui: str, setpoint_c: int) -> str:
     """
     settings = get_settings()
     topic = build_downlink_topic(dev_eui)
-    payload = build_downlink_message(setpoint_c)
+    payload = build_downlink_message(setpoint_c, dev_eui)
 
     async with aiomqtt.Client(
         hostname=settings.mqtt_host,
