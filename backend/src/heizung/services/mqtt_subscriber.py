@@ -86,9 +86,23 @@ def _to_decimal(v: Any) -> Decimal | None:
 
 
 def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
+    """Periodic-Report (fPort 1) -> SensorReading-Row.
+
+    Sprint 9.0: Subscriber liest jetzt `valve_openness` aus dem Codec-Output
+    (Wert 0..100 % geclampt, statt raw `motor_position`-Zahlen wie 1984).
+    Fallback auf `motor_position` bleibt fuer den Uebergang, falls Server
+    noch alten Codec hat.
+    """
     obj = uplink.object or {}
     rx = uplink.rxInfo[0] if uplink.rxInfo else None
     ts = uplink.time or datetime.now(tz=UTC)
+
+    valve_pct = obj.get("valve_openness")
+    if valve_pct is None:
+        # Fallback auf alten Codec-Output. motor_position ist KEIN Prozent —
+        # Wert wird damit zwar persistiert, ist aber semantisch falsch.
+        # Greift nur bis ChirpStack-Codec auf Sprint-9.0-Version aktualisiert ist.
+        valve_pct = obj.get("motor_position")
 
     return {
         "time": ts,
@@ -96,7 +110,7 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         "fcnt": uplink.fCnt,
         "temperature": _to_decimal(obj.get("temperature")),
         "setpoint": _to_decimal(obj.get("target_temperature")),
-        "valve_position": obj.get("motor_position"),
+        "valve_position": valve_pct,
         "battery_percent": _battery_pct_from_volts(obj.get("battery_voltage")),
         "rssi_dbm": rx.rssi if rx else None,
         "snr_db": _to_decimal(rx.snr) if rx else None,
@@ -198,6 +212,19 @@ async def _consume_loop() -> None:
                         continue
                     except Exception:
                         logger.exception("uplink-decode-fehler topic=%s", message.topic)
+                        continue
+
+                    # Sprint 9.0: fPort-2-Replies (z.B. 0x52 Setpoint-Reply)
+                    # haben kein temperature/valve_position. Skip Insert, nur
+                    # loggen — das wird in Sprint 9.5/9.7 in event_log /
+                    # control_command persistiert (engine ack-handling).
+                    obj = uplink.object or {}
+                    if obj.get("report_type") == "setpoint_reply":
+                        logger.info(
+                            "setpoint-reply dev_eui=%s setpoint=%s — skip insert",
+                            uplink.deviceInfo.devEui,
+                            obj.get("target_temperature"),
+                        )
                         continue
 
                     try:
