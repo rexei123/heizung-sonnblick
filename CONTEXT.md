@@ -8,18 +8,17 @@
 
 ## Aktueller Stand
 
-- **Letzter Tag:** `v0.1.7-frontend-dashboard` (2026-05-01)
-- **Letzter Sprint abgeschlossen:** Sprint 7 Frontend-Dashboard + Sprint 8a (K-1 Caddy-Basic-Auth interim)
-- **Aktiver Sprint:** Sprint 8 — Stammdaten-CRUD + Belegung (Brief + Sprintplan freigegeben am 2026-05-02)
-- **Branch:** `feat/sprint8-stammdaten-belegung` (noch nicht erstellt zum Stand 2026-05-02)
-- **Vor Sprint-9-Start zwingend:** Vicki-Setpoint-Downlink-Spike (siehe `docs/working/2026-05-02-vicki-downlink-spike.md`)
+- **Letzter Tag:** `v0.1.8-stammdaten` (2026-05-02, geplant nach Sprint 8.13/14 Merge)
+- **Letzter Sprint abgeschlossen:** Sprint 8 (Stammdaten + Belegung) — Backend 8.1-8.7, Frontend 8.9-8.12, E2E 8.13
+- **Aktiver Sprint:** Sprint 8.14 (Tag) → dann Sprint 9 (Engine + Downlink)
+- **Vor Sprint-9-Start:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Sprint 9 kann starten.
 
 ## Was JETZT der naechste konkrete Schritt ist
 
-1. ✅ Vicki-Spike 2026-05-02 vollstaendig validiert (10:41 Test 21.5°, 11:06 Test 22.0°). Pipeline End-to-End funktioniert. Vicki Hardware-Limit: nur 1° Aufloesung (rundet 21.5 auf 21.0 intern). Periodic Report (fPort 1) zeigt aktuellen Setpoint im Frontend.
-2. **Sprint-9-Architektur-Annahmen:** Engine quantisiert Setpoint auf ganze Grad mit `int(round(x))`. AE-32 Hysterese auf 1.0 °C statt 0.5 °C (ADR-Update mit Sprint-9-Brief). Backend nutzt Periodic Report fuer Setpoint-Ack — kein fPort-2-Codec noetig.
-3. Sprint 8 Code-Arbeit laeuft: 8.1 Models fertig + verifiziert. Naechster Schritt: 8.2 Migration 0003a + 0003b.
-4. Codec-Backlog: Task #86 (Vicki-Ventil 213-242% statt 0-100%), Task #87 (fPort 2 Setpoint-Reply nice-to-have). Beide nicht-blockierend.
+1. Tag `v0.1.8-stammdaten` setzen (PowerShell nach Merge von PR #61)
+2. Sprint 9 Feature-Brief + Sprintplan schreiben — Regel-Engine + Downlink (5-Layer-Pipeline gemaess AE-31, mit Saison aus Layer 1, Sommermodus als Layer 0)
+3. Sprint 8.8 (Integration-Tests gegen echte Postgres) auf Sprint 13 verschoben — H-4 weiterhin offen, aber nicht-blockierend solange CI-Smoke-Tests + manuelle Verifikation reichen
+4. Codec-Backlog Task #86 / #87 weiterhin offen, nicht-blockierend
 
 ## Architektur-Konsens (Stand 2026-05-02)
 
@@ -28,7 +27,8 @@
 - **Datenmodell-Erweiterung Migration 0003:** `season`, `scenario`, `scenario_assignment`, `global_config` (Singleton), `manual_setpoint_event`, `event_log` (Hypertable), plus `room_type.max_temp/min_temp/long_vacant_hours`
 - **Engine:** 5-Schichten-Pipeline (AE-06) erweitert um Layer 0 Sommermodus + Saison-Resolution in Layer 1
 - **UI:** 6-Bereiche-Sidebar (Heute / Zimmer / Regeln / Geraete / Analyse / Einstellungen). Alte Sprint-7-Sidebar wird in Sprint 11 abgeloest.
-- **Sprint-Bogen:** 8 Stammdaten -> 9 Engine -> 10 Saison/Szenarien/Sommermodus -> 11 Dashboard/Floorplan/shadcn -> 12 Mobile/PWA -> 13 Pilot-Reife.
+- **Sprint-Bogen:** ✅ 8 Stammdaten -> 9 Engine (naechster) -> 10 Saison/Szenarien/Sommermodus -> 11 Dashboard/Floorplan/shadcn -> 12 Mobile/PWA -> 13 Pilot-Reife (inkl. Integration-Tests H-4).
+- **Sprint-8-Inkremente:** 8.1 Models, 8.2 Migrationen, 8.3 Schemas+Seed, 8.4 API rooms/types/zones, 8.5 Belegungs-API + OccupancyService, 8.6 global_config-API, 8.7 Device-Zone (existing), 8.9 Frontend Raumtypen, 8.10 Zimmer + Detail-Tabs, 8.11 Belegungen, 8.12 Hotel-Stammdaten, 8.13 Playwright-E2E + Doku, 8.14 Tag.
 
 ## Workflow-Modus
 
@@ -50,6 +50,9 @@
 - `gh pr merge --merge` aendert SHA — Sync-PRs immer ERST nach main-Merge erstellen, nie davor.
 - ChirpStack v4 macht keine `${VAR}`-Substitution in TOML — `envsubst`-Sidecar (AE-20).
 - ChirpStack-Goja JS-Engine ist strict-mode — alle Variablen mit `var` deklarieren (Lessons Sprint 6.8).
+- **deploy-pull.sh git fetch scheitert mit "dubious ownership"** — auf neuen Servern oder nach OS-Updates `git config --global --add safe.directory /opt/heizung-sonnblick` als root setzen. Pull-Timer schweigt sonst stundenlang. Logs via `journalctl -u heizung-deploy-pull -n 50`.
+- **Frontend AppShell NICHT in Page-Komponenten wrappen** — `frontend/src/app/layout.tsx` macht das bereits. Doppelt -> Sidebar zweimal nebeneinander gerendert. Sprint-7-Pattern (`/devices`) ist die korrekte Vorlage.
+- **Pull-Timer + Image-Tag-Caching:** `docker compose up -d` ohne `--force-recreate` startet Container nicht neu, wenn das `:develop`-Tag das gleiche heisst. Bei verdaechtigem alten UI-Stand: `docker compose pull web && docker compose up -d --force-recreate web`.
 
 ## Server-Stand
 

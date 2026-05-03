@@ -109,6 +109,33 @@ Empfehlung im Chat: jeden Code-Block mit explizitem Header oeffnen, z.B.:
 - `**PowerShell (Windows lokal):**`
 - `**SSH (heizung-test, root):**`
 
+### 5.7 deploy-pull.sh schweigt bei git-ownership-Fehler (Sprint 8 Lesson)
+
+Der Pull-Timer (`heizung-deploy-pull`) ruft intern `git fetch origin/develop` auf dem Server-Repo auf. Wenn der `/opt/heizung-sonnblick`-Ordner eine UID/GID hat, die nicht zu root passt (z.B. nach OS-Update oder beim Re-Install), wirft Git seit 2.35:
+
+```
+fatal: detected dubious ownership in repository at '/opt/heizung-sonnblick'
+```
+
+Symptom: Pull-Timer-Logs zeigen 22h+ FEHLER, Server-Code haengt auf altem Stand, Frontend zeigt veraltete UI ohne sichtbaren Hinweis.
+
+**Diagnose:** `journalctl -u heizung-deploy-pull -n 50 --no-pager`
+
+**Fix einmalig pro Server:**
+```bash
+git config --global --add safe.directory /opt/heizung-sonnblick
+```
+
+**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen, damit neue Server out-of-the-box klappen.
+
+### 5.8 Frontend AppShell nicht doppelt wrappen (Sprint 8.13a Lesson)
+
+`frontend/src/app/layout.tsx` wrapped alle Pages bereits in `<AppShell>`. Wenn eine neue Page-Komponente nochmal `<AppShell>` aussen rum macht, wird die Sidebar zweimal nebeneinander gerendert (kein Build-/Lint-Fehler, nur kosmetisch im Browser).
+
+**Korrekte Vorlage:** `frontend/src/app/devices/page.tsx` (Sprint 7) — gibt direkt `<div>...</div>` zurueck, kein AppShell-Wrapper.
+
+**Falsch (Sprint 8.9-8.12 initial):** `<AppShell><div>...</div></AppShell>` als Page-Return.
+
 ---
 
 ## 6. Aktuelle Backlog-Punkte
