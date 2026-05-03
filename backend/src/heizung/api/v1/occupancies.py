@@ -26,6 +26,7 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.schemas.occupancy import OccupancyCancel, OccupancyCreate, OccupancyRead
 from heizung.services.occupancy_service import has_overlap, sync_room_status
+from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
 
@@ -85,6 +86,8 @@ async def create_occupancy(
     await sync_room_status(session, payload.room_id)
     await session.commit()
     await session.refresh(occ)
+    # Sprint 9.4 Trigger: Engine-Re-Eval anstossen, sobald Belegung feststeht.
+    _evaluate_room_task.delay(payload.room_id)
     return occ
 
 
@@ -165,6 +168,8 @@ async def cancel_occupancy(
     await sync_room_status(session, occ.room_id)
     await session.commit()
     await session.refresh(occ)
+    # Sprint 9.4 Trigger: bei Storno auch re-evaluieren (Setpoint geht zurueck).
+    _evaluate_room_task.delay(occ.room_id)
     return occ
 
 
