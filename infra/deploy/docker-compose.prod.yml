@@ -177,6 +177,8 @@ services:
       MQTT_PORT: "1883"
       MQTT_USER: heizung-api
       MQTT_PASSWORD: ${MQTT_HEIZUNG_PASSWORD}
+      # Sprint 9.1: API ruft evaluate_room.delay() ab Sprint 9.4 auf.
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -187,6 +189,45 @@ services:
     # Kein Port-Mapping nach außen — nur Caddy spricht mit der API.
     expose:
       - "8000"
+
+  # Sprint 9.1 — Celery-Worker fuer die Regel-Engine.
+  # Gleiches Image wie api (gleiche Codebasis), anderes Command.
+  # concurrency=2 wegen CPX22-RAM (Brief 2026-05-03 §9 Risiko 3).
+  celery_worker:
+    image: ghcr.io/rexei123/heizung-api:${IMAGE_TAG:-develop}
+    pull_policy: always
+    restart: always
+    env_file: .env
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USER: heizung-api
+      MQTT_PASSWORD: ${MQTT_HEIZUNG_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      # Worker macht keinen MQTT-Subscribe (das ist api-Container).
+      MQTT_ENABLED: "false"
+    command:
+      - celery
+      - -A
+      - heizung.celery_app
+      - worker
+      - --concurrency=2
+      - --loglevel=info
+      - --queues=heizung_default
+      - --hostname=worker@%h
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      # `celery inspect ping` schickt ping ueber Broker. Wenn Worker
+      # keine Antwort liefert, restart. -t 5 = Timeout in s.
+      test: ["CMD", "celery", "-A", "heizung.celery_app", "inspect", "ping", "-t", "5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   web:
     image: ghcr.io/rexei123/heizung-web:${IMAGE_TAG:-develop}
