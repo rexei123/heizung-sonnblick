@@ -8,17 +8,19 @@
 
 ## Aktueller Stand
 
-- **Letzter Tag:** `v0.1.8-stammdaten` (2026-05-02, geplant nach Sprint 8.13/14 Merge)
+- **Letzter Tag:** `v0.1.8-stammdaten` (geplant nach Merge Sprint 8.15)
 - **Letzter Sprint abgeschlossen:** Sprint 8 (Stammdaten + Belegung) — Backend 8.1-8.7, Frontend 8.9-8.12, E2E 8.13
-- **Aktiver Sprint:** Sprint 8.14 (Tag) → dann Sprint 9 (Engine + Downlink)
-- **Vor Sprint-9-Start:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Sprint 9 kann starten.
+- **Aktiver Sprint:** Sprint 8.15 Hotfix (Design-Strategie 2.0.1: Umlaute, Add-/Destructive-Buttons, Schriftgroessen 12/14/16). Branch `chore-sprint8-15-design-fixes`, Brief `docs/features/2026-05-03-sprint8.15-design-fixes.md`. Build + Lint gruen.
+- **Vor Sprint-9-Start:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Sprint 9 kann starten — sobald 8.15 gemerged + getagged ist.
 
 ## Was JETZT der naechste konkrete Schritt ist
 
-1. Tag `v0.1.8-stammdaten` setzen (PowerShell nach Merge von PR #61)
-2. Sprint 9 Feature-Brief + Sprintplan schreiben — Regel-Engine + Downlink (5-Layer-Pipeline gemaess AE-31, mit Saison aus Layer 1, Sommermodus als Layer 0)
-3. Sprint 8.8 (Integration-Tests gegen echte Postgres) auf Sprint 13 verschoben — H-4 weiterhin offen, aber nicht-blockierend solange CI-Smoke-Tests + manuelle Verifikation reichen
-4. Codec-Backlog Task #86 / #87 weiterhin offen, nicht-blockierend
+1. Sprint 8.15 Branch + Commit + Push + PR auf develop (PowerShell-Block beim User)
+2. Browser-Verifikation auf Test-Server via Claude-in-Chrome nach Pull-Timer
+3. Tag `v0.1.8-stammdaten` setzen
+4. Sprint 9 Code starten
+5. Codec-Backlog Task #86 / #87 weiterhin offen, nicht-blockierend
+6. Sprint 8.8 (Integration-Tests gegen echte Postgres) auf Sprint 13 verschoben
 
 ## Architektur-Konsens (Stand 2026-05-02)
 
@@ -40,6 +42,10 @@
 - STATUS.md ist Historie. NICHT bei jedem Boot komplett lesen. Nur den Top-Bereich (aktueller Stand) checken.
 - Bei jeder Sprint-Schliessung: CONTEXT.md aktualisieren VOR dem Tag.
 - Bei jedem ADR: AE-Nummer in CONTEXT.md unter "Architektur-Konsens" referenzieren.
+
+## Browser-Tests: IMMER Claude-fuer-Chrome (mcp__Claude_in_Chrome__*) nutzen
+
+**Pflicht (User-Wunsch 2026-05-03):** Wenn UI getestet werden muss (Sprint-Abnahme, Bug-Reproduktion, Verifikation), Claude oeffnet selbst den Browser via MCP-Tools (`mcp__Claude_in_Chrome__navigate`, `read_page`, `find`, `form_input`, etc.). Nicht den User durchklicken lassen. Wenn ein Tool nicht aufrufbar ist (Permission, Verbindung, Schema): SOFORT melden, nicht stillschweigend zur User-Schritt-Anleitung wechseln. User fixt dann.
 
 ## Bekannte Stolperfallen (Quintessenz aus CLAUDE.md §5)
 

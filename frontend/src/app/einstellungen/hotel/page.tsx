@@ -1,15 +1,13 @@
 "use client";
 
 /**
- * Hotel-Stammdaten-Seite (Sprint 8.12). Bedient Singleton global_config.
- *
- * Drei Cards: Allgemein / Standardzeiten / Alerts. Ohne Sommermodus —
- * der bekommt eine eigene Seite in Sprint 10 (mit eigenem Switch + Datums-
- * Visualisierung).
+ * Hotel-Stammdaten-Seite (Sprint 8.12, Sprint 8.15 Design-Fixes).
+ * Bedient Singleton global_config. Cards: Allgemein / Standardzeiten / Alerts.
  */
 
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-config";
 import type { ApiError, GlobalConfigUpdate } from "@/lib/api/types";
 
@@ -66,7 +64,7 @@ export default function HotelSettingsPage() {
     }
 
     if (Object.keys(payload).length === 0) {
-      setSuccess("Keine Aenderungen.");
+      setSuccess("Keine Änderungen.");
       return;
     }
 
@@ -79,93 +77,89 @@ export default function HotelSettingsPage() {
   };
 
   return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <header className="mb-6">
-          <h1 className="text-2xl font-medium text-text-primary">Hotel-Stammdaten</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Globale Konfiguration. Aenderungen wirken auf die Engine ab dem naechsten Evaluations-Zyklus.
-          </p>
-        </header>
+    <div className="p-6 max-w-3xl mx-auto">
+      <header className="mb-6">
+        <h1 className="text-2xl font-medium text-text-primary">Hotel-Stammdaten</h1>
+        <p className="text-sm text-text-secondary mt-1">
+          Globale Konfiguration. Änderungen wirken auf die Engine ab dem nächsten Evaluations-Zyklus.
+        </p>
+      </header>
 
-        {cfg.isLoading ? (
-          <p className="text-sm text-text-secondary">Lade…</p>
-        ) : cfg.isError ? (
-          <p className="text-sm text-domain-heating-off">Fehler beim Laden.</p>
-        ) : cfg.data ? (
-          <form onSubmit={handle} className="space-y-5">
-            <Card title="Allgemein">
-              <Field id="cfg-name" label="Hotel-Name" value={hotelName} onChange={setHotelName} />
-              <Field
-                id="cfg-tz"
-                label="Zeitzone"
-                value={timezone}
-                onChange={setTimezone}
-                hint="z.B. Europe/Vienna"
-              />
-            </Card>
+      {cfg.isLoading ? (
+        <p className="text-sm text-text-secondary">Lade…</p>
+      ) : cfg.isError ? (
+        <p className="text-sm text-error">Fehler beim Laden.</p>
+      ) : cfg.data ? (
+        <form onSubmit={handle} className="space-y-5">
+          <Card title="Allgemein">
+            <Field id="cfg-name" label="Hotel-Name" value={hotelName} onChange={setHotelName} />
+            <Field
+              id="cfg-tz"
+              label="Zeitzone"
+              value={timezone}
+              onChange={setTimezone}
+              hint="z.B. Europe/Vienna"
+            />
+          </Card>
 
-            <Card title="Standardzeiten">
-              <div className="grid grid-cols-2 gap-3">
-                <TimeField id="cfg-ci" label="Default Check-in" value={checkIn} onChange={setCheckIn} />
-                <TimeField id="cfg-co" label="Default Check-out" value={checkOut} onChange={setCheckOut} />
-              </div>
-            </Card>
-
-            <Card title="Alerts">
-              <Field
-                id="cfg-mail"
-                label="Email fuer Warnungen"
-                value={alertEmail}
-                onChange={setAlertEmail}
-                type="email"
-                placeholder="hotelsonnblick@gmail.com"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <NumField
-                  id="cfg-off"
-                  label="Geraet offline nach (Min)"
-                  value={offlineMin}
-                  onChange={setOfflineMin}
-                  min={1}
-                  max={1440}
-                />
-                <NumField
-                  id="cfg-bat"
-                  label="Batterie-Warnung unter (%)"
-                  value={batteryWarn}
-                  onChange={setBatteryWarn}
-                  min={1}
-                  max={100}
-                />
-              </div>
-            </Card>
-
-            {error ? (
-              <div
-                role="alert"
-                className="text-sm text-domain-heating-off bg-surface-alt border border-domain-heating-off rounded-md px-3 py-2"
-              >
-                {error}
-              </div>
-            ) : null}
-            {success ? (
-              <div className="text-sm text-domain-heating-on bg-surface-alt border border-domain-heating-on rounded-md px-3 py-2">
-                {success}
-              </div>
-            ) : null}
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={updateMut.isPending}
-                className="px-4 py-2 bg-primary text-on-primary rounded-md disabled:opacity-50"
-              >
-                {updateMut.isPending ? "Speichern…" : "Speichern"}
-              </button>
+          <Card title="Standardzeiten">
+            <div className="grid grid-cols-2 gap-3">
+              <TimeField id="cfg-ci" label="Default Check-in" value={checkIn} onChange={setCheckIn} />
+              <TimeField id="cfg-co" label="Default Check-out" value={checkOut} onChange={setCheckOut} />
             </div>
-          </form>
-        ) : null}
-      </div>
+          </Card>
+
+          <Card title="Alerts">
+            <Field
+              id="cfg-mail"
+              label="E-Mail für Warnungen"
+              value={alertEmail}
+              onChange={setAlertEmail}
+              type="email"
+              placeholder="hotelsonnblick@gmail.com"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <NumField
+                id="cfg-off"
+                label="Gerät offline nach (Min)"
+                value={offlineMin}
+                onChange={setOfflineMin}
+                min={1}
+                max={1440}
+              />
+              <NumField
+                id="cfg-bat"
+                label="Batterie-Warnung unter (%)"
+                value={batteryWarn}
+                onChange={setBatteryWarn}
+                min={1}
+                max={100}
+              />
+            </div>
+          </Card>
+
+          {error ? (
+            <div
+              role="alert"
+              className="text-sm text-error bg-error-soft border border-error rounded-md px-3 py-2"
+            >
+              {error}
+            </div>
+          ) : null}
+          {success ? (
+            <div className="text-sm text-success bg-success-soft border border-success rounded-md px-3 py-2">
+              {success}
+            </div>
+          ) : null}
+
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary" loading={updateMut.isPending}>
+              Speichern
+            </Button>
+          </div>
+        </form>
+      ) : null}
+    </div>
   );
 }
 

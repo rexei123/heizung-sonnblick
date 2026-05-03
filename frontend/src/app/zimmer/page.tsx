@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * Zimmer-Liste (Sprint 8.10) mit Filtern + Anlege-Drawer.
+ * Zimmer-Liste (Sprint 8.10, Sprint 8.15 Design-Fixes).
  */
 
 import Link from "next/link";
 import { useState } from "react";
 
 import { RoomForm } from "@/components/patterns/room-form";
+import { Button } from "@/components/ui/button";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
 import type {
@@ -28,10 +29,10 @@ const STATUS_LABEL: Record<RoomStatus, string> = {
 
 const STATUS_COLOR: Record<RoomStatus, string> = {
   vacant: "text-text-tertiary",
-  occupied: "text-domain-heating-on",
-  reserved: "text-domain-preheat",
-  cleaning: "text-domain-preheat",
-  blocked: "text-domain-heating-off",
+  occupied: "text-success",
+  reserved: "text-warning",
+  cleaning: "text-warning",
+  blocked: "text-error",
 };
 
 export default function ZimmerPage() {
@@ -62,87 +63,90 @@ export default function ZimmerPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-medium text-text-primary">Zimmer</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              {list.data?.length ?? 0} Zimmer angezeigt.
-            </p>
-          </div>
-          <button
-            type="button"
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-medium text-text-primary">Zimmer</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            {list.data?.length ?? 0} Zimmer angezeigt.
+          </p>
+        </div>
+        {showCreate ? (
+          <Button variant="secondary" onClick={() => setShowCreate(false)}>
+            Abbrechen
+          </Button>
+        ) : (
+          <Button
+            variant="add"
+            icon="add"
             onClick={() => {
               setError(null);
-              setShowCreate((s) => !s);
+              setShowCreate(true);
             }}
-            className="px-4 py-2 bg-primary text-on-primary rounded-md flex items-center gap-2"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-              add
-            </span>
-            {showCreate ? "Abbrechen" : "Neues Zimmer"}
-          </button>
-        </header>
+            Neues Zimmer
+          </Button>
+        )}
+      </header>
 
-        {showCreate ? (
-          <div className="bg-surface border border-border rounded-md p-5 mb-6">
-            <h2 className="text-lg font-medium text-text-primary mb-4">Neues Zimmer</h2>
-            <RoomForm
-              onSubmit={handleCreate}
-              onCancel={() => setShowCreate(false)}
-              submitting={createMut.isPending}
-              error={error}
-            />
-          </div>
-        ) : null}
-
-        <div className="bg-surface border border-border rounded-md p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs text-text-secondary mb-1">Raumtyp</label>
-            <select
-              value={filterRoomTypeId}
-              onChange={(e) =>
-                setFilterRoomTypeId(e.target.value === "" ? "" : parseInt(e.target.value, 10))
-              }
-              className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
-            >
-              <option value="">Alle</option>
-              {(roomTypes.data ?? []).map((rt) => (
-                <option key={rt.id} value={rt.id}>
-                  {rt.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-secondary mb-1">Status</label>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus((e.target.value || "") as RoomStatus | "")}
-              className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
-            >
-              <option value="">Alle</option>
-              <option value="vacant">Frei</option>
-              <option value="occupied">Belegt</option>
-              <option value="reserved">Reserviert</option>
-              <option value="cleaning">Reinigung</option>
-              <option value="blocked">Gesperrt</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-secondary mb-1">Etage</label>
-            <input
-              type="number"
-              value={filterFloor}
-              onChange={(e) => setFilterFloor(e.target.value)}
-              placeholder="Alle"
-              className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
-            />
-          </div>
+      {showCreate ? (
+        <div className="bg-surface border border-border rounded-md p-5 mb-6">
+          <h2 className="text-lg font-medium text-text-primary mb-4">Neues Zimmer</h2>
+          <RoomForm
+            onSubmit={handleCreate}
+            onCancel={() => setShowCreate(false)}
+            submitting={createMut.isPending}
+            error={error}
+          />
         </div>
+      ) : null}
 
-        <RoomTable list={list.data ?? []} loading={list.isLoading} error={list.isError} />
+      <div className="bg-surface border border-border rounded-md p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-xs text-text-secondary mb-1">Raumtyp</label>
+          <select
+            value={filterRoomTypeId}
+            onChange={(e) =>
+              setFilterRoomTypeId(e.target.value === "" ? "" : parseInt(e.target.value, 10))
+            }
+            className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
+          >
+            <option value="">Alle</option>
+            {(roomTypes.data ?? []).map((rt) => (
+              <option key={rt.id} value={rt.id}>
+                {rt.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-text-secondary mb-1">Status</label>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus((e.target.value || "") as RoomStatus | "")}
+            className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
+          >
+            <option value="">Alle</option>
+            <option value="vacant">Frei</option>
+            <option value="occupied">Belegt</option>
+            <option value="reserved">Reserviert</option>
+            <option value="cleaning">Reinigung</option>
+            <option value="blocked">Gesperrt</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-text-secondary mb-1">Etage</label>
+          <input
+            type="number"
+            value={filterFloor}
+            onChange={(e) => setFilterFloor(e.target.value)}
+            placeholder="Alle"
+            className="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-sm"
+          />
+        </div>
       </div>
+
+      <RoomTable list={list.data ?? []} loading={list.isLoading} error={list.isError} />
+    </div>
   );
 }
 
@@ -162,7 +166,7 @@ function RoomTable({ list, loading, error }: TableProps) {
   }
   if (error) {
     return (
-      <div className="bg-surface border border-border rounded-md p-4 text-sm text-domain-heating-off">
+      <div className="bg-surface border border-border rounded-md p-4 text-sm text-error">
         Fehler beim Laden.
       </div>
     );

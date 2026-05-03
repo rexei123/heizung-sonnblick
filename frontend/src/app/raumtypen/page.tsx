@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * Raumtypen-Seite (Sprint 8.9). Master-Detail-Layout:
- *   Liste links, Form rechts. Klick auf Listen-Eintrag laedt Edit-Form.
- *   Button "Neu" oeffnet leere Form.
+ * Raumtypen-Seite (Sprint 8.9, Sprint 8.15 Design-Fixes).
+ * Master-Detail-Layout: Liste links, Form rechts.
  */
 
 import { useState } from "react";
 
 import { RoomTypeForm } from "@/components/patterns/room-type-form";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   useCreateRoomType,
   useDeleteRoomType,
@@ -27,6 +28,7 @@ export default function RoomTypesPage() {
   const deleteMut = useDeleteRoomType();
 
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<RoomType | null>(null);
 
   const handleCreate = async (payload: RoomTypeCreate | RoomTypeUpdate) => {
     setError(null);
@@ -48,16 +50,16 @@ export default function RoomTypesPage() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Raumtyp wirklich loeschen? Nur moeglich, wenn keine Zimmer verknuepft sind.")) {
-      return;
-    }
+  const performDelete = async () => {
+    if (!confirmDelete) return;
     setError(null);
     try {
-      await deleteMut.mutateAsync(id);
+      await deleteMut.mutateAsync(confirmDelete.id);
+      setConfirmDelete(null);
       setMode({ kind: "list" });
     } catch (e) {
       setError(toMessage(e));
+      setConfirmDelete(null);
     }
   };
 
@@ -66,86 +68,93 @@ export default function RoomTypesPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-medium text-text-primary">Raumtypen</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              Stammdaten fuer alle Zimmertypen mit Default-Sollwerten.
-            </p>
-          </div>
-          {mode.kind === "list" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setMode({ kind: "create" });
-              }}
-              className="px-4 py-2 bg-primary text-on-primary rounded-md flex items-center gap-2"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                add
-              </span>
-              Neuer Raumtyp
-            </button>
-          ) : null}
-        </header>
-
-        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
-          <RoomTypeList
-            items={list.data ?? []}
-            isLoading={list.isLoading}
-            isError={list.isError}
-            selectedId={mode.kind === "edit" ? mode.id : null}
-            onSelect={(id) => {
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-medium text-text-primary">Raumtypen</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            Stammdaten für alle Zimmertypen mit Default-Sollwerten.
+          </p>
+        </div>
+        {mode.kind === "list" ? (
+          <Button
+            variant="add"
+            icon="add"
+            onClick={() => {
               setError(null);
-              setMode({ kind: "edit", id });
+              setMode({ kind: "create" });
             }}
-          />
+          >
+            Neuer Raumtyp
+          </Button>
+        ) : null}
+      </header>
 
-          <div className="bg-surface border border-border rounded-md p-5">
-            {mode.kind === "list" ? (
-              <EmptyState />
-            ) : mode.kind === "create" ? (
-              <>
-                <h2 className="text-lg font-medium text-text-primary mb-4">
-                  Neuer Raumtyp
-                </h2>
-                <RoomTypeForm
-                  onSubmit={handleCreate}
-                  onCancel={() => setMode({ kind: "list" })}
-                  submitting={createMut.isPending}
-                  error={error}
-                />
-              </>
-            ) : editingItem ? (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-medium text-text-primary">
-                    Raumtyp bearbeiten
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(editingItem.id)}
-                    className="text-sm text-domain-heating-off hover:underline"
-                    disabled={deleteMut.isPending}
-                  >
-                    {deleteMut.isPending ? "Loesche…" : "Loeschen"}
-                  </button>
-                </div>
-                <RoomTypeForm
-                  initial={editingItem}
-                  onSubmit={handleUpdate}
-                  onCancel={() => setMode({ kind: "list" })}
-                  submitting={updateMut.isPending}
-                  error={error}
-                />
-              </>
-            ) : (
-              <p className="text-sm text-text-secondary">Lade…</p>
-            )}
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
+        <RoomTypeList
+          items={list.data ?? []}
+          isLoading={list.isLoading}
+          isError={list.isError}
+          selectedId={mode.kind === "edit" ? mode.id : null}
+          onSelect={(id) => {
+            setError(null);
+            setMode({ kind: "edit", id });
+          }}
+        />
+
+        <div className="bg-surface border border-border rounded-md p-5">
+          {mode.kind === "list" ? (
+            <EmptyState />
+          ) : mode.kind === "create" ? (
+            <>
+              <h2 className="text-lg font-medium text-text-primary mb-4">Neuer Raumtyp</h2>
+              <RoomTypeForm
+                onSubmit={handleCreate}
+                onCancel={() => setMode({ kind: "list" })}
+                submitting={createMut.isPending}
+                error={error}
+              />
+            </>
+          ) : editingItem ? (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-medium text-text-primary">Raumtyp bearbeiten</h2>
+                <Button
+                  variant="destructive"
+                  icon="delete"
+                  onClick={() => setConfirmDelete(editingItem)}
+                  disabled={deleteMut.isPending}
+                >
+                  Löschen
+                </Button>
+              </div>
+              <RoomTypeForm
+                initial={editingItem}
+                onSubmit={handleUpdate}
+                onCancel={() => setMode({ kind: "list" })}
+                submitting={updateMut.isPending}
+                error={error}
+              />
+            </>
+          ) : (
+            <p className="text-sm text-text-secondary">Lade…</p>
+          )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Raumtyp löschen?"
+        message={
+          confirmDelete
+            ? `„${confirmDelete.name}“ wird endgültig entfernt. Nur möglich, wenn keine Zimmer verknüpft sind.`
+            : ""
+        }
+        confirmLabel="Endgültig löschen"
+        loading={deleteMut.isPending}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
+    </div>
   );
 }
 
@@ -167,7 +176,7 @@ function RoomTypeList({ items, isLoading, isError, selectedId, onSelect }: ListP
   }
   if (isError) {
     return (
-      <div className="bg-surface border border-border rounded-md p-4 text-sm text-domain-heating-off">
+      <div className="bg-surface border border-border rounded-md p-4 text-sm text-error">
         Fehler beim Laden.
       </div>
     );

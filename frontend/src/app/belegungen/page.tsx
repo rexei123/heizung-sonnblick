@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * Belegungs-Liste (Sprint 8.11) mit Filtern (heute / 7 Tage / ab Datum)
- * + Anlege-Form + Storno.
+ * Belegungs-Liste (Sprint 8.11, Sprint 8.15 Design-Fixes).
+ * Filter: heute / 7 Tage / alle. Anlegen + Storno.
  */
 
 import { useState } from "react";
 
 import { OccupancyForm } from "@/components/patterns/occupancy-form";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useCancelOccupancy, useCreateOccupancy, useOccupancies } from "@/lib/api/hooks-occupancies";
 import { useRooms } from "@/lib/api/hooks-rooms";
 import type { ApiError, Occupancy, OccupancyCreate } from "@/lib/api/types";
@@ -39,6 +41,7 @@ export default function BelegungenPage() {
   const [range, setRange] = useState<Range>("next7");
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<Occupancy | null>(null);
 
   const list = useOccupancies({ ...rangeBounds(range), active: true, limit: 200 });
   const rooms = useRooms({ limit: 1000 });
@@ -55,13 +58,15 @@ export default function BelegungenPage() {
     }
   };
 
-  const handleCancel = async (id: number) => {
-    if (!confirm("Belegung stornieren? Daten bleiben fuer Audit erhalten.")) return;
+  const performCancel = async () => {
+    if (!confirmCancel) return;
     setError(null);
     try {
-      await cancelMut.mutateAsync(id);
+      await cancelMut.mutateAsync(confirmCancel.id);
+      setConfirmCancel(null);
     } catch (e) {
       setError(toMessage(e));
+      setConfirmCancel(null);
     }
   };
 
@@ -71,67 +76,84 @@ export default function BelegungenPage() {
   };
 
   return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-medium text-text-primary">Belegungen</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              {list.data?.length ?? 0} aktive Belegung(en) in diesem Zeitraum.
-            </p>
-          </div>
-          <button
-            type="button"
+    <div className="p-6 max-w-6xl mx-auto">
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-medium text-text-primary">Belegungen</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            {list.data?.length ?? 0} aktive Belegung(en) in diesem Zeitraum.
+          </p>
+        </div>
+        {showCreate ? (
+          <Button variant="secondary" onClick={() => setShowCreate(false)}>
+            Abbrechen
+          </Button>
+        ) : (
+          <Button
+            variant="add"
+            icon="add"
             onClick={() => {
               setError(null);
-              setShowCreate((s) => !s);
+              setShowCreate(true);
             }}
-            className="px-4 py-2 bg-primary text-on-primary rounded-md flex items-center gap-2"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-              add
-            </span>
-            {showCreate ? "Abbrechen" : "Neue Belegung"}
-          </button>
-        </header>
+            Neue Belegung
+          </Button>
+        )}
+      </header>
 
-        {showCreate ? (
-          <div className="bg-surface border border-border rounded-md p-5 mb-6">
-            <h2 className="text-lg font-medium text-text-primary mb-4">Neue Belegung</h2>
-            <OccupancyForm
-              onSubmit={handleCreate}
-              onCancel={() => setShowCreate(false)}
-              submitting={createMut.isPending}
-              error={error}
-            />
-          </div>
-        ) : null}
-
-        <div className="bg-surface border border-border rounded-md p-3 mb-4 flex gap-2">
-          {(["today", "next7", "all"] as const).map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setRange(r)}
-              className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                range === r
-                  ? "bg-primary text-on-primary"
-                  : "text-text-secondary hover:bg-surface-alt"
-              }`}
-            >
-              {r === "today" ? "Heute" : r === "next7" ? "Naechste 7 Tage" : "Alle"}
-            </button>
-          ))}
+      {showCreate ? (
+        <div className="bg-surface border border-border rounded-md p-5 mb-6">
+          <h2 className="text-lg font-medium text-text-primary mb-4">Neue Belegung</h2>
+          <OccupancyForm
+            onSubmit={handleCreate}
+            onCancel={() => setShowCreate(false)}
+            submitting={createMut.isPending}
+            error={error}
+          />
         </div>
+      ) : null}
 
-        <List
-          list={list.data ?? []}
-          loading={list.isLoading}
-          isError={list.isError}
-          roomNumber={roomNumber}
-          onCancel={handleCancel}
-          cancelPending={cancelMut.isPending}
-        />
+      <div className="bg-surface border border-border rounded-md p-3 mb-4 flex gap-2">
+        {(["today", "next7", "all"] as const).map((r) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => setRange(r)}
+            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+              range === r
+                ? "bg-primary text-on-primary"
+                : "text-text-secondary hover:bg-surface-alt"
+            }`}
+          >
+            {r === "today" ? "Heute" : r === "next7" ? "Nächste 7 Tage" : "Alle"}
+          </button>
+        ))}
       </div>
+
+      <List
+        list={list.data ?? []}
+        loading={list.isLoading}
+        isError={list.isError}
+        roomNumber={roomNumber}
+        onCancel={(o) => setConfirmCancel(o)}
+        cancelPending={cancelMut.isPending}
+      />
+
+      <ConfirmDialog
+        open={confirmCancel !== null}
+        title="Belegung stornieren?"
+        message={
+          confirmCancel
+            ? `Belegung für Zimmer ${roomNumber(confirmCancel.room_id)} (Anreise ${new Date(confirmCancel.check_in).toLocaleString("de-AT")}) wird storniert. Daten bleiben für Audit erhalten.`
+            : ""
+        }
+        confirmLabel="Stornieren"
+        loading={cancelMut.isPending}
+        onConfirm={performCancel}
+        onCancel={() => setConfirmCancel(null)}
+      />
+    </div>
   );
 }
 
@@ -140,20 +162,14 @@ interface ListProps {
   loading: boolean;
   isError: boolean;
   roomNumber: (id: number) => string;
-  onCancel: (id: number) => void;
+  onCancel: (o: Occupancy) => void;
   cancelPending: boolean;
 }
 
 function List({ list, loading, isError, roomNumber, onCancel, cancelPending }: ListProps) {
-  if (loading) {
-    return <Box>Lade…</Box>;
-  }
-  if (isError) {
-    return <Box error>Fehler beim Laden.</Box>;
-  }
-  if (list.length === 0) {
-    return <Box>Keine Belegungen in diesem Zeitraum.</Box>;
-  }
+  if (loading) return <Box>Lade…</Box>;
+  if (isError) return <Box error>Fehler beim Laden.</Box>;
+  if (list.length === 0) return <Box>Keine Belegungen in diesem Zeitraum.</Box>;
   return (
     <div className="bg-surface border border-border rounded-md overflow-hidden">
       <table className="w-full text-sm">
@@ -180,14 +196,14 @@ function List({ list, loading, isError, roomNumber, onCancel, cancelPending }: L
               <td className="px-3 py-2 text-text-secondary">{o.guest_count ?? "—"}</td>
               <td className="px-3 py-2 text-text-tertiary">{o.source}</td>
               <td className="px-3 py-2 text-right">
-                <button
-                  type="button"
-                  onClick={() => onCancel(o.id)}
+                <Button
+                  variant="destructive"
+                  icon="cancel"
+                  onClick={() => onCancel(o)}
                   disabled={cancelPending}
-                  className="text-xs text-domain-heating-off hover:underline"
                 >
                   Stornieren
-                </button>
+                </Button>
               </td>
             </tr>
           ))}
@@ -201,7 +217,7 @@ function Box({ children, error }: { children: React.ReactNode; error?: boolean }
   return (
     <div
       className={`bg-surface border border-border rounded-md p-4 text-sm ${
-        error ? "text-domain-heating-off" : "text-text-secondary"
+        error ? "text-error" : "text-text-secondary"
       }`}
     >
       {children}

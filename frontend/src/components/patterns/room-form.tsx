@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * Zimmer-Form (Sprint 8.10).
+ * Zimmer-Form (Sprint 8.10, Sprint 8.15 Design-Fixes).
  */
 
 import { useState, type FormEvent } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import type {
   Orientation,
@@ -115,7 +116,7 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
           required
           className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
         >
-          <option value="">— bitte waehlen —</option>
+          <option value="">— bitte wählen —</option>
           {(roomTypes.data ?? []).map((rt) => (
             <option key={rt.id} value={rt.id}>
               {rt.name}
@@ -155,11 +156,11 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
               className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
             >
               <option value="">—</option>
-              <option value="vacant">vacant</option>
-              <option value="occupied">occupied</option>
-              <option value="reserved">reserved</option>
-              <option value="cleaning">cleaning</option>
-              <option value="blocked">blocked</option>
+              <option value="vacant">Frei</option>
+              <option value="occupied">Belegt</option>
+              <option value="reserved">Reserviert</option>
+              <option value="cleaning">Reinigung</option>
+              <option value="blocked">Gesperrt</option>
             </select>
           </div>
         ) : null}
@@ -182,7 +183,7 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
       {error ? (
         <div
           role="alert"
-          className="text-sm text-domain-heating-off bg-surface-alt border border-domain-heating-off rounded-md px-3 py-2"
+          className="text-sm text-error bg-error-soft border border-error rounded-md px-3 py-2"
         >
           {error}
         </div>
@@ -190,21 +191,19 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
 
       <div className="flex gap-2 justify-end">
         {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-border rounded-md text-text-secondary hover:bg-surface-alt"
-          >
+          <Button variant="secondary" onClick={onCancel}>
             Abbrechen
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           type="submit"
-          disabled={submitting || !number.trim() || roomTypeId === ""}
-          className="px-4 py-2 bg-primary text-on-primary rounded-md disabled:opacity-50"
+          variant={initial ? "primary" : "add"}
+          icon={initial ? undefined : "add"}
+          loading={submitting}
+          disabled={!number.trim() || roomTypeId === ""}
         >
-          {submitting ? "Speichern…" : initial ? "Aktualisieren" : "Anlegen"}
-        </button>
+          {initial ? "Aktualisieren" : "Anlegen"}
+        </Button>
       </div>
     </form>
   );
