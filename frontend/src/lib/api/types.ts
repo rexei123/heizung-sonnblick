@@ -133,3 +133,97 @@ export interface RoomTypeListQuery {
   limit?: number;
   offset?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Zimmer (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type Orientation =
+  | "N"
+  | "NE"
+  | "E"
+  | "SE"
+  | "S"
+  | "SW"
+  | "W"
+  | "NW";
+
+export type RoomStatus =
+  | "vacant"
+  | "occupied"
+  | "reserved"
+  | "cleaning"
+  | "blocked";
+
+export interface Room {
+  id: number;
+  number: string;
+  display_name: string | null;
+  room_type_id: number;
+  floor: number | null;
+  orientation: Orientation | null;
+  status: RoomStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomCreate {
+  number: string;
+  display_name?: string | null;
+  room_type_id: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  notes?: string | null;
+}
+
+export interface RoomUpdate {
+  number?: string;
+  display_name?: string | null;
+  room_type_id?: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  status?: RoomStatus;
+  notes?: string | null;
+}
+
+export interface RoomListQuery {
+  room_type_id?: number;
+  status?: RoomStatus;
+  floor?: number;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Heizzonen (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type HeatingZoneKind =
+  | "bedroom"
+  | "bathroom"
+  | "living"
+  | "hallway"
+  | "other";
+
+export interface HeatingZone {
+  id: number;
+  room_id: number;
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HeatingZoneCreate {
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer?: boolean;
+}
+
+export interface HeatingZoneUpdate {
+  kind?: HeatingZoneKind;
+  name?: string;
+  is_towel_warmer?: boolean;
+}
