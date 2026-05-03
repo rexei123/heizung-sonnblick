@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { RoomForm } from "@/components/patterns/room-form";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import {
 } from "@/lib/api/hooks-rooms";
 import type { ApiError, RoomCreate, RoomUpdate } from "@/lib/api/types";
 
-type Tab = "stammdaten" | "zonen" | "geraete";
+type Tab = "stammdaten" | "zonen" | "geraete" | "engine";
 
 export default function ZimmerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -109,7 +110,7 @@ export default function ZimmerDetailPage() {
       </header>
 
       <div className="border-b border-border mb-4 flex gap-4 text-sm">
-        {(["stammdaten", "zonen", "geraete"] as const).map((t) => (
+        {(["stammdaten", "zonen", "geraete", "engine"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -120,7 +121,13 @@ export default function ZimmerDetailPage() {
                 : "border-transparent text-text-secondary hover:text-text-primary"
             }`}
           >
-            {t === "stammdaten" ? "Stammdaten" : t === "zonen" ? "Heizzonen" : "Geräte"}
+            {t === "stammdaten"
+              ? "Stammdaten"
+              : t === "zonen"
+                ? "Heizzonen"
+                : t === "geraete"
+                  ? "Geräte"
+                  : "Engine"}
           </button>
         ))}
       </div>
@@ -135,8 +142,10 @@ export default function ZimmerDetailPage() {
           />
         ) : tab === "zonen" ? (
           <HeatingZoneList roomId={id} />
-        ) : (
+        ) : tab === "geraete" ? (
           <DevicesInRoom roomId={id} />
+        ) : (
+          <EngineDecisionPanel roomId={id} />
         )}
       </div>
 

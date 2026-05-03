@@ -13,6 +13,7 @@ import {
 import { heatingZonesApi } from "./heating-zones";
 import { roomsApi } from "./rooms";
 import type {
+  EventLogEntry,
   HeatingZone,
   HeatingZoneCreate,
   HeatingZoneUpdate,
@@ -26,7 +27,22 @@ const ROOM_KEYS = {
   all: ["rooms"] as const,
   list: (q: RoomListQuery) => ["rooms", q] as const,
   one: (id: number) => ["room", id] as const,
+  engineTrace: (id: number) => ["room", id, "engine-trace"] as const,
 };
+
+/** Sprint 9.5/9.10: Engine-Pipeline-Trace fuer Decision-Panel.
+ *  Refetch alle 30 s damit Hotelier auch nach automatischen Re-Evals
+ *  (Belegung POST -> evaluate_room.delay) den neuen Setpoint sieht.
+ */
+export function useEngineTrace(roomId: number | null): UseQueryResult<EventLogEntry[]> {
+  return useQuery<EventLogEntry[]>({
+    queryKey: roomId ? ROOM_KEYS.engineTrace(roomId) : ["room", "engine-trace", "noop"],
+    queryFn: () => roomsApi.engineTrace(roomId as number, 50),
+    enabled: roomId !== null,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 const ZONE_KEYS = {
   list: (roomId: number) => ["heating-zones", roomId] as const,
