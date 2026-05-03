@@ -298,3 +298,43 @@ export interface GlobalConfigUpdate {
   alert_device_offline_minutes?: number;
   alert_battery_warn_percent?: number;
 }
+
+// ---------------------------------------------------------------------------
+// event_log (Sprint 9.5 — Engine-Audit-Trace pro Layer)
+// ---------------------------------------------------------------------------
+
+export type EventLogLayer =
+  | "summer_mode_fast_path"
+  | "base_target"
+  | "temporal_override"
+  | "manual_override"
+  | "guest_override"
+  | "window_safety"
+  | "hard_clamp";
+
+export type CommandReason =
+  | "occupied_setpoint"
+  | "vacant_setpoint"
+  | "night_setback"
+  | "day_setback"
+  | "preheat_checkin"
+  | "checkout_setback"
+  | "window_open"
+  | "guest_override"
+  | "long_vacant"
+  | "frost_protection"
+  | "summer_mode"
+  | "manual"
+  | "manual_event";
+
+export interface EventLogEntry {
+  time: string;
+  room_id: number;
+  evaluation_id: string;
+  layer: EventLogLayer;
+  device_id: number | null;
+  setpoint_in: string | null; // Decimal — Backend liefert string
+  setpoint_out: string | null;
+  reason: CommandReason | null;
+  details: Record<string, unknown> | null;
+}
