@@ -15,6 +15,8 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Übersicht", icon: "home" },
+  { href: "/zimmer", label: "Zimmer", icon: "meeting_room" },
+  { href: "/raumtypen", label: "Raumtypen", icon: "category" },
   { href: "/devices", label: "Geräte", icon: "thermostat" },
 ];
 

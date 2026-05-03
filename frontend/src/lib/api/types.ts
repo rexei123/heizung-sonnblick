@@ -80,3 +80,150 @@ export interface ApiError {
   status: number;
   detail: string | unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 8 Stammdaten — Spiegel zu backend/src/heizung/schemas/*.py
+// ---------------------------------------------------------------------------
+
+/**
+ * Raumtyp (Sprint 8.4). Hotelzimmer oder andere Einheiten (Tagungsraum, etc.).
+ * Default-Sollwerte werden in der Engine als Layer-1-Basis verwendet.
+ */
+export interface RoomType {
+  id: number;
+  name: string;
+  description: string | null;
+  is_bookable: boolean;
+  default_t_occupied: number;
+  default_t_vacant: number;
+  default_t_night: number;
+  max_temp_celsius: number | null;
+  min_temp_celsius: number | null;
+  treat_unoccupied_as_vacant_after_hours: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomTypeCreate {
+  name: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeUpdate {
+  name?: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeListQuery {
+  is_bookable?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Zimmer (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type Orientation =
+  | "N"
+  | "NE"
+  | "E"
+  | "SE"
+  | "S"
+  | "SW"
+  | "W"
+  | "NW";
+
+export type RoomStatus =
+  | "vacant"
+  | "occupied"
+  | "reserved"
+  | "cleaning"
+  | "blocked";
+
+export interface Room {
+  id: number;
+  number: string;
+  display_name: string | null;
+  room_type_id: number;
+  floor: number | null;
+  orientation: Orientation | null;
+  status: RoomStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomCreate {
+  number: string;
+  display_name?: string | null;
+  room_type_id: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  notes?: string | null;
+}
+
+export interface RoomUpdate {
+  number?: string;
+  display_name?: string | null;
+  room_type_id?: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  status?: RoomStatus;
+  notes?: string | null;
+}
+
+export interface RoomListQuery {
+  room_type_id?: number;
+  status?: RoomStatus;
+  floor?: number;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Heizzonen (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type HeatingZoneKind =
+  | "bedroom"
+  | "bathroom"
+  | "living"
+  | "hallway"
+  | "other";
+
+export interface HeatingZone {
+  id: number;
+  room_id: number;
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HeatingZoneCreate {
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer?: boolean;
+}
+
+export interface HeatingZoneUpdate {
+  kind?: HeatingZoneKind;
+  name?: string;
+  is_towel_warmer?: boolean;
+}
