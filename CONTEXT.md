@@ -8,19 +8,17 @@
 
 ## Aktueller Stand
 
-- **Letzter Tag:** `v0.1.8-stammdaten` (geplant nach Merge Sprint 8.15)
-- **Letzter Sprint abgeschlossen:** Sprint 8 (Stammdaten + Belegung) — Backend 8.1-8.7, Frontend 8.9-8.12, E2E 8.13
-- **Aktiver Sprint:** Sprint 8.15 Hotfix (Design-Strategie 2.0.1: Umlaute, Add-/Destructive-Buttons, Schriftgroessen 12/14/16). Branch `chore-sprint8-15-design-fixes`, Brief `docs/features/2026-05-03-sprint8.15-design-fixes.md`. Build + Lint gruen.
-- **Vor Sprint-9-Start:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Sprint 9 kann starten — sobald 8.15 gemerged + getagged ist.
+- **Letzter Tag:** `v0.1.8-stammdaten` (2026-05-03, Sprint 8 + 8.15 final, auf main + heizung-main gepullt)
+- **Letzter Sprint abgeschlossen:** Sprint 8.15 (Design-Konformitaet) inkl. Browser-Verifikation auf heizung-test
+- **Aktiver Sprint:** Sprint 9 (Engine + Downlink) — Brief liegt unter `docs/features/2026-05-03-sprint9-engine-downlink.md`, Sprintplan offen
+- **Vor Sprint-9-Code:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Lessons aus 8.15 in CLAUDE.md §5.9-5.11 ergaenzt.
 
 ## Was JETZT der naechste konkrete Schritt ist
 
-1. Sprint 8.15 Branch + Commit + Push + PR auf develop (PowerShell-Block beim User)
-2. Browser-Verifikation auf Test-Server via Claude-in-Chrome nach Pull-Timer
-3. Tag `v0.1.8-stammdaten` setzen
-4. Sprint 9 Code starten
-5. Codec-Backlog Task #86 / #87 weiterhin offen, nicht-blockierend
-6. Sprint 8.8 (Integration-Tests gegen echte Postgres) auf Sprint 13 verschoben
+1. Sprint 9 Sprintplan schreiben (Sub-Sprints + Tasks aus dem Brief ableiten)
+2. Sprint 9.0 Code starten — Codec-Erweiterung fPort 2 (Setpoint-Reply 0x52, Task #87) als ersten Sub-Sprint, weil das die Voraussetzung fuer den Engine-Downlink-Loop ist
+3. Codec-Bug Vicki `valve_position > 100%` (Task #86) entweder in 9.0 mitnehmen oder als eigenes Mini-PR vorab
+4. Sprint 8.8 (Integration-Tests gegen echte Postgres) bleibt auf Sprint 13 verschoben
 
 ## Architektur-Konsens (Stand 2026-05-02)
 

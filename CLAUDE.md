@@ -136,6 +136,46 @@ git config --global --add safe.directory /opt/heizung-sonnblick
 
 **Falsch (Sprint 8.9-8.12 initial):** `<AppShell><div>...</div></AppShell>` als Page-Return.
 
+### 5.9 Cowork-Mount verschluckt Konfig-Files unbemerkt (Sprint 8.15 Lesson)
+
+Der Mount-Sync laut §5.2 ist nicht nur bei NEUEN Files unzuverlaessig — auch MODIFY-Edits an Konfig-Dateien koennen verschluckt werden, OHNE dass der Edit-Schritt fehlschlaegt. Sprint-8.15-Beispiel: `frontend/tailwind.config.ts` wurde via Sandbox `Edit` aktualisiert, Sandbox sagte "OK", aber der File ist NICHT im PowerShell-Repo angekommen. Der `git add frontend/src` hat ihn dann nicht erfasst, der PR ging ohne neue Tailwind-Tokens raus, der Build generierte keine `bg-add`/`text-error`/`border-error`-CSS-Klassen — sichtbar wurde es erst im Browser an weissen Buttons.
+
+**Pflicht-Check nach Sandbox-Edits an Konfig-Dateien (`tailwind.config.ts`, `next.config.mjs`, `tsconfig.json`, `pyproject.toml`, `alembic.ini`, `*.toml`, `*.yml`, `Dockerfile`):**
+
+```powershell
+# PowerShell (lokal) — VOR jedem `git add`
+git diff --stat frontend\tailwind.config.ts <weitere konfig-files>
+```
+
+Wenn `0 files changed` obwohl ein Edit gemacht wurde: Datei direkt in PowerShell ueberschreiben (`[System.IO.File]::WriteAllText`).
+
+### 5.10 build-images.yml triggert nach `gh pr merge` nicht zuverlaessig (Sprint 8.15 Lesson)
+
+`build-images.yml` ist konfiguriert mit `on: push: branches: [develop, main]` plus `paths: frontend/**`. Trotzdem hat es bei PR #63 (Sprint 8.15) NICHT auf den merge-Push reagiert — im GHCR blieb das alte `:develop`-Image. Vermutlich Race-Condition mit `concurrency.cancel-in-progress: true` oder `paths`-Matching-Edge-Case.
+
+**Pflicht nach jedem PR-Merge mit Frontend- oder Backend-Aenderungen:**
+
+```powershell
+# PowerShell (lokal) — direkt nach `gh pr merge`
+gh workflow run build-images.yml --ref develop  # oder --ref main
+Start-Sleep -Seconds 5
+$runId = (gh run list --workflow=build-images.yml --limit 1 --json databaseId --jq '.[0].databaseId').Trim()
+gh run watch $runId --exit-status
+```
+
+### 5.11 `docker compose pull web` ist nicht beweisend (Sprint 8.15 Lesson)
+
+Wenn das `:develop`-Tag im GHCR stale ist (siehe §5.10), zieht `docker compose pull` zwar ein Image, aber das ist das alte. Output `✔ Image ... Pulled` sagt NICHTS ueber Aktualitaet. Der Pull-Timer am Server schweigt dann ohne Hinweis stundenlang.
+
+**Pflicht-Check nach `docker compose pull`:**
+
+```bash
+# SSH (Server, root)
+docker images ghcr.io/rexei123/heizung-web --format '{{.Tag}} {{.CreatedAt}} {{.ID}}' | head -3
+```
+
+CreatedAt muss nach dem letzten erwarteten Build liegen, ID muss sich vom vorherigen Stand unterscheiden. Sonst: §5.10-Workflow erneut anstossen.
+
 ---
 
 ## 6. Aktuelle Backlog-Punkte
