@@ -227,3 +227,74 @@ export interface HeatingZoneUpdate {
   name?: string;
   is_towel_warmer?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Belegungen (Sprint 8.5)
+// ---------------------------------------------------------------------------
+
+export type OccupancySource = "manual" | "pms";
+
+export interface Occupancy {
+  id: number;
+  room_id: number;
+  check_in: string;
+  check_out: string;
+  guest_count: number | null;
+  source: OccupancySource;
+  external_id: string | null;
+  is_active: boolean;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OccupancyCreate {
+  room_id: number;
+  check_in: string;
+  check_out: string;
+  guest_count?: number | null;
+  source?: OccupancySource;
+  external_id?: string | null;
+}
+
+export interface OccupancyListQuery {
+  from?: string;
+  to?: string;
+  room_id?: number;
+  active?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// global_config (Sprint 8.6 — Singleton)
+// ---------------------------------------------------------------------------
+
+export interface GlobalConfig {
+  id: number;
+  hotel_name: string;
+  timezone: string;
+  default_checkin_time: string;
+  default_checkout_time: string;
+  summer_mode_active: boolean;
+  summer_mode_starts_on: string | null;
+  summer_mode_ends_on: string | null;
+  alert_email: string | null;
+  alert_device_offline_minutes: number;
+  alert_battery_warn_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GlobalConfigUpdate {
+  hotel_name?: string;
+  timezone?: string;
+  default_checkin_time?: string;
+  default_checkout_time?: string;
+  summer_mode_active?: boolean;
+  summer_mode_starts_on?: string | null;
+  summer_mode_ends_on?: string | null;
+  alert_email?: string | null;
+  alert_device_offline_minutes?: number;
+  alert_battery_warn_percent?: number;
+}
