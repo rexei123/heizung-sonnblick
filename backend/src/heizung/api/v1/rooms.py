@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.db import get_session
 from heizung.models.enums import RoomStatus
+from heizung.models.event_log import EventLog
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.schemas.event_log import EventLogRead
 from heizung.schemas.room import RoomCreate, RoomRead, RoomUpdate
 
 INT4_MAX = 2_147_483_647
@@ -146,6 +148,32 @@ async def update_room(
         ) from e
     await session.refresh(room)
     return room
+
+
+@router.get(
+    "/{room_id}/engine-trace",
+    response_model=list[EventLogRead],
+    summary="Engine-Pipeline-Trace fuer einen Raum (Sprint 9.5)",
+)
+async def engine_trace(
+    room_id: int = RoomIdPath,
+    limit: int = Query(default=50, ge=1, le=500),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[EventLog]:
+    """Liest die letzten N event_log-Eintraege fuer einen Raum.
+
+    Sortierung: neueste zuerst. Im Frontend (Sprint 9.10) gruppiert das
+    Engine-Decision-Panel die Eintraege per ``evaluation_id`` zu einem
+    Layer-Trace pro Engine-Run.
+    """
+    await _get_or_404(session, room_id)
+    stmt = (
+        select(EventLog)
+        .where(EventLog.room_id == room_id)
+        .order_by(EventLog.time.desc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 @router.delete(
