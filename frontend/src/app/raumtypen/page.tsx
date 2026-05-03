@@ -8,7 +8,6 @@
 
 import { useState } from "react";
 
-import { AppShell } from "@/components/patterns/app-shell";
 import { RoomTypeForm } from "@/components/patterns/room-type-form";
 import {
   useCreateRoomType,
@@ -66,8 +65,7 @@ export default function RoomTypesPage() {
     mode.kind === "edit" ? list.data?.find((rt) => rt.id === mode.id) : undefined;
 
   return (
-    <AppShell>
-      <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-medium text-text-primary">Raumtypen</h1>
@@ -148,7 +146,6 @@ export default function RoomTypesPage() {
           </div>
         </div>
       </div>
-    </AppShell>
   );
 }
 
