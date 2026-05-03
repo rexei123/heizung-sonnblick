@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     mqtt_client_id: str = "heizung-api-subscriber"
     mqtt_enabled: bool = True
 
+    # --- ChirpStack (Sprint 9.2) ---
+    # Application-ID aus dem Tenant „Hotel Sonnblick" / Application „Heizung".
+    # Server-spezifisch in .env zu setzen. Default ist die Test-Server-ID.
+    chirpstack_app_id: str = "b7d74615-aaaa-bbbb-cccc-000000000000"
+    # Topic-Pattern fuer Downlinks an Devices via ChirpStack-Application-Server.
+    # ChirpStack v4 erwartet: application/{ApplicationID}/device/{DevEUI}/command/down
+    downlink_topic_template: str = "application/{app_id}/device/{dev_eui}/command/down"
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.

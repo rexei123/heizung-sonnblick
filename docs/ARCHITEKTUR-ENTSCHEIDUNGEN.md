@@ -301,13 +301,148 @@ Folgende Punkte werden erst bei Bedarf entschieden, nicht jetzt:
 
 ---
 
-## Änderungsprotokoll
+## AE-26 · Saison als oberste Resolution-Schicht in der Settings-Hierarchie
 
-| Version | Datum | Änderung |
+**Kontext.** AE-06 hat die Engine als 5-Schichten-Pipeline entworfen. Settings werden mit der 3-Ebenen-Hierarchie ROOM > ROOM_TYPE > GLOBAL aufgeloest. Saisonale Ueberschreibungen (Skisaison, Sommerpause) brauchen eine zusaetzliche Dimension, die alle 3 Ebenen ueberschreiben kann.
+
+**Entscheidung.** `rule_config` bekommt eine optionale Spalte `season_id`. Wenn gesetzt, gilt der Eintrag NUR im Saison-Zeitraum. Resolution-Reihenfolge erweitert auf 7 Stufen:
+
+1. Saison-spezifisch ROOM
+2. Saison-spezifisch ROOM_TYPE
+3. Saison-spezifisch GLOBAL
+4. Permanent ROOM
+5. Permanent ROOM_TYPE
+6. Permanent GLOBAL
+7. Hardcoded Default
+
+**Begruendung.** Eine separate `season_rule_config`-Tabelle waere doppelte Schema-Pflege. Die NULL-able-Spalte mit derselben Validierung skaliert fuer 5-10 Saisons pro Hotel ohne Performance-Probleme.
+
+---
+
+## AE-27 · Szenarien als orthogonale Aktivierungsschicht (Stammdaten + Assignment)
+
+**Kontext.** Aus den Betterspace-Screenshots ergeben sich 22+ Szenarien (Tagabsenkung, Nachtabsenkung, Realtime Check-in, ...). Die Strategie fasste das in den 8 Kernregeln zusammen, aber der Hotelier denkt in "Szenarien" als Konfigurations-Einheit. Die Engine-Architektur (AE-06) bleibt regel-basiert.
+
+**Entscheidung.** Zwei neue Tabellen:
+
+- `scenario`: Stammdaten (code, name, description, parameter_schema JSONB, default_active, is_system).
+- `scenario_assignment`: Aktivierung pro Scope (global/room_type/room) mit Override-Parametern als JSONB. Optional `season_id` fuer saisonale Aktivierung.
+
+Die Engine liest beim Evaluieren beide Tabellen und mapped Szenarien auf Regel-Layer (Tagabsenkung -> Layer 2 Temporal Override, etc.).
+
+**Begruendung.** Trennung von Was (Regel-Logik in Code) und Ob/Wie (Szenario-Aktivierung in DB). Hotelier-mentales-Modell respektiert. Custom-Szenarien (Phase 2) brauchen nur einen neuen `code`-Eintrag plus parameter_schema. Keine Code-Aenderung fuer reine Konfig-Anpassung.
+
+---
+
+## AE-28 · `global_config` als Singleton-Tabelle statt EAV
+
+**Kontext.** Hotel-globale Settings (Default-Check-in-Zeit, Sommermodus-Flag, Email-Adresse fuer Alerts, Hotel-Name, Timezone) sind keine Regel-Parameter, sondern System-Konfiguration. EAV (key-value) waere flexibel aber schwer validierbar.
+
+**Entscheidung.** Tabelle `global_config` mit `id PK = 1` (CHECK constraint), benannten Spalten pro Setting, Singleton-Pattern. Bei neuen Settings: Migration mit neuer Spalte plus DEFAULT.
+
+**Begruendung.** Typsicher (Pydantic-Mapping trivial), explizit (Migration zeigt jede neue Setting), versioniert. Pflegeaufwand bei 10-30 Settings akzeptabel. EAV waere bei < 50 Settings Over-Engineering.
+
+---
+
+## AE-29 · `manual_setpoint_event` als zeitlich begrenzter Override
+
+**Kontext.** Hotelier braucht "Temperatur jetzt setzen" als One-Off-Aktion (Wartung Fenster, Spezialgast, Aufheizen vor Ankunft). Soll ueber alle Regeln gewinnen ausser Frostschutz, aber zeitlich begrenzt.
+
+**Entscheidung.** Tabelle `manual_setpoint_event` mit `scope`, `room_type_id` ODER `room_id`, `target_setpoint_celsius`, `starts_at`, `ends_at`, `is_active`, `reason TEXT`. Engine prueft im Layer 3 (Manual Override): Gibt es ein aktives Event mit jetzt zwischen starts_at und ends_at? Ja -> Setpoint ersetzen.
+
+**Begruendung.** Audit-faehig (Wer hat wann was warum gesetzt). Auto-Expire ohne Cron-Job (Engine prueft jedes Eval). Multi-Scope (Bulk-Action auf Raumtyp moeglich).
+
+---
+
+## AE-30 · Saison-Override gilt nur fuer rule_config, NICHT fuer Stammdaten
+
+**Kontext.** Theoretisch koennten Raumtyp-Defaults oder Zimmer-Zuordnungen saisonal variieren ("Im Sommer ist Zimmer 215 Lager statt Schlafzimmer"). Soll die Saison auch Stammdaten ueberschreiben?
+
+**Entscheidung.** Nein. Saison-Eintraege wirken NUR auf `rule_config`-Werte (Setpoints, Zeitfenster, Override-Grenzen). Stammdaten-Aenderungen (room_type, room.room_type_id, heating_zone) sind permanente CRUD-Operationen. Wenn ein Raum saisonal anders genutzt wird, muss die Belegung das abbilden (z.B. `BLOCKED`-Status).
+
+**Begruendung.** Saubere Trennung: Saison ist Settings-Override, kein Stammdaten-Modifier. Sonst entsteht eine zweite Realitaet, die debuggen zur Hoelle macht.
+
+---
+
+## AE-31 · Engine als reine Funktion mit 6 Layern (Erweiterung von AE-06 + AE-08)
+
+**Kontext.** AE-06 entwarf 5 Schichten. AE-08 forderte reine Funktion plus vollstaendiges Event-Log. AE-26 fuehrt Saison ein. AE-27 fuehrt Szenarien ein. AE-29 fuehrt manuelle Events ein. Wir brauchen eine konsolidierte Pipeline-Definition.
+
+**Entscheidung.** `evaluate(ctx: RuleContext) -> RuleResult` mit 6 Layern:
+
+| # | Layer | Quelle | Wirkung |
+|---|---|---|---|
+| 0 | Sommermodus-Fast-Path | `global_config.summer_mode_active` | Sofort Frostschutz, Return |
+| 1 | Base Target | rule_config-Hierarchie (Saison > Permanent) | T_belegt / T_frei / T_long_vacant |
+| 2 | Temporal Override | Aktive Szenarien (Tag/Nacht/Vorheizen/Auszug) | Offset oder Absoluttemp |
+| 3a | Manual Setpoint Event | `manual_setpoint_event` aktiv | Ersetzt Setpoint |
+| 3b | Gast-Override am Vicki | `sensor_reading.manual_setpoint` | Cap auf [min, max] gemaess AE-10 |
+| 4 | Window Safety | `sensor_reading.window_open_detected` | Setpoint = FROST_PROTECTION_C |
+| 5 | Hard Clamp | `MIN(MAX_HOTEL_C, MAX(FROST_PROTECTION_C, setpoint))` | Garantierte Grenzen |
+
+Jeder Layer ist eine eigene reine Funktion `apply_layer_X(setpoint, ctx) -> (setpoint, reason)`. `event_log` bekommt einen Eintrag pro Layer pro Evaluation (Audit + KI-Vorbereitung).
+
+**Begruendung.** Jeder Layer einzeln testbar. Reihenfolge ist die Architektur (keine Konflikt-Aufloesung in den Regeln selbst). Audit ist vollstaendig — auch "warum hat sich nichts geaendert" ist sichtbar.
+
+---
+
+## AE-32 · Downlink-Hysterese 0.5 Grad als Konstante
+
+**Kontext.** AE-09 forderte "nur senden bei Aenderung mit Hysterese 0.5 Grad". Konstante muss zentral sein.
+
+**Entscheidung.** `heizung.rules.constants.SETPOINT_HYSTERESIS_C = Decimal("0.5")`. Plus `SETPOINT_HEARTBEAT_HOURS = 6` (mindestens alle 6 h einen Heartbeat-Downlink, auch wenn Wert unveraendert).
+
+**Begruendung.** Werte aenderbar nur via Code-Review (Migration kommt nicht in Frage fuer Konstante). Test-Coverage stellt sicher, dass Aenderung des Wertes Tests aktualisiert.
+
+---
+
+## AE-33 · Bei Saison-Konflikt gewinnt das spaetere `starts_on`
+
+**Kontext.** Zwei Saisons koennen sich ueberschneiden (z.B. "Winter 2026/27" 01.10-30.04 und "Skisaison" 15.12-15.03). Engine muss eindeutig entscheiden welcher Override gilt.
+
+**Entscheidung.** Bei mehreren aktiven Saisons fuer ein Datum gewinnt die Saison mit dem spaetesten `starts_on`. Bei gleichem `starts_on`: hoechste `id` (zuletzt angelegt). UI warnt beim Anlegen ueberlappender Saisons.
+
+**Begruendung.** "Spezifischer schlaegt allgemein" — eine kuerzere, spaeter angelegte Saison ist typischerweise die spezifischere. Deterministisch ohne Rangfolge-Spalte. UI-Warnung verhindert ungewollte Konflikte.
+
+---
+
+## AE-34 · Sommermodus deaktiviert R1-R7, R8 Frostschutz bleibt aktiv
+
+**Kontext.** Was bedeutet "Sommermodus" konkret? Heizung komplett aus? Frostschutz aktiv?
+
+**Entscheidung.** Sommermodus = Layer-0-Fast-Path in der Engine. Setpoint pro Raum = MAX(`FROST_PROTECTION_C`, eventuell saison-spezifisch erhoehter Sommer-Frostschutz). KEINE Belegungs-, Vorheiz-, Tagabsenkung-, Nachtabsenkung-Regeln. Vicki-Geraete senden weiter Telemetrie und Downlinks. Sommermodus kann manuell oder via Datum (`summer_mode_starts_on`/`ends_on` in `global_config`) aktiviert werden.
+
+**Begruendung.** "Heizung komplett aus" waere bei Sommertagen mit Kaltfront riskant (Wasserrohre). 10 Grad Frostschutz ist EU-Standard. Hotelier kann via Saison-Override hoeheren Sommer-Frostschutz definieren (z.B. 12 Grad fuer Wohnkomfort).
+
+---
+
+## AE-35 · UI-Navigation in 6 Hauptbereichen (ersetzt Sprint-7-Sidebar)
+
+**Kontext.** Strategie 8.3 listet 12 Sidebar-Eintraege in 5 Gruppen. Sprint 7 hat eine vereinfachte Variante mit nur "Devices". Hotelier-Workflow zeigte: 6 mentale Bereiche reichen, mehr ist Reibung.
+
+**Entscheidung.** Neue Sidebar-Struktur:
+
+- HEUTE (Dashboard, Live-Status)
+- ZIMMER (Liste, Floorplan, Belegungen)
+- REGELN (Globale Einstellungen, Raumtypen, Szenarien, Saisons, Sommermodus)
+- GERAETE (Liste, Gateway, Pairing)
+- ANALYSE (Heizverlauf, Audit-Log, Reports)
+- EINSTELLUNGEN (Hotel-Stammdaten, Benutzer, API-Keys, System-Status)
+
+Mobile: Top-Level wird zur Bottom-Tab-Bar, zweite Ebene als Drawer von oben.
+
+**Begruendung.** Hotelier-Mental-Model entspricht der natuerlichen Frequenz der Nutzung (Dashboard taeglich, Zimmer-CRUD selten, Regeln noch seltener). 6 Bereiche passen in jeden Bottom-Tab-Bar-Layout. Strategie-8.3-Eintraege bleiben erhalten als Unterpunkte, aber die Top-Hierarchie ist neu.
+
+---
+
+## Aenderungsprotokoll
+
+| Version | Datum | Aenderung |
 |---|---|---|
 | 1.0 | April 2026 | Initiale Version vor Entwicklungsstart |
-| 1.1 | 2026-04-27 | AE-13 bis AE-18 ergänzt (Sprint 5: ChirpStack, Mosquitto, Vicki-Codec, Uplink-Hypertable, MQTT-Subscriber-Pattern) |
-| 1.2 | 2026-04-28 | AE-19 bis AE-25 ergänzt (Sprint 6: Basic Station + envsubst-Sidecar; Sprint 7: shadcn aufgeschoben, TanStack Query, Recharts, Rewrite-Proxy, Design-Tokens) |
+| 1.1 | 2026-04-27 | AE-13 bis AE-18 ergaenzt (Sprint 5) |
+| 1.2 | 2026-04-28 | AE-19 bis AE-25 ergaenzt (Sprint 6 + 7) |
+| 1.3 | 2026-05-02 | AE-26 bis AE-35 ergaenzt (Master-Plan Sprint 8-13: Saison, Szenarien, Sommermodus, Engine-Pipeline, UI-Navigation) |
 
 ---
 

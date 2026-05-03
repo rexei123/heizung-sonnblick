@@ -162,3 +162,41 @@ def test_map_to_reading_no_rxinfo() -> None:
     row = _map_to_reading(uplink, device_id=1)
     assert row["rssi_dbm"] is None
     assert row["snr_db"] is None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.0: valve_openness aus neuem Codec hat Vorrang vor motor_position
+# ---------------------------------------------------------------------------
+
+
+def test_map_to_reading_uses_valve_openness_when_present() -> None:
+    """Neuer Codec liefert geclamptes valve_openness 0..100."""
+    payload = _valid_payload()
+    payload["object"]["valve_openness"] = 73
+    payload["object"]["motor_position"] = 1984  # raw, soll IGNORIERT werden
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["valve_position"] == 73
+
+
+def test_map_to_reading_falls_back_to_motor_position() -> None:
+    """Alter Codec ohne valve_openness -> Fallback motor_position (Uebergang)."""
+    payload = _valid_payload()
+    # valve_openness explizit nicht setzen
+    payload["object"].pop("valve_openness", None)
+    payload["object"]["motor_position"] = 88
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["valve_position"] == 88
+
+
+def test_map_to_reading_valve_openness_zero_is_persisted() -> None:
+    """Sprint-9.0-Codec clamping kann 0 liefern — darf nicht als None
+    gespeichert werden (sonst wuerde fallback auf motor_position greifen
+    und falsche Werte schreiben)."""
+    payload = _valid_payload()
+    payload["object"]["valve_openness"] = 0
+    payload["object"]["motor_position"] = 9999
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["valve_position"] == 0
