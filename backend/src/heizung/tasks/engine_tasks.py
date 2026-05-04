@@ -15,19 +15,22 @@ Sprint 9.6 (Live-Test) verifiziert End-to-End mit Vicki-001.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 import aiomqtt
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import joinedload
 
 from heizung.celery_app import app
-from heizung.db import SessionLocal
+from heizung.config import get_settings
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.event_log import EventLog
@@ -42,6 +45,33 @@ from heizung.rules.engine import (
 from heizung.services.downlink_adapter import DownlinkError, send_setpoint
 
 logger = logging.getLogger(__name__)
+
+
+# Sprint 9.7a: Pool-Pollution-Fix.
+# Jeder Celery-Task spawnt via ``asyncio.run`` einen NEUEN Event-Loop. Eine
+# global geteilte ``SessionLocal`` (aus ``heizung.db``) haelt Connections,
+# die an einen FRUEHEREN Loop gebunden waren. Folge: asyncpg wirft
+# ``cannot perform operation: another operation is in progress``.
+#
+# Loesung: pro Task-Coroutine eine eigene Engine + Session-Factory bauen
+# und am Ende ``engine.dispose()`` rufen. Etwas Overhead pro Task (~10 ms),
+# aber keine Race-Conditions mehr.
+@contextlib.asynccontextmanager
+async def _task_session() -> AsyncIterator[AsyncSession]:
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        pool_pre_ping=False,
+        pool_size=2,
+        max_overflow=0,
+    )
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @app.task(name="heizung.evaluate_room", bind=True, max_retries=3, default_retry_delay=10)
@@ -72,13 +102,10 @@ def evaluate_due_rooms(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=True
 
 
 async def _evaluate_due_rooms_async() -> dict[str, Any]:
-    from datetime import UTC as _UTC
-    from datetime import datetime as _dt
-
     from heizung.models.room import Room
 
-    now = _dt.now(tz=_UTC)
-    async with SessionLocal() as session:
+    now = datetime.now(tz=UTC)
+    async with _task_session() as session:
         stmt = select(Room.id).where(
             (Room.next_transition_at.is_(None)) | (Room.next_transition_at <= now)
         )
@@ -94,7 +121,7 @@ async def _evaluate_due_rooms_async() -> dict[str, Any]:
 
 async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
     eval_id = uuid.uuid4()
-    async with SessionLocal() as session:
+    async with _task_session() as session:
         result = await _engine_evaluate_room(session, room_id)
         if result is None:
             logger.warning("evaluate_room: room_id=%s nicht gefunden — skip", room_id)
