@@ -18,9 +18,15 @@ Test-Hinweis:
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from celery import Celery
+from celery.signals import worker_process_init
 
 from heizung.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 
@@ -53,3 +59,31 @@ app.conf.update(
     task_soft_time_limit=20,
     task_time_limit=30,
 )
+
+
+@worker_process_init.connect
+def _reset_engine_per_worker(**_: object) -> None:
+    """Sprint 9.6b: jeder Forked-Worker-Prozess bekommt eine FRISCHE
+    SQLAlchemy-Engine. Sonst teilen sich Worker-Forks den DB-Pool des
+    Master-Process — Connections funktionieren im neuen Event-Loop nicht
+    (``Future attached to a different loop``).
+
+    Strategie: alten Engine im Pool dispose-en + neue Async-Engine + neue
+    Session-Factory. Die ``heizung.db``-Modul-Variablen ``engine`` und
+    ``SessionLocal`` werden ersetzt, damit alle Imports automatisch die
+    neue Engine sehen.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from heizung import db as db_module
+
+    settings = get_settings()
+    asyncio.run(db_module.engine.dispose())
+    db_module.engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        pool_pre_ping=False,
+        pool_recycle=900,
+    )
+    db_module.SessionLocal = async_sessionmaker(db_module.engine, expire_on_commit=False)
+    logger.info("celery worker: SQLAlchemy-Engine reset (forked process)")

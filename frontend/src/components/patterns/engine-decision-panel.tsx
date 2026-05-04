@@ -133,6 +133,10 @@ function groupByEvaluation(entries: EventLogEntry[]): EvalGroup[] {
 function SummaryCard({ latest }: { latest: EvalGroup }) {
   const setpoint = latest.finalSetpoint;
   const baseEntry = latest.entries.find((e) => e.layer === "base_target");
+  // Stale-Hinweis: wenn die juengste Evaluation > 1 h zurueck — Engine
+  // sollte alle 60 s laufen (Sprint 9.7 Scheduler), oder wir haben einen Bug.
+  const ageMs = Date.now() - new Date(latest.time).getTime();
+  const isStale = ageMs > 60 * 60 * 1000;
   return (
     <div className="bg-surface border border-border rounded-md p-5">
       <div className="flex items-baseline gap-3">
@@ -146,8 +150,13 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
           Grund: <strong className="text-text-primary">{REASON_LABEL[baseEntry.reason]}</strong>
         </p>
       ) : null}
-      <p className="mt-1 text-sm text-text-tertiary">
+      <p
+        className={`mt-1 text-sm ${
+          isStale ? "text-warning font-medium" : "text-text-tertiary"
+        }`}
+      >
         Letzte Evaluation: {formatRelative(latest.time)}
+        {isStale ? " · veraltet — Engine evaluiert alle 60 s sobald Scheduler aktiv ist" : ""}
       </p>
     </div>
   );

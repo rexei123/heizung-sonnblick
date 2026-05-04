@@ -146,35 +146,56 @@ def test_null_in_room_falls_through_to_global() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_clamp_within_range_passes_through() -> None:
-    step = layer_clamp(21, _ctx())
+def test_clamp_within_range_passes_prev_reason() -> None:
+    """Sprint 9.6b: Wenn Wert nicht clamped -> prev_reason durchreichen."""
+    step = layer_clamp(21, _ctx(), prev_reason=CommandReason.OCCUPIED_SETPOINT)
     assert step.layer == EventLogLayer.HARD_CLAMP
     assert step.setpoint_c == 21
+    assert step.reason == CommandReason.OCCUPIED_SETPOINT
     assert "within" in step.detail
 
 
+def test_clamp_within_range_passes_vacant_reason() -> None:
+    """Sprint 9.6b: vacant-Setpoint bleibt vacant, nicht hardcoded occupied."""
+    step = layer_clamp(18, _ctx(), prev_reason=CommandReason.VACANT_SETPOINT)
+    assert step.setpoint_c == 18
+    assert step.reason == CommandReason.VACANT_SETPOINT
+
+
 def test_clamp_above_max_caps() -> None:
-    step = layer_clamp(35, _ctx())
+    step = layer_clamp(35, _ctx(), prev_reason=CommandReason.OCCUPIED_SETPOINT)
     assert step.setpoint_c == MAX_SETPOINT_C
     assert "clamped" in step.detail
+    # Reason vom Layer davor bleibt — nur die Zahl wurde gedeckelt
+    assert step.reason == CommandReason.OCCUPIED_SETPOINT
 
 
-def test_clamp_below_frost_lifts_to_frost() -> None:
-    step = layer_clamp(5, _ctx())
+def test_clamp_below_frost_lifts_to_frost_protection() -> None:
+    """Setpoint < FROST_PROTECTION -> Reason ueberschrieben auf FROST_PROTECTION."""
+    step = layer_clamp(5, _ctx(), prev_reason=CommandReason.OCCUPIED_SETPOINT)
     assert step.setpoint_c == int(FROST_PROTECTION_C)
     assert step.reason == CommandReason.FROST_PROTECTION
 
 
 def test_clamp_room_type_max_respected() -> None:
     """Bad mit max_temp=25 bekommt 25, nicht MAX_SETPOINT_C=30."""
-    step = layer_clamp(28, _ctx(room_type=_make_room_type(max_c=25.0)))
+    step = layer_clamp(
+        28,
+        _ctx(room_type=_make_room_type(max_c=25.0)),
+        prev_reason=CommandReason.OCCUPIED_SETPOINT,
+    )
     assert step.setpoint_c == 25
 
 
 def test_clamp_room_type_min_below_frost_is_ignored() -> None:
     """Auch wenn room_type.min_temp=8 — System-Frostschutz hat Vorrang."""
-    step = layer_clamp(7, _ctx(room_type=_make_room_type(min_c=8.0)))
+    step = layer_clamp(
+        7,
+        _ctx(room_type=_make_room_type(min_c=8.0)),
+        prev_reason=CommandReason.VACANT_SETPOINT,
+    )
     assert step.setpoint_c == int(FROST_PROTECTION_C)
+    assert step.reason == CommandReason.FROST_PROTECTION
 
 
 # ---------------------------------------------------------------------------

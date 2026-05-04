@@ -195,7 +195,7 @@ function RoomTable({ list, loading, error }: TableProps) {
             <tr key={r.id} className="border-b border-border last:border-b-0 hover:bg-surface-alt">
               <td className="px-3 py-2">
                 <Link
-                  href={{ pathname: "/zimmer/[id]", query: { id: r.id } } as never}
+                  href={`/zimmer/${r.id}` as never}
                   className="font-medium text-text-primary hover:text-primary"
                 >
                   {r.number}
@@ -211,7 +211,7 @@ function RoomTable({ list, loading, error }: TableProps) {
               </td>
               <td className="px-3 py-2 text-right">
                 <Link
-                  href={{ pathname: "/zimmer/[id]", query: { id: r.id } } as never}
+                  href={`/zimmer/${r.id}` as never}
                   className="text-xs text-primary hover:underline"
                 >
                   Detail →

@@ -153,10 +153,20 @@ def layer_base_target(ctx: _RoomContext) -> LayerStep:
     )
 
 
-def layer_clamp(prev_setpoint_c: int, ctx: _RoomContext) -> LayerStep:
+def layer_clamp(
+    prev_setpoint_c: int,
+    ctx: _RoomContext,
+    *,
+    prev_reason: CommandReason,
+) -> LayerStep:
     """Layer 5: Final Hard-Clamp. Garantiert Frostschutz, schuetzt vor
     Engine-Bugs. Beruecksichtigt room_type.min_temp_celsius / max_temp_celsius
-    falls gesetzt — sonst System-Defaults."""
+    falls gesetzt — sonst System-Defaults.
+
+    Sprint 9.6b Fix: ``prev_reason`` (aus base_target/temporal/window) wird
+    durchgereicht, wenn der Clamp den Wert nicht aenderte. Vorher hardcoded
+    ``OCCUPIED_SETPOINT`` -> falsches UI-Label fuer alle nicht-Occupied-Status.
+    """
     rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
     rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
 
@@ -170,13 +180,14 @@ def layer_clamp(prev_setpoint_c: int, ctx: _RoomContext) -> LayerStep:
     else:
         detail = f"clamped from {prev_setpoint_c} to {clamped} (range [{floor},{ceiling}])"
 
-    # Reason erkennen: wenn das Clamping auf MIN_SETPOINT_C zieht ->
-    # FROST_PROTECTION, sonst behalten wir die vorherige Reason aus Base.
-    reason = (
-        CommandReason.FROST_PROTECTION
-        if clamped == MIN_SETPOINT_C
-        else CommandReason.OCCUPIED_SETPOINT
-    )
+    # Reason: wenn Clamping nach unten auf MIN_SETPOINT_C zieht -> FROST_PROTECTION.
+    # Sonst die Reason vom Layer davor weiterreichen (vacant_setpoint bleibt
+    # vacant_setpoint, occupied_setpoint bleibt occupied_setpoint, etc.).
+    if clamped == MIN_SETPOINT_C and prev_setpoint_c < MIN_SETPOINT_C:
+        reason = CommandReason.FROST_PROTECTION
+    else:
+        reason = prev_reason
+
     return LayerStep(
         layer=EventLogLayer.HARD_CLAMP,
         setpoint_c=clamped,
@@ -282,7 +293,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         return None
 
     base = layer_base_target(ctx)
-    clamp = layer_clamp(base.setpoint_c, ctx)
+    clamp = layer_clamp(base.setpoint_c, ctx, prev_reason=base.reason)
 
     return RuleResult(
         room_id=room_id,
