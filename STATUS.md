@@ -327,6 +327,57 @@ Ziel: Vollständige CRUD-Schicht für Raumtypen / Zimmer / Heizzonen / Belegunge
 
 ---
 
+## 2l. Sprint 9 Engine + Downlink (2026-05-03/04, in Arbeit — Walking-Skeleton fertig)
+
+Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink an Vicki. Killer-Feature aus Master-Plan.
+
+**Sub-Sprint-Stand:**
+
+- ✅ **9.0** Codec mclimate-vicki.js fPort 1+2 + Encode 0x51 + valveOpenness-Clamp (15 Tests, ChirpStack-UI deployed)
+- ✅ **9.0a** Subscriber liest valve_openness statt motor_position + skip setpoint_reply
+- ✅ **9.1** Celery + Redis Worker-Container (Compose-Service celery_worker, concurrency=2, healthcheck `inspect ping`)
+- ✅ **9.2** Downlink-Adapter (build_downlink_message + send_setpoint via aiomqtt, Topic application/{APP_ID}/device/{DevEUI}/command/down)
+- ✅ **9.3** Engine-Skeleton: LayerStep + RuleResult + layer_base_target + layer_clamp + hysteresis_decision (23 Tests)
+- ✅ **9.4-5** evaluate_room-Task mit echter Logik (statt Stub) + Trigger in occupancies POST/Cancel + GET /rooms/{id}/engine-trace + EventLogRead-Schema
+- ✅ **9.6** Live-Test BESTANDEN: Vicki-001 zeigte 18°C nach Engine-Trigger (validiert mit Vicki-Display und ChirpStack-Queue-Eintrag)
+- ✅ **9.6a** Hotfix devEui im Downlink-Payload (ChirpStack v4 Pflicht — sonst stilles Discard)
+- ✅ **9.6b** Bug-Cleanup: Frontend-Link-Bug, Hard-Clamp-Reason durchreichen, pool_pre_ping=False + Worker-Engine-Reset, UI-Stale-Hinweis
+- ✅ **9.10** Frontend EngineDecisionPanel: Tab "Engine" im Zimmer-Detail mit Schicht-Trace + Vorherige Evaluationen + Refetch 30s
+- ⏸ **9.7** Sommermodus (Layer 0) + Celery-Beat-Scheduler (60s autonomes Re-Eval)
+- ⏸ **9.8** Layer 2 Temporal (Vorheizen 60min vor Check-in + Nachtabsenkung)
+- ⏸ **9.9** Layer 3+4 Manual + Window
+- ⏸ **9.11** Live-Test #2 mit allen Layern
+- ⏸ **9.12** Doku + PR develop→main + Tag v0.1.9-engine
+
+**Architektur-Bestaetigungen (Live-Test 2026-05-03):**
+- AE-32 (Hysterese 1 °C statt 0.5 °C) durch Vicki-Spike + Live-Run validiert
+- Engine-Decision-Panel zeigt korrekte Layer-Trace mit setpoint_in/setpoint_out + reason + detail-JSON
+- ChirpStack-App-ID `b7d74615-6ea9-4b54-aa05-fd094e3c2cae` in heizung-test/.env, in Codec auch eingetragen
+- Vicki-001 (DevEUI 70b3d52dd3034de4) in Heizzone "Schlafzimmer" id=91 von Zimmer 101
+
+**Lessons in CLAUDE.md §5.12-5.17 dokumentiert:**
+- §5.12 PowerShell `$ErrorActionPreference` greift nicht fuer native CLI-Tools
+- §5.13 ChirpStack v4 verlangt devEui im Payload
+- §5.14 Celery-Worker braucht Engine-Reset pro Forked-Process
+- §5.15 event_log wird bei manueller Cleanup nicht mitcleared
+- §5.16 Next.js Object-href cast resolved nicht zu Path-Param
+- §5.17 docker logs --since nach Container-Restart leer
+
+**Tag (geplant):** `v0.1.9-rc1-walking-skeleton` auf develop nach Sprint 9.6b. Final-Tag `v0.1.9-engine` auf main erst nach 9.7-9.12.
+
+**Test-Stand nach Sprint 9.6b:**
+- Backend: 27 + 4 + 4 (downlink) + 23 (engine) + 3 (celery) = 61 Pytest-Tests
+- Codec: 15 Node-Tests
+- Frontend: keine neuen Playwright-Smokes — Engine-Panel nur live-getestet (Sprint 11 Backlog)
+
+**Backlog erzeugt:**
+- Engine-Trace-API: stale event_log nach Bug-Fix-Roundtrip (manuelle DB-Clean noetig)
+- ChirpStack-Bootstrap-Skript fuer reproduzierbares Codec-Setup (war im Sprint 6 Backlog, bestaetigt)
+- pool_pre_ping=False als Workaround — sauberer Fix wenn asyncpg + celery besser integriert werden (Sprint 14+)
+- Mosquitto-Reconnect-Spam bei heizung-api-Subscriber (kosmetisch, nicht-blockierend)
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

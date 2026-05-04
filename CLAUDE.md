@@ -176,6 +176,97 @@ docker images ghcr.io/rexei123/heizung-web --format '{{.Tag}} {{.CreatedAt}} {{.
 
 CreatedAt muss nach dem letzten erwarteten Build liegen, ID muss sich vom vorherigen Stand unterscheiden. Sonst: §5.10-Workflow erneut anstossen.
 
+### 5.12 PowerShell `$ErrorActionPreference = "Stop"` greift NICHT fuer native Tools (Sprint 9 Lesson)
+
+Der PS-Switch fasst nur PowerShell-Cmdlets, NICHT externe `git.exe`/`gh.exe`/`docker.exe` mit non-zero exit. Beobachtet bei Sprint 9.0 + 9.0a: `gh pr merge` returnte exit 1 (BEHIND), Block lief stur weiter bis zum gruenen Write-Host am Ende — User glaubte alles gut, in Wahrheit war kein PR gemerged.
+
+**Pflicht in jedem PowerShell-Block mit `gh`/`git`-Sequenz:**
+
+```powershell
+function Test-Exit($msg) { if ($LASTEXITCODE -ne 0) { throw $msg } }
+gh pr merge $pr --merge --admin; Test-Exit "merge"
+git push -u origin $branch; Test-Exit "push"
+```
+
+Alternativ ab PS 7.3: `$PSNativeCommandUseErrorActionPreference = $true`.
+
+### 5.13 ChirpStack v4 verlangt `devEui` im Downlink-Payload (Sprint 9.6a Lesson)
+
+Das Topic-Pattern `application/<APPID>/device/<DEVEUI>/command/down` reicht NICHT. Im JSON-Payload muss zusaetzlich `devEui` (lowercase) drin sein, sonst:
+
+```
+WARN chirpstack::integration::mqtt: Processing command error:
+  Payload dev_eui  does not match topic dev_eui 70b3d52dd3034de4
+```
+
+Der Downlink wird stillschweigend verworfen. **Korrektes Format:**
+
+```json
+{
+  "devEui": "70b3d52dd3034de4",
+  "data": "<base64>",
+  "fPort": 1,
+  "confirmed": false
+}
+```
+
+Test-Befehl fuer Diagnose:
+
+```bash
+docker logs deploy-chirpstack-1 --since 30s 2>&1 | grep -iE "command|enqueu"
+```
+
+`Command received` + `Device queue-item enqueued` = OK. Nur `Processing command error` = Payload-Fehler.
+
+### 5.14 Celery-Worker braucht Engine-Reset pro Forked-Process (Sprint 9.6b Lesson)
+
+asyncpg-Connections sind an einen Event-Loop gebunden. Celery `prefork` startet n Worker-Forks, die den DB-Pool des Master-Process erben. `asyncio.run()` in einer Task baut einen NEUEN Loop auf — alte Pool-Connections crashen mit:
+
+```
+RuntimeError: Task got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]>
+              attached to a different loop
+```
+
+**Fix:** `@worker_process_init.connect` in `celery_app.py` ruft `asyncio.run(engine.dispose())` + `create_async_engine` neu, ersetzt `db_module.engine` und `db_module.SessionLocal`. So bekommt jeder Fork einen eigenen frischen Pool.
+
+Zusaetzlich: `pool_pre_ping=False` in `db.py`, sonst pingt der Pool im falschen Loop.
+
+### 5.15 `event_log` wird beim manuellen Cleanup NICHT mit-cleared (Sprint 9.10 Lesson)
+
+Engine-Decision-Panel zeigt Stale-Trace, wenn nur `control_command` geleert wird:
+
+```sql
+DELETE FROM control_command WHERE device_id = X;
+-- event_log bleibt unangetastet -> Frontend zeigt alte Layer-Eintraege
+```
+
+**Bei Re-Trigger nach Bug-Fix beide Tabellen clearen:**
+
+```sql
+DELETE FROM control_command WHERE device_id = X;
+DELETE FROM event_log WHERE room_id = Y;
+```
+
+UI macht jetzt einen Stale-Hinweis (orange Banner) wenn die juengste Evaluation > 1h zurueck ist — Frueh-Warnung statt Daten-Verwirrung.
+
+### 5.16 Next.js typed-Object-`href` resolved zu Query-String, nicht Path-Param (Sprint 9.6b Lesson)
+
+```tsx
+// ❌ FALSCH — produziert /zimmer/[id]?id=1
+<Link href={{ pathname: "/zimmer/[id]", query: { id: r.id } } as never}>
+
+// ✅ RICHTIG — produziert /zimmer/1
+<Link href={`/zimmer/${r.id}` as never}>
+```
+
+Der Object-Form-Cast `as never` umgeht die Typed-Routes-Auflosung von Next.js — das `[id]` bleibt literal in der URL. Template-Literal mit `${id}` ist die einzige zuverlassige Variante.
+
+### 5.17 `docker logs --since Xs` ist nach Container-Restart leer (Sprint 9.6 Lesson)
+
+Beim Re-Deploy via `docker compose up -d --force-recreate` wird der Container neu gestartet. Der vorherige `--since 60s`-Filter sieht das neue Container-Log mit Time-Offset und liefert evtl. NICHTS, obwohl Tasks gerade liefen.
+
+**Pflicht nach Re-Deploy:** mindestens `--tail 30` ohne `--since` verwenden, dann zusaetzlich auf den Worker-Boot-Log (`worker@... ready`) als Marker achten.
+
 ---
 
 ## 6. Aktuelle Backlog-Punkte

@@ -435,6 +435,36 @@ Mobile: Top-Level wird zur Bottom-Tab-Bar, zweite Ebene als Drawer von oben.
 
 ---
 
+## AE-36 · Engine-Layer als Pure Functions + duenner DB-Wrapper (Sprint 9.3)
+
+**Kontext.** Die 5-Schichten-Pipeline (AE-06, AE-31) braucht Tests fuer jede Schicht und Edge-Cases. Mit DB-Session in jedem Layer-Aufruf wuerde jeder Test eine Postgres-Test-DB benoetigen — Setup-Hoelle.
+
+**Entscheidung.** Jede Schicht (`layer_base_target`, `layer_clamp`, `hysteresis_decision`, etc.) ist eine **pure Funktion** mit Input-Dataclass `_RoomContext` (room + room_type + rule_configs als bereits geladene SQLAlchemy-Objekte) und Output `LayerStep`. Der DB-Zugriff ist genau zwei Funktionen vorbehalten: `_load_room_context(session, room_id)` und `_last_command_for_room(session, room_id)`. Die Public-API `evaluate_room` orchestriert: laedt Context, schickt durch Layers, gibt `RuleResult` zurueck.
+
+**Begruendung.** Pure-Function-Tests laufen mit `SimpleNamespace`-Dummies in Millisekunden ohne DB. 23 Layer-Tests in Sprint 9.3 nutzen das. Integration-Tests (Sprint 13) testen den DB-Wrapper separat. Erweiterungen (Layer 0/2/3/4 in 9.7-9.9) folgen demselben Pattern.
+
+---
+
+## AE-37 · Hard-Clamp-Reason wird durchgereicht statt hardcoded (Sprint 9.6b)
+
+**Kontext.** Layer-5 Hard-Clamp setzte initial `reason = OCCUPIED_SETPOINT` als Fallback. Bei Vacant-/Reserved-/Cleaning-Status zeigte das Engine-Decision-Panel im Frontend "Belegt-Sollwert" obwohl korrekt "Frei-Sollwert".
+
+**Entscheidung.** `layer_clamp` bekommt `prev_reason: CommandReason` als kwarg vom Caller. Reason wird durchgereicht, NUR ueberschrieben mit `FROST_PROTECTION` wenn der Clamp tatsaechlich den Wert auf `MIN_SETPOINT_C` zog (`prev_setpoint_c < MIN_SETPOINT_C`).
+
+**Begruendung.** Audit-Log + UI brauchen die richtige Reason fuer Erklaerbarkeit. Der Layer 5 ist Sicherheits-Funktion, kein Reason-Setter. Die Reason gehoert zur urspruenglichen Setpoint-Entscheidung.
+
+---
+
+## AE-38 · Celery-Worker-Process-Isolation fuer asyncpg (Sprint 9.6b)
+
+**Kontext.** asyncpg-Connections sind an einen Event-Loop gebunden. Celery prefork startet n Worker-Forks mit dem Pool des Master-Prozesses. `asyncio.run()` in einer Task baut einen NEUEN Loop auf — alte Connections crashen mit `RuntimeError: Future attached to a different loop`.
+
+**Entscheidung.** Im `celery_app.py` registrieren wir einen `@worker_process_init.connect`-Handler, der nach jedem Fork: `engine.dispose()` ausfuehrt und eine FRISCHE Engine + SessionLocal in `heizung.db` injiziert. Plus `pool_pre_ping=False` damit der Pool nicht im falschen Loop pingt.
+
+**Begruendung.** Standard-asyncpg + Celery-prefork ist ein bekanntes Anti-Pattern. SQLAlchemy-Doku empfiehlt Engine-Reset pro Fork. Der Handler ist 10 Zeilen Code und loest das Problem komplett.
+
+---
+
 ## Aenderungsprotokoll
 
 | Version | Datum | Aenderung |
@@ -443,6 +473,7 @@ Mobile: Top-Level wird zur Bottom-Tab-Bar, zweite Ebene als Drawer von oben.
 | 1.1 | 2026-04-27 | AE-13 bis AE-18 ergaenzt (Sprint 5) |
 | 1.2 | 2026-04-28 | AE-19 bis AE-25 ergaenzt (Sprint 6 + 7) |
 | 1.3 | 2026-05-02 | AE-26 bis AE-35 ergaenzt (Master-Plan Sprint 8-13: Saison, Szenarien, Sommermodus, Engine-Pipeline, UI-Navigation) |
+| 1.4 | 2026-05-04 | AE-36 bis AE-38 ergaenzt (Sprint 9.3-9.6b: Engine-Layer-Architektur, Reason-Durchreichung, Worker-Engine-Reset) |
 
 ---
 

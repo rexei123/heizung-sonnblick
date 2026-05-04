@@ -8,17 +8,25 @@
 
 ## Aktueller Stand
 
-- **Letzter Tag:** `v0.1.8-stammdaten` (2026-05-03, Sprint 8 + 8.15 final, auf main + heizung-main gepullt)
-- **Letzter Sprint abgeschlossen:** Sprint 8.15 (Design-Konformitaet) inkl. Browser-Verifikation auf heizung-test
-- **Aktiver Sprint:** Sprint 9 (Engine + Downlink) — Brief liegt unter `docs/features/2026-05-03-sprint9-engine-downlink.md`, Sprintplan offen
-- **Vor Sprint-9-Code:** Spike-OK liegt vor (Vicki nimmt Downlinks an, 1° Aufloesung). Lessons aus 8.15 in CLAUDE.md §5.9-5.11 ergaenzt.
+- **Letzter Tag:** `v0.1.9-rc1-walking-skeleton` (2026-05-04, **develop**) — Walking-Skeleton-Snapshot. Auf main bleibt `v0.1.8-stammdaten`.
+- **Letzter Sprint abgeschlossen:** Sprint 9.6b (Bug-Cleanup, alle 5 9.x-Bugs gruen)
+- **Aktiver Sprint:** Sprint 9 weiter — fehlt: 9.7 Sommermodus + Scheduler / 9.8 Layer 2 Temporal / 9.9 Layer 3+4 / 9.11 Live-Test #2 / 9.12 Final-Tag v0.1.9-engine auf main
+- **Live-Test bestaetigt 2026-05-03:** Vicki-001 reagiert auf Engine-Trigger mit Setpoint-Aenderung im Display (18°C). Walking-Skeleton produktiv.
 
 ## Was JETZT der naechste konkrete Schritt ist
 
-1. Sprint 9 Sprintplan schreiben (Sub-Sprints + Tasks aus dem Brief ableiten)
-2. Sprint 9.0 Code starten — Codec-Erweiterung fPort 2 (Setpoint-Reply 0x52, Task #87) als ersten Sub-Sprint, weil das die Voraussetzung fuer den Engine-Downlink-Loop ist
-3. Codec-Bug Vicki `valve_position > 100%` (Task #86) entweder in 9.0 mitnehmen oder als eigenes Mini-PR vorab
+1. Sprint 9.7 starten: Layer 0 Sommermodus (`global_config.summer_mode_active`) + Celery-Beat-Service `celery_beat` als 5. Compose-Container + Migration 0004 fuer `room.next_transition_at`-Spalte + Periodic Task `evaluate_due_rooms` (60 s)
+2. Sprint 9.8 Layer 2 Temporal (Vorheizen + Nachtabsenkung) baut auf 9.7-Scheduler auf
+3. Codec-Backlog Task #86/#87 sind durch Sprint 9.0 erledigt
 4. Sprint 8.8 (Integration-Tests gegen echte Postgres) bleibt auf Sprint 13 verschoben
+
+## Sprint-9-Walking-Skeleton-Status (2026-05-04)
+
+- **Vicki-001** ist via Heizzone 91 ("Schlafzimmer") an Zimmer 101 gekoppelt. Weitere 3 Vicki sind im DB ohne Zone — Backlog.
+- **ChirpStack-App-ID** `b7d74615-6ea9-4b54-aa05-fd094e3c2cae` in `.env` von heizung-test gesetzt; default in `config.py` ist identisch.
+- **Engine-Trigger** funktioniert via `evaluate_room.delay(room_id)` aus API-Container oder Belegung-POST/Cancel.
+- **Vicki-Display** aendert sich im naechsten Class-A-Uplink-Fenster (~30 Sek bis 30 Min).
+- **Engine-Decision-Panel** unter `/zimmer/{id}` Tab "Engine" zeigt Layer-Trace mit Stale-Hinweis bei > 1h.
 
 ## Architektur-Konsens (Stand 2026-05-02)
 
