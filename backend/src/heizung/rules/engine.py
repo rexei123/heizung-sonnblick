@@ -356,16 +356,33 @@ def hysteresis_decision(
 
 
 async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContext | None:
-    """Eager-Load Room + RoomType + alle relevanten RuleConfigs + GlobalConfig."""
-    stmt = (
-        select(Room)
-        .where(Room.id == room_id)
-        .options(joinedload(Room.room_type), joinedload(Room.rule_configs))
-    )
+    """Eager-Load Room + RoomType + ALLE Hierarchie-RuleConfigs + GlobalConfig.
+
+    Sprint 9.8a Bugfix: ``room.rule_configs`` (Relationship) liefert NUR
+    ROOM-Scope-Eintraege (FK ``rule_config.room_id = room.id``). ROOM_TYPE-
+    und GLOBAL-Scope-Configs wurden vorher NIE geladen — ``_resolve_field``
+    fiel immer auf den Hardcoded-Default. Bug fiel nicht auf, weil Layer 1
+    immer ``room_type.default_t_occupied`` als Fallback hatte; Layer 2 (9.8)
+    braucht Hierarchie-Felder OHNE Default (preheat, night_*) und triggerte
+    deshalb nie.
+    """
+    stmt = select(Room).where(Room.id == room_id).options(joinedload(Room.room_type))
     result = await session.execute(stmt)
     room: Room | None = result.unique().scalar_one_or_none()
     if room is None:
         return None
+
+    # Alle relevanten RuleConfigs ueber alle drei Scopes:
+    # GLOBAL immer, ROOM_TYPE wenn matching, ROOM nur fuer dieses Zimmer.
+    rc_stmt = select(RuleConfig).where(
+        (RuleConfig.scope == RuleConfigScope.GLOBAL)
+        | (
+            (RuleConfig.scope == RuleConfigScope.ROOM_TYPE)
+            & (RuleConfig.room_type_id == room.room_type_id)
+        )
+        | ((RuleConfig.scope == RuleConfigScope.ROOM) & (RuleConfig.room_id == room_id))
+    )
+    rule_configs = list((await session.execute(rc_stmt)).scalars().all())
 
     # Sprint 9.7: Sommermodus-Flag aus Singleton-global_config.
     cfg = await session.get(GlobalConfig, 1)
@@ -386,7 +403,7 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     return _RoomContext(
         room=room,
         room_type=room.room_type,
-        rule_configs=list(room.rule_configs),
+        rule_configs=rule_configs,
         summer_mode_active=summer_active,
         next_occupancy=next_occ,
     )
