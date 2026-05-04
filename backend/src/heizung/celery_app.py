@@ -58,6 +58,15 @@ app.conf.update(
     # nur die Default-Soft-Time-Limit fuer alle Tasks.
     task_soft_time_limit=20,
     task_time_limit=30,
+    # Sprint 9.7: Beat-Schedule fuer autonome periodische Evaluation.
+    # ``celery_beat``-Container ruft alle 60 s ``evaluate_due_rooms`` auf.
+    beat_schedule={
+        "evaluate-due-rooms-every-60s": {
+            "task": "heizung.evaluate_due_rooms",
+            "schedule": 60.0,
+            "options": {"queue": "heizung_default"},
+        },
+    },
 )
 
 

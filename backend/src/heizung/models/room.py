@@ -72,6 +72,12 @@ class Room(Base):
 
     notes: Mapped[str | None] = mapped_column(String(1000))
 
+    # Sprint 9.7: Scheduler-Spalten fuer Celery-Beat ``evaluate_due_rooms``.
+    # NULL = noch nie evaluiert (Beat triggert sofort).
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # NULL = kein geplanter Schaltpunkt (Beat triggert nach Heartbeat-Intervall).
+    next_transition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

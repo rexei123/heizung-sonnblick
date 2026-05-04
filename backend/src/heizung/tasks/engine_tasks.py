@@ -54,6 +54,44 @@ def evaluate_room(self: Any, room_id: int) -> dict[str, Any]:  # noqa: ARG001 - 
     return asyncio.run(_evaluate_room_async(room_id))
 
 
+@app.task(name="heizung.evaluate_due_rooms", bind=True)
+def evaluate_due_rooms(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=True
+    """Sprint 9.7: Beat-getriebene periodische Evaluation.
+
+    Faehrt jede Minute (siehe ``celery_app.beat_schedule``):
+    - holt alle Raeume mit ``next_transition_at IS NULL`` ODER ``<= now``
+    - schickt fuer jeden ein ``evaluate_room.delay(id)`` (Worker uebernimmt)
+    - returnt dict mit ``triggered`` count
+
+    Layer 2 (Sprint 9.8 Vorheizen) wird ``next_transition_at`` selbst setzen.
+    Sprint 9.7 setzt nach jeder Eval ``next_transition_at = now + 60s`` als
+    Heartbeat — d.h. effektiv evaluiert die Engine derzeit jeden Raum
+    mindestens alle 60 s, plus Event-getriggert bei Belegungs-POST.
+    """
+    return asyncio.run(_evaluate_due_rooms_async())
+
+
+async def _evaluate_due_rooms_async() -> dict[str, Any]:
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from heizung.models.room import Room
+
+    now = _dt.now(tz=_UTC)
+    async with SessionLocal() as session:
+        stmt = select(Room.id).where(
+            (Room.next_transition_at.is_(None)) | (Room.next_transition_at <= now)
+        )
+        ids = list((await session.execute(stmt)).scalars().all())
+
+    triggered = 0
+    for rid in ids:
+        evaluate_room.delay(rid)
+        triggered += 1
+    logger.info("evaluate_due_rooms: triggered=%s rooms_total=%s", triggered, len(ids))
+    return {"triggered": triggered, "now": now.isoformat()}
+
+
 async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
     eval_id = uuid.uuid4()
     async with SessionLocal() as session:
@@ -135,6 +173,20 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                     )
                     sent_devices.append({"id": dev.id, "dev_eui": dev.dev_eui, "status": "failed"})
 
+        # Sprint 9.7: Heartbeat. Layer 2 (9.8) ueberschreibt next_transition_at
+        # mit echten Schaltpunkten (Vorheiz-Beginn, Nachtabsenkung-Wechsel).
+        from datetime import timedelta as _td
+
+        from heizung.models.room import Room as _Room
+
+        now = datetime.now(tz=UTC)
+        await session.execute(
+            select(_Room).where(_Room.id == room_id)
+        )  # warm-up der relation map; ergebnis irrelevant
+        room_obj = await session.get(_Room, room_id)
+        if room_obj is not None:
+            room_obj.last_evaluated_at = now
+            room_obj.next_transition_at = now + _td(seconds=60)
         await session.commit()
 
         return {

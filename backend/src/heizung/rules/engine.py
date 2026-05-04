@@ -30,6 +30,7 @@ from sqlalchemy.orm import joinedload
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
+from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
@@ -88,6 +89,7 @@ class _RoomContext:
     room: Room
     room_type: RoomType
     rule_configs: list[RuleConfig] = field(default_factory=list)
+    summer_mode_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +119,26 @@ def _resolve_t(field_name: str, ctx: _RoomContext) -> Decimal | None:
             if value is not None:
                 return value
     return None
+
+
+def layer_summer_mode(ctx: _RoomContext) -> LayerStep | None:
+    """Layer 0: Sommermodus-Fast-Path (AE-31, AE-34).
+
+    Wenn ``global_config.summer_mode_active`` true ist, ueberspringt die
+    Engine ALLE anderen Layer (1-4) und setzt direkt Frostschutz. Layer 5
+    (Hard Clamp) laeuft trotzdem als Sicherheits-Check.
+
+    Returns ``None`` wenn Sommermodus inaktiv — Caller faehrt mit
+    Layer 1 weiter.
+    """
+    if not ctx.summer_mode_active:
+        return None
+    return LayerStep(
+        layer=EventLogLayer.SUMMER_MODE_FAST_PATH,
+        setpoint_c=int(FROST_PROTECTION_C),
+        reason=CommandReason.SUMMER_MODE,
+        detail="summer_mode_active=true",
+    )
 
 
 def layer_base_target(ctx: _RoomContext) -> LayerStep:
@@ -237,7 +259,7 @@ def hysteresis_decision(
 
 
 async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContext | None:
-    """Eager-Load Room + RoomType + alle relevanten RuleConfigs."""
+    """Eager-Load Room + RoomType + alle relevanten RuleConfigs + GlobalConfig."""
     stmt = (
         select(Room)
         .where(Room.id == room_id)
@@ -247,7 +269,17 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     room: Room | None = result.unique().scalar_one_or_none()
     if room is None:
         return None
-    return _RoomContext(room=room, room_type=room.room_type, rule_configs=list(room.rule_configs))
+
+    # Sprint 9.7: Sommermodus-Flag aus Singleton-global_config.
+    cfg = await session.get(GlobalConfig, 1)
+    summer_active = bool(cfg.summer_mode_active) if cfg else False
+
+    return _RoomContext(
+        room=room,
+        room_type=room.room_type,
+        rule_configs=list(room.rule_configs),
+        summer_mode_active=summer_active,
+    )
 
 
 async def _last_command_for_room(
@@ -291,6 +323,17 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     ctx = await _load_room_context(session, room_id)
     if ctx is None:
         return None
+
+    # Sprint 9.7: Layer 0 Sommermodus-Fast-Path. Skip Layers 1-4 wenn aktiv.
+    summer = layer_summer_mode(ctx)
+    if summer is not None:
+        clamp = layer_clamp(summer.setpoint_c, ctx, prev_reason=summer.reason)
+        return RuleResult(
+            room_id=room_id,
+            setpoint_c=clamp.setpoint_c,
+            layers=(summer, clamp),
+            base_reason=summer.reason,
+        )
 
     base = layer_base_target(ctx)
     clamp = layer_clamp(base.setpoint_c, ctx, prev_reason=base.reason)
