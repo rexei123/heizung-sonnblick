@@ -229,6 +229,32 @@ services:
       retries: 3
       start_period: 30s
 
+  # Sprint 9.7 — Celery-Beat Scheduler.
+  # Trigger ``evaluate_due_rooms`` alle 60 s (siehe celery_app.beat_schedule).
+  # Genau EIN beat-Container — sonst doppelte Triggers bei N Replicas.
+  celery_beat:
+    image: ghcr.io/rexei123/heizung-api:${IMAGE_TAG:-develop}
+    pull_policy: always
+    restart: always
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MQTT_ENABLED: "false"
+    command:
+      - celery
+      - -A
+      - heizung.celery_app
+      - beat
+      - --loglevel=info
+      # Schedule im File (Default: celerybeat-schedule), persistiert
+      # zuletzt-getriggerte Zeitpunkte ueber Container-Restarts.
+      - --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+
   web:
     image: ghcr.io/rexei123/heizung-web:${IMAGE_TAG:-develop}
     pull_policy: always

@@ -26,6 +26,7 @@ from heizung.rules.engine import (
     hysteresis_decision,
     layer_base_target,
     layer_clamp,
+    layer_summer_mode,
 )
 
 # ---------------------------------------------------------------------------
@@ -69,12 +70,40 @@ def _ctx(
     status: RoomStatus = RoomStatus.OCCUPIED,
     room_type: SimpleNamespace | None = None,
     rule_configs: list[SimpleNamespace] | None = None,
+    summer_mode_active: bool = False,
 ) -> _RoomContext:
     return _RoomContext(  # type: ignore[arg-type]
         room=_make_room(status),
         room_type=room_type or _make_room_type(),
         rule_configs=rule_configs or [],
+        summer_mode_active=summer_mode_active,
     )
+
+
+# ---------------------------------------------------------------------------
+# Layer 0 Sommermodus (Sprint 9.7)
+# ---------------------------------------------------------------------------
+
+
+def test_summer_mode_inactive_returns_none() -> None:
+    """Standard: summer_mode_active=False -> Layer 0 ueberspringt."""
+    assert layer_summer_mode(_ctx(summer_mode_active=False)) is None
+
+
+def test_summer_mode_active_returns_frost_protection() -> None:
+    """Aktiv -> alle Raeume bekommen Frostschutz, reason=summer_mode."""
+    step = layer_summer_mode(_ctx(summer_mode_active=True))
+    assert step is not None
+    assert step.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
+    assert step.setpoint_c == int(FROST_PROTECTION_C)
+    assert step.reason == CommandReason.SUMMER_MODE
+
+
+def test_summer_mode_overrides_room_status() -> None:
+    """Selbst Belegt-Status fuehrt im Sommermodus zu Frostschutz."""
+    step = layer_summer_mode(_ctx(status=RoomStatus.OCCUPIED, summer_mode_active=True))
+    assert step is not None
+    assert step.setpoint_c == int(FROST_PROTECTION_C)
 
 
 # ---------------------------------------------------------------------------
