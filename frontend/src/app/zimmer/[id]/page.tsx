@@ -207,7 +207,7 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
               </div>
             </div>
             <Link
-              href={{ pathname: "/devices/[device_id]", query: { device_id: d.id } } as never}
+              href={`/devices/${d.id}` as never}
               className="text-xs text-primary hover:underline"
             >
               Detail →
