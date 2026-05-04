@@ -20,9 +20,9 @@ plus Sprint 9.5 Audit-Persistenz).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -32,6 +32,7 @@ from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.rules.constants import FROST_PROTECTION_C
@@ -90,6 +91,9 @@ class _RoomContext:
     room_type: RoomType
     rule_configs: list[RuleConfig] = field(default_factory=list)
     summer_mode_active: bool = False
+    # Sprint 9.8: naechste aktive Belegung (fuer Vorheizen-Logik). NULL wenn
+    # keine zukuenftige oder laufende Belegung existiert.
+    next_occupancy: Occupancy | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +109,7 @@ def _resolve_t(field_name: str, ctx: _RoomContext) -> Decimal | None:
     nach Saison-Aktivitaet gefiltert. Sprint 9.3 ignoriert Saison
     bewusst und nimmt alle ein.
     """
-    by_scope = {
+    by_scope: dict[RuleConfigScope, list[RuleConfig]] = {
         RuleConfigScope.ROOM: [],
         RuleConfigScope.ROOM_TYPE: [],
         RuleConfigScope.GLOBAL: [],
@@ -173,6 +177,99 @@ def layer_base_target(ctx: _RoomContext) -> LayerStep:
         reason=reason,
         detail=f"status={status.value}",
     )
+
+
+def _resolve_field(field_name: str, ctx: _RoomContext) -> Any:
+    """Generische RuleConfig-Hierarchie ROOM > ROOM_TYPE > GLOBAL fuer ein
+    beliebiges Feld (Decimal, time, int)."""
+    by_scope: dict[RuleConfigScope, list[RuleConfig]] = {
+        RuleConfigScope.ROOM: [],
+        RuleConfigScope.ROOM_TYPE: [],
+        RuleConfigScope.GLOBAL: [],
+    }
+    for rc in ctx.rule_configs:
+        by_scope[rc.scope].append(rc)
+    for scope in (RuleConfigScope.ROOM, RuleConfigScope.ROOM_TYPE, RuleConfigScope.GLOBAL):
+        for rc in by_scope[scope]:
+            value = getattr(rc, field_name, None)
+            if value is not None:
+                return value
+    return None
+
+
+def _is_in_night_window(now_local_time: time, night_start: time, night_end: time) -> bool:
+    """Liegt die Uhrzeit im Nacht-Fenster? Faehrt korrekt ueber Mitternacht.
+
+    Beispiel: night_start=22:00, night_end=06:00 -> "Nacht" wenn t>=22:00 ODER t<06:00.
+    Beispiel: night_start=01:00, night_end=05:00 -> "Nacht" wenn 01:00<=t<05:00.
+    """
+    if night_start <= night_end:
+        # Kein Wrap: gleiches Datum
+        return night_start <= now_local_time < night_end
+    # Wrap ueber Mitternacht
+    return now_local_time >= night_start or now_local_time < night_end
+
+
+def layer_temporal(
+    base_step: LayerStep,
+    ctx: _RoomContext,
+    *,
+    now: datetime,
+) -> LayerStep | None:
+    """Layer 2: Zeitsteuerung — Vorheizen + Nachtabsenkung.
+
+    **Vorheizen (gewinnt bei Konflikt):**
+    Wenn Status=RESERVED und naechste Belegung beginnt in [now, now+preheat_min]
+    -> Setpoint wie OCCUPIED (Gast soll in einen warmen Raum kommen).
+
+    **Nachtabsenkung:**
+    Wenn Status=OCCUPIED und Uhrzeit in [night_start, night_end]
+    -> Setpoint = ``t_night``.
+
+    Returns ``None`` wenn weder Vorheizen noch Nacht aktiv — Caller behaelt
+    Layer-1-Output.
+
+    Time-Berechnung in lokaler Hotel-Zeitzone (default Europe/Vienna in
+    global_config). Sprint 9.8 vereinfacht: nutzt now (UTC) direkt — Hotelier
+    kann Sprint 13+ via global_config.timezone konfigurieren.
+    """
+    # --- VORHEIZEN ---
+    occ = ctx.next_occupancy
+    if occ is not None and ctx.room.status == RoomStatus.RESERVED:
+        preheat_min = _resolve_field("preheat_minutes_before_checkin", ctx)
+        if preheat_min is not None and preheat_min > 0:
+            preheat_window_start = occ.check_in - timedelta(minutes=int(preheat_min))
+            if preheat_window_start <= now < occ.check_in:
+                t_occupied = _resolve_field("t_occupied", ctx) or ctx.room_type.default_t_occupied
+                return LayerStep(
+                    layer=EventLogLayer.TEMPORAL_OVERRIDE,
+                    setpoint_c=_quantize(t_occupied),
+                    reason=CommandReason.PREHEAT_CHECKIN,
+                    detail=(
+                        f"preheat: check_in={occ.check_in.isoformat()} "
+                        f"window_start={preheat_window_start.isoformat()}"
+                    ),
+                )
+
+    # --- NACHTABSENKUNG ---
+    if ctx.room.status == RoomStatus.OCCUPIED:
+        night_start = _resolve_field("night_start", ctx)
+        night_end = _resolve_field("night_end", ctx)
+        if night_start is not None and night_end is not None:
+            now_t = now.time()
+            if _is_in_night_window(now_t, night_start, night_end):
+                t_night = _resolve_field("t_night", ctx) or ctx.room_type.default_t_night
+                return LayerStep(
+                    layer=EventLogLayer.TEMPORAL_OVERRIDE,
+                    setpoint_c=_quantize(t_night),
+                    reason=CommandReason.NIGHT_SETBACK,
+                    detail=(
+                        f"night_setback: now={now_t.isoformat()} "
+                        f"window=[{night_start.isoformat()},{night_end.isoformat()}]"
+                    ),
+                )
+
+    return None
 
 
 def layer_clamp(
@@ -274,11 +371,24 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     cfg = await session.get(GlobalConfig, 1)
     summer_active = bool(cfg.summer_mode_active) if cfg else False
 
+    # Sprint 9.8: naechste aktive Belegung fuer Vorheizen-Logik.
+    now = datetime.now(tz=UTC)
+    next_occ_stmt = (
+        select(Occupancy)
+        .where(Occupancy.room_id == room_id)
+        .where(Occupancy.is_active.is_(True))
+        .where(Occupancy.check_out > now)
+        .order_by(Occupancy.check_in)
+        .limit(1)
+    )
+    next_occ = (await session.execute(next_occ_stmt)).scalar_one_or_none()
+
     return _RoomContext(
         room=room,
         room_type=room.room_type,
         rule_configs=list(room.rule_configs),
         summer_mode_active=summer_active,
+        next_occupancy=next_occ,
     )
 
 
@@ -336,6 +446,19 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         )
 
     base = layer_base_target(ctx)
+
+    # Sprint 9.8: Layer 2 Temporal (Vorheizen + Nachtabsenkung).
+    now = datetime.now(tz=UTC)
+    temporal = layer_temporal(base, ctx, now=now)
+    if temporal is not None:
+        clamp = layer_clamp(temporal.setpoint_c, ctx, prev_reason=temporal.reason)
+        return RuleResult(
+            room_id=room_id,
+            setpoint_c=clamp.setpoint_c,
+            layers=(base, temporal, clamp),
+            base_reason=temporal.reason,
+        )
+
     clamp = layer_clamp(base.setpoint_c, ctx, prev_reason=base.reason)
 
     return RuleResult(

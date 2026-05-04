@@ -10,7 +10,7 @@ dort lohnt sich die Integration-Test-Setup-Investition.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -22,11 +22,13 @@ from heizung.rules.engine import (
     HEARTBEAT_INTERVAL,
     HYSTERESIS_C,
     MAX_SETPOINT_C,
+    _is_in_night_window,
     _RoomContext,
     hysteresis_decision,
     layer_base_target,
     layer_clamp,
     layer_summer_mode,
+    layer_temporal,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,12 +58,30 @@ def _make_room(status: RoomStatus = RoomStatus.OCCUPIED) -> SimpleNamespace:
 
 
 def _make_rule_config(
-    scope: RuleConfigScope, *, t_occupied: float | None = None, t_vacant: float | None = None
+    scope: RuleConfigScope,
+    *,
+    t_occupied: float | None = None,
+    t_vacant: float | None = None,
+    t_night: float | None = None,
+    night_start: time | None = None,
+    night_end: time | None = None,
+    preheat_minutes_before_checkin: int | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         scope=scope,
         t_occupied=Decimal(str(t_occupied)) if t_occupied is not None else None,
         t_vacant=Decimal(str(t_vacant)) if t_vacant is not None else None,
+        t_night=Decimal(str(t_night)) if t_night is not None else None,
+        night_start=night_start,
+        night_end=night_end,
+        preheat_minutes_before_checkin=preheat_minutes_before_checkin,
+    )
+
+
+def _make_occupancy(check_in: datetime, *, check_out: datetime | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        check_in=check_in,
+        check_out=check_out or check_in + timedelta(days=1),
     )
 
 
@@ -71,12 +91,14 @@ def _ctx(
     room_type: SimpleNamespace | None = None,
     rule_configs: list[SimpleNamespace] | None = None,
     summer_mode_active: bool = False,
+    next_occupancy: SimpleNamespace | None = None,
 ) -> _RoomContext:
     return _RoomContext(  # type: ignore[arg-type]
         room=_make_room(status),
         room_type=room_type or _make_room_type(),
         rule_configs=rule_configs or [],
         summer_mode_active=summer_mode_active,
+        next_occupancy=next_occupancy,
     )
 
 
@@ -225,6 +247,139 @@ def test_clamp_room_type_min_below_frost_is_ignored() -> None:
     )
     assert step.setpoint_c == int(FROST_PROTECTION_C)
     assert step.reason == CommandReason.FROST_PROTECTION
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 Temporal — Vorheizen + Nachtabsenkung (Sprint 9.8)
+# ---------------------------------------------------------------------------
+
+
+def test_night_window_helper_no_wrap() -> None:
+    """01:00–05:00: Nacht zwischen 01 und 05."""
+    assert _is_in_night_window(time(2, 0), time(1, 0), time(5, 0)) is True
+    assert _is_in_night_window(time(0, 30), time(1, 0), time(5, 0)) is False
+    assert _is_in_night_window(time(5, 0), time(1, 0), time(5, 0)) is False
+
+
+def test_night_window_helper_with_wrap() -> None:
+    """22:00–06:00: Nacht ueber Mitternacht."""
+    assert _is_in_night_window(time(23, 0), time(22, 0), time(6, 0)) is True
+    assert _is_in_night_window(time(2, 0), time(22, 0), time(6, 0)) is True
+    assert _is_in_night_window(time(21, 59), time(22, 0), time(6, 0)) is False
+    assert _is_in_night_window(time(6, 0), time(22, 0), time(6, 0)) is False
+
+
+def test_temporal_no_match_returns_none() -> None:
+    """OCCUPIED ohne Nachtfenster + kein Vorheizen -> None (Layer 1 bleibt)."""
+    base = layer_base_target(_ctx(status=RoomStatus.OCCUPIED))
+    now = datetime(2026, 5, 4, 14, 0, tzinfo=UTC)  # Nachmittag
+    assert layer_temporal(base, _ctx(status=RoomStatus.OCCUPIED), now=now) is None
+
+
+def test_temporal_preheat_active() -> None:
+    """RESERVED + check_in in 30 Min + preheat=60 Min -> Vorheizen aktiv."""
+    now = datetime(2026, 5, 4, 13, 30, tzinfo=UTC)
+    occ = _make_occupancy(check_in=now + timedelta(minutes=30))
+    rcs = [_make_rule_config(RuleConfigScope.GLOBAL, preheat_minutes_before_checkin=60)]
+    ctx = _ctx(status=RoomStatus.RESERVED, rule_configs=rcs, next_occupancy=occ)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.layer == EventLogLayer.TEMPORAL_OVERRIDE
+    assert step.reason == CommandReason.PREHEAT_CHECKIN
+    assert step.setpoint_c == 21  # default occupied
+
+
+def test_temporal_preheat_too_early_no_match() -> None:
+    """RESERVED + check_in in 90 Min + preheat=60 Min -> NICHT in window."""
+    now = datetime(2026, 5, 4, 12, 30, tzinfo=UTC)
+    occ = _make_occupancy(check_in=now + timedelta(minutes=90))
+    rcs = [_make_rule_config(RuleConfigScope.GLOBAL, preheat_minutes_before_checkin=60)]
+    ctx = _ctx(status=RoomStatus.RESERVED, rule_configs=rcs, next_occupancy=occ)
+    base = layer_base_target(ctx)
+    assert layer_temporal(base, ctx, now=now) is None
+
+
+def test_temporal_preheat_no_config_no_match() -> None:
+    """preheat-config NULL -> kein Vorheizen, auch wenn check_in in Naehe."""
+    now = datetime(2026, 5, 4, 13, 30, tzinfo=UTC)
+    occ = _make_occupancy(check_in=now + timedelta(minutes=10))
+    ctx = _ctx(status=RoomStatus.RESERVED, next_occupancy=occ)  # keine rule_configs
+    base = layer_base_target(ctx)
+    assert layer_temporal(base, ctx, now=now) is None
+
+
+def test_temporal_night_setback_active() -> None:
+    """OCCUPIED in Nachtfenster -> t_night."""
+    now = datetime(2026, 5, 4, 23, 30, tzinfo=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.reason == CommandReason.NIGHT_SETBACK
+    assert step.setpoint_c == 19
+
+
+def test_temporal_night_setback_outside_window_no_match() -> None:
+    """OCCUPIED am Nachmittag -> kein Setback."""
+    now = datetime(2026, 5, 4, 14, 0, tzinfo=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    assert layer_temporal(base, ctx, now=now) is None
+
+
+def test_temporal_night_setback_only_when_occupied() -> None:
+    """VACANT in Nachtfenster -> Layer 2 inaktiv (Layer 1 bleibt vacant)."""
+    now = datetime(2026, 5, 4, 23, 30, tzinfo=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.VACANT, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    assert layer_temporal(base, ctx, now=now) is None
+
+
+def test_temporal_preheat_wins_over_night() -> None:
+    """RESERVED + check_in 30 Min + preheat 60 + Nachtzeit -> Vorheizen
+    gewinnt (Konflikt-Resolution)."""
+    now = datetime(2026, 5, 4, 23, 30, tzinfo=UTC)  # Nachtzeit
+    occ = _make_occupancy(check_in=now + timedelta(minutes=30))
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            preheat_minutes_before_checkin=60,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.RESERVED, rule_configs=rcs, next_occupancy=occ)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.reason == CommandReason.PREHEAT_CHECKIN
+    assert step.setpoint_c == 21
 
 
 # ---------------------------------------------------------------------------
