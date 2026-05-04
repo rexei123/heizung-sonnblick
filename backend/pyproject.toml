@@ -50,3 +50,10 @@ testpaths = ["tests"]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+
+# Sprint 9.8a: Celery liefert keine Type-Stubs fuer @app.task / @signal.connect-
+# Decorators. Mypy meldet sonst untyped-decorator fuer alle Engine-Tasks. Das
+# Modul-Override beschraenkt die Suppression auf die Celery-Andockpunkte.
+[[tool.mypy.overrides]]
+module = ["heizung.celery_app", "heizung.tasks.*"]
+disable_error_code = ["untyped-decorator"]
