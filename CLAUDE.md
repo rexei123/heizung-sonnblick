@@ -109,6 +109,164 @@ Empfehlung im Chat: jeden Code-Block mit explizitem Header oeffnen, z.B.:
 - `**PowerShell (Windows lokal):**`
 - `**SSH (heizung-test, root):**`
 
+### 5.7 deploy-pull.sh schweigt bei git-ownership-Fehler (Sprint 8 Lesson)
+
+Der Pull-Timer (`heizung-deploy-pull`) ruft intern `git fetch origin/develop` auf dem Server-Repo auf. Wenn der `/opt/heizung-sonnblick`-Ordner eine UID/GID hat, die nicht zu root passt (z.B. nach OS-Update oder beim Re-Install), wirft Git seit 2.35:
+
+```
+fatal: detected dubious ownership in repository at '/opt/heizung-sonnblick'
+```
+
+Symptom: Pull-Timer-Logs zeigen 22h+ FEHLER, Server-Code haengt auf altem Stand, Frontend zeigt veraltete UI ohne sichtbaren Hinweis.
+
+**Diagnose:** `journalctl -u heizung-deploy-pull -n 50 --no-pager`
+
+**Fix einmalig pro Server:**
+```bash
+git config --global --add safe.directory /opt/heizung-sonnblick
+```
+
+**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen, damit neue Server out-of-the-box klappen.
+
+### 5.8 Frontend AppShell nicht doppelt wrappen (Sprint 8.13a Lesson)
+
+`frontend/src/app/layout.tsx` wrapped alle Pages bereits in `<AppShell>`. Wenn eine neue Page-Komponente nochmal `<AppShell>` aussen rum macht, wird die Sidebar zweimal nebeneinander gerendert (kein Build-/Lint-Fehler, nur kosmetisch im Browser).
+
+**Korrekte Vorlage:** `frontend/src/app/devices/page.tsx` (Sprint 7) — gibt direkt `<div>...</div>` zurueck, kein AppShell-Wrapper.
+
+**Falsch (Sprint 8.9-8.12 initial):** `<AppShell><div>...</div></AppShell>` als Page-Return.
+
+### 5.9 Cowork-Mount verschluckt Konfig-Files unbemerkt (Sprint 8.15 Lesson)
+
+Der Mount-Sync laut §5.2 ist nicht nur bei NEUEN Files unzuverlaessig — auch MODIFY-Edits an Konfig-Dateien koennen verschluckt werden, OHNE dass der Edit-Schritt fehlschlaegt. Sprint-8.15-Beispiel: `frontend/tailwind.config.ts` wurde via Sandbox `Edit` aktualisiert, Sandbox sagte "OK", aber der File ist NICHT im PowerShell-Repo angekommen. Der `git add frontend/src` hat ihn dann nicht erfasst, der PR ging ohne neue Tailwind-Tokens raus, der Build generierte keine `bg-add`/`text-error`/`border-error`-CSS-Klassen — sichtbar wurde es erst im Browser an weissen Buttons.
+
+**Pflicht-Check nach Sandbox-Edits an Konfig-Dateien (`tailwind.config.ts`, `next.config.mjs`, `tsconfig.json`, `pyproject.toml`, `alembic.ini`, `*.toml`, `*.yml`, `Dockerfile`):**
+
+```powershell
+# PowerShell (lokal) — VOR jedem `git add`
+git diff --stat frontend\tailwind.config.ts <weitere konfig-files>
+```
+
+Wenn `0 files changed` obwohl ein Edit gemacht wurde: Datei direkt in PowerShell ueberschreiben (`[System.IO.File]::WriteAllText`).
+
+### 5.10 build-images.yml triggert nach `gh pr merge` nicht zuverlaessig (Sprint 8.15 Lesson)
+
+`build-images.yml` ist konfiguriert mit `on: push: branches: [develop, main]` plus `paths: frontend/**`. Trotzdem hat es bei PR #63 (Sprint 8.15) NICHT auf den merge-Push reagiert — im GHCR blieb das alte `:develop`-Image. Vermutlich Race-Condition mit `concurrency.cancel-in-progress: true` oder `paths`-Matching-Edge-Case.
+
+**Pflicht nach jedem PR-Merge mit Frontend- oder Backend-Aenderungen:**
+
+```powershell
+# PowerShell (lokal) — direkt nach `gh pr merge`
+gh workflow run build-images.yml --ref develop  # oder --ref main
+Start-Sleep -Seconds 5
+$runId = (gh run list --workflow=build-images.yml --limit 1 --json databaseId --jq '.[0].databaseId').Trim()
+gh run watch $runId --exit-status
+```
+
+### 5.11 `docker compose pull web` ist nicht beweisend (Sprint 8.15 Lesson)
+
+Wenn das `:develop`-Tag im GHCR stale ist (siehe §5.10), zieht `docker compose pull` zwar ein Image, aber das ist das alte. Output `✔ Image ... Pulled` sagt NICHTS ueber Aktualitaet. Der Pull-Timer am Server schweigt dann ohne Hinweis stundenlang.
+
+**Pflicht-Check nach `docker compose pull`:**
+
+```bash
+# SSH (Server, root)
+docker images ghcr.io/rexei123/heizung-web --format '{{.Tag}} {{.CreatedAt}} {{.ID}}' | head -3
+```
+
+CreatedAt muss nach dem letzten erwarteten Build liegen, ID muss sich vom vorherigen Stand unterscheiden. Sonst: §5.10-Workflow erneut anstossen.
+
+### 5.12 PowerShell `$ErrorActionPreference = "Stop"` greift NICHT fuer native Tools (Sprint 9 Lesson)
+
+Der PS-Switch fasst nur PowerShell-Cmdlets, NICHT externe `git.exe`/`gh.exe`/`docker.exe` mit non-zero exit. Beobachtet bei Sprint 9.0 + 9.0a: `gh pr merge` returnte exit 1 (BEHIND), Block lief stur weiter bis zum gruenen Write-Host am Ende — User glaubte alles gut, in Wahrheit war kein PR gemerged.
+
+**Pflicht in jedem PowerShell-Block mit `gh`/`git`-Sequenz:**
+
+```powershell
+function Test-Exit($msg) { if ($LASTEXITCODE -ne 0) { throw $msg } }
+gh pr merge $pr --merge --admin; Test-Exit "merge"
+git push -u origin $branch; Test-Exit "push"
+```
+
+Alternativ ab PS 7.3: `$PSNativeCommandUseErrorActionPreference = $true`.
+
+### 5.13 ChirpStack v4 verlangt `devEui` im Downlink-Payload (Sprint 9.6a Lesson)
+
+Das Topic-Pattern `application/<APPID>/device/<DEVEUI>/command/down` reicht NICHT. Im JSON-Payload muss zusaetzlich `devEui` (lowercase) drin sein, sonst:
+
+```
+WARN chirpstack::integration::mqtt: Processing command error:
+  Payload dev_eui  does not match topic dev_eui 70b3d52dd3034de4
+```
+
+Der Downlink wird stillschweigend verworfen. **Korrektes Format:**
+
+```json
+{
+  "devEui": "70b3d52dd3034de4",
+  "data": "<base64>",
+  "fPort": 1,
+  "confirmed": false
+}
+```
+
+Test-Befehl fuer Diagnose:
+
+```bash
+docker logs deploy-chirpstack-1 --since 30s 2>&1 | grep -iE "command|enqueu"
+```
+
+`Command received` + `Device queue-item enqueued` = OK. Nur `Processing command error` = Payload-Fehler.
+
+### 5.14 Celery-Worker braucht Engine-Reset pro Forked-Process (Sprint 9.6b Lesson)
+
+asyncpg-Connections sind an einen Event-Loop gebunden. Celery `prefork` startet n Worker-Forks, die den DB-Pool des Master-Process erben. `asyncio.run()` in einer Task baut einen NEUEN Loop auf — alte Pool-Connections crashen mit:
+
+```
+RuntimeError: Task got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]>
+              attached to a different loop
+```
+
+**Fix:** `@worker_process_init.connect` in `celery_app.py` ruft `asyncio.run(engine.dispose())` + `create_async_engine` neu, ersetzt `db_module.engine` und `db_module.SessionLocal`. So bekommt jeder Fork einen eigenen frischen Pool.
+
+Zusaetzlich: `pool_pre_ping=False` in `db.py`, sonst pingt der Pool im falschen Loop.
+
+### 5.15 `event_log` wird beim manuellen Cleanup NICHT mit-cleared (Sprint 9.10 Lesson)
+
+Engine-Decision-Panel zeigt Stale-Trace, wenn nur `control_command` geleert wird:
+
+```sql
+DELETE FROM control_command WHERE device_id = X;
+-- event_log bleibt unangetastet -> Frontend zeigt alte Layer-Eintraege
+```
+
+**Bei Re-Trigger nach Bug-Fix beide Tabellen clearen:**
+
+```sql
+DELETE FROM control_command WHERE device_id = X;
+DELETE FROM event_log WHERE room_id = Y;
+```
+
+UI macht jetzt einen Stale-Hinweis (orange Banner) wenn die juengste Evaluation > 1h zurueck ist — Frueh-Warnung statt Daten-Verwirrung.
+
+### 5.16 Next.js typed-Object-`href` resolved zu Query-String, nicht Path-Param (Sprint 9.6b Lesson)
+
+```tsx
+// ❌ FALSCH — produziert /zimmer/[id]?id=1
+<Link href={{ pathname: "/zimmer/[id]", query: { id: r.id } } as never}>
+
+// ✅ RICHTIG — produziert /zimmer/1
+<Link href={`/zimmer/${r.id}` as never}>
+```
+
+Der Object-Form-Cast `as never` umgeht die Typed-Routes-Auflosung von Next.js — das `[id]` bleibt literal in der URL. Template-Literal mit `${id}` ist die einzige zuverlassige Variante.
+
+### 5.17 `docker logs --since Xs` ist nach Container-Restart leer (Sprint 9.6 Lesson)
+
+Beim Re-Deploy via `docker compose up -d --force-recreate` wird der Container neu gestartet. Der vorherige `--since 60s`-Filter sieht das neue Container-Log mit Time-Offset und liefert evtl. NICHTS, obwohl Tasks gerade liefen.
+
+**Pflicht nach Re-Deploy:** mindestens `--tail 30` ohne `--since` verwenden, dann zusaetzlich auf den Worker-Boot-Log (`worker@... ready`) als Marker achten.
+
 ---
 
 ## 6. Aktuelle Backlog-Punkte

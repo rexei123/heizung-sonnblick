@@ -1,23 +1,5 @@
 import type { Config } from "tailwindcss";
 
-/**
- * Tailwind-Konfiguration auf Basis der Design-Strategie 2.0.1.
- *
- * Alle Farben, Radien, Shadows, Spacing-Tokens kommen aus CSS-Variablen
- * in globals.css. Hier nur das Mapping CSS-Variable -> Tailwind-Utility.
- *
- * FLAT-Mapping fuer Surface- und Border-Tokens:
- *   bg-surface         => var(--color-surface)
- *   bg-surface-alt     => var(--color-surface-alt)
- *   border-border      => var(--color-border)
- *   border-border-strong => var(--color-border-strong)
- *
- * NESTED-Mapping fuer Text- und Brand-/Semantik-Farben (mit Sub-Tokens):
- *   text-text-primary  => var(--color-text-primary)
- *   bg-primary         => var(--color-primary)
- *   bg-primary-soft    => var(--color-primary-soft)
- *   text-primary       => var(--color-primary)
- */
 const config: Config = {
   content: [
     "./src/app/**/*.{ts,tsx}",
@@ -29,8 +11,6 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-admin)", "system-ui", "sans-serif"],
       },
-      // Schriftgroessen via Tokens. Aenderung von --font-size-base
-      // skaliert die ganze App proportional.
       fontSize: {
         xs: "var(--font-size-xs)",
         sm: "var(--font-size-sm)",
@@ -39,9 +19,9 @@ const config: Config = {
         xl: "var(--font-size-xl)",
         "2xl": "var(--font-size-2xl)",
         "3xl": "var(--font-size-3xl)",
+        "4xl": "var(--font-size-4xl)",
       },
       colors: {
-        // Brand: Rosé
         primary: {
           DEFAULT: "var(--color-primary)",
           hover: "var(--color-primary-hover)",
@@ -49,23 +29,26 @@ const config: Config = {
           soft: "var(--color-primary-soft)",
           "on-primary": "var(--color-on-primary)",
         },
-        // Text — nested, damit `text-text-primary` semantisch klar ist.
+        add: {
+          DEFAULT: "var(--color-add)",
+          hover: "var(--color-add-hover)",
+          "on-add": "var(--color-on-add)",
+        },
+        "on-primary": "var(--color-on-primary)",
+        "on-add": "var(--color-on-add)",
         text: {
           primary: "var(--color-text-primary)",
           secondary: "var(--color-text-secondary)",
           tertiary: "var(--color-text-tertiary)",
           inverse: "var(--color-text-inverse)",
         },
-        // Surfaces — flach, damit `bg-surface`, `bg-surface-alt` direkt greifen.
         bg: "var(--color-bg)",
         surface: "var(--color-surface)",
         "surface-alt": "var(--color-surface-alt)",
         overlay: "var(--color-overlay)",
-        // Borders — flach, damit `border-border`, `border-border-strong` greifen.
         border: "var(--color-border)",
         "border-strong": "var(--color-border-strong)",
         "border-focus": "var(--color-border-focus)",
-        // Semantik
         success: {
           DEFAULT: "var(--color-success)",
           soft: "var(--color-success-soft)",
@@ -73,6 +56,10 @@ const config: Config = {
         warning: {
           DEFAULT: "var(--color-warning)",
           soft: "var(--color-warning-soft)",
+        },
+        error: {
+          DEFAULT: "var(--color-error)",
+          soft: "var(--color-error-soft)",
         },
         danger: {
           DEFAULT: "var(--color-danger)",
@@ -82,7 +69,6 @@ const config: Config = {
           DEFAULT: "var(--color-info)",
           soft: "var(--color-info-soft)",
         },
-        // Domain-Farben für Heizung
         heating: {
           on: "var(--color-heating-on)",
           off: "var(--color-heating-off)",

@@ -27,9 +27,11 @@ from heizung.models.enums import Orientation, RoomStatus, _enum_values
 
 if TYPE_CHECKING:
     from heizung.models.heating_zone import HeatingZone
+    from heizung.models.manual_setpoint_event import ManualSetpointEvent
     from heizung.models.occupancy import Occupancy
     from heizung.models.room_type import RoomType
     from heizung.models.rule_config import RuleConfig
+    from heizung.models.scenario_assignment import ScenarioAssignment
 
 
 class Room(Base):
@@ -70,6 +72,12 @@ class Room(Base):
 
     notes: Mapped[str | None] = mapped_column(String(1000))
 
+    # Sprint 9.7: Scheduler-Spalten fuer Celery-Beat ``evaluate_due_rooms``.
+    # NULL = noch nie evaluiert (Beat triggert sofort).
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # NULL = kein geplanter Schaltpunkt (Beat triggert nach Heartbeat-Intervall).
+    next_transition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -88,6 +96,12 @@ class Room(Base):
         back_populates="room", cascade="all, delete-orphan"
     )
     rule_configs: Mapped[list[RuleConfig]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    scenario_assignments: Mapped[list[ScenarioAssignment]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    manual_setpoint_events: Mapped[list[ManualSetpointEvent]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )
 

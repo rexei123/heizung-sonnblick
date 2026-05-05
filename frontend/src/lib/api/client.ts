@@ -22,6 +22,12 @@ async function request<T>(
     const res = await fetch(path, {
       ...rest,
       signal: controller.signal,
+      // K-1 (Sprint 8a): same-origin schickt Browser-Auth-Header
+      // (HTTP-Basic-Auth, Cookies) automatisch mit. Default ohne diese
+      // Option waere "same-origin" nur fuer Cookies, NICHT fuer Auth-
+      // Header bei manuellen fetch()-Calls — TanStack Query bekommt
+      // sonst 401 obwohl Browser eingeloggt ist.
+      credentials: "same-origin",
       headers: {
         Accept: "application/json",
         ...(rest.body ? { "Content-Type": "application/json" } : {}),

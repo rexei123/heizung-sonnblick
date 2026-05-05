@@ -280,6 +280,104 @@ Ziel: Hotelier sieht auf einen Blick die LoRaWAN-Geräte mit aktuellen Reading-W
 
 ---
 
+## 2k. Sprint 8 Stammdaten + Belegung (2026-05-02/03, abgeschlossen)
+
+Ziel: Vollständige CRUD-Schicht für Raumtypen / Zimmer / Heizzonen / Belegungen / Hotel-Stammdaten als Voraussetzung für die Regel-Engine in Sprint 9.
+
+**Backend (8.1–8.7):**
+- 6 neue Models: `season`, `scenario`, `scenario_assignment`, `global_config` (Singleton mit `CHECK id=1`), `manual_setpoint_event`, `event_log` (TimescaleDB Hypertable mit 7-Tage-Chunks). Erweiterungen an `room_type` (`max_temp_celsius`, `min_temp_celsius`, `treat_unoccupied_as_vacant_after_hours`) und `rule_config` (`season_id`).
+- Migrationen `0003a_stammdaten_schema.py` + `0003b_event_log_hypertable.py` mit Singleton-Insert.
+- 5 neue API-Module: `room_types.py`, `rooms.py`, `heating_zones.py`, `occupancies.py`, `global_config.py` — Pydantic-v2-Schemas, Zod-äquivalente Validierung, EmailStr für Alert-Adresse.
+- `OccupancyService` mit `has_overlap`, `sync_room_status`, `derive_room_status` für Auto-Status-Update bei Check-in/out.
+- 8 System-Szenarien als Seed (`standard_setpoint`, `preheat_checkin`, `night_setback`, etc.).
+
+**Frontend (8.9–8.13):**
+- 5 neue Routen: `/raumtypen` (Master-Detail), `/zimmer` + `/zimmer/[id]` (Liste + Tabs Stammdaten/Heizzonen/Geräte), `/belegungen` (Liste mit Range-Filter), `/einstellungen/hotel` (Singleton-Form).
+- TanStack-Query-Hooks pro Domain (`hooks-room-types.ts`, `hooks-rooms.ts`, `hooks-occupancies.ts`, `hooks-global-config.ts`).
+- Form-Patterns: `room-type-form`, `room-form`, `heating-zone-list`, `occupancy-form`.
+- AppShell-Sidebar erweitert um 6. Eintrag (`/einstellungen/hotel`).
+- 4 neue Playwright-Smokes (Sprint 8.13).
+
+**Sprint 8.13a Hotfix:** AppShell-Doppel-Render entfernt (5 Pages wrappten zusätzlich `<AppShell>` obwohl `layout.tsx` das schon macht).
+
+**Sprint 8.15 Hotfix Design-Konformität (2026-05-03):**
+- 3 Bugs vom Hotelier nach Sprint-8-Test gemeldet: ASCII-Workaround-Umlaute, Submit-Buttons in Rosé statt Grün, Schriftgröße zu klein. Alle 3 belegt durch Design-Strategie 2.0.1 §3.2 + §6.1.
+- Token-Layer korrigiert (`globals.css` + `tailwind.config.ts`): Schriftgrößen 12/14/16/18/20/24/30/36 statt 11/13/14, neue `--color-add` (#16A34A), Semantik-Farben auf Strategie-Werte.
+- Neue UI-Komponenten: `Button` mit Variants `primary`/`add`/`secondary`/`destructive`/`ghost`, `ConfirmDialog` mit Fokus-Trap-Light + ESC-Close + Backdrop-Klick.
+- Alle 5 Pages + 4 Form-Patterns auf neue Buttons umgebaut: „Anlegen" → grün Add, „Aktualisieren"/„Speichern" → Rosé Primary, „Löschen"/„Stornieren" → rot Destructive Outline mit Pflicht-ConfirmDialog.
+- ASCII-Workarounds in allen UI-Strings durch echte Umlaute ersetzt.
+- Browser-Verifikation auf `heizung-test` via Claude-in-Chrome bestätigt alle 3 Bugs gefixt.
+
+**Schmerzpunkte (in CLAUDE.md §5.9–5.11 dokumentiert):**
+- §5.9: Cowork-Mount-Sync hat `tailwind.config.ts` verschluckt — der erste 8.15-Build war ohne neue Tokens, Klassen wurden nicht generiert. Nachgereicht in PR #64.
+- §5.10: `build-images.yml` reagierte auf `gh pr merge`-Push nicht zuverlässig — manueller `gh workflow run` als Sicherheits-Trigger nötig.
+- §5.11: `docker compose pull` zog stale `:develop`-Tag, ohne Hinweis. Image-ID-Check nach Pull als Pflicht.
+
+**Test-Stand nach Sprint 8:**
+- Backend: 27 Pytest-Tests + 4 neue Sprint-8-Tests (Modelle, Schemas)
+- Frontend: 4 Sprint-7 + 4 Sprint-8.13 Playwright-Smokes
+- TypeScript strict + ESLint + `next build` grün
+
+**Tag:** `v0.1.8-stammdaten` (2026-05-03), auf `main` gemerged via PR #65, Image gebaut + auf beide Server gepullt.
+
+**Backlog erzeugt:**
+- ConfirmDialog-Playwright-Coverage (mit Sprint 11)
+- Codec-Bug Vicki `valve_position > 100%` (Task #86)
+- Codec-Erweiterung fPort 2 Setpoint-Reply 0x52 (Task #87, wird in Sprint 9 ohnehin gebraucht)
+
+---
+
+## 2l. Sprint 9 Engine + Downlink (2026-05-03/04, in Arbeit — Walking-Skeleton fertig)
+
+Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink an Vicki. Killer-Feature aus Master-Plan.
+
+**Sub-Sprint-Stand:**
+
+- ✅ **9.0** Codec mclimate-vicki.js fPort 1+2 + Encode 0x51 + valveOpenness-Clamp (15 Tests, ChirpStack-UI deployed)
+- ✅ **9.0a** Subscriber liest valve_openness statt motor_position + skip setpoint_reply
+- ✅ **9.1** Celery + Redis Worker-Container (Compose-Service celery_worker, concurrency=2, healthcheck `inspect ping`)
+- ✅ **9.2** Downlink-Adapter (build_downlink_message + send_setpoint via aiomqtt, Topic application/{APP_ID}/device/{DevEUI}/command/down)
+- ✅ **9.3** Engine-Skeleton: LayerStep + RuleResult + layer_base_target + layer_clamp + hysteresis_decision (23 Tests)
+- ✅ **9.4-5** evaluate_room-Task mit echter Logik (statt Stub) + Trigger in occupancies POST/Cancel + GET /rooms/{id}/engine-trace + EventLogRead-Schema
+- ✅ **9.6** Live-Test BESTANDEN: Vicki-001 zeigte 18°C nach Engine-Trigger (validiert mit Vicki-Display und ChirpStack-Queue-Eintrag)
+- ✅ **9.6a** Hotfix devEui im Downlink-Payload (ChirpStack v4 Pflicht — sonst stilles Discard)
+- ✅ **9.6b** Bug-Cleanup: Frontend-Link-Bug, Hard-Clamp-Reason durchreichen, pool_pre_ping=False + Worker-Engine-Reset, UI-Stale-Hinweis
+- ✅ **9.10** Frontend EngineDecisionPanel: Tab "Engine" im Zimmer-Detail mit Schicht-Trace + Vorherige Evaluationen + Refetch 30s
+- ⏸ **9.7** Sommermodus (Layer 0) + Celery-Beat-Scheduler (60s autonomes Re-Eval)
+- ⏸ **9.8** Layer 2 Temporal (Vorheizen 60min vor Check-in + Nachtabsenkung)
+- ⏸ **9.9** Layer 3+4 Manual + Window
+- ⏸ **9.11** Live-Test #2 mit allen Layern
+- ⏸ **9.12** Doku + PR develop→main + Tag v0.1.9-engine
+
+**Architektur-Bestaetigungen (Live-Test 2026-05-03):**
+- AE-32 (Hysterese 1 °C statt 0.5 °C) durch Vicki-Spike + Live-Run validiert
+- Engine-Decision-Panel zeigt korrekte Layer-Trace mit setpoint_in/setpoint_out + reason + detail-JSON
+- ChirpStack-App-ID `b7d74615-6ea9-4b54-aa05-fd094e3c2cae` in heizung-test/.env, in Codec auch eingetragen
+- Vicki-001 (DevEUI 70b3d52dd3034de4) in Heizzone "Schlafzimmer" id=91 von Zimmer 101
+
+**Lessons in CLAUDE.md §5.12-5.17 dokumentiert:**
+- §5.12 PowerShell `$ErrorActionPreference` greift nicht fuer native CLI-Tools
+- §5.13 ChirpStack v4 verlangt devEui im Payload
+- §5.14 Celery-Worker braucht Engine-Reset pro Forked-Process
+- §5.15 event_log wird bei manueller Cleanup nicht mitcleared
+- §5.16 Next.js Object-href cast resolved nicht zu Path-Param
+- §5.17 docker logs --since nach Container-Restart leer
+
+**Tag (geplant):** `v0.1.9-rc1-walking-skeleton` auf develop nach Sprint 9.6b. Final-Tag `v0.1.9-engine` auf main erst nach 9.7-9.12.
+
+**Test-Stand nach Sprint 9.6b:**
+- Backend: 27 + 4 + 4 (downlink) + 23 (engine) + 3 (celery) = 61 Pytest-Tests
+- Codec: 15 Node-Tests
+- Frontend: keine neuen Playwright-Smokes — Engine-Panel nur live-getestet (Sprint 11 Backlog)
+
+**Backlog erzeugt:**
+- Engine-Trace-API: stale event_log nach Bug-Fix-Roundtrip (manuelle DB-Clean noetig)
+- ChirpStack-Bootstrap-Skript fuer reproduzierbares Codec-Setup (war im Sprint 6 Backlog, bestaetigt)
+- pool_pre_ping=False als Workaround — sauberer Fix wenn asyncpg + celery besser integriert werden (Sprint 14+)
+- Mosquitto-Reconnect-Spam bei heizung-api-Subscriber (kosmetisch, nicht-blockierend)
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

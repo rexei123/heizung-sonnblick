@@ -15,7 +15,11 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Übersicht", icon: "home" },
+  { href: "/zimmer", label: "Zimmer", icon: "meeting_room" },
+  { href: "/belegungen", label: "Belegungen", icon: "event" },
+  { href: "/raumtypen", label: "Raumtypen", icon: "category" },
   { href: "/devices", label: "Geräte", icon: "thermostat" },
+  { href: "/einstellungen/hotel", label: "Einstellungen", icon: "settings" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }): ReactNode {

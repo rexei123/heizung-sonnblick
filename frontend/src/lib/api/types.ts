@@ -80,3 +80,261 @@ export interface ApiError {
   status: number;
   detail: string | unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 8 Stammdaten — Spiegel zu backend/src/heizung/schemas/*.py
+// ---------------------------------------------------------------------------
+
+/**
+ * Raumtyp (Sprint 8.4). Hotelzimmer oder andere Einheiten (Tagungsraum, etc.).
+ * Default-Sollwerte werden in der Engine als Layer-1-Basis verwendet.
+ */
+export interface RoomType {
+  id: number;
+  name: string;
+  description: string | null;
+  is_bookable: boolean;
+  default_t_occupied: number;
+  default_t_vacant: number;
+  default_t_night: number;
+  max_temp_celsius: number | null;
+  min_temp_celsius: number | null;
+  treat_unoccupied_as_vacant_after_hours: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomTypeCreate {
+  name: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeUpdate {
+  name?: string;
+  description?: string | null;
+  is_bookable?: boolean;
+  default_t_occupied?: number;
+  default_t_vacant?: number;
+  default_t_night?: number;
+  max_temp_celsius?: number | null;
+  min_temp_celsius?: number | null;
+  treat_unoccupied_as_vacant_after_hours?: number | null;
+}
+
+export interface RoomTypeListQuery {
+  is_bookable?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Zimmer (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type Orientation =
+  | "N"
+  | "NE"
+  | "E"
+  | "SE"
+  | "S"
+  | "SW"
+  | "W"
+  | "NW";
+
+export type RoomStatus =
+  | "vacant"
+  | "occupied"
+  | "reserved"
+  | "cleaning"
+  | "blocked";
+
+export interface Room {
+  id: number;
+  number: string;
+  display_name: string | null;
+  room_type_id: number;
+  floor: number | null;
+  orientation: Orientation | null;
+  status: RoomStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomCreate {
+  number: string;
+  display_name?: string | null;
+  room_type_id: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  notes?: string | null;
+}
+
+export interface RoomUpdate {
+  number?: string;
+  display_name?: string | null;
+  room_type_id?: number;
+  floor?: number | null;
+  orientation?: Orientation | null;
+  status?: RoomStatus;
+  notes?: string | null;
+}
+
+export interface RoomListQuery {
+  room_type_id?: number;
+  status?: RoomStatus;
+  floor?: number;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Heizzonen (Sprint 8.4)
+// ---------------------------------------------------------------------------
+
+export type HeatingZoneKind =
+  | "bedroom"
+  | "bathroom"
+  | "living"
+  | "hallway"
+  | "other";
+
+export interface HeatingZone {
+  id: number;
+  room_id: number;
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HeatingZoneCreate {
+  kind: HeatingZoneKind;
+  name: string;
+  is_towel_warmer?: boolean;
+}
+
+export interface HeatingZoneUpdate {
+  kind?: HeatingZoneKind;
+  name?: string;
+  is_towel_warmer?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Belegungen (Sprint 8.5)
+// ---------------------------------------------------------------------------
+
+export type OccupancySource = "manual" | "pms";
+
+export interface Occupancy {
+  id: number;
+  room_id: number;
+  check_in: string;
+  check_out: string;
+  guest_count: number | null;
+  source: OccupancySource;
+  external_id: string | null;
+  is_active: boolean;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OccupancyCreate {
+  room_id: number;
+  check_in: string;
+  check_out: string;
+  guest_count?: number | null;
+  source?: OccupancySource;
+  external_id?: string | null;
+}
+
+export interface OccupancyListQuery {
+  from?: string;
+  to?: string;
+  room_id?: number;
+  active?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// global_config (Sprint 8.6 — Singleton)
+// ---------------------------------------------------------------------------
+
+export interface GlobalConfig {
+  id: number;
+  hotel_name: string;
+  timezone: string;
+  default_checkin_time: string;
+  default_checkout_time: string;
+  summer_mode_active: boolean;
+  summer_mode_starts_on: string | null;
+  summer_mode_ends_on: string | null;
+  alert_email: string | null;
+  alert_device_offline_minutes: number;
+  alert_battery_warn_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GlobalConfigUpdate {
+  hotel_name?: string;
+  timezone?: string;
+  default_checkin_time?: string;
+  default_checkout_time?: string;
+  summer_mode_active?: boolean;
+  summer_mode_starts_on?: string | null;
+  summer_mode_ends_on?: string | null;
+  alert_email?: string | null;
+  alert_device_offline_minutes?: number;
+  alert_battery_warn_percent?: number;
+}
+
+// ---------------------------------------------------------------------------
+// event_log (Sprint 9.5 — Engine-Audit-Trace pro Layer)
+// ---------------------------------------------------------------------------
+
+export type EventLogLayer =
+  | "summer_mode_fast_path"
+  | "base_target"
+  | "temporal_override"
+  | "manual_override"
+  | "guest_override"
+  | "window_safety"
+  | "hard_clamp";
+
+export type CommandReason =
+  | "occupied_setpoint"
+  | "vacant_setpoint"
+  | "night_setback"
+  | "day_setback"
+  | "preheat_checkin"
+  | "checkout_setback"
+  | "window_open"
+  | "guest_override"
+  | "long_vacant"
+  | "frost_protection"
+  | "summer_mode"
+  | "manual"
+  | "manual_event";
+
+export interface EventLogEntry {
+  time: string;
+  room_id: number;
+  evaluation_id: string;
+  layer: EventLogLayer;
+  device_id: number | null;
+  setpoint_in: string | null; // Decimal — Backend liefert string
+  setpoint_out: string | null;
+  reason: CommandReason | null;
+  details: Record<string, unknown> | null;
+}
