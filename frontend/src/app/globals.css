@@ -177,3 +177,33 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================
+ * shadcn-Foundation-Tokens (HSL) — Sprint 9.8d
+ * Tailwind v3, slate-Default-Palette + Brand-Rosé für --primary/--ring.
+ * Konsistent mit shadcn-CLI für T2/T3 (shadcn add ...).
+ * ============================================================ */
+@layer base {
+  :root {
+    --primary: 340.3 70.3% 55.1%;            /* Brand-Rosé #DD3C71 */
+    --primary-foreground: 0 0% 100%;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 340.3 70.3% 55.1%;               /* Brand-Rosé für Focus-Ring */
+    --radius: 0.5rem;
+  }
+}
