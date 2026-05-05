@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-04-28. Sprints 0 (Baseline), 1 (GHCR-PAT-Rotation), 2 (Web-Healthcheck), 3 (UFW-Reaktivierung), 4 (Domain hoteltec.at) und 5 (LoRaWAN-Foundation lokal) abgeschlossen.
+Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in Arbeit.
 
 ---
 
@@ -397,27 +397,57 @@ Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink a
 ## 4. Architektur-Stand
 
 ### Backend (FastAPI + PostgreSQL/TimescaleDB)
-- Domain-Model vollständig: Zimmer, Raumtypen, Gäste, Belegungen, Geräte, Events
-- Alembic-Migration 0001_initial deployed auf beiden Servern
-- Seed-Daten: 45 Zimmer + Raumtypen eingespielt
-- Unit-Tests grün
+- Python 3.12, FastAPI >=0.110, SQLAlchemy >=2.0, Pydantic >=2.6, Alembic >=1.13
+- Celery >=5.3 + Redis >=5.0 (Worker + Beat-Scheduler), aiomqtt >=2.3
+- 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable), event_log (Hypertable), control_command
+- Alembic-Migrationen 0001-0004 deployed auf beiden Servern (0003 in zwei Files: 0003a Stammdaten + 0003b event_log-Hypertable)
+- Engine: 6-Layer-Pipeline (Layer 0/1/2/5 + Hysterese implementiert, Layer 3/4 offen)
+- 10 Test-Dateien, 96 Test-Cases, CI grün
 
 ### Frontend (Next.js 14.2 App Router + Tailwind)
-- Grundgerüst mit Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
+- Next.js 14.2.15, React 18.3.1, TypeScript 5.6.3 strict
+- Tailwind 3.4.14, Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
+- TanStack Query 5.100.5 für Server-State, recharts 3.8.1 für Charts
+- Eigene UI-Komponenten unter `components/ui/` (Button, ConfirmDialog) — kein shadcn/ui
 - AppShell mit 200 px Sidebar
-- Caddy-Reverse-Proxy konfiguriert
-- **Hinweis:** shadcn/ui ist derzeit **nicht** installiert. Runtime-Deps sind `next`, `react`, `react-dom`, `clsx`, `tailwind-merge`. Einführung von shadcn/ui wird separat entschieden, wenn erste Komponenten es brauchen.
-- Playwright E2E eingerichtet (Smoke-Tests) + CI-Job `e2e` in `.github/workflows/frontend-ci.yml`
+- Playwright E2E (`smoke.spec.ts`, `devices.spec.ts` unter `frontend/tests/e2e/`) — `sprint8.spec.ts` noch nicht erstellt, siehe Backlog
 
 ### Infrastruktur
-- Docker Compose: api, web, postgres, redis, caddy (5 Container pro Umgebung)
-- CI/CD: GitHub Actions baut Images bei Push auf `develop`/`main`, published nach GHCR
-- Deploy: systemd-Timer auf Server zieht neue Images alle 5 Min
+- Docker Compose: 13 Services (api, web, db/timescaledb, redis, caddy, mosquitto, chirpstack, chirpstack-postgres, chirpstack-gateway-bridge, celery_worker, celery_beat) plus 2 Init-Sidecars (chirpstack-init, chirpstack-gateway-bridge-init)
+- Compose-File: `infra/deploy/docker-compose.prod.yml` (zwingend `-f`)
+- CI/CD: GitHub Actions baut Images bei Push auf `develop`, published nach GHCR
+- Deploy: systemd-Timer auf Server zieht neue Images alle 5 Min (Pull-basiert, kein Push-Deploy)
 - SSH-Zugang nur über Tailscale (Public-IP als Fallback via `id_ed25519_heizung`)
 
 ---
 
-## 5. Wichtige Dokumente im Repo
+## 5. Routen-Übersicht
+
+### Frontend-Pages
+
+- `/` — Dashboard-Startseite
+- `/zimmer` — Zimmerliste mit Filter
+- `/zimmer/[id]` — Zimmer-Detail (Tabs: Stammdaten, Belegungen, Engine, Devices)
+- `/raumtypen` — Raumtypen Master-Detail
+- `/belegungen` — Belegungen-Liste + Form
+- `/einstellungen/hotel` — Hotel-Stammdaten Singleton
+- `/devices` — Geräteliste
+- `/devices/[device_id]` — Geräte-Detail mit Reading-Chart
+- `/healthz` — Frontend-Healthcheck (Caddy/Compose)
+
+### Backend-API (`/api/v1/...`)
+
+- `/api/v1/devices/*` — CRUD Devices, GET `{device_id}/sensor-readings`
+- `/api/v1/rooms/*` — CRUD Rooms, GET `{room_id}/engine-trace`
+- `/api/v1/room-types/*` — CRUD Raumtypen
+- `/api/v1/rooms/{room_id}/heating-zones` — CRUD Heating-Zones (nested unter Rooms)
+- `/api/v1/occupancies/*` — CRUD Belegungen
+- `/api/v1/global-config` — GET/PATCH Hotel-weite Settings
+- `/healthz` — Backend-Healthcheck
+
+---
+
+## 5a. Wichtige Dokumente im Repo
 
 - `docs/STRATEGIE.md` — Gesamtkonzept, Architektur, Roadmap
 - `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
@@ -428,16 +458,24 @@ Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink a
 
 ## 6. Nächste Schritte
 
-**Unmittelbar:**
-1. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
-2. **Regel-Engine** (8 Kernregeln) implementieren — Start mit Frostschutz + belegungsabhängige Temperatur
+Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Parallel wird im Strategie-Chat der jeweils nächste Task geplant.
 
-**Backlog (nicht dringend):**
-- Caddy: separater öffentlich erreichbarer Health-Endpoint (aktuell routet `/api/*` auf Backend, der frontend-interne `/api/health` ist von extern nicht getrennt adressierbar — z. B. auf `/_health` umbiegen)
-- Caddyfile formatieren (`caddy fmt --overwrite` — Warnung im Log, kosmetisch)
-- CI-Mirror-Redundanz (`frontend-ci-skip.yml`) aufräumen wenn Branch-Protection-Matcher smarter wird
-- `~/.ssh/config`-Einträge für `heizung-test`/`heizung-main` auf dem Entwickler-Client (spart `-i …`-Flag)
-- heizung-test: Kernel-Update ausstehend (`*** System restart required ***`)
+**Aktiv in Claude Code:**
+- Sprint 9.8c (Hygiene-Sprint): CLAUDE.md erledigt, STATUS.md-Kopf in Arbeit, Windows-Build-Reparatur, sprint8.spec.ts, Lint-Warnings, README-Update folgen.
+
+**Aktiv in Planung (Strategie):**
+- T1 Windows-Build-Reparatur: `frontend/src/app/icon.tsx` durch statisches Asset ersetzen.
+
+**Backlog (nicht priorisiert):**
+- Sprint 9.9: Engine Layer 3 (Manual-Override) + Layer 4 (Window/Fenster-offen)
+- Backup-Cron + Off-Site-Replikation (manueller Dump in `/opt/heizung-backup/`, kein Cron)
+- main-Branch-Strategie (aktuell hinter develop, Image-Tag-Logik klären)
+- Sprint 10: Szenarien (scenario/scenario_assignment-Modelle vorbereitet)
+- NextAuth/Multi-Tenant (Sprint 11+)
+- frontend-ci-skip.yml aufräumen
+- `~/.ssh/config`-Einträge für heizung-test/heizung-main
+- heizung-test: Kernel-Update ausstehend
+- README aktualisieren
 
 ---
 
@@ -482,3 +520,7 @@ Secrets liegen in:
 | `v0.1.3-ufw-reactivation` | Sprint 3 (UFW aktiv auf beiden Servern + RUNBOOK §8 aktualisiert) | 2026-04-22 |
 | `v0.1.4-domain-hoteltec` | Sprint 4 (Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS) | 2026-04-22 |
 | `v0.1.5-lorawan-foundation` | Sprint 5 (LoRaWAN-Pipeline lokal: ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API) | 2026-04-28 |
+| `v0.1.6-hardware-pairing` | Sprint 6 (Hardware-Pairing, Vicki-Onboarding) | 2026-04-29 |
+| `v0.1.7-frontend-dashboard` | Sprint 7 (Frontend-Dashboard, Devices-Liste) | 2026-04-30 |
+| `v0.1.8-stammdaten` | Sprint 8 (Stammdaten + Belegung, Master-Detail-CRUD) | 2026-05-03 |
+| `v0.1.9-rc1-walking-skeleton` | Sprint 9 (Engine 6-Layer-Skelett + Downlink + Engine-Panel) | 2026-05-04 |
