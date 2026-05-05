@@ -2,49 +2,48 @@
 
 Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 
-## 1. IdentitÃ¤t & Stand
+## 1. Identität & Stand
 
-- **Projekt:** Heizungssteuerung fÃ¼r Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
+- **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
 - **Repo:** https://github.com/rexei123/heizung-sonnblick (public)
-- **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick` (synced mit Cowork-Mount)
-- **Aktueller Sprint:** **Sprint 6 in Arbeit** (Hardware-Pairing). Server-Stack vorbereitet, Pairing 2026-04-29 mit IT-Mitarbeiter geplant.
-- **Letzter Tag:** `v0.1.5-lorawan-foundation`
-- **Pairing-Tagesplan:** `docs/working/sprint6-pairing-anleitung.md` (zuerst lesen am Pairing-Tag!)
+- **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick`
+- **Aktueller Sprint:** **Sprint 9.8 abgeschlossen**, Sprint 9.8c (Hygiene) in Vorbereitung.
+- **Letzter Tag:** `v0.1.9-rc1-walking-skeleton`
 - **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
 
-## 2. Pflicht-LektÃ¼re vor Sprint-Arbeit
+## 2. Pflicht-Lektüre vor Sprint-Arbeit
 
 In dieser Reihenfolge:
 
-1. `STATUS.md` â€” Gesamtstand, alle Sprints, aktuelle URLs, Tags
-2. `docs/SPEC-FRAMEWORK.md` â€” verbindliche Code- und Doku-Regeln
-3. `docs/WORKFLOW.md` â€” 5-Phasen-Feature-Flow mit User-Gates
-4. `docs/RUNBOOK.md` â€” Operations, Rescue, UFW, GHCR-PAT, Domain
-5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` â€” ADR-Log
-6. `docs/working/sprint5-execution-plan.md` â€” **wenn Sprint 5 lÃ¤uft**
+1. `CONTEXT.md` — Boot-Anker, aktueller Stand, nächster Schritt
+2. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags
+3. `docs/SPEC-FRAMEWORK.md` — verbindliche Code- und Doku-Regeln
+4. `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit User-Gates
+5. `docs/RUNBOOK.md` — Operations, Rescue, UFW, GHCR-PAT, Domain
+6. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
 
 ## 3. Goldene Regeln
 
-1. **5-Phasen-Workflow:** Brief â†’ Sprintplan â†’ User-Gate â†’ Execution â†’ Tag. Keine Schritte Ã¼berspringen.
-2. **Branch-Naming:** `feat/sprintN-<slug>` fÃ¼r Features, `chore/<slug>` fÃ¼r Wartung, `fix/<slug>` fÃ¼r Bugs.
+1. **5-Phasen-Workflow:** Brief → Sprintplan → User-Gate → Execution → Tag. Keine Schritte überspringen.
+2. **Branch-Naming:** `feat/sprintN-<slug>` für Features, `chore/<slug>` für Wartung, `fix/<slug>` für Bugs.
 3. **Tag-Pattern:** `v0.<minor>.<sprint>-<slug>` (z. B. `v0.1.5-lorawan-foundation`).
-4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewÃ¼nscht.
-5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergÃ¤nzt.
-6. **Sprache:** Deutsch, Sie-Form, sachlich.
-7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)** oder **SSH (Server)** kennzeichnen.
+4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewünscht. Bei Claude-Code-Commits: `Co-Authored-By: Claude` immer dranhängen.
+5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergänzt.
+6. **Sprache:** Deutsch, Sie-Form, sachlich, maximal kurz, hohe Inhaltsdichte, keine Floskeln.
+7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)**, **SSH (Server)** oder **Claude Code (im Repo)** kennzeichnen.
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
-9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer Ã¼ber PR.
-10. **Cowork-Mount = Windows-Repo:** Edits in `/sessions/.../mnt/heizung-sonnblick/` landen direkt in `C:\Users\User\dev\heizung-sonnblick\`.
+9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer über PR.
+10. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
 
 ## 4. Operations-Highlights
 
 - **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung` (zwingend `-i ...`-Flag, Default-Key passt nicht)
 - **Server-Hostnames:** `heizung-test`, `heizung-main` (Tailscale MagicDNS)
-- **Container-Stack:** api, web, db (timescaledb), redis, caddy â€” Compose-File: `docker-compose.prod.yml` (zwingend `-f`)
-- **Deploy:** GHCR Pull Ã¼ber systemd-Timer (5 Min), KEIN Push-Deploy
-- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` â€” NICHT Hetzner Cloud DNS
+- **Container-Stack:** api, web, db (timescaledb), redis, caddy, mosquitto, chirpstack, chirpstack-postgres, chirpstack-gateway-bridge, celery_worker, celery_beat (plus Init-Sidecars `chirpstack-init`, `chirpstack-gateway-bridge-init`) — Compose-File: `infra/deploy/docker-compose.prod.yml` (zwingend `-f`)
+- **Deploy:** GHCR Pull über systemd-Timer (5 Min), KEIN Push-Deploy
+- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` — NICHT Hetzner Cloud DNS
 - **UFW:** aktiv auf beiden Servern, Port 22/80/443 + tailscale0 erlaubt
-- **PAT-Type:** Classic PAT (Fine-grained unterstÃ¼tzt GHCR nicht)
+- **PAT-Type:** Classic PAT (Fine-grained unterstützt GHCR nicht)
 
 ## 5. Lessons Learned (Pflicht-Lektuere, NICHT ueberspringen)
 
@@ -57,7 +56,9 @@ Diese Punkte sind harte Lehren aus echten Fehlern. Bei jedem Verstoss wiederhole
 - "Quick Fix" gibt es nicht. Jedes Item, das im Wartemodus zwischendrin "schnell mit reingenommen" wird, frisst 1+ Stunden.
 - Im Pairing-/Wartemodus KEINE Architektur-Aenderungen. Nur fertige, getestete, klar abgegrenzte Items.
 
-### 5.2 Cowork-Mount-Sandbox-Quirks (sehr wichtig)
+### 5.2 Cowork-Mount-Sandbox-Quirks (HISTORISCH — gilt nicht mehr seit Umstieg auf Claude Code)
+
+Diese Lesson stammt aus der Cowork-Phase. Seit Umstieg auf Claude Code (Sprint 9.8c) nicht mehr relevant. Aufbewahrt als Wissensspeicher.
 
 Der Cowork-Mount unter `/sessions/.../mnt/heizung-sonnblick/` ist NICHT 1:1 mit dem Windows-Repo synchron. Goldene Regel 10 (alte CLAUDE.md) ist eine Luege.
 
