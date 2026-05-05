@@ -70,3 +70,6 @@ sprint0*.ps1
 # Doku-Ausnahme: das Strategie-Dokument soll im Repo bleiben
 !docs/Design-Strategie-2.0.1.docx
 
+# Claude Code lokale Settings (nicht committen)
+.claude/
+
