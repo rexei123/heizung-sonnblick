@@ -475,6 +475,10 @@ Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Pa
 - frontend-ci-skip.yml aufräumen
 - `~/.ssh/config`-Einträge für heizung-test/heizung-main
 - heizung-test: Kernel-Update ausstehend
+- e2e-Smoketests für Sprint-8-Routen (/belegungen, /einstellungen/hotel, 
+  Master-Detail-Pages): aktuell keine e2e-Coverage. Architektur-Entscheidung 
+  vor Implementierung — Playwright-Mocking via route.fulfill ODER 
+  api+db-Container in CI hochfahren. Eigener Mini-Sprint, nicht Hygiene.
 - README aktualisieren
 
 ---
