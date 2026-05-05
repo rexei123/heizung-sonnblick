@@ -378,6 +378,29 @@ Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink a
 
 ---
 
+## 2m. Sprint 9.8c Hygiene-Sprint (2026-05-05, abgeschlossen)
+
+Ziel: Repo-Hygiene zwischen Sprint 9.8 und Sprint 9.9. Veraltete Doku, Windows-Build-Bug, Lint-Warnings, fehlende Backlog-Notiz.
+
+**Tasks:**
+
+- ✅ **T0a CLAUDE.md auf Sprint 9.8 ziehen** — Mojibake bereinigt, §1 Stand auf 9.8c gezogen, §3 Goldene Regeln 4/6/7 erweitert, §3 Regel 10 ersetzt durch Claude-Code-Workflow, §4 Container-Stack vollständig (13 Services + 2 Init-Sidecars), §5.2 als HISTORISCH markiert. PR #84.
+- ✅ **T0b STATUS.md auf Sprint 9.8 ziehen** — Header-Datum 2026-05-05, §4 Architektur-Stand mit Versionen + 14 Modellen + Engine-Status, §5 neue Routen-Übersicht (Frontend-Pages + Backend `/api/v1/...`), §5a alte Doku-Sektion umbenannt, §6 Pipeline-Modell, §9 Tag-Tabelle vollständig (10 Tags). PR #85.
+- ✅ **T1 Windows-Build-Reparatur** — `frontend/src/app/icon.tsx` (next/og ImageResponse, brach Windows-Build mit „Invalid URL") durch statisches `icon.png` ersetzt (512×512, Brand-Rosé `#DD3C71`, Roboto Bold „H" via System.Drawing). PR #86.
+- ✅ **T2 Backlog-Notiz e2e-Smoketests** — STATUS.md §6 ergänzt um Mini-Sprint-Notiz für Sprint-8-Routen-e2e-Coverage (Architektur-Entscheidung Mocking vs. Container in CI offen). Commit `57be5af` auf chore-Branch.
+- ✅ **T5 ESLint-Warnings beheben** — Material-Symbols-Outlined selbst gehostet (Static-Cut v332, 309 KB woff2, Apache 2.0), `<head>`-Block aus `layout.tsx` entfernt. Beide Warnings (`google-font-display`, `no-page-custom-font`) weg, DSGVO-Vorteil (keine Direktladung von fonts.googleapis.com). PR #87.
+- ✅ **T6 README + Abschluss-Doku** — README-Status, Stack-Sektion mit Versionen + Engine + DSGVO-Hinweis, ADR-Range AE-38, Tag-Tabelle bis v0.1.9-rc1. STATUS.md §2m + §6 finalisiert.
+
+**Tag-Vergabe:** Keiner. Hygiene-Sprint ohne Funktions-Änderung.
+
+**Lessons Learned:**
+- Render-Wrap-Artefakt bei langen PowerShell-Skript-Zeilen — Lösung: Type-Aliase + Backtick-Continuation, alle Zeilen <80 Zeichen halten.
+- curl-WD-Bug: relative Pfade im curl `-o`-Argument hängen WD-Prefix dran; Bash-Tool persistiert WD zwischen Calls nicht zuverlässig. Lehre: absolute Pfade oder `cd` zum Repo-Root vor curl.
+- Material-Symbols Variable-Font ist 3.74 MB, Static-Cut 309 KB. Subset auf tatsächlich genutzte Glyphen scheitert am dynamischen `{children}`-Pattern in Icon-Components.
+- `npm run build` validiert URL-References in CSS NICHT zur Build-Zeit — Asset-Existenz wird erst zur Runtime im Browser geprüft. Lokaler Build kann grün sein trotz fehlender Asset.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -461,12 +484,13 @@ Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink a
 Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Parallel wird im Strategie-Chat der jeweils nächste Task geplant.
 
 **Aktiv in Claude Code:**
-- Sprint 9.8c (Hygiene-Sprint): CLAUDE.md erledigt, STATUS.md-Kopf in Arbeit, Windows-Build-Reparatur, sprint8.spec.ts, Lint-Warnings, README-Update folgen.
+- (kein aktiver Task — Sprint 9.8c abgeschlossen, wartet auf nächste Vorgabe)
 
 **Aktiv in Planung (Strategie):**
-- T1 Windows-Build-Reparatur: `frontend/src/app/icon.tsx` durch statisches Asset ersetzen.
+- (Platzhalter — wird nach Entscheidung über Sprint 9.8d/9.9 gefüllt)
 
 **Backlog (nicht priorisiert):**
+- Sprint 9.8d: shadcn/ui-Foundation (Button, Dialog, Form-Felder von shadcn übernehmen)
 - Sprint 9.9: Engine Layer 3 (Manual-Override) + Layer 4 (Window/Fenster-offen)
 - Backup-Cron + Off-Site-Replikation (manueller Dump in `/opt/heizung-backup/`, kein Cron)
 - main-Branch-Strategie (aktuell hinter develop, Image-Tag-Logik klären)
@@ -479,7 +503,6 @@ Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Pa
   Master-Detail-Pages): aktuell keine e2e-Coverage. Architektur-Entscheidung 
   vor Implementierung — Playwright-Mocking via route.fulfill ODER 
   api+db-Container in CI hochfahren. Eigener Mini-Sprint, nicht Hygiene.
-- README aktualisieren
 
 ---
 
