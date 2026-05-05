@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -492,8 +492,14 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
 
 
 def _quantize(value: Decimal | float | int) -> int:
-    """Vicki-Hardware: nur ganze Grad. Standard Round-Half-Up reicht."""
-    return int(round(float(value)))
+    """Vicki-Hardware: nur ganze Grad.
+
+    Sprint 9.8b: Pythons builtin ``round()`` macht Banker's Rounding
+    (22.5 -> 22). Test ``test_global_used_when_no_room_or_room_type_override``
+    erwartet aber 22.5 -> 23 (Half-Up). Decimal+ROUND_HALF_UP ist
+    deterministisch und erwartungskonform.
+    """
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _safe_int(value: Decimal | None, *, default: int) -> int:
