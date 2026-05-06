@@ -479,3 +479,31 @@ Mobile: Top-Level wird zur Bottom-Tab-Bar, zweite Ebene als Drawer von oben.
 
 *Ende des Dokuments*
                                                                                                                                                                                                                                                
+
+## AE-39 · Manual-Override Adapter-Pattern (Sprint 9.9)
+
+**Kontext:** Engine Layer 3 muss Setpoint-Übersteuerungen aus zwei
+Quellen verarbeiten: Vicki-Drehknopf (LoRaWAN-Uplink) und Frontend-
+Rezeption (REST). Künftiger PMS- oder Thermostat-Wechsel soll keine
+Engine-Änderung erzwingen.
+
+**Entscheidung:** Generische `manual_override`-Tabelle mit `source`-
+Spalte (`device | frontend_4h | frontend_midnight | frontend_checkout`).
+Adapter-Schicht (`device_adapter`, `override_pms_hook`, REST-API)
+befüllt die Tabelle, Engine kennt nur generische Override-Records.
+Diff-Strategie für Vicki (kein dediziertes user-Setpoint-Feld im
+Codec) via `ControlCommand`-Vergleich mit Toleranz-Modi (`0.6 °C`
+für `fPort 1`/`uint8`, `0.1 °C` für `fPort 2`/decimal) und
+60s-Acknowledgment-Window.
+
+**Konsequenzen:**
++ Engine-Code unabhängig von PMS- und Hardware-Wahl.
++ Neue Quelle (z.B. Mobile-App) = neuer `source`-Wert + Adapter,
+  kein Engine-Touch.
++ `next_active_checkout` und `next_active_checkin` zentral in
+  `services/occupancy_service`, von API + Engine + PMS-Hook geteilt.
+- Diff-Strategie kann seltene Edge-Cases (gleichzeitiger
+  Engine-Send und User-Drehung im 60s-Fenster) nicht zu 100% sauber
+  unterscheiden — akzeptiert, weil Folge-Tick mit Hysterese korrigiert.
+- `LayerStep.extras: dict | None` im Engine-Pipeline ist additive
+  Erweiterung; andere Layer setzen es nicht.

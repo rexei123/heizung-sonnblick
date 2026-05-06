@@ -429,6 +429,37 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 - PowerShell `;` ist nicht `&&` — `Set-Location`-Fehler bricht nicht ab, nachfolgendes `npx` läuft trotzdem. Vor `shadcn add` immer `Get-Location` verifizieren.
 - Browser-Cache nach Frontend-Deploy: Hard-Reload (Strg+Shift+R) ist Pflicht-Schritt vor jeder Live-QA. Sonst falsche Befunde am alten Bundle.
 
+## 2o. Sprint 9.9 Manual-Override / Engine Layer 3 (2026-05-06, abgeschlossen)
+
+Ziel: Engine berücksichtigt manuelle Setpoint-Übersteuerungen aus Vicki-Drehknopf und Frontend-Rezeption mit definierten Ablaufzeiten und Sicherheitsnetzen. Quelle und Hardware via Adapter-Pattern abstrahiert (siehe AE-39).
+
+**Tasks:**
+
+- ✅ **T1 Datenmodell + Migration** (`2ba7693`): `manual_override`-Tabelle, `OverrideSource`-Enum, Pydantic-Schemas, Alembic `0008_manual_override`. INTEGER-PK/FK statt UUID (Repo-Konvention), Index ohne `NOW()` im Predicate.
+- ✅ **T2 `override_service` Domain-Logik** (`d1bb99e`): 7 Funktionen (`compute_expires_at`, `create`, `get_active`, `get_history`, `revoke`, `revoke_device_overrides`, `cleanup_expired`). Decimal-Hygiene + 7-Tage-Hard-Cap für alle Quellen.
+- ✅ **T3 Engine Layer 3** (`bdb2af7` + `2 fixes`): `layer_manual_override` in `rules/engine.py` zwischen Layer 2 und Layer 5. Läuft IMMER (auch no-op) für Trace-Sichtbarkeit. `LayerStep.extras: dict | None` additive Erweiterung; `engine_tasks` merged ins `event_log.details`-JSONB.
+- ✅ **T4 REST-API** (`534d708` + 5 fixes): `GET/POST /api/v1/rooms/{id}/overrides`, `DELETE /api/v1/overrides/{id}`. `X-User-Email`-Header → `created_by`. `frontend_checkout` ohne Belegung → 422.
+- ✅ **T5 Vicki Device-Adapter** (`a3e32aa` + 2 fixes): Diff-Detection gegen letzten ControlCommand mit Toleranz-Modi (`0.6` für fPort 1, `0.1` für fPort 2) und 60s-Acknowledgment-Window. Hook im `mqtt_subscriber` für beide Pfade. `next_active_checkout` in `services/occupancy_service` konsolidiert.
+- ✅ **T6 PMS-Auto-Revoke** (`cc09a34`): Hook `auto_revoke_on_checkout` in `services/override_pms_hook`. `OCCUPIED → VACANT` ohne Folgegast in 4 h → revokt nur `device`-Overrides, Frontend bleibt. Lazy-Import in `sync_room_status` gegen Circular.
+- ✅ **T7 Daily-Cleanup-Job** (`d3274d7`): celery_beat-Task `heizung.cleanup_expired_overrides` `crontab(hour=3, minute=0)`. Eigene Engine pro Run (Pool-Pollution-Fix Sprint 9.7a).
+- ✅ **T8 Frontend Override-UI** (`e5aed26`): 5. Tab „Übersteuerung" auf `/zimmer/[id]`. Aktiv/Anlage-Card + Historie-Tabelle. T4-Vorrats-Komponenten (Input, Select) genutzt. Decimal als String durchgängig.
+- ✅ **T9 Engine-Decision-Panel-Erweiterung** (Teil von T9-Commit): Layer-3-Detail mit Source-Badge + `expires_at` + Restzeit-Countdown. Helper `useRemainingTime` + Source-Mappings nach `lib/overrides-display.ts` extrahiert.
+- ✅ **T10 Doku** (Merge-Commit): AE-39 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`, Feature-Brief in `docs/features/`, STATUS.md §2o, CLAUDE.md §6 Pre-Push-Routine.
+
+**Tag-Vergabe:** Keiner. Final-Tag `v0.1.9-engine` kommt nach Sprint 9.10–9.12.
+
+**Lessons Learned:**
+- `ruff format` kollabiert Single-Line-Funktionssignaturen unter 100 Zeichen — multi-line nur wenn echt zu lang. T1–T5 haben das in 5 Format-Iterationen gelernt.
+- Ruff-isort-Default klassifiziert `alembic` (Top-Level) als first-party (wegen `backend/alembic/`-Verzeichnis), `alembic.config` als third-party. Imports landen in unterschiedlichen Sections — kontraintuitiv, aber linter-erzwungen.
+- `room.number` ist `VARCHAR(20)` — Test-Suffixe vorab gegen Schema-Limits prüfen.
+- API-Tests mit DB: `httpx.AsyncClient` + `ASGITransport` + `app.dependency_overrides[get_session]` für Pool-Sharing zwischen Setup und App. `alembic upgrade head` als `pytest_asyncio.fixture(scope="module", autouse=True)` mit `asyncio.to_thread` (alembic env.py macht intern `asyncio.run` und kollidiert sonst mit pytest-asyncio-Loop).
+- `LayerStep`-Erweiterung um optional `extras: dict[str, Any]`: additive Änderung, JSONB-flexibel, kein Schema-Update am Engine-Trace-Endpoint nötig.
+- Lazy-Import bei Service↔Service-Circular-Risiko (z.B. `override_pms_hook` ↔ `occupancy_service`). Backlog-Item: `services/_common.py` für plattformneutrale Helpers.
+- **Pre-Push-Toolchain** (CLAUDE.md §6) spart 1–2 Min pro Task gegenüber CI-only-Workflow. T6–T8 hatten CI-grün auf Anhieb; T1–T5 hatten zusammen ca. 15 Min Format-Iteration.
+- `next_active_checkout`/`next_active_checkin` in `services/occupancy_service` zentral konsolidiert — von API, Engine, PMS-Hook und Device-Adapter geteilt. `rules/engine._load_room_context` behält die Inline-Query (anderer Lifecycle).
+
+---
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -480,7 +511,7 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 
 - `/` — Dashboard-Startseite
 - `/zimmer` — Zimmerliste mit Filter
-- `/zimmer/[id]` — Zimmer-Detail (Tabs: Stammdaten, Belegungen, Engine, Devices)
+- `/zimmer/[id]` — Zimmer-Detail (Tabs: Stammdaten, Heizzonen, Geräte, Engine, Übersteuerung)
 - `/raumtypen` — Raumtypen Master-Detail
 - `/belegungen` — Belegungen-Liste + Form
 - `/einstellungen/hotel` — Hotel-Stammdaten Singleton
@@ -496,6 +527,8 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 - `/api/v1/rooms/{room_id}/heating-zones` — CRUD Heating-Zones (nested unter Rooms)
 - `/api/v1/occupancies/*` — CRUD Belegungen
 - `/api/v1/global-config` — GET/PATCH Hotel-weite Settings
+- `/api/v1/rooms/{room_id}/overrides` — GET/POST Manual-Override-Liste/Anlage (Sprint 9.9)
+- `/api/v1/overrides/{override_id}` — DELETE Manual-Override revoken (Sprint 9.9)
 - `/healthz` — Backend-Healthcheck
 
 ---
@@ -517,7 +550,7 @@ Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Pa
 - (keiner — wartet auf nächsten Plan-Slot)
 
 **Aktiv in Planung (Strategie):**
-- Sprint 9.9: Engine Layer 3 (Manual-Override) + Layer 4 (Window/Fenster-offen)
+- Sprint 9.10: Engine Layer 4 (Window/Fenster-offen-Detection) + restliche Engine-Punkte vor Final-Tag `v0.1.9-engine`
 
 **Backlog (nicht priorisiert):**
 - B-2: "Detail →" als Plain-`<a>` vs. ghost-Button-Spec — Design-Strategie 2.0.1 §6.1 präzisieren (ghost gilt für Buttons, Navigation nutzt Plain-Anchor)

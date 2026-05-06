@@ -10,7 +10,7 @@
  * Plus eine zweite Card mit der Historie (limit 20, "Mehr laden").
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -33,20 +33,7 @@ import type {
   ManualOverride,
   OverrideSource,
 } from "@/lib/api/types";
-
-const SOURCE_LABEL: Record<OverrideSource, string> = {
-  device: "Drehknopf",
-  frontend_4h: "Für 4 Stunden",
-  frontend_midnight: "Bis Mitternacht",
-  frontend_checkout: "Bis Check-Out",
-};
-
-const SOURCE_ICON: Record<OverrideSource, string> = {
-  device: "tune",
-  frontend_4h: "schedule",
-  frontend_midnight: "bedtime",
-  frontend_checkout: "logout",
-};
+import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
 const FRONTEND_SOURCES: FrontendOverrideSource[] = [
   "frontend_4h",
@@ -381,28 +368,6 @@ function useActiveOverride(items: ManualOverride[]): ManualOverride | null {
         o.revoked_at === null && new Date(o.expires_at).getTime() > now,
     ) ?? null
   );
-}
-
-function useRemainingTime(expiresAt: string): string {
-  const [now, setNow] = useState<number>(() => Date.now());
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const diffMs = new Date(expiresAt).getTime() - now;
-  if (diffMs <= 0) return "abgelaufen";
-  const totalMin = Math.floor(diffMs / 60_000);
-  const hours = Math.floor(totalMin / 60);
-  const mins = totalMin % 60;
-  if (hours >= 24) {
-    const days = Math.floor(hours / 24);
-    const remHours = hours % 24;
-    return `${days}T ${remHours}h`;
-  }
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
 }
 
 function toMessage(err: unknown): string {

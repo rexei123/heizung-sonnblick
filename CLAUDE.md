@@ -274,7 +274,49 @@ Beim Re-Deploy via `docker compose up -d --force-recreate` wird der Container ne
 
 ---
 
-## 6. Aktuelle Backlog-Punkte
+## 6. Pre-Push-Backend (Win-Host, PowerShell)
+
+Lokale Toolchain auf `C:\Users\User\dev\heizung-sonnblick\backend\.venv` — ersetzt CI-Format-Loops und den ruff-`--diff`-Trick aus Sprint 9.9 T1-T5.
+
+**Einmaliges Setup (bereits durch, falls fehlt erneut):**
+
+```powershell
+winget install --id Python.Python.3.12 -e --silent
+winget install --id astral-sh.uv -e --silent
+# Neue Shell oeffnen, damit PATH greift
+cd C:\Users\User\dev\heizung-sonnblick\backend
+uv venv --python 3.12
+.\.venv\Scripts\Activate.ps1
+uv pip install -e ".[dev]"
+```
+
+**Vor jedem Backend-Push (Pflicht):**
+
+```powershell
+cd C:\Users\User\dev\heizung-sonnblick\backend
+.\.venv\Scripts\Activate.ps1
+ruff format .
+ruff check . --fix
+mypy src
+pytest -x
+```
+
+Erst nach allen vier grün: `git push`. Lokaler Voll-Lauf <10 Sek; ersetzt 1-2 Min CI-Iteration und alle Format-Fix-Cascades aus Sprint 9.9 T1-T5.
+
+**DB-Tests:** skippen lokal (kein `DATABASE_URL`); CI-Pipeline hat den Postgres-Service-Container und führt sie aus.
+
+**Frontend (analog):**
+
+```powershell
+cd C:\Users\User\dev\heizung-sonnblick\frontend
+npm run type-check
+npm run lint
+npm run build
+```
+
+---
+
+## 7. Aktuelle Backlog-Punkte
 
 - Caddy `fmt --overwrite` (kosmetisch, mit Sprint 6 wenn Caddy-Touch fuer ChirpStack-UI ohnehin)
 - `~/.ssh/config`-Eintraege auf work02
@@ -282,3 +324,5 @@ Beim Re-Deploy via `docker compose up -d --force-recreate` wird der Container ne
 - CI-Mirror-Workflow `frontend-ci-skip.yml` aufraeumen, wenn Branch-Protection-Matcher smarter wird
 - ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup nach `docker compose down -v` (Sprint 6 oder spaeter)
 - `.github/CODEOWNERS` einrichten, wenn weitere Mitwirkende dazukommen
+- `services/_common.py` (Sprint 9.9-Backlog): konsolidiert duplicates `_task_session` aus `engine_tasks.py`/`override_cleanup_tasks.py`
+- `services/event_log`-Wrapper (Sprint 9.9-Backlog): strukturierte Cap-/Revoke-Events ausserhalb der Engine-Pipeline
