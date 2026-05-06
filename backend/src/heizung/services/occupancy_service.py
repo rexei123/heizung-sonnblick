@@ -52,6 +52,38 @@ async def has_overlap(
     return result.scalar_one_or_none() is not None
 
 
+async def next_active_checkout(
+    session: AsyncSession,
+    room_id: int,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    """``check_out`` der naechsten aktiven Belegung im Raum, sonst ``None``.
+
+    Naechste aktive Belegung = ``is_active AND check_out > now``,
+    sortiert nach ``check_in``. Bei laufender Belegung deren ``check_out``,
+    bei rein zukuenftiger der erste eintreffende. Konsolidierte Variante
+    der bislang in ``rules.engine._load_room_context`` und
+    ``api.v1.overrides._next_checkout_for_room`` doppelten Logik
+    (Sprint 9.9 T5).
+    """
+    current_time = now or _now()
+    stmt = (
+        select(Occupancy)
+        .where(
+            and_(
+                Occupancy.room_id == room_id,
+                Occupancy.is_active.is_(True),
+                Occupancy.check_out > current_time,
+            )
+        )
+        .order_by(Occupancy.check_in)
+        .limit(1)
+    )
+    occ = await session.scalar(stmt)
+    return occ.check_out if occ is not None else None
+
+
 async def derive_room_status(
     session: AsyncSession, room_id: int, now: datetime | None = None
 ) -> RoomStatus:

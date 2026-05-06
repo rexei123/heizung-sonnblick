@@ -14,14 +14,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.db import get_session
 from heizung.models.enums import OverrideSource
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
-from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.schemas.manual_override import (
     ManualOverrideCreate,
@@ -29,6 +27,7 @@ from heizung.schemas.manual_override import (
     ManualOverrideRevoke,
 )
 from heizung.services import override_service
+from heizung.services.occupancy_service import next_active_checkout
 
 INT4_MAX = 2_147_483_647
 
@@ -55,27 +54,6 @@ async def _ensure_room_exists(session: AsyncSession, room_id: int) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"room_id={room_id} existiert nicht",
         )
-
-
-async def _next_checkout_for_room(session: AsyncSession, room_id: int) -> datetime | None:
-    """Liefert ``check_out`` der naechsten aktiven Belegung des Raums.
-
-    Naechste aktive Belegung = ``is_active AND check_out > now``,
-    sortiert nach ``check_in``. Bei laufender Belegung deren ``check_out``,
-    bei rein zukuenftiger der erste eintreffende. Kein Treffer -> ``None``.
-    Logik konsistent zu ``rules.engine._load_room_context`` (next_occupancy).
-    """
-    now = datetime.now(tz=UTC)
-    stmt = (
-        select(Occupancy)
-        .where(Occupancy.room_id == room_id)
-        .where(Occupancy.is_active.is_(True))
-        .where(Occupancy.check_out > now)
-        .order_by(Occupancy.check_in)
-        .limit(1)
-    )
-    occ = (await session.execute(stmt)).scalar_one_or_none()
-    return occ.check_out if occ else None
 
 
 @router.get(
@@ -116,7 +94,7 @@ async def create_room_override(
 
     next_checkout: datetime | None = None
     if source == OverrideSource.FRONTEND_CHECKOUT:
-        next_checkout = await _next_checkout_for_room(session, room_id)
+        next_checkout = await next_active_checkout(session, room_id)
         if next_checkout is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
