@@ -105,6 +105,11 @@ function ActiveOverrideCard({
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const remaining = useRemainingTime(override.expires_at);
+  // Sprint 9.9a Hotfix A2: Engine quantisiert Setpoint auf ganze Grad
+  // (rules.engine._quantize). Wir spiegeln das an der Anzeige - der DB-Wert
+  // kann bei alten Records noch Decimal sein (z.B. 22.5), wird aber visuell
+  // als 23 gezeigt (= effektiver Engine-Setpoint).
+  const displaySetpoint = Math.round(parseFloat(override.setpoint));
 
   const performRevoke = async () => {
     setError(null);
@@ -123,7 +128,7 @@ function ActiveOverrideCard({
         <div>
           <div className="flex items-baseline gap-2">
             <span className="text-4xl font-medium text-text-primary tabular-nums">
-              {override.setpoint}
+              {displaySetpoint}
             </span>
             <span className="text-xl text-text-secondary">°C</span>
           </div>
@@ -153,7 +158,7 @@ function ActiveOverrideCard({
       <ConfirmDialog
         open={confirmRevoke}
         title="Übersteuerung aufheben?"
-        message={`Setpoint ${override.setpoint} °C (${SOURCE_LABEL[override.source]}) wird sofort beendet. Engine fällt auf den regulären Setpoint zurück.`}
+        message={`Setpoint ${displaySetpoint} °C (${SOURCE_LABEL[override.source]}) wird sofort beendet. Engine fällt auf den regulären Setpoint zurück.`}
         confirmLabel="Aufheben"
         loading={revokeMut.isPending}
         onConfirm={performRevoke}
@@ -169,7 +174,7 @@ function ActiveOverrideCard({
 
 function CreateOverrideForm({ roomId }: { roomId: number }) {
   const createMut = useCreateRoomOverride(roomId);
-  const [setpoint, setSetpoint] = useState("21.0");
+  const [setpoint, setSetpoint] = useState("21");
   const [source, setSource] = useState<FrontendOverrideSource>("frontend_4h");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -203,7 +208,7 @@ function CreateOverrideForm({ roomId }: { roomId: number }) {
           </span>
           <Input
             type="number"
-            step="0.5"
+            step="1"
             min="5"
             max="30"
             value={setpoint}
@@ -298,7 +303,7 @@ function HistoryTable({
                 {new Date(o.created_at).toLocaleString("de-AT")}
               </td>
               <td className="py-2 pr-4 font-medium text-text-primary tabular-nums">
-                {o.setpoint} °C
+                {Math.round(parseFloat(o.setpoint))} °C
               </td>
               <td className="py-2 pr-4">
                 <SourceBadge source={o.source} />

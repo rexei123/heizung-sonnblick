@@ -12,6 +12,7 @@ Auth: vorerst offen. ``X-User-Email``-Header wird optional als
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from heizung.schemas.manual_override import (
 )
 from heizung.services import override_service
 from heizung.services.occupancy_service import next_active_checkout
+from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
 
@@ -90,6 +92,15 @@ async def create_room_override(
 ) -> ManualOverride:
     await _ensure_room_exists(session, room_id)
 
+    # Sprint 9.9a Hotfix A2: Engine quantisiert auf ganze Grad (rules.engine._quantize),
+    # daher API-seitig nur ganze Werte akzeptieren - sonst sieht der User
+    # 22.5 in der DB, aber 23 im Engine-Trace.
+    if payload.setpoint != payload.setpoint.quantize(Decimal("1"), rounding=ROUND_HALF_UP):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Setpoint muss in ganzen °C-Schritten angegeben werden.",
+        )
+
     source = OverrideSource(payload.source)
 
     next_checkout: datetime | None = None
@@ -98,7 +109,7 @@ async def create_room_override(
         if next_checkout is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="frontend_checkout-Override braucht eine aktive Belegung in diesem Raum",
+                detail='„Bis Check-Out" funktioniert nur bei einem belegten Zimmer.',
             )
 
     hotel_config = await session.get(GlobalConfig, 1)
@@ -128,6 +139,9 @@ async def create_room_override(
 
     await session.commit()
     await session.refresh(override)
+    # Sprint 9.9a Hotfix A1: Engine-Re-Eval anstossen, damit Layer 3 sofort
+    # greift (analog zu occupancies.py - AE-07).
+    _evaluate_room_task.delay(room_id)
     return override
 
 
@@ -164,4 +178,7 @@ async def revoke_override(
 
     await session.commit()
     await session.refresh(override)
+    # Sprint 9.9a Hotfix A1: Engine-Re-Eval nach Revoke - Setpoint faellt
+    # auf den regulaeren Layer-1/2-Wert zurueck.
+    _evaluate_room_task.delay(override.room_id)
     return override
