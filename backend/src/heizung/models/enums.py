@@ -132,6 +132,25 @@ class ManualOverrideScope(enum.StrEnum):
     ROOM = "room"
 
 
+class OverrideSource(enum.StrEnum):
+    """Quelle einer Manual-Override-Aktion (Sprint 9.9 Engine Layer 3).
+
+    ``device``        Drehring-Drehung am Vicki, erkannt ueber Setpoint-Diff
+                      ``last_engine_setpoint`` vs. ``target_temperature`` aus
+                      Periodic-Report. Default-Ablauf: PMS-Check-Out, sonst
+                      now + 7 Tage (Hard-Cap).
+    ``frontend_4h``   Rezeption setzt im UI "fuer 4 Stunden". Ablauf now + 4 h.
+    ``frontend_midnight``  Rezeption setzt "bis Mitternacht". Ablauf heute
+                      23:59 lokal.
+    ``frontend_checkout``  Rezeption setzt "bis Check-Out". Ablauf wie ``device``.
+    """
+
+    DEVICE = "device"
+    FRONTEND_4H = "frontend_4h"
+    FRONTEND_MIDNIGHT = "frontend_midnight"
+    FRONTEND_CHECKOUT = "frontend_checkout"
+
+
 class EventLogLayer(enum.StrEnum):
     """Welche Engine-Pipeline-Schicht hat den Eintrag erzeugt.
 

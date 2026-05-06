@@ -14,7 +14,13 @@
 import { useMemo } from "react";
 
 import { useEngineTrace } from "@/lib/api/hooks-rooms";
-import type { CommandReason, EventLogEntry, EventLogLayer } from "@/lib/api/types";
+import type {
+  CommandReason,
+  EventLogEntry,
+  EventLogLayer,
+  OverrideSource,
+} from "@/lib/api/types";
+import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
 const LAYER_ORDER: EventLogLayer[] = [
   "summer_mode_fast_path",
@@ -200,14 +206,60 @@ function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
                 {e.reason ? REASON_LABEL[e.reason] : "—"}
               </td>
               <td className="px-4 py-2 text-sm text-text-tertiary">
-                {(e.details && typeof e.details.detail === "string"
-                  ? e.details.detail
-                  : null) ?? "—"}
+                {e.layer === "manual_override" ? (
+                  <ManualOverrideDetail entry={e} />
+                ) : (
+                  ((e.details && typeof e.details.detail === "string"
+                    ? e.details.detail
+                    : null) ?? "—")
+                )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ManualOverrideDetail({ entry }: { entry: EventLogEntry }) {
+  const details = entry.details ?? {};
+  const sourceRaw = details["source"];
+  const expiresAtRaw = details["expires_at"];
+  const source: OverrideSource | null =
+    typeof sourceRaw === "string" && sourceRaw in SOURCE_LABEL
+      ? (sourceRaw as OverrideSource)
+      : null;
+  const expiresAt = typeof expiresAtRaw === "string" ? expiresAtRaw : null;
+
+  if (source === null) {
+    return <span className="italic text-text-tertiary">kein aktiver Override</span>;
+  }
+  return <ActiveOverrideDetail source={source} expiresAt={expiresAt} />;
+}
+
+function ActiveOverrideDetail({
+  source,
+  expiresAt,
+}: {
+  source: OverrideSource;
+  expiresAt: string | null;
+}) {
+  const remaining = useRemainingTime(expiresAt ?? new Date(0).toISOString());
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="inline-flex items-center gap-1 text-text-primary">
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
+          {SOURCE_ICON[source]}
+        </span>
+        {SOURCE_LABEL[source]}
+      </span>
+      {expiresAt ? (
+        <span className="text-xs text-text-tertiary">
+          läuft ab in {remaining} ·{" "}
+          {new Date(expiresAt).toLocaleString("de-AT")}
+        </span>
+      ) : null}
     </div>
   );
 }

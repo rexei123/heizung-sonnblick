@@ -33,6 +33,7 @@ from heizung.config import get_settings
 from heizung.db import SessionLocal
 from heizung.models.device import Device
 from heizung.models.sensor_reading import SensorReading
+from heizung.services.device_adapter import handle_uplink_for_override
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,48 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
         )
 
 
+async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
+    """Sprint 9.9 T5: Drehknopf-Override-Detection nach Reading-Persistenz.
+
+    Vergleicht den Uplink-Setpoint mit dem letzten Engine-Send fuer
+    dasselbe Geraet (siehe ``device_adapter.detect_user_override``).
+    Bei Diff > Toleranz und ausserhalb des Acknowledgment-Windows wird
+    ein ``device``-Override angelegt. Failure ist non-fatal; wir loggen
+    und blockieren die Subscriber-Loop nicht.
+    """
+    obj = uplink.object or {}
+    target_temp_raw = obj.get("target_temperature")
+    if target_temp_raw is None:
+        return
+
+    dev_eui = uplink.deviceInfo.devEui.lower()
+    try:
+        async with SessionLocal() as session:
+            row = await session.execute(select(Device.id).where(Device.dev_eui == dev_eui))
+            device_id = row.scalar_one_or_none()
+            if device_id is None:
+                return
+
+            received_at = uplink.time or datetime.now(tz=UTC)
+            override = await handle_uplink_for_override(
+                session,
+                device_id=device_id,
+                uplink_target_temp=Decimal(str(target_temp_raw)),
+                fport=uplink.fPort or 1,
+                received_at=received_at,
+            )
+            if override is not None:
+                await session.commit()
+                logger.info(
+                    "device-override erkannt dev_eui=%s setpoint=%s expires_at=%s",
+                    dev_eui,
+                    override.setpoint,
+                    override.expires_at.isoformat(),
+                )
+    except Exception:
+        logger.exception("override-detection-fehler dev_eui=%s", dev_eui)
+
+
 # ---------------------------------------------------------------------------
 # Subscriber-Loop
 # ---------------------------------------------------------------------------
@@ -215,16 +258,18 @@ async def _consume_loop() -> None:
                         continue
 
                     # Sprint 9.0: fPort-2-Replies (z.B. 0x52 Setpoint-Reply)
-                    # haben kein temperature/valve_position. Skip Insert, nur
-                    # loggen — das wird in Sprint 9.5/9.7 in event_log /
-                    # control_command persistiert (engine ack-handling).
+                    # haben kein temperature/valve_position. Skip SensorReading-
+                    # Insert, aber Sprint 9.9 T5: Override-Detection greift
+                    # auch fuer Reply-Setpoints (Drehring kann via fPort 2
+                    # Setpoint zurueckmelden).
                     obj = uplink.object or {}
                     if obj.get("report_type") == "setpoint_reply":
                         logger.info(
-                            "setpoint-reply dev_eui=%s setpoint=%s — skip insert",
+                            "setpoint-reply dev_eui=%s setpoint=%s — skip reading-insert",
                             uplink.deviceInfo.devEui,
                             obj.get("target_temperature"),
                         )
+                        await _handle_override_detection(uplink)
                         continue
 
                     try:
@@ -234,6 +279,8 @@ async def _consume_loop() -> None:
                             "uplink-persist-fehler dev_eui=%s",
                             uplink.deviceInfo.devEui,
                         )
+
+                    await _handle_override_detection(uplink)
         except asyncio.CancelledError:
             logger.info("MQTT-Subscriber beendet (CancelledError)")
             raise
