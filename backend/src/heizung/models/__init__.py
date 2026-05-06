@@ -15,6 +15,7 @@ from heizung.models.enums import (
     ManualOverrideScope,
     OccupancySource,
     Orientation,
+    OverrideSource,
     RoomStatus,
     RuleConfigScope,
     ScenarioScope,
@@ -22,6 +23,7 @@ from heizung.models.enums import (
 from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.manual_override import ManualOverride
 from heizung.models.manual_setpoint_event import ManualSetpointEvent
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
@@ -43,11 +45,13 @@ __all__ = [
     "GlobalConfig",
     "HeatingZone",
     "HeatingZoneKind",
+    "ManualOverride",
     "ManualOverrideScope",
     "ManualSetpointEvent",
     "Occupancy",
     "OccupancySource",
     "Orientation",
+    "OverrideSource",
     "Room",
     "RoomStatus",
     "RoomType",
