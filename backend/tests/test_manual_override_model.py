@@ -7,8 +7,10 @@ Pflicht-Akzeptanz aus dem T1-Brief:
 - ``ON DELETE CASCADE`` -> Override verschwindet beim Room-Delete
 - Partial Index ``ix_manual_override_active`` existiert nach Migration
 
-Setup analog zu ``test_migrations_roundtrip.py``: skipt komplett, wenn
-``TEST_DATABASE_URL`` nicht gesetzt ist (kein silent-pass / Coverage-Luege).
+Skipt komplett, wenn ``TEST_DATABASE_URL`` nicht gesetzt ist (kein silent-
+pass / Coverage-Luege). Die Migrations-Roundtrip-Mechanik liegt bewusst
+in ``test_migrations_roundtrip.py``; dieses Modul setzt voraus, dass die
+DB bereits auf head ist.
 """
 
 from __future__ import annotations
@@ -17,10 +19,7 @@ import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DataError, IntegrityError
@@ -34,15 +33,10 @@ SKIP_REASON = (
 
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
-    """Sync-Engine + alembic upgrade head einmal pro Test-Modul."""
+    """Sync-Engine gegen die Test-DB. Migrationen muessen extern angewandt
+    sein (siehe ``test_migrations_roundtrip.py`` bzw. CI-Setup)."""
     if not TEST_DB_URL:
         pytest.skip(SKIP_REASON)
-
-    backend_root = Path(__file__).resolve().parents[1]
-    cfg = Config(str(backend_root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(backend_root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", TEST_DB_URL)
-    command.upgrade(cfg, "head")
 
     sync_url = TEST_DB_URL.replace("+asyncpg", "")
     eng = create_engine(sync_url)
