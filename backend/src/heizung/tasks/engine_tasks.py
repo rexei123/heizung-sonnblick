@@ -155,6 +155,7 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                             "should_send": decision.should_send,
                             "reason": decision.reason,
                         },
+                        **(layer.extras or {}),
                     },
                 )
             )

@@ -36,6 +36,7 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.rules.constants import FROST_PROTECTION_C
+from heizung.services import override_service
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,12 +58,20 @@ MIN_SETPOINT_C: int = int(FROST_PROTECTION_C)
 @dataclass(frozen=True, slots=True)
 class LayerStep:
     """Ein Pipeline-Schritt mit seinem Output. Wird in event_log persistiert
-    und im Frontend Engine-Decision-Panel angezeigt."""
+    und im Frontend Engine-Decision-Panel angezeigt.
+
+    ``extras`` (Sprint 9.9 T3): layer-spezifische strukturierte Felder,
+    die zusaetzlich zum string ``detail`` ins ``event_log.details``-JSONB
+    gemerged werden (siehe ``tasks.engine_tasks``). Layer 3 nutzt das fuer
+    ``source``/``expires_at``/``override_id`` — andere Layer setzen es
+    aktuell nicht.
+    """
 
     layer: EventLogLayer
     setpoint_c: int
     reason: CommandReason
     detail: str | None = None
+    extras: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +281,45 @@ def layer_temporal(
     return None
 
 
+async def layer_manual_override(
+    session: AsyncSession,
+    room_id: int,
+    *,
+    prev_setpoint_c: int,
+    prev_reason: CommandReason,
+) -> LayerStep:
+    """Layer 3: Manual Override (Sprint 9.9 T3).
+
+    Liefert IMMER einen ``LayerStep`` (auch im no-op-Fall) fuer Trace-
+    Transparenz im Engine-Decision-Panel. Wenn kein aktiver Override
+    existiert, wird ``prev_setpoint_c`` und ``prev_reason`` durchgereicht
+    und ``extras["source"]`` ist ``None``.
+
+    Aktive Override -> Setpoint = override.setpoint, Reason = MANUAL,
+    extras enthaelt source/expires_at/override_id fuer Frontend.
+    """
+    override = await override_service.get_active(session, room_id)
+    if override is None:
+        return LayerStep(
+            layer=EventLogLayer.MANUAL_OVERRIDE,
+            setpoint_c=prev_setpoint_c,
+            reason=prev_reason,
+            detail="no active override",
+            extras={"source": None, "expires_at": None, "override_id": None},
+        )
+    return LayerStep(
+        layer=EventLogLayer.MANUAL_OVERRIDE,
+        setpoint_c=_quantize(override.setpoint),
+        reason=CommandReason.MANUAL,
+        detail=f"override_id={override.id} source={override.source.value}",
+        extras={
+            "source": override.source.value,
+            "expires_at": override.expires_at.isoformat(),
+            "override_id": override.id,
+        },
+    )
+
+
 def layer_clamp(
     prev_setpoint_c: int,
     ctx: _RoomContext,
@@ -467,22 +515,29 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     # Sprint 9.8: Layer 2 Temporal (Vorheizen + Nachtabsenkung).
     now = datetime.now(tz=UTC)
     temporal = layer_temporal(base, ctx, now=now)
-    if temporal is not None:
-        clamp = layer_clamp(temporal.setpoint_c, ctx, prev_reason=temporal.reason)
-        return RuleResult(
-            room_id=room_id,
-            setpoint_c=clamp.setpoint_c,
-            layers=(base, temporal, clamp),
-            base_reason=temporal.reason,
-        )
 
-    clamp = layer_clamp(base.setpoint_c, ctx, prev_reason=base.reason)
+    # Sprint 9.9 T3: Layer 3 Manual-Override. Laeuft IMMER (auch no-op),
+    # damit das Engine-Decision-Panel stets zeigt, ob ein Override anliegt.
+    pre_layer3 = temporal if temporal is not None else base
+    manual = await layer_manual_override(
+        session,
+        room_id,
+        prev_setpoint_c=pre_layer3.setpoint_c,
+        prev_reason=pre_layer3.reason,
+    )
+
+    clamp = layer_clamp(manual.setpoint_c, ctx, prev_reason=manual.reason)
+
+    layers_tuple: tuple[LayerStep, ...] = (base,)
+    if temporal is not None:
+        layers_tuple = (*layers_tuple, temporal)
+    layers_tuple = (*layers_tuple, manual, clamp)
 
     return RuleResult(
         room_id=room_id,
         setpoint_c=clamp.setpoint_c,
-        layers=(base, clamp),
-        base_reason=base.reason,
+        layers=layers_tuple,
+        base_reason=manual.reason,
     )
 
 
