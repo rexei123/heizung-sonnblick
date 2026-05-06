@@ -18,7 +18,12 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from alembic.config import Config
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from alembic import command
 from heizung.models.control_command import ControlCommand
