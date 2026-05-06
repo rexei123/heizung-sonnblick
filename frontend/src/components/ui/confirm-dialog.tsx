@@ -68,7 +68,14 @@ export function ConfirmDialog({
         if (!next && !loading) onCancel();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        onEscapeKeyDown={(event) => {
+          // Loading-Schutz: ESC darf laufende Mutation nicht abbrechen.
+          // Sonst Default zulassen — Radix-DismissableLayer triggert dann
+          // onOpenChange(false), worauf unser Filter onCancel() ruft.
+          if (loading) event.preventDefault();
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{message}</AlertDialogDescription>
