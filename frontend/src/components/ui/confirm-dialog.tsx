@@ -69,12 +69,11 @@ export function ConfirmDialog({
       }}
     >
       <AlertDialogContent
-        onKeyDown={(event) => {
-          // Robuster ESC-Pfad: falls der Radix-onOpenChange-Default aus
-          // irgendeinem Grund nicht greift (Fokus-Container, Browser-Quirk),
-          // schliessen wir hier explizit. Doppelter onCancel-Aufruf ist
-          // idempotent (Parent setzt State auf null).
-          if (event.key === "Escape" && !loading) onCancel();
+        onEscapeKeyDown={(event) => {
+          // Loading-Schutz: ESC darf laufende Mutation nicht abbrechen.
+          // Sonst Default zulassen — Radix-DismissableLayer triggert dann
+          // onOpenChange(false), worauf unser Filter onCancel() ruft.
+          if (loading) event.preventDefault();
         }}
       >
         <AlertDialogHeader>
