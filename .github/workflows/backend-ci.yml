@@ -63,7 +63,7 @@ jobs:
         run: ruff check src tests
 
       - name: Ruff (Format-Check)
-        run: ruff format --check src tests
+        run: ruff format --check --diff src tests
 
       - name: Mypy (Type-Check)
         run: mypy src
