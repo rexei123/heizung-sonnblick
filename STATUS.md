@@ -615,5 +615,6 @@ Secrets liegen in:
 | `v0.1.7-frontend-dashboard` | Sprint 7 (Frontend-Dashboard, Devices-Liste) | 2026-04-30 |
 | `v0.1.8-stammdaten` | Sprint 8 (Stammdaten + Belegung, Master-Detail-CRUD) | 2026-05-03 |
 | `v0.1.9-rc1-walking-skeleton` | Sprint 9 (Engine 6-Layer-Skelett + Downlink + Engine-Panel) | 2026-05-04 |
+| `v0.1.9-rc2-manual-override` | Sprint 9.9 + 9.9a (Engine Layer 3 + UI + Hotfix) | 2026-05-06 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
