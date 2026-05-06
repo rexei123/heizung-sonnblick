@@ -83,7 +83,7 @@ class ManualOverride(Base):
         ),
         # Layer-3-Lookup: aktive (= nicht-revokierte) Overrides pro Raum,
         # juengster zuerst. Partial Index laesst alte revokierte Records
-        # ausserhalb des Index — die brauchen wir nur fuer Audit-Queries.
+        # ausserhalb des Index - die brauchen wir nur fuer Audit-Queries.
         # Hinweis: kein ``expires_at > NOW()`` im Predicate, weil NOW()
         # in PostgreSQL STABLE statt IMMUTABLE ist und im Index-Predicate
         # nicht erlaubt waere; ``expires_at``-Filter passiert query-seitig.
