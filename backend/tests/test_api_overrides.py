@@ -89,7 +89,10 @@ async def room_id(setup_engine: AsyncEngine) -> AsyncIterator[int]:
         yield rid
     finally:
         async with sessionmaker() as session:
-            await session.execute(text("DELETE FROM manual_override WHERE room_id = :r"), {"r": rid})
+            await session.execute(
+                text("DELETE FROM manual_override WHERE room_id = :r"),
+                {"r": rid},
+            )
             await session.execute(text("DELETE FROM occupancy WHERE room_id = :r"), {"r": rid})
             await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": rid})
             await session.execute(text("DELETE FROM room_type WHERE id = :r"), {"r": rt_id})
