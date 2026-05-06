@@ -22,12 +22,12 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from alembic import command
+import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
-import pytest
 from sqlalchemy import create_engine, text
 
+from alembic import command
 from heizung.main import app
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
