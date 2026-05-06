@@ -46,9 +46,7 @@ class ManualOverride(Base):
     __tablename__ = "manual_override"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    room_id: Mapped[int] = mapped_column(
-        ForeignKey("room.id", ondelete="CASCADE"), nullable=False
-    )
+    room_id: Mapped[int] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"), nullable=False)
 
     setpoint: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
     source: Mapped[OverrideSource] = mapped_column(
