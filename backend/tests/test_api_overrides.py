@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from alembic import command
+from heizung.db import get_session
 from heizung.main import app
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
@@ -52,17 +53,10 @@ async def _migrate_db() -> None:
 
 
 @pytest_asyncio.fixture
-async def http_client() -> AsyncIterator[httpx.AsyncClient]:
-    if not DATABASE_URL_PRESENT:
-        pytest.skip(SKIP_REASON)
-    transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
-
-
-@pytest_asyncio.fixture
 async def setup_engine() -> AsyncIterator[AsyncEngine]:
-    """Eigene async engine fuer Setup/Cleanup, getrennter Pool von der App."""
+    """Async engine fuer Setup + dependency_override. Pro Test ein eigener
+    Pool, alle Connections im aktuellen pytest-asyncio-Loop -> kein
+    "another operation in progress" und kein "different loop"."""
     if not DATABASE_URL_PRESENT:
         pytest.skip(SKIP_REASON)
     engine = create_async_engine(DATABASE_URL or "")
@@ -73,14 +67,35 @@ async def setup_engine() -> AsyncIterator[AsyncEngine]:
 
 
 @pytest_asyncio.fixture
+async def http_client(setup_engine: AsyncEngine) -> AsyncIterator[httpx.AsyncClient]:
+    """AsyncClient + dependency_override: App nutzt dieselbe engine wie das
+    Test-Setup, damit beide Pools im gleichen Loop laufen."""
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+
+    async def _override_get_session() -> AsyncIterator:
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _override_get_session
+    try:
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
 async def room_id(setup_engine: AsyncEngine) -> AsyncIterator[int]:
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    # ``room.number`` ist VARCHAR(20). Kompaktes prefix + 12-stelliges suffix
+    # passt sicher rein (4 + 12 = 16 chars).
     suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
     async with sessionmaker() as session:
-        rt = RoomType(name=f"t9-9-api-{suffix}")
+        rt = RoomType(name=f"t99api-{suffix}")
         session.add(rt)
         await session.flush()
-        room = Room(number=f"t9-9-api-{suffix}", room_type_id=rt.id)
+        room = Room(number=f"t99-{suffix}", room_type_id=rt.id)
         session.add(room)
         await session.commit()
         rid, rt_id = room.id, rt.id
