@@ -124,10 +124,14 @@ Symptom: Pull-Timer-Logs zeigen 22h+ FEHLER, Server-Code haengt auf altem Stand,
 
 **Fix einmalig pro Server:**
 ```bash
-git config --global --add safe.directory /opt/heizung-sonnblick
+git config --system --add safe.directory /opt/heizung-sonnblick
 ```
 
-**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen, damit neue Server out-of-the-box klappen.
+**Wichtig: `--system`, nicht `--global`.** Der `--global`-Eintrag in `/root/.gitconfig` wird vom `heizung-deploy-pull.service` trotz `User=root` und `HOME=/root` nicht gelesen (vermutlich systemd-Sandbox). `--system` schreibt nach `/etc/gitconfig` und wird zuverlässig gelesen.
+
+Diese Korrektur basiert auf Diagnose vom 2026-05-05 (Sprint 9.8d). Vorherige Empfehlung `--global` war falsch.
+
+**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen (`git config --system --add safe.directory ...`), damit neue Server out-of-the-box klappen. Bis dahin: Server-Setup-Dokumentation muss diesen Schritt explizit nennen.
 
 ### 5.8 Frontend AppShell nicht doppelt wrappen (Sprint 8.13a Lesson)
 
