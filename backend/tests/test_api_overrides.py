@@ -22,10 +22,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import create_engine, text
 
 from heizung.main import app
