@@ -136,9 +136,7 @@ async def test_layer3_trace_extras_complete(db_session: AsyncSession, room_id: i
 # ---------------------------------------------------------------------------
 
 
-async def test_layer5_clamps_above_room_type_max(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_layer5_clamps_above_room_type_max(db_session: AsyncSession, room_id: int) -> None:
     """``room_type.max_temp_celsius=22`` + Override 25 -> Layer 5 cappt auf 22."""
     room = await db_session.get(Room, room_id)
     assert room is not None
@@ -170,9 +168,7 @@ async def test_layer5_clamps_above_room_type_max(
 # ---------------------------------------------------------------------------
 
 
-async def test_layer3_revoked_override_ignored(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_layer3_revoked_override_ignored(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     o = await override_service.create(
         db_session,
