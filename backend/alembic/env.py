@@ -7,16 +7,15 @@ mit der asynchronen Engine aus.
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from heizung.config import get_settings
-from heizung.db import Base
-
 # Modelle importieren, damit sie sich in Base.metadata registrieren.
 import heizung.models  # noqa: F401
+from alembic import context
+from heizung.config import get_settings
+from heizung.db import Base
 
 # Alembic-Konfiguration
 config = context.config
