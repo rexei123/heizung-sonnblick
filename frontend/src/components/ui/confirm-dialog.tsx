@@ -68,7 +68,15 @@ export function ConfirmDialog({
         if (!next && !loading) onCancel();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        onKeyDown={(event) => {
+          // Robuster ESC-Pfad: falls der Radix-onOpenChange-Default aus
+          // irgendeinem Grund nicht greift (Fokus-Container, Browser-Quirk),
+          // schliessen wir hier explizit. Doppelter onCancel-Aufruf ist
+          // idempotent (Parent setzt State auf null).
+          if (event.key === "Escape" && !loading) onCancel();
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{message}</AlertDialogDescription>
