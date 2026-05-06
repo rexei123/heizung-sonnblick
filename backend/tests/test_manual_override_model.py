@@ -20,6 +20,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DataError, IntegrityError
 
@@ -35,9 +37,6 @@ def engine() -> Iterator[Engine]:
     """Sync-Engine + alembic upgrade head einmal pro Test-Modul."""
     if not TEST_DB_URL:
         pytest.skip(SKIP_REASON)
-
-    from alembic import command
-    from alembic.config import Config
 
     backend_root = Path(__file__).resolve().parents[1]
     cfg = Config(str(backend_root / "alembic.ini"))
