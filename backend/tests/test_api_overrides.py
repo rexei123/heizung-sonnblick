@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -123,13 +124,13 @@ async def test_post_frontend_4h_returns_201(http_client: httpx.AsyncClient, room
     before = datetime.now(tz=UTC)
     resp = await http_client.post(
         f"/api/v1/rooms/{room_id}/overrides",
-        json={"setpoint": "21.5", "source": "frontend_4h", "reason": "API-Test"},
+        json={"setpoint": "22", "source": "frontend_4h", "reason": "API-Test"},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["room_id"] == room_id
     assert body["source"] == "frontend_4h"
-    assert Decimal(body["setpoint"]) == Decimal("21.5")
+    assert Decimal(body["setpoint"]) == Decimal("22")
     expires = datetime.fromisoformat(body["expires_at"])
     delta = expires - before
     assert timedelta(hours=3, minutes=55) < delta < timedelta(hours=4, minutes=5)
@@ -228,3 +229,47 @@ async def test_delete_then_double_revoke_returns_409(
 async def test_delete_unknown_override_returns_404(http_client: httpx.AsyncClient) -> None:
     resp = await http_client.request("DELETE", "/api/v1/overrides/9999999")
     assert resp.status_code == 404, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.9a Hotfix - Engine-Re-Eval-Trigger + Integer-Setpoint
+# ---------------------------------------------------------------------------
+
+
+async def test_post_triggers_evaluate_room(http_client: httpx.AsyncClient, room_id: int) -> None:
+    """A1: POST muss ``evaluate_room.delay(room_id)`` triggern (analog
+    zu occupancies, AE-07)."""
+    with patch("heizung.api.v1.overrides._evaluate_room_task") as mock_task:
+        resp = await http_client.post(
+            f"/api/v1/rooms/{room_id}/overrides",
+            json={"setpoint": "22", "source": "frontend_4h"},
+        )
+        assert resp.status_code == 201, resp.text
+        mock_task.delay.assert_called_once_with(room_id)
+
+
+async def test_delete_triggers_evaluate_room(http_client: httpx.AsyncClient, room_id: int) -> None:
+    """A1: DELETE muss ebenfalls ``evaluate_room.delay`` triggern."""
+    create_resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22", "source": "frontend_4h"},
+    )
+    override_id = create_resp.json()["id"]
+
+    with patch("heizung.api.v1.overrides._evaluate_room_task") as mock_task:
+        resp = await http_client.request("DELETE", f"/api/v1/overrides/{override_id}")
+        assert resp.status_code == 200, resp.text
+        mock_task.delay.assert_called_once_with(room_id)
+
+
+async def test_post_setpoint_with_half_step_returns_422(
+    http_client: httpx.AsyncClient, room_id: int
+) -> None:
+    """A2: API akzeptiert nur ganze Grad - sonst Diskrepanz UI vs.
+    Engine-Trace (rules.engine._quantize rundet auf int)."""
+    resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22.5", "source": "frontend_4h"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "ganzen °C-Schritten" in resp.text
