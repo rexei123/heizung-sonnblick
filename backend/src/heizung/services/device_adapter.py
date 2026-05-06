@@ -106,7 +106,8 @@ async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:
         .where(Device.id == device_id)
         .limit(1)
     )
-    return await session.scalar(stmt)
+    room_id: int | None = await session.scalar(stmt)
+    return room_id
 
 
 async def handle_uplink_for_override(
