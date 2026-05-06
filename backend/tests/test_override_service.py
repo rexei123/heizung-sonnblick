@@ -141,9 +141,7 @@ async def test_create_quantizes_setpoint(db_session: AsyncSession, room_id: int)
     assert o.setpoint == Decimal("21.6")
 
 
-async def test_create_rejects_setpoint_below_min(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_create_rejects_setpoint_below_min(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     with pytest.raises(ValueError):
         await override_service.create(
@@ -155,9 +153,7 @@ async def test_create_rejects_setpoint_below_min(
         )
 
 
-async def test_create_rejects_setpoint_above_max(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_create_rejects_setpoint_above_max(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     with pytest.raises(ValueError):
         await override_service.create(
@@ -169,9 +165,7 @@ async def test_create_rejects_setpoint_above_max(
         )
 
 
-async def test_create_caps_long_expires_at(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_create_caps_long_expires_at(db_session: AsyncSession, room_id: int) -> None:
     """``expires_at > now+7d`` wird hart auf ``now+7d`` gecappt."""
     far_future = datetime.now(tz=UTC) + timedelta(days=30)
     o = await override_service.create(
@@ -184,9 +178,7 @@ async def test_create_caps_long_expires_at(
     assert o.expires_at <= datetime.now(tz=UTC) + timedelta(days=7, seconds=1)
 
 
-async def test_get_active_returns_only_non_revoked(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_get_active_returns_only_non_revoked(db_session: AsyncSession, room_id: int) -> None:
     """Revokierter Override wird uebersprungen; aktiver gewinnt."""
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     revoked = await override_service.create(
@@ -257,9 +249,7 @@ async def test_revoke_double_raises(db_session: AsyncSession, room_id: int) -> N
         await override_service.revoke(db_session, o.id, reason="zweites mal")
 
 
-async def test_revoke_device_overrides_only_device(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_revoke_device_overrides_only_device(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     device = await override_service.create(
         db_session,
@@ -283,9 +273,7 @@ async def test_revoke_device_overrides_only_device(
     assert frontend.revoked_at is None
 
 
-async def test_cleanup_expired_marks_only_expired(
-    db_session: AsyncSession, room_id: int
-) -> None:
+async def test_cleanup_expired_marks_only_expired(db_session: AsyncSession, room_id: int) -> None:
     past = datetime.now(tz=UTC) - timedelta(hours=2)
     future = datetime.now(tz=UTC) + timedelta(hours=4)
     expired = ManualOverride(
