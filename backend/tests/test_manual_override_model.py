@@ -19,9 +19,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
+import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DataError, IntegrityError
 
