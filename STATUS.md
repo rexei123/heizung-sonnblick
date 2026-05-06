@@ -401,7 +401,7 @@ Ziel: Repo-Hygiene zwischen Sprint 9.8 und Sprint 9.9. Veraltete Doku, Windows-B
 
 ---
 
-## 2n. Sprint 9.8d shadcn/ui-Migration (2026-05-05, T1+T2 abgeschlossen, T3+T4 offen)
+## 2n. Sprint 9.8d shadcn/ui-Migration (2026-05-05/06, abgeschlossen)
 
 Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende Komponenten schrittweise migrieren. Brand-Identität (Design-Strategie 2.0.1) bleibt erhalten.
 
@@ -409,10 +409,10 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 
 - ✅ **T1 shadcn-Foundation** (PR #89, Commit `513fb84`): shadcn 2.1.8 (Tailwind-v3-kompatibel) initialisiert. `components.json` mit `style: default`, `baseColor: slate`, `iconLibrary: lucide`. `tailwind.config.ts` erweitert um `darkMode: ["class"]`, 11 shadcn-Color-Slots (`background`, `foreground`, `card`, `popover`, `secondary`, `muted`, `accent`, `destructive`, `input`, `ring`), `plugins: tailwindcss-animate`. `globals.css` um 19 HSL-Tokens in `@layer base { :root }` erweitert, `--primary` und `--ring` auf Brand-Rosé `#DD3C71` (HSL `340.3 70.3% 55.1%`). Bestehende Custom-Tokens (`--color-*`, `borderRadius`, `fontFamily.sans`) byteweise erhalten. Neue Dependencies: `class-variance-authority ^0.7.1`, `lucide-react ^1.14.0`, `tailwindcss-animate ^1.0.7`. Build grün, 12 Routes.
 - ✅ **T2 Button-Migration** (PR #90, Commit `4956ae3`): `button.tsx` auf cva-Pattern umgestellt. 5 Variants erhalten (`primary`, `add`, `secondary`, `destructive`, `ghost`), 3 Sizes erhalten (`sm`, `md`, `lg`), Custom Props erhalten (`icon`, `iconSize`, `loading`). `asChild`-Prop ergänzt via `@radix-ui/react-slot ^1.2.4` (shadcn-Standard). `secondary` und `destructive` bewusst Outline statt shadcn-Default-solid (Design-Strategie 2.0.1 §6.1). API abwärtskompatibel — alle 10 importierenden Files (5 Pages + 4 Patterns + ConfirmDialog) compilieren ohne Änderung. Visuelle Cowork-QA gegen heizung-test bestätigt: alle Variants spec-konform, B-1 (Focus-Ring) nach Live-Deploy WCAG 2.4.7 erfüllt.
-- ⏸ **T3 ConfirmDialog-Migration** (offen): `confirm-dialog.tsx` auf shadcn `AlertDialog` umstellen, dynamisches `variant={intent}` weiterhin unterstützen.
-- ⏸ **T4 Vorrats-Komponenten** (offen): `shadcn add dialog select input` für zukünftige Form-Komponenten.
+- ✅ **T3 ConfirmDialog-Migration** (PR #92, Commit `b49cd7e` Initial-Migration; Hotfix PR #94, Commit `54ad897` Button-Stil + ESC-Safety-Net; Final-Hotfix PR #95, Commit `ee3d51a` Radix-natives `onEscapeKeyDown`): `ConfirmDialog` rendert intern Radix `AlertDialog`, externe Props-API unverändert, alle 4 Call-Sites kompilieren ohne Touch. Cowork-QA: alle DOM-Marker bestätigt (`role="alertdialog"`, `data-state`, `aria-describedby`, Fokus-Trap, Initial-Fokus auf Cancel), Button-Stil nach Spec (destructive-Outline), ESC schließt, Outside-Click blockiert.
+- ✅ **T4 Vorrats-Komponenten** (PR #93, Squash-Merge `3067df01`): `dialog.tsx` (122 Z.), `select.tsx` (160 Z.), `input.tsx` (22 Z.) via `npx shadcn@2.1.8 add dialog select input`. Keine Call-Sites, reine Vorratshaltung. Dependencies: `@radix-ui/react-dialog ^1.1.15`, `@radix-ui/react-select ^2.2.6`.
 
-**Tag-Vergabe:** Keiner während Lauf. Vergabe nach T3+T4-Abschluss bzw. mit Final-Tag `v0.1.9-engine` auf main.
+**Tag-Vergabe:** Keiner. Final-Tag `v0.1.9-engine` kommt nach Sprint 9.9–9.12 wie geplant.
 
 **Lessons Learned:**
 - shadcn 2.1.8 schreibt **OKLCH** in `globals.css`, aber `hsl(var(--xxx))`-Wrapper in `tailwind.config.ts` — interne Inkonsistenz, kaputte Farben zur Laufzeit. Workaround: tailwind-config + globals.css revertieren, manuell **HSL** in beiden konsistent setzen.
@@ -421,6 +421,13 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 - cva-Base-Klasse: `focus-visible:outline-none` ohne Ersatz-Ring ist A11y-Bug (WCAG 2.4.7). **Pflicht:** explizit `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background` anhängen.
 - Material Symbols Variable-Font ist 3.74 MB, Static-Cut 309 KB — Subset-Refactor scheitert am dynamischen `{children}`-Pattern in Icon-Components (T1-Backlog).
 - `heizung-test` deploy-pull-Service braucht `git config --system --add safe.directory ...`. **`--global` greift im systemd-Service-Kontext nicht** trotz `User=root` und `HOME=/root` (vermutlich systemd-Sandbox). Siehe CLAUDE.md §5.7 Korrektur.
+- shadcn-Generate referenzieren teils `buttonVariants({variant:"outline"})`. T2-Button hat kein `outline` → TS-Strict-Bruch. Anpassung auf `"secondary"` in `alert-dialog.tsx` nötig. Bei `dialog`/`select`/`input` nicht aufgetreten.
+- shadcn-`AlertDialogAction`/`AlertDialogCancel` rendern per Default `buttonVariants()` im Wrapper-Element. Mit `asChild` + T2-Button als Child gewinnt der Wrapper-Default die Tailwind-Cascade gegen die Child-Variante → Button rendert solid statt Outline. Fix: `buttonVariants` aus `alert-dialog.tsx` entfernen, `asChild` greift dann sauber durch.
+- Radix-`AlertDialog` nutzt `useEscapeKeydown` auf document-Level. Ein React-`onKeyDown` auf `AlertDialogContent` feuert nicht — Radix fängt das Event davor ab. Korrektur: Radix-native Prop `onEscapeKeyDown` direkt auf `AlertDialogContent` setzen, mit `if (loading) event.preventDefault()` als einziger Override.
+- "Build grün + API-kompatibel" ist KEIN Migrationsnachweis bei Komponenten-Migrationen. Pflicht-Akzeptanzkriterium ab jetzt: DOM-Marker-Check im laufenden Browser (z.B. `document.querySelector('[role="alertdialog"]')`).
+- Live-QA von Feature-Branches setzt Merge nach `develop` voraus (heizung-test pullt `:develop`-Tag). Reihenfolge ab jetzt: Phase 2 → CI → Merge → Deploy → QA. T3.4/T3.5-Trennung obsolet.
+- PowerShell `;` ist nicht `&&` — `Set-Location`-Fehler bricht nicht ab, nachfolgendes `npx` läuft trotzdem. Vor `shadcn add` immer `Get-Location` verifizieren.
+- Browser-Cache nach Frontend-Deploy: Hard-Reload (Strg+Shift+R) ist Pflicht-Schritt vor jeder Live-QA. Sonst falsche Befunde am alten Bundle.
 
 ---
 
@@ -507,18 +514,15 @@ Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende 
 Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Parallel wird im Strategie-Chat der jeweils nächste Task geplant.
 
 **Aktiv in Claude Code:**
-- Sprint 9.8d (shadcn-Migration): T1 Foundation + T2 Button abgeschlossen. Offen: T3 ConfirmDialog-Migration, T4 Vorrats-Komponenten.
+- (keiner — wartet auf nächsten Plan-Slot)
 
 **Aktiv in Planung (Strategie):**
-- (Platzhalter — wird nach T3+T4-Abschluss gefüllt)
+- Sprint 9.9: Engine Layer 3 (Manual-Override) + Layer 4 (Window/Fenster-offen)
 
 **Backlog (nicht priorisiert):**
-- T3 ConfirmDialog-Migration auf shadcn AlertDialog (Sprint 9.8d)
-- T4 Vorrats-Komponenten installieren (`dialog`, `select`, `input` — Sprint 9.8d)
 - B-2: "Detail →" als Plain-`<a>` vs. ghost-Button-Spec — Design-Strategie 2.0.1 §6.1 präzisieren (ghost gilt für Buttons, Navigation nutzt Plain-Anchor)
 - B-3: secondary-Border-Kontrast (`#E3E5EA`) zu blass auf surface-alt-Hintergrund — kosmetisch
 - /healthz-Bug: `ts` ist Modul-Load-Zeit, nicht Request-Zeit — irreführend für Deploy-Diagnose
-- Sprint 9.9: Engine Layer 3 (Manual-Override) + Layer 4 (Window/Fenster-offen)
 - Backup-Cron + Off-Site-Replikation (manueller Dump in `/opt/heizung-backup/`, kein Cron)
 - main-Branch-Strategie (aktuell hinter develop, Image-Tag-Logik klären)
 - Sprint 10: Szenarien (scenario/scenario_assignment-Modelle vorbereitet)
