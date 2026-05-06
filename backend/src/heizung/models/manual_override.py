@@ -27,7 +27,6 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
-    column,
     func,
     text,
 )
@@ -91,7 +90,7 @@ class ManualOverride(Base):
         Index(
             "ix_manual_override_active",
             "room_id",
-            column("created_at").desc(),
+            "created_at",
             postgresql_where=text("revoked_at IS NULL"),
         ),
     )
