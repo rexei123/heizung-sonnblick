@@ -2,6 +2,133 @@
 
 Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 
+## 0. Stabilitätsregeln (oberste Priorität)
+
+Dieses System steuert Heizungen im produktiven Hotelbetrieb.
+Instabilität ist nicht akzeptabel. Stabilität schlägt Sprint-
+Tempo, Feature-Vollständigkeit, Eleganz und Backlog-Sauberkeit.
+
+### Operative Regeln
+
+- **S1 — Keine Verschiebung scharfer Mängel:** Bekannte Race-
+  Conditions, Doku-Drifts oder TODO-Kommentare in der Steuer-
+  logik werden gefixt, sobald sie scharf werden — auch wenn
+  das einen laufenden Sprint unterbricht. Kein "Hotfix danach"
+  wenn der Mangel mit dem aktuellen Sprint produktiv aktiv
+  wird.
+
+- **S2 — Determinismus und Idempotenz:** Jede Steuer-
+  entscheidung muss deterministisch sein. Mehrfach getriggerte
+  Code-Pfade müssen identisch reagieren. Locks, SETNX,
+  Idempotenz-Checks sind Pflicht, nicht Optimierung.
+
+- **S3 — Auditierbarkeit:** Jede Setpoint-Änderung wird im
+  Engine-Trace geloggt, mit Layer, Reason, Detail, Zeitstempel.
+  Keine schnellen Pfade am Trace vorbei. Auch Hotfixes loggen.
+
+- **S4 — Hardware-Schutz:** Keine doppelten Downlinks. Keine
+  widersprüchlichen Setpoints in der ChirpStack-Queue. Keine
+  Befehle ohne Bestätigungs-Strategie. Battery-Cost und
+  Motor-Aktivität sind real.
+
+- **S5 — Defensive bei externen Quellen:** PMS, IoT-Devices,
+  Netzwerk dürfen keine Falschzustände erzeugen. Letzter
+  bekannter guter Stand mit Zeitstempel schlägt jede Annahme.
+
+- **S6 — Komplexität trägt Beweislast:** Wer ein Feature, eine
+  Konfiguration oder einen Spezialpfad einbauen will, muss
+  begründen, warum die einfachere Variante nicht reicht. Im
+  Zweifel: einfacher.
+
+### Eskalations-Regel
+
+Wenn ein Sprint-Plan, Brief, Pull-Request oder Live-Deploy
+gegen S1-S6 verstoßen würde: Strategie-Chat-Stop. Keine Merge-
+Entscheidung ohne explizite Freigabe. Auch wenn der Sprint
+dadurch länger dauert.
+
+### Was diese Regeln NICHT sind
+
+- Kein Vorwand, Sprints unkontrolliert auszudehnen — die Regeln
+  greifen bei konkreten Stabilitätsrisiken, nicht bei "könnte
+  man theoretisch schöner machen".
+- Kein Schutz vor Bugs in neuem Code — neue Bugs werden gefixt
+  wie immer. Die Regeln greifen bei strukturellen Risiken in
+  der Steuerlogik.
+- Kein Argument gegen YAGNI — S6 ist explizit pro Einfachheit.
+  Stabilität bedeutet "wenig, robust", nicht "viel,
+  abgesichert".
+
+Querverweise:
+- ADR AE-41 (Stabilitätsregeln + Autonomie-Default)
+- §0.1 Autonomie-Default für Claude Code
+- §5.20 Aspirative Code-Kommentare als Doku-Drift-Risiko
+  (konkreter Fall, der zu S1 geführt hat)
+
+## 0.1 Autonomie-Default für Claude Code
+
+Claude Code arbeitet Sprint-Briefe autonom ab und stoppt nur
+bei substantiellen Entscheidungen. Stop-Points werden nicht
+inflationär gesetzt — der Hotelier prüft an wenigen, klaren
+Punkten, nicht bei jedem Code-Edit.
+
+### Pflicht-Stops (immer)
+
+Claude Code stoppt und wartet auf Freigabe bei:
+
+1. Abweichung vom Sprint-Brief (Pfad, Signatur, Migration-
+   Nummer, Datenmodell-Erweiterung außerhalb des Plans)
+2. Phase-0-Quellcheck-Befund mit Auswirkung auf andere Tasks
+3. Race-Condition, Doku-Drift, TODO-Kommentar in Steuerlogik
+   entdeckt (S1-Verstoß-Kandidat)
+4. Test-Failure, der nicht durch das aktuelle Task entstanden
+   ist
+5. Mypy/Ruff/ESLint-Errors in fremden Dateien
+6. Vor Pull-Request-Erstellung
+7. Vor Tag-Vergabe
+8. Vor Live-Deploy auf heizung-test oder heizung-main
+9. S1-S6-Verstoß-Verdacht (siehe §0)
+
+### Auto-Continue (autonom)
+
+- Code-Edits, die dem Brief 1:1 entsprechen
+- Test-Erstellung gemäß Brief
+- ruff/mypy/pytest/eslint/next build-Runs
+- Doku-Updates gemäß Brief
+- Routine-Bash-Commands (git status/diff/add, ls, cd, find,
+  grep)
+- Datei-Reads
+
+### Berichts-Format
+
+- **Auto-Continue:** Eine Zeile pro Task am Ende ("T1 done,
+  alle Checks grün, Diff in Branch")
+- **Pflicht-Stop:** Voller Bericht mit Diff, Befund, Optionen,
+  Empfehlung
+- **Sprint-Ende:** Sammelbericht mit allen Diffs, Test-Outputs,
+  PR-Vorschlag, Tag-Vorschlag
+
+### Eskalation bei Unsicherheit
+
+Wenn unklar ist, ob ein Befund unter Pflicht-Stop fällt:
+**immer stoppen.** Falsch-Positiv ist günstiger als
+Falsch-Negativ. Stabilität schlägt Geschwindigkeit (S1+S2).
+
+### Sprint-spezifische Stufen
+
+Der Default ist Stufe 2. Der Sprint-Brief kann eine andere
+Stufe explizit setzen:
+
+- **Stufe 1** (volle Stop-Points): Engine-Logik mit
+  Concurrency, neue Architektur-Schichten, Hardware-
+  Befehlspfade
+- **Stufe 2** (Default): Standard-Sprints
+- **Stufe 3** (volle Autonomie): reine Markdown-Doku,
+  Dependency-Bumps, Lint-Fixes ohne Logik-Änderung
+
+Begründung der Stufe steht im Sprint-Brief, nicht im
+Strategie-Chat.
+
 ## 1. Identität & Stand
 
 - **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
@@ -15,6 +142,7 @@ Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 
 In dieser Reihenfolge:
 
+0. CLAUDE.md §0 + §0.1 — Stabilitätsregeln und Autonomie-Default. Nicht überspringbar.
 1. `CONTEXT.md` — Boot-Anker, aktueller Stand, nächster Schritt
 2. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags
 3. `docs/SPEC-FRAMEWORK.md` — verbindliche Code- und Doku-Regeln

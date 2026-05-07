@@ -25,6 +25,21 @@ DNS-Hosting: Hetzner Online / konsoleH (siehe [`docs/RUNBOOK.md`](docs/RUNBOOK.m
 - [`docs/features/`](docs/features/) — Feature-Briefe pro Sprint
 - [`infra/deploy/SERVER-SETUP.md`](infra/deploy/SERVER-SETUP.md) — Hetzner-Setup-Anleitung
 
+## Stabilitätsregeln
+
+Dieses System steuert Heizungen im produktiven Hotelbetrieb.
+Stabilität ist die oberste Systemregel und schlägt Sprint-
+Tempo, Feature-Vollständigkeit und Eleganz. Verbindlich sind
+die operativen Regeln S1-S6 in
+[CLAUDE.md §0](./CLAUDE.md#0-stabilitätsregeln-oberste-priorität).
+Sprint-Pläne und Pull-Requests werden gegen diese Regeln
+geprüft.
+
+Claude-Code-Sessions arbeiten unter dem Autonomie-Default
+Stufe 2 (siehe [CLAUDE.md §0.1](./CLAUDE.md#01-autonomie-default-für-claude-code)):
+Routine wird autonom abgearbeitet, substantielle
+Entscheidungen werden ausdrücklich freigegeben.
+
 ## Stack
 
 - **Backend:** Python 3.12, FastAPI ≥0.110, PostgreSQL 16 + TimescaleDB, SQLAlchemy 2.0 (async), Celery 5.3 + Redis 5.0 (Worker + Beat-Scheduler), aiomqtt 2.3
