@@ -476,6 +476,45 @@ Anlass: Sprint 9.10d Phase 0 — Layer 0 (Sommer) und Layer 2 (Temporal) gaben i
 
 **Querverweise:** §5.18 Sprint 9.10 Lessons (Schema-Constraints), AE-40 (Engine-Lock), §5.20 (aspirative Code-Kommentare als Doku-Drift). detail-Konvention selbst ist heute heterogen (Layer 4 vorbildlich snake_case, Layer 1/2/3/5 f-string-Freitext) — Backlog B-9.10d-1 für die Vereinheitlichung vor `v0.1.9-engine`.
 
+### 5.24 `ruff check` und `ruff format --check` sind verschiedene Gates (Sprint 9.10d Lesson)
+
+Lokal `ruff check .` allein reicht nicht für CI. Der CI-Job ruft sowohl `ruff check` (Lint) als auch `ruff format --check` (Formatierungs-Drift) auf — beide müssen grün sein, sonst rot.
+
+Symptom: lokal alles grün, CI rot mit Diff-Block in der Action-Log.
+
+**Pflicht vor jedem Push, der Python-Code ändert:**
+
+```powershell
+cd backend
+ruff check .
+ruff format --check .
+```
+
+Falls `ruff format --check` rot: `ruff format .` läuft, dann diff reviewen, mit aufnehmen in den Commit. Kein Force-Push, kein Bypass.
+
+Anlass: Sprint 9.10d PR #103 erster Push war wegen `ruff format --check` rot, weil lokal nur `ruff check` lief. Folge-Commit `ea0d53a` reformatierte eine `scalars()`-Kette in `test_engine_trace_consistency.py`. Hat einen zweiten CI-Round-Trip gekostet.
+
+Backlog B-9.10d-6: Pre-Push-Hook oder pyproject-Config erzwingt beides automatisch — Hygiene-Sprint vor `v0.1.9-engine`.
+
+### 5.25 `gh pr checks --watch` zeigt manchmal stale concurrency-cancel'd Runs (Sprint 9.10d Lesson)
+
+Wenn ein Push während eines laufenden CI-Jobs erfolgt, cancelt GitHub-Actions per `concurrency.cancel-in-progress` den älteren Run. `gh pr checks --watch` rendert in dem Moment manchmal noch den canceled "pass in 3s"-Status, obwohl der finale Run für den neuen HEAD parallel läuft.
+
+Symptom: `gh pr merge` failt mit `Required status check "e2e" is in progress`, obwohl `gh pr checks --watch` ein paar Sekunden vorher "all green" gemeldet hat.
+
+**Fix:** zweiter `gh pr checks $prNum --watch` direkt nach Merge-Block. Wartet bis der echte Run für den aktuellen HEAD-Commit grün ist. Dann Merge erneut versuchen.
+
+**Robust-Variante** für PR-Workflows in Skripten:
+
+```powershell
+# Vor jedem Merge: Run-ID des LETZTEN Pushes verifizieren
+$headSha = gh pr view $prNum --json headRefOid -q .headRefOid
+gh run list --commit $headSha --json status,name,conclusion
+# Erst mergen, wenn alle conclusion="success" UND status="completed"
+```
+
+Anlass: Sprint 9.10d Merge — `gh pr checks --watch` zeigte "pass in 3s" für den e2e-Job, der erste `gh pr merge`-Versuch failte trotzdem mit `Required status check "e2e" is in progress`. Ein zweiter Watch-Durchlauf zeigte den echten Run mit ~1m46s Dauer; danach lief der Merge sauber.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
