@@ -460,6 +460,43 @@ Ziel: Engine berücksichtigt manuelle Setpoint-Übersteuerungen aus Vicki-Drehkn
 
 ---
 
+## 2p. Sprint 9.10 Window-Detection / Engine Layer 4 (2026-05-07, abgeschlossen)
+
+Ziel: Engine reagiert auf Vicki-Fenster-offen-Sensor und senkt den Setpoint auf System-Frostschutz, solange ein frisches Reading `open_window=true` meldet. Race-Condition aus dem MQTT-Reading-Trigger gleich mit-gefixt (T3.5 vorgezogen).
+
+**Tasks:**
+
+- ✅ **T1 Persistenz-Fix `sensor_reading.open_window`**: Migration `0009_sensor_reading_open_window` (Boolean NULL), Modell + `SensorReadingRead`-Schema erweitert, MQTT-Subscriber liest `obj.openWindow` (camelCase wie vom Codec geliefert). NULL = Feld fehlte im Payload, NICHT False. 3 neue Pytests (true / false / missing→None).
+- ✅ **T2 Engine Layer 4 Window-Detection**: `layer_window_open` in `rules/engine.py` zwischen Layer 3 (Manual) und Layer 5 (Clamp). DISTINCT-ON-Query `SensorReading → Device → HeatingZone.room_id`, Filter `now - 30min`. Aktiv → `MIN_SETPOINT_C=10` + `reason=WINDOW_OPEN` + extras `{open_zones, occupancy_state}`. Passthrough mit Detail-Diagnose `no_readings | stale_reading | no_open_window`. Signatur erweitert um `room_status`/`now` für Test-Determinismus. 7 DB-Tests, alle gegen echte TimescaleDB grün.
+- ✅ **T3 Re-Eval-Trigger im MQTT-Subscriber**: `_persist_uplink` ruft nach `commit()` `evaluate_room.delay(room_id)` über Device→HeatingZone-Join. Edge-Case `device.heating_zone_id IS NULL` → Warning-Log, kein Trigger. 2 neue Pytests (mocked `SessionLocal` + `evaluate_room.delay`).
+- ✅ **T3.5 Engine-Task-Lock via Redis-SETNX (vorgezogen aus 9.10a)**: `services/engine_lock.py` mit `try_acquire(room_id, ttl_s=30)` / `release(room_id)`. `evaluate_room` umrahmt: SETNX-Acquire → bei Konflikt `apply_async(countdown=5)` (kein Drop, Re-Trigger), sonst `try/finally` mit `release`. ADR **AE-40** dokumentiert die Entscheidung. Aspirativer celery_app.py-Kommentar aus Sprint 9.6 ersetzt durch Verweis auf AE-40. 8 Pytests (FakeRedis-Mock × 4 + Task-Wrapper × 4) plus Live-Smoke gegen Compose-Stack: 10 Threads gegen denselben Lock → genau 1 gewinnt; 5×`evaluate_room.delay` → alle 5 `lock_busy_retriggered`, danach Re-Trigger-Generationen konvergieren in `skipped_no_room`. Bonus: 1631 Null-Bytes im ADR-File mit-bereinigt (CLAUDE.md §5.2-Pollution).
+- ✅ **T4 Frontend Window-Indikator im Engine-Panel**: `WindowOpenIndicator` + `extractWindowOpenSince` in eigener Datei `engine-window-indicator.tsx` (kein TanStack-Query-Plumbing für Proof-Script). Material-Symbol-Glyph **`window`** als Static-Cut-Fallback (`sensor_window_open` per fonttools-Inspektion NICHT im 317-KB-Subset enthalten — Backlog B-9.10-3). Brand-Rosé `text-primary`, Tooltip `Fenster offen seit HH:MM` (de-AT), DOM-Marker `data-testid="window-open-indicator"`. Mock-Render-Beweis via `scripts/dom-marker-proof.tsx` (`renderToString`): positiver Pfad rendert Marker, 3 negative Pfade (leer / kein window_safety / fehlendes Feld) rendern keinen.
+- ✅ **T5 Sprint-Doku + Backlog**: dieser STATUS.md-Eintrag, CLAUDE.md §1 + neue Lessons §5.18 / §5.19, AE-40 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`.
+
+**Engine-Pipeline-Stand:** Layer 0 / 1 / 2 / 3 / **4 (NEU)** / 5 + Hysterese — alle aktiv. Layer 4 überschreibt auch Manual-Override → Sicherheit > Komfort.
+
+**Test-Stand:** 190 passed (vorher 182 + 7 Layer-4-DB-Tests + 8 Lock-Tests + 2 T3-Trigger-Tests + 3 open_window-Mapping-Tests). Pre-existing psycopg2-Failures in `test_manual_override_model.py` (7 Errors) + `test_migrations_roundtrip.py` (3 Failures) sind unverändert — kein 9.10-Bezug, Backlog für nächsten Hygiene-Sprint.
+
+**Worker-Setup-Hinweis:** Dev-Compose hat keinen `celery_worker`-Service. Lokaler Worker-Aufruf für T3.5-Smoke unter Windows:
+
+```powershell
+celery -A heizung.celery_app worker --concurrency=2 --pool=threads `
+       --without-heartbeat --without-gossip --without-mingle -Q heizung_default
+```
+
+`--pool=threads` statt prefork (Windows-Limitation). Die Compose-Erweiterung um einen `celery_worker`-Container wäre eigener Mini-Sprint.
+
+**Ad-hoc-Frage „evaluate_room für nicht-existente room_id":** sauber abgefangen. `engine_tasks.py:127-132` returnt `{status: "skipped_no_room"}` mit `WARNING`-Log und ohne State-Mutation, wenn `_engine_evaluate_room` `None` liefert. Im T3.5-Live-Smoke gegen Room=99999 wurde dieser Pfad ~10x durchlaufen — keine Side-Effects, keine Exceptions.
+
+**Tag-Vergabe:** Vorschlag `v0.1.9-rc3-window-detection` nach Sprint-Merge. Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
+
+**Lessons Learned:**
+- **Test-Fixtures müssen Schema-Constraints respektieren**: `room.number` ist `VARCHAR(20)`, `device.dev_eui` ist `VARCHAR(16)`. Mein erster Layer-4-Fixture-Suffix `t9-10-l4-{HHMMSSffffff}` (21 Zeichen) hat alle 7 Tests gleichzeitig gekippt. Robuste Suffix-Strategie: `uuid.uuid4().hex[:8]` + kurzer Präfix (3-5 Zeichen) — passt in alle bekannten String-Limits dieses Repos.
+- **Live-DB-Verify ist Pflicht-Schritt zwischen DB-erzeugenden und DB-konsumierenden Tasks**: T1 hat `0009_sensor_reading_open_window` geschrieben, T2 hat darauf gebauten Engine-Code geschrieben. Erst der explizite Zwischen-Schritt — Compose-Stack hochfahren, `alembic upgrade head` gegen echte TimescaleDB, `pytest mit TEST_DATABASE_URL` — hat den `String(20)`-Bug aufgedeckt. Pure-Function-Tests laufen lokal grün, aber blind. Ergänzung zur Pre-Push-Routine in §6 angedacht für nächsten Hygiene-Sprint.
+- **Aspirative Code-Kommentare sind Doku-Drift**: `celery_app.py:60-61` versprach seit Sprint 9.6 einen Redis-SETNX-Lock, der nie geliefert wurde. Drei Folgesprints haben Tasks darauf gestapelt, ohne dass der Lock real war. Pflicht-Stop-Trigger: TODO/FIXME/„kommt in Sprint X" in produktiver Steuer- oder Sicherheitslogik gehört in den Sprint-Plan, nicht als Kommentar im Code.
+- **Static-Cut-Fonts brauchen Glyph-Inventarisierung vor UI-Design**: `fontTools.ttLib.TTFont('...woff2').getBestCmap()` listet alle ~4300 enthaltenen Glyphen. `sensor_window_open` (vom Brief gewünscht) ist NICHT enthalten, `window` (Brief-Fallback) ist enthalten. Static-Cut-Erweiterung erfordert eigenen Mini-Sprint mit Re-Generation des Subset-Fonts → Backlog B-9.10-3.
+- **`tsx`-Runner mit Path-Aliases + JSX**: bei `package.json` ohne `"type": "module"` transpilieren `.tsx`-Dateien zu CJS — named imports aus `.mjs`-Entry sehen nur `default` + `module.exports`. Saubere Lösung: Proof-Script selbst als `.tsx`, plus einmal `import * as React from "react"` im Helper (Tree-Shaking macht das im Next.js-Build wieder weg).
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -483,10 +520,10 @@ Ziel: Engine berücksichtigt manuelle Setpoint-Übersteuerungen aus Vicki-Drehkn
 ### Backend (FastAPI + PostgreSQL/TimescaleDB)
 - Python 3.12, FastAPI >=0.110, SQLAlchemy >=2.0, Pydantic >=2.6, Alembic >=1.13
 - Celery >=5.3 + Redis >=5.0 (Worker + Beat-Scheduler), aiomqtt >=2.3
-- 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable), event_log (Hypertable), control_command
-- Alembic-Migrationen 0001-0004 deployed auf beiden Servern (0003 in zwei Files: 0003a Stammdaten + 0003b event_log-Hypertable)
-- Engine: 6-Layer-Pipeline (Layer 0/1/2/5 + Hysterese implementiert, Layer 3/4 offen)
-- 10 Test-Dateien, 96 Test-Cases, CI grün
+- 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable, ab Sprint 9.10 mit `open_window`), event_log (Hypertable), control_command
+- Alembic-Migrationen 0001-0004 + 0008 + 0009 (0003 in zwei Files: 0003a Stammdaten + 0003b event_log-Hypertable; 0008 manual_override aus 9.9; 0009 sensor_reading.open_window aus 9.10)
+- Engine: 6-Layer-Pipeline vollständig — Layer 0 Sommer / 1 Base / 2 Temporal / 3 Manual / 4 Window-Detection / 5 Hard-Clamp + Hysterese. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40) abgesichert.
+- ~25 Test-Dateien, 190 Test-Cases lokal grün (+10 pre-existing psycopg2-Failures, kein 9.10-Bezug)
 
 ### Frontend (Next.js 14.2 App Router + Tailwind)
 - Next.js 14.2.15, React 18.3.1, TypeScript 5.6.3 strict
@@ -550,9 +587,15 @@ Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Pa
 - (keiner — wartet auf nächsten Plan-Slot)
 
 **Aktiv in Planung (Strategie):**
-- Sprint 9.10: Engine Layer 4 (Window/Fenster-offen-Detection) + restliche Engine-Punkte vor Final-Tag `v0.1.9-engine`
+- Sprint 9.11/9.12: Live-Test #2 (Vicki gegen Test-Server, vollständiger Layer-Stack inkl. Window-Detection + Lock + 6h-Hysterese-Heartbeat), danach Final-Tag `v0.1.9-engine`
 
 **Backlog (nicht priorisiert):**
+- **B-9.10-1** (aus 9.10): Fenster-Indikator in `/zimmer`-Liste (Spalte STATUS, analog Betterspace grünes Quadrat). Aufwand 1-2 h.
+- **B-9.10-2** (aus 9.10): Fehler-Übersicht für Devices (filterbar nach Battery, Valve-Error, Offline). Eigener Sprint 6-10 h. Vorbedingung: Codec-Quellcheck `fPort 1` `error_code`-Bytes.
+- **B-9.10-3** (aus 9.10): Material-Symbols-Static-Cut um `sensor_window_open` erweitern (aktuell Fallback `window`). Erfordert Re-Generation des `material-symbols-outlined-v332.woff2`-Subsets aus erweiterter Glyph-Liste. Eigener Mini-Sprint.
+- **B-9.10-5** (aus 9.10): Codec-snake_case-Alias für `open_window` aus camelCase `openWindow` (mit nächstem ChirpStack-Touch — Codec-Re-Deploy hat eigenen Sprint-Plan).
+- **B-9.10-6** (aus 9.10): pre-existing psycopg2-Failures in `test_manual_override_model.py` + `test_migrations_roundtrip.py` (`ModuleNotFoundError: psycopg2`). Tests nutzen den sync psycopg2-Driver, der lokal nicht installiert ist. Optionen: a) `psycopg2-binary` als Dev-Dependency, b) Tests auf asyncpg-Driver umstellen, c) `requires_psycopg2`-Skip-Marker. Hygiene-Sprint.
+- **B-9.10-7** (aus 9.10): `celery_worker`-Service in dev `docker-compose.yml` (aktuell nur prod). Lokaler Smoke + Live-Reload-Workflow gegen echte Worker. Aufwand ~30 Min.
 - B-2: "Detail →" als Plain-`<a>` vs. ghost-Button-Spec — Design-Strategie 2.0.1 §6.1 präzisieren (ghost gilt für Buttons, Navigation nutzt Plain-Anchor)
 - B-3: secondary-Border-Kontrast (`#E3E5EA`) zu blass auf surface-alt-Hintergrund — kosmetisch
 - /healthz-Bug: `ts` ist Modul-Load-Zeit, nicht Request-Zeit — irreführend für Deploy-Diagnose
@@ -616,5 +659,6 @@ Secrets liegen in:
 | `v0.1.8-stammdaten` | Sprint 8 (Stammdaten + Belegung, Master-Detail-CRUD) | 2026-05-03 |
 | `v0.1.9-rc1-walking-skeleton` | Sprint 9 (Engine 6-Layer-Skelett + Downlink + Engine-Panel) | 2026-05-04 |
 | `v0.1.9-rc2-manual-override` | Sprint 9.9 + 9.9a (Engine Layer 3 + UI + Hotfix) | 2026-05-06 |
+| `v0.1.9-rc3-window-detection` | Sprint 9.10 (Engine Layer 4 Window-Detection + AE-40 Engine-Task-Lock) | 2026-05-07 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*

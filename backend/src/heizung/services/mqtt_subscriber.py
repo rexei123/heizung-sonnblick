@@ -32,8 +32,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from heizung.config import get_settings
 from heizung.db import SessionLocal
 from heizung.models.device import Device
+from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.services.device_adapter import handle_uplink_for_override
+from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,9 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         "battery_percent": _battery_pct_from_volts(obj.get("battery_voltage")),
         "rssi_dbm": rx.rssi if rx else None,
         "snr_db": _to_decimal(rx.snr) if rx else None,
+        # Sprint 9.10: Vicki openWindow durchreichen (NULL wenn Feld fehlt,
+        # nicht False).
+        "open_window": obj.get("openWindow"),
         "raw_payload": uplink.data,
     }
 
@@ -170,6 +175,32 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
             values["setpoint"],
             seen_at.isoformat(),
         )
+
+        # Sprint 9.10 T3: Re-Eval-Trigger. Jedes frische Reading kann den
+        # Engine-State aendern (Layer 4 Window-Detection braucht aktuelles
+        # open_window). Ohne Trigger wuerde Layer 4 erst beim naechsten
+        # 60-s-Beat-Tick reagieren — fuer Fenster-Auf-Erkennung zu lahm.
+        # Race-Condition mit parallelen evaluate_room ist durch
+        # AE-40 (Redis-SETNX-Lock in evaluate_room) abgedeckt.
+        room_id = (
+            await session.execute(
+                select(HeatingZone.room_id)
+                .join(Device, Device.heating_zone_id == HeatingZone.id)
+                .where(Device.id == device_id)
+            )
+        ).scalar_one_or_none()
+        if room_id is not None:
+            evaluate_room.delay(room_id)
+            logger.info(
+                "evaluate_room geschedult room_id=%s dev_eui=%s",
+                room_id,
+                dev_eui,
+            )
+        else:
+            logger.warning(
+                "device_id=%s ohne heating_zone -> kein Re-Eval geschedult",
+                device_id,
+            )
 
 
 async def _handle_override_detection(uplink: ChirpStackUplink) -> None:

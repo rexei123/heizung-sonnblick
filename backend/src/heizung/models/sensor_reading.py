@@ -12,7 +12,16 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from heizung.db import Base
@@ -43,6 +52,11 @@ class SensorReading(Base):
     battery_percent: Mapped[int | None] = mapped_column(SmallInteger)
     rssi_dbm: Mapped[int | None] = mapped_column(SmallInteger)
     snr_db: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
+
+    # Sprint 9.10: Vicki-Codec-Feld ``openWindow`` aus Periodic-Reports.
+    # NULL = Feld nicht im Payload vorhanden (alter Codec / Recovery-Daten),
+    # NICHT identisch mit False. Layer 4 behandelt NULL + False gleich.
+    open_window: Mapped[bool | None] = mapped_column(Boolean)
 
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.

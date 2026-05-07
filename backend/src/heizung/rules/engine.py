@@ -35,6 +35,7 @@ from heizung.models.heating_zone import HeatingZone
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
+from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import FROST_PROTECTION_C
 from heizung.services import override_service
 
@@ -48,6 +49,12 @@ HYSTERESIS_C: int = 1
 HEARTBEAT_INTERVAL: timedelta = timedelta(hours=6)
 MAX_SETPOINT_C: int = 30
 MIN_SETPOINT_C: int = int(FROST_PROTECTION_C)
+
+# Sprint 9.10: Reading-Alter, ab dem ein open_window-Flag als veraltet gilt
+# und Layer 4 nicht mehr aktiviert. 30 Min entspricht zwei verpassten
+# Vicki-Periodic-Reports (Default 15 Min) — robust gegen Einzel-Ausfall,
+# eng genug, dass nach Funkloch nicht stundenlang fehlhaltend.
+WINDOW_STALE_THRESHOLD_MIN: int = 30
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +327,99 @@ async def layer_manual_override(
     )
 
 
+async def layer_window_open(
+    session: AsyncSession,
+    room_id: int,
+    *,
+    prev_setpoint_c: int,
+    prev_reason: CommandReason,
+    room_status: RoomStatus,
+    now: datetime,
+) -> LayerStep:
+    """Layer 4: Fenster-Sicherheit (Sprint 9.10 T2).
+
+    Liefert IMMER einen ``LayerStep`` (auch im no-op-Fall), damit das
+    Engine-Decision-Panel pro Eval einen Trace-Eintrag fuer Layer 4 zeigt.
+
+    Aktiv: mindestens ein Geraet im Raum hat ein **frisches** Reading
+    (Alter <= ``WINDOW_STALE_THRESHOLD_MIN``) mit ``open_window=True``.
+    Setpoint -> ``MIN_SETPOINT_C`` (= System-Frostschutz aus
+    ``rules/constants.py``), Reason -> ``WINDOW_OPEN``.
+
+    Passthrough: ``prev_setpoint_c`` / ``prev_reason`` unveraendert. ``detail``
+    haelt fest WARUM kein Eingriff erfolgte (no_readings / stale_reading /
+    no_open_window) — wichtig fuer Operator-Diagnose.
+
+    ``extras`` ist immer befuellt mit ``open_zones`` (Liste mit
+    ``zone_id`` + ``reading_at``) und ``occupancy_state`` (occupied/vacant
+    abgeleitet aus ``room_status``). ``occupancy_state`` beeinflusst
+    Layer 4 NICHT — es wird nur fuer einen spaeteren Notification-Sprint
+    mitgeschrieben (Doppel-Auswertung gegen Layer 1 vermieden).
+
+    NULL-Werte in ``open_window`` (alter Codec / Vicki ohne Sensor) gelten
+    als ``False`` und aktivieren Layer 4 NICHT.
+
+    Signatur weicht bewusst vom Layer-3-Vorbild ab: ``room_status`` und
+    ``now`` werden vom Caller mitgegeben, statt erneut DB-Roundtrip oder
+    ``datetime.now()`` intern. Macht Tests deterministisch und nutzt den
+    bereits geladenen ``ctx.room.status``.
+    """
+    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
+    occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
+
+    # DISTINCT ON (device_id) liefert pro Geraet das juengste Reading.
+    # JOIN-Pfad SensorReading -> Device -> HeatingZone -> room_id grenzt
+    # auf Devices dieses Raums ein. Devices ohne heating_zone (Provisioning)
+    # fallen durch den INNER JOIN raus — das ist gewollt.
+    stmt = (
+        select(
+            SensorReading.device_id,
+            SensorReading.time,
+            SensorReading.open_window,
+            Device.heating_zone_id,
+        )
+        .join(Device, Device.id == SensorReading.device_id)
+        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
+        .where(HeatingZone.room_id == room_id)
+        .order_by(SensorReading.device_id, SensorReading.time.desc())
+        .distinct(SensorReading.device_id)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    open_zones: list[dict[str, Any]] = []
+    fresh_count = 0
+    for _device_id, reading_time, open_window, zone_id in rows:
+        if reading_time < threshold:
+            continue
+        fresh_count += 1
+        if open_window is True:
+            open_zones.append({"zone_id": zone_id, "reading_at": reading_time.isoformat()})
+
+    if open_zones:
+        return LayerStep(
+            layer=EventLogLayer.WINDOW_SAFETY,
+            setpoint_c=MIN_SETPOINT_C,
+            reason=CommandReason.WINDOW_OPEN,
+            detail=f"open_zones={[z['zone_id'] for z in open_zones]}",
+            extras={"open_zones": open_zones, "occupancy_state": occupancy_state},
+        )
+
+    if not rows:
+        detail = "no_readings"
+    elif fresh_count == 0:
+        detail = "stale_reading"
+    else:
+        detail = "no_open_window"
+
+    return LayerStep(
+        layer=EventLogLayer.WINDOW_SAFETY,
+        setpoint_c=prev_setpoint_c,
+        reason=prev_reason,
+        detail=detail,
+        extras={"open_zones": [], "occupancy_state": occupancy_state},
+    )
+
+
 def layer_clamp(
     prev_setpoint_c: int,
     ctx: _RoomContext,
@@ -526,18 +626,30 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         prev_reason=pre_layer3.reason,
     )
 
-    clamp = layer_clamp(manual.setpoint_c, ctx, prev_reason=manual.reason)
+    # Sprint 9.10 T2: Layer 4 Window-Detection. Ueberschreibt JEDEN
+    # vorherigen Setpoint (auch Manual-Override) auf Frostschutz, wenn ein
+    # frisches Reading open_window=True meldet. Sicherheit > Komfort.
+    window = await layer_window_open(
+        session,
+        room_id,
+        prev_setpoint_c=manual.setpoint_c,
+        prev_reason=manual.reason,
+        room_status=ctx.room.status,
+        now=now,
+    )
+
+    clamp = layer_clamp(window.setpoint_c, ctx, prev_reason=window.reason)
 
     layers_tuple: tuple[LayerStep, ...] = (base,)
     if temporal is not None:
         layers_tuple = (*layers_tuple, temporal)
-    layers_tuple = (*layers_tuple, manual, clamp)
+    layers_tuple = (*layers_tuple, manual, window, clamp)
 
     return RuleResult(
         room_id=room_id,
         setpoint_c=clamp.setpoint_c,
         layers=layers_tuple,
-        base_reason=manual.reason,
+        base_reason=window.reason,
     )
 
 

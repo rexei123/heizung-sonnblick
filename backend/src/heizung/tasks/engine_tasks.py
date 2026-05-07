@@ -42,7 +42,15 @@ from heizung.rules.engine import (
 from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
+from heizung.services import engine_lock
 from heizung.services.downlink_adapter import DownlinkError, send_setpoint
+
+# Sprint 9.10 T3.5: Re-Trigger-Verzoegerung wenn der Lock fuer einen Raum
+# anderweitig gehalten wird. 5 s ist kurz genug, dass der Burst-Trigger
+# (Reading-Eval) nicht gefuehlt verloren geht, lang genug, dass der
+# laufende Eval bei normalen Latenzen abgeschlossen ist (Engine-Path
+# ~1-2 s lokal, ~3 s Live).
+EVAL_LOCK_RETRIGGER_DELAY_S = 5
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +88,34 @@ def evaluate_room(self: Any, room_id: int) -> dict[str, Any]:  # noqa: ARG001 - 
 
     Sprint 9.1 war Stub — ab Sprint 9.4-5 echte Logik. Task-Name
     bleibt `heizung.evaluate_room` (siehe AsyncResult-Lookups).
+
+    Sprint 9.10 T3.5 (AE-40): Pro Raum hoechstens EIN aktiver Eval.
+    Lock per Redis-SETNX (Key ``engine:eval:lock:{room_id}``, TTL 30 s).
+    Bei Lock-Konflikt wird der Task ueber ``apply_async(countdown=5)``
+    erneut in die Queue geschrieben — kein Drop. Der TTL fungiert als
+    Watchdog falls ein Worker gekillt wird, bevor ``release`` laeuft.
     """
-    return asyncio.run(_evaluate_room_async(room_id))
+    if not engine_lock.try_acquire(room_id):
+        evaluate_room.apply_async(
+            (room_id,),
+            countdown=EVAL_LOCK_RETRIGGER_DELAY_S,
+        )
+        logger.info(
+            "evaluate_room: lock busy fuer room_id=%s -> re-trigger in %ss",
+            room_id,
+            EVAL_LOCK_RETRIGGER_DELAY_S,
+        )
+        return {
+            "room_id": room_id,
+            "status": "lock_busy_retriggered",
+            "retrigger_in_s": EVAL_LOCK_RETRIGGER_DELAY_S,
+        }
+
+    logger.debug("evaluate_room: lock acquired room_id=%s", room_id)
+    try:
+        return asyncio.run(_evaluate_room_async(room_id))
+    finally:
+        engine_lock.release(room_id)
 
 
 @app.task(name="heizung.evaluate_due_rooms", bind=True)

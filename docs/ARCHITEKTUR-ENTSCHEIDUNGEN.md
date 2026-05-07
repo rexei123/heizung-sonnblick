@@ -478,7 +478,7 @@ Mobile: Top-Level wird zur Bottom-Tab-Bar, zweite Ebene als Drawer von oben.
 ---
 
 *Ende des Dokuments*
-                                                                                                                                                                                                                                               
+
 
 ## AE-39 · Manual-Override Adapter-Pattern (Sprint 9.9)
 
@@ -507,3 +507,55 @@ für `fPort 1`/`uint8`, `0.1 °C` für `fPort 2`/decimal) und
   unterscheiden — akzeptiert, weil Folge-Tick mit Hysterese korrigiert.
 - `LayerStep.extras: dict | None` im Engine-Pipeline ist additive
   Erweiterung; andere Layer setzen es nicht.
+---
+
+## AE-40 · Engine-Task-Lock via Redis-SETNX (Sprint 9.10 T3.5)
+
+**Kontext.** Ab Sprint 9.10 triggert der MQTT-Subscriber nach jedem
+persistierten Reading ein ``evaluate_room.delay(room_id)``. Bei
+mehreren Vickis im selben Raum oder schnellen Auf-/Zu-Sequenzen
+kann derselbe Raum innerhalb von Sekunden mehrfach in der
+Celery-Queue landen. Mit ``worker_concurrency=2`` laufen zwei
+Evals fuer denselben Raum parallel — Folge: doppelte
+``ControlCommand``-Rows, doppelte Downlinks, gegenseitige
+Hysterese-Umgehung (jeder Task liest noch nicht-committed
+Vorgaengerstand).
+
+**Entscheidung.** ``evaluate_room`` akquiriert vor jeder Eval
+einen Redis-SETNX-Lock auf dem Key ``engine:eval:lock:{room_id}``
+mit TTL 30 s. Bei Erfolg laeuft die Eval; ``finally`` gibt den
+Lock frei. Bei Misserfolg wird der Task ueber
+``apply_async(countdown=5)`` erneut in die Queue gelegt. KEIN
+Drop — ein verzoegerter Eval ist akzeptabel, ein verlorener nicht.
+
+**Begruendung.**
++ Atomicity: Redis-SETNX serialisiert die Acquire-Versuche
+  Cluster-weit — auch bei mehreren Worker-Containern auf
+  verschiedenen Hosts.
++ Self-healing: Der TTL (30 s) ist >= ``task_time_limit``. Wird
+  ein Worker im laufenden Eval gekillt, gibt der TTL den Lock
+  spaetestens nach 30 s frei.
++ Re-Trigger statt Drop: ``countdown=5`` haelt den Burst-Trigger
+  (Reading-Eval, PMS-Push) garantiert wirksam — der naechste
+  Slot uebernimmt. Verlorene Edge-Reads sind im Sicherheits-
+  kontext (Layer 4 Window-Detection) inakzeptabel.
+- Nicht-Determinismus: Bei sehr hoher Frequenz kann ein Eval
+  ueber mehrere Re-Trigger-Generationen hingeschoben werden,
+  bis der Lock frei wird. Akzeptiert: Hotelbetrieb mit 45 Zimmern
+  + maximal 2 Vickis je Raum erzeugt keine relevante Last.
+- Lock-Schluessel global pro Raum: zwei Sub-Operationen am
+  selben Raum (z.B. Reading-Trigger + Beat-Tick) blockieren
+  sich auch dann gegenseitig, wenn sie semantisch unabhaengig
+  waeren. Akzeptiert wegen einfacher Mechanik.
+
+**Konsequenzen.** ``services/engine_lock.py`` (Singleton-Helper,
+``try_acquire`` / ``release``); ``celery_app.py``-Kommentar
+ersetzt den 9.6-Hinweis durch Verweis auf AE-40; Backlog-Eintrag
+B-9.10-4 (vorab in T3-Bericht angedacht) entfaellt — ist gefixt.
+
+**Worker-Crash-Recovery.** Wenn ein Worker zwischen Lock-Acquire
+und ``try``/``finally``-Release crasht (OOM, Container-Kill,
+SIGKILL, Power-Loss), raeumt Redis den Lock nach TTL=30 s
+automatisch auf. Der naechste Trigger fuer denselben ``room_id``
+laeuft dann durch. Damit ist der Lock selbstheilend, ohne
+externes Cleanup-Skript oder Watchdog.
