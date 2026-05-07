@@ -520,6 +520,36 @@ Ziel: Stabilität als oberste Systemregel und Autonomie-Default für Claude Code
 
 ---
 
+## 2r. Sprint 9.10c Vicki-Codec-Decoder-Fix (2026-05-07, abgeschlossen)
+
+Ziel: Cowork-QA aus Sprint 9.10 hatte aufgedeckt, dass `sensor_reading` nur `fcnt/rssi/snr` befüllt, alle aus dem Codec-`object` gelesenen Felder (`temperature/setpoint/valve_position/battery_percent/open_window`) seit dem Sprint-9.0-Codec-Refactor durchgängig NULL. Engine-Layer 1/4 hatten dadurch keine Ist-Daten — Sprint 9.11 (Live-Test #2) wäre blockiert.
+
+**Phase-0-Befund (H4, neu):** Codec-Routing-Bug. Die Vickis senden Periodic Status Reports auf **fPort=2** (cmd-Byte `0x81`). Der Codec routete `fPort===2` jedoch hartcodiert in `decodeCommandReply`, der nur `cmd=0x52` versteht — Periodics wurden als `unknown_reply` abgewürgt, kein Sensor-Feld im `object`. Live-Beleg per `mosquitto_sub` auf heizung-test (2026-05-07T10:00:04Z, dev_eui 70b3d52dd3034de4, fcnt 895): `{"fPort":2, "data":"gRKdYZmZEeAw", "object":{"command":129, "report_type":"unknown_reply"}}`.
+
+**Lösung:** Cmd-Byte-Routing über `bytes[0]` statt fPort. fPort wird redundant für das Routing.
+
+**Tasks:**
+
+- ✅ **T1a Codec-Fix** `infra/chirpstack/codecs/mclimate-vicki.js`: `decodeUplink` routet jetzt `cmd === 0x52 -> decodeCommandReply`, sonst `decodePeriodicReport`. Header-Kommentar um Sprint-9.10c-Eintrag erweitert. 4 neue Regression-Tests in `test-mclimate-vicki.js` (Periodic v2 auf fPort 2, Periodic v1 auf fPort 1, Setpoint-Reply auf fPort 2, Setpoint-Reply ohne fPort), Test 12 angepasst (vorheriges fPort-2-unknown-reply-Verhalten war ein Bug-Symptom). **19/19 Tests grün.**
+- ✅ **T1b Subscriber-Kommentar-Update** `services/mqtt_subscriber.py`: Sprint-9.0-Kommentar zu „fPort 2 = Reply" präzisiert auf `report_type == 'setpoint_reply'`. §5.20-Anwendung. Funktional unverändert.
+- ✅ **T1c ChirpStack-UI-Re-Paste** auf heizung-test: Codec im ChirpStack-Device-Profile „Heizung" durch Sprint-9.10c-Stand ersetzt (manueller UI-Schritt). Ab Strategie-Chat-Zeitstempel `2026-05-07 ~10:58` greift der neue Codec.
+- ✅ **T1d Backend-Pytest** `test_mqtt_subscriber.py`: neuer Test `test_map_to_reading_live_codec_output_fport2_periodic` mit vollem Live-Codec-Output-Fixture (fPort=2, cmd=0x81, alle Sensor-Felder). **141 passed, 62 skipped (lokal ohne TEST_DATABASE_URL).**
+- ✅ **T2 Live-Smoke heizung-test:**
+  - **Subscriber-Logs Vorher/Nachher:** bis 10:55:57 alle Vickis `temp=None setpoint=None`; ab 11:00:18 Vicki-001 (de4) `temp=22.71 setpoint=18.0`, gefolgt von de5/d7b/e53 mit jeweils echten Werten.
+  - **Postgres `sensor_reading`:** 4 frische Readings, alle Sensor-Felder befüllt, `open_window` jetzt explizit `false` statt NULL, Battery-Werte 33–42 % plausibel.
+  - **Engine-Trace Room 1** (evaluation `09007b00…`, 11:05:53Z): Layer 4 `window_safety` → `detail=no_open_window`, `open_zones=[]`, `occupancy_state=vacant` (Beweis: Layer 4 sieht **frische** Readings, alle `open_window=false` → no-op). Layer 3/1/5 konsistent.
+- ✅ **T3 Sprint-Doku:** dieser STATUS-Eintrag, CLAUDE.md §1 + §5.21 + §5.22, Sprint-Brief `docs/features/2026-05-07-sprint9-10c-codec-fix.md`, RUNBOOK §10 „Codec-Deploy auf ChirpStack" neu.
+
+**Test-Stand:** Codec-Tests 19/19 grün, Backend 141 passed + 62 skipped. **Live-Pipeline auf heizung-test wieder vollständig — alle 4 Vickis liefern befüllte Readings.**
+
+**Hinweis:** Codec-Deploy nach ChirpStack ist manueller UI-Schritt, kein Repo-Push-Effekt. Bootstrap-Skript via gRPC bleibt Backlog.
+
+**Lessons Learned:** CLAUDE.md §5.21 (Cmd-Byte > fPort beim Codec-Routing), §5.22 (ChirpStack-Codec-Deploy ist nicht automatisch).
+
+**Tag-Vergabe:** Strategie-Chat-Entscheidung. Vorschlag `v0.1.9-rc4-codec-fix`, weil sichtbare Zustandsänderung (Vickis liefern jetzt erst korrekt persistierte Werte). Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -631,6 +661,16 @@ Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Pa
   Master-Detail-Pages): aktuell keine e2e-Coverage. Architektur-Entscheidung 
   vor Implementierung — Playwright-Mocking via route.fulfill ODER 
   api+db-Container in CI hochfahren. Eigener Mini-Sprint, nicht Hygiene.
+- **ChirpStack-Codec-Bootstrap-Skript** (Sprint 9.10c): Codec-Deploy ist 
+  heute manueller UI-Schritt je Server (siehe RUNBOOK §10, CLAUDE.md §5.22). 
+  Programmatisches Skript via ChirpStack gRPC-API würde Repo-Stand → 
+  ChirpStack reproduzierbar machen — heizung-test, heizung-main und 
+  spätere Disaster-Recovery wären damit ein Befehl statt UI-Klickerei. 
+  War im Sprint-6-Backlog erwähnt, durch 9.10c-Befund jetzt fällig. 
+  Eigener Hygiene-Sprint.
+- **B-9.10-2 (Devices-Fehler-Übersicht-Filter)** durch 9.10c-Live-Daten 
+  bestätigt fällig: Battery-Werte 33 % (Vicki-001) vs 42 % (andere drei) 
+  sind nur per Filter-Spalte sichtbar — heute nicht in der Devices-Liste.
 
 ---
 

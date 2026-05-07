@@ -211,6 +211,54 @@ def test_map_to_reading_valve_openness_zero_is_persisted() -> None:
     assert row["valve_position"] == 0
 
 
+def test_map_to_reading_live_codec_output_fport2_periodic() -> None:
+    """Regression-Wand fuer Sprint 9.10c (Codec-Routing-Bug).
+
+    Vor dem 9.10c-Fix routete der Codec fPort=2 hartcodiert in den
+    Reply-Pfad — Vicki-Periodics kamen damit als
+    ``{command: 129, report_type: 'unknown_reply'}`` durch und der
+    Subscriber persistierte temperature/setpoint/valve/battery als
+    NULL. Diese Fixture verwendet ein echtes Codec-Output-Beispiel
+    (fPort=2, cmd=0x81 bytes), wie es seit dem Fix vorliegt — voller
+    object-Block. Der Test verifiziert, dass _map_to_reading alle
+    Felder korrekt herausliest.
+    """
+    payload = {
+        "deviceInfo": {"devEui": "70b3d52dd3034de4"},
+        "fCnt": 895,
+        "fPort": 2,
+        "time": "2026-05-07T10:00:04Z",
+        "object": {
+            "report_type": "periodic",
+            "command": 129,
+            "temperature": 19.42,
+            "target_temperature": 22,
+            "battery_voltage": 3.5,
+            "valve_openness": 65,
+            "motor_position": 100,
+            "motor_range": 285,
+            "openWindow": False,
+            "highMotorConsumption": False,
+            "brokenSensor": False,
+        },
+        "rxInfo": [{"rssi": -90, "snr": 9.8}],
+        "data": "gRKdYZmZEeAw",
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=42)
+
+    assert row["device_id"] == 42
+    assert row["fcnt"] == 895
+    assert row["temperature"] == Decimal("19.42")
+    assert row["setpoint"] == Decimal("22")
+    assert row["valve_position"] == 65
+    assert row["battery_percent"] == 42  # (3.5 - 3.0) / 1.2 * 100 = 41.67 -> 42
+    assert row["open_window"] is False
+    assert row["rssi_dbm"] == -90
+    assert row["snr_db"] == Decimal("9.8")
+    assert row["raw_payload"] == "gRKdYZmZEeAw"
+
+
 # ---------------------------------------------------------------------------
 # Sprint 9.10: openWindow aus Vicki-Codec persistieren (Layer-4-Voraussetzung)
 # ---------------------------------------------------------------------------

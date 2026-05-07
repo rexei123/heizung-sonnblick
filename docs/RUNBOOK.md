@@ -625,6 +625,56 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 
 ---
 
+## 10c. Codec-Deploy auf ChirpStack (Sprint 9.10c)
+
+**Hintergrund.** Repo-Codec (`infra/chirpstack/codecs/mclimate-vicki.js`) ist Source of Truth, ChirpStack zieht ihn aber nicht selbst. Jeder Repo-Codec-Touch erfordert anschliessend einen manuellen Re-Paste in der ChirpStack-UI je Server. Siehe CLAUDE.md §5.22.
+
+**Zielserver:** `heizung-test` zuerst, `heizung-main` nachgezogen, sobald Production-Migration ansteht.
+
+### 10c.1 UI-Re-Paste
+
+1. Browser → `https://heizung-test.hoteltec.at/chirpstack/`
+2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API).
+3. **Tenants → Hotel Sonnblick → Device Profiles → Heizung**.
+4. Tab **Codec** öffnen.
+5. Bestehenden JS-Code komplett markieren und löschen.
+6. Inhalt von `infra/chirpstack/codecs/mclimate-vicki.js` (aktueller Repo-Stand auf `develop` bzw. dem zu deployenden Branch) einfügen.
+7. **Update Device Profile** klicken.
+
+Kein Container-Restart nötig — ChirpStack lädt Codec-Änderungen für jedes neue Event neu.
+
+### 10c.2 Verifikation
+
+Nach 1–2 Minuten muss ein neues Vicki-Event mit dem geänderten Codec laufen:
+
+1. Im ChirpStack-UI: **Devices → Vicki-001 → LoRaWAN frames** (oder Events) → letztes Event aufklappen.
+2. Decoded-`object`-Block muss die geänderten/neuen Felder enthalten. Beispiel-Erwartung nach Sprint 9.10c (Cmd-Byte-Routing):
+   ```
+   { "report_type": "periodic",
+     "command": 129,
+     "temperature": 22.71,
+     "target_temperature": 18,
+     "valve_openness": 0,
+     "battery_voltage": 3.4,
+     "openWindow": false, ... }
+   ```
+   (vorher: `{ "command": 129, "report_type": "unknown_reply" }` ohne Sensor-Felder.)
+
+3. Subscriber-Side per SSH gegenchecken:
+   ```bash
+   # SSH (heizung-test, root)
+   docker logs deploy-api-1 --since 5m 2>&1 | grep "uplink persistiert" | tail -5
+   ```
+   Erwartung: Log-Zeilen mit `temp=...` und `setpoint=...`, NICHT `temp=None`.
+
+### 10c.3 Backlog: Bootstrap-Skript
+
+UI-Re-Paste je Server ist fehleranfällig (Copy-Paste-Verlust, ungetesteter Stand). Eigener Hygiene-Sprint via ChirpStack gRPC-API (`UpdateDeviceProfile`-RPC mit `payload_codec_script`-Feld) macht Repo → ChirpStack reproduzierbar. Siehe STATUS.md §6 Backlog-Eintrag „ChirpStack-Codec-Bootstrap-Skript".
+
+**Production-Hinweis:** Sobald heizung-main Live-Vickis bekommt, muss dieser Codec-Deploy-Schritt dort wiederholt werden. Backlog: B-9.10c-2.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

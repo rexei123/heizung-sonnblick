@@ -134,8 +134,8 @@ Strategie-Chat.
 - **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
 - **Repo:** https://github.com/rexei123/heizung-sonnblick (public)
 - **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick`
-- **Aktueller Sprint:** **Sprint 9.10 abgeschlossen** (Window-Detection / Engine Layer 4 + AE-40 Task-Lock). Sprint 9.11/9.12 Live-Test in Vorbereitung.
-- **Letzter Tag:** `v0.1.9-rc3-window-detection` (vorgeschlagen, vergeben nach Sprint-Merge)
+- **Aktueller Sprint:** **Sprint 9.10c abgeschlossen** (Vicki-Codec-Decoder-Fix: Cmd-Byte-Routing statt fPort-Routing). Sprint 9.11 Live-Test #2 in Vorbereitung.
+- **Letzter Tag:** `v0.1.9-rc3-window-detection` (Sprint 9.10). Sprint 9.10c-Tag-Frage offen (Strategie-Chat).
 - **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
 
 ## 2. Pflicht-Lektüre vor Sprint-Arbeit
@@ -441,6 +441,26 @@ Die DB-Tests muessen **gegen echtes Postgres** laufen, nicht nur skipped sein. C
 `celery_app.py:60-61` versprach seit Sprint 9.6 einen Redis-SETNX-Lock fuer Engine-Tasks, der nie geliefert wurde. Drei Folgesprints (9.7-9.9) haben Funktionalitaet darauf gestapelt, ohne dass der Lock real war. Erst Sprint 9.10 hat den Befund (`Grep -path src/heizung/tasks "SETNX|lock|acquire"` → leer) und die Race-Condition aktiv.
 
 **Regel:** TODO/FIXME/„kommt in Sprint X"-Kommentare in produktiver Steuer- oder Sicherheitslogik sind kein neutraler Sprint-Plan, sondern aktive Doku-Drift. Pflicht-Stop-Trigger im Brief-Workflow: solche Kommentare im Quellcheck markieren und entweder a) im aktuellen Sprint mit-fixen oder b) explizit in den Backlog mit Ticket-ID.
+
+### 5.21 Hardware-Annahmen defensiv interpretieren — Cmd-Byte > fPort beim Codec-Routing (Sprint 9.10c Lesson)
+
+Sprint 9.0 hatte `fPort=2` als Marker fuer Setpoint-Replies angenommen und den Vicki-Codec entsprechend hartcodiert (`if fPort === 2 -> decodeCommandReply`). Live-Daten am 2026-05-07 zeigten: alle vier Vickis senden ihre Periodic Status Reports auf `fPort=2` (mit `bytes[0]=0x81`). Folge: Codec wuergte Periodics als `unknown_reply` ab, Subscriber persistierte `temperature/setpoint/valve/battery` als NULL — der Engine-Layer-Stack lief vier Tage lang ohne Ist-Daten.
+
+**Regel:** Codec-Routing ueber das Payload-Byte `bytes[0]` ist robuster als ueber Transport-Felder wie fPort. `bytes[0]` ist Payload-immanent und unabhaengig vom Gateway/Netzwerk-Verhalten. fPort darf zur Diagnose mit-geloggt werden, aber NICHT als Routing-Schluessel dienen, solange der Vendor das Mapping nicht garantiert.
+
+**Querverweise:** AE-40-Schwester-Pattern (Lock im Datenpfad statt Sprint-Plan), §5.22 (ChirpStack-Codec-Deploy ist nicht automatisch).
+
+### 5.22 ChirpStack-Codec-Deploy ist NICHT automatisch (Sprint 9.10c Lesson)
+
+Repo-Codec-Update bedeutet **nicht** ChirpStack-Live-Stand. Der Codec im Repo (`infra/chirpstack/codecs/mclimate-vicki.js`) ist Source of Truth — aber ChirpStack zieht ihn nicht selbst, er muss in der ChirpStack-UI je Server (heizung-test, spaeter heizung-main) im Device-Profile-Codec-Tab manuell eingefuegt werden.
+
+Anlass: Sprint 9.10c Phase 0 — der Repo-Codec war seit Sprint 9.0 mit dem fPort-Routing-Bug angelegt; ChirpStack hatte denselben Stand; der Bug fiel erst in der Cowork-Live-QA von Sprint 9.10 auf. Hat zwei Sprints lang Verifikations-Arbeit gekostet, weil das Symptom (Sensor-Felder NULL) wie ein Subscriber-Problem aussah.
+
+**Konsequenz:** Jeder Codec-Touch im Repo erfordert anschliessend
+1. manuellen UI-Re-Paste auf jedem ChirpStack-Server, plus
+2. Verifikation per **Events-Tab eines aktiven Vickis** — der `object`-Block muss die geaenderten/neuen Felder zeigen.
+
+**Backlog (eigener Hygiene-Sprint):** Programmatisches Bootstrap-Skript via ChirpStack gRPC API, das `device_profile.payload_codec_script` aus dem Repo deployed. Bis dahin ist der manuelle Schritt im RUNBOOK §10c dokumentiert.
 
 ---
 
