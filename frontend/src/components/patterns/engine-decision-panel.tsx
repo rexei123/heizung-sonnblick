@@ -22,6 +22,11 @@ import type {
 } from "@/lib/api/types";
 import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
+import {
+  extractWindowOpenSince,
+  WindowOpenIndicator,
+} from "./engine-window-indicator";
+
 const LAYER_ORDER: EventLogLayer[] = [
   "summer_mode_fast_path",
   "base_target",
@@ -105,7 +110,7 @@ export function EngineDecisionPanel({ roomId }: Props) {
   );
 }
 
-interface EvalGroup {
+export interface EvalGroup {
   evaluationId: string;
   time: string;
   entries: EventLogEntry[];
@@ -143,13 +148,17 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
   // sollte alle 60 s laufen (Sprint 9.7 Scheduler), oder wir haben einen Bug.
   const ageMs = Date.now() - new Date(latest.time).getTime();
   const isStale = ageMs > 60 * 60 * 1000;
+  const windowOpen = extractWindowOpenSince(latest);
   return (
     <div className="bg-surface border border-border rounded-md p-5">
-      <div className="flex items-baseline gap-3">
-        <span className="text-3xl font-medium text-primary">
-          {setpoint !== null ? `${setpoint}°C` : "—"}
-        </span>
-        <span className="text-base text-text-secondary">aktueller Sollwert</span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <span className="text-3xl font-medium text-primary">
+            {setpoint !== null ? `${setpoint}°C` : "—"}
+          </span>
+          <span className="text-base text-text-secondary">aktueller Sollwert</span>
+        </div>
+        {windowOpen ? <WindowOpenIndicator since={windowOpen.since} /> : null}
       </div>
       {baseEntry?.reason ? (
         <p className="mt-2 text-base text-text-secondary">
@@ -167,6 +176,7 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
     </div>
   );
 }
+
 
 function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
   return (
