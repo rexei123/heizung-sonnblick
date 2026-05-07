@@ -115,6 +115,9 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         "battery_percent": _battery_pct_from_volts(obj.get("battery_voltage")),
         "rssi_dbm": rx.rssi if rx else None,
         "snr_db": _to_decimal(rx.snr) if rx else None,
+        # Sprint 9.10: Vicki openWindow durchreichen (NULL wenn Feld fehlt,
+        # nicht False).
+        "open_window": obj.get("openWindow"),
         "raw_payload": uplink.data,
     }
 

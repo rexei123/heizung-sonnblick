@@ -200,3 +200,40 @@ def test_map_to_reading_valve_openness_zero_is_persisted() -> None:
     uplink = ChirpStackUplink.model_validate(payload)
     row = _map_to_reading(uplink, device_id=1)
     assert row["valve_position"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.10: openWindow aus Vicki-Codec persistieren (Layer-4-Voraussetzung)
+# ---------------------------------------------------------------------------
+
+
+def test_map_to_reading_open_window_true() -> None:
+    """openWindow=true im Codec-Output landet als open_window=True in der Row."""
+    payload = _valid_payload()
+    payload["object"]["openWindow"] = True
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["open_window"] is True
+
+
+def test_map_to_reading_open_window_false() -> None:
+    payload = _valid_payload()
+    payload["object"]["openWindow"] = False
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["open_window"] is False
+
+
+def test_map_to_reading_open_window_missing_is_none() -> None:
+    """Feld fehlt im Payload (alter Codec) -> NULL in DB, NICHT False.
+
+    Layer 4 behandelt NULL und False gleich, aber die Persistenz muss die
+    Lueke abbilden, damit Backfills/Audits unterscheiden koennen.
+    """
+    payload = _valid_payload()
+    payload["object"].pop("openWindow", None)
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["open_window"] is None
+
+
