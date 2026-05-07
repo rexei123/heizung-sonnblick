@@ -559,3 +559,52 @@ SIGKILL, Power-Loss), raeumt Redis den Lock nach TTL=30 s
 automatisch auf. Der naechste Trigger fuer denselben ``room_id``
 laeuft dann durch. Damit ist der Lock selbstheilend, ohne
 externes Cleanup-Skript oder Watchdog.
+
+---
+
+## AE-41 · Stabilitaet als oberste Systemregel + Autonomie-Default fuer Claude Code (Sprint 9.10b)
+
+**Status.** Akzeptiert, 2026-05-07.
+
+**Kontext.** Waehrend Sprint 9.10 (Window-Detection) wurde eine
+bestehende, undokumentierte Race-Condition-Luecke
+(``celery_app.py:60-61`` dokumentierte die Mitigation als
+erforderlich, sie war aber nicht implementiert) durch T3
+(Reading-Trigger) scharf. Die Diskussion zeigte, dass Stabilitaet
+als Prinzip nicht explizit verankert war und dass Sprint-Reviews
+durch zu viele Yes-Klicks auf Routine-Schritte verwaessert wurden,
+statt sich auf substantielle Entscheidungen zu konzentrieren.
+
+**Entscheidung.**
+1. Stabilitaet wird als oberste Systemregel in CLAUDE.md §0
+   festgeschrieben — sechs operative Regeln S1-S6 plus
+   Eskalations-Regel.
+2. Claude Code erhaelt in CLAUDE.md §0.1 einen Autonomie-Default
+   (Stufe 2): Auto-Continue fuer Routine, Pflicht-Stops bei
+   substantiellen Entscheidungen. Sprints koennen abweichende
+   Stufen 1 (volle Stops) oder 3 (volle Autonomie) explizit
+   setzen.
+3. Strategie-Chat und Sprint-Plaene pruefen aktiv gegen S1-S6.
+
+**Konsequenzen.**
++ Race-Conditions, Doku-Drifts, TODO-Kommentare in Steuerlogik
+  werden gefixt, nicht verschoben (S1).
++ Idempotenz und Determinismus sind Pflicht, nicht Optimierung
+  (S2).
++ Engine-Trace ist Single Source of Truth fuer Setpoint-
+  Aenderungen (S3).
++ Hardware-Schutz vor doppelten/widerspruechlichen Befehlen ist
+  verbindlich (S4).
++ Defensive bei externen Quellen (PMS, IoT) statt Annahmen (S5).
++ Feature-Komplexitaet traegt Beweislast — im Zweifel einfacher
+  (S6).
+- Sprints koennen sich verlaengern, wenn S1-S6 das verlangen.
+- Yes-Klick-Frequenz im Claude-Code-Workflow sinkt durch Stufe-2-
+  Default; Aufmerksamkeit konzentriert sich auf Substanz statt
+  Routine.
+
+**Querverweise.**
+- CLAUDE.md §0 (Stabilitaetsregeln)
+- CLAUDE.md §0.1 (Autonomie-Default)
+- CLAUDE.md §5.20 (Aspirative Kommentare als Doku-Drift)
+- AE-40 (Engine-Task-Lock — konkreter Anlass-Fall fuer S1)

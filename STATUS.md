@@ -499,6 +499,27 @@ celery -A heizung.celery_app worker --concurrency=2 --pool=threads `
 
 ---
 
+## 2q. Sprint 9.10b Stabilitätsregeln-Verankerung (2026-05-07, abgeschlossen)
+
+Ziel: Stabilität als oberste Systemregel und Autonomie-Default für Claude Code formal im Repo verankern. Reine Governance-Doku, kein Code-Pfad, kein CI-Risiko. Anlass: Race-Condition aus Sprint 9.10 (siehe §5.20 / AE-40) hat gezeigt, dass Stabilitätsprinzipien explizit gemacht werden müssen, statt implizit auf Sprint-Ebene auszuhandeln.
+
+**Tasks:**
+
+- ✅ **T1 CLAUDE.md §0 — Stabilitätsregeln S1-S6** (oberste Priorität, vor §1) inkl. Eskalations-Regel und expliziten Nicht-Zielen. Bestehende §-Nummerierung unverändert.
+- ✅ **T2 CLAUDE.md §0.1 — Autonomie-Default Stufe 2** (Pflicht-Stops 1-9, Auto-Continue-Liste, Berichts-Format, Eskalation bei Unsicherheit, Sprint-spezifische Stufen 1/2/3).
+- ✅ **T3 CLAUDE.md §2 Pflicht-Lektüre** um Punkt 0 (Verweis auf §0 + §0.1) erweitert; Punkte 1-6 unverändert.
+- ✅ **T4 ADR AE-41** in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` angelegt — Format konsistent zu AE-40 (Status / Kontext / Entscheidung / Konsequenzen / Querverweise).
+- ✅ **T5 README.md** um Abschnitt „Stabilitätsregeln" zwischen Dokumentation und Stack ergänzt — kein Vollabdruck, nur Verweis auf CLAUDE.md §0 + §0.1.
+- ✅ **T6 Sprint-Brief** `docs/features/2026-05-07-sprint9-10b-stability-rules.md` + dieser STATUS-Eintrag.
+
+**Tag-Vergabe:** Keiner — Governance-Sprint, kein Feature.
+
+**Verweise:** CLAUDE.md §0, §0.1, §2 (Pflicht-Lektüre Punkt 0), ADR AE-41.
+
+**Test-Stand:** unverändert (kein Code-Pfad).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
