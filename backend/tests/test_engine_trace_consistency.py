@@ -204,10 +204,10 @@ async def test_evaluate_room_layers_share_engine_evaluation_id(
     eval_id = uuid.UUID(result["evaluation_id"])
 
     rows = (
-        await db_session.execute(
-            select(EventLog).where(EventLog.evaluation_id == eval_id)
-        )
-    ).scalars().all()
+        (await db_session.execute(select(EventLog).where(EventLog.evaluation_id == eval_id)))
+        .scalars()
+        .all()
+    )
 
     assert len(rows) == 6, f"erwarte 6 EventLog-Rows pro Eval, gefunden {len(rows)}"
     assert all(r.evaluation_id == eval_id for r in rows), (
