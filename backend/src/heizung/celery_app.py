@@ -57,9 +57,11 @@ app.conf.update(
     # Concurrency=2 wie im Brief vereinbart (CPX22-RAM-konservativ).
     worker_concurrency=2,
     task_default_queue="heizung_default",
-    # Sprint 9.6 Race-Condition-Mitigation: Engine-Tasks bekommen einen
-    # 30s-Lock per Redis-SETNX. Wird im Engine-Task selbst gesetzt, hier
-    # nur die Default-Soft-Time-Limit fuer alle Tasks.
+    # Sprint 9.10 T3.5 / AE-40: Engine-Task-Lock ist im Task selbst
+    # implementiert (services.engine_lock, Redis-SETNX, TTL 30 s) — siehe
+    # tasks.engine_tasks.evaluate_room. Die Limits hier sind generelle
+    # Tasks-Watchdogs; der TTL des Lock muss >= task_time_limit sein, damit
+    # ein gekillter Task seinen Lock nicht ueber das Limit hinaus haelt.
     task_soft_time_limit=20,
     task_time_limit=30,
     # Sprint 9.7: Beat-Schedule fuer autonome periodische Evaluation.
