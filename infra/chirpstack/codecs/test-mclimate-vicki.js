@@ -150,11 +150,14 @@ function arrayEq(actual, expected, label) {
     arrayEq(r.bytes, [0x51, 0x01, 0x2c], 'encode 30°C -> 0x51 0x01 0x2c');
 })();
 
-// --- Test 12: Unbekannte fPort-2-Reply ---
+// --- Test 12: Unbekanntes Cmd-Byte auf fPort 2 (Sprint 9.10c-Routing) ---
+// Mit Cmd-Byte-Routing (statt fPort-Routing) wird ein nicht-0x52-cmd
+// auf fPort 2 als Periodic-Versuch interpretiert. Bei nur 1 Byte ist
+// das "too short" — assertion auf den errors-Array.
 (function () {
     var r = decodeUplink({ bytes: [0x99], fPort: 2 });
-    eq(r.data.report_type, 'unknown_reply', 'unknown reply: report_type');
-    eq(r.warnings && r.warnings.length, 1, 'unknown reply: warning');
+    eq(r.errors && r.errors.length, 1, 'fPort2 + unknown cmd: too-short error');
+    eq(r.data.report_type, undefined, 'fPort2 + unknown cmd: kein report_type');
 })();
 
 // --- Test 13: Periodic-Report ohne fPort (Test-Tools) ---
@@ -179,9 +182,53 @@ function arrayEq(actual, expected, label) {
     eq(r.data.openWindow, true, 'openWindow flag');
 })();
 
+// --- Sprint 9.10c: Cmd-Byte-Routing (statt fPort-Routing) ---
+
+// --- Test 16: Periodic v2 (cmd=0x81) auf fPort 2 (Live-Beleg 2026-05-07) ---
+// Regression-Wand: Vor 9.10c hat fPort=2 immer decodeCommandReply ausgeloest,
+// 0x81 wurde dort als unknown_reply abgewuergt. Jetzt: Cmd-Byte-Routing
+// erkennt 0x81 als Periodic, unabhaengig vom fPort.
+(function () {
+    var bytes = [0x81, 22, 138, 80, 0x10, 0xa0, 0x14, 0xb2, 0x00];
+    var r = decodeUplink({ bytes: bytes, fPort: 2 });
+    eq(r.data.report_type, 'periodic', 'periodic v2 fPort2: report_type');
+    eq(r.data.command, 0x81, 'periodic v2 fPort2: command');
+    eq(r.data.target_temperature, 22, 'periodic v2 fPort2: target');
+    near(r.data.temperature, 19.4, 0.2, 'periodic v2 fPort2: temperature');
+})();
+
+// --- Test 17: Periodic v1 (cmd=0x01) auf fPort 1 (unveraendertes Verhalten) ---
+// Sicherstellt, dass der Routing-Refactor das fPort-1-Standard-Verhalten
+// nicht regrediert.
+(function () {
+    var bytes = [0x01, 21, 142, 64, 0x10, 0xa0, 0x14, 0xa1, 0x00];
+    var r = decodeUplink({ bytes: bytes, fPort: 1 });
+    eq(r.data.report_type, 'periodic', 'periodic v1 fPort1: report_type');
+    eq(r.data.command, 0x01, 'periodic v1 fPort1: command');
+})();
+
+// --- Test 18: Setpoint-Reply (cmd=0x52) auf fPort 2 (unveraendertes Verhalten) ---
+// Reply-Pfad muss erhalten bleiben — Vicki-Drehring/Engine-Ack laeuft hier rein.
+(function () {
+    var bytes = [0x52, 0x00, 0xd2];  // setpoint 21 °C
+    var r = decodeUplink({ bytes: bytes, fPort: 2 });
+    eq(r.data.report_type, 'setpoint_reply', 'setpoint reply fPort2: report_type');
+    eq(r.data.target_temperature, 21, 'setpoint reply fPort2: target');
+})();
+
+// --- Test 19: Setpoint-Reply ohne fPort (Robustness) ---
+// Test-Tools/Replays liefern manchmal kein fPort. Cmd-Byte-Routing entscheidet
+// trotzdem korrekt: 0x52 -> Reply.
+(function () {
+    var bytes = [0x52, 0x00, 0xc3];  // setpoint 19.5 °C
+    var r = decodeUplink({ bytes: bytes });  // kein fPort
+    eq(r.data.report_type, 'setpoint_reply', 'setpoint reply no fPort: report_type');
+    eq(r.data.target_temperature, 19.5, 'setpoint reply no fPort: target');
+})();
+
 // --- Resultat ---
 if (failures.length === 0) {
-    console.log('OK — 15/15 tests passed');
+    console.log('OK — 19/19 tests passed');
     process.exit(0);
 } else {
     console.error('FAIL — ' + failures.length + ' failure(s):');

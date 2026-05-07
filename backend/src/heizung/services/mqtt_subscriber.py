@@ -288,11 +288,18 @@ async def _consume_loop() -> None:
                         logger.exception("uplink-decode-fehler topic=%s", message.topic)
                         continue
 
-                    # Sprint 9.0: fPort-2-Replies (z.B. 0x52 Setpoint-Reply)
-                    # haben kein temperature/valve_position. Skip SensorReading-
-                    # Insert, aber Sprint 9.9 T5: Override-Detection greift
-                    # auch fuer Reply-Setpoints (Drehring kann via fPort 2
-                    # Setpoint zurueckmelden).
+                    # Sprint 9.10c: Codec routet ueber Cmd-Byte (0x52 -> Reply,
+                    # sonst -> Periodic), siehe ``infra/chirpstack/codecs/
+                    # mclimate-vicki.js``. Vickis schicken Periodic-Reports
+                    # auch auf fPort 2 (Live-Beleg 2026-05-07) — fPort allein
+                    # ist also kein zuverlaessiges Routing-Signal. Wir
+                    # entscheiden hier ausschliesslich nach
+                    # ``report_type == 'setpoint_reply'``.
+                    #
+                    # Setpoint-Replies (cmd 0x52) haben kein temperature/
+                    # valve_position. Skip SensorReading-Insert, aber
+                    # Override-Detection (Sprint 9.9 T5) laeuft trotzdem —
+                    # der Drehring meldet seinen Setpoint hier zurueck.
                     obj = uplink.object or {}
                     if obj.get("report_type") == "setpoint_reply":
                         logger.info(
