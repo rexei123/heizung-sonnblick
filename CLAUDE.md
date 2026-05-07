@@ -462,6 +462,20 @@ Anlass: Sprint 9.10c Phase 0 — der Repo-Codec war seit Sprint 9.0 mit dem fPor
 
 **Backlog (eigener Hygiene-Sprint):** Programmatisches Bootstrap-Skript via ChirpStack gRPC API, das `device_profile.payload_codec_script` aus dem Repo deployed. Bis dahin ist der manuelle Schritt im RUNBOOK §10c dokumentiert.
 
+### 5.23 Engine-Trace-Konsistenz: alle Layer schreiben immer LayerStep (Sprint 9.10d Lesson)
+
+Jeder Engine-Layer schreibt einen LayerStep — auch im No-Effect-Fall. Variante-B-Konvention: `setpoint_in == setpoint_out` (Pass-Through), `reason = prev_reason` durchgereicht, `detail = snake_case-Token` mit dem Grund warum die Schicht nichts getan hat. Begründung: S3 (Auditierbarkeit). Wenn Layer im inaktiven Pfad keinen Trace-Eintrag schreiben, ist das Engine-Decision-Panel als QA-Tool für genau diese Schicht blind — der Hotelier sieht nicht "Layer 0 hat geprüft und nichts getan", sondern gar nichts. Der Code-Review kann nicht unterscheiden zwischen "Layer war inaktiv" und "Layer wurde gar nicht ausgeführt".
+
+Anlass: Sprint 9.10d Phase 0 — Layer 0 (Sommer) und Layer 2 (Temporal) gaben im inaktiven Fall `None` zurück und tauchten gar nicht im `event_log` auf. Layer 1/3/4/5 waren bereits always-on (Layer 3 explizit aus Sprint 9.9 T3, Layer 4 aus 9.10 T2). Die Inkonsistenz war historisch gewachsen, wurde aber erst beim Variante-B-Frontend-Refactor sichtbar.
+
+**Sonderfall Layer 0 (Sommer):** Erste Schicht der Pipeline, hat keinen Vorgänger. Die Pass-Through-Konvention "setpoint_in == setpoint_out" greift hier nicht — es gibt keinen `setpoint_in`. Lösung: Schema-Erweiterung `LayerStep.setpoint_c: int | None`, wobei `None` ausschliesslich für Layer 0 inactive zugelassen ist und "Layer hat keinen eigenen Setpoint-Beitrag" bedeutet. Alle anderen Layer garantieren weiterhin einen Integer-Wert. Der Helper `_require_setpoint(step) -> int` (engine.py) engt den Typ an Call-Sites ein und raised AssertionError mit Layer-Name, falls die Invariante doch verletzt wird.
+
+**Hysterese ist KEIN Layer.** `hysteresis_decision` produziert kein `LayerStep`, sondern wird in `engine_tasks.py` in jedes Layer-`details`-JSONB eingebettet. Frontend zeigt sie genau einmal pro Evaluation an (Footer unter dem LayerTrace), nicht pro Layer.
+
+**Konsequenz für neue Layer:** Wer in Sprint 11+ einen `guest_override`-Layer oder vergleichbares anflanscht, schreibt von Anfang an always-on mit Pass-Through-LayerStep, snake_case-detail-Token im no-effect-Fall, und `setpoint_c: int` (nicht None — das ist und bleibt Layer 0 vorbehalten).
+
+**Querverweise:** §5.18 Sprint 9.10 Lessons (Schema-Constraints), AE-40 (Engine-Lock), §5.20 (aspirative Code-Kommentare als Doku-Drift). detail-Konvention selbst ist heute heterogen (Layer 4 vorbildlich snake_case, Layer 1/2/3/5 f-string-Freitext) — Backlog B-9.10d-1 für die Vereinheitlichung vor `v0.1.9-engine`.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
