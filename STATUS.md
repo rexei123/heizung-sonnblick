@@ -550,6 +550,37 @@ Ziel: Cowork-QA aus Sprint 9.10 hatte aufgedeckt, dass `sensor_reading` nur `fcn
 
 ---
 
+## 2s. Sprint 9.10d Engine-Trace-Konsistenz (2026-05-07, abgeschlossen)
+
+Ziel: Trace-Lücke in Layer 0 (Sommer) und Layer 2 (Temporal) schließen — bisher liefern beide Layer im No-Effect-Fall `None` zurück und tauchen damit gar nicht im `event_log` auf. Ergebnis: das Engine-Decision-Panel war als QA-Tool blind für diese Schichten. Zusätzlich Hysterese-Info im Frontend sichtbar machen, die heute zwar in `event_log.details.hysteresis_decision` persistiert wird, aber nirgends gerendert ist.
+
+**Phase-0-Befund:** Layer 0 und Layer 2 sind heute conditional (return None bei No-Effect), Layer 1/3/4/5 sind always-on. detail-Konvention heterogen: Layer 4 nutzt snake_case-Tokens (vorbildlich), Layer 1/2/3/5 nutzen f-string-Freitext. Hysterese ist kein eigener Layer, sondern wird in jedes LayerStep-`details`-JSONB gemerged (engine_tasks.py:188).
+
+**Architektur-Entscheidung:** `LayerStep.setpoint_c` von `int` auf `int | None` erweitert. None bedeutet "Layer hat keinen eigenen Setpoint-Beitrag" und ist ausschließlich für Layer 0 inactive zugelassen — Layer 0 hat als erste Schicht keinen Vorgänger, daher greift die "setpoint_in == setpoint_out"-Pass-Through-Konvention dort nicht. Alle anderen Layer garantieren weiterhin einen Integer-Wert.
+
+**Tasks:**
+
+- ✅ **T1 Layer 0 always-on** `backend/src/heizung/rules/engine.py:144`: `layer_summer_mode` liefert immer einen LayerStep. Active unverändert (`detail="summer_mode_active=true"`). Inactive: `setpoint_c=None`, `detail="summer_mode_inactive"`. Fast-Path-Gate in `evaluate_room` von `if summer is not None` auf `if ctx.summer_mode_active` umgestellt.
+- ✅ **T2 Layer 2 always-on** `backend/src/heizung/rules/engine.py:229`: `layer_temporal` liefert immer einen LayerStep. Aktive Pfade unverändert. Inactive: passthrough `base.setpoint_c` + `base.reason`, snake_case-Token-detail (`no_upcoming_arrival` / `outside_preheat_window` / `outside_night_setback` / `temporal_inactive`). Caller-Aufräumen: alle `if step is not None`-Branches in `evaluate_room` entfallen, Trace-Tupel ist nun unconditional `(summer, base, temporal, manual, window, clamp)`.
+- ✅ **T2.5 Schema + None-Sentinel** `engine.py` + `engine_tasks.py`: `LayerStep.setpoint_c: int | None`. Helper `_require_setpoint(step) -> int` für die fünf Stellen in `evaluate_room`, an denen Layer-1+-Setpoints typed an Folge-Schichten weitergegeben werden — Helper raised AssertionError mit Layer-Name, falls die Invariante verletzt wird (S3 Auditierbarkeit). `engine_tasks.py:184` Decimal-Wrap auf `setpoint_out` None-safe gemacht (Layer 0 inactive sonst TypeError). Frontend ist bereits null-aware (Type `string | null`, JSX rendert "—") — keine Änderung nötig.
+- ✅ **T3 Trace-Konsistenz-Tests** `backend/tests/test_engine_trace_consistency.py` (neu, 3 Tests, DB-Skip wie test_engine_layer3/4): 6-Layer-Trace bei Sommer inactive verifiziert (Layer 0 None, restliche fünf passthrough oder aktiv). Sommer-active xfail dokumentiert die Brief-Erwartung "auch im Fast-Path 6 Layer" gegenüber dem aktuellen 2-Layer-Verhalten — Engine-Refactor liegt out-of-scope. Dritter Test ruft `_evaluate_room_async` und queried `event_log` auf gemeinsame `evaluation_id` aller sechs Persistenz-Rows.
+- ✅ **T4 Frontend Hysterese-Footer** `frontend/src/components/patterns/engine-decision-panel.tsx`: Neue `HysteresisFooter`-Komponente unter `LayerTrace`, vor `HistoryList`. Liest `details.hysteresis_decision` vom ersten LayerStep (alle Steps tragen denselben Wert gemerged). reason-Mapping mit Regex-Patterns für die vier Backend-Strings, Roh-Fallback bei unbekanntem Format (kein Crash). Icons `send` (gesendet) bzw. `block` (unterdrückt).
+- ✅ **T5 Sprint-Doku:** dieser STATUS-Eintrag, CLAUDE.md §5.23.
+
+**Test-Stand:** Backend 142 passed + 65 skipped (3 neue DB-Skips bei T3 ohne TEST_DATABASE_URL). ruff clean, mypy `src` clean (Test-Dateien-Vorlast unverändert), tsc + next lint clean. Live-Verify wurde aus 9.10d herausgezogen und verbleibt für Sprint 9.11 (Live-Test #2 sowieso geplant).
+
+**Backlog (vor `v0.1.9-engine` aufzuräumen):**
+
+- **B-9.10d-1 detail-Konvention vereinheitlichen:** snake_case-Tokens für alle Layer (heute heterogen, Layer 4 als Vorbild). Vor allem Layer 1/2/3/5 betroffen. Frontend kann erst sinnvoll übersetzen, wenn Tokens konsistent sind.
+- **B-9.10d-2 mypy-Vorlast:** 71 pre-existing Errors in `tests/` (`test_manual_override_schema`, `test_device_schema`, `test_engine_skeleton`-SimpleNamespace, `test_mqtt_subscriber`, `test_api_overrides`). Sprint 9.10d-Diff bringt 0 neue Errors. Aufräumen vor `v0.1.9-engine`.
+- **B-9.10d-3 Type-Inkonsistenz Engine vs. EventLog:** `LayerStep.setpoint_c: int` (heute `int | None`), `EventLog.setpoint_out: Decimal | None`. Hygiene-Sprint, weil int↔Decimal-Konvertierung an mehreren Stellen passiert.
+- **B-9.10d-4 Sommer-aktiv-Fast-Path auf 6-Layer-Vollständigkeit:** Heute liefert die Engine bei `summer_mode_active=True` nur `(summer, clamp)` — die Variante-B-Konvention sagt aber: alle 6 Layer schreiben immer LayerStep, auch im Fast-Path. Heute Auditierbarkeitslücke (S3) für den Sommer-Fall: keine Spur, dass Layer 1-4 überhaupt evaluiert wurden. Test `test_evaluate_room_emits_six_layer_steps_when_summer_active` ist `pytest.xfail` und dokumentiert die Lücke. Eigener Sprint vor `v0.1.9-engine` — Engine-Refactor (Layer 1-4 müssen Setpoint-Override durch SUMMER_MODE durchreichen).
+- **B-9.10d-5 engine_tasks DB-Session per Dependency-Injection:** Heute öffnet `_evaluate_room_async` die DB-Engine über `settings.database_url` (engine_tasks.py:69). Test `test_evaluate_room_layers_share_engine_evaluation_id` braucht deshalb `monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)` + `get_settings.cache_clear()`-Workaround, weil Test-Session und Task-Session sonst auf unterschiedliche DBs zeigen können. Saubere Lösung: Session-Factory per Parameter injizieren, Tests reichen die Test-Session direkt durch. Hygiene-Sprint.
+
+**Tag-Vergabe (geplant nach Merge):** `v0.1.9-rc5-trace-consistency`. Sprint 9.11 Live-Test #2 schließt sich an, Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
