@@ -72,10 +72,15 @@ class LayerStep:
     gemerged werden (siehe ``tasks.engine_tasks``). Layer 3 nutzt das fuer
     ``source``/``expires_at``/``override_id`` — andere Layer setzen es
     aktuell nicht.
+
+    ``setpoint_c`` (Sprint 9.10d): ``None`` bedeutet "Layer hat keinen
+    eigenen Setpoint-Beitrag". Aktuell ausschliesslich Layer 0 im Inactive-
+    Pfad — alle anderen Layer (Base, Temporal, Manual, Window, Clamp)
+    garantieren weiterhin einen Integer-Wert, auch im Pass-Through-Fall.
     """
 
     layer: EventLogLayer
-    setpoint_c: int
+    setpoint_c: int | None
     reason: CommandReason
     detail: str | None = None
     extras: dict[str, Any] | None = None
@@ -141,23 +146,37 @@ def _resolve_t(field_name: str, ctx: _RoomContext) -> Decimal | None:
     return None
 
 
-def layer_summer_mode(ctx: _RoomContext) -> LayerStep | None:
+def layer_summer_mode(ctx: _RoomContext) -> LayerStep:
     """Layer 0: Sommermodus-Fast-Path (AE-31, AE-34).
 
-    Wenn ``global_config.summer_mode_active`` true ist, ueberspringt die
-    Engine ALLE anderen Layer (1-4) und setzt direkt Frostschutz. Layer 5
-    (Hard Clamp) laeuft trotzdem als Sicherheits-Check.
+    Sprint 9.10d: Layer ist always-on, liefert IMMER einen LayerStep — auch
+    im inaktiven Fall —, damit das Engine-Decision-Panel pro Eval einen
+    Trace-Eintrag fuer Layer 0 zeigt. Der Fast-Path-Skip (Layer 1-4
+    ueberspringen) wird vom Caller via ``ctx.summer_mode_active`` gesteuert,
+    NICHT mehr ueber ``is None``.
 
-    Returns ``None`` wenn Sommermodus inaktiv — Caller faehrt mit
-    Layer 1 weiter.
+    Aktiv (``summer_mode_active=True``): Setpoint ``FROST_PROTECTION_C``,
+    Reason ``SUMMER_MODE``, ``detail="summer_mode_active=true"``.
+
+    Inaktiv: Passthrough-Marker mit ``setpoint_c=None`` (Layer 0 hat keinen
+    eigenen Setpoint-Beitrag — der finale Wert kommt aus Layer 1+), Reason
+    ``SUMMER_MODE``, ``detail="summer_mode_inactive"``. T2.5 (Sprint 9.10d):
+    None statt MIN_SETPOINT_C-Platzhalter, weil Layer 0 als erste Schicht
+    kein "in" hat und die Pass-Through-Konvention setpoint_in==setpoint_out
+    hier nicht greift.
     """
-    if not ctx.summer_mode_active:
-        return None
+    if ctx.summer_mode_active:
+        return LayerStep(
+            layer=EventLogLayer.SUMMER_MODE_FAST_PATH,
+            setpoint_c=int(FROST_PROTECTION_C),
+            reason=CommandReason.SUMMER_MODE,
+            detail="summer_mode_active=true",
+        )
     return LayerStep(
         layer=EventLogLayer.SUMMER_MODE_FAST_PATH,
-        setpoint_c=int(FROST_PROTECTION_C),
+        setpoint_c=None,
         reason=CommandReason.SUMMER_MODE,
-        detail="summer_mode_active=true",
+        detail="summer_mode_inactive",
     )
 
 
@@ -231,7 +250,7 @@ def layer_temporal(
     ctx: _RoomContext,
     *,
     now: datetime,
-) -> LayerStep | None:
+) -> LayerStep:
     """Layer 2: Zeitsteuerung — Vorheizen + Nachtabsenkung.
 
     **Vorheizen (gewinnt bei Konflikt):**
@@ -242,30 +261,47 @@ def layer_temporal(
     Wenn Status=OCCUPIED und Uhrzeit in [night_start, night_end]
     -> Setpoint = ``t_night``.
 
-    Returns ``None`` wenn weder Vorheizen noch Nacht aktiv — Caller behaelt
-    Layer-1-Output.
+    Sprint 9.10d: Layer ist always-on, liefert IMMER einen LayerStep — auch
+    im no-effect-Fall. Im Passthrough-Pfad bleiben ``setpoint_c`` und
+    ``reason`` aus ``base_step`` unveraendert; ``detail`` haelt einen
+    snake_case-Token fest WARUM kein Eingriff erfolgte:
+        - ``no_upcoming_arrival``    keine Belegung mit anstehender Anreise
+        - ``outside_preheat_window`` Belegung existiert, aber check_in zu
+                                     weit weg oder schon vorbei
+        - ``outside_night_setback``  OCCUPIED, Nachtfenster konfiguriert,
+                                     aktuelle Zeit liegt ausserhalb
+        - ``temporal_inactive``      Fallback (Status nicht RESERVED/OCCUPIED,
+                                     oder noetige Konfiguration fehlt)
 
     Time-Berechnung in lokaler Hotel-Zeitzone (default Europe/Vienna in
     global_config). Sprint 9.8 vereinfacht: nutzt now (UTC) direkt — Hotelier
     kann Sprint 13+ via global_config.timezone konfigurieren.
     """
+    detail_token: str | None = None
+
     # --- VORHEIZEN ---
-    occ = ctx.next_occupancy
-    if occ is not None and ctx.room.status == RoomStatus.RESERVED:
-        preheat_min = _resolve_field("preheat_minutes_before_checkin", ctx)
-        if preheat_min is not None and preheat_min > 0:
-            preheat_window_start = occ.check_in - timedelta(minutes=int(preheat_min))
-            if preheat_window_start <= now < occ.check_in:
-                t_occupied = _resolve_field("t_occupied", ctx) or ctx.room_type.default_t_occupied
-                return LayerStep(
-                    layer=EventLogLayer.TEMPORAL_OVERRIDE,
-                    setpoint_c=_quantize(t_occupied),
-                    reason=CommandReason.PREHEAT_CHECKIN,
-                    detail=(
-                        f"preheat: check_in={occ.check_in.isoformat()} "
-                        f"window_start={preheat_window_start.isoformat()}"
-                    ),
-                )
+    if ctx.room.status == RoomStatus.RESERVED:
+        occ = ctx.next_occupancy
+        if occ is None:
+            detail_token = "no_upcoming_arrival"
+        else:
+            preheat_min = _resolve_field("preheat_minutes_before_checkin", ctx)
+            if preheat_min is not None and preheat_min > 0:
+                preheat_window_start = occ.check_in - timedelta(minutes=int(preheat_min))
+                if preheat_window_start <= now < occ.check_in:
+                    t_occupied = (
+                        _resolve_field("t_occupied", ctx) or ctx.room_type.default_t_occupied
+                    )
+                    return LayerStep(
+                        layer=EventLogLayer.TEMPORAL_OVERRIDE,
+                        setpoint_c=_quantize(t_occupied),
+                        reason=CommandReason.PREHEAT_CHECKIN,
+                        detail=(
+                            f"preheat: check_in={occ.check_in.isoformat()} "
+                            f"window_start={preheat_window_start.isoformat()}"
+                        ),
+                    )
+                detail_token = "outside_preheat_window"
 
     # --- NACHTABSENKUNG ---
     if ctx.room.status == RoomStatus.OCCUPIED:
@@ -284,8 +320,15 @@ def layer_temporal(
                         f"window=[{night_start.isoformat()},{night_end.isoformat()}]"
                     ),
                 )
+            detail_token = "outside_night_setback"
 
-    return None
+    return LayerStep(
+        layer=EventLogLayer.TEMPORAL_OVERRIDE,
+        setpoint_c=base_step.setpoint_c,
+        reason=base_step.reason,
+        detail=detail_token or "temporal_inactive",
+        extras=None,
+    )
 
 
 async def layer_manual_override(
@@ -600,12 +643,15 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         return None
 
     # Sprint 9.7: Layer 0 Sommermodus-Fast-Path. Skip Layers 1-4 wenn aktiv.
+    # Sprint 9.10d: Layer 0 ist always-on und liefert immer einen LayerStep —
+    # die Fast-Path-Entscheidung steuert ``ctx.summer_mode_active`` direkt.
     summer = layer_summer_mode(ctx)
-    if summer is not None:
-        clamp = layer_clamp(summer.setpoint_c, ctx, prev_reason=summer.reason)
+    if ctx.summer_mode_active:
+        # Aktiver Pfad garantiert setpoint_c=FROST_PROTECTION_C.
+        clamp = layer_clamp(_require_setpoint(summer), ctx, prev_reason=summer.reason)
         return RuleResult(
             room_id=room_id,
-            setpoint_c=clamp.setpoint_c,
+            setpoint_c=_require_setpoint(clamp),
             layers=(summer, clamp),
             base_reason=summer.reason,
         )
@@ -618,12 +664,13 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
 
     # Sprint 9.9 T3: Layer 3 Manual-Override. Laeuft IMMER (auch no-op),
     # damit das Engine-Decision-Panel stets zeigt, ob ein Override anliegt.
-    pre_layer3 = temporal if temporal is not None else base
+    # Sprint 9.10d: temporal ist nun always-on und reicht im no-effect-Fall
+    # base.setpoint/base.reason als Passthrough durch — kein None-Fallback noetig.
     manual = await layer_manual_override(
         session,
         room_id,
-        prev_setpoint_c=pre_layer3.setpoint_c,
-        prev_reason=pre_layer3.reason,
+        prev_setpoint_c=_require_setpoint(temporal),
+        prev_reason=temporal.reason,
     )
 
     # Sprint 9.10 T2: Layer 4 Window-Detection. Ueberschreibt JEDEN
@@ -632,22 +679,19 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     window = await layer_window_open(
         session,
         room_id,
-        prev_setpoint_c=manual.setpoint_c,
+        prev_setpoint_c=_require_setpoint(manual),
         prev_reason=manual.reason,
         room_status=ctx.room.status,
         now=now,
     )
 
-    clamp = layer_clamp(window.setpoint_c, ctx, prev_reason=window.reason)
+    clamp = layer_clamp(_require_setpoint(window), ctx, prev_reason=window.reason)
 
-    layers_tuple: tuple[LayerStep, ...] = (base,)
-    if temporal is not None:
-        layers_tuple = (*layers_tuple, temporal)
-    layers_tuple = (*layers_tuple, manual, window, clamp)
+    layers_tuple: tuple[LayerStep, ...] = (summer, base, temporal, manual, window, clamp)
 
     return RuleResult(
         room_id=room_id,
-        setpoint_c=clamp.setpoint_c,
+        setpoint_c=_require_setpoint(clamp),
         layers=layers_tuple,
         base_reason=window.reason,
     )
@@ -673,3 +717,17 @@ def _safe_int(value: Decimal | None, *, default: int) -> int:
     if value is None:
         return default
     return _quantize(value)
+
+
+def _require_setpoint(step: LayerStep) -> int:
+    """Engt den Typ ``int | None`` auf ``int`` ein.
+
+    Sprint 9.10d T2.5: nur Layer 0 inactive darf ``setpoint_c=None`` haben.
+    Layer 1+ (Base, Temporal, Manual, Window, Clamp) garantieren immer
+    einen Integer-Setpoint. Helper macht diese Invariante an Call-Sites
+    explizit und liefert mypy einen narrowed Typ.
+    """
+    if step.setpoint_c is None:
+        msg = f"layer={step.layer.value} hat setpoint_c=None — invariant violation"
+        raise AssertionError(msg)
+    return step.setpoint_c

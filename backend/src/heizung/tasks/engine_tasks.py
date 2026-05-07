@@ -181,7 +181,12 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                     evaluation_id=eval_id,
                     layer=layer.layer,
                     setpoint_in=Decimal(prev_setpoint) if prev_setpoint is not None else None,
-                    setpoint_out=Decimal(layer.setpoint_c),
+                    # Sprint 9.10d T2.5: ``layer.setpoint_c`` kann None sein
+                    # (aktuell nur Layer 0 inaktiv — Layer hat keinen
+                    # Setpoint-Beitrag). EventLog.setpoint_out ist nullable.
+                    setpoint_out=(
+                        Decimal(layer.setpoint_c) if layer.setpoint_c is not None else None
+                    ),
                     reason=layer.reason,
                     details={
                         "detail": layer.detail,

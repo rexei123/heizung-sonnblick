@@ -105,6 +105,7 @@ export function EngineDecisionPanel({ roomId }: Props) {
     <div className="space-y-5">
       <SummaryCard latest={latest} />
       <LayerTrace entries={latest.entries} />
+      <HysteresisFooter latest={latest} />
       <HistoryList groups={grouped.slice(1, 6)} />
     </div>
   );
@@ -270,6 +271,89 @@ function ActiveOverrideDetail({
           {new Date(expiresAt).toLocaleString("de-AT")}
         </span>
       ) : null}
+    </div>
+  );
+}
+
+// Sprint 9.10d T4: Hysterese-Anzeige unter dem LayerTrace.
+//
+// Datenquelle: ``details.hysteresis_decision`` ist ab Sprint 9.5 in JEDEM
+// LayerStep-Eintrag der Eval gemerged (engine_tasks.py:188), wir lesen
+// also vom ersten Eintrag und zeigen einmal pro Evaluation. Roh-Schema:
+//   { should_send: boolean, reason: string }
+// reason-Strings kommen aus engine.py:484-497 (siehe Mapping unten).
+
+interface HysteresisDecision {
+  should_send: boolean;
+  reason: string;
+}
+
+function extractHysteresisDecision(latest: EvalGroup): HysteresisDecision | null {
+  for (const entry of latest.entries) {
+    const raw = entry.details?.["hysteresis_decision"];
+    if (
+      raw !== undefined &&
+      raw !== null &&
+      typeof raw === "object" &&
+      "should_send" in raw &&
+      "reason" in raw
+    ) {
+      const obj = raw as { should_send: unknown; reason: unknown };
+      if (typeof obj.should_send === "boolean" && typeof obj.reason === "string") {
+        return { should_send: obj.should_send, reason: obj.reason };
+      }
+    }
+  }
+  return null;
+}
+
+function formatHysteresisReason(reason: string): string {
+  // engine.py:484: "no_previous_command"
+  if (reason === "no_previous_command") {
+    return "Erster Downlink — wird gesendet";
+  }
+  // engine.py:497: "hysteresis: delta=… < … und age=… < …"
+  const insideMatch = /^hysteresis:\s*delta=([^\s]+)\s*<.*und\s*age=([^\s]+)\s*<.*$/.exec(reason);
+  if (insideMatch) {
+    const [, delta, age] = insideMatch;
+    return `Innerhalb Hysterese (Δ ${delta}°C, Alter ${age}) — kein Downlink`;
+  }
+  // engine.py:493: "heartbeat age=…"
+  const heartbeatMatch = /^heartbeat\s+age=(.+)$/.exec(reason);
+  if (heartbeatMatch) {
+    return `Heartbeat überfällig (${heartbeatMatch[1]}) — wird gesendet`;
+  }
+  // engine.py:488: "delta=…"
+  const deltaMatch = /^delta=(.+)$/.exec(reason);
+  if (deltaMatch) {
+    return `Delta ${deltaMatch[1]}°C — wird gesendet`;
+  }
+  // Unbekanntes Format -> Roh-String, kein Crash. Folgt dem Layer-Detail-
+  // Rendering im LayerTrace.
+  return reason;
+}
+
+function HysteresisFooter({ latest }: { latest: EvalGroup }) {
+  const decision = extractHysteresisDecision(latest);
+  if (decision === null) return null;
+
+  const icon = decision.should_send ? "send" : "block";
+  const label = formatHysteresisReason(decision.reason);
+
+  return (
+    <div className="bg-surface border border-border rounded-md px-4 py-3">
+      <div className="flex items-center gap-2 text-sm text-text-secondary">
+        <span
+          className="material-symbols-outlined text-text-tertiary"
+          style={{ fontSize: 18 }}
+          aria-hidden
+        >
+          {icon}
+        </span>
+        <span>
+          <strong className="text-text-primary">Hysterese:</strong> {label}
+        </span>
+      </div>
     </div>
   );
 }
