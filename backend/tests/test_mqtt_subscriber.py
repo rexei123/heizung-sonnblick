@@ -7,18 +7,27 @@ End-to-End wurde im Sprint-5-Brief manuell verifiziert.
 
 from __future__ import annotations
 
+import os
+import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.services.mqtt_subscriber import (
     ChirpStackUplink,
     _battery_pct_from_volts,
     _map_to_reading,
+    _persist_uplink,
     _to_decimal,
 )
+
+TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
+SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
 
 # ---------------------------------------------------------------------------
 # _battery_pct_from_volts
@@ -237,3 +246,133 @@ def test_map_to_reading_open_window_missing_is_none() -> None:
     assert row["open_window"] is None
 
 
+# ---------------------------------------------------------------------------
+# Sprint 9.10 T3: _persist_uplink schedult evaluate_room.delay nach commit
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def db_session_for_persist() -> AsyncIterator[AsyncSession]:
+    if not TEST_DB_URL:
+        pytest.skip(SKIP_REASON)
+    engine = create_async_engine(TEST_DB_URL)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
+    await engine.dispose()
+
+
+async def test_persist_uplink_schedules_evaluate_room(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Periodic-Uplink -> Reading wird inserted UND evaluate_room.delay
+    wird mit der korrekten room_id aufgerufen.
+
+    Mockt sowohl den Subscriber-eigenen ``SessionLocal`` (damit unser
+    rollback-fixture-Session verwendet wird) als auch ``evaluate_room.delay``
+    (damit kein Redis-Roundtrip noetig ist).
+    """
+    from heizung.models.device import Device
+    from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+    from heizung.models.heating_zone import HeatingZone
+    from heizung.models.room import Room
+    from heizung.models.room_type import RoomType
+    from heizung.services import mqtt_subscriber as sub_module
+
+    suffix = uuid.uuid4().hex[:8]
+    rt = RoomType(name=f"t3-rt-{suffix}")
+    db_session_for_persist.add(rt)
+    await db_session_for_persist.flush()
+    room = Room(number=f"t3-{suffix}", room_type_id=rt.id)
+    db_session_for_persist.add(room)
+    await db_session_for_persist.flush()
+    zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="bedroom")
+    db_session_for_persist.add(zone)
+    await db_session_for_persist.flush()
+    dev_eui = f"deadbeef{suffix}"
+    device = Device(
+        dev_eui=dev_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=zone.id,
+    )
+    db_session_for_persist.add(device)
+    await db_session_for_persist.flush()
+    expected_room_id = room.id
+
+    # SessionLocal so monkeypatchen, dass _persist_uplink unsere
+    # rollback-Session wiederverwendet (commit() wird auf der gleichen
+    # Verbindung gemacht und beim Test-Tear-down weggerollt).
+    class _FakeContext:
+        async def __aenter__(self) -> AsyncSession:  # noqa: PLW0211 - Test-Fake
+            return db_session_for_persist
+
+        async def __aexit__(self, *args: object) -> None:  # noqa: PLW0211 - Test-Fake
+            return None
+
+    monkeypatch.setattr(sub_module, "SessionLocal", lambda: _FakeContext())
+
+    delay_calls: list[tuple[int, ...]] = []
+    monkeypatch.setattr(
+        sub_module.evaluate_room,
+        "delay",
+        lambda *args: delay_calls.append(args),
+    )
+
+    payload = {
+        "deviceInfo": {"devEui": dev_eui},
+        "fCnt": 42,
+        "fPort": 1,
+        "time": "2026-05-07T08:00:00Z",
+        "object": {
+            "temperature": 22.5,
+            "target_temperature": 21.0,
+            "valve_openness": 50,
+            "openWindow": True,
+        },
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [(expected_room_id,)], (
+        f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
+    )
+
+
+async def test_persist_uplink_unknown_dev_eui_no_eval(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unbekannte DevEUI -> early return, KEIN evaluate_room.delay."""
+    from heizung.services import mqtt_subscriber as sub_module
+
+    class _FakeContext:
+        async def __aenter__(self) -> AsyncSession:  # noqa: PLW0211 - Test-Fake
+            return db_session_for_persist
+
+        async def __aexit__(self, *args: object) -> None:  # noqa: PLW0211 - Test-Fake
+            return None
+
+    monkeypatch.setattr(sub_module, "SessionLocal", lambda: _FakeContext())
+
+    delay_calls: list[tuple[int, ...]] = []
+    monkeypatch.setattr(
+        sub_module.evaluate_room,
+        "delay",
+        lambda *args: delay_calls.append(args),
+    )
+
+    payload = {
+        "deviceInfo": {"devEui": "ffffffffffffffff"},  # nicht in DB
+        "fCnt": 1,
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [], "unbekannte DevEUI darf evaluate_room nicht triggern"
