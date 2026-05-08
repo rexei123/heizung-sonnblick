@@ -598,6 +598,22 @@ vorgesehenen, aber nicht implementierten Bausteinen.
 
 **Tag:** `v0.2.0-architektur-refresh` (nach Merge)
 
+## 2u. Sprint 9.11a Geräte-Zuordnungs-API (2026-05-08, abgeschlossen)
+
+**Ziel:** Minimal-Backend-API für Vicki-Heizzonen-Zuordnung als Voraussetzung für Sprint 9.11 Live-Test #2. Kein UI, kein Tag (Sub-Sprint per SPRINT-PLAN.md §9.11a-Vorgabe). Bezug AE-43.
+
+**Implementierung:**
+
+- **API:** `PUT /api/v1/devices/{id}/heating-zone` (assign / re-assign, idempotent ohne commit bei gleichem Wert) + `DELETE /api/v1/devices/{id}/heating-zone` (detach, idempotent bei `None`). 404-Codes snake_case (`device_not_found`, `heating_zone_not_found`) per Lesson §5.23. Logger-Events `device_zone_changed` / `device_zone_detached` mit `device_id`/`dev_eui` im `extra`. Schemata in `backend/src/heizung/schemas/device.py`: `DeviceAssignZoneRequest` (gt=0, extra=forbid), `DeviceAssignZoneResponse` (validation_alias `id` → `device_id`, weil ORM-Feld nur `id` heisst).
+- **Tests:** `backend/tests/test_api_device_zone.py` (10 Pytests) gegen echtes Postgres. Setup-Fixture mit `uuid.uuid4().hex[:8]`-Suffix (Lesson §5.18, `dev_eui` exakt 16 Zeichen). Cleanup räumt Devices über DevEUI-Pattern auf (FK `ondelete=SET NULL` würde sonst Orphans hinterlassen). Test-Matrix deckt assign/idempotent/reassign/detach/422-Pydantic/404-Device/404-Zone ab.
+- **RUNBOOK §10d** zwischen §10c und §11 mit curl-Befehlen für assign/reassign/detach + Verifikations-SQL + Fehlerbild-Tabelle. Bonus: 3 abgeschnittene Anhang-Bullets aus Commit `b5438d4` rekonstruiert + 1016 Null-Bytes Trailing-Padding entfernt (eingecheckt seit `4dda449` bzw. `fe0f2b9`, beide vor Cowork-Mount-Lessons §5.2/§5.9). Datei jetzt 29151 Bytes, 0 Null-Bytes.
+
+**Pre-existing-Failures-Disclaimer:** Voller pytest-Lauf zeigt 206 passed, 1 xfailed, 3 failed + 7 errors — alle 10 Failures/Errors sind `ModuleNotFoundError: No module named 'psycopg2'` in `tests/test_migrations_roundtrip.py` und `tests/test_manual_override_model.py`. Bekanntes Backlog-Item B-9.10-6, kein Sprint-9.11a-Bezug. Sprint-9.11a-Tests (10 neue): grün.
+
+**Tag-Vergabe:** keiner. Sub-Sprint per SPRINT-PLAN.md-Vorgabe.
+
+**Offen für Live-Verify nach Merge** (B-9.11a-2): Vicki-002/003/004 produktiv den Heating-Zones der Zimmer 102/103/104 (Schlafzimmer) zuweisen. Plan vom Strategie-Chat, Ausführung durch Hotelier — nicht im Code-Sprint.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -722,6 +738,8 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.10d-5 | engine_tasks DB-Session per Dependency-Injection | 🟢 |
 | B-9.10d-6 | Pre-Push-Hook für `ruff format --check` | 🟢 |
 | B-9.11-1 | celery_beat Healthcheck korrigieren | 🟡 |
+| B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
+| B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | 🔴 |
 
 ### 6.3 — Operative Aufgaben
 

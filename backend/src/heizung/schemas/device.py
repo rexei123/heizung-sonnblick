@@ -88,3 +88,27 @@ class DeviceRead(BaseModel):
     last_seen_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeviceAssignZoneRequest(BaseModel):
+    """Request body fuer PUT /api/v1/devices/{device_id}/heating-zone."""
+
+    heating_zone_id: int = Field(..., gt=0, description="Ziel-Heizzone")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeviceAssignZoneResponse(BaseModel):
+    """Response fuer PUT und DELETE - heating_zone_id ist None nach Detach.
+
+    ``device_id`` ist als alias auf ``Device.id`` gemappt; der Parameter-Pfad
+    der API spricht von ``device_id``, das ORM-Feld heisst nur ``id``.
+    """
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    device_id: int = Field(..., validation_alias="id")
+    dev_eui: str
+    heating_zone_id: int | None
+    label: str | None
+    updated_at: datetime
