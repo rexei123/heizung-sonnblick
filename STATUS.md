@@ -7,11 +7,26 @@ Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in 
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-07
-**Aktueller Branch:** develop, HEAD `654fbab` (Doku-Patch §5.24+§5.25)
-**Letzter Tag:** `v0.1.9-rc5-trace-consistency`
-**Nächster Sprint:** 9.11 Live-Test #2 (siehe `docs/SPRINT-PLAN.md`)
+**Aktueller Branch:** develop
+**Letzter Tag:** `v0.2.0-architektur-refresh`
+**Nächster Sprint:** 9.11a Geräte-Zuordnungs-API (siehe `docs/SPRINT-PLAN.md`)
 **Architektur-Refresh:** durchgeführt 2026-05-07, siehe
 `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
+
+### Server heizung-test
+
+- **IP:** `157.90.17.150` (Hetzner)
+- **App** (Frontend + API): https://heizung-test.hoteltec.at
+  - [Annahme] FastAPI ist auf derselben Domain unter `/api/v1`
+    erreichbar (Caddy-Reverse-Proxy). Falls API auf eigener Subdomain:
+    Brief korrigieren.
+- **ChirpStack** (LoRaWAN-Network-Server): https://cs-test.hoteltec.at
+- **LoRaWAN-Gateway** (LAN-only, nicht öffentlich): siehe `RUNBOOK.md` §10a.2
+- **DB-Zugang** (PostgreSQL/TimescaleDB via SSH-Tunnel): RUNBOOK-Sektion fehlt, siehe Backlog OP-5
+
+### Server heizung-main
+
+Noch nicht produktiv. Bootstrap in Sprint 12 (siehe `docs/SPRINT-PLAN.md`).
 
 ---
 
@@ -716,6 +731,7 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | OP-2 | main-Branch-Strategie | 🟡 (vor 12) |
 | OP-3 | heizung-test Kernel-Update | 🟢 |
 | OP-4 | ~/.ssh/config Eintrag heizung-test | erledigt |
+| OP-5 | RUNBOOK-Sektion für DB-Zugang via SSH-Tunnel ergänzen | 🟡 |
 
 ---
 
