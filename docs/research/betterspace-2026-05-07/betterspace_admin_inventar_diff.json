@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "captured_at": "2026-05-08T07:00:00+02:00",
+    "captured_by": "Cowork",
+    "run1_screens_count": 36,
+    "run2_screens_count": 10,
+    "run1_files": [
+      "betterspace_admin_inventar_run1.json (21 screens, Top-Down)",
+      "betterspace_admin_inventar_run1_tiefenpass.json (6 screens, Sub-Apps + Cog-Modal-Tooltips)",
+      "betterspace_admin_inventar_run1_periphery.json (9 screens, News/Profil/Feedback/Filter/Pairing/Raume-Edit/Reporting-Suche)"
+    ],
+    "run2_file": "betterspace_admin_inventar_run2.json",
+    "method": "Run 1 = Top-Down + Tiefenpass + Periphery. Run 2 = Use-Case-getrieben mit Logout zwischen Runs.",
+    "schema_version": "1.0"
+  },
+  "screens_only_in_run1": [
+    {
+      "screen_id": "S010",
+      "screen_label": "Profil-Modal Cog-Tooltip 'Wirtschaftsmodus / Standard / Komfortmodus'",
+      "reason_missing_in_run2": "In Run 2 nur funktional erreicht via Use-Case 1, ohne Tooltip-Hover."
+    },
+    {
+      "screen_id": "S028",
+      "screen_label": "News/Updates-Liste mit gelesen/ungelesen-Badge",
+      "reason_missing_in_run2": "Run 2 hatte keinen Use-Case fuer News - peripher fuer Heizungslogik."
+    },
+    {
+      "screen_id": "S029",
+      "screen_label": "Profil-Modal Detail (Account-Tabs)",
+      "reason_missing_in_run2": "In Run 2 nicht eigenstaendig besucht."
+    },
+    {
+      "screen_id": "S030",
+      "screen_label": "Feedback-Modal (Bug/Idea/Other-Auswahl)",
+      "reason_missing_in_run2": "Run 2 hatte keinen Use-Case fuer Feedback."
+    },
+    {
+      "screen_id": "S031",
+      "screen_label": "Filter-Bar Mehrfachauswahl",
+      "reason_missing_in_run2": "Filter-UI in Run 2 nur in Reporting-Use-Case (Use-Case 9) gestreift."
+    },
+    {
+      "screen_id": "S032",
+      "screen_label": "Pairing-Wizard (5 Schritte)",
+      "reason_missing_in_run2": "Run 2 hatte keinen Use-Case fuer Pairing - peripher zur taeglichen Steuerung."
+    },
+    {
+      "screen_id": "S033",
+      "screen_label": "Raum-Edit-Form (alle Felder)",
+      "reason_missing_in_run2": "In Run 2 nur via Use-Case 5 erreicht ('Raumtyp-Standardprofil') - dort Raumtyp-Edit, nicht Raum-Edit."
+    },
+    {
+      "screen_id": "S034",
+      "screen_label": "Reporting-Search-Maske mit Filtern",
+      "reason_missing_in_run2": "In Run 2 nur Verbrauchs-Diagramm-Use-Case (Use-Case 4) - dort Verbrauchs-Tab, kein Search-Maske."
+    },
+    {
+      "screen_id": "S035",
+      "screen_label": "Inventar-Filter (Hardware-Type/Status)",
+      "reason_missing_in_run2": "Run 2 hatte keinen Use-Case fuer Inventar-Drilldown."
+    },
+    {
+      "screen_id": "S036",
+      "screen_label": "Logout-Confirm-Toast",
+      "reason_missing_in_run2": "Logout zwischen Runs gemacht, aber nicht eigenstaendig dokumentiert in Run 2."
+    }
+  ],
+  "screens_only_in_run2": [
+    {
+      "screen_id": "S101",
+      "use_case": "Pruefen welcher Raum gerade ungewollt heizt",
+      "added_value": "Bestaetigt: Dashboard-Pie zeigt Status, aber kein Live-Heizleistungs-Wert. Ist-Temp und Soll-Temp nur in Raum-Detail sichtbar."
+    },
+    {
+      "screen_id": "S104",
+      "use_case": "Verbrauch eines Raums in den letzten 30 Tagen",
+      "added_value": "Bestaetigt: Reporting-Modul vorhanden, aber nicht selbsterklaerend wie Dashboard-Verbrauchs-Pie. Run 1 hat dies nicht gefunden, weil ich Top-Down nicht in Reporting drilldown."
+    },
+    {
+      "screen_id": "S107",
+      "use_case": "Frostschutz-Konfiguration pro Raumtyp",
+      "added_value": "Wichtigste Architektur-Erkenntnis: Frostschutz NICHT als globale Systemkonstante - Betterspace erlaubt Frostschutz-Override pro Raumtyp. Im Run 1 nur als Feld in Szenarien gesehen, nicht als Konzept verstanden."
+    }
+  ],
+  "screens_in_both": [
+    {
+      "screen_id_run1": "S001",
+      "screen_id_run2": "S101",
+      "label": "Login-Maske"
+    },
+    {
+      "screen_id_run1": "S002",
+      "screen_id_run2": "S101",
+      "label": "Dashboard"
+    },
+    {
+      "screen_id_run1": "S005",
+      "screen_id_run2": "S102",
+      "label": "Raumliste"
+    },
+    {
+      "screen_id_run1": "S006",
+      "screen_id_run2": "S102",
+      "label": "Raum-Detail (Soll/Ist/Modus)"
+    },
+    {
+      "screen_id_run1": "S014",
+      "screen_id_run2": "S105",
+      "label": "Raumtypen-Liste"
+    },
+    {
+      "screen_id_run1": "S015",
+      "screen_id_run2": "S105",
+      "label": "Raumtyp-Edit (Profil)"
+    },
+    {
+      "screen_id_run1": "S017",
+      "screen_id_run2": "S107",
+      "label": "Szenarien-Liste"
+    },
+    {
+      "screen_id_run1": "S018",
+      "screen_id_run2": "S107",
+      "label": "Szenario-Edit (Algorithmen)"
+    },
+    {
+      "screen_id_run1": "S008",
+      "screen_id_run2": "S108",
+      "label": "Inventar-Liste (Hardware)"
+    },
+    {
+      "screen_id_run1": "S012",
+      "screen_id_run2": "S106",
+      "label": "Mitarbeiter-Liste"
+    }
+  ],
+  "biggest_surprise": "Run 1 ergab: Frostschutz erscheint als Feld in Szenarien-Algorithmen. Run 2 (Use-Case 7 'Frostschutz pro Raumtyp') zeigte: Betterspace behandelt Frostschutz NICHT als globale Systemkonstante (wie unser Strategiepapier), sondern als raumtyp-konfigurierbaren Sicherheitswert. Das hat starke Architektur-Implikationen: unser MVP-Plan 'Frostschutz absolut, nicht konfigurierbar' weicht hier von Betterspace ab. Empfehlung: Sicherheits-Hardcap (10 Grad C absolut) UND raumtyp-konfigurierbares Frostschutz-Setpoint (z.B. 12 Grad C fuer Bad mit Handtuchtrockner) - zwei Ebenen.",
+  "additional_findings": [
+    "Energieverbrauch nur in Reporting-Sub-App, nicht im Dashboard. Run 1 hat das uebersehen, weil Reporting peripher angeordnet ist.",
+    "PMS-Abstraktion: Betterspace zeigt PMS nur als 'Hardware-Inventar-Box' - keine eigene PMS-Konfig-UI. Booking-Daten kommen via API, der Admin sieht nur Belegungsstatus pro Raum.",
+    "Keine dedizierte Wartungs-/Health-Sub-App. Hardware-Health nur als Status-Badge in Inventar-Liste sichtbar. Run 1 hat das vermutet, Run 2 hat es bestaetigt.",
+    "Bulk-Edit der Heiz-Settings nicht direkt - geht nur ueber Raumtyp-Aenderung. Architektur-Hinweis: Raumtyp ist die Bulk-Edit-Schicht.",
+    "21 Szenarien-Algorithmen pro Raumtyp ist deutlich mehr als unsere geplanten 8 Kernregeln. Backlog: Pruefen welche dieser 21 wir wirklich brauchen.",
+    "Manuelle Belegungseingabe: Im Admin-UI von Betterspace nicht eigenstaendig sichtbar - vermutlich nur via PMS-Sync. Unsere autonome Architektur (manuell als First-Class-Connector) ist hier ein Vorteil."
+  ]
+}
