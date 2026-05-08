@@ -129,6 +129,32 @@ Stufe explizit setzen:
 Begründung der Stufe steht im Sprint-Brief, nicht im
 Strategie-Chat.
 
+## §0.2 — Source-of-Truth-Hierarchie nach Architektur-Refresh 2026-05-07
+
+Bei Konflikt zwischen Dokumenten gilt diese Reihenfolge (oben schlägt
+unten):
+
+1. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
+2. `docs/SPRINT-PLAN.md`
+3. `STATUS.md` (für laufenden Stand)
+4. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
+5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
+6. `docs/STRATEGIE.md`
+7. `docs/RUNBOOK.md`
+8. `docs/WORKFLOW.md`
+9. `Design-Strategie-2_0_1.docx`
+
+Alles in `docs/features/` mit Datum vor 2026-05-07 ist historisch —
+gilt nicht mehr für Pläne, gilt für Lessons.
+
+**Trigger-Phrase pro Session** (siehe `docs/SESSION-START.md`):
+
+> „Architektur-Refresh aktiv ab 2026-05-07. Lies `docs/SESSION-START.md`
+> und bestätige."
+
+Vor jeder Code-Änderung: Pflicht-Pre-Read aus SESSION-START.md →
+Claude-Code-Rolle abarbeiten.
+
 ## 1. Identität & Stand
 
 - **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
@@ -514,6 +540,24 @@ gh run list --commit $headSha --json status,name,conclusion
 ```
 
 Anlass: Sprint 9.10d Merge — `gh pr checks --watch` zeigte "pass in 3s" für den e2e-Job, der erste `gh pr merge`-Versuch failte trotzdem mit `Required status check "e2e" is in progress`. Ein zweiter Watch-Durchlauf zeigte den echten Run mit ~1m46s Dauer; danach lief der Merge sauber.
+
+### 5.26 — Strategie und Implementierung sauber trennen
+(Architektur-Refresh 2026-05-07 Lesson)
+
+Beim Refresh am 2026-05-07 zeigte sich: das Strategiepapier hatte vieles
+korrekt vorgesehen, aber zwischen Strategie und Implementierung war ein
+größerer Rückstand entstanden, als der Diff zwischen Strategie und
+Referenzsystem (Betterspace).
+
+**Lesson:** Bei jedem zweiten oder dritten Sprint kurz prüfen, ob die
+implementierte Realität noch zur Strategie passt. Drift in einer
+Richtung (Code holt Strategie ein, oder Strategie holt Realität ein) ist
+normal — Drift in beide Richtungen gleichzeitig ist Refresh-Anlass.
+
+**Konkret:**
+- STATUS.md §1 alle 5 Sprints aktualisieren (nicht nur §2 anhängen)
+- Strategie-Refresh nach Cowork-Inventarisierung oder externer Bestätigung
+- Sprint-Plan und Backlog mindestens monatlich konsolidieren
 
 ---
 
