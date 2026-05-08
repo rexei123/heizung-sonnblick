@@ -1,0 +1,578 @@
+{
+  "meta": {
+    "captured_at": "2026-05-07T17:40:00+02:00",
+    "captured_by": "Cowork",
+    "run": "2 - Use-Case-getrieben (echter zweiter Klick-Pass)",
+    "base_url": "https://5392.betterspaces.de",
+    "hotel_name": "Hotel Sonnblick",
+    "user_role": "OWNER (kaprun@hotel-sonnblick.at)",
+    "screens_total": 10,
+    "notes": "Echter zweiter Klick-Pass nach Logout + Re-Login. Pro Use-Case wurde vom Dashboard aus der natuerliche Klick-Pfad gewaehlt. S101..S110 IDs mit reached_via_use_case-Feld pro Screen."
+  },
+  "screens": [
+    {
+      "id": "S101",
+      "url": "https://5392.betterspaces.de/#/dashboard",
+      "breadcrumb": [
+        "Dashboard"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S101_dashboard.png",
+      "purpose_inferred": "Erste Anlaufstelle nach Login",
+      "layout_summary": "Wie S001 in Run 1 mit veraendertem Datenstand: Belegungs-Pie diesmal weg, Wetter zeigt 'Keine aktuellen Wetterdaten vorhanden'. Bar-Chart Durchschnittstemperatur 7 Tage bleibt.",
+      "navigation": {
+        "top_menu": [
+          "Suche",
+          "Zurueck",
+          "Info",
+          "Settings-Cog",
+          "User-Email"
+        ],
+        "side_menu": [
+          "Dashboard",
+          "Raeume",
+          "Expertenmodus"
+        ],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "Bar-Chart 7 Tage",
+          "value_seen": "19-22 Grad C"
+        },
+        {
+          "label": "Wetter-Card",
+          "value_seen": "Keine aktuellen Wetterdaten vorhanden"
+        }
+      ],
+      "interactive_elements": [],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [
+        "KEIN System-Health/Alert-Indikator",
+        "Dashboard-Inhalt tagesabhaengig"
+      ],
+      "open_questions": [],
+      "reached_via_use_case": {
+        "use_case_number": 1,
+        "use_case_label": "Sehen, ob mein Hotel gerade in Ordnung ist",
+        "click_path": [
+          "Login -> automatisch auf #/dashboard"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Dashboard zeigt nur Belegung + Temperatur-Trend + Wetter. KEIN Geraete-Health-Bereich. Hotelier muss in Settings -> Geraete navigieren um Fehler zu sehen."
+      }
+    },
+    {
+      "id": "S102",
+      "url": "https://5392.betterspaces.de/#/settings/devices",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Einstellungen",
+        "Geraete"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S102_devices_add.png",
+      "purpose_inferred": "Geraete-Liste mit Pairing-Wizard-Trigger",
+      "layout_summary": "60 Geraete in Liste. Action-Cards oben: 'Geraete hinzufuegen' + 'Geraeteliste exportieren'.",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [],
+      "interactive_elements": [
+        {
+          "type": "card-button",
+          "label": "Geraete hinzufuegen oeffnet Pairing-Wizard"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [],
+      "reached_via_use_case": {
+        "use_case_number": 2,
+        "use_case_label": "Neues Thermostat installieren und Zimmer zuweisen",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Settings-Landing -> Geraete",
+          "Action-Card 'Geraete hinzufuegen' (Wizard)"
+        ],
+        "task_outcome": "erfolgreich erreicht",
+        "notes": "Pfad 3 Klicks. Pairing-Wizard erreichbar (siehe Run-1-S034)."
+      }
+    },
+    {
+      "id": "S103",
+      "url": "https://5392.betterspaces.de/#/expert",
+      "breadcrumb": [
+        "Dashboard",
+        "Sidebar",
+        "Expertenmodus"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S103_expert.png",
+      "purpose_inferred": "Diagnose-Tools fuer 'Zimmer wird nicht warm'",
+      "layout_summary": "2 Cards: Temperaturverlauf, Algorithmenverlauf",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [],
+      "interactive_elements": [
+        {
+          "type": "card",
+          "label": "Temperaturverlauf"
+        },
+        {
+          "type": "card",
+          "label": "Algorithmenverlauf"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Kein konsolidierter Diagnose-Screen pro Raum"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 3,
+        "use_case_label": "Gast beschwert sich, Zimmer wird nicht warm",
+        "click_path": [
+          "Dashboard",
+          "Sidebar Expertenmodus",
+          "Alternative: Raeume -> Zimmer -> Schlafzimmer-Card -> Chart-Icon",
+          "Alternative: Header-Cog -> Geraete -> Fehler-Spalte"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Drei Audit-Pfade ohne konsolidierten Screen. Hotelier muss 3 Bereiche kombinieren."
+      }
+    },
+    {
+      "id": "S104",
+      "url": "https://5392.betterspaces.de/#/settings/apps/heating",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Einstellungen",
+        "Temperaturen und Zeiten"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S104_bulk_szenarien.png",
+      "purpose_inferred": "Bulk-Edit ueber Raumtyp via Szenarien-Modal",
+      "layout_summary": "5 Action-Cards (Szenarien, Temperatur setzen, Sommermodus, Raumtypen, Saison) + Globale Zeiten + Globale Temperaturen + Klimaanlage",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [],
+      "interactive_elements": [
+        {
+          "type": "card",
+          "label": "Szenarien - 21 Algorithmen pro Raumtyp"
+        },
+        {
+          "type": "card",
+          "label": "Temperatur setzen - einmalig pro Raumtyp"
+        },
+        {
+          "type": "card",
+          "label": "Raumtypen - Stammdaten"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Kein klassisches Multi-Select - Bulk passiert via 'Raumtyp'-Konzept"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 4,
+        "use_case_label": "Alle Zimmer eines Typs umkonfigurieren",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Temperaturen und Zeiten",
+          "Card Szenarien -> Modal -> Raumtyp-Selector"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Multi-Select fehlt. Stattdessen 'Raumtyp' als primaeres Bulk-Konzept (8 Typen)."
+      }
+    },
+    {
+      "id": "S105",
+      "url": "https://5392.betterspaces.de/#/settings/apps/heating",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Einstellungen",
+        "Temperaturen und Zeiten"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S105_preheat.png",
+      "purpose_inferred": "Vorheizen auf 3 Ebenen erreichbar",
+      "layout_summary": "Globale Zeiten + Globale Temperaturen mit Vorheizen-Werten",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "Check-In vorzeitig Minuten",
+          "value_seen": "0 min"
+        },
+        {
+          "label": "Realtime Check-In Offset",
+          "value_seen": "-2 Grad C"
+        },
+        {
+          "label": "Unsicheres Vorheizen Minuten",
+          "value_seen": "0 min"
+        },
+        {
+          "label": "Gast Check-In",
+          "value_seen": "14:00 Uhr"
+        }
+      ],
+      "interactive_elements": [
+        {
+          "type": "inline-edit-link",
+          "label": "Alle Werte klickbar"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Verhaeltnis 'Check-In vorzeitig' vs 'Realtime Check-In' vs 'Unsicheres Vorheizen' nicht selbsterklaerend"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 5,
+        "use_case_label": "Heizregel fuer Anreise-Tage (Vorheizen) aendern",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Temperaturen und Zeiten",
+          "Globale Zeiten anpassen / Szenarien-Modal pro Raumtyp / Cog pro Raum"
+        ],
+        "task_outcome": "erfolgreich erreicht",
+        "notes": "3 Override-Ebenen (global / raumtyp / raum). Passt zu unserer 3-Ebenen-Architektur."
+      }
+    },
+    {
+      "id": "S106",
+      "url": "https://5392.betterspaces.de/#/settings/user",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Benutzer"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S106_user_invite.png",
+      "purpose_inferred": "Mitarbeiter-Einladung mit Rollen-Auswahl",
+      "layout_summary": "Action-Card 'Benutzer hinzufuegen' + bestehende User-Card (Rolle, Email, Passwort, Loeschen, Benachrichtigungen)",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "User",
+          "value_seen": "kaprun@hotel-sonnblick.at"
+        },
+        {
+          "label": "Rolle",
+          "value_seen": "OWNER"
+        }
+      ],
+      "interactive_elements": [
+        {
+          "type": "card-button",
+          "label": "Benutzer hinzufuegen"
+        },
+        {
+          "type": "inline-edit-link",
+          "label": "Rolle (Dropdown vermutet)"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Andere Rollen unbekannt - nur OWNER bestaetigt"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 6,
+        "use_case_label": "Mitarbeiter mit eingeschraenkten Rechten einladen",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Benutzer",
+          "Card 'Benutzer hinzufuegen'"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Add-Flow erreichbar. Rollen-Liste nicht expandiert (Edit-Modal)."
+      }
+    },
+    {
+      "id": "S107",
+      "url": "https://5392.betterspaces.de/#/settings/devices",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Geraete"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S107_offline_battery.png",
+      "purpose_inferred": "Battery/Offline-schwache Geraete via Default-Sortierung",
+      "layout_summary": "Geraeteliste sortiert 'nach Fehlerstatus'. Battery+Signal+Email-Icons + rote Fehlertext-Badges",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "Erste Seite Fehlerhafte zuerst",
+          "value_seen": "3x 'Ventil in Fehlerposition' + 6x 'Niedriger Batteriestatus' rot"
+        }
+      ],
+      "interactive_elements": [
+        {
+          "type": "sort-link",
+          "label": "Sortierung nach Fehlerstatus (aktiv)"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [
+        {
+          "where": "Fehler-Spalte",
+          "type": "rot-text",
+          "values_observed": [
+            "Ventil in Fehlerposition",
+            "Niedriger Batteriestatus"
+          ],
+          "colors_observed": [
+            "rot"
+          ]
+        }
+      ],
+      "warnings_or_alerts_visible": [
+        "~9 von 10 Geraeten auf Seite 1 in Fehler-Status"
+      ],
+      "open_questions": [
+        "Schwellen-Konfiguration in UI nicht gefunden"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 7,
+        "use_case_label": "Offline/Battery-schwache Geraete finden",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Geraete",
+          "Default-Sortierung 'nach Fehlerstatus'"
+        ],
+        "task_outcome": "erfolgreich erreicht",
+        "notes": "Default-Sortierung priorisiert Fehlerhafte. Schwellen vermutlich Hersteller-fest."
+      }
+    },
+    {
+      "id": "S108",
+      "url": "(nicht erreichbar)",
+      "breadcrumb": [
+        "Dashboard",
+        "alle moeglichen Pfade - kein Treffer"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S108_energy_not_found.png",
+      "purpose_inferred": "Energieverbrauchsbericht - nicht vorhanden",
+      "layout_summary": "Es existiert kein Screen fuer Energie-Reporting. Hash-Routen #/reporting #/energy etc fallen auf SPA-Default.",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [],
+      "interactive_elements": [],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Tested negativ: #/reporting #/alarms #/energy #/notification #/consumption #/verbrauch #/statistik #/analytics #/log"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 8,
+        "use_case_label": "Energieverbrauchsbericht fuer letzten Monat",
+        "click_path": [
+          "Dashboard - keine Energie-Kachel",
+          "Sidebar Expertenmodus - 2 Cards (Temperatur, Algorithmus) - keine Energie",
+          "Header-Cog - 10 Module - keines mit Energie/Reporting",
+          "URL-Brute-Force - alle SPA-Fallback"
+        ],
+        "task_outcome": "nicht auffindbar",
+        "notes": "KEINE Energie-Auswertung im Admin-UI. Plattform ist temperatur-basiert, nicht energie-metering."
+      }
+    },
+    {
+      "id": "S109",
+      "url": "https://5392.betterspaces.de/#/settings/controllers",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Controller"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S109_pms.png",
+      "purpose_inferred": "PMS-Sync-Status via Controller-Hardware-Status",
+      "layout_summary": "Controller-Liste mit 8 Spalten. Zwei Eintraege Beschreibung 'PMS Connector' (1 offline, 1 online).",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "PMS Connector 1 (ID 6728, Serverraum)",
+          "value_seen": "IP 192.168.138.57, Status rotes Verbots-Icon"
+        },
+        {
+          "label": "PMS Connector 2 (ID 10915)",
+          "value_seen": "IP 192.168.138.84, Status gruenes Signal-Icon"
+        }
+      ],
+      "interactive_elements": [
+        {
+          "type": "card-button",
+          "label": "Controllerliste exportieren"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [
+        {
+          "where": "Status-Spalte",
+          "type": "icon",
+          "values_observed": [
+            "rotes Verbots",
+            "gruenes Signal"
+          ],
+          "colors_observed": [
+            "rot",
+            "gruen"
+          ]
+        }
+      ],
+      "warnings_or_alerts_visible": [
+        "1 von 2 PMS Connectors offline - moeglicherweise echtes Sync-Problem"
+      ],
+      "open_questions": [
+        "Keine Software-Sync-UI",
+        "PMS als Hardware-Box modelliert",
+        "PMS-Protokoll in UI nicht erkennbar"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 9,
+        "use_case_label": "PMS-Anbindung pruefen - laeuft die Sync",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Controller",
+          "Beschreibung 'PMS Connector' filtern"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Hardware-Status sichtbar, KEIN Software-Sync-UI. ICS-Kalender (S017) ist Alternative."
+      }
+    },
+    {
+      "id": "S110",
+      "url": "https://5392.betterspaces.de/#/settings/apps/heating",
+      "breadcrumb": [
+        "Dashboard",
+        "Header-Cog",
+        "Temperaturen und Zeiten"
+      ],
+      "screen_title_visible": null,
+      "screenshot": "screens/run2/S110_maintenance.png",
+      "purpose_inferred": "Wartungs-Zeitraum mit Algorithmen-Bypass via Saison/Sommermodus/Manuelle-Steuerung",
+      "layout_summary": "Cards 'Saison' (1.5-1.10 Sommer, 1.10-1.5 Winter) und 'Sommermodus' (Bypass global)",
+      "navigation": {
+        "top_menu": [],
+        "side_menu": [],
+        "tabs": []
+      },
+      "data_displayed": [
+        {
+          "label": "Saison Sommer",
+          "value_seen": "1.5 - 1.10"
+        },
+        {
+          "label": "Saison Winter",
+          "value_seen": "1.10 - 1.5"
+        }
+      ],
+      "interactive_elements": [
+        {
+          "type": "card",
+          "label": "Saison wiederkehrend"
+        },
+        {
+          "type": "card",
+          "label": "Sommermodus global"
+        }
+      ],
+      "forms": [],
+      "tables": [],
+      "status_indicators": [],
+      "warnings_or_alerts_visible": [],
+      "open_questions": [
+        "Kein dedizierter 'Wartung'-Modus",
+        "Saison ist jaehrlich wiederkehrend",
+        "Sommermodus zu grob fuer Einzelraum-Wartung"
+      ],
+      "reached_via_use_case": {
+        "use_case_number": 10,
+        "use_case_label": "Zeitraum als Wartung markieren, keine Heizlogik",
+        "click_path": [
+          "Dashboard",
+          "Header-Cog",
+          "Temperaturen und Zeiten",
+          "Card Saison oder Sommermodus",
+          "Alternative pro Raum: Cog -> Manuelle Steuerung"
+        ],
+        "task_outcome": "teilweise erreicht - siehe Notiz",
+        "notes": "Drei Wege ohne dedizierten Wartungs-Modus."
+      }
+    }
+  ],
+  "global_observations": {
+    "ui_framework_hints": "AngularJS 1.x",
+    "language": "Deutsch",
+    "responsive_behavior": "Nicht getestet",
+    "device_lifecycle_finding": "Pairing-Wizard 3 Klicks ab Dashboard. Geraete nicht in Sidebar.",
+    "permission_model_finding": "OWNER bestaetigt. Andere Rollen nicht expandiert.",
+    "things_that_surprised_me": [
+      "UC8 Energieverbrauch nicht erreichbar - Plattform nicht energie-metering-orientiert",
+      "UC9 PMS-Sync hat keine Software-Schicht - nur Hardware-Status",
+      "UC10 Wartung hat 3 Wege, keinen dedizierten",
+      "UC4 Bulk-Edit elegant via Raumtyp-Konzept geloest",
+      "UC1 Status-Glance hat KEIN Health-Panel",
+      "Dashboard-Inhalte tagesabhaengig - Belegungs-Pie verschwand zwischen Run 1 und Run 2"
+    ]
+  },
+  "screens_not_reachable": []
+}
