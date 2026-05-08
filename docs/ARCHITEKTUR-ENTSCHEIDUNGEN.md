@@ -608,3 +608,91 @@ statt sich auf substantielle Entscheidungen zu konzentrieren.
 - CLAUDE.md §0.1 (Autonomie-Default)
 - CLAUDE.md §5.20 (Aspirative Kommentare als Doku-Drift)
 - AE-40 (Engine-Task-Lock — konkreter Anlass-Fall fuer S1)
+
+---
+
+## AE-42 — Frostschutz zweistufig (2026-05-07)
+
+**Kontext:** Cowork-Inventarisierung Betterspace zeigt: untere
+Temperaturgrenzen werden in der Praxis pro Raumtyp differenziert.
+Bad mit Handtuchwärmer braucht andere untere Grenze als Flur.
+
+**Entscheidung:** Frostschutz in zwei Ebenen.
+
+1. Hard-Cap als Code-Konstante `FROST_PROTECTION_C = Decimal("10.0")`
+   in `constants.py`. Nicht UI-änderbar.
+2. Optionaler Override pro Raumtyp via Spalte
+   `room_type.frost_protection_c NUMERIC(4,1) NULL`. Default NULL,
+   fällt auf Hard-Cap. Kann höher gesetzt werden, nie niedriger.
+
+Effektiver Frostschutz: `MAX(HARD_CAP, room_type.frost_protection_c)`.
+
+Engine-Layer 0, 4, 5 lesen diesen Wert.
+
+**Konsequenzen:**
+- DB-Migration in Sprint 9.12 (eine neue Spalte)
+- Engine-Helper `_resolve_frost_protection(room_type)` in `engine.py`
+- Tests pro Layer mit Override
+
+**Status:** akzeptiert
+**Ersetzt:** ältere Fassung von R8 in STRATEGIE.md §6.2
+
+---
+
+## AE-43 — Geräte-Lifecycle als eigene UI-Disziplin (2026-05-07)
+
+**Kontext:** Strategie sah „Thermostate Master-Detail mit Drawer".
+Cowork zeigt: Betterspace behandelt Geräte-Verwaltung als komplexen
+Workflow mit Pairing-Wizard, Inline-Edit, Sortierung, Tausch-Logik.
+Akuter Anlass: heute haben wir keine Funktion, ein Gerät einer
+Heizzone zuzuweisen — nur Vicki-001 ist via DB-Direkt-Edit verlinkt.
+
+**Entscheidung:** Geräte-Verwaltung wird als eigenständiger Sub-Bereich
+in der Sidebar geführt mit folgenden Bausteinen:
+
+1. **API-Endpoint** zur Zuordnung Gerät→Heizzone (Sprint 9.11a)
+2. **Pairing-Wizard** mehrstufig: Gerät → Zimmer → Heizzone → Label →
+   Bestätigen (Sprint 9.13)
+3. **Inline-Edit** für `device.label`
+4. **Sortierung nach Fehlerstatus** als Default
+5. **Health-Indikatoren** pro Zeile: Battery, Signal, Online-Status,
+   Notification-Bell
+6. **Tausch-Workflow:** Detach → Re-Attach via API
+
+**Konsequenzen:**
+- Neue Routen: `/devices/pair`, `/zimmer/[id]/devices`
+- API-Erweiterungen: PUT/DELETE `/api/v1/devices/{id}/heating-zone`
+- Sprint 9.11a (API-Quick-Fix), Sprint 9.13 (volle UI)
+
+**Status:** akzeptiert
+**Verstärkt:** STRATEGIE.md §8.3 Geräte-Sektion
+
+---
+
+## AE-44 — Stabilitätsregeln S1-S6 (2026-05-07)
+
+**Kontext:** Während Sprint 9.10b wurden sechs Stabilitätsregeln in
+CLAUDE.md §0 verankert. Diese Regeln sind faktisch
+Architektur-Entscheidungen, weil sie definieren, welche Klassen von
+Mängeln das System nicht akzeptiert. Sie gehören daher auch ins ADR-Log.
+
+**Entscheidung:** Folgende sechs Stabilitätsregeln gelten verbindlich
+für jedes Sprint, jeden Code-Pfad und jede Architektur-Entscheidung:
+
+- **S1:** Bekannte Race-Conditions, Doku-Drifts und TODO-Kommentare in
+  Steuerlogik werden gefixt sobald scharf, nicht verschoben.
+- **S2:** Determinismus + Idempotenz Pflicht (Locks, SETNX,
+  Idempotenz-Checks).
+- **S3:** Auditierbarkeit — jede Setpoint-Änderung im Engine-Trace
+  sichtbar.
+- **S4:** Hardware-Schutz — keine doppelten Downlinks, keine
+  widersprüchlichen Setpoints.
+- **S5:** Defensive bei externen Quellen (PMS, IoT, Netzwerk).
+- **S6:** Komplexität trägt Beweislast — im Zweifel einfacher.
+
+Eskalations-Regel: Wenn Sprint-Plan, Brief, PR oder Live-Deploy gegen
+S1-S6 verstoßen würde → Strategie-Chat-Stop, kein Merge ohne explizite
+Freigabe.
+
+**Status:** akzeptiert
+**Bezug:** CLAUDE.md §0 (operatives Pendant)

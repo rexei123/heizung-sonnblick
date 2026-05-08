@@ -4,32 +4,14 @@ Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in 
 
 ---
 
-## 1. Was läuft produktiv
+## 1. Aktueller Stand
 
-### Test-System
-- **URL:** https://heizung-test.hoteltec.at
-- **Hetzner:** CPX22, `157.90.17.150`
-- **Tailscale:** `heizung-test` = `100.82.226.57`
-- **Branch:** `develop`, **GHCR-Tag:** `develop`
-- **Deploy-Mode:** GHCR Pull-Deploy via systemd-Timer, 5-Min-Intervall
-- **UFW:** aktiv (22/80/443 + tailscale0)
-- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
-- **Status:** ✅ Läuft, alle Container up, `web` (healthy)
-
-### Main-System
-- **URL:** https://heizung.hoteltec.at
-- **Hetzner:** CPX32, `157.90.30.116`
-- **Tailscale:** `heizung-main` = `100.82.254.20`
-- **Branch:** `main`, **GHCR-Tag:** `main`
-- **Deploy-Mode:** Identisch zu Test (Pull-Deploy + Auto-Migration)
-- **UFW:** aktiv (22/80/443 + tailscale0)
-- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
-- **Status:** ✅ Läuft, alle Container up, `web` (healthy), Auto-Migration erfolgreich gelaufen
-
-### Entwicklungs-Client
-- **Hostname:** `work02` (Tailscale = `100.78.38.29`)
-- **Git-Repo:** `C:\Users\User\dev\heizung-sonnblick`
-- **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung`
+**Stichtag:** 2026-05-07
+**Aktueller Branch:** develop, HEAD `654fbab` (Doku-Patch §5.24+§5.25)
+**Letzter Tag:** `v0.1.9-rc5-trace-consistency`
+**Nächster Sprint:** 9.11 Live-Test #2 (siehe `docs/SPRINT-PLAN.md`)
+**Architektur-Refresh:** durchgeführt 2026-05-07, siehe
+`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
 
 ---
 
@@ -579,6 +561,28 @@ Ziel: Trace-Lücke in Layer 0 (Sommer) und Layer 2 (Temporal) schließen — bis
 
 **Tag-Vergabe (geplant nach Merge):** `v0.1.9-rc5-trace-consistency`. Sprint 9.11 Live-Test #2 schließt sich an, Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
 
+## 2t. Architektur-Refresh 2026-05-07 (abgeschlossen)
+
+**Anlass:** Cowork-Inventarisierung Betterspace zeigt drei Korrekturen
+am ursprünglichen Strategiepapier sowie eine Reihe von im Plan
+vorgesehenen, aber nicht implementierten Bausteinen.
+
+**Ergebnis:**
+- Neues Master-Dokument `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
+- Neuer Sprint-Plan `docs/SPRINT-PLAN.md` (Sprint 9.11 bis 14
+  Go-Live)
+- Pflicht-Pre-Read pro Session `docs/SESSION-START.md`
+- Rollen-Definition `docs/AI-ROLES.md`
+- STRATEGIE.md auf Version 1.1
+- Drei neue ADRs: AE-42 (Frostschutz zweistufig), AE-43
+  (Geräte-Lifecycle), AE-44 (Stabilitätsregeln S1-S6 als ADR)
+
+**Trigger-Phrase ab heute für jede neue Session:**
+> „Architektur-Refresh aktiv ab 2026-05-07. Lies `docs/SESSION-START.md`
+> und bestätige."
+
+**Tag:** `v0.2.0-architektur-refresh` (nach Merge)
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -661,47 +665,57 @@ Ziel: Trace-Lücke in Layer 0 (Sommer) und Layer 2 (Temporal) schließen — bis
 
 ---
 
-## 6. Nächste Schritte
+## 6. Backlog
 
-Pipeline-Modell: Claude Code arbeitet kontinuierlich am ausdiskutierten Task. Parallel wird im Strategie-Chat der jeweils nächste Task geplant.
+Sortierung: Priorität (🔴 blockierend, 🟡 wichtig, 🟢 nice-to-have),
+innerhalb der Priorität nach Aufwand.
 
-**Aktiv in Claude Code:**
-- (keiner — wartet auf nächsten Plan-Slot)
+### 6.1 — Refresh-Aufgaben (BR-1 bis BR-15)
 
-**Aktiv in Planung (Strategie):**
-- Sprint 9.11/9.12: Live-Test #2 (Vicki gegen Test-Server, vollständiger Layer-Stack inkl. Window-Detection + Lock + 6h-Hysterese-Heartbeat), danach Final-Tag `v0.1.9-engine`
+| ID | Inhalt | Sprint |
+|---|---|---|
+| BR-1 🔴 | Frostschutz pro Raumtyp (DB + Engine + API) | 9.12 |
+| BR-2 🔴 | Geräte-Pairing-UI + Sidebar-Migration | 9.13 |
+| BR-3 🟡 | Globale Temperaturen+Zeiten-UI | 9.14 |
+| BR-4 🟡 | Profile-CRUD + UI | 9.15 |
+| BR-5 🟡 | Szenarien-Aktivierung CRUD + UI | 9.16 |
+| BR-6 🟡 | Saison-CRUD + UI | 9.16 |
+| BR-7 🔴 | NextAuth + User-UI | 9.17 |
+| BR-8 🟡 | Dashboard mit 6 KPI-Cards | 9.18 |
+| BR-9 🟢 | Temperaturverlauf-Analytics | 9.19 |
+| BR-10 🟢 | API-Keys + Webhooks | 9.20 |
+| BR-11 🟢 | Gateway-Status-UI | 9.21 |
+| BR-12 🟢 | KI-Layer-Hülle in Engine | nach Go-Live |
+| BR-13 🔴 | PMS-Casablanca-Connector | 11 |
+| BR-14 🟡 | Wetterdaten-Service aktiv | 13 |
+| BR-15 🔴 | Backup + Production-Migration | 12 |
 
-**Backlog (nicht priorisiert):**
-- **B-9.10-1** (aus 9.10): Fenster-Indikator in `/zimmer`-Liste (Spalte STATUS, analog Betterspace grünes Quadrat). Aufwand 1-2 h.
-- **B-9.10-2** (aus 9.10): Fehler-Übersicht für Devices (filterbar nach Battery, Valve-Error, Offline). Eigener Sprint 6-10 h. Vorbedingung: Codec-Quellcheck `fPort 1` `error_code`-Bytes.
-- **B-9.10-3** (aus 9.10): Material-Symbols-Static-Cut um `sensor_window_open` erweitern (aktuell Fallback `window`). Erfordert Re-Generation des `material-symbols-outlined-v332.woff2`-Subsets aus erweiterter Glyph-Liste. Eigener Mini-Sprint.
-- **B-9.10-5** (aus 9.10): Codec-snake_case-Alias für `open_window` aus camelCase `openWindow` (mit nächstem ChirpStack-Touch — Codec-Re-Deploy hat eigenen Sprint-Plan).
-- **B-9.10-6** (aus 9.10): pre-existing psycopg2-Failures in `test_manual_override_model.py` + `test_migrations_roundtrip.py` (`ModuleNotFoundError: psycopg2`). Tests nutzen den sync psycopg2-Driver, der lokal nicht installiert ist. Optionen: a) `psycopg2-binary` als Dev-Dependency, b) Tests auf asyncpg-Driver umstellen, c) `requires_psycopg2`-Skip-Marker. Hygiene-Sprint.
-- **B-9.10-7** (aus 9.10): `celery_worker`-Service in dev `docker-compose.yml` (aktuell nur prod). Lokaler Smoke + Live-Reload-Workflow gegen echte Worker. Aufwand ~30 Min.
-- B-2: "Detail →" als Plain-`<a>` vs. ghost-Button-Spec — Design-Strategie 2.0.1 §6.1 präzisieren (ghost gilt für Buttons, Navigation nutzt Plain-Anchor)
-- B-3: secondary-Border-Kontrast (`#E3E5EA`) zu blass auf surface-alt-Hintergrund — kosmetisch
-- /healthz-Bug: `ts` ist Modul-Load-Zeit, nicht Request-Zeit — irreführend für Deploy-Diagnose
-- Backup-Cron + Off-Site-Replikation (manueller Dump in `/opt/heizung-backup/`, kein Cron)
-- main-Branch-Strategie (aktuell hinter develop, Image-Tag-Logik klären)
-- Sprint 10: Szenarien (scenario/scenario_assignment-Modelle vorbereitet)
-- NextAuth/Multi-Tenant (Sprint 11+)
-- frontend-ci-skip.yml aufräumen
-- `~/.ssh/config`-Einträge für heizung-test/heizung-main
-- heizung-test: Kernel-Update ausstehend
-- e2e-Smoketests für Sprint-8-Routen (/belegungen, /einstellungen/hotel, 
-  Master-Detail-Pages): aktuell keine e2e-Coverage. Architektur-Entscheidung 
-  vor Implementierung — Playwright-Mocking via route.fulfill ODER 
-  api+db-Container in CI hochfahren. Eigener Mini-Sprint, nicht Hygiene.
-- **ChirpStack-Codec-Bootstrap-Skript** (Sprint 9.10c): Codec-Deploy ist 
-  heute manueller UI-Schritt je Server (siehe RUNBOOK §10, CLAUDE.md §5.22). 
-  Programmatisches Skript via ChirpStack gRPC-API würde Repo-Stand → 
-  ChirpStack reproduzierbar machen — heizung-test, heizung-main und 
-  spätere Disaster-Recovery wären damit ein Befehl statt UI-Klickerei. 
-  War im Sprint-6-Backlog erwähnt, durch 9.10c-Befund jetzt fällig. 
-  Eigener Hygiene-Sprint.
-- **B-9.10-2 (Devices-Fehler-Übersicht-Filter)** durch 9.10c-Live-Daten 
-  bestätigt fällig: Battery-Werte 33 % (Vicki-001) vs 42 % (andere drei) 
-  sind nur per Filter-Spalte sichtbar — heute nicht in der Devices-Liste.
+### 6.2 — Hygiene-Aufgaben (B-9.10*)
+
+Werden im Hygiene-Sprint 10 abgearbeitet.
+
+| ID | Inhalt | Priorität |
+|---|---|---|
+| B-9.10-1 | Fenster-Indikator in /zimmer-Liste | 🟡 |
+| B-9.10-2 | Fehler-Übersicht für Devices (in BR-2 enthalten) | erledigt |
+| B-9.10-6 | psycopg2-Failures | 🟡 |
+| B-9.10c-1 | ChirpStack-Codec-Bootstrap-Skript | 🟡 |
+| B-9.10c-2 | Codec-Re-Paste auf heizung-main bei Production-Migration | 🔴 (in 12) |
+| B-9.10d-1 | detail-Konvention vereinheitlichen | 🟡 |
+| B-9.10d-2 | mypy-Vorlast 71 Errors in tests/ | 🟡 |
+| B-9.10d-3 | Type-Inkonsistenz Engine `int` vs. EventLog `Decimal` | 🟡 |
+| B-9.10d-5 | engine_tasks DB-Session per Dependency-Injection | 🟢 |
+| B-9.10d-6 | Pre-Push-Hook für `ruff format --check` | 🟢 |
+| B-9.11-1 | celery_beat Healthcheck korrigieren | 🟡 |
+
+### 6.3 — Operative Aufgaben
+
+| ID | Inhalt | Priorität |
+|---|---|---|
+| OP-1 | Backup-Cron + Off-Site-Replikation auf db | 🔴 (in 12) |
+| OP-2 | main-Branch-Strategie | 🟡 (vor 12) |
+| OP-3 | heizung-test Kernel-Update | 🟢 |
+| OP-4 | ~/.ssh/config Eintrag heizung-test | erledigt |
 
 ---
 

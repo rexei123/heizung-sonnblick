@@ -1,3 +1,8 @@
+> **Historisch (Stand 2026-05-07).** Diese Datei dokumentiert einen
+> abgeschlossenen Sprint und ist nicht mehr Bezugsquelle für neue
+> Pläne. Maßgeblich sind ab 2026-05-07:
+> `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`, `docs/SPRINT-PLAN.md`.
+
 # Sprint 9.10 — Window-Detection (Engine Layer 4) + AE-40 Task-Lock
 
 **Datum:** 2026-05-06
