@@ -675,6 +675,77 @@ UI-Re-Paste je Server ist fehleranfällig (Copy-Paste-Verlust, ungetesteter Stan
 
 ---
 
+## 10d. Geräte-Zuordnung via API (Sprint 9.11a)
+
+Vicki-Thermostate werden produktiv via REST-API einer Heizzone
+zugewiesen. Bis zur UI-Pairing-Lösung in Sprint 9.13 ist dies der
+einzige unterstützte Weg. Direkter DB-Edit ist NICHT mehr nötig.
+
+### 10d.1 Voraussetzungen
+
+- Device existiert (via ChirpStack-Pairing aus §10) und ist in der
+  `device`-Tabelle persistiert.
+- Heizzone existiert (`heating_zone`-Tabelle, ID via UI oder
+  `GET /api/v1/rooms/{room_id}/heating-zones`).
+- Basic-Auth-Credentials für heizung-test (siehe §10b).
+
+### 10d.2 Gerät einer Heizzone zuweisen
+
+```bash
+curl -X PUT \
+  -u "<user>:<pass>" \
+  -H "Content-Type: application/json" \
+  -d '{"heating_zone_id": 42}' \
+  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+```
+
+Erwartete Response (200):
+
+```json
+{
+  "device_id": 2,
+  "dev_eui": "70b3d52dd3034de4",
+  "heating_zone_id": 42,
+  "label": "Vicki-002",
+  "updated_at": "2026-05-08T14:23:11.482Z"
+}
+```
+
+### 10d.3 Re-Assign (Hardware-Tausch)
+
+Identisch zu §10d.2 — die API behandelt Re-Assign idempotent. Der
+neue Wert überschreibt den alten ohne 409-Konflikt.
+
+### 10d.4 Gerät von Heizzone trennen (Detach)
+
+```bash
+curl -X DELETE \
+  -u "<user>:<pass>" \
+  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+```
+
+Response (200): `heating_zone_id` ist `null`.
+
+### 10d.5 Verifikation via DB
+
+```bash
+docker exec -it deploy-db-1 psql -U heizung -d heizung -c \
+  "SELECT id, dev_eui, label, heating_zone_id FROM device ORDER BY id;"
+```
+
+Erwartet nach Sprint 9.11a Live-Setup: alle 4 Vickis mit
+`heating_zone_id IS NOT NULL`.
+
+### 10d.6 Fehlerbilder
+
+| HTTP | Detail | Bedeutung |
+|---|---|---|
+| 404 | `device_not_found` | Device-ID existiert nicht |
+| 404 | `heating_zone_not_found` | Zone-ID existiert nicht |
+| 422 | Pydantic-Default | Body fehlt, `heating_zone_id <= 0`, oder Extra-Feld |
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
@@ -689,4 +760,6 @@ UI-Re-Paste je Server ist fehleranfällig (Copy-Paste-Verlust, ungetesteter Stan
 ## Anhang: Lessons Learned 2026-04-20
 
 - Hetzner Web Console (noVNC) hat US-Keyboard-Mapping → `|`, `:`, `"` werden zerlegt. Nur für kurze Single-Word-Commands nutzen.
-- Hetzner Cloud Firewall ist für diesen Accoun                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+- Hetzner Cloud Firewall ist für diesen Account NICHT konfiguriert — Blockaden kommen server-seitig (UFW).
+- Rescue-Modus ist nach einem Reboot verbraucht, Server bootet normal zurück.
+- `ssh-heizung`-Key in Hetzner gilt sowohl für Rescue-Auth als auch produktiven SSH-Zugang.
