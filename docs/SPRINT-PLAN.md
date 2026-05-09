@@ -121,6 +121,81 @@ Kein UI, nur Backend. Damit ist 9.11 fahrbar.
 
 ---
 
+# SPRINT 9.11x — Vicki-Konfiguration + Backplate-Bit (Quick Win)
+
+**Priorität:** 🔴
+**Geschätzte Dauer:** 2-3 h
+**Autonomiestufe:** 2
+**Voraussetzung:** 9.11 abgeschlossen, AE-47 dokumentiert
+**Tag nach Abschluss:** kein eigener Tag
+
+## Ziel
+
+Vicki-Hardware-Window-Detection aktivieren, FW-Versionen erfassen, `attached_backplate` ins `sensor_reading` persistieren. Voraussetzung für Layer-4-Erweiterung in Sprint 9.11y.
+
+## Tasks
+
+- T1: Migration `device.firmware_version VARCHAR(8) NULL`
+- T2: Helper-Skript für Downlink `0x04` (FW-Version-Abfrage) — auf alle 4 Vickis ausführen, Antwort persistieren
+- T3: Helper-Skript für Downlink `0x4501020F` (Open-Window aktivieren) auf Vickis mit FW >= 4.2; Fallback auf `0x06`-Variante bei FW < 4.2
+- T4: Verifikation via `0x46` (Get) bzw. `0x13` (Get für FW < 4.2)
+- T5: Migration `sensor_reading.attached_backplate BOOLEAN NULL`
+- T6: ChirpStack-Codec-Mapping ergänzen: `attachedBackplate` aus Decoded-Payload in `sensor_reading.attached_backplate` schreiben (B-9.10c-1)
+- T7: Engine Layer 4 erweitern: bei zwei aufeinanderfolgenden Frames mit `attached_backplate=false` → Setpoint = Frostschutz, reason `device_detached`; Pytest dazu
+- T8: RUNBOOK §10e neue Sektion „Vicki-Konfiguration via Downlink" mit curl-Beispielen + Hardware-Kältepack-Test-Verfahren
+
+## Definition of Done
+
+- 4 Vickis haben Open-Window-Detection aktiviert (per Get-Verify bestätigt)
+- `device.firmware_version` für alle 4 Vickis gefüllt
+- `sensor_reading.attached_backplate`-Spalte gefüllt
+- Layer 4 reagiert auf `attached_backplate=false` mit Frostschutz + Reason `device_detached`
+- RUNBOOK §10e dokumentiert
+- Pytests grün, Mypy grün, Ruff grün
+
+## Risiken
+
+- FW-Version eines Vickis < 4.2 → `0x45` schlägt fehl, Fallback auf `0x06`
+- Codec-Re-Paste nach Migration nicht vergessen (Lesson §5.22)
+
+---
+
+# SPRINT 9.11y — Backend-Synthetic-Test + passiver Window-Logger
+
+**Priorität:** 🔴
+**Geschätzte Dauer:** 3-4 h
+**Autonomiestufe:** 1 (Engine-Touch + Test-Infrastruktur)
+**Voraussetzung:** 9.11x abgeschlossen
+**Tag nach Abschluss:** `v0.1.9-rc6-live-test-2`
+
+## Ziel
+
+Layer-4-Pipeline End-to-End deterministisch testbar machen ohne Hardware-Abhängigkeit (Sommer-tauglich). Passiver Backend-Window-Logger für spätere Aktivierungs-Entscheidung (BR-16).
+
+## Tasks
+
+- T1: Helper `_detect_inferred_window(room_id, lookback_min=10)` — berechnet Δ Raumluft über `sensor_reading`-Hypertable mit Window-Function
+- T2: Helper schreibt bei Treffer ins `event_log` mit Type `MAINTENANCE_INFERRED_WINDOW`, **kein Setpoint-Effekt**
+- T3: Pytest mit künstlichen `sensor_reading`-Inserts: Layer-4-Pfad End-to-End asserted (Vicki-Trigger, Detached-Trigger, Inferred-Trigger jeweils einzeln und kombiniert)
+- T4: T1 aus Sprint 9.11 als pytest abgebildet — Vicki-`openWindow=true` führt zu Frostschutz-Setpoint + Reason `open_window`
+- T5: T1 erneut via Cowork-Live-Test mit Hardware-Kältepack durchführen (RUNBOOK §10e), Befund dokumentieren
+- T6: STATUS.md §2v finalisieren
+- T7: Tag `v0.1.9-rc6-live-test-2` nach Strategie-Chat-Freigabe
+
+## Definition of Done
+
+- Synthetic-Test in pytest grün, in CI lauffähig
+- 3 Layer-4-Reasons im Engine-Trace: `open_window`, `device_detached`, passiv `inferred_window` im `event_log`
+- Cowork-Kältepack-Test bestätigt T1 Pass mit echter Hardware
+- Tag gesetzt
+
+## Risiken
+
+- Falsch-Positive im Inferred-Logger → Justierung der Δ-T-Schwelle in 2-Wochen-Beobachtungs-Phase
+- Synthetic-Test in CI braucht TimescaleDB — bestehender Test-Setup prüfen
+
+---
+
 # SPRINT 9.12 — Frostschutz pro Raumtyp
 
 **Priorität:** 🔴
