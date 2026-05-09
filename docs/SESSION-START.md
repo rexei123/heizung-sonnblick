@@ -30,12 +30,18 @@ SESSION-START.md."**
 
 In dieser Reihenfolge lesen:
 
+0. **Projekt-Anweisung im Strategie-Chat-Frontend** (steht im
+   Projekt-Frontend von claude.ai, NICHT im Repo) — definiert Rolle,
+   Stil, Domänen-Wissen, Stabilitäts-Verhalten, Format für Antworten.
+   Wird beim Chat-Start automatisch geladen, MUSS aber bewusst gelesen
+   und befolgt werden, nicht überflogen.
 1. `docs/SESSION-START.md` (dieses Dokument)
 2. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Master)
 3. `docs/SPRINT-PLAN.md` (aktueller + nächster Sprint)
 4. `STATUS.md` §1 (Aktueller Stand) + §2 letzter Eintrag
 5. `CLAUDE.md` §0 (Stabilitätsregeln) + §0.1 (Autonomie-Default)
-6. `docs/AI-ROLES.md` (eigene Rolle)
+6. **Kritische Hardware-Befunde** (siehe Sektion unten in diesem Dokument)
+7. `docs/AI-ROLES.md` (eigene Rolle)
 
 **Was die Strategie-Chat-Rolle tut:**
 - Sprint-Briefe schreiben
@@ -54,11 +60,12 @@ In dieser Reihenfolge lesen:
 In dieser Reihenfolge lesen:
 
 1. `docs/SESSION-START.md`
-2. `CLAUDE.md` (komplett — alle Lessons §5.x)
-3. `docs/SPRINT-PLAN.md` (nur den aktuellen Sprint-Eintrag)
-4. `STATUS.md` §1
-5. Ggf. `RUNBOOK.md` für SSH/Deploy-Kontext
-6. Den vom Strategie-Chat gelieferten Brief (im User-Prompt)
+2. **Kritische Hardware-Befunde** (siehe Sektion unten in diesem Dokument)
+3. `CLAUDE.md` (komplett — alle Lessons §5.x)
+4. `docs/SPRINT-PLAN.md` (nur den aktuellen Sprint-Eintrag)
+5. `STATUS.md` §1
+6. Ggf. `RUNBOOK.md` für SSH/Deploy-Kontext
+7. Den vom Strategie-Chat gelieferten Brief (im User-Prompt)
 
 **Was Claude Code tut:**
 - Code schreiben nach Brief 1:1
@@ -93,6 +100,31 @@ In dieser Reihenfolge lesen:
 - Daten ändern (Speichern, Senden, Anwenden, Löschen, Reset)
 - Eigenmächtige Vergleiche oder Bewertungen
 - Sprint-Plan oder Architektur-Vorschläge
+
+## Kritische Hardware-Befunde (Pflicht-Wissen vor jeder Code-Session)
+
+Diese Befunde MÜSSEN bewusst vor jeder Sprint-Planung oder Code-Aktion
+gelesen werden, weil sie Architektur-Annahmen aus früheren Sprints
+korrigieren. Drift im Inhalt zwischen den verlinkten Stellen ist ein
+S1-Befund (CLAUDE.md §0). Diese Sektion enthält **nur Verweise**, keine
+Inhalte — die Wahrheit steht in den verlinkten Dokumenten.
+
+### Vicki-Thermostat-Verhalten
+
+- **CLAUDE.md §5.27** — Open-Window-Detection im Default disabled,
+  Algorithmus-Trägheit, Sommer-Test-Strategie
+- **AE-45 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Auto-Detect-Override
+  bei Hand-Drehung am Vicki
+- **AE-47 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Hardware-First-Window-
+  Detection mit drei Trigger-Quellen
+- **`docs/vendor/mclimate-vicki/README.md`** — Hersteller-Doku-Stand
+  2026-05-09 mit FW-Tabelle und Command-Cheat-Sheet
+
+### Pflege dieser Sektion
+
+Wenn ein Sprint einen neuen Hardware-Realitäts-Befund aufdeckt
+(Discrepancy zwischen Annahme und Verhalten): neue Lesson §5.x in
+CLAUDE.md anlegen UND hier verlinken. Inhalt nicht doppelt pflegen.
 
 ## Source-of-Truth-Hierarchie
 
@@ -147,6 +179,8 @@ Rolle: <Strategie / Code / Cowork>
 Gelesen: <Dokumentenliste>
 Aktueller Sprint laut STATUS.md §2: <Sprint-Nummer + Ziel>
 Top-3-Backlog: <BR-x, BR-y, BR-z>
+Kritische Hardware-Befunde gelesen: §5.27 (Vicki-Window-Default),
+  AE-45 (Auto-Override), AE-47 (Window-Hybrid), docs/vendor/mclimate-vicki/
 Historische Sprint-Briefe vor 2026-05-07: nicht für Pläne, nur Lessons
 Bereit für Auftrag.
 ```

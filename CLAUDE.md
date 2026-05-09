@@ -559,6 +559,50 @@ normal — Drift in beide Richtungen gleichzeitig ist Refresh-Anlass.
 - Strategie-Refresh nach Cowork-Inventarisierung oder externer Bestätigung
 - Sprint-Plan und Backlog mindestens monatlich konsolidieren
 
+### 5.27 Vicki-Hardware-Realität: Open-Window-Default + Algorithmus-Trägheit (Sprint 9.11 Lesson)
+
+**Befund 2026-05-09 (Sprint 9.11 Live-Test #2 + Hersteller-Doku-Recherche):**
+
+Die MClimate-Vicki sendet `openWindow=true` im Hotelbetrieb NICHT zuverlässig.
+Drei Ursachen, alle real:
+
+1. **Open-Window-Detection ist im Default DISABLED.** MClimate liefert die
+   Funktion ab Werk ausgeschaltet. Aktivierung nur via Downlink (`0x4501020F`
+   für FW >= 4.2, `0x06{...}` für FW < 4.2).
+2. **Algorithmus arbeitet auf internem Vicki-Sensor**, der durch HK-Wärme
+   dominiert wird. Hersteller-Zitat: „not 100% reliable, can be affected by
+   outdoor temperature, position of the device on the radiator, position of
+   the radiator in the room and more factors."
+3. **Im Sommer / bei Außentemp >= 15 °C physikalisch nicht testbar.**
+   Δ-T zu klein und zu langsam für Vicki-Schwellen.
+
+**Konsequenzen für Code-Änderungen:**
+
+- **Engine Layer 4 darf nicht NUR auf `sensor_reading.open_window` hören.**
+  Hardware-First mit aktiven Triggern: Vicki-Flag UND `attached_backplate`.
+  Backend-Inferenz nur passiv (siehe AE-47).
+- **Window-Detection-Tests im Sommer:** Backend-Synthetic-Test in pytest
+  (SQL-Inserts mit künstlichem Δ-T). Hardware-Test nur via Kältepack
+  (RUNBOOK §10e), nicht in CI.
+- **Vicki-Konfiguration vor Heizperiode prüfen:** Bei jedem Vicki-Tausch /
+  Neu-Pairing Open-Window via Downlink aktivieren. Nicht annehmen, dass
+  die Funktion läuft.
+- **`attachedBackplate`-Bit gehört in `sensor_reading`.** Codec liefert es
+  seit FW 4.1, ohne Persistenz keine Demontage-Erkennung.
+
+**Quellen:**
+
+- `docs/vendor/mclimate-vicki/` (vollständige Hersteller-Doku-Kopie 2026-05-09)
+- `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` AE-47
+
+**Was diese Lesson für andere Sprints bedeutet:**
+
+- Sprint 9.12 (Frostschutz pro Raumtyp): Layer 4 wird in 9.11x/9.11y bereits
+  angefasst, Frostschutz-Logik muss mit drei Trigger-Reasons koexistieren
+  (`open_window`, `device_detached`, später ggf. `inferred_window`).
+- BR-16 (Backend-Eigenlogik aktiv): nicht voreilig aktivieren, erst nach
+  2 Wochen produktiver Beobachtung in Heizperiode.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
