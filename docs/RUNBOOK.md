@@ -744,6 +744,52 @@ Erwartet nach Sprint 9.11a Live-Setup: alle 4 Vickis mit
 | 404 | `heating_zone_not_found` | Zone-ID existiert nicht |
 | 422 | Pydantic-Default | Body fehlt, `heating_zone_id <= 0`, oder Extra-Feld |
 
+### 10d.7 Verwandte API-Endpunkte (Sprint 9.11 verifiziert)
+
+#### Manual-Override anlegen
+
+```bash
+curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+  -d '{"setpoint": "23", "source": "frontend_4h", "reason": "Test"}' \
+  https://heizung-test.hoteltec.at/api/v1/rooms/{room_id}/overrides
+```
+
+Erlaubte `source`-Werte:
+
+- `device` — vom System bei Auto-Detect (siehe AE-45) — manuell nicht setzen
+- `frontend_4h` — Standard-Frontend-Override, 4 h Gültigkeit
+- `frontend_midnight` — gültig bis 00:00
+- `frontend_checkout` — gültig bis Check-out der aktiven Belegung
+
+`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 400 abgelehnt).
+
+#### Manual-Override revoken
+
+```bash
+curl -u "<user>:<pass>" -X DELETE \
+  https://heizung-test.hoteltec.at/api/v1/overrides/{override_id}
+```
+
+#### Belegung anlegen
+
+```bash
+curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+  -d '{"room_id": 2, "check_in": "2026-05-09T06:00:00Z", "check_out": "2026-05-11T11:00:00Z", "source": "manual"}' \
+  https://heizung-test.hoteltec.at/api/v1/occupancies
+```
+
+#### Belegung stornieren
+
+DELETE ist nicht erlaubt. Stornierung via PATCH:
+
+```bash
+curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
+  -d '{"cancel": true}' \
+  https://heizung-test.hoteltec.at/api/v1/occupancies/{id}
+```
+
+Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelöscht werden.
+
 ---
 
 ## 11. Notfall-Links

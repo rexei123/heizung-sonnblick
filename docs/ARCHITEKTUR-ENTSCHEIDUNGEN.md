@@ -696,3 +696,32 @@ Freigabe.
 
 **Status:** akzeptiert
 **Bezug:** CLAUDE.md §0 (operatives Pendant)
+
+---
+
+## AE-45 — Device-Auto-Detect-Override-Mechanismus (2026-05-09)
+
+**Kontext:** Während Sprint 9.11 Live-Test #2 wurde beobachtet, dass die `manual_override`-Tabelle automatisch Einträge mit `source=device`, `reason="auto: detected user setpoint change"` und `expires_at=now+7days` erhält. Der Mechanismus war im Strategie-Chat-Kontext nicht dokumentiert. Bekannt waren nur die `frontend_*`-Override-Quellen aus Sprint 9.9.
+
+**Beobachtetes Verhalten:**
+
+1. Wenn Vicki einen Setpoint zurückmeldet, der nicht zur Engine-Erwartung passt (z. B. weil Gast am Drehrad gedreht hat), schreibt das System einen `manual_override` mit `source=device` und `expires_at` +7 Tage.
+2. Beim Anlegen des Auto-Overrides werden bestehende `frontend_*`-Overrides auf demselben Raum auto-revoked.
+3. Layer 3 (`manual_override`) behandelt Auto-Override und Frontend-Override identisch — beide werden als `reason=manual` durchgereicht.
+4. Das Frontend-Engine-Decision-Panel zeigt source-Information im Detail-Text („Drehknopf, läuft ab in 6T 23h"), aber nicht im reason-Token.
+
+**Entscheidung:** Der Mechanismus wird als gewollt akzeptiert und in diesem ADR verankert. Begründung:
+
+- Wenn Gast am Vicki dreht, ist seine Absicht klar: Komfort-Wunsch.
+- 7-Tage-Cap ist defensiv — länger als Frontend (4h), aber nicht unbegrenzt.
+- Auto-Revoke alter Frontend-Overrides verhindert widersprüchliche Setpoints (S4 Hardware-Schutz).
+
+**Konsequenzen:**
+
+- Engine-Trace muss source-Differenzierung sichtbar machen, damit Hotelier zwischen API-Setting und Hardware-Eingriff unterscheiden kann. Backlog B-9.11-1 + B-9.11-3 (Trace-Reason-Sub-Tokens `manual_frontend` / `manual_device`).
+- RUNBOOK §10d zukünftig (Sprint 9.13 Pairing-UI) erweitern um Hardware-Override-Verhalten.
+- Sprint 9.17 (NextAuth) sollte Audit-Trail für Auto-Override-Erkennung berücksichtigen — wer/wann hat am Vicki gedreht?
+- Bestehender Code-Pfad muss noch lokalisiert werden — Quellcheck als Pflicht-Vorgehen für Sprint 9.13 Pairing-UI (Trace-UI braucht source-Differenzierung).
+
+**Status:** akzeptiert
+**Verstärkt:** Sprint 9.9 manual_override (Sub-Reasons fehlen heute)

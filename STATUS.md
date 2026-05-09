@@ -614,6 +614,44 @@ vorgesehenen, aber nicht implementierten Bausteinen.
 
 **Offen für Live-Verify nach Merge** (B-9.11a-2): Vicki-002/003/004 produktiv den Heating-Zones der Zimmer 102/103/104 (Schlafzimmer) zuweisen. Plan vom Strategie-Chat, Ausführung durch Hotelier — nicht im Code-Sprint.
 
+## 2v. Sprint 9.11 Live-Test #2 — Teilweise abgeschlossen (2026-05-09)
+
+**Ziel:** 6-Layer-Engine + Hysterese auf heizung-test mit echter Hardware verifizieren.
+
+**Ergebnis:** 3 von 4 effektiv getesteten Layern Pass, 1 Layer nicht testbar (Hardware), plus 4 strukturelle Befunde.
+
+**Test-Matrix (verschlankt vor Beginn — T4 Nacht in 9.15, T6 Bad-Clamp in 9.12, T7 Hysterese gestrichen weil bereits in Pytests abgedeckt):**
+
+| Test | Layer | Ergebnis |
+|---|---|---|
+| T1 | 4 (Window) | ❌ nicht testbar — Vicki-001 meldet `open_window=false` trotz Abnehmen vom HK |
+| T2 | 2 (Vorheizen) | ✅ Pass — Belegung +30min triggert temporal_override mit reason `preheat` |
+| T3 | 1 (Base) + 2 (Nacht) | ✅ Pass — occupied erkannt, Layer 2 Nacht-Override greift korrekt darüber |
+| T5 | 3 (Manual) | ✅ Pass — Override 23 °C via API `frontend_4h`, Layer 3 reason `manual` |
+| T8 | UI Engine-Decision-Panel | ⚠️ Teilweise Pass — siehe Befunde |
+
+**Befunde (4):**
+
+1. **Vicki-001 Window-Sensor liefert kein `open_window=true`** trotz physischem Abnehmen vom HK. Layer 4 ist auf Code-Ebene grün (Pytests Sprint 9.10), aber Hardware-Trigger fehlt. → Sprint 9.11x.
+2. **Auto-Detect-Override-Mechanismus** existiert (siehe AE-45) — automatische Erstellung eines `manual_override` mit `source=device` und 7-Tage-Expiry, wenn Vicki einen Setpoint zurückmeldet, der nicht zur Engine-Erwartung passt. War nicht im Strategie-Chat-Kontext bekannt.
+3. **UI Engine-Decision-Panel zeigt nur einen Setpoint pro Zeile** statt `setpoint_in` und `setpoint_out` separat. Designentscheidung vs. Brief-Erwartung unklar. → Backlog B-9.11-1.
+4. **„Vorherige Evaluationen" zeigt historisch `base_target`-Reason** statt finalem Layer-Reason. Vermuteter Backend-Befund. → Backlog B-9.11-2.
+
+**API-Schema-Korrekturen für RUNBOOK §10d (in T-D3 erfasst):**
+
+- `POST /rooms/{id}/overrides`: `source` muss aus `device | frontend_4h | frontend_midnight | frontend_checkout` sein (`manual`/`manual_test` wird mit 422 abgelehnt).
+- `POST /rooms/{id}/overrides`: `setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden abgelehnt).
+- `DELETE /occupancies/{id}`: nicht erlaubt, Belegungen werden via PATCH mit Body `{"cancel": true}` storniert (Audit/PMS-Sync).
+
+**Tag-Vergabe:** keiner. Sprint 9.11 bleibt offen bis T1 in 9.11x abgeschlossen ist.
+
+**Live-Verify B-9.11a-2:** Erfolgreich abgeschlossen am 2026-05-09 vor Test-Beginn — alle 4 Vickis korrekt zugeordnet:
+
+- Vicki-001 → Zone 91 Schlafzimmer (Zimmer 101) — bestand bereits
+- Vicki-002 → Zone 3 Schlafbereich (Zimmer 102)
+- Vicki-003 → Zone 5 Schlafbereich (Zimmer 103)
+- Vicki-004 → Zone 7 Schlafbereich (Zimmer 104)
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -737,9 +775,13 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.10d-3 | Type-Inkonsistenz Engine `int` vs. EventLog `Decimal` | 🟡 |
 | B-9.10d-5 | engine_tasks DB-Session per Dependency-Injection | 🟢 |
 | B-9.10d-6 | Pre-Push-Hook für `ruff format --check` | 🟢 |
-| B-9.11-1 | celery_beat Healthcheck korrigieren | 🟡 |
+| B-9.11-1 | Engine-Decision-Panel: `setpoint_in` zusätzlich zu `setpoint_out` anzeigen | 🟡 |
+| B-9.11-2 | „Vorherige Evaluationen" zeigt `base_target`-Reason statt finalem Layer-Reason | 🟡 |
+| B-9.11-3 | Layer 3 manual_override Sub-Reasons (`manual_frontend` / `manual_device`) im Trace | 🟡 |
+| B-9.11-4 | celery_beat Healthcheck korrigieren | 🟡 |
+| B-9.11x  | Sprint 9.11x — Vicki-001 `open_window`-Hardware-Diagnose | 🔴 |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
-| B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | 🔴 |
+| B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
 ### 6.3 — Operative Aufgaben
 
