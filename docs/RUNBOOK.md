@@ -792,6 +792,21 @@ Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelösc
 
 ---
 
+## 10e. Vicki-Konfiguration via Downlink (Sprint 9.11x.b)
+
+**Status:** Stub — wird in Sprint 9.11x.b vollständig ausgearbeitet.
+**Bezug:** AE-48 (Downlink-Helper-Architektur), AE-47 (Window-Detection-Hybrid)
+
+Diese Sektion dokumentiert das Vicki-Downlink-Verfahren für drei Konfigurations-Commands:
+
+- `0x04` — Firmware-Version abfragen
+- `0x4501020F` — Open-Window-Detection aktivieren (FW >= 4.2)
+- `0x46` — Open-Window-Detection-Status abfragen
+
+Implementierung in Sprint 9.11x.b. Bis dahin: Vicki-Konfiguration ausschließlich über die Setpoint-Logik (`0x51`) der Engine — kein manuelles Eingreifen nötig im Normalbetrieb.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

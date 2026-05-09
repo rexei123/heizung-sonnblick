@@ -777,6 +777,7 @@ innerhalb der Priorität nach Aufwand.
 | BR-15 🔴 | Backup + Production-Migration | 12 |
 | BR-16 🔴 | Backend-Window-Detection-Eigenlogik (Layer 4 Erweiterung, aktiver Trigger nach 2-Wochen-Beobachtung) | 9.11y + späterer Re-Eval |
 | B-9.11a-4 🔴 | Basic-Auth-Pass rotieren vor Production-Migration | 12 |
+| B-9.11x.b-1 🟢 | Decimal-Rundungs-Charakteristik in RUNBOOK §10e dokumentiert (in 9.11x.b T7) | erledigt mit 9.11x.b |
 
 ### 6.2 — Hygiene-Aufgaben (B-9.10*)
 

@@ -121,42 +121,118 @@ Kein UI, nur Backend. Damit ist 9.11 fahrbar.
 
 ---
 
-# SPRINT 9.11x — Vicki-Konfiguration + Backplate-Bit (Quick Win)
+# SPRINT 9.11x — Backplate-Persistenz + Layer-4-Detached-Trigger
 
 **Priorität:** 🔴
 **Geschätzte Dauer:** 2-3 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 9.11 abgeschlossen, AE-47 dokumentiert
+**Autonomiestufe:** 1 (Engine-Touch in Layer 4)
+**Voraussetzung:** Sprint 9.11 Doku-Final abgeschlossen (PR #113), AE-47 dokumentiert
 **Tag nach Abschluss:** kein eigener Tag
 
 ## Ziel
 
-Vicki-Hardware-Window-Detection aktivieren, FW-Versionen erfassen, `attached_backplate` ins `sensor_reading` persistieren. Voraussetzung für Layer-4-Erweiterung in Sprint 9.11y.
+`attachedBackplate` aus Codec-Output ins Backend persistieren und Engine Layer 4 um Detached-Trigger erweitern. Reines Backend, kein Hardware-Touch — alle Tests via Synthetic-Inserts in pytest.
 
 ## Tasks
 
-- T1: Migration `device.firmware_version VARCHAR(8) NULL`
-- T2: Helper-Skript für Downlink `0x04` (FW-Version-Abfrage) — auf alle 4 Vickis ausführen, Antwort persistieren
-- T3: Helper-Skript für Downlink `0x4501020F` (Open-Window aktivieren) auf Vickis mit FW >= 4.2; Fallback auf `0x06`-Variante bei FW < 4.2
-- T4: Verifikation via `0x46` (Get) bzw. `0x13` (Get für FW < 4.2)
-- T5: Migration `sensor_reading.attached_backplate BOOLEAN NULL`
-- T6: ChirpStack-Codec-Mapping ergänzen: `attachedBackplate` aus Decoded-Payload in `sensor_reading.attached_backplate` schreiben (B-9.10c-1)
-- T7: Engine Layer 4 erweitern: bei zwei aufeinanderfolgenden Frames mit `attached_backplate=false` → Setpoint = Frostschutz, reason `device_detached`; Pytest dazu
-- T8: RUNBOOK §10e neue Sektion „Vicki-Konfiguration via Downlink" mit curl-Beispielen + Hardware-Kältepack-Test-Verfahren
+- T1: Alembic-Migration `0010_device_firmware_version_and_sensor_reading_attached_backplate`
+  - `device.firmware_version VARCHAR(8) NULL`
+  - `sensor_reading.attached_backplate BOOLEAN NULL`
+- T2: SQLAlchemy-Modelle erweitern (`Device`, `SensorReading`)
+- T3: Pydantic-Schemata erweitern (`DeviceRead`, `SensorReadingRead`)
+- T4: `backend/src/heizung/services/mqtt_subscriber.py` — `_map_to_reading` ergänzen um `"attached_backplate": obj.get("attachedBackplate")`
+- T5: `backend/src/heizung/rules/engine.py` Layer 4 erweitern:
+  - 2-Frame-Hysterese auf `attached_backplate=false` (zwei aufeinanderfolgende `sensor_readings` für `device_id`)
+  - Reason `device_detached`, Setpoint = Frostschutz
+  - Bei `NULL` (Codec liefert das Feld nicht): wie bisher behandeln (kein Trigger)
+- T6: Pytests:
+  - 1× `attached_backplate=true` → kein Trigger
+  - 1× ein einzelnes `attached_backplate=false` → kein Trigger (Hysterese-Schutz)
+  - 1× zwei aufeinanderfolgende `attached=false` → `device_detached`-Reason
+  - 1× `attached=NULL` über alle Frames → kein Trigger (Backwards-Compat)
+- T7: Codec-Re-Paste auf heizung-test verifizieren (RUNBOOK §10c Verfahren). `attachedBackplate`-Feld ist bereits im Codec — nur prüfen, dass der aktuelle deployed Codec auf Test-Server das Feld schon emittiert. Falls nicht: Re-Paste durchführen.
 
 ## Definition of Done
 
-- 4 Vickis haben Open-Window-Detection aktiviert (per Get-Verify bestätigt)
-- `device.firmware_version` für alle 4 Vickis gefüllt
-- `sensor_reading.attached_backplate`-Spalte gefüllt
-- Layer 4 reagiert auf `attached_backplate=false` mit Frostschutz + Reason `device_detached`
-- RUNBOOK §10e dokumentiert
-- Pytests grün, Mypy grün, Ruff grün
+- Migration grün, mypy/ruff/pytest grün
+- Layer-4-Pytest-Matrix komplett
+- Codec auf heizung-test verifiziert emittiert `attachedBackplate`
+- `sensor_reading`-Spalte gefüllt für mindestens 1 frischen Frame pro Vicki (DB-Query-Verify nach Deploy)
+- STATUS.md §2w (oder nächster freier Buchstabe) Sprint-Bericht
 
 ## Risiken
 
-- FW-Version eines Vickis < 4.2 → `0x45` schlägt fehl, Fallback auf `0x06`
-- Codec-Re-Paste nach Migration nicht vergessen (Lesson §5.22)
+- 2-Frame-Hysterese-Logik in Layer 4 kann mit bestehender `open_window`-Logik kollidieren wenn beide Trigger gleichzeitig feuern. Mitigation: explizite Reason-Priorität im Test (`open_window` > `device_detached` > base).
+
+---
+
+# SPRINT 9.11x.b — Vicki-Downlink-Helper + Open-Window-Aktivierung
+
+**Priorität:** 🔴
+**Geschätzte Dauer:** 4-5 h
+**Autonomiestufe:** 1 (Hardware-Befehlspfad)
+**Voraussetzung:** Sprint 9.11x abgeschlossen, AE-48 dokumentiert
+**Tag nach Abschluss:** kein eigener Tag (Tag in 9.11y)
+
+## Ziel
+
+Drei neue Vicki-Downlinks via Hybrid-Helper-Architektur (AE-48) implementieren, Bulk-Aktivierung der 4 produktiven Vickis ausführen, FW-Antwort-Parsing in `mqtt_subscriber`.
+
+## Tasks
+
+- T1: `backend/src/heizung/services/downlink_adapter.py` refactorn:
+  - Neuer `send_raw_downlink(dev_eui, payload_bytes, fport=1, confirmed=False)`
+  - `send_setpoint` nutzt `send_raw_downlink` intern
+  - Bestehende Aufrufer aus `engine_tasks.py` unverändert
+  - Pytest: `send_setpoint` produziert identische Bytes wie vor Refactor
+- T2: Drei Wrapper in `downlink_adapter.py`:
+  - `query_firmware_version(dev_eui)`
+  - `set_open_window_detection(dev_eui, enabled, duration_min=10, delta_c=Decimal("1.5"))`
+  - `get_open_window_detection(dev_eui)`
+- T3: Decimal-Rundungs-Tests für `set_open_window_detection`:
+  - `Decimal("1.5")` → byte `0x0F` (15)
+  - `Decimal("1.55")` → byte `0x10` (16, ROUND_HALF_EVEN oder dokumentierte Strategie)
+  - `Decimal("0.2")` → byte `0x02` (Minimum)
+  - `Decimal("0.1")` → `DownlinkError` (unter Minimum)
+  - `Decimal("3.0")` → byte `0x1E` (oberer plausibler Wert)
+- T4: Codec-Encoder-Erweiterung in `infra/chirpstack/codecs/mclimate-vicki.js`:
+  - `input.data.query_firmware_version` → `[0x04]`
+  - `input.data.set_open_window_detection` (mit gleichen Bytes wie Backend-Wrapper)
+  - `input.data.get_open_window_detection` → `[0x46]`
+  - Pytest in Backend, der gegen Erwartungs-Bytes asserted (Drift-Schutz)
+- T5: `scripts/vicki_open_window_setup.py` — One-Shot-CLI für Bulk-Aktivierung:
+  - Argumente: `--dev-eui ...` oder `--all` (alle Vickis aus DB)
+  - Schritt 1: `query_firmware_version()` für alle ausgewählten Vickis
+  - Schritt 2: 30 s warten (auf Antwort-Uplinks)
+  - Schritt 3: `device.firmware_version` aus DB lesen, FW >= 4.2 prüfen
+  - Schritt 4: `set_open_window_detection(enabled=True, duration_min=10, delta_c=Decimal("1.5"))`
+  - Schritt 5: 30 s warten
+  - Schritt 6: `get_open_window_detection()` zur Verifikation
+  - Schritt 7: Bericht (welche Vickis aktiviert, welche FW < 4.2 skipped)
+- T6: `backend/src/heizung/services/mqtt_subscriber.py` erweitern:
+  - cmd-Byte-Routing in `obj`-Parsing: bei `cmd=0x04` die FW-Antwort parsen und `device.firmware_version` updaten
+  - bei `cmd=0x46` die Open-Window-Status-Antwort parsen und ins `event_log` loggen (Type `CONFIG_VERIFY`)
+- T7: RUNBOOK §10e neue Sektion „Vicki-Konfiguration via Downlink" mit:
+  - Architektur-Übersicht (verweist AE-48)
+  - CLI-Aufruf-Beispiele (PowerShell + SSH)
+  - Decimal-Rundungs-Charakteristik (Backlog B-9.11x.b-1 erledigt)
+  - Verifikations-SQL für `device.firmware_version` + `event_log`
+  - Troubleshooting (Vicki antwortet nicht innerhalb 30 s)
+- T8: Cowork-Verifikations-Brief (separat vom Strategie-Chat vorbereitet, nicht in Claude Code's Scope) — alle 4 Vickis nach Bulk-Aktivierung im ChirpStack-UI prüfen, `openWindow_params` im nächsten Keepalive-Frame enthalten.
+
+## Definition of Done
+
+- 4 Vickis haben `device.firmware_version` gefüllt
+- 4 Vickis haben Open-Window-Detection aktiviert (per Get-Verify bestätigt, im `event_log` loggt)
+- Backend-Tests grün (Decimal-Rundungs-Matrix + Codec-Spiegel-Test)
+- RUNBOOK §10e dokumentiert
+- Cowork-Verifikation abgeschlossen
+
+## Risiken
+
+- FW eines Vickis < 4.2 → `0x45` schlägt fehl. Skript skipped diese Vickis und meldet in Output. Manueller Fallback auf `0x06`-Variante via RUNBOOK §10e dokumentiert (1.0 °C-Resolution).
+- Codec-Re-Paste nach Encoder-Erweiterung nötig. Lesson §5.22 prüfen.
+- Vicki antwortet nicht innerhalb 30 s → Skript timeoutet. Retry-Logik in T5 (max 2 Retries mit 60 s Wait).
 
 ---
 

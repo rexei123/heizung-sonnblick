@@ -803,3 +803,120 @@ Im Sommer / bei Außentemp >= 15 °C ist der Vicki-Hardware-Algorithmus physikal
 - `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md`
 - CLAUDE.md §5.27 (neue Lesson aus diesem Befund)
 - Sprint 9.11x, 9.11y in SPRINT-PLAN.md
+
+---
+
+# AE-48 Vicki-Downlink-Helper-Architektur (Hybrid)
+
+**Datum:** 2026-05-09
+**Status:** Beschlossen
+**Bezug:** Sprint 9.11x.b, `downlink_adapter.py`, AE-47
+
+## Problem
+
+Sprint 9.11x.b benötigt drei neue Vicki-Downlinks (FW-Get `0x04`, Open-Window-Set `0x4501020F`, Open-Window-Get `0x46`). Bisher existiert nur ein hartcodierter Setpoint-Sender (`0x51`) in `backend/src/heizung/services/downlink_adapter.py`. Die Frage: Wie erweitern, ohne den bestehenden Pfad zu zerstören und ohne pro Command eine eigene Architektur einzuführen.
+
+Bestehende Repo-Realität:
+
+- `send_setpoint(dev_eui, setpoint_c)` → MQTT-Publish auf `application/{app_id}/device/{dev_eui}/command/down`
+- Payload: base64-encoded bytes, fPort=1, confirmed=False
+- Aufrufer: `backend/src/heizung/tasks/engine_tasks.py`
+- Kein gRPC-Client, `CHIRPSTACK_API_KEY` leer
+
+## Entscheidung
+
+**Hybrid-Helper:** ein generischer Low-Level-Helper plus drei dünne typisierte Wrapper.
+
+### Low-Level (neu)
+
+```python
+async def send_raw_downlink(
+    dev_eui: str,
+    payload_bytes: bytes,
+    fport: int = 1,
+    confirmed: bool = False,
+) -> str:
+    """MQTT-Publish auf ChirpStack-Downlink-Topic. Return: published
+    payload-id (für Trace)."""
+```
+
+Ziel: ein einziger Pfad zur ChirpStack-MQTT-Queue. Setpoint wird intern auf diesen Helper umgestellt (kein Verhalten-Change, nur Refactor).
+
+### Wrapper (typsicher, Domain-Sprache)
+
+```python
+async def query_firmware_version(dev_eui: str) -> None:
+    """Sendet 0x04. Antwort kommt asynchron als Uplink mit cmd 0x04 + 4
+    Bytes (HW major/minor + FW major/minor)."""
+
+async def set_open_window_detection(
+    dev_eui: str,
+    enabled: bool,
+    duration_min: int = 10,
+    delta_c: Decimal = Decimal("1.5"),
+) -> None:
+    """Sendet 0x45 {enabled} {duration_min/5} {round(delta_c*10)}.
+    FW-Voraussetzung: >= 4.2 (0.1 °C-Resolution-Variante).
+    delta_c MUSS Decimal sein (harte Regel: keine Floats für
+    Temperaturen)."""
+
+async def get_open_window_detection(dev_eui: str) -> None:
+    """Sendet 0x46. Antwort kommt asynchron als Uplink mit cmd 0x46 + 3
+    Bytes."""
+```
+
+### Konventionen
+
+- **Byte-Konvertierung intern.** Aufrufer übergeben Domain-Werte (Decimal-Celsius, Minuten, Bool), Helper rechnet auf Hardware-Format.
+- **Keine confirmed Downlinks** für diese drei Commands. Antwort kommt als Uplink, nicht als ACK. (Setpoint bleibt unverändert `confirmed=False` — bestehender Vertrag.)
+- **fPort=1** für alle drei (MClimate-Konvention, im bestehenden Encoder bereits gesetzt).
+- **Logging analog `send_setpoint`:** `logger.info` mit `dev_eui` + cmd-byte als extra für Trace-Korrelation.
+
+### Codec-Erweiterung (parallel)
+
+Damit ChirpStack-Application-Layer auch eigenständig sendet (z. B. via UI im Notfall), wird `encodeDownlink` im Codec `infra/chirpstack/codecs/mclimate-vicki.js` um drei Commands erweitert:
+
+- `input.data.query_firmware_version === true` → `[0x04]`
+- `input.data.set_open_window_detection: {enabled, duration_min, delta_c}`
+- `input.data.get_open_window_detection === true` → `[0x46]`
+
+Codec-Encoder ist Spiegel des Backend-Helpers, NICHT die primäre Quelle. Zwei Implementierungen sind eine Drift-Quelle (siehe Lesson §5.22). Mitigation: Codec wird in Sprint 9.11x.b mitaktualisiert UND der Backend-Helper bekommt einen pytest, der gegen die identischen Erwartungs-Bytes asserted. Falls die zwei jemals divergieren, fällt der Test um.
+
+## Begründung
+
+S6 (Komplexität trägt Beweislast):
+
+- Generic-Helper allein → Aufrufstellen kryptisch (raw bytes + magic numbers)
+- Drei spezifische Helper allein → Boilerplate, kein gemeinsamer Test-Pfad für MQTT-Publish-Mechanik
+- Hybrid → Aufrufstellen lesbar, MQTT-Mechanik einmal getestet, Wrapper-Tests nur Byte-Encoding
+
+S2 (Determinismus + Idempotenz):
+
+- Wrapper sind reine Funktionen mit Decimal-Input → identische Bytes bei gleichem Input, getestbar via pytest mit Decimal-Edge-Cases
+- `Decimal("1.55")` wird zu `round(15.5) = 16` → 1.6 °C-Schwelle. Test deckt das explizit ab (Backlog-Item B-9.11x.b-1: Doku in RUNBOOK §10e zur Rundungs-Charakteristik).
+
+S4 (Hardware-Schutz):
+
+- Keine confirmed Downlinks für Get/Set-Konfig — Antwort kommt asynchron, kein Doppelversand
+- Bulk-Aktivierung der 4 Vickis als One-Shot-Skript, nicht in Engine-Loop
+
+## Verworfen
+
+- **gRPC-Client einführen:** Aufwand >> Nutzen. ChirpStack-MQTT-Pfad läuft, gRPC würde neue Auth (`CHIRPSTACK_API_KEY`-Bootstrap) und neue Bibliothek erfordern. Kein operativer Vorteil für Downlinks.
+- **Drei spezifische Helper ohne Generic-Layer:** Boilerplate + duplizierte MQTT-Mechanik. Nicht S6-konform.
+- **Generic-Helper ohne Wrapper:** Aufrufer müssten Hex-Bytes bauen, Tests pro Aufrufer wiederholt — nicht S2-/S6-konform.
+
+## Konsequenzen
+
+- Sprint 9.11x.b implementiert AE-48 vollständig
+- Bestehender `send_setpoint` wird auf `send_raw_downlink` umgestellt (Refactor ohne Verhalten-Change, mit Test-Schutz)
+- CLAUDE.md neue Lesson: Downlink-Pfad ist MQTT-basiert via `downlink_adapter.py`, NICHT gRPC
+- Backlog B-9.11x.b-1: Decimal-Rundungs-Charakteristik in RUNBOOK §10e dokumentieren
+
+## Referenzen
+
+- `backend/src/heizung/services/downlink_adapter.py` (bestehender 0x51-Pfad)
+- `backend/src/heizung/services/mqtt_subscriber.py` (Uplink-Subscriber für FW-Antwort-Parsing in Sprint 9.11x.b T6)
+- `infra/chirpstack/codecs/mclimate-vicki.js` (Encoder-Spiegel)
+- `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md` (Hex-Definitionen)
+- AE-47 (Window-Detection-Hybrid, der diese Helper braucht)

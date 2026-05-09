@@ -603,6 +603,34 @@ Drei Ursachen, alle real:
 - BR-16 (Backend-Eigenlogik aktiv): nicht voreilig aktivieren, erst nach
   2 Wochen produktiver Beobachtung in Heizperiode.
 
+### 5.28 ChirpStack-Downlinks: MQTT-Pfad, NICHT gRPC (Sprint 9.11x.b Lesson)
+
+**Befund 2026-05-09 (Recherche für AE-48):**
+
+Repo hat etablierten MQTT-basierten Downlink-Pfad in
+`backend/src/heizung/services/downlink_adapter.py` (`send_setpoint` mit
+`0x51`, MQTT-Topic `application/{app_id}/device/{dev_eui}/command/down`,
+fPort=1, base64-payload). `aiomqtt` als Client-Bibliothek.
+
+`CHIRPSTACK_API_KEY`-Slot in `.env.example` ist Bootstrap-Vorbereitung für
+spätere gRPC-Anbindung (Backlog B-9.10c-1: Codec-Bootstrap-Skript), aber
+**nicht** für Device-Downlinks. Device-Downlinks laufen über MQTT.
+
+**Konsequenzen für Code-Änderungen:**
+
+- Neue Vicki-Commands erweitern `downlink_adapter.py` via AE-48-Hybrid-
+  Helper-Architektur (`send_raw_downlink` + typisierte Wrapper).
+- Codec-`encodeDownlink`-Section ist Spiegel, nicht Quelle —
+  Drift-Schutz via pytest gegen identische Erwartungs-Bytes.
+- gRPC-Pfad NICHT aufmachen für Device-Downlinks.
+- `Decimal` als Domain-Eingabe für Temperaturen, Byte-Konvertierung im
+  Wrapper.
+
+**Quelle:**
+
+- AE-48 in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
+- `backend/src/heizung/services/downlink_adapter.py` (bestehender Pfad)
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
