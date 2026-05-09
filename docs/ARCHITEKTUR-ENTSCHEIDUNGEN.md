@@ -725,3 +725,81 @@ Freigabe.
 
 **Status:** akzeptiert
 **Verstärkt:** Sprint 9.9 manual_override (Sub-Reasons fehlen heute)
+
+---
+
+# AE-47 Window-Detection: Hardware-First mit passiver Backend-Diagnose
+
+**Datum:** 2026-05-09
+**Status:** Beschlossen
+**Bezug:** Sprint 9.11 Live-Test #2, docs/vendor/mclimate-vicki/
+
+## Problem
+
+Sprint 9.11 Live-Test hat gezeigt, dass die MClimate-Vicki openWindow im Hotelbetrieb nicht zuverlässig sendet. Cowork-Diagnose eliminiert Codec und Backend; Hersteller-Doku-Recherche identifiziert zwei harte Fakten:
+
+1. **Open-Window-Detection ist im Vicki-Default DISABLED.** Wir haben nie via Downlink aktiviert. Funktion lief seit Inbetriebnahme nicht.
+2. **Selbst aktiviert ist Erkennung laut MClimate „not 100% reliable".** Interner Vicki-Sensor wird durch HK-Wärme dominiert; bei aktiver Heizung kompensiert das Ventil den Raumluft-Sturz schneller als der Algorithmus ihn erkennt.
+
+A/B-Test 2026-05-09 mit Vicki-001 (am HK) und Vicki-003 (passiv neben HK gelegt, kein Ventil-Anschluss) bei Außentemp ~18 °C: beide Devices verharren auf 18 °C-Niveau, Vicki-Algorithmus triggert nicht. Im Sommer und in der Heizung-Aus-Periode ist der Hardware-Pfad physikalisch nicht testbar.
+
+## Entscheidung
+
+Hardware-First-Strategie mit drei Trigger-Quellen, davon zwei aktiv und eine passiv:
+
+### Aktive Trigger (verändern Setpoint)
+
+**1. Vicki openWindow-Flag**
+
+- In Sprint 9.11x via Downlink `0x4501020F` aktiviert (FW >= 4.2)
+- Parameter: enabled, 10 Min Ventil zu, 1.5 °C Delta in 1 Min
+- Bei `openWindow=true` → Layer 4 setzt Frostschutz, reason `open_window`
+
+**2. attached_backplate=false**
+
+- Codec liefert das Feld seit Vicki-FW 4.1 verlässlich
+- Sprint 9.11x persistiert in `sensor_reading.attached_backplate`
+- Bei zwei aufeinanderfolgenden Frames mit `attached=false` → Layer 4 setzt Frostschutz, reason `device_detached`
+- Hysterese (2 Frames) gegen Sensor-Schalter-Wackler
+
+### Passiver Trigger (nur Diagnose, kein Setpoint-Effekt)
+
+**3. inferred_window via Backend-Algorithmus**
+
+- Helper berechnet Δ Raumluft >= 0.5 °C in 10 Min bei stehendem Heizungs-Setpoint
+- **Schreibt nur ins `event_log`** als Wartungs-Event-Kandidat (Sprint 9.11y)
+- Layer 4 reagiert NICHT auf diesen Trigger
+- Wenn der Trigger wiederholt feuert (z. B. 3× in 30 Min im selben Raum) ohne dass Vicki-Trigger kam → Hinweis auf Hardware-Schwäche der Vicki, nicht auf Setpoint-Bedarf
+
+## Begründung
+
+S2 (Determinismus) und S6 (Komplexität trägt Beweislast) verbieten unklare Multi-Trigger-Logiken in der Steuerlogik. OR-Verknüpfung mehrerer Trigger erhöht Falsch-Positiv-Risiko (Setpoint springt auf Frostschutz wegen Lufthauch / vorübergehender Tür-Öffnung) und Komfort-Verlust beim Gast. Hardware-Trigger sind Fakten (Vicki-Algorithmus, Backplate-Schalter), Backend-Algorithmus ist Inferenz. Inferenz darf beobachten, aber nicht steuern, bevor sie sich produktiv bewährt hat.
+
+## Verworfen
+
+- **OR-Verknüpfung aller drei Trigger als Setpoint-Quelle:** S2/S6-Verstoß
+- **Reine Vicki-Konfiguration ohne Backend-Inferenz:** verschwendet Daten, blockiert spätere Diagnose
+- **Reine Backend-Inferenz ohne Vicki-Aktivierung:** Hardware-Pfad bliebe blind, schneller Trigger fehlt
+
+## Konsequenzen
+
+- Sprint 9.11x liefert die Hardware-Quick-Wins (Vicki-Aktivierung + Backplate-Bit-Persistenz)
+- Sprint 9.11y liefert Backend-Synthetic-Test (deterministisch via pytest mit künstlichen `sensor_reading`-Inserts) plus passiven Backend-Logger
+- BR-16 verschoben in Heizperiode: aktive Eigenlogik-Trigger erst nach 2 Wochen produktiver Beobachtung neu bewerten
+- Hardware-Kältepack-Test als manuelles Verfahren in RUNBOOK §10e (Vicki im Tiefkühlfach 5 Min → Sturz 18 → 4 °C → Vicki triggert)
+
+## Test-Strategie für Heizung-Aus-Perioden
+
+Im Sommer / bei Außentemp >= 15 °C ist der Vicki-Hardware-Algorithmus physikalisch nicht testbar. Test-Pfade:
+
+1. **Backend-Synthetic-Test (pytest):** SQL-Inserts in `sensor_reading` mit künstlichem Δ-T, Layer-4-Output asserted. Deterministisch, in CI lauffähig, jederzeit. — Sprint 9.11y T1.
+2. **Hardware-Kältepack-Test:** Vicki im Tiefkühlfach 5 Min, dokumentiert im RUNBOOK §10e. Manuelles Akzeptanz-Verfahren, kein Sprint-Task.
+3. Codec-Spoofing in ChirpStack: **verworfen** wegen Drift-Risiko (§5.21/§5.22).
+
+## Referenzen
+
+- `docs/vendor/mclimate-vicki/01-open-window-detection.md`
+- `docs/vendor/mclimate-vicki/03-firmware-release-notes.md`
+- `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md`
+- CLAUDE.md §5.27 (neue Lesson aus diesem Befund)
+- Sprint 9.11x, 9.11y in SPRINT-PLAN.md
