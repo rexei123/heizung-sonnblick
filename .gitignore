@@ -43,6 +43,9 @@ htmlcov/
 *.log
 logs/
 
+# Cowork-Session-Output (Test-Artefakte, Diagnosen, Notizen)
+docs/working/
+
 # Caddy state (nur in Entwicklung)
 infra/caddy/data/
 infra/caddy/config/
