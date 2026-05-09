@@ -652,6 +652,23 @@ vorgesehenen, aber nicht implementierten Bausteinen.
 - Vicki-003 → Zone 5 Schlafbereich (Zimmer 103)
 - Vicki-004 → Zone 7 Schlafbereich (Zimmer 104)
 
+### Update 2026-05-09 — Root Cause T1 identifiziert
+
+Cowork-Diagnose + Hersteller-Doku-Recherche (`docs/vendor/mclimate-vicki/`) ergeben:
+
+- Codec liefert `openWindow` korrekt — Codec-Pfad eliminiert
+- Backend persistiert `sensor_reading` 1:1 — Backend-Pfad eliminiert
+- Engine Layer 4 verarbeitet `open_window=false` korrekt — Engine-Pfad eliminiert
+- **Root Cause:** Vicki-Open-Window-Detection ist im Default DISABLED (Hersteller-Setting), und der Algorithmus ist laut MClimate „not 100% reliable" wegen HK-Wärme-Dominanz am internen Sensor
+- A/B-Test mit Vicki-003 (passiv neben Vicki-001 gelegt) bei Außentemp ~18 °C bestätigt: Sturz zu klein und zu langsam für Vicki-Schwellen, Hardware-Pfad im Sommer physikalisch nicht testbar
+
+**Konsequenzen:**
+
+- AE-47 dokumentiert die Hybrid-Strategie (Hardware-First + passiver Logger)
+- Sprint 9.11x aktiviert die Vicki-Konfiguration + persistiert Backplate-Bit
+- Sprint 9.11y baut Backend-Synthetic-Test + passiven Logger
+- Tag `v0.1.9-rc6-live-test-2` erst nach 9.11y Abschluss
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -758,6 +775,7 @@ innerhalb der Priorität nach Aufwand.
 | BR-13 🔴 | PMS-Casablanca-Connector | 11 |
 | BR-14 🟡 | Wetterdaten-Service aktiv | 13 |
 | BR-15 🔴 | Backup + Production-Migration | 12 |
+| BR-16 🔴 | Backend-Window-Detection-Eigenlogik (Layer 4 Erweiterung, aktiver Trigger nach 2-Wochen-Beobachtung) | 9.11y + späterer Re-Eval |
 | B-9.11a-4 🔴 | Basic-Auth-Pass rotieren vor Production-Migration | 12 |
 
 ### 6.2 — Hygiene-Aufgaben (B-9.10*)
