@@ -758,6 +758,7 @@ innerhalb der Priorität nach Aufwand.
 | BR-13 🔴 | PMS-Casablanca-Connector | 11 |
 | BR-14 🟡 | Wetterdaten-Service aktiv | 13 |
 | BR-15 🔴 | Backup + Production-Migration | 12 |
+| B-9.11a-4 🔴 | Basic-Auth-Pass rotieren vor Production-Migration | 12 |
 
 ### 6.2 — Hygiene-Aufgaben (B-9.10*)
 
