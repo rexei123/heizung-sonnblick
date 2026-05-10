@@ -22,7 +22,6 @@ import asyncio
 import logging
 
 from celery import Celery
-from celery.schedules import crontab
 from celery.signals import worker_process_init
 
 from heizung.config import get_settings
@@ -37,10 +36,7 @@ app: Celery = Celery(
     "heizung",
     broker=_settings.redis_url,
     backend=_settings.redis_url,
-    include=[
-        "heizung.tasks.engine_tasks",
-        "heizung.tasks.override_cleanup_tasks",
-    ],
+    include=["heizung.tasks.engine_tasks"],
 )
 
 app.conf.update(
@@ -57,11 +53,9 @@ app.conf.update(
     # Concurrency=2 wie im Brief vereinbart (CPX22-RAM-konservativ).
     worker_concurrency=2,
     task_default_queue="heizung_default",
-    # Sprint 9.10 T3.5 / AE-40: Engine-Task-Lock ist im Task selbst
-    # implementiert (services.engine_lock, Redis-SETNX, TTL 30 s) — siehe
-    # tasks.engine_tasks.evaluate_room. Die Limits hier sind generelle
-    # Tasks-Watchdogs; der TTL des Lock muss >= task_time_limit sein, damit
-    # ein gekillter Task seinen Lock nicht ueber das Limit hinaus haelt.
+    # Sprint 9.6 Race-Condition-Mitigation: Engine-Tasks bekommen einen
+    # 30s-Lock per Redis-SETNX. Wird im Engine-Task selbst gesetzt, hier
+    # nur die Default-Soft-Time-Limit fuer alle Tasks.
     task_soft_time_limit=20,
     task_time_limit=30,
     # Sprint 9.7: Beat-Schedule fuer autonome periodische Evaluation.
@@ -70,13 +64,6 @@ app.conf.update(
         "evaluate-due-rooms-every-60s": {
             "task": "heizung.evaluate_due_rooms",
             "schedule": 60.0,
-            "options": {"queue": "heizung_default"},
-        },
-        # Sprint 9.9 T7: Daily-Cleanup fuer abgelaufene Manual-Overrides.
-        # 03:00 UTC = niedriger Traffic, vor erster Engine-Tick-Welle des Tages.
-        "cleanup-expired-overrides-daily": {
-            "task": "heizung.cleanup_expired_overrides",
-            "schedule": crontab(hour=3, minute=0),
             "options": {"queue": "heizung_default"},
         },
     },

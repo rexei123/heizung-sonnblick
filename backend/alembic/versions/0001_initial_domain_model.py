@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -142,7 +141,9 @@ def upgrade() -> None:
         sa.Column(
             "heating_zone_id",
             sa.Integer(),
-            sa.ForeignKey("heating_zone.id", ondelete="SET NULL", name="fk_device_heating_zone"),
+            sa.ForeignKey(
+                "heating_zone.id", ondelete="SET NULL", name="fk_device_heating_zone"
+            ),
         ),
         sa.Column("label", sa.String(length=200)),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
@@ -199,8 +200,12 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index("ix_occupancy_room_checkin", "occupancy", ["room_id", "check_in"])
-    op.create_index("ix_occupancy_checkin_checkout", "occupancy", ["check_in", "check_out"])
+    op.create_index(
+        "ix_occupancy_room_checkin", "occupancy", ["room_id", "check_in"]
+    )
+    op.create_index(
+        "ix_occupancy_checkin_checkout", "occupancy", ["check_in", "check_out"]
+    )
 
     # -----------------------------------------------------------------
     # rule_config
@@ -212,7 +217,9 @@ def upgrade() -> None:
         sa.Column(
             "room_type_id",
             sa.Integer(),
-            sa.ForeignKey("room_type.id", ondelete="CASCADE", name="fk_rule_config_room_type"),
+            sa.ForeignKey(
+                "room_type.id", ondelete="CASCADE", name="fk_rule_config_room_type"
+            ),
         ),
         sa.Column(
             "room_id",
@@ -280,7 +287,9 @@ def upgrade() -> None:
         sa.Column("snr_db", sa.Numeric(4, 1)),
         sa.Column("raw_payload", sa.String()),
     )
-    op.create_index("ix_sensor_reading_device_time", "sensor_reading", ["device_id", "time"])
+    op.create_index(
+        "ix_sensor_reading_device_time", "sensor_reading", ["device_id", "time"]
+    )
     # Hypertable-Konvertierung. 1 Tag Chunk-Intervall ist für 45 Zimmer × 2
     # Thermostate × Messungen/15 min ausreichend dimensioniert.
     op.execute(

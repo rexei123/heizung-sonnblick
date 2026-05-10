@@ -10,17 +10,9 @@
 // auf fPort 2) + Encode auf Command 0x51 (statt 0x02) + valveOpenness
 // auf [0,100] geclampt (Bug Task #86).
 //
-// Sprint 9.10c (2026-05-07): Cmd-Byte-Routing statt fPort-Routing.
-// Live-Daten zeigen, dass Vickis Periodic-Reports auch auf fPort 2
-// senden (Annahme aus 9.0 war falsch, siehe CLAUDE.md §5.21). Der
-// Command-Byte (bytes[0]) ist die einzige verlaessliche Quelle:
-//   0x52  -> Setpoint-Reply (decodeCommandReply)
-//   sonst -> Periodic Status Report (decodePeriodicReport)
-// fPort wird damit redundant fuer das Routing.
-//
 // === Uplinks ===
 //
-// Periodic Status Report (Cmd 0x01 = v1 / 0x81 = v2; fPort 1 oder 2)
+// fPort 1 (Periodic Status Reports)
 //   Byte 0  : Command-Code (0x01 = v1, 0x81 = v2)
 //   Byte 1  : Target Temperature (uint8, direkt in degC)
 //   Byte 2  : Sensor Temperature
@@ -33,9 +25,9 @@
 //   Byte 7  : High nibble = battery (V = 2 + nibble * 0.1), Low nibble = status flags
 //   Byte 8  : Erweiterte Status-Flags
 //
-// Setpoint-Reply (Cmd 0x52; typisch fPort 2)
-//   Byte 0  : 0x52 = Setpoint-Reply
-//   Byte 1+2: bestaetigter Setpoint * 10, Big-Endian
+// fPort 2 (Command Replies)
+//   Byte 0  : Reply-Command-Code, z.B. 0x52 = Setpoint-Reply
+//   Byte 1+2 (fuer 0x52): bestaetigter Setpoint * 10, Big-Endian
 //
 // === Downlinks ===
 //
@@ -49,18 +41,18 @@
 
 function decodeUplink(input) {
     var bytes = input.bytes;
+    var fPort = input.fPort;
 
-    if (!bytes || bytes.length === 0) {
+    if (!bytes) {
         return { data: {}, errors: ['empty payload'] };
     }
 
-    // Sprint 9.10c: Routing ueber Command-Byte, nicht ueber fPort.
-    // Vickis schicken Periodic-Reports auf fPort 2 (Live-Beleg
-    // 2026-05-07: dev_eui 70b3d52dd3034de4, fPort=2, bytes[0]=0x81).
-    var cmd = bytes[0];
-    if (cmd === 0x52) {
+    if (fPort === 2) {
         return decodeCommandReply(bytes);
     }
+
+    // Default: fPort 1 (Periodic Status Report). Auch wenn fPort fehlt
+    // (manche Test-Tools senden ohne fPort) versuchen wir Periodic.
     return decodePeriodicReport(bytes);
 }
 

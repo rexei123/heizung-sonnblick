@@ -2,202 +2,49 @@
 
 Dieses File wird automatisch geladen. Lies es **vor jeder Aktion** im Repo.
 
-## 0. Stabilitätsregeln (oberste Priorität)
+## 1. IdentitÃ¤t & Stand
 
-Dieses System steuert Heizungen im produktiven Hotelbetrieb.
-Instabilität ist nicht akzeptabel. Stabilität schlägt Sprint-
-Tempo, Feature-Vollständigkeit, Eleganz und Backlog-Sauberkeit.
-
-### Operative Regeln
-
-- **S1 — Keine Verschiebung scharfer Mängel:** Bekannte Race-
-  Conditions, Doku-Drifts oder TODO-Kommentare in der Steuer-
-  logik werden gefixt, sobald sie scharf werden — auch wenn
-  das einen laufenden Sprint unterbricht. Kein "Hotfix danach"
-  wenn der Mangel mit dem aktuellen Sprint produktiv aktiv
-  wird.
-
-- **S2 — Determinismus und Idempotenz:** Jede Steuer-
-  entscheidung muss deterministisch sein. Mehrfach getriggerte
-  Code-Pfade müssen identisch reagieren. Locks, SETNX,
-  Idempotenz-Checks sind Pflicht, nicht Optimierung.
-
-- **S3 — Auditierbarkeit:** Jede Setpoint-Änderung wird im
-  Engine-Trace geloggt, mit Layer, Reason, Detail, Zeitstempel.
-  Keine schnellen Pfade am Trace vorbei. Auch Hotfixes loggen.
-
-- **S4 — Hardware-Schutz:** Keine doppelten Downlinks. Keine
-  widersprüchlichen Setpoints in der ChirpStack-Queue. Keine
-  Befehle ohne Bestätigungs-Strategie. Battery-Cost und
-  Motor-Aktivität sind real.
-
-- **S5 — Defensive bei externen Quellen:** PMS, IoT-Devices,
-  Netzwerk dürfen keine Falschzustände erzeugen. Letzter
-  bekannter guter Stand mit Zeitstempel schlägt jede Annahme.
-
-- **S6 — Komplexität trägt Beweislast:** Wer ein Feature, eine
-  Konfiguration oder einen Spezialpfad einbauen will, muss
-  begründen, warum die einfachere Variante nicht reicht. Im
-  Zweifel: einfacher.
-
-### Eskalations-Regel
-
-Wenn ein Sprint-Plan, Brief, Pull-Request oder Live-Deploy
-gegen S1-S6 verstoßen würde: Strategie-Chat-Stop. Keine Merge-
-Entscheidung ohne explizite Freigabe. Auch wenn der Sprint
-dadurch länger dauert.
-
-### Was diese Regeln NICHT sind
-
-- Kein Vorwand, Sprints unkontrolliert auszudehnen — die Regeln
-  greifen bei konkreten Stabilitätsrisiken, nicht bei "könnte
-  man theoretisch schöner machen".
-- Kein Schutz vor Bugs in neuem Code — neue Bugs werden gefixt
-  wie immer. Die Regeln greifen bei strukturellen Risiken in
-  der Steuerlogik.
-- Kein Argument gegen YAGNI — S6 ist explizit pro Einfachheit.
-  Stabilität bedeutet "wenig, robust", nicht "viel,
-  abgesichert".
-
-Querverweise:
-- ADR AE-41 (Stabilitätsregeln + Autonomie-Default)
-- §0.1 Autonomie-Default für Claude Code
-- §5.20 Aspirative Code-Kommentare als Doku-Drift-Risiko
-  (konkreter Fall, der zu S1 geführt hat)
-
-## 0.1 Autonomie-Default für Claude Code
-
-Claude Code arbeitet Sprint-Briefe autonom ab und stoppt nur
-bei substantiellen Entscheidungen. Stop-Points werden nicht
-inflationär gesetzt — der Hotelier prüft an wenigen, klaren
-Punkten, nicht bei jedem Code-Edit.
-
-### Pflicht-Stops (immer)
-
-Claude Code stoppt und wartet auf Freigabe bei:
-
-1. Abweichung vom Sprint-Brief (Pfad, Signatur, Migration-
-   Nummer, Datenmodell-Erweiterung außerhalb des Plans)
-2. Phase-0-Quellcheck-Befund mit Auswirkung auf andere Tasks
-3. Race-Condition, Doku-Drift, TODO-Kommentar in Steuerlogik
-   entdeckt (S1-Verstoß-Kandidat)
-4. Test-Failure, der nicht durch das aktuelle Task entstanden
-   ist
-5. Mypy/Ruff/ESLint-Errors in fremden Dateien
-6. Vor Pull-Request-Erstellung
-7. Vor Tag-Vergabe
-8. Vor Live-Deploy auf heizung-test oder heizung-main
-9. S1-S6-Verstoß-Verdacht (siehe §0)
-
-### Auto-Continue (autonom)
-
-- Code-Edits, die dem Brief 1:1 entsprechen
-- Test-Erstellung gemäß Brief
-- ruff/mypy/pytest/eslint/next build-Runs
-- Doku-Updates gemäß Brief
-- Routine-Bash-Commands (git status/diff/add, ls, cd, find,
-  grep)
-- Datei-Reads
-
-### Berichts-Format
-
-- **Auto-Continue:** Eine Zeile pro Task am Ende ("T1 done,
-  alle Checks grün, Diff in Branch")
-- **Pflicht-Stop:** Voller Bericht mit Diff, Befund, Optionen,
-  Empfehlung
-- **Sprint-Ende:** Sammelbericht mit allen Diffs, Test-Outputs,
-  PR-Vorschlag, Tag-Vorschlag
-
-### Eskalation bei Unsicherheit
-
-Wenn unklar ist, ob ein Befund unter Pflicht-Stop fällt:
-**immer stoppen.** Falsch-Positiv ist günstiger als
-Falsch-Negativ. Stabilität schlägt Geschwindigkeit (S1+S2).
-
-### Sprint-spezifische Stufen
-
-Der Default ist Stufe 2. Der Sprint-Brief kann eine andere
-Stufe explizit setzen:
-
-- **Stufe 1** (volle Stop-Points): Engine-Logik mit
-  Concurrency, neue Architektur-Schichten, Hardware-
-  Befehlspfade
-- **Stufe 2** (Default): Standard-Sprints
-- **Stufe 3** (volle Autonomie): reine Markdown-Doku,
-  Dependency-Bumps, Lint-Fixes ohne Logik-Änderung
-
-Begründung der Stufe steht im Sprint-Brief, nicht im
-Strategie-Chat.
-
-## §0.2 — Source-of-Truth-Hierarchie nach Architektur-Refresh 2026-05-07
-
-Bei Konflikt zwischen Dokumenten gilt diese Reihenfolge (oben schlägt
-unten):
-
-1. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-2. `docs/SPRINT-PLAN.md`
-3. `STATUS.md` (für laufenden Stand)
-4. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
-5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
-6. `docs/STRATEGIE.md`
-7. `docs/RUNBOOK.md`
-8. `docs/WORKFLOW.md`
-9. `Design-Strategie-2_0_1.docx`
-
-Alles in `docs/features/` mit Datum vor 2026-05-07 ist historisch —
-gilt nicht mehr für Pläne, gilt für Lessons.
-
-**Trigger-Phrase pro Session** (siehe `docs/SESSION-START.md`):
-
-> „Architektur-Refresh aktiv ab 2026-05-07. Lies `docs/SESSION-START.md`
-> und bestätige."
-
-Vor jeder Code-Änderung: Pflicht-Pre-Read aus SESSION-START.md →
-Claude-Code-Rolle abarbeiten.
-
-## 1. Identität & Stand
-
-- **Projekt:** Heizungssteuerung für Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
+- **Projekt:** Heizungssteuerung fÃ¼r Hotel Sonnblick (Mandatar: hotelsonnblick@gmail.com)
 - **Repo:** https://github.com/rexei123/heizung-sonnblick (public)
-- **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick`
-- **Aktueller Sprint:** **Sprint 9.10c abgeschlossen** (Vicki-Codec-Decoder-Fix: Cmd-Byte-Routing statt fPort-Routing). Sprint 9.11 Live-Test #2 in Vorbereitung.
-- **Letzter Tag:** `v0.1.9-rc3-window-detection` (Sprint 9.10). Sprint 9.10c-Tag-Frage offen (Strategie-Chat).
+- **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick` (synced mit Cowork-Mount)
+- **Aktueller Sprint:** **Sprint 6 in Arbeit** (Hardware-Pairing). Server-Stack vorbereitet, Pairing 2026-04-29 mit IT-Mitarbeiter geplant.
+- **Letzter Tag:** `v0.1.5-lorawan-foundation`
+- **Pairing-Tagesplan:** `docs/working/sprint6-pairing-anleitung.md` (zuerst lesen am Pairing-Tag!)
 - **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
 
-## 2. Pflicht-Lektüre vor Sprint-Arbeit
+## 2. Pflicht-LektÃ¼re vor Sprint-Arbeit
 
 In dieser Reihenfolge:
 
-0. CLAUDE.md §0 + §0.1 — Stabilitätsregeln und Autonomie-Default. Nicht überspringbar.
-1. `CONTEXT.md` — Boot-Anker, aktueller Stand, nächster Schritt
-2. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags
-3. `docs/SPEC-FRAMEWORK.md` — verbindliche Code- und Doku-Regeln
-4. `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit User-Gates
-5. `docs/RUNBOOK.md` — Operations, Rescue, UFW, GHCR-PAT, Domain
-6. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
+1. `STATUS.md` â€” Gesamtstand, alle Sprints, aktuelle URLs, Tags
+2. `docs/SPEC-FRAMEWORK.md` â€” verbindliche Code- und Doku-Regeln
+3. `docs/WORKFLOW.md` â€” 5-Phasen-Feature-Flow mit User-Gates
+4. `docs/RUNBOOK.md` â€” Operations, Rescue, UFW, GHCR-PAT, Domain
+5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` â€” ADR-Log
+6. `docs/working/sprint5-execution-plan.md` â€” **wenn Sprint 5 lÃ¤uft**
 
 ## 3. Goldene Regeln
 
-1. **5-Phasen-Workflow:** Brief → Sprintplan → User-Gate → Execution → Tag. Keine Schritte überspringen.
-2. **Branch-Naming:** `feat/sprintN-<slug>` für Features, `chore/<slug>` für Wartung, `fix/<slug>` für Bugs.
+1. **5-Phasen-Workflow:** Brief â†’ Sprintplan â†’ User-Gate â†’ Execution â†’ Tag. Keine Schritte Ã¼berspringen.
+2. **Branch-Naming:** `feat/sprintN-<slug>` fÃ¼r Features, `chore/<slug>` fÃ¼r Wartung, `fix/<slug>` fÃ¼r Bugs.
 3. **Tag-Pattern:** `v0.<minor>.<sprint>-<slug>` (z. B. `v0.1.5-lorawan-foundation`).
-4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewünscht. Bei Claude-Code-Commits: `Co-Authored-By: Claude` immer dranhängen.
-5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergänzt.
-6. **Sprache:** Deutsch, Sie-Form, sachlich, maximal kurz, hohe Inhaltsdichte, keine Floskeln.
-7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)**, **SSH (Server)** oder **Claude Code (im Repo)** kennzeichnen.
+4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewÃ¼nscht.
+5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergÃ¤nzt.
+6. **Sprache:** Deutsch, Sie-Form, sachlich.
+7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)** oder **SSH (Server)** kennzeichnen.
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
-9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer über PR.
-10. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
+9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer Ã¼ber PR.
+10. **Cowork-Mount = Windows-Repo:** Edits in `/sessions/.../mnt/heizung-sonnblick/` landen direkt in `C:\Users\User\dev\heizung-sonnblick\`.
 
 ## 4. Operations-Highlights
 
 - **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung` (zwingend `-i ...`-Flag, Default-Key passt nicht)
 - **Server-Hostnames:** `heizung-test`, `heizung-main` (Tailscale MagicDNS)
-- **Container-Stack:** api, web, db (timescaledb), redis, caddy, mosquitto, chirpstack, chirpstack-postgres, chirpstack-gateway-bridge, celery_worker, celery_beat (plus Init-Sidecars `chirpstack-init`, `chirpstack-gateway-bridge-init`) — Compose-File: `infra/deploy/docker-compose.prod.yml` (zwingend `-f`)
-- **Deploy:** GHCR Pull über systemd-Timer (5 Min), KEIN Push-Deploy
-- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` — NICHT Hetzner Cloud DNS
+- **Container-Stack:** api, web, db (timescaledb), redis, caddy â€” Compose-File: `docker-compose.prod.yml` (zwingend `-f`)
+- **Deploy:** GHCR Pull Ã¼ber systemd-Timer (5 Min), KEIN Push-Deploy
+- **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` â€” NICHT Hetzner Cloud DNS
 - **UFW:** aktiv auf beiden Servern, Port 22/80/443 + tailscale0 erlaubt
-- **PAT-Type:** Classic PAT (Fine-grained unterstützt GHCR nicht)
+- **PAT-Type:** Classic PAT (Fine-grained unterstÃ¼tzt GHCR nicht)
 
 ## 5. Lessons Learned (Pflicht-Lektuere, NICHT ueberspringen)
 
@@ -210,9 +57,7 @@ Diese Punkte sind harte Lehren aus echten Fehlern. Bei jedem Verstoss wiederhole
 - "Quick Fix" gibt es nicht. Jedes Item, das im Wartemodus zwischendrin "schnell mit reingenommen" wird, frisst 1+ Stunden.
 - Im Pairing-/Wartemodus KEINE Architektur-Aenderungen. Nur fertige, getestete, klar abgegrenzte Items.
 
-### 5.2 Cowork-Mount-Sandbox-Quirks (HISTORISCH — gilt nicht mehr seit Umstieg auf Claude Code)
-
-Diese Lesson stammt aus der Cowork-Phase. Seit Umstieg auf Claude Code (Sprint 9.8c) nicht mehr relevant. Aufbewahrt als Wissensspeicher.
+### 5.2 Cowork-Mount-Sandbox-Quirks (sehr wichtig)
 
 Der Cowork-Mount unter `/sessions/.../mnt/heizung-sonnblick/` ist NICHT 1:1 mit dem Windows-Repo synchron. Goldene Regel 10 (alte CLAUDE.md) ist eine Luege.
 
@@ -278,14 +123,10 @@ Symptom: Pull-Timer-Logs zeigen 22h+ FEHLER, Server-Code haengt auf altem Stand,
 
 **Fix einmalig pro Server:**
 ```bash
-git config --system --add safe.directory /opt/heizung-sonnblick
+git config --global --add safe.directory /opt/heizung-sonnblick
 ```
 
-**Wichtig: `--system`, nicht `--global`.** Der `--global`-Eintrag in `/root/.gitconfig` wird vom `heizung-deploy-pull.service` trotz `User=root` und `HOME=/root` nicht gelesen (vermutlich systemd-Sandbox). `--system` schreibt nach `/etc/gitconfig` und wird zuverlässig gelesen.
-
-Diese Korrektur basiert auf Diagnose vom 2026-05-05 (Sprint 9.8d). Vorherige Empfehlung `--global` war falsch.
-
-**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen (`git config --system --add safe.directory ...`), damit neue Server out-of-the-box klappen. Bis dahin: Server-Setup-Dokumentation muss diesen Schritt explizit nennen.
+**Sprint-Backlog:** `deploy-pull.sh` sollte beim ersten Run diesen Fix selbst setzen, damit neue Server out-of-the-box klappen.
 
 ### 5.8 Frontend AppShell nicht doppelt wrappen (Sprint 8.13a Lesson)
 
@@ -426,256 +267,9 @@ Beim Re-Deploy via `docker compose up -d --force-recreate` wird der Container ne
 
 **Pflicht nach Re-Deploy:** mindestens `--tail 30` ohne `--since` verwenden, dann zusaetzlich auf den Worker-Boot-Log (`worker@... ready`) als Marker achten.
 
-### 5.18 Test-Fixtures muessen Schema-Constraints respektieren (Sprint 9.10 Lesson)
-
-`room.number` ist `VARCHAR(20)`, `device.dev_eui` ist `VARCHAR(16)`. Im Sprint 9.10 hat ein zu langer Layer-4-Fixture-Suffix `t9-10-l4-{HHMMSSffffff}` (21 Zeichen) alle 7 DB-Tests auf einen Schlag gekippt — Pure-Function-Tests waren grün, Live-DB-Tests crashten mit `StringDataRightTruncationError`.
-
-**Robuste Suffix-Strategie fuer Test-Fixtures in diesem Repo:**
-
-```python
-import uuid
-suffix = uuid.uuid4().hex[:8]  # 8 Hex-Zeichen, deterministisch
-rt = RoomType(name=f"l4-rt-{suffix}")          # 14 Zeichen, passt in VARCHAR(20)
-room = Room(number=f"l4-{suffix}")              # 11 Zeichen
-device = Device(dev_eui=f"deadbeef{suffix}")    # 16 Zeichen exakt -> VARCHAR(16) voll
-```
-
-8 Hex-Zeichen reichen fuer Test-Eindeutigkeit innerhalb einer Session (Rollback am Ende). Nie `datetime.strftime("%H%M%S%f")` ohne Laengen-Rechnung verwenden.
-
-### 5.19 Live-DB-Verify zwischen DB-erzeugenden und DB-konsumierenden Tasks (Sprint 9.10 Lesson)
-
-T1 (Sprint 9.10) hat `0009_sensor_reading_open_window` geschrieben, T2 hat den darauf bauenden Engine-Code geschrieben. Pre-Push-Routine (`mypy`, `ruff`, lokale `pytest`) war zwischen T1 und T2 grün — die Layer-4-DB-Tests wurden ohne `TEST_DATABASE_URL` skipped, der `String(20)`-Bug fiel nicht auf.
-
-**Pflicht-Zwischenschritt nach Migration + DB-modifizierendem Code, BEVOR Folge-Task startet:**
-
-```powershell
-# PowerShell (lokal)
-Set-Location "C:\Users\User\dev\heizung-sonnblick"
-docker compose up -d db  # TimescaleDB hochfahren
-
-# Bash (im Repo, backend-Verzeichnis)
-export DATABASE_URL="postgresql+asyncpg://heizung:heizung_dev@localhost:5432/heizung"
-export TEST_DATABASE_URL=$DATABASE_URL
-./.venv/Scripts/python.exe -m alembic upgrade head
-./.venv/Scripts/python.exe -m pytest tests/test_<neuer_layer>.py -v
-```
-
-Die DB-Tests muessen **gegen echtes Postgres** laufen, nicht nur skipped sein. CI deckt das spaeter ab — aber spaet, wenn der Folge-Task schon falsche Annahmen verbaut hat. Aufwand <2 Min, spart 15-30 Min Ruecksetz-Arbeit.
-
-### 5.20 Aspirative Code-Kommentare als Doku-Drift-Risiko (Sprint 9.10 Lesson)
-
-`celery_app.py:60-61` versprach seit Sprint 9.6 einen Redis-SETNX-Lock fuer Engine-Tasks, der nie geliefert wurde. Drei Folgesprints (9.7-9.9) haben Funktionalitaet darauf gestapelt, ohne dass der Lock real war. Erst Sprint 9.10 hat den Befund (`Grep -path src/heizung/tasks "SETNX|lock|acquire"` → leer) und die Race-Condition aktiv.
-
-**Regel:** TODO/FIXME/„kommt in Sprint X"-Kommentare in produktiver Steuer- oder Sicherheitslogik sind kein neutraler Sprint-Plan, sondern aktive Doku-Drift. Pflicht-Stop-Trigger im Brief-Workflow: solche Kommentare im Quellcheck markieren und entweder a) im aktuellen Sprint mit-fixen oder b) explizit in den Backlog mit Ticket-ID.
-
-### 5.21 Hardware-Annahmen defensiv interpretieren — Cmd-Byte > fPort beim Codec-Routing (Sprint 9.10c Lesson)
-
-Sprint 9.0 hatte `fPort=2` als Marker fuer Setpoint-Replies angenommen und den Vicki-Codec entsprechend hartcodiert (`if fPort === 2 -> decodeCommandReply`). Live-Daten am 2026-05-07 zeigten: alle vier Vickis senden ihre Periodic Status Reports auf `fPort=2` (mit `bytes[0]=0x81`). Folge: Codec wuergte Periodics als `unknown_reply` ab, Subscriber persistierte `temperature/setpoint/valve/battery` als NULL — der Engine-Layer-Stack lief vier Tage lang ohne Ist-Daten.
-
-**Regel:** Codec-Routing ueber das Payload-Byte `bytes[0]` ist robuster als ueber Transport-Felder wie fPort. `bytes[0]` ist Payload-immanent und unabhaengig vom Gateway/Netzwerk-Verhalten. fPort darf zur Diagnose mit-geloggt werden, aber NICHT als Routing-Schluessel dienen, solange der Vendor das Mapping nicht garantiert.
-
-**Querverweise:** AE-40-Schwester-Pattern (Lock im Datenpfad statt Sprint-Plan), §5.22 (ChirpStack-Codec-Deploy ist nicht automatisch).
-
-### 5.22 ChirpStack-Codec-Deploy ist NICHT automatisch (Sprint 9.10c Lesson)
-
-Repo-Codec-Update bedeutet **nicht** ChirpStack-Live-Stand. Der Codec im Repo (`infra/chirpstack/codecs/mclimate-vicki.js`) ist Source of Truth — aber ChirpStack zieht ihn nicht selbst, er muss in der ChirpStack-UI je Server (heizung-test, spaeter heizung-main) im Device-Profile-Codec-Tab manuell eingefuegt werden.
-
-Anlass: Sprint 9.10c Phase 0 — der Repo-Codec war seit Sprint 9.0 mit dem fPort-Routing-Bug angelegt; ChirpStack hatte denselben Stand; der Bug fiel erst in der Cowork-Live-QA von Sprint 9.10 auf. Hat zwei Sprints lang Verifikations-Arbeit gekostet, weil das Symptom (Sensor-Felder NULL) wie ein Subscriber-Problem aussah.
-
-**Konsequenz:** Jeder Codec-Touch im Repo erfordert anschliessend
-1. manuellen UI-Re-Paste auf jedem ChirpStack-Server, plus
-2. Verifikation per **Events-Tab eines aktiven Vickis** — der `object`-Block muss die geaenderten/neuen Felder zeigen.
-
-**Backlog (eigener Hygiene-Sprint):** Programmatisches Bootstrap-Skript via ChirpStack gRPC API, das `device_profile.payload_codec_script` aus dem Repo deployed. Bis dahin ist der manuelle Schritt im RUNBOOK §10c dokumentiert.
-
-### 5.23 Engine-Trace-Konsistenz: alle Layer schreiben immer LayerStep (Sprint 9.10d Lesson)
-
-Jeder Engine-Layer schreibt einen LayerStep — auch im No-Effect-Fall. Variante-B-Konvention: `setpoint_in == setpoint_out` (Pass-Through), `reason = prev_reason` durchgereicht, `detail = snake_case-Token` mit dem Grund warum die Schicht nichts getan hat. Begründung: S3 (Auditierbarkeit). Wenn Layer im inaktiven Pfad keinen Trace-Eintrag schreiben, ist das Engine-Decision-Panel als QA-Tool für genau diese Schicht blind — der Hotelier sieht nicht "Layer 0 hat geprüft und nichts getan", sondern gar nichts. Der Code-Review kann nicht unterscheiden zwischen "Layer war inaktiv" und "Layer wurde gar nicht ausgeführt".
-
-Anlass: Sprint 9.10d Phase 0 — Layer 0 (Sommer) und Layer 2 (Temporal) gaben im inaktiven Fall `None` zurück und tauchten gar nicht im `event_log` auf. Layer 1/3/4/5 waren bereits always-on (Layer 3 explizit aus Sprint 9.9 T3, Layer 4 aus 9.10 T2). Die Inkonsistenz war historisch gewachsen, wurde aber erst beim Variante-B-Frontend-Refactor sichtbar.
-
-**Sonderfall Layer 0 (Sommer):** Erste Schicht der Pipeline, hat keinen Vorgänger. Die Pass-Through-Konvention "setpoint_in == setpoint_out" greift hier nicht — es gibt keinen `setpoint_in`. Lösung: Schema-Erweiterung `LayerStep.setpoint_c: int | None`, wobei `None` ausschliesslich für Layer 0 inactive zugelassen ist und "Layer hat keinen eigenen Setpoint-Beitrag" bedeutet. Alle anderen Layer garantieren weiterhin einen Integer-Wert. Der Helper `_require_setpoint(step) -> int` (engine.py) engt den Typ an Call-Sites ein und raised AssertionError mit Layer-Name, falls die Invariante doch verletzt wird.
-
-**Hysterese ist KEIN Layer.** `hysteresis_decision` produziert kein `LayerStep`, sondern wird in `engine_tasks.py` in jedes Layer-`details`-JSONB eingebettet. Frontend zeigt sie genau einmal pro Evaluation an (Footer unter dem LayerTrace), nicht pro Layer.
-
-**Konsequenz für neue Layer:** Wer in Sprint 11+ einen `guest_override`-Layer oder vergleichbares anflanscht, schreibt von Anfang an always-on mit Pass-Through-LayerStep, snake_case-detail-Token im no-effect-Fall, und `setpoint_c: int` (nicht None — das ist und bleibt Layer 0 vorbehalten).
-
-**Querverweise:** §5.18 Sprint 9.10 Lessons (Schema-Constraints), AE-40 (Engine-Lock), §5.20 (aspirative Code-Kommentare als Doku-Drift). detail-Konvention selbst ist heute heterogen (Layer 4 vorbildlich snake_case, Layer 1/2/3/5 f-string-Freitext) — Backlog B-9.10d-1 für die Vereinheitlichung vor `v0.1.9-engine`.
-
-### 5.24 `ruff check` und `ruff format --check` sind verschiedene Gates (Sprint 9.10d Lesson)
-
-Lokal `ruff check .` allein reicht nicht für CI. Der CI-Job ruft sowohl `ruff check` (Lint) als auch `ruff format --check` (Formatierungs-Drift) auf — beide müssen grün sein, sonst rot.
-
-Symptom: lokal alles grün, CI rot mit Diff-Block in der Action-Log.
-
-**Pflicht vor jedem Push, der Python-Code ändert:**
-
-```powershell
-cd backend
-ruff check .
-ruff format --check .
-```
-
-Falls `ruff format --check` rot: `ruff format .` läuft, dann diff reviewen, mit aufnehmen in den Commit. Kein Force-Push, kein Bypass.
-
-Anlass: Sprint 9.10d PR #103 erster Push war wegen `ruff format --check` rot, weil lokal nur `ruff check` lief. Folge-Commit `ea0d53a` reformatierte eine `scalars()`-Kette in `test_engine_trace_consistency.py`. Hat einen zweiten CI-Round-Trip gekostet.
-
-Backlog B-9.10d-6: Pre-Push-Hook oder pyproject-Config erzwingt beides automatisch — Hygiene-Sprint vor `v0.1.9-engine`.
-
-### 5.25 `gh pr checks --watch` zeigt manchmal stale concurrency-cancel'd Runs (Sprint 9.10d Lesson)
-
-Wenn ein Push während eines laufenden CI-Jobs erfolgt, cancelt GitHub-Actions per `concurrency.cancel-in-progress` den älteren Run. `gh pr checks --watch` rendert in dem Moment manchmal noch den canceled "pass in 3s"-Status, obwohl der finale Run für den neuen HEAD parallel läuft.
-
-Symptom: `gh pr merge` failt mit `Required status check "e2e" is in progress`, obwohl `gh pr checks --watch` ein paar Sekunden vorher "all green" gemeldet hat.
-
-**Fix:** zweiter `gh pr checks $prNum --watch` direkt nach Merge-Block. Wartet bis der echte Run für den aktuellen HEAD-Commit grün ist. Dann Merge erneut versuchen.
-
-**Robust-Variante** für PR-Workflows in Skripten:
-
-```powershell
-# Vor jedem Merge: Run-ID des LETZTEN Pushes verifizieren
-$headSha = gh pr view $prNum --json headRefOid -q .headRefOid
-gh run list --commit $headSha --json status,name,conclusion
-# Erst mergen, wenn alle conclusion="success" UND status="completed"
-```
-
-Anlass: Sprint 9.10d Merge — `gh pr checks --watch` zeigte "pass in 3s" für den e2e-Job, der erste `gh pr merge`-Versuch failte trotzdem mit `Required status check "e2e" is in progress`. Ein zweiter Watch-Durchlauf zeigte den echten Run mit ~1m46s Dauer; danach lief der Merge sauber.
-
-### 5.26 — Strategie und Implementierung sauber trennen
-(Architektur-Refresh 2026-05-07 Lesson)
-
-Beim Refresh am 2026-05-07 zeigte sich: das Strategiepapier hatte vieles
-korrekt vorgesehen, aber zwischen Strategie und Implementierung war ein
-größerer Rückstand entstanden, als der Diff zwischen Strategie und
-Referenzsystem (Betterspace).
-
-**Lesson:** Bei jedem zweiten oder dritten Sprint kurz prüfen, ob die
-implementierte Realität noch zur Strategie passt. Drift in einer
-Richtung (Code holt Strategie ein, oder Strategie holt Realität ein) ist
-normal — Drift in beide Richtungen gleichzeitig ist Refresh-Anlass.
-
-**Konkret:**
-- STATUS.md §1 alle 5 Sprints aktualisieren (nicht nur §2 anhängen)
-- Strategie-Refresh nach Cowork-Inventarisierung oder externer Bestätigung
-- Sprint-Plan und Backlog mindestens monatlich konsolidieren
-
-### 5.27 Vicki-Hardware-Realität: Open-Window-Default + Algorithmus-Trägheit (Sprint 9.11 Lesson)
-
-**Befund 2026-05-09 (Sprint 9.11 Live-Test #2 + Hersteller-Doku-Recherche):**
-
-Die MClimate-Vicki sendet `openWindow=true` im Hotelbetrieb NICHT zuverlässig.
-Drei Ursachen, alle real:
-
-1. **Open-Window-Detection ist im Default DISABLED.** MClimate liefert die
-   Funktion ab Werk ausgeschaltet. Aktivierung nur via Downlink (`0x4501020F`
-   für FW >= 4.2, `0x06{...}` für FW < 4.2).
-2. **Algorithmus arbeitet auf internem Vicki-Sensor**, der durch HK-Wärme
-   dominiert wird. Hersteller-Zitat: „not 100% reliable, can be affected by
-   outdoor temperature, position of the device on the radiator, position of
-   the radiator in the room and more factors."
-3. **Im Sommer / bei Außentemp >= 15 °C physikalisch nicht testbar.**
-   Δ-T zu klein und zu langsam für Vicki-Schwellen.
-
-**Konsequenzen für Code-Änderungen:**
-
-- **Engine Layer 4 darf nicht NUR auf `sensor_reading.open_window` hören.**
-  Hardware-First mit aktiven Triggern: Vicki-Flag UND `attached_backplate`.
-  Backend-Inferenz nur passiv (siehe AE-47).
-- **Window-Detection-Tests im Sommer:** Backend-Synthetic-Test in pytest
-  (SQL-Inserts mit künstlichem Δ-T). Hardware-Test nur via Kältepack
-  (RUNBOOK §10e), nicht in CI.
-- **Vicki-Konfiguration vor Heizperiode prüfen:** Bei jedem Vicki-Tausch /
-  Neu-Pairing Open-Window via Downlink aktivieren. Nicht annehmen, dass
-  die Funktion läuft.
-- **`attachedBackplate`-Bit gehört in `sensor_reading`.** Codec liefert es
-  seit FW 4.1, ohne Persistenz keine Demontage-Erkennung.
-
-**Quellen:**
-
-- `docs/vendor/mclimate-vicki/` (vollständige Hersteller-Doku-Kopie 2026-05-09)
-- `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` AE-47
-
-**Was diese Lesson für andere Sprints bedeutet:**
-
-- Sprint 9.12 (Frostschutz pro Raumtyp): Layer 4 wird in 9.11x/9.11y bereits
-  angefasst, Frostschutz-Logik muss mit drei Trigger-Reasons koexistieren
-  (`open_window`, `device_detached`, später ggf. `inferred_window`).
-- BR-16 (Backend-Eigenlogik aktiv): nicht voreilig aktivieren, erst nach
-  2 Wochen produktiver Beobachtung in Heizperiode.
-
-### 5.28 ChirpStack-Downlinks: MQTT-Pfad, NICHT gRPC (Sprint 9.11x.b Lesson)
-
-**Befund 2026-05-09 (Recherche für AE-48):**
-
-Repo hat etablierten MQTT-basierten Downlink-Pfad in
-`backend/src/heizung/services/downlink_adapter.py` (`send_setpoint` mit
-`0x51`, MQTT-Topic `application/{app_id}/device/{dev_eui}/command/down`,
-fPort=1, base64-payload). `aiomqtt` als Client-Bibliothek.
-
-`CHIRPSTACK_API_KEY`-Slot in `.env.example` ist Bootstrap-Vorbereitung für
-spätere gRPC-Anbindung (Backlog B-9.10c-1: Codec-Bootstrap-Skript), aber
-**nicht** für Device-Downlinks. Device-Downlinks laufen über MQTT.
-
-**Konsequenzen für Code-Änderungen:**
-
-- Neue Vicki-Commands erweitern `downlink_adapter.py` via AE-48-Hybrid-
-  Helper-Architektur (`send_raw_downlink` + typisierte Wrapper).
-- Codec-`encodeDownlink`-Section ist Spiegel, nicht Quelle —
-  Drift-Schutz via pytest gegen identische Erwartungs-Bytes.
-- gRPC-Pfad NICHT aufmachen für Device-Downlinks.
-- `Decimal` als Domain-Eingabe für Temperaturen, Byte-Konvertierung im
-  Wrapper.
-
-**Quelle:**
-
-- AE-48 in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
-- `backend/src/heizung/services/downlink_adapter.py` (bestehender Pfad)
-
 ---
 
-## 6. Pre-Push-Backend (Win-Host, PowerShell)
-
-Lokale Toolchain auf `C:\Users\User\dev\heizung-sonnblick\backend\.venv` — ersetzt CI-Format-Loops und den ruff-`--diff`-Trick aus Sprint 9.9 T1-T5.
-
-**Einmaliges Setup (bereits durch, falls fehlt erneut):**
-
-```powershell
-winget install --id Python.Python.3.12 -e --silent
-winget install --id astral-sh.uv -e --silent
-# Neue Shell oeffnen, damit PATH greift
-cd C:\Users\User\dev\heizung-sonnblick\backend
-uv venv --python 3.12
-.\.venv\Scripts\Activate.ps1
-uv pip install -e ".[dev]"
-```
-
-**Vor jedem Backend-Push (Pflicht):**
-
-```powershell
-cd C:\Users\User\dev\heizung-sonnblick\backend
-.\.venv\Scripts\Activate.ps1
-ruff format .
-ruff check . --fix
-mypy src
-pytest -x
-```
-
-Erst nach allen vier grün: `git push`. Lokaler Voll-Lauf <10 Sek; ersetzt 1-2 Min CI-Iteration und alle Format-Fix-Cascades aus Sprint 9.9 T1-T5.
-
-**DB-Tests:** skippen lokal (kein `DATABASE_URL`); CI-Pipeline hat den Postgres-Service-Container und führt sie aus.
-
-**Frontend (analog):**
-
-```powershell
-cd C:\Users\User\dev\heizung-sonnblick\frontend
-npm run type-check
-npm run lint
-npm run build
-```
-
----
-
-## 7. Aktuelle Backlog-Punkte
+## 6. Aktuelle Backlog-Punkte
 
 - Caddy `fmt --overwrite` (kosmetisch, mit Sprint 6 wenn Caddy-Touch fuer ChirpStack-UI ohnehin)
 - `~/.ssh/config`-Eintraege auf work02
@@ -683,5 +277,3 @@ npm run build
 - CI-Mirror-Workflow `frontend-ci-skip.yml` aufraeumen, wenn Branch-Protection-Matcher smarter wird
 - ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup nach `docker compose down -v` (Sprint 6 oder spaeter)
 - `.github/CODEOWNERS` einrichten, wenn weitere Mitwirkende dazukommen
-- `services/_common.py` (Sprint 9.9-Backlog): konsolidiert duplicates `_task_session` aus `engine_tasks.py`/`override_cleanup_tasks.py`
-- `services/event_log`-Wrapper (Sprint 9.9-Backlog): strukturierte Cap-/Revoke-Events ausserhalb der Engine-Pipeline

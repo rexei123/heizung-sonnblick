@@ -43,9 +43,6 @@ htmlcov/
 *.log
 logs/
 
-# Cowork-Session-Output (Test-Artefakte, Diagnosen, Notizen)
-docs/working/
-
 # Caddy state (nur in Entwicklung)
 infra/caddy/data/
 infra/caddy/config/
@@ -72,7 +69,4 @@ sprint0*.ps1
 *.ppt
 # Doku-Ausnahme: das Strategie-Dokument soll im Repo bleiben
 !docs/Design-Strategie-2.0.1.docx
-
-# Claude Code lokale Settings (nicht committen)
-.claude/
 
