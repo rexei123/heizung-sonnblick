@@ -188,6 +188,7 @@ In dieser Reihenfolge:
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
 9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer über PR.
 10. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
+11. **PR-Base immer explizit:** `gh pr create` IMMER mit `--base develop` für Feature-PRs (`--base main` nur für Hotfixes/Releases). GitHub-Default ist `main`, ohne explizites `--base` landet jeder Feature-PR dort. Vor PR-Erstellung Default per `gh pr view <n> --json baseRefName` prüfen, falls Zweifel. Lesson aus Sprint 9.11x (PR #116 versehentlich gegen main → Frankenstein-Konstellation, Revert-PR #117 + Re-Run #118 + heizung-main-Sanierung als B-9.11x-2 als Folge-Aufwand).
 
 ## 4. Operations-Highlights
 
