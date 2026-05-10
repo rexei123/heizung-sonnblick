@@ -58,6 +58,14 @@ class SensorReading(Base):
     # NICHT identisch mit False. Layer 4 behandelt NULL + False gleich.
     open_window: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Sprint 9.11x: Vicki-Codec-Feld ``attachedBackplate`` (FW >= 4.1).
+    # True = Vicki an Wandhalterung angeflanscht, False = demontiert.
+    # NULL = Feld nicht im Payload vorhanden (alter Codec). Layer 4
+    # Detached-Trigger fordert AND-Semantik ueber alle Devices der Zone:
+    # NULL zaehlt als "unklar" (Device blockt den Trigger), False alleine
+    # reicht nicht — beide letzten frischen Frames muessen False sein.
+    attached_backplate: Mapped[bool | None] = mapped_column(Boolean)
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)

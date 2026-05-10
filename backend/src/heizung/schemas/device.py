@@ -86,6 +86,7 @@ class DeviceRead(BaseModel):
     heating_zone_id: int | None
     is_active: bool
     last_seen_at: datetime | None
+    firmware_version: str | None = None
     created_at: datetime
     updated_at: datetime
 
