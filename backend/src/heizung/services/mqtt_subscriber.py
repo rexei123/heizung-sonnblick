@@ -39,6 +39,18 @@ from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
 
+# Sprint 9.11x.b T6: Codec setzt ``report_type`` fuer alle Command-Replies
+# (cmd-byte != 0x01/0x81 Periodic). Subscriber skipped sensor_reading-
+# Insert fuer alle Replies — Reply-Frames haben weder temperature noch
+# valve_position und wuerden nur NULL-Garbage in der Hypertable erzeugen.
+REPLY_REPORT_TYPES: frozenset[str] = frozenset(
+    {
+        "setpoint_reply",  # 0x52 — Drehring/Setpoint-Ack (Sprint 9.0)
+        "firmware_version_reply",  # 0x04 — FW-Query (Sprint 9.11x.b)
+        "open_window_status_reply",  # 0x46 — OW-Get (Sprint 9.11x.b)
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic-Schemas fuer ChirpStack-v4-Uplink-JSON
@@ -207,6 +219,73 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
             )
 
 
+async def _handle_open_window_status_report(uplink: ChirpStackUplink) -> None:
+    """Sprint 9.11x.b T5: loggt OW-Status aus Codec-Output (S6: Logger,
+    kein DB-Insert, kein Schema-Drift).
+
+    Codec emittiert nach Antwort auf 0x46-Downlink (Vendor-Doku §04):
+        - ``open_window_detection_enabled``: bool
+        - ``open_window_detection_duration_min``: int (= byte * 5)
+        - ``open_window_detection_delta_c``: float (= byte / 10)
+
+    Audit-Trail via journalctl (event_type-Marker im Log-String macht
+    den Eintrag grep-bar). Bewusste S6-Entscheidung statt event_log-DB-
+    Insert: Maintenance-Reports sind seltene Events (~1x pro Bulk-
+    Aktivierung), DB-Audit waere Overkill.
+    """
+    obj = uplink.object or {}
+    if "open_window_detection_enabled" not in obj:
+        return
+    dev_eui = uplink.deviceInfo.devEui.lower()
+    logger.info(
+        "event_type=MAINTENANCE_VICKI_CONFIG_REPORT dev_eui=%s "
+        "enabled=%s duration_min=%s delta_c=%s",
+        dev_eui,
+        obj.get("open_window_detection_enabled"),
+        obj.get("open_window_detection_duration_min"),
+        obj.get("open_window_detection_delta_c"),
+    )
+
+
+async def _handle_firmware_version_report(uplink: ChirpStackUplink) -> None:
+    """Sprint 9.11x.b T4: persistiert ``firmware_version`` aus Codec-Output.
+
+    Codec emittiert ``firmware_version: "{FW_major}.{FW_minor}"`` (z.B.
+    ``"4.5"``) nach Antwort auf 0x04-Downlink (Vendor-Doku §04). Wird
+    in ``device.firmware_version`` (VARCHAR(8) NULL, Migration 0010)
+    persistiert, separater UPDATE — nicht Teil von sensor_reading.
+
+    Defensive: None / leerer String / > 8 Zeichen / nicht-String werden
+    als Warning geloggt, kein DB-Write. Failure ist non-fatal — wir
+    loggen und blockieren die Subscriber-Loop nicht.
+    """
+    obj = uplink.object or {}
+    fw = obj.get("firmware_version")
+    if fw is None:
+        return
+    dev_eui = uplink.deviceInfo.devEui.lower()
+    if not isinstance(fw, str) or not fw or len(fw) > 8:
+        logger.warning(
+            "firmware_version-Format ungueltig dev_eui=%s value=%r",
+            dev_eui,
+            fw,
+        )
+        return
+    try:
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Device).where(Device.dev_eui == dev_eui).values(firmware_version=fw)
+            )
+            await session.commit()
+            logger.info(
+                "firmware_version persistiert dev_eui=%s fw=%s",
+                dev_eui,
+                fw,
+            )
+    except Exception:
+        logger.exception("firmware_version-update-fehler dev_eui=%s", dev_eui)
+
+
 async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
     """Sprint 9.9 T5: Drehknopf-Override-Detection nach Reading-Persistenz.
 
@@ -305,13 +384,19 @@ async def _consume_loop() -> None:
                     # Override-Detection (Sprint 9.9 T5) laeuft trotzdem —
                     # der Drehring meldet seinen Setpoint hier zurueck.
                     obj = uplink.object or {}
-                    if obj.get("report_type") == "setpoint_reply":
+                    if obj.get("report_type") in REPLY_REPORT_TYPES:
                         logger.info(
-                            "setpoint-reply dev_eui=%s setpoint=%s — skip reading-insert",
+                            "command-reply dev_eui=%s report_type=%s — skip reading-insert",
                             uplink.deviceInfo.devEui,
-                            obj.get("target_temperature"),
+                            obj.get("report_type"),
                         )
                         await _handle_override_detection(uplink)
+                        # Sprint 9.11x.b: FW + OW-Status sind eigene Reply-
+                        # Typen (siehe REPLY_REPORT_TYPES). Override-Detection
+                        # ist defensive (fehlt target_temperature -> return),
+                        # daher safe fuer alle Reply-Typen aufzurufen.
+                        await _handle_firmware_version_report(uplink)
+                        await _handle_open_window_status_report(uplink)
                         continue
 
                     try:
@@ -323,6 +408,8 @@ async def _consume_loop() -> None:
                         )
 
                     await _handle_override_detection(uplink)
+                    await _handle_firmware_version_report(uplink)
+                    await _handle_open_window_status_report(uplink)
         except asyncio.CancelledError:
             logger.info("MQTT-Subscriber beendet (CancelledError)")
             raise
