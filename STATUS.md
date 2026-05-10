@@ -864,6 +864,7 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11x-2 | heizung-main-Sanierung: alter Sprint-9.8a-Stand auf aktuellen develop-Stand bringen, `safe.directory`-Block fixen (CLAUDE.md §5.7), `:main`-Image neu bauen, Migrations 0005-0010 anwenden. Eigener Sprint, vor v0.2.0. | 🔴 |
 | B-9.11x-3 | celery_beat unhealthy auf heizung-test (vermutet aus 9.11x-Diagnose) — Healthcheck-Konfiguration prüfen, ggf. Backlog mit B-9.11-4 zusammenführen | 🟡 |
 | B-9.11x-4 | Status-Dashboard: zentrale Sicht auf Pull-Timer + Container-Health + letzte Engine-Eval pro Raum (heizung-test + heizung-main), aktuell verteilt über `journalctl`/`docker ps`/SQL — 9.13+ | 🟡 |
+| B-9.11x-5 | Quick-Win: Zimmer-Spalte in Geräte-Liste (`/devices`) und Geräte-Detailseite (`/devices/[id]`). Aktuelle Tabelle zeigt Bezeichnung, DevEUI, Hersteller/Modell, Status, Zuletzt-gesehen — aber nicht die Heizzonen-/Zimmer-Zuordnung. Read-Only-Erweiterung, kein neuer Endpoint nötig (Device-API liefert `heating_zone_id`, Heating-Zone-API liefert `room_id`). 30-60 Min, vor Sprint 9.13. Anlass: Hotelier-Feedback 2026-05-10 | 🟡 |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
