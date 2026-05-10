@@ -120,6 +120,10 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         # Sprint 9.10: Vicki openWindow durchreichen (NULL wenn Feld fehlt,
         # nicht False).
         "open_window": obj.get("openWindow"),
+        # Sprint 9.11x: Vicki attachedBackplate (FW >= 4.1) durchreichen.
+        # NULL wenn Feld fehlt (alter Codec) — Layer 4 Detached behandelt
+        # NULL als "Device unklar", nicht als detached.
+        "attached_backplate": obj.get("attachedBackplate"),
         "raw_payload": uplink.data,
     }
 

@@ -310,6 +310,7 @@ export type EventLogLayer =
   | "manual_override"
   | "guest_override"
   | "window_safety"
+  | "device_detached"
   | "hard_clamp";
 
 export type CommandReason =
@@ -320,6 +321,7 @@ export type CommandReason =
   | "preheat_checkin"
   | "checkout_setback"
   | "window_open"
+  | "device_detached"
   | "guest_override"
   | "long_vacant"
   | "frost_protection"

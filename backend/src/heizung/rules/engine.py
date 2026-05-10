@@ -24,7 +24,7 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from heizung.models.control_command import ControlCommand
@@ -463,6 +463,160 @@ async def layer_window_open(
     )
 
 
+async def layer_device_detached(
+    session: AsyncSession,
+    room_id: int,
+    *,
+    prev_setpoint_c: int,
+    prev_reason: CommandReason,
+    room_status: RoomStatus,
+    now: datetime,
+) -> LayerStep:
+    """Layer 4 (zweiter Trigger): Detached-Frostschutz (Sprint 9.11x T5).
+
+    AND-Semantik ueber alle Devices der Heizzonen des Raums: ALLE Devices
+    muessen frisch und uebereinstimmend ``attached_backplate=False`` melden,
+    damit der Trigger feuert. Anders als Layer 4 Window (OR) — ein einzelner
+    False-Frame ist nicht eindeutig (Housekeeping-Pause, Sensor-Klemmer,
+    Defekt), und ein offline-Device darf die Zone nicht in Frostschutz
+    kippen, nur weil ein anderes Device altes False im History hat.
+
+    Pro Device werden die letzten 2 frischen Frames mit
+    ``attached_backplate IS NOT NULL`` gepruef:
+      - <2 solche Frames -> Device "unklar" (offline / NULL-only / neu)
+      - beide ``False``  -> Device "detached"
+      - sonst (>=1 True) -> Device "attached"
+
+    NULL-Frames werden bewusst aus der Frische-Zaehlung entfernt: alter Codec
+    (FW < 4.1) und Recovery-Daten haben kein ``attached_backplate``-Feld;
+    "false, NULL" ist eindeutig nicht "false, false" und darf nicht zum
+    Trigger fuehren (Brief §Edge Cases).
+
+    Trigger-Bedingung: alle Devices "detached" UND mindestens ein Device.
+
+    Reason-Prioritaet (§5.23 Pass-Through): wenn der Window-Layer bereits
+    Frostschutz mit ``CommandReason.WINDOW_OPEN`` gesetzt hat, behaelt der
+    Detached-Layer ``setpoint_c=prev_setpoint_c`` und ``reason=prev_reason``,
+    setzt ``detail="superseded_by_window"``. Beide Trigger meinen Frostschutz,
+    aber der Audit-Trail braucht eine eindeutige Reason.
+
+    ``extras`` enthaelt IMMER ``detached_devices`` (Liste der dev_euis mit
+    beiden letzten frischen Frames False — auch im No-Trigger-Fall, sodass
+    Operatoren sehen "1 von 2 detached, B haelt") und ``occupancy_state``.
+    """
+    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
+    occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
+
+    # 1. Alle Devices der Heizzonen des Raums laden.
+    devices_stmt = (
+        select(Device.id, Device.dev_eui)
+        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
+        .where(HeatingZone.room_id == room_id)
+    )
+    devices: list[tuple[int, str]] = list((await session.execute(devices_stmt)).tuples().all())
+
+    if not devices:
+        return LayerStep(
+            layer=EventLogLayer.DEVICE_DETACHED,
+            setpoint_c=prev_setpoint_c,
+            reason=prev_reason,
+            detail="no_devices_in_zone",
+            extras={"detached_devices": [], "occupancy_state": occupancy_state},
+        )
+
+    # 2. Pro Device die letzten 2 frischen Frames mit nicht-NULL
+    # attached_backplate. row_number() ueber PARTITION BY device_id ORDER BY
+    # time DESC, dann rn <= 2 — vermeidet N+1-Queries.
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=SensorReading.device_id,
+            order_by=SensorReading.time.desc(),
+        )
+        .label("rn")
+    )
+    sub = (
+        select(
+            SensorReading.device_id.label("device_id"),
+            SensorReading.attached_backplate.label("attached_backplate"),
+            rn,
+        )
+        .join(Device, Device.id == SensorReading.device_id)
+        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
+        .where(HeatingZone.room_id == room_id)
+        .where(SensorReading.time >= threshold)
+        .where(SensorReading.attached_backplate.is_not(None))
+        .subquery()
+    )
+    readings_stmt = select(sub.c.device_id, sub.c.attached_backplate).where(sub.c.rn <= 2)
+    readings = (await session.execute(readings_stmt)).all()
+
+    # 3. Aggregiere pro Device.
+    frames_by_dev: dict[int, list[bool]] = {dev_id: [] for dev_id, _ in devices}
+    for dev_id, flag in readings:
+        # flag ist garantiert non-NULL (WHERE-Filter), aber mypy weiss das nicht.
+        if flag is not None:
+            frames_by_dev[dev_id].append(flag)
+
+    eui_by_id: dict[int, str] = dict(devices)
+    detached_dev_euis: list[str] = []
+    any_attached = False
+    any_unclear = False
+
+    for dev_id, frames in frames_by_dev.items():
+        if len(frames) < 2:
+            any_unclear = True
+        elif all(f is False for f in frames):
+            detached_dev_euis.append(eui_by_id[dev_id])
+        else:
+            any_attached = True
+
+    extras: dict[str, Any] = {
+        "detached_devices": detached_dev_euis,
+        "occupancy_state": occupancy_state,
+    }
+
+    all_detached = not any_unclear and not any_attached and len(detached_dev_euis) == len(devices)
+
+    # 4. Reason-Prioritaets-Schutz: Window gewinnt (§5.23 Pass-Through).
+    if all_detached and prev_reason == CommandReason.WINDOW_OPEN:
+        return LayerStep(
+            layer=EventLogLayer.DEVICE_DETACHED,
+            setpoint_c=prev_setpoint_c,
+            reason=prev_reason,
+            detail="superseded_by_window",
+            extras=extras,
+        )
+
+    if all_detached:
+        return LayerStep(
+            layer=EventLogLayer.DEVICE_DETACHED,
+            setpoint_c=MIN_SETPOINT_C,
+            reason=CommandReason.DEVICE_DETACHED,
+            detail=f"detached_devices={detached_dev_euis}",
+            extras=extras,
+        )
+
+    # 5. Pass-Through: WARUM kein Trigger? Operator-Diagnose im Trace.
+    if any_attached:
+        detail = "device_attached"
+    elif any_unclear:
+        detail = "device_unclear"
+    else:
+        # Alle Devices haben Frames, aber keiner ist "detached" und keiner
+        # "attached" — kann nicht eintreten, weil jedes Device in genau eine
+        # der drei Kategorien faellt. Defensive Default.
+        detail = "no_detached_devices"
+
+    return LayerStep(
+        layer=EventLogLayer.DEVICE_DETACHED,
+        setpoint_c=prev_setpoint_c,
+        reason=prev_reason,
+        detail=detail,
+        extras=extras,
+    )
+
+
 def layer_clamp(
     prev_setpoint_c: int,
     ctx: _RoomContext,
@@ -685,15 +839,36 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         now=now,
     )
 
-    clamp = layer_clamp(_require_setpoint(window), ctx, prev_reason=window.reason)
+    # Sprint 9.11x T5: Layer 4 zweiter Trigger — Detached-Frostschutz mit
+    # AND-Semantik ueber alle Zone-Devices. Reichert das Trace-Bild an
+    # auch im No-Trigger-Fall (extras.detached_devices listet immer die
+    # eindeutig detached Devices).
+    detached = await layer_device_detached(
+        session,
+        room_id,
+        prev_setpoint_c=_require_setpoint(window),
+        prev_reason=window.reason,
+        room_status=ctx.room.status,
+        now=now,
+    )
 
-    layers_tuple: tuple[LayerStep, ...] = (summer, base, temporal, manual, window, clamp)
+    clamp = layer_clamp(_require_setpoint(detached), ctx, prev_reason=detached.reason)
+
+    layers_tuple: tuple[LayerStep, ...] = (
+        summer,
+        base,
+        temporal,
+        manual,
+        window,
+        detached,
+        clamp,
+    )
 
     return RuleResult(
         room_id=room_id,
         setpoint_c=_require_setpoint(clamp),
         layers=layers_tuple,
-        base_reason=window.reason,
+        base_reason=detached.reason,
     )
 
 
