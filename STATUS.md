@@ -671,6 +671,66 @@ Cowork-Diagnose + Hersteller-Doku-Recherche (`docs/vendor/mclimate-vicki/`) erge
 
 ---
 
+## 2w. Sprint 9.11x Backplate-Persistenz + Layer-4-Detached-Trigger (2026-05-10, abgeschlossen)
+
+**Ziel:** `attachedBackplate` aus dem Vicki-Codec ins Backend persistieren und Engine Layer 4 um den zweiten Frostschutz-Trigger `device_detached` mit AND-Semantik über alle Devices einer Heizzone erweitern. Bereitet die Demontage-Erkennung für Live-Test #2 (9.11y) vor.
+
+**Ergebnis:** Backend + Frontend-Sync gemerged auf develop, 10 Pytests grün, CI grün auf finalem PR. Pre-Merge-Codec-Verify entfällt (raw_payload ist Base64-LoRaWAN, nicht JSONB — Codec-Emission durch AE-47 + Session-Header bestätigt). Post-Deploy-Verify gegen `sensor_reading.attached_backplate` direkt nach 5-Min-Pull.
+
+**Diff-Stats:** 12 Files, 736 insertions, 24 deletions. Migration 0010 + neuer Test-File + 10 Code-Edits.
+
+**Architektur — AND-Semantik:** Anders als Layer 4 Window (OR — ein offenes Fenster reicht): **alle** Zone-Devices müssen frisch und übereinstimmend `attached_backplate=False` melden. Pro Device: letzte 2 frische (>= now-30min) Frames mit `attached_backplate IS NOT NULL`. Trigger nur wenn ALLE Devices "detached" UND mindestens ein Device existiert. Begründung: ein einzelnes False ist nicht eindeutig (Housekeeping-Pause, Sensor-Klemmer, Defekt); ein offline-Device darf die Zone nicht in Frostschutz kippen wegen altem False-History eines anderen Devices.
+
+**Reason-Prioritäts-Schutz (§5.23):** Wenn `prev_reason == WINDOW_OPEN` und `all_detached=True` → Pass-Through (`setpoint_c=prev_setpoint_c`, `reason=WINDOW_OPEN`, `detail="superseded_by_window"`). Beide Trigger meinen Frostschutz, aber Audit-Trail bleibt eindeutig.
+
+**Test-Matrix (10/10 grün):**
+
+| # | Setup | Frames | Erwartung |
+|---|---|---|---|
+| 1 | Single | T,T | kein Trigger (attached) |
+| 2 | Single | F,T | kein Trigger (Hysterese) |
+| 3 | Single | F,F | Trigger |
+| 4 | Single | NULL,NULL | kein Trigger (Backwards-Compat) |
+| 5 | Multi | A:F,F / B:T,T | kein Trigger (B attached) |
+| 6 | Multi | A:F,F / B:offline | kein Trigger (B unklar) |
+| 7 | Multi | A:F,F / B:F,F | Trigger, beide gelistet |
+| 8 | Multi | A:F,F / B:F,T | kein Trigger (B Hysterese) |
+| 9 | Single + open_window | F,F + ow=T | superseded_by_window |
+| 10 | Single | F,F,NULL (jüngster NULL) | Trigger (NULL gefiltert) |
+
+Tests 5/6/8 sind die AND-Wachposten. Test 9 wächt AE-47. Test 10 verriegelt den Frische-Filter `attached_backplate IS NOT NULL`.
+
+**Brief-Drifts vorab freigegeben (alle dokumentiert in PR #116/#118):**
+
+1. `recorded_at` → `time` (Code-Source-of-Truth, Spalte heißt `time` seit Migration 0001)
+2. `tests/rules/` → `tests/` (bestehende flache Konvention)
+3. `now`-Param → `age_min`-Pattern (analog Window-Tests)
+4. Enum-Erweiterung in T2 mitgenommen (`CommandReason.DEVICE_DETACHED`, `EventLogLayer.DEVICE_DETACHED`, beide `VARCHAR(30) native_enum=False` — kein Schema-Drift)
+5. `applied=False` → §5.23 Pass-Through (LayerStep-Schema bleibt unverändert)
+6. T6 von 9 auf 10 Tests erweitert (Test 10 NULL-Glitch-Robustheit auf User-Add)
+
+**Migration-Name gekürzt:** Brief-Originalname (67 Zeichen) sprengt `alembic_version.version_num VARCHAR(32)`. Gekürzt auf `0010_attached_backplate_and_fw` (30 Zeichen).
+
+**Scope-Erweiterung Frontend (begründet):** Sprint 9.11x ursprünglich Backend-only. 4 Frontend-Edits in 2 Files (`types.ts`, `engine-decision-panel.tsx`) durch Cross-Repo-Schema-Drift gerechtfertigt — `Record<EventLogLayer, string>` und `Record<CommandReason, string>` sind exhaustive. Ohne Frontend-Anpassung wäre der `device_detached`-Layer im Decision-Panel unsichtbar (S3-Verstoß für Live-Test #2 in 9.11y). Labels: `LAYER_LABEL.device_detached = "Geraet-Sicherheit"` (analog "Fenster-Sicherheit"), `REASON_LABEL.device_detached = "Geraet abgenommen"` (analog "Fenster offen").
+
+**PR-Reihenfolge — Workflow-Befund:**
+
+- **PR #116** wurde irrtümlich gegen `main` statt `develop` gemerged (`gh pr create` ohne `--base develop` — GitHub-Default ist `main`). main war 83 Commits hinter develop (Sprint-9.8a-Stand). Squash hat Frankenstein-Konstellation produziert: Files im Branch geändert haben jetzt Sprint-9.10d-Stand, andere behalten Sprint-9.8a-Stand. Engine-Pipeline auf main potenziell defekt. CI war grün, weil GitHub Actions die merge-base testet, nicht main-after-merge.
+- **PR #117** revertiert main (`git revert -m 1 bc8e3dd`). CI rot wegen Pre-Existing Sprint-9.8b-`_quantize`-Bug auf altem main-Stand (kein Bezug zu 9.11x). Bleibt offen — heizung-main-Saneirung als eigener Sprint (B-9.11x-2), Pull-Service ist eh durch safe.directory blockiert (CLAUDE.md §5.7), kein Production-Risiko.
+- **PR #118** (Branch v2 von develop, 12 Files via `git checkout bc8e3dd -- ...` übernommen, identisches Diff zu #116) sauber auf develop gemerged (`mergeCommit aaa6585`). Codec-Emission verifiziert durch AE-47 + Session-Header — kein SSH-Pre-Merge nötig.
+
+**Workflow-Lesson:** `gh pr create` ohne `--base develop` ist bei Standard-Gitflow-Repos eine Falle. CLAUDE.md §3 Goldene Regel #2 wird in einer Folge-Doku-PR um diesen Punkt erweitert (vor Sprint 9.11y).
+
+**manual_override-Cleanup 2026-05-10 (9.11y-Vorbereitung):** IDs 3/4/5 wurden via API revoked. Hintergrund: vor 9.11y-Live-Synthetic-Test alte Test-Overrides wegräumen, sodass die Engine wieder auf Layer-1/2/4-Pfaden läuft und nicht durch alte Layer-3-Overrides maskiert ist.
+
+**Pre-Push-Toolchain:** Backend grün (`ruff format/check`, `mypy strict`, `pytest -x` mit zwei psycopg2-Ignores — siehe B-9.11x-1). Frontend grün (`type-check`, `lint`, `build`).
+
+**Tag-Vergabe:** keiner. Sprint 9.11x bleibt im Block 9.11y. Tag `v0.1.9-rc6-live-test-2` erst nach 9.11y-Abschluss.
+
+**Backlog-Items aus diesem Sprint:** B-9.11x-1 bis B-9.11x-4 — siehe §6.2.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -800,6 +860,10 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11-3 | Layer 3 manual_override Sub-Reasons (`manual_frontend` / `manual_device`) im Trace | 🟡 |
 | B-9.11-4 | celery_beat Healthcheck korrigieren | 🟡 |
 | B-9.11x  | Sprint 9.11x — Vicki-001 `open_window`-Hardware-Diagnose | 🔴 |
+| B-9.11x-1 | `psycopg2-binary` in `pyproject.toml [dev]`-extras aufnehmen ODER `test_manual_override_model.py` + `test_migrations_roundtrip.py` auf asyncpg umstellen (Pre-Existing, lokales `.venv`-Setup, CI grün) | 🟡 |
+| B-9.11x-2 | heizung-main-Sanierung: alter Sprint-9.8a-Stand auf aktuellen develop-Stand bringen, `safe.directory`-Block fixen (CLAUDE.md §5.7), `:main`-Image neu bauen, Migrations 0005-0010 anwenden. Eigener Sprint, vor v0.2.0. | 🔴 |
+| B-9.11x-3 | celery_beat unhealthy auf heizung-test (vermutet aus 9.11x-Diagnose) — Healthcheck-Konfiguration prüfen, ggf. Backlog mit B-9.11-4 zusammenführen | 🟡 |
+| B-9.11x-4 | Status-Dashboard: zentrale Sicht auf Pull-Timer + Container-Health + letzte Engine-Eval pro Raum (heizung-test + heizung-main), aktuell verteilt über `journalctl`/`docker ps`/SQL — 9.13+ | 🟡 |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
