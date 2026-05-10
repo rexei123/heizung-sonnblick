@@ -794,16 +794,195 @@ Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelösc
 
 ## 10e. Vicki-Konfiguration via Downlink (Sprint 9.11x.b)
 
-**Status:** Stub — wird in Sprint 9.11x.b vollständig ausgearbeitet.
-**Bezug:** AE-48 (Downlink-Helper-Architektur), AE-47 (Window-Detection-Hybrid)
+**Status:** Implementiert ab Sprint 9.11x.b (mergeCommit folgt).
+**Bezug:** AE-48 (Downlink-Helper-Architektur), AE-47 (Window-Detection-Hybrid),
+Vendor-Doku `docs/vendor/mclimate-vicki/`.
 
-Diese Sektion dokumentiert das Vicki-Downlink-Verfahren für drei Konfigurations-Commands:
+Drei Konfigurations-Downlinks via MQTT-Pfad (`downlink_adapter.py`,
+`aiomqtt`, fPort=1, `confirmed=False`). Vicki antwortet asynchron mit
+dem nächsten Keepalive (~10 Min Periodic-Cycle) — kein blockierendes
+Warten im Helper.
 
-- `0x04` — Firmware-Version abfragen
-- `0x4501020F` — Open-Window-Detection aktivieren (FW >= 4.2)
-- `0x46` — Open-Window-Detection-Status abfragen
+### 10e.1 Vendor-Byte-Layouts
 
-Implementierung in Sprint 9.11x.b. Bis dahin: Vicki-Konfiguration ausschließlich über die Setpoint-Logik (`0x51`) der Engine — kein manuelles Eingreifen nötig im Normalbetrieb.
+| Command | Bytes | Antwort | Subscriber-Handler |
+|---|---|---|---|
+| FW-Query | `0x04` | `0x04 {HW_maj} {HW_min} {FW_maj} {FW_min}` (5 Bytes) | `_handle_firmware_version_report` → `device.firmware_version` |
+| OW-Set (FW≥4.2) | `0x45 {enable} {duration_min/5} {delta_c×10}` | (kein expliziter Reply, nur GET-Verify) | — |
+| OW-Get | `0x46` | `0x46 {enabled} {duration_byte} {delta_byte}` (4 Bytes) | `_handle_open_window_status_report` → `journalctl` |
+
+**Vendor-Beispiele** (aus `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md`):
+
+- `0x4501020F` — enable, `0x02 × 5 = 10` Min, `0x0F / 10 = 1.5 °C` Delta
+- `0x4501060D` — enable, `0x06 × 5 = 30` Min, `0x0D / 10 = 1.3 °C` Delta
+- `0x4501020A` — enable, 10 Min, 1.0 °C (aggressive Variante, mehr Falsch-Positive)
+
+### 10e.2 Bulk-Aktivierung der 4 Hotel-Vickis
+
+**SSH (heizung-test, root):**
+
+```bash
+docker exec deploy-api-1 python scripts/activate_open_window_detection.py
+# Empfohlen für realistische Wartezeit (4 Vickis × 10 Min Periodic):
+docker exec deploy-api-1 python scripts/activate_open_window_detection.py --wait-secs 600
+```
+
+3-Phasen-Logik:
+
+1. **Phase 1**: `0x04` an alle Devices mit `kind=thermostat AND heating_zone_id IS NOT NULL` (sequentiell, 0.5 s Pause).
+2. **Wait**: `--wait-secs N` (default 60). Vickis antworten beim
+   nächsten Periodic-Report. Default 60 ist best-effort — bei 4 Vickis
+   mit 10-Min-Cycle realistisch nur 0-1 Antworten. Empfohlen: 600-1200.
+3. **Phase 3**: pro Device `device.firmware_version` aus DB lesen,
+   parsen (`"4.5"` → `(4, 5)`), Vergleich gegen `(4, 2)`:
+   - **FW ≥ 4.2**: `0x45` (mit Vendor-Defaults `enabled=True, 10 Min, 1.5 °C`) + `0x46` senden.
+   - **FW < 4.2**: skip + Hinweis auf B-9.11x.b-2 (0x06-Fallback).
+   - **FW NULL**: skip + Hinweis "Vicki hat nicht geantwortet".
+
+**Erwarteter Tabellen-Output** (Phase 4):
+
+```
+=== Ergebnis ===
+  dev_eui          | label    | fw_version | action          | result
+  -----------------+----------+------------+-----------------+----------------------------------
+  70b3d52dd3034de4 | Vicki-001| 4.5        | 0x45+0x46 sent  | verify-pending (siehe journalctl)
+  70b3d52dd3034dxx | Vicki-002| 4.5        | 0x45+0x46 sent  | verify-pending (siehe journalctl)
+  70b3d52dd3034dyy | Vicki-003| (NULL)     | skip            | no FW (Vicki hat nicht geantwortet)
+  70b3d52dd3034dzz | Vicki-004| 4.1        | skip            | FW<4.2 (B-9.11x.b-2: 0x06-Fallback)
+
+Total: 4  aktiviert: 2  geskippt: 2  fehlgeschlagen: 0
+```
+
+Exit-Code 0 (kein Failure), 1 (mind. ein Failure).
+
+### 10e.3 Failure-Patterns
+
+| Symptom | Ursache | Fix |
+|---|---|---|
+| Alle Devices `fw_version=(NULL)` nach Phase 3 | `--wait-secs` zu kurz, Vickis hatten noch keinen Periodic-Cycle | Re-Run mit `--wait-secs 1200` |
+| Exception in Phase 3 | MQTT-Connect-Fehler oder ChirpStack down | `docker compose ps` + `journalctl -u deploy-api` |
+| `device.firmware_version` bleibt NULL trotz Wait | Codec emittiert `firmware_version` nicht (alter Codec-Stand) | RUNBOOK §10c Codec-Re-Paste |
+| Validation-Error `duration_min muss 5..1275 in 5-Min-Schritten sein` | Aufrufer-Bug: nicht-durch-5-teilbar | Wert korrigieren (Skript hat Defaults, sonst CLI prüfen) |
+| Validation-Error `delta_c muss Decimal sein, ist float` | Aufrufer-Bug: Float statt Decimal | `Decimal("1.5")` statt `1.5` |
+
+### 10e.4 ROUND_HALF_UP-Charakteristik (delta_c-Encoding)
+
+Backend-Encoder `_encode_ow_set_payload` rundet `delta_c` mit
+`Decimal.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)` auf
+0.1 °C — **NICHT** Banker's Rounding. Tests in
+`backend/tests/test_downlink_adapter.py::test_ow_set_delta_c_round_half_up_matrix`
+verriegeln das Verhalten:
+
+| `delta_c` Input | `delta_byte` (hex) | Hardware-Wirkung |
+|---|---|---|
+| `Decimal("1.0")` | `0x0A` (10) | 1.0 °C |
+| `Decimal("1.5")` | `0x0F` (15) | 1.5 °C |
+| `Decimal("1.54")` | `0x0F` (15) | 1.5 °C (quantize abrunden) |
+| `Decimal("1.55")` | `0x10` (16) | 1.6 °C (Half-Up, NICHT 1.5!) |
+| `Decimal("1.56")` | `0x10` (16) | 1.6 °C |
+| `Decimal("2.0")` | `0x14` (20) | 2.0 °C |
+
+Codec-Spiegel (`mclimate-vicki.js encodeDownlink`) nutzt JS
+`Math.round(deltaC * 10)` — verhalten-gleich für positive Floats
+(was hier alles ist, da `delta_c ∈ [0.1, 6.4]`). Spiegel-Test
+`backend/tests/test_codec_mirror.py` verriegelt Vendor-Bytes.
+
+### 10e.5 FW < 4.2 Fallback (Backlog B-9.11x.b-2)
+
+Vendor unterstützt für FW < 4.2 die alte 1.0 °C-Variante:
+**Command** `0x06 {enable} {duration_min/5} {motor_pos+delta}` — eigene
+Encoder-Funktion, eigene Payload-Struktur (5 Bytes statt 4). In
+9.11x.b NICHT implementiert. Bulk-Skript skipped Devices mit FW<4.2
+und gibt einen Hinweis im Output. Bei Bedarf manuell:
+
+**SSH (heizung-test, root):**
+
+```bash
+# Beispiel: enable, 20 Min, motor-pos 540, delta 3.0 °C
+docker exec deploy-api-1 python -c "
+import asyncio, base64
+from heizung.services.downlink_adapter import send_raw_downlink
+asyncio.run(send_raw_downlink(
+    'aabbccdd11223344',
+    bytes([0x06, 0x01, 0x04, 0x1C, 0x23]),
+))
+"
+```
+
+(`0x0601041C23` aus Vendor-Cheat-Sheet, FW < 4.2.)
+
+### 10e.6 Hardware-Kältepack-Test (T1 aus Sprint 9.11)
+
+Verifiziert Vicki-Open-Window-Algorithmus physikalisch — nur sinnvoll
+nach erfolgreicher 0x45-Aktivierung und außerhalb der Heizperiode
+(im Sommer ist der Δ-T sonst zu klein).
+
+**Vor Ort am Vicki:**
+
+1. Vicki demontieren oder im Raum nahe Sensor positionieren.
+2. **Kältepack** (z.B. Tiefkühlfach 5+ Min) direkt an die Vicki-Front
+   halten (interner Sensor sitzt im Display-Bereich).
+3. 1-2 Min Kontakt halten — interner Sensor soll von ~18 °C auf
+   ~4 °C fallen.
+4. Vicki sollte innerhalb 60-120 s `openWindow=true` melden (via
+   nächstem Periodic-Report sichtbar).
+5. Nach Test: Kältepack entfernen, 5 Min warten, dann sollte
+   `openWindow=false` zurückkommen.
+
+**SSH (heizung-test, root):** Live-Beobachtung:
+
+```bash
+docker exec heizung-postgres psql -U heizung -d heizung -c \
+  "SELECT time, temperature, open_window
+   FROM sensor_reading sr JOIN device d ON sr.device_id = d.id
+   WHERE d.dev_eui = '70b3d52dd3034de4'
+   ORDER BY time DESC LIMIT 5;"
+```
+
+### 10e.7 Audit-Log-Patterns
+
+**SSH (heizung-test, root):** alle Vicki-Konfig-Reports zeigen:
+
+```bash
+journalctl -u deploy-api --since "1 hour ago" | grep "MAINTENANCE_VICKI_CONFIG_REPORT"
+# Beispiel-Output:
+# event_type=MAINTENANCE_VICKI_CONFIG_REPORT dev_eui=70b3d52dd3034de4 enabled=True duration_min=10 delta_c=1.5
+```
+
+FW-Persist-Events:
+
+```bash
+journalctl -u deploy-api --since "1 hour ago" | grep "firmware_version persistiert"
+# Beispiel-Output:
+# firmware_version persistiert dev_eui=70b3d52dd3034de4 fw=4.5
+```
+
+Downlink-Send-Events (alle Commands):
+
+```bash
+journalctl -u deploy-api --since "5 minutes ago" | grep "downlink gesendet"
+# Beispiel-Output:
+# downlink gesendet dev_eui=70b3d52dd3034de4 cmd=0x04 topic=application/...
+# downlink gesendet dev_eui=70b3d52dd3034de4 cmd=0x45 topic=application/...
+# downlink gesendet dev_eui=70b3d52dd3034de4 cmd=0x46 topic=application/...
+```
+
+### 10e.8 Re-Run-Idempotenz
+
+Bulk-Skript ist idempotent:
+
+- `0x04`: stateless, Vicki antwortet jedes Mal mit aktueller FW.
+- `0x45`: setzt OW-Konfig (überschreibt, kein additives Verhalten).
+  Re-Run mit gleichen Parametern → identische Hardware-Konfig, kein
+  Schaden.
+- `0x46`: read-only, keine Hardware-Aktion.
+
+Re-Run-Indikation:
+
+- Nach Codec-Re-Paste (RUNBOOK §10c) — alle Devices haben evtl. neue
+  FW-Strings.
+- Nach Hardware-Tausch eines Vickis.
+- Nach Sprint-Update mit geänderten OW-Defaults.
 
 ---
 

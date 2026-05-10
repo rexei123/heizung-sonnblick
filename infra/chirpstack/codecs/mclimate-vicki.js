@@ -15,8 +15,19 @@
 // senden (Annahme aus 9.0 war falsch, siehe CLAUDE.md §5.21). Der
 // Command-Byte (bytes[0]) ist die einzige verlaessliche Quelle:
 //   0x52  -> Setpoint-Reply (decodeCommandReply)
+//   0x04  -> FW-Query-Reply (Sprint 9.11x.b, decodeCommandReply)
+//   0x46  -> Open-Window-Status-Reply (Sprint 9.11x.b, decodeCommandReply)
 //   sonst -> Periodic Status Report (decodePeriodicReport)
 // fPort wird damit redundant fuer das Routing.
+//
+// Sprint 9.11x.b (2026-05-10): Drei neue Downlinks gemaess AE-48:
+//   0x04        -> FW-Query (Antwort: 0x04 HW_maj HW_min FW_maj FW_min)
+//   0x4501020F  -> Open-Window-Detection an (Vendor-Bytes, FW>=4.2)
+//   0x46        -> Open-Window-Detection-Status abfragen
+// Vendor-Doku: docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md.
+// Backend-Helper-Architektur (Spiegel) in
+// backend/src/heizung/services/downlink_adapter.py — Drift-Schutz via
+// pytest-Spiegel-Test (siehe backend/tests/test_codec_mirror.py).
 //
 // === Uplinks ===
 //
@@ -58,7 +69,7 @@ function decodeUplink(input) {
     // Vickis schicken Periodic-Reports auf fPort 2 (Live-Beleg
     // 2026-05-07: dev_eui 70b3d52dd3034de4, fPort=2, bytes[0]=0x81).
     var cmd = bytes[0];
-    if (cmd === 0x52) {
+    if (cmd === 0x52 || cmd === 0x04 || cmd === 0x46) {
         return decodeCommandReply(bytes);
     }
     return decodePeriodicReport(bytes);
@@ -178,6 +189,54 @@ function decodeCommandReply(bytes) {
         };
     }
 
+    // 0x04 = FW-Query-Reply (Sprint 9.11x.b)
+    // Vendor-Format: [0x04, HW_major, HW_minor, FW_major, FW_minor]
+    if (cmd === 0x04) {
+        if (bytes.length < 5) {
+            return {
+                data: { command: cmd, report_type: 'firmware_version_reply' },
+                errors: ['fw-query reply too short (' + bytes.length + ' bytes, expected 5)']
+            };
+        }
+        var hwMajor = bytes[1];
+        var hwMinor = bytes[2];
+        var fwMajor = bytes[3];
+        var fwMinor = bytes[4];
+        return {
+            data: {
+                report_type: 'firmware_version_reply',
+                command: cmd,
+                firmware_version: fwMajor + '.' + fwMinor,
+                hw_version: hwMajor + '.' + hwMinor
+            }
+        };
+    }
+
+    // 0x46 = Open-Window-Status-Reply (Sprint 9.11x.b)
+    // Vendor-Format: [0x46, enabled, duration_byte, delta_byte]
+    //   duration_min = duration_byte * 5
+    //   delta_c       = delta_byte / 10
+    if (cmd === 0x46) {
+        if (bytes.length < 4) {
+            return {
+                data: { command: cmd, report_type: 'open_window_status_reply' },
+                errors: ['open-window status reply too short (' + bytes.length + ' bytes, expected 4)']
+            };
+        }
+        var enabled = bytes[1] === 0x01;
+        var durationMin = bytes[2] * 5;
+        var deltaC = bytes[3] / 10.0;
+        return {
+            data: {
+                report_type: 'open_window_status_reply',
+                command: cmd,
+                open_window_detection_enabled: enabled,
+                open_window_detection_duration_min: durationMin,
+                open_window_detection_delta_c: parseFloat(deltaC.toFixed(2))
+            }
+        };
+    }
+
     return {
         data: { command: cmd, report_type: 'unknown_reply' },
         warnings: ['unknown command-reply 0x' + cmd.toString(16)]
@@ -203,6 +262,41 @@ function encodeDownlink(input) {
 
     if (data.force_window_redetect === true) {
         return { bytes: [0x05], fPort: 1, errors: errors };
+    }
+
+    // Sprint 9.11x.b — drei neue Commands (AE-48). Spiegel zum Backend-
+    // Helper backend/src/heizung/services/downlink_adapter.py. Drift-
+    // Schutz via tests/test_codec_mirror.py (hardcoded Erwartungs-Bytes).
+
+    // 0x04 — Firmware-Version abfragen.
+    if (data.query_firmware_version === true) {
+        return { bytes: [0x04], fPort: 1, errors: errors };
+    }
+
+    // 0x45 — Open-Window-Detection setzen (FW>=4.2, 0.1 °C-Resolution).
+    // Vendor-Format: [0x45, enabled, duration_min/5, delta_c*10].
+    if (typeof data.set_open_window_detection === 'object' && data.set_open_window_detection !== null) {
+        var owSet = data.set_open_window_detection;
+        var enabled = owSet.enabled === true;
+        var durationMin = owSet.duration_min;
+        var deltaC = owSet.delta_c;
+        if (typeof durationMin !== 'number' || durationMin < 5 || durationMin > 1275 || durationMin % 5 !== 0) {
+            errors.push('duration_min muss 5..1275 in 5-Min-Schritten sein');
+            return { bytes: [], fPort: 1, errors: errors };
+        }
+        if (typeof deltaC !== 'number' || deltaC < 0.1 || deltaC > 6.4) {
+            errors.push('delta_c muss 0.1..6.4 °C sein');
+            return { bytes: [], fPort: 1, errors: errors };
+        }
+        var enabledByte = enabled ? 0x01 : 0x00;
+        var durationByte = Math.floor(durationMin / 5);
+        var deltaByte = Math.round(deltaC * 10);
+        return { bytes: [0x45, enabledByte, durationByte, deltaByte], fPort: 1, errors: errors };
+    }
+
+    // 0x46 — Open-Window-Detection-Status abfragen.
+    if (data.get_open_window_detection === true) {
+        return { bytes: [0x46], fPort: 1, errors: errors };
     }
 
     errors.push('no actionable downlink fields in input.data');
