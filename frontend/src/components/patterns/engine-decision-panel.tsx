@@ -34,6 +34,7 @@ const LAYER_ORDER: EventLogLayer[] = [
   "manual_override",
   "guest_override",
   "window_safety",
+  "device_detached",
   "hard_clamp",
 ];
 
@@ -44,6 +45,7 @@ const LAYER_LABEL: Record<EventLogLayer, string> = {
   manual_override: "Manueller Override",
   guest_override: "Gast-Drehring",
   window_safety: "Fenster-Sicherheit",
+  device_detached: "Geraet-Sicherheit",
   hard_clamp: "Sicherheits-Limit",
 };
 
@@ -55,6 +57,7 @@ const REASON_LABEL: Record<CommandReason, string> = {
   preheat_checkin: "Vorheizen vor Check-in",
   checkout_setback: "Absenken nach Check-out",
   window_open: "Fenster offen",
+  device_detached: "Geraet abgenommen",
   guest_override: "Gast-Override",
   long_vacant: "Langzeit unbelegt",
   frost_protection: "Frostschutz",

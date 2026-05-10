@@ -1,9 +1,12 @@
-"""Sprint 9.10d - Engine-Trace-Konsistenz-Tests.
+"""Sprint 9.10d / 9.11x - Engine-Trace-Konsistenz-Tests.
 
 Stellt sicher, dass jede Engine-Eval einen vollstaendigen Schicht-Trace
-schreibt: alle 6 Layer (im Standard-Pfad) bzw. die Fast-Path-2-Layer
-(im Sommermodus). Komplementaer zu ``test_engine_layer3``/``layer4``,
-die jeweils eine einzelne Schicht in Tiefe testen.
+schreibt: alle 7 Layer (im Standard-Pfad) bzw. die Fast-Path-2-Layer
+(im Sommermodus). Komplementaer zu ``test_engine_layer3``/``layer4``/
+``layer4_detached``, die jeweils eine einzelne Schicht in Tiefe testen.
+
+Sprint 9.11x: Pipeline um ``DEVICE_DETACHED`` zwischen ``WINDOW_SAFETY``
+und ``HARD_CLAMP`` erweitert -> 6 Layer -> 7 Layer.
 
 DB-Tests skippen ohne ``TEST_DATABASE_URL``.
 """
@@ -73,16 +76,20 @@ async def _set_summer_mode(session: AsyncSession, *, active: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 1 - Summer inactive: 6 Layer in fixer Reihenfolge, Layer 0 is None
+# Test 1 - Summer inactive: 7 Layer in fixer Reihenfolge, Layer 0 is None
 # ---------------------------------------------------------------------------
 
 
-async def test_evaluate_room_emits_six_layer_steps_when_summer_inactive(
+async def test_evaluate_room_emits_seven_layer_steps_when_summer_inactive(
     db_session: AsyncSession, room_id: int
 ) -> None:
-    """Standard-Pfad (Winter, VACANT, kein Override, keine Reading):
-    Pipeline emittiert genau 6 LayerSteps in fixer Reihenfolge.
-    Layer 0 inactive traegt setpoint_c=None.
+    """Standard-Pfad (Winter, VACANT, kein Override, keine Reading, keine
+    Devices in Zone): Pipeline emittiert genau 7 LayerSteps in fixer
+    Reihenfolge. Layer 0 inactive traegt setpoint_c=None.
+
+    Sprint 9.11x: ``DEVICE_DETACHED`` neu zwischen ``WINDOW_SAFETY`` und
+    ``HARD_CLAMP``. Ohne Devices in der Zone gibt der Detached-Layer ein
+    Pass-Through mit ``detail="no_devices_in_zone"``.
     """
     await _set_summer_mode(db_session, active=False)
 
@@ -90,7 +97,7 @@ async def test_evaluate_room_emits_six_layer_steps_when_summer_inactive(
     assert result is not None
 
     layers = result.layers
-    assert len(layers) == 6
+    assert len(layers) == 7
 
     expected_order = [
         EventLogLayer.SUMMER_MODE_FAST_PATH,
@@ -98,11 +105,12 @@ async def test_evaluate_room_emits_six_layer_steps_when_summer_inactive(
         EventLogLayer.TEMPORAL_OVERRIDE,
         EventLogLayer.MANUAL_OVERRIDE,
         EventLogLayer.WINDOW_SAFETY,
+        EventLogLayer.DEVICE_DETACHED,
         EventLogLayer.HARD_CLAMP,
     ]
     assert [step.layer for step in layers] == expected_order
 
-    summer, base, temporal, manual, window, clamp = layers
+    summer, base, temporal, manual, window, detached, clamp = layers
 
     # Layer 0 inactive: kein Setpoint-Beitrag.
     assert summer.setpoint_c is None
@@ -115,12 +123,15 @@ async def test_evaluate_room_emits_six_layer_steps_when_summer_inactive(
     assert temporal.setpoint_c == base_sp
     assert manual.setpoint_c == base_sp
     assert window.setpoint_c == base_sp
+    assert detached.setpoint_c == base_sp
     assert clamp.setpoint_c == base_sp
 
     # Detail-Tokens (Layer 2/4: snake_case-Konvention; Layer 3: Fixstring).
     assert temporal.detail == "temporal_inactive"
     assert manual.detail == "no active override"
     assert window.detail in {"no_readings", "stale_reading", "no_open_window"}
+    # Fixture-Raum hat keine Heating-Zones -> Detached liefert Pass-Through.
+    assert detached.detail == "no_devices_in_zone"
 
 
 # ---------------------------------------------------------------------------
@@ -131,20 +142,22 @@ async def test_evaluate_room_emits_six_layer_steps_when_summer_inactive(
 async def test_evaluate_room_emits_six_layer_steps_when_summer_active(
     db_session: AsyncSession, room_id: int
 ) -> None:
-    """Sprint 9.10d Brief erwartet `Trotzdem 6 LayerSteps` auch im
+    """Sprint 9.10d Brief erwartet `Trotzdem alle LayerSteps` auch im
     Sommermodus. Aktuelle Engine-Logik fuehrt jedoch einen Fast-Path:
     bei ``ctx.summer_mode_active=True`` werden Layer 1-4 uebersprungen
     und nur ``(summer, clamp)`` emittiert (engine.py:649).
 
-    Fast-Path -> 6 Layer waere ein Engine-Refactor, der ueber Sprint
-    9.10d-Scope hinausgeht (S6: Komplexitaet traegt Beweislast). Test
-    ist daher ``xfail``: dokumentiert die Brief-Erwartung, blockt aber
-    keinen Merge. Wenn die Brief-Vorgabe nachgezogen werden soll, wird
-    der Fast-Path entfernt und der xfail-Marker fliegt raus.
+    Fast-Path -> volle Pipeline waere ein Engine-Refactor, der ueber
+    Sprint 9.10d-Scope hinausgeht (S6: Komplexitaet traegt Beweislast).
+    Test ist daher ``xfail``: dokumentiert die Brief-Erwartung, blockt
+    aber keinen Merge. Wenn die Brief-Vorgabe nachgezogen werden soll,
+    wird der Fast-Path entfernt und der xfail-Marker fliegt raus.
+
+    Sprint 9.11x: Erwartung von 6 -> 7 Layer angepasst (Detached neu).
     """
     pytest.xfail(
         "Sommer-Fast-Path liefert heute 2 Layer (summer, clamp); "
-        "Brief erwartet 6 — Engine-Refactor out-of-scope fuer 9.10d."
+        "Brief erwartet volle Pipeline — Engine-Refactor out-of-scope."
     )
 
     await _set_summer_mode(db_session, active=True)
@@ -153,7 +166,7 @@ async def test_evaluate_room_emits_six_layer_steps_when_summer_active(
     assert result is not None
 
     layers = result.layers
-    assert len(layers) == 6  # heute: 2 -> xfail
+    assert len(layers) == 7  # heute: 2 -> xfail
 
     summer = layers[0]
     assert summer.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
@@ -209,7 +222,7 @@ async def test_evaluate_room_layers_share_engine_evaluation_id(
         .all()
     )
 
-    assert len(rows) == 6, f"erwarte 6 EventLog-Rows pro Eval, gefunden {len(rows)}"
+    assert len(rows) == 7, f"erwarte 7 EventLog-Rows pro Eval, gefunden {len(rows)}"
     assert all(r.evaluation_id == eval_id for r in rows), (
         "alle LayerStep-Persistenz-Rows einer Eval muessen dieselbe "
         "evaluation_id tragen (engine_tasks.py:181)"

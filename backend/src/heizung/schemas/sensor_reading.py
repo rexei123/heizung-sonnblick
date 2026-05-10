@@ -22,6 +22,7 @@ class SensorReadingRead(BaseModel):
     rssi_dbm: int | None = None
     snr_db: Decimal | None = None
     open_window: bool | None = None
+    attached_backplate: bool | None = None
 
     @field_serializer("temperature", "setpoint", "snr_db")
     def _decimal_to_float(self, v: Decimal | None) -> float | None:
