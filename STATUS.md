@@ -1,32 +1,35 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in Arbeit.
+Stand: 2026-04-28. Sprints 0 (Baseline), 1 (GHCR-PAT-Rotation), 2 (Web-Healthcheck), 3 (UFW-Reaktivierung), 4 (Domain hoteltec.at) und 5 (LoRaWAN-Foundation lokal) abgeschlossen.
 
 ---
 
-## 1. Aktueller Stand
+## 1. Was läuft produktiv
 
-**Stichtag:** 2026-05-07
-**Aktueller Branch:** develop
-**Letzter Tag:** `v0.2.0-architektur-refresh`
-**Nächster Sprint:** 9.11a Geräte-Zuordnungs-API (siehe `docs/SPRINT-PLAN.md`)
-**Architektur-Refresh:** durchgeführt 2026-05-07, siehe
-`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
+### Test-System
+- **URL:** https://heizung-test.hoteltec.at
+- **Hetzner:** CPX22, `157.90.17.150`
+- **Tailscale:** `heizung-test` = `100.82.226.57`
+- **Branch:** `develop`, **GHCR-Tag:** `develop`
+- **Deploy-Mode:** GHCR Pull-Deploy via systemd-Timer, 5-Min-Intervall
+- **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
+- **Status:** ✅ Läuft, alle Container up, `web` (healthy)
 
-### Server heizung-test
+### Main-System
+- **URL:** https://heizung.hoteltec.at
+- **Hetzner:** CPX32, `157.90.30.116`
+- **Tailscale:** `heizung-main` = `100.82.254.20`
+- **Branch:** `main`, **GHCR-Tag:** `main`
+- **Deploy-Mode:** Identisch zu Test (Pull-Deploy + Auto-Migration)
+- **UFW:** aktiv (22/80/443 + tailscale0)
+- **TLS:** Let's Encrypt via Caddy (Auto-Renewal)
+- **Status:** ✅ Läuft, alle Container up, `web` (healthy), Auto-Migration erfolgreich gelaufen
 
-- **IP:** `157.90.17.150` (Hetzner)
-- **App** (Frontend + API): https://heizung-test.hoteltec.at
-  - [Annahme] FastAPI ist auf derselben Domain unter `/api/v1`
-    erreichbar (Caddy-Reverse-Proxy). Falls API auf eigener Subdomain:
-    Brief korrigieren.
-- **ChirpStack** (LoRaWAN-Network-Server): https://cs-test.hoteltec.at
-- **LoRaWAN-Gateway** (LAN-only, nicht öffentlich): siehe `RUNBOOK.md` §10a.2
-- **DB-Zugang** (PostgreSQL/TimescaleDB via SSH-Tunnel): RUNBOOK-Sektion fehlt, siehe Backlog OP-5
-
-### Server heizung-main
-
-Noch nicht produktiv. Bootstrap in Sprint 12 (siehe `docs/SPRINT-PLAN.md`).
+### Entwicklungs-Client
+- **Hostname:** `work02` (Tailscale = `100.78.38.29`)
+- **Git-Repo:** `C:\Users\User\dev\heizung-sonnblick`
+- **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung`
 
 ---
 
@@ -375,302 +378,6 @@ Ziel: Heizung steuert sich selbst. Belegung POST → Regel-Engine → Downlink a
 
 ---
 
-## 2m. Sprint 9.8c Hygiene-Sprint (2026-05-05, abgeschlossen)
-
-Ziel: Repo-Hygiene zwischen Sprint 9.8 und Sprint 9.9. Veraltete Doku, Windows-Build-Bug, Lint-Warnings, fehlende Backlog-Notiz.
-
-**Tasks:**
-
-- ✅ **T0a CLAUDE.md auf Sprint 9.8 ziehen** — Mojibake bereinigt, §1 Stand auf 9.8c gezogen, §3 Goldene Regeln 4/6/7 erweitert, §3 Regel 10 ersetzt durch Claude-Code-Workflow, §4 Container-Stack vollständig (13 Services + 2 Init-Sidecars), §5.2 als HISTORISCH markiert. PR #84.
-- ✅ **T0b STATUS.md auf Sprint 9.8 ziehen** — Header-Datum 2026-05-05, §4 Architektur-Stand mit Versionen + 14 Modellen + Engine-Status, §5 neue Routen-Übersicht (Frontend-Pages + Backend `/api/v1/...`), §5a alte Doku-Sektion umbenannt, §6 Pipeline-Modell, §9 Tag-Tabelle vollständig (10 Tags). PR #85.
-- ✅ **T1 Windows-Build-Reparatur** — `frontend/src/app/icon.tsx` (next/og ImageResponse, brach Windows-Build mit „Invalid URL") durch statisches `icon.png` ersetzt (512×512, Brand-Rosé `#DD3C71`, Roboto Bold „H" via System.Drawing). PR #86.
-- ✅ **T2 Backlog-Notiz e2e-Smoketests** — STATUS.md §6 ergänzt um Mini-Sprint-Notiz für Sprint-8-Routen-e2e-Coverage (Architektur-Entscheidung Mocking vs. Container in CI offen). Commit `57be5af` auf chore-Branch.
-- ✅ **T5 ESLint-Warnings beheben** — Material-Symbols-Outlined selbst gehostet (Static-Cut v332, 309 KB woff2, Apache 2.0), `<head>`-Block aus `layout.tsx` entfernt. Beide Warnings (`google-font-display`, `no-page-custom-font`) weg, DSGVO-Vorteil (keine Direktladung von fonts.googleapis.com). PR #87.
-- ✅ **T6 README + Abschluss-Doku** — README-Status, Stack-Sektion mit Versionen + Engine + DSGVO-Hinweis, ADR-Range AE-38, Tag-Tabelle bis v0.1.9-rc1. STATUS.md §2m + §6 finalisiert.
-
-**Tag-Vergabe:** Keiner. Hygiene-Sprint ohne Funktions-Änderung.
-
-**Lessons Learned:**
-- Render-Wrap-Artefakt bei langen PowerShell-Skript-Zeilen — Lösung: Type-Aliase + Backtick-Continuation, alle Zeilen <80 Zeichen halten.
-- curl-WD-Bug: relative Pfade im curl `-o`-Argument hängen WD-Prefix dran; Bash-Tool persistiert WD zwischen Calls nicht zuverlässig. Lehre: absolute Pfade oder `cd` zum Repo-Root vor curl.
-- Material-Symbols Variable-Font ist 3.74 MB, Static-Cut 309 KB. Subset auf tatsächlich genutzte Glyphen scheitert am dynamischen `{children}`-Pattern in Icon-Components.
-- `npm run build` validiert URL-References in CSS NICHT zur Build-Zeit — Asset-Existenz wird erst zur Runtime im Browser geprüft. Lokaler Build kann grün sein trotz fehlender Asset.
-
----
-
-## 2n. Sprint 9.8d shadcn/ui-Migration (2026-05-05/06, abgeschlossen)
-
-Ziel: shadcn/ui als Foundation für Frontend-Komponenten einführen, bestehende Komponenten schrittweise migrieren. Brand-Identität (Design-Strategie 2.0.1) bleibt erhalten.
-
-**Tasks:**
-
-- ✅ **T1 shadcn-Foundation** (PR #89, Commit `513fb84`): shadcn 2.1.8 (Tailwind-v3-kompatibel) initialisiert. `components.json` mit `style: default`, `baseColor: slate`, `iconLibrary: lucide`. `tailwind.config.ts` erweitert um `darkMode: ["class"]`, 11 shadcn-Color-Slots (`background`, `foreground`, `card`, `popover`, `secondary`, `muted`, `accent`, `destructive`, `input`, `ring`), `plugins: tailwindcss-animate`. `globals.css` um 19 HSL-Tokens in `@layer base { :root }` erweitert, `--primary` und `--ring` auf Brand-Rosé `#DD3C71` (HSL `340.3 70.3% 55.1%`). Bestehende Custom-Tokens (`--color-*`, `borderRadius`, `fontFamily.sans`) byteweise erhalten. Neue Dependencies: `class-variance-authority ^0.7.1`, `lucide-react ^1.14.0`, `tailwindcss-animate ^1.0.7`. Build grün, 12 Routes.
-- ✅ **T2 Button-Migration** (PR #90, Commit `4956ae3`): `button.tsx` auf cva-Pattern umgestellt. 5 Variants erhalten (`primary`, `add`, `secondary`, `destructive`, `ghost`), 3 Sizes erhalten (`sm`, `md`, `lg`), Custom Props erhalten (`icon`, `iconSize`, `loading`). `asChild`-Prop ergänzt via `@radix-ui/react-slot ^1.2.4` (shadcn-Standard). `secondary` und `destructive` bewusst Outline statt shadcn-Default-solid (Design-Strategie 2.0.1 §6.1). API abwärtskompatibel — alle 10 importierenden Files (5 Pages + 4 Patterns + ConfirmDialog) compilieren ohne Änderung. Visuelle Cowork-QA gegen heizung-test bestätigt: alle Variants spec-konform, B-1 (Focus-Ring) nach Live-Deploy WCAG 2.4.7 erfüllt.
-- ✅ **T3 ConfirmDialog-Migration** (PR #92, Commit `b49cd7e` Initial-Migration; Hotfix PR #94, Commit `54ad897` Button-Stil + ESC-Safety-Net; Final-Hotfix PR #95, Commit `ee3d51a` Radix-natives `onEscapeKeyDown`): `ConfirmDialog` rendert intern Radix `AlertDialog`, externe Props-API unverändert, alle 4 Call-Sites kompilieren ohne Touch. Cowork-QA: alle DOM-Marker bestätigt (`role="alertdialog"`, `data-state`, `aria-describedby`, Fokus-Trap, Initial-Fokus auf Cancel), Button-Stil nach Spec (destructive-Outline), ESC schließt, Outside-Click blockiert.
-- ✅ **T4 Vorrats-Komponenten** (PR #93, Squash-Merge `3067df01`): `dialog.tsx` (122 Z.), `select.tsx` (160 Z.), `input.tsx` (22 Z.) via `npx shadcn@2.1.8 add dialog select input`. Keine Call-Sites, reine Vorratshaltung. Dependencies: `@radix-ui/react-dialog ^1.1.15`, `@radix-ui/react-select ^2.2.6`.
-
-**Tag-Vergabe:** Keiner. Final-Tag `v0.1.9-engine` kommt nach Sprint 9.9–9.12 wie geplant.
-
-**Lessons Learned:**
-- shadcn 2.1.8 schreibt **OKLCH** in `globals.css`, aber `hsl(var(--xxx))`-Wrapper in `tailwind.config.ts` — interne Inkonsistenz, kaputte Farben zur Laufzeit. Workaround: tailwind-config + globals.css revertieren, manuell **HSL** in beiden konsistent setzen.
-- shadcn 2.1.8 verweigert Init bei existierender `components.json` ("To start over, remove the components.json file"). Pre-write + Init scheitert. Pfad: `rm components.json` → `init --defaults` → manuell überschreiben.
-- Auto-Init in `tailwind.config.ts` zerstört bestehende Custom-Tokens (`colors.primary` mit hover/active/soft, `colors.border`, `borderRadius.sm/md/lg`). **Revert + hand-crafted Merge** ist der einzige sichere Weg.
-- cva-Base-Klasse: `focus-visible:outline-none` ohne Ersatz-Ring ist A11y-Bug (WCAG 2.4.7). **Pflicht:** explizit `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background` anhängen.
-- Material Symbols Variable-Font ist 3.74 MB, Static-Cut 309 KB — Subset-Refactor scheitert am dynamischen `{children}`-Pattern in Icon-Components (T1-Backlog).
-- `heizung-test` deploy-pull-Service braucht `git config --system --add safe.directory ...`. **`--global` greift im systemd-Service-Kontext nicht** trotz `User=root` und `HOME=/root` (vermutlich systemd-Sandbox). Siehe CLAUDE.md §5.7 Korrektur.
-- shadcn-Generate referenzieren teils `buttonVariants({variant:"outline"})`. T2-Button hat kein `outline` → TS-Strict-Bruch. Anpassung auf `"secondary"` in `alert-dialog.tsx` nötig. Bei `dialog`/`select`/`input` nicht aufgetreten.
-- shadcn-`AlertDialogAction`/`AlertDialogCancel` rendern per Default `buttonVariants()` im Wrapper-Element. Mit `asChild` + T2-Button als Child gewinnt der Wrapper-Default die Tailwind-Cascade gegen die Child-Variante → Button rendert solid statt Outline. Fix: `buttonVariants` aus `alert-dialog.tsx` entfernen, `asChild` greift dann sauber durch.
-- Radix-`AlertDialog` nutzt `useEscapeKeydown` auf document-Level. Ein React-`onKeyDown` auf `AlertDialogContent` feuert nicht — Radix fängt das Event davor ab. Korrektur: Radix-native Prop `onEscapeKeyDown` direkt auf `AlertDialogContent` setzen, mit `if (loading) event.preventDefault()` als einziger Override.
-- "Build grün + API-kompatibel" ist KEIN Migrationsnachweis bei Komponenten-Migrationen. Pflicht-Akzeptanzkriterium ab jetzt: DOM-Marker-Check im laufenden Browser (z.B. `document.querySelector('[role="alertdialog"]')`).
-- Live-QA von Feature-Branches setzt Merge nach `develop` voraus (heizung-test pullt `:develop`-Tag). Reihenfolge ab jetzt: Phase 2 → CI → Merge → Deploy → QA. T3.4/T3.5-Trennung obsolet.
-- PowerShell `;` ist nicht `&&` — `Set-Location`-Fehler bricht nicht ab, nachfolgendes `npx` läuft trotzdem. Vor `shadcn add` immer `Get-Location` verifizieren.
-- Browser-Cache nach Frontend-Deploy: Hard-Reload (Strg+Shift+R) ist Pflicht-Schritt vor jeder Live-QA. Sonst falsche Befunde am alten Bundle.
-
-## 2o. Sprint 9.9 Manual-Override / Engine Layer 3 (2026-05-06, abgeschlossen)
-
-Ziel: Engine berücksichtigt manuelle Setpoint-Übersteuerungen aus Vicki-Drehknopf und Frontend-Rezeption mit definierten Ablaufzeiten und Sicherheitsnetzen. Quelle und Hardware via Adapter-Pattern abstrahiert (siehe AE-39).
-
-**Tasks:**
-
-- ✅ **T1 Datenmodell + Migration** (`2ba7693`): `manual_override`-Tabelle, `OverrideSource`-Enum, Pydantic-Schemas, Alembic `0008_manual_override`. INTEGER-PK/FK statt UUID (Repo-Konvention), Index ohne `NOW()` im Predicate.
-- ✅ **T2 `override_service` Domain-Logik** (`d1bb99e`): 7 Funktionen (`compute_expires_at`, `create`, `get_active`, `get_history`, `revoke`, `revoke_device_overrides`, `cleanup_expired`). Decimal-Hygiene + 7-Tage-Hard-Cap für alle Quellen.
-- ✅ **T3 Engine Layer 3** (`bdb2af7` + `2 fixes`): `layer_manual_override` in `rules/engine.py` zwischen Layer 2 und Layer 5. Läuft IMMER (auch no-op) für Trace-Sichtbarkeit. `LayerStep.extras: dict | None` additive Erweiterung; `engine_tasks` merged ins `event_log.details`-JSONB.
-- ✅ **T4 REST-API** (`534d708` + 5 fixes): `GET/POST /api/v1/rooms/{id}/overrides`, `DELETE /api/v1/overrides/{id}`. `X-User-Email`-Header → `created_by`. `frontend_checkout` ohne Belegung → 422.
-- ✅ **T5 Vicki Device-Adapter** (`a3e32aa` + 2 fixes): Diff-Detection gegen letzten ControlCommand mit Toleranz-Modi (`0.6` für fPort 1, `0.1` für fPort 2) und 60s-Acknowledgment-Window. Hook im `mqtt_subscriber` für beide Pfade. `next_active_checkout` in `services/occupancy_service` konsolidiert.
-- ✅ **T6 PMS-Auto-Revoke** (`cc09a34`): Hook `auto_revoke_on_checkout` in `services/override_pms_hook`. `OCCUPIED → VACANT` ohne Folgegast in 4 h → revokt nur `device`-Overrides, Frontend bleibt. Lazy-Import in `sync_room_status` gegen Circular.
-- ✅ **T7 Daily-Cleanup-Job** (`d3274d7`): celery_beat-Task `heizung.cleanup_expired_overrides` `crontab(hour=3, minute=0)`. Eigene Engine pro Run (Pool-Pollution-Fix Sprint 9.7a).
-- ✅ **T8 Frontend Override-UI** (`e5aed26`): 5. Tab „Übersteuerung" auf `/zimmer/[id]`. Aktiv/Anlage-Card + Historie-Tabelle. T4-Vorrats-Komponenten (Input, Select) genutzt. Decimal als String durchgängig.
-- ✅ **T9 Engine-Decision-Panel-Erweiterung** (Teil von T9-Commit): Layer-3-Detail mit Source-Badge + `expires_at` + Restzeit-Countdown. Helper `useRemainingTime` + Source-Mappings nach `lib/overrides-display.ts` extrahiert.
-- ✅ **T10 Doku** (Merge-Commit): AE-39 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`, Feature-Brief in `docs/features/`, STATUS.md §2o, CLAUDE.md §6 Pre-Push-Routine.
-
-**Tag-Vergabe:** Keiner. Final-Tag `v0.1.9-engine` kommt nach Sprint 9.10–9.12.
-
-**Lessons Learned:**
-- `ruff format` kollabiert Single-Line-Funktionssignaturen unter 100 Zeichen — multi-line nur wenn echt zu lang. T1–T5 haben das in 5 Format-Iterationen gelernt.
-- Ruff-isort-Default klassifiziert `alembic` (Top-Level) als first-party (wegen `backend/alembic/`-Verzeichnis), `alembic.config` als third-party. Imports landen in unterschiedlichen Sections — kontraintuitiv, aber linter-erzwungen.
-- `room.number` ist `VARCHAR(20)` — Test-Suffixe vorab gegen Schema-Limits prüfen.
-- API-Tests mit DB: `httpx.AsyncClient` + `ASGITransport` + `app.dependency_overrides[get_session]` für Pool-Sharing zwischen Setup und App. `alembic upgrade head` als `pytest_asyncio.fixture(scope="module", autouse=True)` mit `asyncio.to_thread` (alembic env.py macht intern `asyncio.run` und kollidiert sonst mit pytest-asyncio-Loop).
-- `LayerStep`-Erweiterung um optional `extras: dict[str, Any]`: additive Änderung, JSONB-flexibel, kein Schema-Update am Engine-Trace-Endpoint nötig.
-- Lazy-Import bei Service↔Service-Circular-Risiko (z.B. `override_pms_hook` ↔ `occupancy_service`). Backlog-Item: `services/_common.py` für plattformneutrale Helpers.
-- **Pre-Push-Toolchain** (CLAUDE.md §6) spart 1–2 Min pro Task gegenüber CI-only-Workflow. T6–T8 hatten CI-grün auf Anhieb; T1–T5 hatten zusammen ca. 15 Min Format-Iteration.
-- `next_active_checkout`/`next_active_checkin` in `services/occupancy_service` zentral konsolidiert — von API, Engine, PMS-Hook und Device-Adapter geteilt. `rules/engine._load_room_context` behält die Inline-Query (anderer Lifecycle).
-
----
-
-## 2p. Sprint 9.10 Window-Detection / Engine Layer 4 (2026-05-07, abgeschlossen)
-
-Ziel: Engine reagiert auf Vicki-Fenster-offen-Sensor und senkt den Setpoint auf System-Frostschutz, solange ein frisches Reading `open_window=true` meldet. Race-Condition aus dem MQTT-Reading-Trigger gleich mit-gefixt (T3.5 vorgezogen).
-
-**Tasks:**
-
-- ✅ **T1 Persistenz-Fix `sensor_reading.open_window`**: Migration `0009_sensor_reading_open_window` (Boolean NULL), Modell + `SensorReadingRead`-Schema erweitert, MQTT-Subscriber liest `obj.openWindow` (camelCase wie vom Codec geliefert). NULL = Feld fehlte im Payload, NICHT False. 3 neue Pytests (true / false / missing→None).
-- ✅ **T2 Engine Layer 4 Window-Detection**: `layer_window_open` in `rules/engine.py` zwischen Layer 3 (Manual) und Layer 5 (Clamp). DISTINCT-ON-Query `SensorReading → Device → HeatingZone.room_id`, Filter `now - 30min`. Aktiv → `MIN_SETPOINT_C=10` + `reason=WINDOW_OPEN` + extras `{open_zones, occupancy_state}`. Passthrough mit Detail-Diagnose `no_readings | stale_reading | no_open_window`. Signatur erweitert um `room_status`/`now` für Test-Determinismus. 7 DB-Tests, alle gegen echte TimescaleDB grün.
-- ✅ **T3 Re-Eval-Trigger im MQTT-Subscriber**: `_persist_uplink` ruft nach `commit()` `evaluate_room.delay(room_id)` über Device→HeatingZone-Join. Edge-Case `device.heating_zone_id IS NULL` → Warning-Log, kein Trigger. 2 neue Pytests (mocked `SessionLocal` + `evaluate_room.delay`).
-- ✅ **T3.5 Engine-Task-Lock via Redis-SETNX (vorgezogen aus 9.10a)**: `services/engine_lock.py` mit `try_acquire(room_id, ttl_s=30)` / `release(room_id)`. `evaluate_room` umrahmt: SETNX-Acquire → bei Konflikt `apply_async(countdown=5)` (kein Drop, Re-Trigger), sonst `try/finally` mit `release`. ADR **AE-40** dokumentiert die Entscheidung. Aspirativer celery_app.py-Kommentar aus Sprint 9.6 ersetzt durch Verweis auf AE-40. 8 Pytests (FakeRedis-Mock × 4 + Task-Wrapper × 4) plus Live-Smoke gegen Compose-Stack: 10 Threads gegen denselben Lock → genau 1 gewinnt; 5×`evaluate_room.delay` → alle 5 `lock_busy_retriggered`, danach Re-Trigger-Generationen konvergieren in `skipped_no_room`. Bonus: 1631 Null-Bytes im ADR-File mit-bereinigt (CLAUDE.md §5.2-Pollution).
-- ✅ **T4 Frontend Window-Indikator im Engine-Panel**: `WindowOpenIndicator` + `extractWindowOpenSince` in eigener Datei `engine-window-indicator.tsx` (kein TanStack-Query-Plumbing für Proof-Script). Material-Symbol-Glyph **`window`** als Static-Cut-Fallback (`sensor_window_open` per fonttools-Inspektion NICHT im 317-KB-Subset enthalten — Backlog B-9.10-3). Brand-Rosé `text-primary`, Tooltip `Fenster offen seit HH:MM` (de-AT), DOM-Marker `data-testid="window-open-indicator"`. Mock-Render-Beweis via `scripts/dom-marker-proof.tsx` (`renderToString`): positiver Pfad rendert Marker, 3 negative Pfade (leer / kein window_safety / fehlendes Feld) rendern keinen.
-- ✅ **T5 Sprint-Doku + Backlog**: dieser STATUS.md-Eintrag, CLAUDE.md §1 + neue Lessons §5.18 / §5.19, AE-40 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`.
-
-**Engine-Pipeline-Stand:** Layer 0 / 1 / 2 / 3 / **4 (NEU)** / 5 + Hysterese — alle aktiv. Layer 4 überschreibt auch Manual-Override → Sicherheit > Komfort.
-
-**Test-Stand:** 190 passed (vorher 182 + 7 Layer-4-DB-Tests + 8 Lock-Tests + 2 T3-Trigger-Tests + 3 open_window-Mapping-Tests). Pre-existing psycopg2-Failures in `test_manual_override_model.py` (7 Errors) + `test_migrations_roundtrip.py` (3 Failures) sind unverändert — kein 9.10-Bezug, Backlog für nächsten Hygiene-Sprint.
-
-**Worker-Setup-Hinweis:** Dev-Compose hat keinen `celery_worker`-Service. Lokaler Worker-Aufruf für T3.5-Smoke unter Windows:
-
-```powershell
-celery -A heizung.celery_app worker --concurrency=2 --pool=threads `
-       --without-heartbeat --without-gossip --without-mingle -Q heizung_default
-```
-
-`--pool=threads` statt prefork (Windows-Limitation). Die Compose-Erweiterung um einen `celery_worker`-Container wäre eigener Mini-Sprint.
-
-**Ad-hoc-Frage „evaluate_room für nicht-existente room_id":** sauber abgefangen. `engine_tasks.py:127-132` returnt `{status: "skipped_no_room"}` mit `WARNING`-Log und ohne State-Mutation, wenn `_engine_evaluate_room` `None` liefert. Im T3.5-Live-Smoke gegen Room=99999 wurde dieser Pfad ~10x durchlaufen — keine Side-Effects, keine Exceptions.
-
-**Tag-Vergabe:** Vorschlag `v0.1.9-rc3-window-detection` nach Sprint-Merge. Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
-
-**Lessons Learned:**
-- **Test-Fixtures müssen Schema-Constraints respektieren**: `room.number` ist `VARCHAR(20)`, `device.dev_eui` ist `VARCHAR(16)`. Mein erster Layer-4-Fixture-Suffix `t9-10-l4-{HHMMSSffffff}` (21 Zeichen) hat alle 7 Tests gleichzeitig gekippt. Robuste Suffix-Strategie: `uuid.uuid4().hex[:8]` + kurzer Präfix (3-5 Zeichen) — passt in alle bekannten String-Limits dieses Repos.
-- **Live-DB-Verify ist Pflicht-Schritt zwischen DB-erzeugenden und DB-konsumierenden Tasks**: T1 hat `0009_sensor_reading_open_window` geschrieben, T2 hat darauf gebauten Engine-Code geschrieben. Erst der explizite Zwischen-Schritt — Compose-Stack hochfahren, `alembic upgrade head` gegen echte TimescaleDB, `pytest mit TEST_DATABASE_URL` — hat den `String(20)`-Bug aufgedeckt. Pure-Function-Tests laufen lokal grün, aber blind. Ergänzung zur Pre-Push-Routine in §6 angedacht für nächsten Hygiene-Sprint.
-- **Aspirative Code-Kommentare sind Doku-Drift**: `celery_app.py:60-61` versprach seit Sprint 9.6 einen Redis-SETNX-Lock, der nie geliefert wurde. Drei Folgesprints haben Tasks darauf gestapelt, ohne dass der Lock real war. Pflicht-Stop-Trigger: TODO/FIXME/„kommt in Sprint X" in produktiver Steuer- oder Sicherheitslogik gehört in den Sprint-Plan, nicht als Kommentar im Code.
-- **Static-Cut-Fonts brauchen Glyph-Inventarisierung vor UI-Design**: `fontTools.ttLib.TTFont('...woff2').getBestCmap()` listet alle ~4300 enthaltenen Glyphen. `sensor_window_open` (vom Brief gewünscht) ist NICHT enthalten, `window` (Brief-Fallback) ist enthalten. Static-Cut-Erweiterung erfordert eigenen Mini-Sprint mit Re-Generation des Subset-Fonts → Backlog B-9.10-3.
-- **`tsx`-Runner mit Path-Aliases + JSX**: bei `package.json` ohne `"type": "module"` transpilieren `.tsx`-Dateien zu CJS — named imports aus `.mjs`-Entry sehen nur `default` + `module.exports`. Saubere Lösung: Proof-Script selbst als `.tsx`, plus einmal `import * as React from "react"` im Helper (Tree-Shaking macht das im Next.js-Build wieder weg).
-
----
-
-## 2q. Sprint 9.10b Stabilitätsregeln-Verankerung (2026-05-07, abgeschlossen)
-
-Ziel: Stabilität als oberste Systemregel und Autonomie-Default für Claude Code formal im Repo verankern. Reine Governance-Doku, kein Code-Pfad, kein CI-Risiko. Anlass: Race-Condition aus Sprint 9.10 (siehe §5.20 / AE-40) hat gezeigt, dass Stabilitätsprinzipien explizit gemacht werden müssen, statt implizit auf Sprint-Ebene auszuhandeln.
-
-**Tasks:**
-
-- ✅ **T1 CLAUDE.md §0 — Stabilitätsregeln S1-S6** (oberste Priorität, vor §1) inkl. Eskalations-Regel und expliziten Nicht-Zielen. Bestehende §-Nummerierung unverändert.
-- ✅ **T2 CLAUDE.md §0.1 — Autonomie-Default Stufe 2** (Pflicht-Stops 1-9, Auto-Continue-Liste, Berichts-Format, Eskalation bei Unsicherheit, Sprint-spezifische Stufen 1/2/3).
-- ✅ **T3 CLAUDE.md §2 Pflicht-Lektüre** um Punkt 0 (Verweis auf §0 + §0.1) erweitert; Punkte 1-6 unverändert.
-- ✅ **T4 ADR AE-41** in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` angelegt — Format konsistent zu AE-40 (Status / Kontext / Entscheidung / Konsequenzen / Querverweise).
-- ✅ **T5 README.md** um Abschnitt „Stabilitätsregeln" zwischen Dokumentation und Stack ergänzt — kein Vollabdruck, nur Verweis auf CLAUDE.md §0 + §0.1.
-- ✅ **T6 Sprint-Brief** `docs/features/2026-05-07-sprint9-10b-stability-rules.md` + dieser STATUS-Eintrag.
-
-**Tag-Vergabe:** Keiner — Governance-Sprint, kein Feature.
-
-**Verweise:** CLAUDE.md §0, §0.1, §2 (Pflicht-Lektüre Punkt 0), ADR AE-41.
-
-**Test-Stand:** unverändert (kein Code-Pfad).
-
----
-
-## 2r. Sprint 9.10c Vicki-Codec-Decoder-Fix (2026-05-07, abgeschlossen)
-
-Ziel: Cowork-QA aus Sprint 9.10 hatte aufgedeckt, dass `sensor_reading` nur `fcnt/rssi/snr` befüllt, alle aus dem Codec-`object` gelesenen Felder (`temperature/setpoint/valve_position/battery_percent/open_window`) seit dem Sprint-9.0-Codec-Refactor durchgängig NULL. Engine-Layer 1/4 hatten dadurch keine Ist-Daten — Sprint 9.11 (Live-Test #2) wäre blockiert.
-
-**Phase-0-Befund (H4, neu):** Codec-Routing-Bug. Die Vickis senden Periodic Status Reports auf **fPort=2** (cmd-Byte `0x81`). Der Codec routete `fPort===2` jedoch hartcodiert in `decodeCommandReply`, der nur `cmd=0x52` versteht — Periodics wurden als `unknown_reply` abgewürgt, kein Sensor-Feld im `object`. Live-Beleg per `mosquitto_sub` auf heizung-test (2026-05-07T10:00:04Z, dev_eui 70b3d52dd3034de4, fcnt 895): `{"fPort":2, "data":"gRKdYZmZEeAw", "object":{"command":129, "report_type":"unknown_reply"}}`.
-
-**Lösung:** Cmd-Byte-Routing über `bytes[0]` statt fPort. fPort wird redundant für das Routing.
-
-**Tasks:**
-
-- ✅ **T1a Codec-Fix** `infra/chirpstack/codecs/mclimate-vicki.js`: `decodeUplink` routet jetzt `cmd === 0x52 -> decodeCommandReply`, sonst `decodePeriodicReport`. Header-Kommentar um Sprint-9.10c-Eintrag erweitert. 4 neue Regression-Tests in `test-mclimate-vicki.js` (Periodic v2 auf fPort 2, Periodic v1 auf fPort 1, Setpoint-Reply auf fPort 2, Setpoint-Reply ohne fPort), Test 12 angepasst (vorheriges fPort-2-unknown-reply-Verhalten war ein Bug-Symptom). **19/19 Tests grün.**
-- ✅ **T1b Subscriber-Kommentar-Update** `services/mqtt_subscriber.py`: Sprint-9.0-Kommentar zu „fPort 2 = Reply" präzisiert auf `report_type == 'setpoint_reply'`. §5.20-Anwendung. Funktional unverändert.
-- ✅ **T1c ChirpStack-UI-Re-Paste** auf heizung-test: Codec im ChirpStack-Device-Profile „Heizung" durch Sprint-9.10c-Stand ersetzt (manueller UI-Schritt). Ab Strategie-Chat-Zeitstempel `2026-05-07 ~10:58` greift der neue Codec.
-- ✅ **T1d Backend-Pytest** `test_mqtt_subscriber.py`: neuer Test `test_map_to_reading_live_codec_output_fport2_periodic` mit vollem Live-Codec-Output-Fixture (fPort=2, cmd=0x81, alle Sensor-Felder). **141 passed, 62 skipped (lokal ohne TEST_DATABASE_URL).**
-- ✅ **T2 Live-Smoke heizung-test:**
-  - **Subscriber-Logs Vorher/Nachher:** bis 10:55:57 alle Vickis `temp=None setpoint=None`; ab 11:00:18 Vicki-001 (de4) `temp=22.71 setpoint=18.0`, gefolgt von de5/d7b/e53 mit jeweils echten Werten.
-  - **Postgres `sensor_reading`:** 4 frische Readings, alle Sensor-Felder befüllt, `open_window` jetzt explizit `false` statt NULL, Battery-Werte 33–42 % plausibel.
-  - **Engine-Trace Room 1** (evaluation `09007b00…`, 11:05:53Z): Layer 4 `window_safety` → `detail=no_open_window`, `open_zones=[]`, `occupancy_state=vacant` (Beweis: Layer 4 sieht **frische** Readings, alle `open_window=false` → no-op). Layer 3/1/5 konsistent.
-- ✅ **T3 Sprint-Doku:** dieser STATUS-Eintrag, CLAUDE.md §1 + §5.21 + §5.22, Sprint-Brief `docs/features/2026-05-07-sprint9-10c-codec-fix.md`, RUNBOOK §10 „Codec-Deploy auf ChirpStack" neu.
-
-**Test-Stand:** Codec-Tests 19/19 grün, Backend 141 passed + 62 skipped. **Live-Pipeline auf heizung-test wieder vollständig — alle 4 Vickis liefern befüllte Readings.**
-
-**Hinweis:** Codec-Deploy nach ChirpStack ist manueller UI-Schritt, kein Repo-Push-Effekt. Bootstrap-Skript via gRPC bleibt Backlog.
-
-**Lessons Learned:** CLAUDE.md §5.21 (Cmd-Byte > fPort beim Codec-Routing), §5.22 (ChirpStack-Codec-Deploy ist nicht automatisch).
-
-**Tag-Vergabe:** Strategie-Chat-Entscheidung. Vorschlag `v0.1.9-rc4-codec-fix`, weil sichtbare Zustandsänderung (Vickis liefern jetzt erst korrekt persistierte Werte). Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
-
----
-
-## 2s. Sprint 9.10d Engine-Trace-Konsistenz (2026-05-07, abgeschlossen)
-
-Ziel: Trace-Lücke in Layer 0 (Sommer) und Layer 2 (Temporal) schließen — bisher liefern beide Layer im No-Effect-Fall `None` zurück und tauchen damit gar nicht im `event_log` auf. Ergebnis: das Engine-Decision-Panel war als QA-Tool blind für diese Schichten. Zusätzlich Hysterese-Info im Frontend sichtbar machen, die heute zwar in `event_log.details.hysteresis_decision` persistiert wird, aber nirgends gerendert ist.
-
-**Phase-0-Befund:** Layer 0 und Layer 2 sind heute conditional (return None bei No-Effect), Layer 1/3/4/5 sind always-on. detail-Konvention heterogen: Layer 4 nutzt snake_case-Tokens (vorbildlich), Layer 1/2/3/5 nutzen f-string-Freitext. Hysterese ist kein eigener Layer, sondern wird in jedes LayerStep-`details`-JSONB gemerged (engine_tasks.py:188).
-
-**Architektur-Entscheidung:** `LayerStep.setpoint_c` von `int` auf `int | None` erweitert. None bedeutet "Layer hat keinen eigenen Setpoint-Beitrag" und ist ausschließlich für Layer 0 inactive zugelassen — Layer 0 hat als erste Schicht keinen Vorgänger, daher greift die "setpoint_in == setpoint_out"-Pass-Through-Konvention dort nicht. Alle anderen Layer garantieren weiterhin einen Integer-Wert.
-
-**Tasks:**
-
-- ✅ **T1 Layer 0 always-on** `backend/src/heizung/rules/engine.py:144`: `layer_summer_mode` liefert immer einen LayerStep. Active unverändert (`detail="summer_mode_active=true"`). Inactive: `setpoint_c=None`, `detail="summer_mode_inactive"`. Fast-Path-Gate in `evaluate_room` von `if summer is not None` auf `if ctx.summer_mode_active` umgestellt.
-- ✅ **T2 Layer 2 always-on** `backend/src/heizung/rules/engine.py:229`: `layer_temporal` liefert immer einen LayerStep. Aktive Pfade unverändert. Inactive: passthrough `base.setpoint_c` + `base.reason`, snake_case-Token-detail (`no_upcoming_arrival` / `outside_preheat_window` / `outside_night_setback` / `temporal_inactive`). Caller-Aufräumen: alle `if step is not None`-Branches in `evaluate_room` entfallen, Trace-Tupel ist nun unconditional `(summer, base, temporal, manual, window, clamp)`.
-- ✅ **T2.5 Schema + None-Sentinel** `engine.py` + `engine_tasks.py`: `LayerStep.setpoint_c: int | None`. Helper `_require_setpoint(step) -> int` für die fünf Stellen in `evaluate_room`, an denen Layer-1+-Setpoints typed an Folge-Schichten weitergegeben werden — Helper raised AssertionError mit Layer-Name, falls die Invariante verletzt wird (S3 Auditierbarkeit). `engine_tasks.py:184` Decimal-Wrap auf `setpoint_out` None-safe gemacht (Layer 0 inactive sonst TypeError). Frontend ist bereits null-aware (Type `string | null`, JSX rendert "—") — keine Änderung nötig.
-- ✅ **T3 Trace-Konsistenz-Tests** `backend/tests/test_engine_trace_consistency.py` (neu, 3 Tests, DB-Skip wie test_engine_layer3/4): 6-Layer-Trace bei Sommer inactive verifiziert (Layer 0 None, restliche fünf passthrough oder aktiv). Sommer-active xfail dokumentiert die Brief-Erwartung "auch im Fast-Path 6 Layer" gegenüber dem aktuellen 2-Layer-Verhalten — Engine-Refactor liegt out-of-scope. Dritter Test ruft `_evaluate_room_async` und queried `event_log` auf gemeinsame `evaluation_id` aller sechs Persistenz-Rows.
-- ✅ **T4 Frontend Hysterese-Footer** `frontend/src/components/patterns/engine-decision-panel.tsx`: Neue `HysteresisFooter`-Komponente unter `LayerTrace`, vor `HistoryList`. Liest `details.hysteresis_decision` vom ersten LayerStep (alle Steps tragen denselben Wert gemerged). reason-Mapping mit Regex-Patterns für die vier Backend-Strings, Roh-Fallback bei unbekanntem Format (kein Crash). Icons `send` (gesendet) bzw. `block` (unterdrückt).
-- ✅ **T5 Sprint-Doku:** dieser STATUS-Eintrag, CLAUDE.md §5.23.
-
-**Test-Stand:** Backend 142 passed + 65 skipped (3 neue DB-Skips bei T3 ohne TEST_DATABASE_URL). ruff clean, mypy `src` clean (Test-Dateien-Vorlast unverändert), tsc + next lint clean. Live-Verify wurde aus 9.10d herausgezogen und verbleibt für Sprint 9.11 (Live-Test #2 sowieso geplant).
-
-**Backlog (vor `v0.1.9-engine` aufzuräumen):**
-
-- **B-9.10d-1 detail-Konvention vereinheitlichen:** snake_case-Tokens für alle Layer (heute heterogen, Layer 4 als Vorbild). Vor allem Layer 1/2/3/5 betroffen. Frontend kann erst sinnvoll übersetzen, wenn Tokens konsistent sind.
-- **B-9.10d-2 mypy-Vorlast:** 71 pre-existing Errors in `tests/` (`test_manual_override_schema`, `test_device_schema`, `test_engine_skeleton`-SimpleNamespace, `test_mqtt_subscriber`, `test_api_overrides`). Sprint 9.10d-Diff bringt 0 neue Errors. Aufräumen vor `v0.1.9-engine`.
-- **B-9.10d-3 Type-Inkonsistenz Engine vs. EventLog:** `LayerStep.setpoint_c: int` (heute `int | None`), `EventLog.setpoint_out: Decimal | None`. Hygiene-Sprint, weil int↔Decimal-Konvertierung an mehreren Stellen passiert.
-- **B-9.10d-4 Sommer-aktiv-Fast-Path auf 6-Layer-Vollständigkeit:** Heute liefert die Engine bei `summer_mode_active=True` nur `(summer, clamp)` — die Variante-B-Konvention sagt aber: alle 6 Layer schreiben immer LayerStep, auch im Fast-Path. Heute Auditierbarkeitslücke (S3) für den Sommer-Fall: keine Spur, dass Layer 1-4 überhaupt evaluiert wurden. Test `test_evaluate_room_emits_six_layer_steps_when_summer_active` ist `pytest.xfail` und dokumentiert die Lücke. Eigener Sprint vor `v0.1.9-engine` — Engine-Refactor (Layer 1-4 müssen Setpoint-Override durch SUMMER_MODE durchreichen).
-- **B-9.10d-5 engine_tasks DB-Session per Dependency-Injection:** Heute öffnet `_evaluate_room_async` die DB-Engine über `settings.database_url` (engine_tasks.py:69). Test `test_evaluate_room_layers_share_engine_evaluation_id` braucht deshalb `monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)` + `get_settings.cache_clear()`-Workaround, weil Test-Session und Task-Session sonst auf unterschiedliche DBs zeigen können. Saubere Lösung: Session-Factory per Parameter injizieren, Tests reichen die Test-Session direkt durch. Hygiene-Sprint.
-
-**Tag-Vergabe (geplant nach Merge):** `v0.1.9-rc5-trace-consistency`. Sprint 9.11 Live-Test #2 schließt sich an, Final-Tag `v0.1.9-engine` weiterhin nach 9.11/9.12.
-
-## 2t. Architektur-Refresh 2026-05-07 (abgeschlossen)
-
-**Anlass:** Cowork-Inventarisierung Betterspace zeigt drei Korrekturen
-am ursprünglichen Strategiepapier sowie eine Reihe von im Plan
-vorgesehenen, aber nicht implementierten Bausteinen.
-
-**Ergebnis:**
-- Neues Master-Dokument `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-- Neuer Sprint-Plan `docs/SPRINT-PLAN.md` (Sprint 9.11 bis 14
-  Go-Live)
-- Pflicht-Pre-Read pro Session `docs/SESSION-START.md`
-- Rollen-Definition `docs/AI-ROLES.md`
-- STRATEGIE.md auf Version 1.1
-- Drei neue ADRs: AE-42 (Frostschutz zweistufig), AE-43
-  (Geräte-Lifecycle), AE-44 (Stabilitätsregeln S1-S6 als ADR)
-
-**Trigger-Phrase ab heute für jede neue Session:**
-> „Architektur-Refresh aktiv ab 2026-05-07. Lies `docs/SESSION-START.md`
-> und bestätige."
-
-**Tag:** `v0.2.0-architektur-refresh` (nach Merge)
-
-## 2u. Sprint 9.11a Geräte-Zuordnungs-API (2026-05-08, abgeschlossen)
-
-**Ziel:** Minimal-Backend-API für Vicki-Heizzonen-Zuordnung als Voraussetzung für Sprint 9.11 Live-Test #2. Kein UI, kein Tag (Sub-Sprint per SPRINT-PLAN.md §9.11a-Vorgabe). Bezug AE-43.
-
-**Implementierung:**
-
-- **API:** `PUT /api/v1/devices/{id}/heating-zone` (assign / re-assign, idempotent ohne commit bei gleichem Wert) + `DELETE /api/v1/devices/{id}/heating-zone` (detach, idempotent bei `None`). 404-Codes snake_case (`device_not_found`, `heating_zone_not_found`) per Lesson §5.23. Logger-Events `device_zone_changed` / `device_zone_detached` mit `device_id`/`dev_eui` im `extra`. Schemata in `backend/src/heizung/schemas/device.py`: `DeviceAssignZoneRequest` (gt=0, extra=forbid), `DeviceAssignZoneResponse` (validation_alias `id` → `device_id`, weil ORM-Feld nur `id` heisst).
-- **Tests:** `backend/tests/test_api_device_zone.py` (10 Pytests) gegen echtes Postgres. Setup-Fixture mit `uuid.uuid4().hex[:8]`-Suffix (Lesson §5.18, `dev_eui` exakt 16 Zeichen). Cleanup räumt Devices über DevEUI-Pattern auf (FK `ondelete=SET NULL` würde sonst Orphans hinterlassen). Test-Matrix deckt assign/idempotent/reassign/detach/422-Pydantic/404-Device/404-Zone ab.
-- **RUNBOOK §10d** zwischen §10c und §11 mit curl-Befehlen für assign/reassign/detach + Verifikations-SQL + Fehlerbild-Tabelle. Bonus: 3 abgeschnittene Anhang-Bullets aus Commit `b5438d4` rekonstruiert + 1016 Null-Bytes Trailing-Padding entfernt (eingecheckt seit `4dda449` bzw. `fe0f2b9`, beide vor Cowork-Mount-Lessons §5.2/§5.9). Datei jetzt 29151 Bytes, 0 Null-Bytes.
-
-**Pre-existing-Failures-Disclaimer:** Voller pytest-Lauf zeigt 206 passed, 1 xfailed, 3 failed + 7 errors — alle 10 Failures/Errors sind `ModuleNotFoundError: No module named 'psycopg2'` in `tests/test_migrations_roundtrip.py` und `tests/test_manual_override_model.py`. Bekanntes Backlog-Item B-9.10-6, kein Sprint-9.11a-Bezug. Sprint-9.11a-Tests (10 neue): grün.
-
-**Tag-Vergabe:** keiner. Sub-Sprint per SPRINT-PLAN.md-Vorgabe.
-
-**Offen für Live-Verify nach Merge** (B-9.11a-2): Vicki-002/003/004 produktiv den Heating-Zones der Zimmer 102/103/104 (Schlafzimmer) zuweisen. Plan vom Strategie-Chat, Ausführung durch Hotelier — nicht im Code-Sprint.
-
-## 2v. Sprint 9.11 Live-Test #2 — Teilweise abgeschlossen (2026-05-09)
-
-**Ziel:** 6-Layer-Engine + Hysterese auf heizung-test mit echter Hardware verifizieren.
-
-**Ergebnis:** 3 von 4 effektiv getesteten Layern Pass, 1 Layer nicht testbar (Hardware), plus 4 strukturelle Befunde.
-
-**Test-Matrix (verschlankt vor Beginn — T4 Nacht in 9.15, T6 Bad-Clamp in 9.12, T7 Hysterese gestrichen weil bereits in Pytests abgedeckt):**
-
-| Test | Layer | Ergebnis |
-|---|---|---|
-| T1 | 4 (Window) | ❌ nicht testbar — Vicki-001 meldet `open_window=false` trotz Abnehmen vom HK |
-| T2 | 2 (Vorheizen) | ✅ Pass — Belegung +30min triggert temporal_override mit reason `preheat` |
-| T3 | 1 (Base) + 2 (Nacht) | ✅ Pass — occupied erkannt, Layer 2 Nacht-Override greift korrekt darüber |
-| T5 | 3 (Manual) | ✅ Pass — Override 23 °C via API `frontend_4h`, Layer 3 reason `manual` |
-| T8 | UI Engine-Decision-Panel | ⚠️ Teilweise Pass — siehe Befunde |
-
-**Befunde (4):**
-
-1. **Vicki-001 Window-Sensor liefert kein `open_window=true`** trotz physischem Abnehmen vom HK. Layer 4 ist auf Code-Ebene grün (Pytests Sprint 9.10), aber Hardware-Trigger fehlt. → Sprint 9.11x.
-2. **Auto-Detect-Override-Mechanismus** existiert (siehe AE-45) — automatische Erstellung eines `manual_override` mit `source=device` und 7-Tage-Expiry, wenn Vicki einen Setpoint zurückmeldet, der nicht zur Engine-Erwartung passt. War nicht im Strategie-Chat-Kontext bekannt.
-3. **UI Engine-Decision-Panel zeigt nur einen Setpoint pro Zeile** statt `setpoint_in` und `setpoint_out` separat. Designentscheidung vs. Brief-Erwartung unklar. → Backlog B-9.11-1.
-4. **„Vorherige Evaluationen" zeigt historisch `base_target`-Reason** statt finalem Layer-Reason. Vermuteter Backend-Befund. → Backlog B-9.11-2.
-
-**API-Schema-Korrekturen für RUNBOOK §10d (in T-D3 erfasst):**
-
-- `POST /rooms/{id}/overrides`: `source` muss aus `device | frontend_4h | frontend_midnight | frontend_checkout` sein (`manual`/`manual_test` wird mit 422 abgelehnt).
-- `POST /rooms/{id}/overrides`: `setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden abgelehnt).
-- `DELETE /occupancies/{id}`: nicht erlaubt, Belegungen werden via PATCH mit Body `{"cancel": true}` storniert (Audit/PMS-Sync).
-
-**Tag-Vergabe:** keiner. Sprint 9.11 bleibt offen bis T1 in 9.11x abgeschlossen ist.
-
-**Live-Verify B-9.11a-2:** Erfolgreich abgeschlossen am 2026-05-09 vor Test-Beginn — alle 4 Vickis korrekt zugeordnet:
-
-- Vicki-001 → Zone 91 Schlafzimmer (Zimmer 101) — bestand bereits
-- Vicki-002 → Zone 3 Schlafbereich (Zimmer 102)
-- Vicki-003 → Zone 5 Schlafbereich (Zimmer 103)
-- Vicki-004 → Zone 7 Schlafbereich (Zimmer 104)
-
-### Update 2026-05-09 — Root Cause T1 identifiziert
-
-Cowork-Diagnose + Hersteller-Doku-Recherche (`docs/vendor/mclimate-vicki/`) ergeben:
-
-- Codec liefert `openWindow` korrekt — Codec-Pfad eliminiert
-- Backend persistiert `sensor_reading` 1:1 — Backend-Pfad eliminiert
-- Engine Layer 4 verarbeitet `open_window=false` korrekt — Engine-Pfad eliminiert
-- **Root Cause:** Vicki-Open-Window-Detection ist im Default DISABLED (Hersteller-Setting), und der Algorithmus ist laut MClimate „not 100% reliable" wegen HK-Wärme-Dominanz am internen Sensor
-- A/B-Test mit Vicki-003 (passiv neben Vicki-001 gelegt) bei Außentemp ~18 °C bestätigt: Sturz zu klein und zu langsam für Vicki-Schwellen, Hardware-Pfad im Sommer physikalisch nicht testbar
-
-**Konsequenzen:**
-
-- AE-47 dokumentiert die Hybrid-Strategie (Hardware-First + passiver Logger)
-- Sprint 9.11x aktiviert die Vicki-Konfiguration + persistiert Backplate-Bit
-- Sprint 9.11y baut Backend-Synthetic-Test + passiven Logger
-- Tag `v0.1.9-rc6-live-test-2` erst nach 9.11y Abschluss
-
----
-
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -690,59 +397,27 @@ Cowork-Diagnose + Hersteller-Doku-Recherche (`docs/vendor/mclimate-vicki/`) erge
 ## 4. Architektur-Stand
 
 ### Backend (FastAPI + PostgreSQL/TimescaleDB)
-- Python 3.12, FastAPI >=0.110, SQLAlchemy >=2.0, Pydantic >=2.6, Alembic >=1.13
-- Celery >=5.3 + Redis >=5.0 (Worker + Beat-Scheduler), aiomqtt >=2.3
-- 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable, ab Sprint 9.10 mit `open_window`), event_log (Hypertable), control_command
-- Alembic-Migrationen 0001-0004 + 0008 + 0009 (0003 in zwei Files: 0003a Stammdaten + 0003b event_log-Hypertable; 0008 manual_override aus 9.9; 0009 sensor_reading.open_window aus 9.10)
-- Engine: 6-Layer-Pipeline vollständig — Layer 0 Sommer / 1 Base / 2 Temporal / 3 Manual / 4 Window-Detection / 5 Hard-Clamp + Hysterese. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40) abgesichert.
-- ~25 Test-Dateien, 190 Test-Cases lokal grün (+10 pre-existing psycopg2-Failures, kein 9.10-Bezug)
+- Domain-Model vollständig: Zimmer, Raumtypen, Gäste, Belegungen, Geräte, Events
+- Alembic-Migration 0001_initial deployed auf beiden Servern
+- Seed-Daten: 45 Zimmer + Raumtypen eingespielt
+- Unit-Tests grün
 
 ### Frontend (Next.js 14.2 App Router + Tailwind)
-- Next.js 14.2.15, React 18.3.1, TypeScript 5.6.3 strict
-- Tailwind 3.4.14, Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
-- TanStack Query 5.100.5 für Server-State, recharts 3.8.1 für Charts
-- Eigene UI-Komponenten unter `components/ui/` (Button, ConfirmDialog) — kein shadcn/ui
+- Grundgerüst mit Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
 - AppShell mit 200 px Sidebar
-- Playwright E2E (`smoke.spec.ts`, `devices.spec.ts` unter `frontend/tests/e2e/`) — `sprint8.spec.ts` noch nicht erstellt, siehe Backlog
+- Caddy-Reverse-Proxy konfiguriert
+- **Hinweis:** shadcn/ui ist derzeit **nicht** installiert. Runtime-Deps sind `next`, `react`, `react-dom`, `clsx`, `tailwind-merge`. Einführung von shadcn/ui wird separat entschieden, wenn erste Komponenten es brauchen.
+- Playwright E2E eingerichtet (Smoke-Tests) + CI-Job `e2e` in `.github/workflows/frontend-ci.yml`
 
 ### Infrastruktur
-- Docker Compose: 13 Services (api, web, db/timescaledb, redis, caddy, mosquitto, chirpstack, chirpstack-postgres, chirpstack-gateway-bridge, celery_worker, celery_beat) plus 2 Init-Sidecars (chirpstack-init, chirpstack-gateway-bridge-init)
-- Compose-File: `infra/deploy/docker-compose.prod.yml` (zwingend `-f`)
-- CI/CD: GitHub Actions baut Images bei Push auf `develop`, published nach GHCR
-- Deploy: systemd-Timer auf Server zieht neue Images alle 5 Min (Pull-basiert, kein Push-Deploy)
+- Docker Compose: api, web, postgres, redis, caddy (5 Container pro Umgebung)
+- CI/CD: GitHub Actions baut Images bei Push auf `develop`/`main`, published nach GHCR
+- Deploy: systemd-Timer auf Server zieht neue Images alle 5 Min
 - SSH-Zugang nur über Tailscale (Public-IP als Fallback via `id_ed25519_heizung`)
 
 ---
 
-## 5. Routen-Übersicht
-
-### Frontend-Pages
-
-- `/` — Dashboard-Startseite
-- `/zimmer` — Zimmerliste mit Filter
-- `/zimmer/[id]` — Zimmer-Detail (Tabs: Stammdaten, Heizzonen, Geräte, Engine, Übersteuerung)
-- `/raumtypen` — Raumtypen Master-Detail
-- `/belegungen` — Belegungen-Liste + Form
-- `/einstellungen/hotel` — Hotel-Stammdaten Singleton
-- `/devices` — Geräteliste
-- `/devices/[device_id]` — Geräte-Detail mit Reading-Chart
-- `/healthz` — Frontend-Healthcheck (Caddy/Compose)
-
-### Backend-API (`/api/v1/...`)
-
-- `/api/v1/devices/*` — CRUD Devices, GET `{device_id}/sensor-readings`
-- `/api/v1/rooms/*` — CRUD Rooms, GET `{room_id}/engine-trace`
-- `/api/v1/room-types/*` — CRUD Raumtypen
-- `/api/v1/rooms/{room_id}/heating-zones` — CRUD Heating-Zones (nested unter Rooms)
-- `/api/v1/occupancies/*` — CRUD Belegungen
-- `/api/v1/global-config` — GET/PATCH Hotel-weite Settings
-- `/api/v1/rooms/{room_id}/overrides` — GET/POST Manual-Override-Liste/Anlage (Sprint 9.9)
-- `/api/v1/overrides/{override_id}` — DELETE Manual-Override revoken (Sprint 9.9)
-- `/healthz` — Backend-Healthcheck
-
----
-
-## 5a. Wichtige Dokumente im Repo
+## 5. Wichtige Dokumente im Repo
 
 - `docs/STRATEGIE.md` — Gesamtkonzept, Architektur, Roadmap
 - `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log
@@ -751,67 +426,18 @@ Cowork-Diagnose + Hersteller-Doku-Recherche (`docs/vendor/mclimate-vicki/`) erge
 
 ---
 
-## 6. Backlog
+## 6. Nächste Schritte
 
-Sortierung: Priorität (🔴 blockierend, 🟡 wichtig, 🟢 nice-to-have),
-innerhalb der Priorität nach Aufwand.
+**Unmittelbar:**
+1. **LoRaWAN-Integration** starten: ChirpStack auf Milesight UG65 Gateway, erstes Pairing mit MClimate Vicki (Referenzgerät)
+2. **Regel-Engine** (8 Kernregeln) implementieren — Start mit Frostschutz + belegungsabhängige Temperatur
 
-### 6.1 — Refresh-Aufgaben (BR-1 bis BR-15)
-
-| ID | Inhalt | Sprint |
-|---|---|---|
-| BR-1 🔴 | Frostschutz pro Raumtyp (DB + Engine + API) | 9.12 |
-| BR-2 🔴 | Geräte-Pairing-UI + Sidebar-Migration | 9.13 |
-| BR-3 🟡 | Globale Temperaturen+Zeiten-UI | 9.14 |
-| BR-4 🟡 | Profile-CRUD + UI | 9.15 |
-| BR-5 🟡 | Szenarien-Aktivierung CRUD + UI | 9.16 |
-| BR-6 🟡 | Saison-CRUD + UI | 9.16 |
-| BR-7 🔴 | NextAuth + User-UI | 9.17 |
-| BR-8 🟡 | Dashboard mit 6 KPI-Cards | 9.18 |
-| BR-9 🟢 | Temperaturverlauf-Analytics | 9.19 |
-| BR-10 🟢 | API-Keys + Webhooks | 9.20 |
-| BR-11 🟢 | Gateway-Status-UI | 9.21 |
-| BR-12 🟢 | KI-Layer-Hülle in Engine | nach Go-Live |
-| BR-13 🔴 | PMS-Casablanca-Connector | 11 |
-| BR-14 🟡 | Wetterdaten-Service aktiv | 13 |
-| BR-15 🔴 | Backup + Production-Migration | 12 |
-| BR-16 🔴 | Backend-Window-Detection-Eigenlogik (Layer 4 Erweiterung, aktiver Trigger nach 2-Wochen-Beobachtung) | 9.11y + späterer Re-Eval |
-| B-9.11a-4 🔴 | Basic-Auth-Pass rotieren vor Production-Migration | 12 |
-| B-9.11x.b-1 🟢 | Decimal-Rundungs-Charakteristik in RUNBOOK §10e dokumentiert (in 9.11x.b T7) | erledigt mit 9.11x.b |
-
-### 6.2 — Hygiene-Aufgaben (B-9.10*)
-
-Werden im Hygiene-Sprint 10 abgearbeitet.
-
-| ID | Inhalt | Priorität |
-|---|---|---|
-| B-9.10-1 | Fenster-Indikator in /zimmer-Liste | 🟡 |
-| B-9.10-2 | Fehler-Übersicht für Devices (in BR-2 enthalten) | erledigt |
-| B-9.10-6 | psycopg2-Failures | 🟡 |
-| B-9.10c-1 | ChirpStack-Codec-Bootstrap-Skript | 🟡 |
-| B-9.10c-2 | Codec-Re-Paste auf heizung-main bei Production-Migration | 🔴 (in 12) |
-| B-9.10d-1 | detail-Konvention vereinheitlichen | 🟡 |
-| B-9.10d-2 | mypy-Vorlast 71 Errors in tests/ | 🟡 |
-| B-9.10d-3 | Type-Inkonsistenz Engine `int` vs. EventLog `Decimal` | 🟡 |
-| B-9.10d-5 | engine_tasks DB-Session per Dependency-Injection | 🟢 |
-| B-9.10d-6 | Pre-Push-Hook für `ruff format --check` | 🟢 |
-| B-9.11-1 | Engine-Decision-Panel: `setpoint_in` zusätzlich zu `setpoint_out` anzeigen | 🟡 |
-| B-9.11-2 | „Vorherige Evaluationen" zeigt `base_target`-Reason statt finalem Layer-Reason | 🟡 |
-| B-9.11-3 | Layer 3 manual_override Sub-Reasons (`manual_frontend` / `manual_device`) im Trace | 🟡 |
-| B-9.11-4 | celery_beat Healthcheck korrigieren | 🟡 |
-| B-9.11x  | Sprint 9.11x — Vicki-001 `open_window`-Hardware-Diagnose | 🔴 |
-| B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
-| B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
-
-### 6.3 — Operative Aufgaben
-
-| ID | Inhalt | Priorität |
-|---|---|---|
-| OP-1 | Backup-Cron + Off-Site-Replikation auf db | 🔴 (in 12) |
-| OP-2 | main-Branch-Strategie | 🟡 (vor 12) |
-| OP-3 | heizung-test Kernel-Update | 🟢 |
-| OP-4 | ~/.ssh/config Eintrag heizung-test | erledigt |
-| OP-5 | RUNBOOK-Sektion für DB-Zugang via SSH-Tunnel ergänzen | 🟡 |
+**Backlog (nicht dringend):**
+- Caddy: separater öffentlich erreichbarer Health-Endpoint (aktuell routet `/api/*` auf Backend, der frontend-interne `/api/health` ist von extern nicht getrennt adressierbar — z. B. auf `/_health` umbiegen)
+- Caddyfile formatieren (`caddy fmt --overwrite` — Warnung im Log, kosmetisch)
+- CI-Mirror-Redundanz (`frontend-ci-skip.yml`) aufräumen wenn Branch-Protection-Matcher smarter wird
+- `~/.ssh/config`-Einträge für `heizung-test`/`heizung-main` auf dem Entwickler-Client (spart `-i …`-Flag)
+- heizung-test: Kernel-Update ausstehend (`*** System restart required ***`)
 
 ---
 
@@ -856,11 +482,3 @@ Secrets liegen in:
 | `v0.1.3-ufw-reactivation` | Sprint 3 (UFW aktiv auf beiden Servern + RUNBOOK §8 aktualisiert) | 2026-04-22 |
 | `v0.1.4-domain-hoteltec` | Sprint 4 (Domain-Umschaltung auf hoteltec.at, Let's-Encrypt-TLS) | 2026-04-22 |
 | `v0.1.5-lorawan-foundation` | Sprint 5 (LoRaWAN-Pipeline lokal: ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API) | 2026-04-28 |
-| `v0.1.6-hardware-pairing` | Sprint 6 (Hardware-Pairing, Vicki-Onboarding) | 2026-04-29 |
-| `v0.1.7-frontend-dashboard` | Sprint 7 (Frontend-Dashboard, Devices-Liste) | 2026-04-30 |
-| `v0.1.8-stammdaten` | Sprint 8 (Stammdaten + Belegung, Master-Detail-CRUD) | 2026-05-03 |
-| `v0.1.9-rc1-walking-skeleton` | Sprint 9 (Engine 6-Layer-Skelett + Downlink + Engine-Panel) | 2026-05-04 |
-| `v0.1.9-rc2-manual-override` | Sprint 9.9 + 9.9a (Engine Layer 3 + UI + Hotfix) | 2026-05-06 |
-| `v0.1.9-rc3-window-detection` | Sprint 9.10 (Engine Layer 4 Window-Detection + AE-40 Engine-Task-Lock) | 2026-05-07 |
-
-*Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*

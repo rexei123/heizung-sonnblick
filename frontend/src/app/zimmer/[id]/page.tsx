@@ -11,7 +11,6 @@ import { useState } from "react";
 
 import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
-import { ManualOverridePanel } from "@/components/patterns/manual-override-panel";
 import { RoomForm } from "@/components/patterns/room-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -24,7 +23,7 @@ import {
 } from "@/lib/api/hooks-rooms";
 import type { ApiError, RoomCreate, RoomUpdate } from "@/lib/api/types";
 
-type Tab = "stammdaten" | "zonen" | "geraete" | "engine" | "override";
+type Tab = "stammdaten" | "zonen" | "geraete" | "engine";
 
 export default function ZimmerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -111,7 +110,7 @@ export default function ZimmerDetailPage() {
       </header>
 
       <div className="border-b border-border mb-4 flex gap-4 text-sm">
-        {(["stammdaten", "zonen", "geraete", "engine", "override"] as const).map((t) => (
+        {(["stammdaten", "zonen", "geraete", "engine"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -128,33 +127,27 @@ export default function ZimmerDetailPage() {
                 ? "Heizzonen"
                 : t === "geraete"
                   ? "Geräte"
-                  : t === "engine"
-                    ? "Engine"
-                    : "Übersteuerung"}
+                  : "Engine"}
           </button>
         ))}
       </div>
 
-      {tab === "override" ? (
-        <ManualOverridePanel roomId={id} />
-      ) : (
-        <div className="bg-surface border border-border rounded-md p-5">
-          {tab === "stammdaten" ? (
-            <RoomForm
-              initial={room.data}
-              onSubmit={handleUpdate}
-              submitting={updateMut.isPending}
-              error={error}
-            />
-          ) : tab === "zonen" ? (
-            <HeatingZoneList roomId={id} />
-          ) : tab === "geraete" ? (
-            <DevicesInRoom roomId={id} />
-          ) : (
-            <EngineDecisionPanel roomId={id} />
-          )}
-        </div>
-      )}
+      <div className="bg-surface border border-border rounded-md p-5">
+        {tab === "stammdaten" ? (
+          <RoomForm
+            initial={room.data}
+            onSubmit={handleUpdate}
+            submitting={updateMut.isPending}
+            error={error}
+          />
+        ) : tab === "zonen" ? (
+          <HeatingZoneList roomId={id} />
+        ) : tab === "geraete" ? (
+          <DevicesInRoom roomId={id} />
+        ) : (
+          <EngineDecisionPanel roomId={id} />
+        )}
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}

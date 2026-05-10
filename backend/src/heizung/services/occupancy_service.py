@@ -10,8 +10,7 @@ deshalb ist die Auto-Aktualisierung kein Komfort sondern Pflicht.
 
 from __future__ import annotations
 
-import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.enums import RoomStatus
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -53,67 +50,6 @@ async def has_overlap(
         stmt = stmt.where(Occupancy.id != exclude_occupancy_id)
     result = await session.execute(stmt.limit(1))
     return result.scalar_one_or_none() is not None
-
-
-async def next_active_checkout(
-    session: AsyncSession,
-    room_id: int,
-    *,
-    now: datetime | None = None,
-) -> datetime | None:
-    """``check_out`` der naechsten aktiven Belegung im Raum, sonst ``None``.
-
-    Naechste aktive Belegung = ``is_active AND check_out > now``,
-    sortiert nach ``check_in``. Bei laufender Belegung deren ``check_out``,
-    bei rein zukuenftiger der erste eintreffende. Konsolidierte Variante
-    der bislang in ``rules.engine._load_room_context`` und
-    ``api.v1.overrides._next_checkout_for_room`` doppelten Logik
-    (Sprint 9.9 T5).
-    """
-    current_time = now or _now()
-    stmt = (
-        select(Occupancy)
-        .where(
-            and_(
-                Occupancy.room_id == room_id,
-                Occupancy.is_active.is_(True),
-                Occupancy.check_out > current_time,
-            )
-        )
-        .order_by(Occupancy.check_in)
-        .limit(1)
-    )
-    occ = await session.scalar(stmt)
-    return occ.check_out if occ is not None else None
-
-
-async def next_active_checkin(
-    session: AsyncSession,
-    room_id: int,
-    *,
-    within: timedelta,
-    now: datetime | None = None,
-) -> bool:
-    """Gibt es eine aktive Belegung, deren ``check_in`` in den naechsten
-    ``within`` ab ``now`` liegt? (Sprint 9.9 T6 - PMS-Auto-Revoke).
-
-    True = Folgegast kommt direkt anschliessend, Auto-Revoke darf NICHT
-    triggern. False = Raum wirklich frei.
-    """
-    current_time = now or _now()
-    stmt = (
-        select(Occupancy.id)
-        .where(
-            and_(
-                Occupancy.room_id == room_id,
-                Occupancy.is_active.is_(True),
-                Occupancy.check_in > current_time,
-                Occupancy.check_in <= current_time + within,
-            )
-        )
-        .limit(1)
-    )
-    return await session.scalar(stmt) is not None
 
 
 async def derive_room_status(
@@ -179,23 +115,4 @@ async def sync_room_status(
         return
     new_status = await derive_room_status(session, room_id, now)
     if room.status != new_status:
-        previous_status = room.status
         room.status = new_status
-        # Sprint 9.9 T6: bei Auszug device-Overrides auto-revoken.
-        # Lazy import vermeidet circular dependency
-        # (override_pms_hook -> occupancy_service.next_active_checkin).
-        from heizung.services.override_pms_hook import auto_revoke_on_checkout
-
-        revoked = await auto_revoke_on_checkout(
-            session,
-            room_id,
-            previous_status,
-            new_status,
-            now or _now(),
-        )
-        if revoked > 0:
-            logger.info(
-                "auto-revoked %d device-overrides for room_id=%s on checkout",
-                revoked,
-                room_id,
-            )

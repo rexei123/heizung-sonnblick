@@ -2,7 +2,7 @@
 
 Eigenständige, cloud-basierte Heizungssteuerung für das Hotel Sonnblick Kaprun. Steuert LoRaWAN-Thermostate (MClimate Vicki, Milesight WT102) belegungsabhängig und ersetzt das bestehende Betterspace-System.
 
-**Status:** Sprint 9.8 abgeschlossen (Engine-Walking-Skeleton: Layer 0/1/2/5 + Hysterese fertig, Layer 3/4 offen). Sprint 9.8c (Hygiene-Sprint) abgeschlossen.
+**Status:** Sprint 6 in Arbeit (Hardware-Pairing, ChirpStack auf Test-Server live), Sprint 7 in Arbeit (Frontend-Dashboard mit Geräteliste + Detail-View). QA-Audit-Fixes K-2, K-3, K-6 eingebaut.
 
 ## Systeme
 
@@ -17,7 +17,7 @@ DNS-Hosting: Hetzner Online / konsoleH (siehe [`docs/RUNBOOK.md`](docs/RUNBOOK.m
 
 - [`STATUS.md`](STATUS.md) — Sprint-Stand, Tags, offene Punkte
 - [`docs/STRATEGIE.md`](docs/STRATEGIE.md) — Strategiepapier v1.0
-- [`docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`](docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md) — ADR-Log (AE-01 bis AE-38)
+- [`docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`](docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md) — ADR-Log (AE-01 bis AE-18)
 - [`docs/SPEC-FRAMEWORK.md`](docs/SPEC-FRAMEWORK.md) — Verbindliche Code- und Doku-Regeln
 - [`docs/WORKFLOW.md`](docs/WORKFLOW.md) — 5-Phasen-Feature-Flow mit User-Gates
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — Operations, Rescue-Mode, UFW, GHCR-PAT, Domain, LoRaWAN-Pipeline
@@ -25,30 +25,13 @@ DNS-Hosting: Hetzner Online / konsoleH (siehe [`docs/RUNBOOK.md`](docs/RUNBOOK.m
 - [`docs/features/`](docs/features/) — Feature-Briefe pro Sprint
 - [`infra/deploy/SERVER-SETUP.md`](infra/deploy/SERVER-SETUP.md) — Hetzner-Setup-Anleitung
 
-## Stabilitätsregeln
-
-Dieses System steuert Heizungen im produktiven Hotelbetrieb.
-Stabilität ist die oberste Systemregel und schlägt Sprint-
-Tempo, Feature-Vollständigkeit und Eleganz. Verbindlich sind
-die operativen Regeln S1-S6 in
-[CLAUDE.md §0](./CLAUDE.md#0-stabilitätsregeln-oberste-priorität).
-Sprint-Pläne und Pull-Requests werden gegen diese Regeln
-geprüft.
-
-Claude-Code-Sessions arbeiten unter dem Autonomie-Default
-Stufe 2 (siehe [CLAUDE.md §0.1](./CLAUDE.md#01-autonomie-default-für-claude-code)):
-Routine wird autonom abgearbeitet, substantielle
-Entscheidungen werden ausdrücklich freigegeben.
-
 ## Stack
 
-- **Backend:** Python 3.12, FastAPI ≥0.110, PostgreSQL 16 + TimescaleDB, SQLAlchemy 2.0 (async), Celery 5.3 + Redis 5.0 (Worker + Beat-Scheduler), aiomqtt 2.3
-- **Engine:** 6-Layer-Pipeline. Implementiert: Layer 0 (Sommermodus), 1 (Base), 2 (Temporal: Vorheizen + Nachtabsenkung), 5 (Hard-Clamp), Hysterese. Offen: Layer 3 (Manual-Override), Layer 4 (Window/Fenster-offen).
-- **Datenmodell:** 14 SQLAlchemy-Modelle (Stammdaten, Engine, Telemetrie), 5 Migrationen (0001-0004 inkl. 0003a/b)
-- **Frontend:** Next.js 14.2 (App Router), TypeScript 5.6 strict, Tailwind 3.4, Roboto + Material Symbols Outlined (selbst gehostet, DSGVO-konform), TanStack Query 5, Recharts 3
-- **LoRaWAN:** ChirpStack v4 (eigener Container, eigene Postgres-Instanz), Eclipse Mosquitto v2 als MQTT-Broker, 4 MClimate-Vicki TRV im Test-Hotel-LAN gepaired
+- **Backend:** Python 3.12, FastAPI, PostgreSQL 16 + TimescaleDB, SQLAlchemy 2.0 (async), Celery + Redis, aiomqtt
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind, Roboto, Material Symbols Outlined
+- **LoRaWAN:** ChirpStack v4 (eigener Container, eigene Postgres-Instanz), Eclipse Mosquitto v2 als MQTT-Broker
 - **Edge:** Milesight UG65 Gateway (Packet-Forwarder zu ChirpStack)
-- **Infrastruktur:** Hetzner Cloud (DE), 13 Compose-Services + 2 Init-Sidecars, Caddy (Reverse-Proxy + Let's Encrypt), Tailscale-VPN für SSH
+- **Infrastruktur:** Hetzner Cloud (DE), Docker Compose, Caddy (Reverse-Proxy + Let's Encrypt), Tailscale-VPN für SSH
 - **CI/CD:** GitHub Actions, GHCR Pull-Deploy via systemd-Timer
 
 ## Lokale Entwicklung
@@ -99,7 +82,7 @@ docker run --rm --network heizung-sonnblick_default \
 
 ```
 backend/                  FastAPI-Anwendung, Regel-Engine, Geräte-Treiber, MQTT-Subscriber
-frontend/                 Next.js Admin-UI: Devices-Liste/Detail, Zimmer mit Engine-Tab, Raumtypen, Belegungen, Hotel-Stammdaten
+frontend/                 Next.js Admin-UI (Grundgerüst, Dashboard folgt in spaeterem Sprint)
 infra/caddy/              Caddyfiles für test + main
 infra/chirpstack/         ChirpStack-Konfig, Codecs, Postgres-Init, Bootstrap-Test-Payloads
 infra/mosquitto/          Mosquitto-Konfig + ACL
@@ -120,8 +103,6 @@ docs/                     Strategiepapier, ADRs, RUNBOOK, Feature-Briefs, Workin
 | `v0.1.5-lorawan-foundation` | 5 | ChirpStack + Mosquitto + MQTT-Subscriber + Sensor-Readings-API |
 | `v0.1.6-hardware-pairing` | 6 | UG65-Gateway, ChirpStack-Stack, Mosquitto-MQTT-Auth, deploy-pull-Hardening, vier MClimate-Vicki gepaired, Codec produktiv |
 | `v0.1.7-frontend-dashboard` | 7 | Frontend `/devices` + Detail-View mit Recharts, TanStack Query 30s-Refresh, Design-Tokens, /healthz-Trennung |
-| `v0.1.8-stammdaten` | 8 | CRUD Raumtypen/Zimmer/Heizzonen/Belegungen/Hotel-Settings, Design-Strategie 2.0.1 Tokens + Buttons + ConfirmDialog |
-| `v0.1.9-rc1-walking-skeleton` | 9 | Engine 6-Layer-Skelett (Layer 0/1/2/5 + Hysterese), Downlink-Adapter, Frontend Engine-Decision-Panel |
 
 ## Lizenz
 

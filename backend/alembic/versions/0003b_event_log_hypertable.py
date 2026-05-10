@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -58,7 +57,9 @@ def upgrade() -> None:
         sa.Column(
             "device_id",
             sa.Integer(),
-            sa.ForeignKey("device.id", ondelete="SET NULL", name="fk_event_log_device"),
+            sa.ForeignKey(
+                "device.id", ondelete="SET NULL", name="fk_event_log_device"
+            ),
         ),
         sa.Column("setpoint_in", sa.Numeric(4, 1)),
         sa.Column("setpoint_out", sa.Numeric(4, 1)),
@@ -75,8 +76,12 @@ def upgrade() -> None:
         ")"
     )
 
-    op.create_index("ix_event_log_room_time", "event_log", ["room_id", "time"])
-    op.create_index("ix_event_log_evaluation", "event_log", ["evaluation_id"])
+    op.create_index(
+        "ix_event_log_room_time", "event_log", ["room_id", "time"]
+    )
+    op.create_index(
+        "ix_event_log_evaluation", "event_log", ["evaluation_id"]
+    )
 
 
 def downgrade() -> None:

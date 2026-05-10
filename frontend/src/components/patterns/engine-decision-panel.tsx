@@ -14,18 +14,7 @@
 import { useMemo } from "react";
 
 import { useEngineTrace } from "@/lib/api/hooks-rooms";
-import type {
-  CommandReason,
-  EventLogEntry,
-  EventLogLayer,
-  OverrideSource,
-} from "@/lib/api/types";
-import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
-
-import {
-  extractWindowOpenSince,
-  WindowOpenIndicator,
-} from "./engine-window-indicator";
+import type { CommandReason, EventLogEntry, EventLogLayer } from "@/lib/api/types";
 
 const LAYER_ORDER: EventLogLayer[] = [
   "summer_mode_fast_path",
@@ -34,7 +23,6 @@ const LAYER_ORDER: EventLogLayer[] = [
   "manual_override",
   "guest_override",
   "window_safety",
-  "device_detached",
   "hard_clamp",
 ];
 
@@ -45,7 +33,6 @@ const LAYER_LABEL: Record<EventLogLayer, string> = {
   manual_override: "Manueller Override",
   guest_override: "Gast-Drehring",
   window_safety: "Fenster-Sicherheit",
-  device_detached: "Geraet-Sicherheit",
   hard_clamp: "Sicherheits-Limit",
 };
 
@@ -57,7 +44,6 @@ const REASON_LABEL: Record<CommandReason, string> = {
   preheat_checkin: "Vorheizen vor Check-in",
   checkout_setback: "Absenken nach Check-out",
   window_open: "Fenster offen",
-  device_detached: "Geraet abgenommen",
   guest_override: "Gast-Override",
   long_vacant: "Langzeit unbelegt",
   frost_protection: "Frostschutz",
@@ -108,13 +94,12 @@ export function EngineDecisionPanel({ roomId }: Props) {
     <div className="space-y-5">
       <SummaryCard latest={latest} />
       <LayerTrace entries={latest.entries} />
-      <HysteresisFooter latest={latest} />
       <HistoryList groups={grouped.slice(1, 6)} />
     </div>
   );
 }
 
-export interface EvalGroup {
+interface EvalGroup {
   evaluationId: string;
   time: string;
   entries: EventLogEntry[];
@@ -152,17 +137,13 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
   // sollte alle 60 s laufen (Sprint 9.7 Scheduler), oder wir haben einen Bug.
   const ageMs = Date.now() - new Date(latest.time).getTime();
   const isStale = ageMs > 60 * 60 * 1000;
-  const windowOpen = extractWindowOpenSince(latest);
   return (
     <div className="bg-surface border border-border rounded-md p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-baseline gap-3">
-          <span className="text-3xl font-medium text-primary">
-            {setpoint !== null ? `${setpoint}°C` : "—"}
-          </span>
-          <span className="text-base text-text-secondary">aktueller Sollwert</span>
-        </div>
-        {windowOpen ? <WindowOpenIndicator since={windowOpen.since} /> : null}
+      <div className="flex items-baseline gap-3">
+        <span className="text-3xl font-medium text-primary">
+          {setpoint !== null ? `${setpoint}°C` : "—"}
+        </span>
+        <span className="text-base text-text-secondary">aktueller Sollwert</span>
       </div>
       {baseEntry?.reason ? (
         <p className="mt-2 text-base text-text-secondary">
@@ -180,7 +161,6 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
     </div>
   );
 }
-
 
 function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
   return (
@@ -220,143 +200,14 @@ function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
                 {e.reason ? REASON_LABEL[e.reason] : "—"}
               </td>
               <td className="px-4 py-2 text-sm text-text-tertiary">
-                {e.layer === "manual_override" ? (
-                  <ManualOverrideDetail entry={e} />
-                ) : (
-                  ((e.details && typeof e.details.detail === "string"
-                    ? e.details.detail
-                    : null) ?? "—")
-                )}
+                {(e.details && typeof e.details.detail === "string"
+                  ? e.details.detail
+                  : null) ?? "—"}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function ManualOverrideDetail({ entry }: { entry: EventLogEntry }) {
-  const details = entry.details ?? {};
-  const sourceRaw = details["source"];
-  const expiresAtRaw = details["expires_at"];
-  const source: OverrideSource | null =
-    typeof sourceRaw === "string" && sourceRaw in SOURCE_LABEL
-      ? (sourceRaw as OverrideSource)
-      : null;
-  const expiresAt = typeof expiresAtRaw === "string" ? expiresAtRaw : null;
-
-  if (source === null) {
-    return <span className="italic text-text-tertiary">kein aktiver Override</span>;
-  }
-  return <ActiveOverrideDetail source={source} expiresAt={expiresAt} />;
-}
-
-function ActiveOverrideDetail({
-  source,
-  expiresAt,
-}: {
-  source: OverrideSource;
-  expiresAt: string | null;
-}) {
-  const remaining = useRemainingTime(expiresAt ?? new Date(0).toISOString());
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="inline-flex items-center gap-1 text-text-primary">
-        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>
-          {SOURCE_ICON[source]}
-        </span>
-        {SOURCE_LABEL[source]}
-      </span>
-      {expiresAt ? (
-        <span className="text-xs text-text-tertiary">
-          läuft ab in {remaining} ·{" "}
-          {new Date(expiresAt).toLocaleString("de-AT")}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-// Sprint 9.10d T4: Hysterese-Anzeige unter dem LayerTrace.
-//
-// Datenquelle: ``details.hysteresis_decision`` ist ab Sprint 9.5 in JEDEM
-// LayerStep-Eintrag der Eval gemerged (engine_tasks.py:188), wir lesen
-// also vom ersten Eintrag und zeigen einmal pro Evaluation. Roh-Schema:
-//   { should_send: boolean, reason: string }
-// reason-Strings kommen aus engine.py:484-497 (siehe Mapping unten).
-
-interface HysteresisDecision {
-  should_send: boolean;
-  reason: string;
-}
-
-function extractHysteresisDecision(latest: EvalGroup): HysteresisDecision | null {
-  for (const entry of latest.entries) {
-    const raw = entry.details?.["hysteresis_decision"];
-    if (
-      raw !== undefined &&
-      raw !== null &&
-      typeof raw === "object" &&
-      "should_send" in raw &&
-      "reason" in raw
-    ) {
-      const obj = raw as { should_send: unknown; reason: unknown };
-      if (typeof obj.should_send === "boolean" && typeof obj.reason === "string") {
-        return { should_send: obj.should_send, reason: obj.reason };
-      }
-    }
-  }
-  return null;
-}
-
-function formatHysteresisReason(reason: string): string {
-  // engine.py:484: "no_previous_command"
-  if (reason === "no_previous_command") {
-    return "Erster Downlink — wird gesendet";
-  }
-  // engine.py:497: "hysteresis: delta=… < … und age=… < …"
-  const insideMatch = /^hysteresis:\s*delta=([^\s]+)\s*<.*und\s*age=([^\s]+)\s*<.*$/.exec(reason);
-  if (insideMatch) {
-    const [, delta, age] = insideMatch;
-    return `Innerhalb Hysterese (Δ ${delta}°C, Alter ${age}) — kein Downlink`;
-  }
-  // engine.py:493: "heartbeat age=…"
-  const heartbeatMatch = /^heartbeat\s+age=(.+)$/.exec(reason);
-  if (heartbeatMatch) {
-    return `Heartbeat überfällig (${heartbeatMatch[1]}) — wird gesendet`;
-  }
-  // engine.py:488: "delta=…"
-  const deltaMatch = /^delta=(.+)$/.exec(reason);
-  if (deltaMatch) {
-    return `Delta ${deltaMatch[1]}°C — wird gesendet`;
-  }
-  // Unbekanntes Format -> Roh-String, kein Crash. Folgt dem Layer-Detail-
-  // Rendering im LayerTrace.
-  return reason;
-}
-
-function HysteresisFooter({ latest }: { latest: EvalGroup }) {
-  const decision = extractHysteresisDecision(latest);
-  if (decision === null) return null;
-
-  const icon = decision.should_send ? "send" : "block";
-  const label = formatHysteresisReason(decision.reason);
-
-  return (
-    <div className="bg-surface border border-border rounded-md px-4 py-3">
-      <div className="flex items-center gap-2 text-sm text-text-secondary">
-        <span
-          className="material-symbols-outlined text-text-tertiary"
-          style={{ fontSize: 18 }}
-          aria-hidden
-        >
-          {icon}
-        </span>
-        <span>
-          <strong className="text-text-primary">Hysterese:</strong> {label}
-        </span>
-      </div>
     </div>
   );
 }

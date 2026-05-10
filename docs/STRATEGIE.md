@@ -2,14 +2,9 @@
 
 ## Vollständiges Strategiepapier
 
-**Version: 1.1 · Stand: 2026-05-07 (Architektur-Refresh)**
+**Version 1.0 · April 2026**
 **Domain:** heizung.hotel-sonnblick.at
 **Status:** Freigegeben für Entwicklungsstart
-
-> **Hinweis (2026-05-07):** Dieses Dokument wurde überarbeitet. Korrekturen
-> in §6.2 R8 (Frostschutz) und §9.3 (Phasen-Modell). Die maßgebliche
-> Quelle für aktuelle Pläne ist `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-> sowie `docs/SPRINT-PLAN.md`.
 
 ---
 
@@ -277,28 +272,8 @@ Gast ändert Soll-Temperatur am Thermostat. Wert wird gecapped auf konfigurierba
 **Regel 7 – Unbelegt-Langzeitabsenkung:**
 Zimmer > 24 h als „frei" markiert → Absenkung auf T_frei_langzeit (Standard: 15 °C). Spart Energie bei längeren Leerständen.
 
-**R8 — Frostschutz (zweistufig, ab 2026-05-07, AE-42)**
-
-Frostschutz wird in zwei Ebenen modelliert:
-
-1. **Hard-Cap im Code:** `FROST_PROTECTION_C = Decimal("10.0")` in
-   `backend/src/heizung/rules/constants.py`. Diese Konstante kann
-   niemand per UI ändern. Sie ist absoluter Boden für jeden Setpoint.
-
-2. **Raumtyp-Override (optional):** `room_type.frost_protection_c
-   NUMERIC(4,1) NULL`. Default NULL → fällt auf Hard-Cap. Kann pro
-   Raumtyp **höher** gesetzt werden (z. B. 12 °C für Bad mit
-   Handtuchwärmer), niemals niedriger als Hard-Cap.
-
-Der effektive Frostschutz für einen Raum ist
-`MAX(HARD_CAP, room_type.frost_protection_c)`. Engine-Layer 0 (Sommer),
-Layer 4 (Window-Detection) und Layer 5 (Hard-Clamp) lesen diesen Wert.
-
-Begründung: Cowork-Inventarisierung 2026-05-07 zeigte, dass Betterspace
-untere Temperaturgrenzen pro Raumtyp führt. Reale Hotelbetriebe brauchen
-das, weil Wasserleitungen in Bädern bei niedrigeren Temperaturen
-empfindlicher sind als trockene Flure. Hard-Cap bleibt als Sicherheitsnetz
-gegen Fehlkonfiguration.
+**Regel 8 – Frostschutz (absolut):**
+Harte Untergrenze bei 10 °C. Kann von keiner Regel, keinem Override und keiner KI unterschritten werden. Nicht verhandelbar, nicht konfigurierbar. Systemkonstante.
 
 ### 6.3 Konfigurierbarkeit: Drei-Ebenen-System
 
@@ -449,13 +424,6 @@ EINSTELLUNGEN
 | Benutzer | Settings-Layout | Benutzer-Verwaltung |
 | API & Webhooks | Settings-Layout | Key-Verwaltung, Webhook-Liste |
 
-**Sidebar-Migration (Sprint 9.13):** Heute existieren 7 flache Einträge
-in `frontend/src/components/sidebar.tsx`. Strategie-Konform sind 14
-Einträge in 5 Gruppen (Übersicht / Steuerung / Geräte / Analyse /
-Einstellungen). Migration in Sprint 9.13 zusammen mit Geräte-Pairing-UI.
-
-Detaillierte Route-Liste in `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` §6.
-
 ### 8.4 Dashboard – Persönliche Begrüßung und KPI-Cards
 
 Das Dashboard zeigt maximal 6 KPI-Cards (keine Charts, gemäß Design Strategie 5.2):
@@ -489,18 +457,28 @@ Beide Server laufen im selben Hetzner-Projekt (eine Rechnung).
 
 Jedes Feature wird auf einem eigenen Branch entwickelt. Der main-Branch enthält nur getesteten, freigegebenen Code. Kein Feature erreicht Produktion, das nicht vorher getestet und vom Hotelier freigegeben wurde.
 
-### 9.3 5-Phasen-Workflow (verbindlich, siehe `docs/WORKFLOW.md`)
+### 9.3 Die 7 Phasen pro Feature
 
-Pro Feature/Sprint werden fünf Phasen durchlaufen:
+**Phase 1 – Planung (Google Drive):**
+Kurzes Planungsdokument: Was, Warum, Wann fertig, Risiken, Aufwand. Ihr Aufwand: 5 Minuten lesen und bestätigen.
 
-1. Brief & Plan (Strategie-Chat)
-2. Implementierung (Claude Code)
-3. Tests & lokale Validierung (Claude Code)
-4. PR & Review (Claude Code formuliert, User gibt frei)
-5. Merge & Tag (Claude Code nach Freigabe)
+**Phase 2 – Entwicklung (GitHub + Claude Code):**
+Code schreiben auf Feature-Branch. Clean Code, SOLID-Prinzipien, modulare Architektur. Ihr Aufwand: Null.
 
-Eine frühere Fassung dieses Dokuments nannte 7 Phasen. Die maßgebliche
-Quelle ist `docs/WORKFLOW.md` mit 5 Phasen.
+**Phase 3 – Testing (automatisch):**
+Unit-Tests, Integrationstests, System-Tests. CI/CD-Pipeline prüft bei jedem Push automatisch. Ihr Aufwand: Null.
+
+**Phase 4 – Dokumentation (automatisch + manuell):**
+API-Doku automatisch aus Code. Feature-Beschreibung in Google Drive. Ihr Aufwand: Null.
+
+**Phase 5 – Review & Abnahme (Testsystem):**
+Sie prüfen das Feature auf dem Testsystem. Kurze Checkliste, 10–20 Minuten. Drei Optionen: Freigabe, Änderungswunsch, Ablehnung.
+
+**Phase 6 – Deployment (automatisch):**
+Nach Freigabe: Merge in main → automatische Tests → automatisches Deployment auf Main-System. Zero-Downtime. Rollback in 2 Minuten möglich. Ihr Aufwand: Null.
+
+**Phase 7 – Monitoring (laufend):**
+Health-Checks alle 60 Sekunden. E-Mail-Alerts bei Problemen. Zwei Stufen: Warnung (informativ) und Kritisch (Handlung nötig). Ihr Aufwand: 0–5 Minuten bei Alerts.
 
 ### 9.4 Speicherstrategie
 

@@ -6,13 +6,6 @@
  * Pflicht laut Design-Strategie 2.0.1 §6.1 fuer alle destruktiven Aktionen
  * (Loeschen, Deaktivieren, Archivieren).
  *
- * Sprint 9.8d T3: intern shadcn AlertDialog (Radix). Externe Props-API
- * unveraendert. Outside-Click ist via Radix-Default fuer alertdialog
- * geblockt. Waehrend `loading` ignoriert onOpenChange das Schliessen,
- * sodass weder ESC noch Cancel-Klick die laufende Mutation abbrechen.
- * Auto-Schliessen nach Action-Klick wird via event.preventDefault()
- * unterdrueckt — der Parent setzt `open` nach erfolgter Mutation.
- *
  * Nutzung:
  *   <ConfirmDialog
  *     open={…}
@@ -25,16 +18,8 @@
  *   />
  */
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "./alert-dialog";
+import { useEffect, useRef } from "react";
+
 import { Button } from "./button";
 
 export interface ConfirmDialogProps {
@@ -61,45 +46,55 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Fokus-Trap-Light: beim Öffnen Fokus auf "Abbrechen" — verhindert
+  // versehentliches Triggern via Enter.
+  useEffect(() => {
+    if (open) {
+      const id = window.setTimeout(() => cancelRef.current?.focus(), 50);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [open]);
+
+  // Esc schliesst.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !loading) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, loading, onCancel]);
+
+  if (!open) return null;
+
   return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !loading) onCancel();
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
+      onClick={(e) => {
+        // Klick auf Backdrop = Abbrechen (nicht waehrend Loading).
+        if (e.target === e.currentTarget && !loading) onCancel();
       }}
     >
-      <AlertDialogContent
-        onEscapeKeyDown={(event) => {
-          // Loading-Schutz: ESC darf laufende Mutation nicht abbrechen.
-          // Sonst Default zulassen — Radix-DismissableLayer triggert dann
-          // onOpenChange(false), worauf unser Filter onCancel() ruft.
-          if (loading) event.preventDefault();
-        }}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{message}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel asChild>
-            <Button variant="secondary" disabled={loading}>
-              {cancelLabel}
-            </Button>
-          </AlertDialogCancel>
-          <AlertDialogAction asChild>
-            <Button
-              variant={intent}
-              loading={loading}
-              onClick={(event) => {
-                event.preventDefault();
-                onConfirm();
-              }}
-            >
-              {confirmLabel}
-            </Button>
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      <div className="bg-surface rounded-lg shadow-lg max-w-md w-full p-6 space-y-4">
+        <h2 id="confirm-dialog-title" className="text-lg font-semibold text-text-primary">
+          {title}
+        </h2>
+        <p className="text-base text-text-secondary">{message}</p>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button ref={cancelRef} variant="secondary" onClick={onCancel} disabled={loading}>
+            {cancelLabel}
+          </Button>
+          <Button variant={intent} onClick={onConfirm} loading={loading}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

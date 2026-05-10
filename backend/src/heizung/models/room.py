@@ -27,7 +27,6 @@ from heizung.models.enums import Orientation, RoomStatus, _enum_values
 
 if TYPE_CHECKING:
     from heizung.models.heating_zone import HeatingZone
-    from heizung.models.manual_override import ManualOverride
     from heizung.models.manual_setpoint_event import ManualSetpointEvent
     from heizung.models.occupancy import Occupancy
     from heizung.models.room_type import RoomType
@@ -103,9 +102,6 @@ class Room(Base):
         back_populates="room", cascade="all, delete-orphan"
     )
     manual_setpoint_events: Mapped[list[ManualSetpointEvent]] = relationship(
-        back_populates="room", cascade="all, delete-orphan"
-    )
-    manual_overrides: Mapped[list[ManualOverride]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )
 

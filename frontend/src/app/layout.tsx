@@ -35,6 +35,14 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de" className={roboto.variable}>
+      <head>
+        {/* Material Symbols als Link-Tag — robuster als @import in CSS,
+            Next.js kann das preloaden + Build-Optimizer fasst es nicht an. */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300..700,0..1,-50..200&display=block"
+        />
+      </head>
       <body className="font-sans bg-bg text-text-primary antialiased">
         <Providers>
           <AppShell>{children}</AppShell>

@@ -310,7 +310,6 @@ export type EventLogLayer =
   | "manual_override"
   | "guest_override"
   | "window_safety"
-  | "device_detached"
   | "hard_clamp";
 
 export type CommandReason =
@@ -321,63 +320,12 @@ export type CommandReason =
   | "preheat_checkin"
   | "checkout_setback"
   | "window_open"
-  | "device_detached"
   | "guest_override"
   | "long_vacant"
   | "frost_protection"
   | "summer_mode"
   | "manual"
   | "manual_event";
-
-// ---------------------------------------------------------------------------
-// Manual Override (Sprint 9.9 - Engine Layer 3)
-// ---------------------------------------------------------------------------
-
-export type OverrideSource =
-  | "device"
-  | "frontend_4h"
-  | "frontend_midnight"
-  | "frontend_checkout";
-
-/**
- * Quellen, die das Frontend selbst anlegen darf. ``device``-Overrides
- * werden ausschliesslich vom Backend ``device_adapter`` aus Vicki-
- * Uplinks erzeugt.
- */
-export type FrontendOverrideSource =
-  | "frontend_4h"
-  | "frontend_midnight"
-  | "frontend_checkout";
-
-/**
- * Spiegelt ``ManualOverrideResponse`` aus
- * ``backend/src/heizung/schemas/manual_override.py``. ``setpoint`` kommt
- * als String aus Pydantic-Decimal-Serialisierung — bewusst nicht in
- * Number umwandeln (Float-Rundungsfreiheit).
- */
-export interface ManualOverride {
-  id: number;
-  room_id: number;
-  setpoint: string;
-  source: OverrideSource;
-  expires_at: string;
-  reason: string | null;
-  created_at: string;
-  created_by: string | null;
-  revoked_at: string | null;
-  revoked_reason: string | null;
-}
-
-export interface ManualOverrideCreate {
-  setpoint: string;
-  source: FrontendOverrideSource;
-  reason?: string | null;
-}
-
-export interface ManualOverrideListQuery {
-  limit?: number;
-  include_expired?: boolean;
-}
 
 export interface EventLogEntry {
   time: string;

@@ -8,15 +8,10 @@ CRUD (Sprint 6.10):
 
 Zeitreihen (Sprint 5.8):
     GET    /api/v1/devices/{device_id}/sensor-readings
-
-Geraete-Zone-Zuordnung (Sprint 9.11a):
-    PUT    /api/v1/devices/{device_id}/heating-zone
-    DELETE /api/v1/devices/{device_id}/heating-zone
 """
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -28,16 +23,8 @@ from heizung.db import get_session
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
-from heizung.schemas.device import (
-    DeviceAssignZoneRequest,
-    DeviceAssignZoneResponse,
-    DeviceCreate,
-    DeviceRead,
-    DeviceUpdate,
-)
+from heizung.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate
 from heizung.schemas.sensor_reading import SensorReadingRead
-
-logger = logging.getLogger(__name__)
 
 # Postgres int4-Range. IDs > 2^31-1 wuerden DataError werfen → 500.
 # Mit Path-Validierung kommt FastAPI sauberer mit 422 zurueck.
@@ -168,90 +155,6 @@ async def update_device(
 
     await session.commit()
     await session.refresh(device)
-    return device
-
-
-# ---------------------------------------------------------------------------
-# Geraete-Zone-Zuordnung (Sprint 9.11a)
-# ---------------------------------------------------------------------------
-
-
-@router.put(
-    "/{device_id}/heating-zone",
-    response_model=DeviceAssignZoneResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Geraet einer Heizzone zuweisen oder neu zuordnen",
-)
-async def assign_device_to_zone(
-    payload: DeviceAssignZoneRequest,
-    device_id: int = DeviceIdPath,
-    session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
-    device = await session.get(Device, device_id)
-    if device is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="device_not_found",
-        )
-
-    zone = await session.get(HeatingZone, payload.heating_zone_id)
-    if zone is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="heating_zone_not_found",
-        )
-
-    if device.heating_zone_id == payload.heating_zone_id:
-        return device
-
-    device.heating_zone_id = payload.heating_zone_id
-    await session.commit()
-    await session.refresh(device)
-
-    logger.info(
-        "device_zone_changed",
-        extra={
-            "device_id": device.id,
-            "dev_eui": device.dev_eui,
-            "heating_zone_id_new": device.heating_zone_id,
-        },
-    )
-    return device
-
-
-@router.delete(
-    "/{device_id}/heating-zone",
-    response_model=DeviceAssignZoneResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Geraet von Heizzone trennen (Detach)",
-)
-async def detach_device_from_zone(
-    device_id: int = DeviceIdPath,
-    session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
-    device = await session.get(Device, device_id)
-    if device is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="device_not_found",
-        )
-
-    if device.heating_zone_id is None:
-        return device
-
-    prev = device.heating_zone_id
-    device.heating_zone_id = None
-    await session.commit()
-    await session.refresh(device)
-
-    logger.info(
-        "device_zone_detached",
-        extra={
-            "device_id": device.id,
-            "dev_eui": device.dev_eui,
-            "heating_zone_id_prev": prev,
-        },
-    )
     return device
 
 
