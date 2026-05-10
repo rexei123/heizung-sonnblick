@@ -107,9 +107,17 @@ def _ctx(
 # ---------------------------------------------------------------------------
 
 
-def test_summer_mode_inactive_returns_none() -> None:
-    """Standard: summer_mode_active=False -> Layer 0 ueberspringt."""
-    assert layer_summer_mode(_ctx(summer_mode_active=False)) is None
+def test_summer_mode_inactive_emits_passthrough_step() -> None:
+    """Sprint 9.10d T2.5: Layer 0 ist always-on, im Inactive-Pfad
+    ``setpoint_c=None`` (Layer hat keinen eigenen Setpoint-Beitrag) mit
+    ``detail="summer_mode_inactive"``."""
+    step = layer_summer_mode(_ctx(summer_mode_active=False))
+    assert step is not None
+    assert step.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
+    assert step.setpoint_c is None
+    assert step.detail == "summer_mode_inactive"
+    assert step.reason == CommandReason.SUMMER_MODE
+    assert step.extras is None
 
 
 def test_summer_mode_active_returns_frost_protection() -> None:
@@ -119,6 +127,7 @@ def test_summer_mode_active_returns_frost_protection() -> None:
     assert step.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
     assert step.setpoint_c == int(FROST_PROTECTION_C)
     assert step.reason == CommandReason.SUMMER_MODE
+    assert step.detail == "summer_mode_active=true"
 
 
 def test_summer_mode_overrides_room_status() -> None:
@@ -269,11 +278,19 @@ def test_night_window_helper_with_wrap() -> None:
     assert _is_in_night_window(time(6, 0), time(22, 0), time(6, 0)) is False
 
 
-def test_temporal_no_match_returns_none() -> None:
-    """OCCUPIED ohne Nachtfenster + kein Vorheizen -> None (Layer 1 bleibt)."""
+def test_temporal_no_match_emits_temporal_inactive() -> None:
+    """Sprint 9.10d: OCCUPIED ohne Nachtfenster-Config -> Passthrough mit
+    detail="temporal_inactive" (keine Konfiguration -> kein spezifischerer
+    Token)."""
     base = layer_base_target(_ctx(status=RoomStatus.OCCUPIED))
     now = datetime(2026, 5, 4, 14, 0, tzinfo=UTC)  # Nachmittag
-    assert layer_temporal(base, _ctx(status=RoomStatus.OCCUPIED), now=now) is None
+    step = layer_temporal(base, _ctx(status=RoomStatus.OCCUPIED), now=now)
+    assert step is not None
+    assert step.layer == EventLogLayer.TEMPORAL_OVERRIDE
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "temporal_inactive"
+    assert step.extras is None
 
 
 def test_temporal_preheat_active() -> None:
@@ -290,23 +307,49 @@ def test_temporal_preheat_active() -> None:
     assert step.setpoint_c == 21  # default occupied
 
 
-def test_temporal_preheat_too_early_no_match() -> None:
-    """RESERVED + check_in in 90 Min + preheat=60 Min -> NICHT in window."""
+def test_temporal_preheat_too_early_emits_outside_window() -> None:
+    """Sprint 9.10d: RESERVED + check_in in 90 Min + preheat=60 Min -> NICHT
+    in Window. detail="outside_preheat_window" (Config existiert, Zeit-
+    fenster aber nicht erfuellt)."""
     now = datetime(2026, 5, 4, 12, 30, tzinfo=UTC)
     occ = _make_occupancy(check_in=now + timedelta(minutes=90))
     rcs = [_make_rule_config(RuleConfigScope.GLOBAL, preheat_minutes_before_checkin=60)]
     ctx = _ctx(status=RoomStatus.RESERVED, rule_configs=rcs, next_occupancy=occ)
     base = layer_base_target(ctx)
-    assert layer_temporal(base, ctx, now=now) is None
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "outside_preheat_window"
 
 
-def test_temporal_preheat_no_config_no_match() -> None:
-    """preheat-config NULL -> kein Vorheizen, auch wenn check_in in Naehe."""
+def test_temporal_reserved_without_occupancy_emits_no_upcoming_arrival() -> None:
+    """Sprint 9.10d: RESERVED aber keine ctx.next_occupancy -> spezifisches
+    detail="no_upcoming_arrival"."""
+    now = datetime(2026, 5, 4, 13, 30, tzinfo=UTC)
+    rcs = [_make_rule_config(RuleConfigScope.GLOBAL, preheat_minutes_before_checkin=60)]
+    ctx = _ctx(status=RoomStatus.RESERVED, rule_configs=rcs, next_occupancy=None)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "no_upcoming_arrival"
+
+
+def test_temporal_preheat_no_config_emits_temporal_inactive() -> None:
+    """Sprint 9.10d: RESERVED + occ aber keine preheat-Config -> Fallback
+    detail="temporal_inactive" (Config fehlt, keine spezifischere Aussage
+    moeglich)."""
     now = datetime(2026, 5, 4, 13, 30, tzinfo=UTC)
     occ = _make_occupancy(check_in=now + timedelta(minutes=10))
     ctx = _ctx(status=RoomStatus.RESERVED, next_occupancy=occ)  # keine rule_configs
     base = layer_base_target(ctx)
-    assert layer_temporal(base, ctx, now=now) is None
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "temporal_inactive"
 
 
 def test_temporal_night_setback_active() -> None:
@@ -328,8 +371,9 @@ def test_temporal_night_setback_active() -> None:
     assert step.setpoint_c == 19
 
 
-def test_temporal_night_setback_outside_window_no_match() -> None:
-    """OCCUPIED am Nachmittag -> kein Setback."""
+def test_temporal_night_setback_outside_window_emits_outside_token() -> None:
+    """Sprint 9.10d: OCCUPIED am Nachmittag -> kein Setback.
+    detail="outside_night_setback" (Config existiert, Zeitfenster nicht)."""
     now = datetime(2026, 5, 4, 14, 0, tzinfo=UTC)
     rcs = [
         _make_rule_config(
@@ -341,11 +385,16 @@ def test_temporal_night_setback_outside_window_no_match() -> None:
     ]
     ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
     base = layer_base_target(ctx)
-    assert layer_temporal(base, ctx, now=now) is None
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "outside_night_setback"
 
 
-def test_temporal_night_setback_only_when_occupied() -> None:
-    """VACANT in Nachtfenster -> Layer 2 inaktiv (Layer 1 bleibt vacant)."""
+def test_temporal_night_setback_only_when_occupied_emits_temporal_inactive() -> None:
+    """Sprint 9.10d: VACANT in Nachtfenster -> Layer 2 ohne aktiven Pfad.
+    Status weder RESERVED noch OCCUPIED -> Fallback "temporal_inactive"."""
     now = datetime(2026, 5, 4, 23, 30, tzinfo=UTC)
     rcs = [
         _make_rule_config(
@@ -357,7 +406,11 @@ def test_temporal_night_setback_only_when_occupied() -> None:
     ]
     ctx = _ctx(status=RoomStatus.VACANT, rule_configs=rcs)
     base = layer_base_target(ctx)
-    assert layer_temporal(base, ctx, now=now) is None
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.setpoint_c == base.setpoint_c
+    assert step.reason == base.reason
+    assert step.detail == "temporal_inactive"
 
 
 def test_temporal_preheat_wins_over_night() -> None:

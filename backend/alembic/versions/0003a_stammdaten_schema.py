@@ -12,9 +12,9 @@ Create Date: 2026-05-02
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import time
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -317,9 +317,7 @@ def upgrade() -> None:
             " OR (scope = 'room' AND room_id IS NOT NULL AND room_type_id IS NULL)",
             name="ck_manual_setpoint_event_scope_consistency",
         ),
-        sa.CheckConstraint(
-            "starts_at < ends_at", name="ck_manual_setpoint_event_time_ordered"
-        ),
+        sa.CheckConstraint("starts_at < ends_at", name="ck_manual_setpoint_event_time_ordered"),
         sa.CheckConstraint(
             "target_setpoint_celsius >= 5.0 AND target_setpoint_celsius <= 30.0",
             name="ck_manual_setpoint_event_temp_range",
@@ -363,9 +361,7 @@ def upgrade() -> None:
         ),
     )
     # Alten UNIQUE-Constraint ohne season_id durch neuen mit season_id ersetzen.
-    op.drop_constraint(
-        "uq_rule_config_scope_target", "rule_config", type_="unique"
-    )
+    op.drop_constraint("uq_rule_config_scope_target", "rule_config", type_="unique")
     op.create_unique_constraint(
         "uq_rule_config_scope_target",
         "rule_config",
@@ -375,9 +371,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # rule_config — Saison entfernen, alten UNIQUE wiederherstellen
-    op.drop_constraint(
-        "uq_rule_config_scope_target", "rule_config", type_="unique"
-    )
+    op.drop_constraint("uq_rule_config_scope_target", "rule_config", type_="unique")
     op.drop_constraint("fk_rule_config_season", "rule_config", type_="foreignkey")
     op.drop_column("rule_config", "season_id")
     op.create_unique_constraint(

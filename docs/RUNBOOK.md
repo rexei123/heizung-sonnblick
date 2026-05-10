@@ -625,6 +625,188 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 
 ---
 
+## 10c. Codec-Deploy auf ChirpStack (Sprint 9.10c)
+
+**Hintergrund.** Repo-Codec (`infra/chirpstack/codecs/mclimate-vicki.js`) ist Source of Truth, ChirpStack zieht ihn aber nicht selbst. Jeder Repo-Codec-Touch erfordert anschliessend einen manuellen Re-Paste in der ChirpStack-UI je Server. Siehe CLAUDE.md §5.22.
+
+**Zielserver:** `heizung-test` zuerst, `heizung-main` nachgezogen, sobald Production-Migration ansteht.
+
+### 10c.1 UI-Re-Paste
+
+1. Browser → `https://heizung-test.hoteltec.at/chirpstack/`
+2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API).
+3. **Tenants → Hotel Sonnblick → Device Profiles → Heizung**.
+4. Tab **Codec** öffnen.
+5. Bestehenden JS-Code komplett markieren und löschen.
+6. Inhalt von `infra/chirpstack/codecs/mclimate-vicki.js` (aktueller Repo-Stand auf `develop` bzw. dem zu deployenden Branch) einfügen.
+7. **Update Device Profile** klicken.
+
+Kein Container-Restart nötig — ChirpStack lädt Codec-Änderungen für jedes neue Event neu.
+
+### 10c.2 Verifikation
+
+Nach 1–2 Minuten muss ein neues Vicki-Event mit dem geänderten Codec laufen:
+
+1. Im ChirpStack-UI: **Devices → Vicki-001 → LoRaWAN frames** (oder Events) → letztes Event aufklappen.
+2. Decoded-`object`-Block muss die geänderten/neuen Felder enthalten. Beispiel-Erwartung nach Sprint 9.10c (Cmd-Byte-Routing):
+   ```
+   { "report_type": "periodic",
+     "command": 129,
+     "temperature": 22.71,
+     "target_temperature": 18,
+     "valve_openness": 0,
+     "battery_voltage": 3.4,
+     "openWindow": false, ... }
+   ```
+   (vorher: `{ "command": 129, "report_type": "unknown_reply" }` ohne Sensor-Felder.)
+
+3. Subscriber-Side per SSH gegenchecken:
+   ```bash
+   # SSH (heizung-test, root)
+   docker logs deploy-api-1 --since 5m 2>&1 | grep "uplink persistiert" | tail -5
+   ```
+   Erwartung: Log-Zeilen mit `temp=...` und `setpoint=...`, NICHT `temp=None`.
+
+### 10c.3 Backlog: Bootstrap-Skript
+
+UI-Re-Paste je Server ist fehleranfällig (Copy-Paste-Verlust, ungetesteter Stand). Eigener Hygiene-Sprint via ChirpStack gRPC-API (`UpdateDeviceProfile`-RPC mit `payload_codec_script`-Feld) macht Repo → ChirpStack reproduzierbar. Siehe STATUS.md §6 Backlog-Eintrag „ChirpStack-Codec-Bootstrap-Skript".
+
+**Production-Hinweis:** Sobald heizung-main Live-Vickis bekommt, muss dieser Codec-Deploy-Schritt dort wiederholt werden. Backlog: B-9.10c-2.
+
+---
+
+## 10d. Geräte-Zuordnung via API (Sprint 9.11a)
+
+Vicki-Thermostate werden produktiv via REST-API einer Heizzone
+zugewiesen. Bis zur UI-Pairing-Lösung in Sprint 9.13 ist dies der
+einzige unterstützte Weg. Direkter DB-Edit ist NICHT mehr nötig.
+
+### 10d.1 Voraussetzungen
+
+- Device existiert (via ChirpStack-Pairing aus §10) und ist in der
+  `device`-Tabelle persistiert.
+- Heizzone existiert (`heating_zone`-Tabelle, ID via UI oder
+  `GET /api/v1/rooms/{room_id}/heating-zones`).
+- Basic-Auth-Credentials für heizung-test (siehe §10b).
+
+### 10d.2 Gerät einer Heizzone zuweisen
+
+```bash
+curl -X PUT \
+  -u "<user>:<pass>" \
+  -H "Content-Type: application/json" \
+  -d '{"heating_zone_id": 42}' \
+  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+```
+
+Erwartete Response (200):
+
+```json
+{
+  "device_id": 2,
+  "dev_eui": "70b3d52dd3034de4",
+  "heating_zone_id": 42,
+  "label": "Vicki-002",
+  "updated_at": "2026-05-08T14:23:11.482Z"
+}
+```
+
+### 10d.3 Re-Assign (Hardware-Tausch)
+
+Identisch zu §10d.2 — die API behandelt Re-Assign idempotent. Der
+neue Wert überschreibt den alten ohne 409-Konflikt.
+
+### 10d.4 Gerät von Heizzone trennen (Detach)
+
+```bash
+curl -X DELETE \
+  -u "<user>:<pass>" \
+  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+```
+
+Response (200): `heating_zone_id` ist `null`.
+
+### 10d.5 Verifikation via DB
+
+```bash
+docker exec -it deploy-db-1 psql -U heizung -d heizung -c \
+  "SELECT id, dev_eui, label, heating_zone_id FROM device ORDER BY id;"
+```
+
+Erwartet nach Sprint 9.11a Live-Setup: alle 4 Vickis mit
+`heating_zone_id IS NOT NULL`.
+
+### 10d.6 Fehlerbilder
+
+| HTTP | Detail | Bedeutung |
+|---|---|---|
+| 404 | `device_not_found` | Device-ID existiert nicht |
+| 404 | `heating_zone_not_found` | Zone-ID existiert nicht |
+| 422 | Pydantic-Default | Body fehlt, `heating_zone_id <= 0`, oder Extra-Feld |
+
+### 10d.7 Verwandte API-Endpunkte (Sprint 9.11 verifiziert)
+
+#### Manual-Override anlegen
+
+```bash
+curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+  -d '{"setpoint": "23", "source": "frontend_4h", "reason": "Test"}' \
+  https://heizung-test.hoteltec.at/api/v1/rooms/{room_id}/overrides
+```
+
+Erlaubte `source`-Werte:
+
+- `device` — vom System bei Auto-Detect (siehe AE-45) — manuell nicht setzen
+- `frontend_4h` — Standard-Frontend-Override, 4 h Gültigkeit
+- `frontend_midnight` — gültig bis 00:00
+- `frontend_checkout` — gültig bis Check-out der aktiven Belegung
+
+`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 400 abgelehnt).
+
+#### Manual-Override revoken
+
+```bash
+curl -u "<user>:<pass>" -X DELETE \
+  https://heizung-test.hoteltec.at/api/v1/overrides/{override_id}
+```
+
+#### Belegung anlegen
+
+```bash
+curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+  -d '{"room_id": 2, "check_in": "2026-05-09T06:00:00Z", "check_out": "2026-05-11T11:00:00Z", "source": "manual"}' \
+  https://heizung-test.hoteltec.at/api/v1/occupancies
+```
+
+#### Belegung stornieren
+
+DELETE ist nicht erlaubt. Stornierung via PATCH:
+
+```bash
+curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
+  -d '{"cancel": true}' \
+  https://heizung-test.hoteltec.at/api/v1/occupancies/{id}
+```
+
+Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelöscht werden.
+
+---
+
+## 10e. Vicki-Konfiguration via Downlink (Sprint 9.11x.b)
+
+**Status:** Stub — wird in Sprint 9.11x.b vollständig ausgearbeitet.
+**Bezug:** AE-48 (Downlink-Helper-Architektur), AE-47 (Window-Detection-Hybrid)
+
+Diese Sektion dokumentiert das Vicki-Downlink-Verfahren für drei Konfigurations-Commands:
+
+- `0x04` — Firmware-Version abfragen
+- `0x4501020F` — Open-Window-Detection aktivieren (FW >= 4.2)
+- `0x46` — Open-Window-Detection-Status abfragen
+
+Implementierung in Sprint 9.11x.b. Bis dahin: Vicki-Konfiguration ausschließlich über die Setpoint-Logik (`0x51`) der Engine — kein manuelles Eingreifen nötig im Normalbetrieb.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
@@ -639,4 +821,6 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 ## Anhang: Lessons Learned 2026-04-20
 
 - Hetzner Web Console (noVNC) hat US-Keyboard-Mapping → `|`, `:`, `"` werden zerlegt. Nur für kurze Single-Word-Commands nutzen.
-- Hetzner Cloud Firewall ist für diesen Accoun                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+- Hetzner Cloud Firewall ist für diesen Account NICHT konfiguriert — Blockaden kommen server-seitig (UFW).
+- Rescue-Modus ist nach einem Reboot verbraucht, Server bootet normal zurück.
+- `ssh-heizung`-Key in Hetzner gilt sowohl für Rescue-Auth als auch produktiven SSH-Zugang.
