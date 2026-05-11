@@ -874,6 +874,77 @@ Beide Bugs **B-9.11x.b-5** und **B-9.11x.b-6** ✅ geschlossen.
 
 ---
 
+## 2z. Sprint 9.11y Synthetic-Tests + Inferred-Window-Logger + Hardware-Verify (2026-05-11, abgeschlossen, **Tag `v0.1.9-rc6-live-test-2`**)
+
+**Ziel:** Layer-4-Pipeline End-to-End ohne Hardware-Abhängigkeit testbar machen (AE-47-Strategie für Heizungs-Aus-Periode), passiven Inferred-Window-Detector als dritten Trigger im event_log einbauen, Hardware-Kältepack-Verify auf heizung-test als Akzeptanz-Schritt.
+
+**Ergebnis:** Sprint inhaltlich abgeschlossen, **Tag gesetzt**. Synthetic-Tests grün (6/6). Hardware-Verify lieferte AE-47-Hardware-First-Bestätigung (Vicki-Trägheit live demonstriert) plus AE-45-Live-Demonstration (Auto-Override-Erkennung). Inferred-Logger deployed und funktional, aber durch synchronen Drehrad-Override während Kältepack-Test nicht observierbar — die korrekte Spec-Konformität (Pre-Window-Baseline-Block bei Setpoint-Wechsel) hat in diesem Live-Setup den Trigger verhindert.
+
+**Diff-Stats:** 6 Files, 119 insertions (PR #128, mergeCommit `2e9f833`).
+
+**Architektur (AE-47 §Passiver Trigger):**
+
+```
+detect_inferred_window(session, room_id, now) -> InferredWindowResult | None
+log_inferred_window_event(session, result)  # event_log Off-Pipeline-Audit
+```
+
+- Lookback **10 Min**, Δ-T-Schwelle **0.5 °C** (`oldest - newest`, fallend)
+- Stehender Setpoint geprüft über **Pre-Window-Baseline + Window-Set** zusammen — naive "nur in_window prüfen"-Variante hätte Boundary-Wechsel verpasst
+- OR-Semantik über Devices der Zone (analog Window-Trigger)
+- Off-Pipeline: keine Setpoint-Aktion, nur event_log mit `layer=INFERRED_WINDOW_OBSERVATION`, `reason=INFERRED_WINDOW`, `setpoint_in == setpoint_out`
+
+**Integration `engine_tasks.py`:** Detect-Aufruf nach Engine-Pipeline + ControlCommand-Insert, vor `session.commit()` — atomar in derselben Transaction. Defensive try/except: Detector-Failure blockiert regulären Eval-Commit nie.
+
+**Synthetic-Test-Matrix (6/6 grün):**
+
+| # | Setup | Erwartung |
+|---|---|---|
+| 1 | Engine: `open_window=True` | MIN_SETPOINT_C, reason=WINDOW_OPEN |
+| 2 | Engine: `attached=False,False` | MIN_SETPOINT_C, reason=DEVICE_DETACHED |
+| 3 | Inferred: Falling 21→20.5→20, SP stehend | delta_c=1.0, setpoint_c=20 |
+| 4 | Inferred: Stabile 21.0 | None |
+| 5 | Inferred: SP-Wechsel 20→18 Boundary | None (Wachposten) |
+| 6 | Inferred: nur Pre-Window-Baseline | setpoint_c=20 (Baseline) |
+
+Plus 2 Log-Format-Mirror-Tests (S3-Audit-Trail-Drift-Schutz).
+
+**Wichtiger Detector-Fix während T4 (User-gefangen, Test 5 als Wachposten):** Naive Implementierung "nur `issued_at >= threshold` prüfen" hätte den Boundary-Wechsel verpasst (20→18 mit 20.0-CC vor 30 Min, 18.0-CC vor 1 Min → Window enthält nur `{18.0}` → naiv kein Block). Fix: `all_setpoints = in_window_setpoints ∪ {pre_window_sp}`, bei `len > 1` Return `None`. Test 5 + Test 6 verriegeln beide Richtungen.
+
+**Brief-Drifts (vorab freigegeben):**
+
+| # | Brief | Auflösung |
+|---|---|---|
+| 1 | `services/event_log.py` "vorhanden, erweitern" | neu angelegt (bisherige Inserts in `engine_tasks.py`) |
+| 2 | Detect-Aufruf "danach" | vor `session.commit()`, atomar (semantisch unabhängig vom frisch erzeugten CC) |
+| 3 | Defensive try/except | Detector-Failure blockiert Eval nicht (S2) |
+| 4 | (User-Befund) | Pre-Window-Baseline-Check für stehender-Setpoint-Bedingung |
+
+**Pre-Push-Toolchain:** Backend grün (`ruff`, `mypy src`, `pytest`: **261 passed, 1 xfailed** mit B-9.11x-1-Ignores). Frontend `type-check` grün (kein Touch).
+
+**Hardware-Kältepack-Verify auf heizung-test (2026-05-11):**
+
+Vicki-001 wurde mit Kältepack belastet (T-Sturz 22.0 → 14.4 °C im internen Sensor). Drei Befunde:
+
+1. **Vicki-Hardware-Trigger NICHT ausgelöst** trotz 7.6 °C T-Sturz → **AE-47 §Algorithmus-Trägheit live bestätigt**. Vendor-Doku "not 100% reliable, can be affected by outdoor temperature, position of the device on the radiator..." erfüllt sich in der Praxis.
+2. **Auto-Override-Erkennung AE-45 live demonstriert** während Kältepack-Hantierung — zwei Vicki-Drehrad-Sprünge erkannt:
+   - 09:57 UTC: 20 → 26 → `manual_override id=12 source=device`
+   - 10:28 UTC: 26 → 29 → `manual_override id=13 source=device`
+   Engine-Pipeline reagierte korrekt, Override-Schutz greift.
+3. **Inferred-Window-Logger deployed und im evaluate_room-Pfad bestätigt aktiv** (minütlich pro Raum laut Logs), aber **nicht getriggert** — die Setpoint-Sprünge unter Punkt 2 haben den Pre-Window-Baseline-Block ausgelöst (Test 5-Pattern: `len(all_setpoints) > 1 → return None`). **Korrektes Verhalten nach Spec.**
+
+**Konsequenz für Sprint-Bewertung:** Hardware-Verify-Pfad A (Vicki-Trigger) und Pfad B (Inferred-Logger) sind beide durch die Live-Bedingungen nicht in der ursprünglich antizipierten Form observierbar geworden. Aber:
+- Pfad A: **bestätigt** AE-47-Hypothese der Hardware-Trägheit (Hauptbegründung für AE-47 lebt).
+- Pfad B: Logger ist deployed, im Hot-Path eingehängt, Spec-konform geblockt durch echten Setpoint-Wechsel — das ist exakt das Verhalten, das Test 5 verriegelt. AE-45-Erkennung läuft parallel und macht den Detector im Hotelbetrieb häufiger inaktiv als ursprünglich angenommen.
+
+→ **Backlog B-9.11y-1**: Inferred-Logger Live-Verify in der Heizperiode mit einem Test-Szenario ohne Drehrad-Hantieren (echtes Fenster-Öffnen, niemand fasst den Vicki an, Setpoint bleibt stehend) — dann kann der Detector seinen Trigger zeigen.
+
+**Tag-Vergabe:** `v0.1.9-rc6-live-test-2` gesetzt 2026-05-11, AE-47-Begründung gemäß Brief-Fail-Safe (Tag wird in beiden Hardware-Fällen gesetzt). Sprint-9.11-Familie offiziell geschlossen.
+
+**Backlog-Items aus diesem Sprint:** B-9.11y-1, B-9.11y-2 — siehe §6.2.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1014,6 +1085,8 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11x.b-4 | Dockerfile-COPY-Konvention prüfen, dass zukünftige neue Top-Level-Verzeichnisse standardmäßig mit ins Image gehen, oder ein conftest existiert das eine Inventur macht. Anlass: `scripts/` fehlte im Image (PR #124) | 🟡 |
 | B-9.11x.b-5 | 0x04-Decoder Byte-Offset-Bug in `mclimate-vicki.js`. Vendor-Doku-Spec war ungenau (Bytes statt Nibbles + Vicki packt Reply + Keep-alive im selben Uplink). Fix in Sprint 9.11x.c via 3-Byte-Nibble-Decoder + Frame-Merge mit Reply-Priorität. Live-Verify: alle 4 Vickis zeigen `firmware_version=4.4` | ✅ erledigt 2026-05-11 (PR #126) |
 | B-9.11x.b-6 | Subscriber-Log "firmware_version persistiert" feuert nicht. Fix in Sprint 9.11x.c: `logger.info` AUSSERHALB des `async-with`-Blocks + `rowcount`-Diagnose. Live-Verify: 4× `firmware_version persistiert ... fw=4.4 rows=1` im `docker logs` (08:07–08:12 UTC) | ✅ erledigt 2026-05-11 (PR #126) |
+| B-9.11y-1 | Inferred-Window-Logger Live-Verify in Heizperiode mit echtem Fenster-Öffnen ohne Drehrad-Hantieren (Kältepack-Test 2026-05-11 lieferte parallel AE-45-Drehrad-Sprünge, die den Pre-Window-Baseline-Block ausgelöst haben — Detector blieb Spec-konform inaktiv). Test-Szenario: Vicki ungestört lassen, Fenster physikalisch öffnen, Δ-T ≥ 0.5 °C im Lookback erwarten → Trigger im event_log | 🟡 (in Heizperiode) |
+| B-9.11y-2 | `manual_override id=12` (20→26, source=device, 2026-05-11 09:57 UTC) und `id=13` (26→29, 2026-05-11 10:28 UTC) auf heizung-test manuell revoken vor Sprint 9.12. Sonst maskieren sie weitere Tests bis 7-Tage-Hard-Cap (2026-05-18) abgelaufen ist | 🟡 (vor 9.12) |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
@@ -1076,5 +1149,8 @@ Secrets liegen in:
 | `v0.1.9-rc1-walking-skeleton` | Sprint 9 (Engine 6-Layer-Skelett + Downlink + Engine-Panel) | 2026-05-04 |
 | `v0.1.9-rc2-manual-override` | Sprint 9.9 + 9.9a (Engine Layer 3 + UI + Hotfix) | 2026-05-06 |
 | `v0.1.9-rc3-window-detection` | Sprint 9.10 (Engine Layer 4 Window-Detection + AE-40 Engine-Task-Lock) | 2026-05-07 |
+| `v0.1.9-rc6-live-test-2` | Sprint 9.11y (Synthetic-Layer-4-Tests + Inferred-Window-Logger + Hardware-Kältepack-Verify, Sprint-9.11-Familie abgeschlossen) | 2026-05-11 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
+
+*Sprints 9.11x, 9.11x.b, 9.11x.c: kein eigener Tag — Familie schließt mit `v0.1.9-rc6-live-test-2` auf 9.11y.*
