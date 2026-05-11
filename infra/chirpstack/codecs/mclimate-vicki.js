@@ -21,13 +21,21 @@
 // fPort wird damit redundant fuer das Routing.
 //
 // Sprint 9.11x.b (2026-05-10): Drei neue Downlinks gemaess AE-48:
-//   0x04        -> FW-Query (Antwort: 0x04 HW_maj HW_min FW_maj FW_min)
+//   0x04        -> FW-Query (Antwort siehe 9.11x.c-Korrektur unten)
 //   0x4501020F  -> Open-Window-Detection an (Vendor-Bytes, FW>=4.2)
 //   0x46        -> Open-Window-Detection-Status abfragen
 // Vendor-Doku: docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md.
 // Backend-Helper-Architektur (Spiegel) in
 // backend/src/heizung/services/downlink_adapter.py — Drift-Schutz via
 // pytest-Spiegel-Test (siehe backend/tests/test_codec_mirror.py).
+//
+// Sprint 9.11x.c (2026-05-11): 0x04-Reply-Decoder-Fix nach Live-Recon.
+//   Reply ist 3 Bytes Nibble-Split, NICHT 5 Bytes wie Vendor-Doku
+//   ungenau angab. Plus Vicki packt Reply + Keep-alive im selben
+//   Uplink-Frame — Rest wird mit-dekodiert und in dasselbe data-Object
+//   gemergt; Reply-Felder (report_type, command) priorisieren bei
+//   Konflikt. Bytes-Beleg: 04 26 44 81 14 97 62 a2 a2 11 e0 30
+//   (Vicki-001, 2026-05-11).
 //
 // === Uplinks ===
 //
@@ -189,27 +197,58 @@ function decodeCommandReply(bytes) {
         };
     }
 
-    // 0x04 = FW-Query-Reply (Sprint 9.11x.b)
-    // Vendor-Format: [0x04, HW_major, HW_minor, FW_major, FW_minor]
+    // 0x04 = FW-Query-Reply (Sprint 9.11x.b, korrigiert in 9.11x.c).
+    // Echtes Vicki-Layout (Live-Recon 2026-05-11, Bytes
+    // `04 26 44 81 14 97 62 a2 a2 11 e0 30` von Vicki-001):
+    //   Byte 0: 0x04 (Reply-Cmd)
+    //   Byte 1: HW-Version, high-nibble=major, low-nibble=minor
+    //           (0x26 -> HW 2.6)
+    //   Byte 2: FW-Version, high-nibble=major, low-nibble=minor
+    //           (0x44 -> FW 4.4)
+    //   Byte 3+: optional eingebetteter Keep-alive-Frame (Cmd 0x81),
+    //           wird hier mit-dekodiert und gemergt; Reply-Felder
+    //           priorisieren bei Konflikt (report_type, command).
+    //
+    // Vendor-Doku §5 "0x04{HW_major}{HW_minor}{FW_major}{FW_minor}"
+    // meinte Nibbles, nicht Bytes — Quelle ist ungenau, korrigiert in
+    // docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md §1.
     if (cmd === 0x04) {
-        if (bytes.length < 5) {
+        if (bytes.length < 3) {
             return {
                 data: { command: cmd, report_type: 'firmware_version_reply' },
-                errors: ['fw-query reply too short (' + bytes.length + ' bytes, expected 5)']
+                errors: ['fw-query reply too short (' + bytes.length + ' bytes, expected 3+)']
             };
         }
-        var hwMajor = bytes[1];
-        var hwMinor = bytes[2];
-        var fwMajor = bytes[3];
-        var fwMinor = bytes[4];
-        return {
-            data: {
-                report_type: 'firmware_version_reply',
-                command: cmd,
-                firmware_version: fwMajor + '.' + fwMinor,
-                hw_version: hwMajor + '.' + hwMinor
-            }
+        var hwByte = bytes[1];
+        var fwByte = bytes[2];
+        var data = {
+            report_type: 'firmware_version_reply',
+            command: cmd,
+            firmware_version: ((fwByte >> 4) & 0x0F) + '.' + (fwByte & 0x0F),
+            hw_version: ((hwByte >> 4) & 0x0F) + '.' + (hwByte & 0x0F)
         };
+        // Optional eingebetteter Keep-alive (Cmd 0x01 oder 0x81, 9 Bytes).
+        // Vicki packt FW-Reply + Periodic im selben Uplink-Frame —
+        // wir wollen die Periodic-Felder nicht verlieren, aber
+        // report_type=firmware_version_reply MUSS bleiben, sonst
+        // greift REPLY_REPORT_TYPES-Filter im Subscriber nicht und
+        // _persist_uplink wuerde fuer den Reply einen sensor_reading-
+        // Insert versuchen (CLAUDE.md §5.21-Pattern-Risiko).
+        if (bytes.length > 3) {
+            var rest = bytes.slice(3);
+            if (rest.length >= 9 && (rest[0] === 0x01 || rest[0] === 0x81)) {
+                var periodic = decodePeriodicReport(rest);
+                if (periodic && periodic.data) {
+                    for (var key in periodic.data) {
+                        if (Object.prototype.hasOwnProperty.call(periodic.data, key)
+                            && !Object.prototype.hasOwnProperty.call(data, key)) {
+                            data[key] = periodic.data[key];
+                        }
+                    }
+                }
+            }
+        }
+        return { data: data };
     }
 
     // 0x46 = Open-Window-Status-Reply (Sprint 9.11x.b)
