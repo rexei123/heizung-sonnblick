@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -e ".[dev]"
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY tests ./tests
+# Sprint 9.11x.b: One-Shot-Skripte (Bulk-Aktivierung Open-Window-Detection
+# etc.). Aufruf via `docker exec deploy-api-1 python scripts/<name>.py`.
+COPY scripts ./scripts
 
 # Entrypoint (führt beim Start automatisch alembic upgrade head aus)
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
