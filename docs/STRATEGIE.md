@@ -6,10 +6,13 @@
 **Domain:** heizung.hotel-sonnblick.at
 **Status:** Freigegeben für Entwicklungsstart
 
-> **Hinweis (2026-05-07):** Dieses Dokument wurde überarbeitet. Korrekturen
-> in §6.2 R8 (Frostschutz) und §9.3 (Phasen-Modell). Die maßgebliche
-> Quelle für aktuelle Pläne ist `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-> sowie `docs/SPRINT-PLAN.md`.
+> **Hinweis (2026-05-07, Update 2026-05-11):** Dieses Dokument wurde
+> überarbeitet. Ursprüngliche Korrekturen in §6.2 R8 (Frostschutz) und
+> §9.3 (Phasen-Modell). Die R8-Korrektur (zweistufiger Frostschutz) wurde
+> 2026-05-11 zurückgenommen — R8 ist wieder globale Konstante, AE-42 auf
+> „zurückgestellt" gesetzt. Die maßgebliche Quelle für aktuelle Pläne
+> bleibt `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` sowie
+> `docs/SPRINT-PLAN.md`.
 
 ---
 
@@ -277,28 +280,16 @@ Gast ändert Soll-Temperatur am Thermostat. Wert wird gecapped auf konfigurierba
 **Regel 7 – Unbelegt-Langzeitabsenkung:**
 Zimmer > 24 h als „frei" markiert → Absenkung auf T_frei_langzeit (Standard: 15 °C). Spart Energie bei längeren Leerständen.
 
-**R8 — Frostschutz (zweistufig, ab 2026-05-07, AE-42)**
+**R8 — Frostschutz**
 
-Frostschutz wird in zwei Ebenen modelliert:
+Frostschutz ist systemweit `FROST_PROTECTION_C = Decimal("10.0")` in
+`backend/src/heizung/rules/constants.py`. Nicht UI-änderbar, nicht pro
+Raumtyp differenziert. Engine-Layer 0 (Sommer), Layer 4
+(Window-Detection) und Layer 5 (Hard-Clamp) lesen die Konstante direkt.
 
-1. **Hard-Cap im Code:** `FROST_PROTECTION_C = Decimal("10.0")` in
-   `backend/src/heizung/rules/constants.py`. Diese Konstante kann
-   niemand per UI ändern. Sie ist absoluter Boden für jeden Setpoint.
-
-2. **Raumtyp-Override (optional):** `room_type.frost_protection_c
-   NUMERIC(4,1) NULL`. Default NULL → fällt auf Hard-Cap. Kann pro
-   Raumtyp **höher** gesetzt werden (z. B. 12 °C für Bad mit
-   Handtuchwärmer), niemals niedriger als Hard-Cap.
-
-Der effektive Frostschutz für einen Raum ist
-`MAX(HARD_CAP, room_type.frost_protection_c)`. Engine-Layer 0 (Sommer),
-Layer 4 (Window-Detection) und Layer 5 (Hard-Clamp) lesen diesen Wert.
-
-Begründung: Cowork-Inventarisierung 2026-05-07 zeigte, dass Betterspace
-untere Temperaturgrenzen pro Raumtyp führt. Reale Hotelbetriebe brauchen
-das, weil Wasserleitungen in Bädern bei niedrigeren Temperaturen
-empfindlicher sind als trockene Flure. Hard-Cap bleibt als Sicherheitsnetz
-gegen Fehlkonfiguration.
+Pro-Raumtyp-Override wurde geprüft und zurückgestellt — siehe AE-42.
+Migrations-Pfad bleibt offen, Feature wird aktiviert, wenn konkreter
+Bedarf entsteht.
 
 ### 6.3 Konfigurierbarkeit: Drei-Ebenen-System
 

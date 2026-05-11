@@ -74,6 +74,11 @@ HARD_CAP)`.
 
 Verankert als **AE-42**.
 
+> **Update 2026-05-11:** Diese Strategie-Änderung wurde zurückgestellt
+> (siehe AE-42 Status „zurückgestellt"). Frostschutz bleibt vorerst
+> systemweit 10 °C. Migrations-Pfad ist im AE-42-Text dokumentiert,
+> Feature wird bei konkretem Bedarf aktiviert.
+
 ### 2.2 Geräte-Lifecycle als eigene UI-Disziplin
 
 **Bisherige Strategie (§8.3):** „Thermostate Master-Detail mit Drawer."
@@ -130,7 +135,7 @@ Heute haben wir nur Global (rudimentär als Singleton-Form) und Raumtyp
 
 | ID | Tabelle | Änderung |
 |---|---|---|
-| DB-1 | `room_type` | Neue Spalte `frost_protection_c NUMERIC(4,1) NULL` |
+| DB-1 | `room_type` | ~~Neue Spalte `frost_protection_c NUMERIC(4,1) NULL`~~ — **zurückgestellt 2026-05-11** (siehe AE-42) |
 | DB-3 | `device` | Bestehende Spalte `label` reicht, neue API-Route nötig |
 
 Keine weiteren Schemaänderungen. Bestehende Tabellen `scenario`,
@@ -141,11 +146,14 @@ Keine weiteren Schemaänderungen. Bestehende Tabellen `scenario`,
 
 | ID | Layer | Änderung |
 |---|---|---|
-| E-1 | Layer 0 (Sommer) | `frost_protection_c` aus `room_type` lesen, Fallback Hard-Cap |
-| E-2 | Layer 4 (Window) | analog E-1 |
-| E-3 | Layer 5 (Hard-Clamp) | untere Grenze `MAX(min_temp_celsius, frost_protection_c, HARD_CAP)` |
+| E-1 | Layer 0 (Sommer) | ~~`frost_protection_c` aus `room_type` lesen, Fallback Hard-Cap~~ — **zurückgestellt 2026-05-11** (AE-42) |
+| E-2 | Layer 4 (Window) | ~~analog E-1~~ — **zurückgestellt 2026-05-11** (AE-42) |
+| E-3 | Layer 5 (Hard-Clamp) | ~~untere Grenze `MAX(min_temp_celsius, frost_protection_c, HARD_CAP)`~~ — **zurückgestellt 2026-05-11** (AE-42) |
 
 Layer 1, 2, 3 unverändert. Pipeline-Reihenfolge unverändert.
+
+Bis zur Reaktivierung lesen Layer 0, 4, 5 die globale Konstante
+`FROST_PROTECTION_C` direkt aus `constants.py`, ohne Helper.
 
 ## 5. UI-Bauplan
 
@@ -207,7 +215,6 @@ Detaillierter Sprint-Plan in `docs/SPRINT-PLAN.md`. Übersicht:
 |---|---|---|
 | 9.11 | Live-Test #2 (minimal, mit DB-Hack-Zuordnung) | jetzt |
 | 9.11a | API-Endpoint Geräte-Zuordnung (Quick Fix) | sofort |
-| 9.12 | Frostschutz pro Raumtyp (DB + Engine + API) | hoch |
 | 9.13 | Geräte-Pairing-UI + Sidebar-Migration | hoch |
 | 9.14 | Globale Temperaturen + Zeiten UI | hoch |
 | 9.15 | Profile (Wochentag-Schedule) | mittel |
@@ -240,7 +247,12 @@ Detaillierter Sprint-Plan in `docs/SPRINT-PLAN.md`. Übersicht:
 Folgende Inhalte gelten ab heute als historisch — sie werden nicht
 gelöscht, aber dürfen nicht mehr für neue Pläne herangezogen werden:
 
-- STRATEGIE.md §6.2 R8 alte Fassung („absolut, nicht konfigurierbar")
+- ~~STRATEGIE.md §6.2 R8 alte Fassung („absolut, nicht konfigurierbar")~~
+  — **Update 2026-05-11:** Diese Markierung ist hinfällig. Strategie-Chat-
+  Review hat den Schwenk auf zweistufigen Frostschutz zurückgenommen.
+  R8 gilt wieder als „absolut, nicht konfigurierbar"; AE-42 wurde auf
+  „zurückgestellt" gesetzt. Der Refresh-Eintrag bleibt als Historie
+  stehen.
 - STRATEGIE.md §9.3 7-Phasen-Modell (gilt: WORKFLOW.md 5 Phasen)
 - Alle Sprint-Briefe in `docs/features/` mit Datum vor 2026-05-07
   (gilt: SPRINT-PLAN.md)

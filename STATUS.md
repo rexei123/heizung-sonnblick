@@ -945,6 +945,25 @@ Vicki-001 wurde mit Kältepack belastet (T-Sturz 22.0 → 14.4 °C im internen S
 
 ---
 
+## 2aa. Sprint 9.12 zurückgestellt (2026-05-11)
+
+Strategie-Chat-Review entschied: Frostschutz pro Raumtyp ist Feature
+ohne realen Schmerz. Hotel Sonnblick meldet keine Frostschäden, kein
+Hotelier-Bedarf. AE-42 auf „zurückgestellt" gesetzt, STRATEGIE.md §6.2
+R8 auf globale Konstante zurückgedreht, SPRINT-PLAN.md 9.12-Eintrag
+entfernt, ARCHITEKTUR-REFRESH §2.1 / §3 / §4 / §7 mit Update-Box
+ergänzt.
+
+Engine-Code bleibt unverändert — Layer 0, 4, 5 lesen die Konstante
+direkt, kein Helper, keine Migration nötig.
+
+Migrations-Pfad für spätere Aktivierung steht in AE-42 als additive
+5-Schritt-Liste.
+
+Nächster Sprint: 9.13 Geräte-Pairing-UI + Sidebar-Migration.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1034,7 +1053,7 @@ innerhalb der Priorität nach Aufwand.
 
 | ID | Inhalt | Sprint |
 |---|---|---|
-| BR-1 🔴 | Frostschutz pro Raumtyp (DB + Engine + API) | 9.12 |
+| BR-1 🟢 | Frostschutz pro Raumtyp — zurückgestellt, siehe AE-42 |  |
 | BR-2 🔴 | Geräte-Pairing-UI + Sidebar-Migration | 9.13 |
 | BR-3 🟡 | Globale Temperaturen+Zeiten-UI | 9.14 |
 | BR-4 🟡 | Profile-CRUD + UI | 9.15 |

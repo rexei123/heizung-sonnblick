@@ -620,9 +620,10 @@ Drei Ursachen, alle real:
 
 **Was diese Lesson für andere Sprints bedeutet:**
 
-- Sprint 9.12 (Frostschutz pro Raumtyp): Layer 4 wird in 9.11x/9.11y bereits
-  angefasst, Frostschutz-Logik muss mit drei Trigger-Reasons koexistieren
-  (`open_window`, `device_detached`, später ggf. `inferred_window`).
+- Sprint 9.12 (Frostschutz pro Raumtyp): zurückgestellt 2026-05-11
+  (AE-42) — Lesson zur Layer-4-Koexistenz mit drei Trigger-Reasons
+  (`open_window`, `device_detached`, später ggf. `inferred_window`)
+  bleibt für späteren Reaktivierungs-Sprint relevant.
 - BR-16 (Backend-Eigenlogik aktiv): nicht voreilig aktivieren, erst nach
   2 Wochen produktiver Beobachtung in Heizperiode.
 

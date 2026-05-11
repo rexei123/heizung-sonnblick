@@ -272,40 +272,6 @@ Layer-4-Pipeline End-to-End deterministisch testbar machen ohne Hardware-Abhäng
 
 ---
 
-# SPRINT 9.12 — Frostschutz pro Raumtyp
-
-**Priorität:** 🔴
-**Geschätzte Dauer:** 2-3 h
-**Autonomiestufe:** 1 (Engine-Touch)
-**Voraussetzung:** 9.11 abgeschlossen
-**Tag nach Abschluss:** `v0.1.10-frost-protection`
-
-## Ziel
-
-Zweistufige Frostschutz-Logik aus AE-42 implementieren.
-
-## Tasks
-
-- T1: Alembic-Migration: `room_type.frost_protection_c NUMERIC(4,1) NULL`
-- T2: SQLAlchemy-Model erweitern, Pydantic-Schema erweitern
-- T3: Engine-Code: Helper `_resolve_frost_protection(room_type)` baut
-  effective floor aus `room_type.frost_protection_c` oder Hard-Cap
-- T4: Layer 0 (`layer_summer_mode`) nutzt Helper im Aktiv-Pfad
-- T5: Layer 4 (`layer_window_open`) nutzt Helper bei `open_window=true`
-- T6: Layer 5 (`layer_clamp`) untere Grenze =
-  `MAX(min_temp_celsius, frost_protection_c, HARD_CAP)`
-- T7: API-PATCH-Route `/api/v1/room-types/{id}` ergänzt um Feld
-- T8: Tests: pro Layer ein Frostschutz-Override-Test
-- T9: STATUS.md §2u + ARCHITEKTUR-ENTSCHEIDUNGEN.md AE-42 finalisieren
-
-## Definition of Done (zusätzlich)
-
-- Bad-Raumtyp im Hotel Sonnblick auf 12°C frost_protection_c gesetzt
-  (verifiziert via DB-Query)
-- Engine-Trace zeigt im Window-Test bei Bad-Zimmer Setpoint 12°C statt 10°C
-
----
-
 # SPRINT 9.13 — Geräte-Pairing-UI + Sidebar-Migration
 
 **Priorität:** 🔴
@@ -668,7 +634,6 @@ stabil mit allen Sprints integriert.
 | Tag | Bedeutung |
 |---|---|
 | `v0.1.9-rc6-live-test-2` | Engine-Pipeline live verifiziert |
-| `v0.1.10-frost-protection` | Frostschutz-Korrektur eingebaut |
 | `v0.1.11-device-pairing` | Geräte-Verwaltung produktiv |
 | `v0.1.15-auth` | Multi-User produktiv |
 | `v0.1.19-hygiene` | Technische Schuld abgebaut |
