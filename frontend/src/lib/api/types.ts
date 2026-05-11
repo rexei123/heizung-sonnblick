@@ -73,6 +73,18 @@ export interface DeviceListQuery {
   offset?: number;
 }
 
+export interface DeviceAssignZoneRequest {
+  heating_zone_id: number;
+}
+
+export interface DeviceAssignZoneResponse {
+  device_id: number;
+  dev_eui: string;
+  heating_zone_id: number | null;
+  label: string | null;
+  updated_at: string;
+}
+
 /**
  * API-Fehler-Schema (FastAPI default: { detail: string | object[] }).
  */

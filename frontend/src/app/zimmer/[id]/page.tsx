@@ -15,7 +15,7 @@ import { ManualOverridePanel } from "@/components/patterns/manual-override-panel
 import { RoomForm } from "@/components/patterns/room-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useDevices } from "@/lib/api/hooks";
+import { useDetachDeviceZone, useDevices } from "@/lib/api/hooks";
 import {
   useDeleteRoom,
   useHeatingZones,
@@ -172,6 +172,12 @@ export default function ZimmerDetailPage() {
 function DevicesInRoom({ roomId }: { roomId: number }) {
   const zones = useHeatingZones(roomId);
   const allDevices = useDevices();
+  const [detachTarget, setDetachTarget] = useState<{
+    id: number;
+    label: string;
+    zoneName: string;
+  } | null>(null);
+  const [detachError, setDetachError] = useState<string | null>(null);
 
   const zoneIds = new Set((zones.data ?? []).map((z) => z.id));
   const devicesInRoom = (allDevices.data ?? []).filter(
@@ -188,41 +194,127 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
       </p>
     );
   }
-  if (devicesInRoom.length === 0) {
-    return (
-      <p className="text-sm text-text-secondary italic">
-        Noch keine Geräte den Zonen dieses Zimmers zugeordnet. Geräte-Zuordnung
-        erfolgt in der Geräte-Detailseite (PATCH heating_zone_id).
-      </p>
-    );
-  }
+
   return (
-    <ul className="bg-surface border border-border rounded-md overflow-hidden">
-      {devicesInRoom.map((d) => {
-        const zone = (zones.data ?? []).find((z) => z.id === d.heating_zone_id);
-        return (
-          <li
-            key={d.id}
-            className="flex items-center justify-between px-3 py-2 border-b border-border last:border-b-0"
-          >
-            <div>
-              <div className="font-medium text-text-primary text-sm">
-                {d.label ?? d.dev_eui}
-              </div>
-              <div className="text-xs text-text-tertiary">
-                {d.vendor} {d.model} · Zone {zone?.name ?? "?"}
-              </div>
-            </div>
-            <Link
-              href={`/devices/${d.id}` as never}
-              className="text-xs text-primary hover:underline"
-            >
-              Detail →
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        <Link
+          href={`/devices/pair?room_id=${roomId}` as never}
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        >
+          <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+            add
+          </span>
+          Gerät zuordnen
+        </Link>
+      </div>
+
+      {detachError ? (
+        <p role="alert" className="text-sm text-error">
+          {detachError}
+        </p>
+      ) : null}
+
+      {devicesInRoom.length === 0 ? (
+        <p className="text-sm text-text-secondary italic">
+          Noch keine Geräte den Zonen dieses Zimmers zugeordnet.
+        </p>
+      ) : (
+        <ul className="bg-surface border border-border rounded-md overflow-hidden">
+          {devicesInRoom.map((d) => {
+            const zone = (zones.data ?? []).find((z) => z.id === d.heating_zone_id);
+            return (
+              <li
+                key={d.id}
+                className="flex items-center justify-between px-3 py-2 border-b border-border last:border-b-0"
+              >
+                <div>
+                  <div className="font-medium text-text-primary text-sm">
+                    {d.label ?? d.dev_eui}
+                  </div>
+                  <div className="text-xs text-text-tertiary">
+                    {d.vendor} {d.model} · Zone {zone?.name ?? "?"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/devices/${d.id}` as never}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Detail →
+                  </Link>
+                  <DetachButton
+                    onClick={() =>
+                      setDetachTarget({
+                        id: d.id,
+                        label: d.label ?? d.dev_eui,
+                        zoneName: zone?.name ?? "?",
+                      })
+                    }
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {detachTarget !== null ? (
+        <DetachConfirm
+          target={detachTarget}
+          onClose={() => setDetachTarget(null)}
+          onError={setDetachError}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DetachButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error transition-colors"
+      aria-label="Gerät von Heizzone trennen"
+    >
+      <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        link_off
+      </span>
+      Trennen
+    </button>
+  );
+}
+
+function DetachConfirm({
+  target,
+  onClose,
+  onError,
+}: {
+  target: { id: number; label: string; zoneName: string };
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const detachMut = useDetachDeviceZone(target.id);
+  return (
+    <ConfirmDialog
+      open={true}
+      title="Gerät von Heizzone trennen?"
+      message={`Gerät „${target.label}" wird von Heizzone „${target.zoneName}" getrennt. Das Gerät bleibt im System, ist aber keiner Heizzone mehr zugeordnet.`}
+      confirmLabel="Trennen"
+      loading={detachMut.isPending}
+      onConfirm={async () => {
+        onError(null);
+        try {
+          await detachMut.mutateAsync();
+          onClose();
+        } catch (e) {
+          onError(toMessage(e));
+          onClose();
+        }
+      }}
+      onCancel={onClose}
+    />
   );
 }
 

@@ -17,6 +17,7 @@ import {
 import { devicesApi } from "./devices";
 import type {
   Device,
+  DeviceAssignZoneResponse,
   DeviceCreate,
   DeviceListQuery,
   DeviceUpdate,
@@ -85,6 +86,39 @@ export function useUpdateDevice(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: DeviceUpdate) => devicesApi.update(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.device(id) });
+      qc.invalidateQueries({ queryKey: KEYS.devicesAll });
+    },
+  });
+}
+
+/**
+ * Geraet einer Heizzone zuordnen (Sprint 9.11a Backend, 9.13a Frontend).
+ * Invalidiert Geraet + Liste; das Zimmer der Heizzone muss der Aufrufer
+ * separat invalidieren (siehe useDetachDeviceZone).
+ */
+export function useAssignDeviceZone(
+  id: number,
+): UseMutationResult<DeviceAssignZoneResponse, Error, { heating_zone_id: number }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ heating_zone_id }) =>
+      devicesApi.assignZone(id, { heating_zone_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.device(id) });
+      qc.invalidateQueries({ queryKey: KEYS.devicesAll });
+    },
+  });
+}
+
+/** Geraet von Heizzone trennen (Detach). */
+export function useDetachDeviceZone(
+  id: number,
+): UseMutationResult<DeviceAssignZoneResponse, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => devicesApi.detachZone(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.device(id) });
       qc.invalidateQueries({ queryKey: KEYS.devicesAll });

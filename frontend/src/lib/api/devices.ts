@@ -5,6 +5,8 @@
 import { apiClient, queryString } from "./client";
 import type {
   Device,
+  DeviceAssignZoneRequest,
+  DeviceAssignZoneResponse,
   DeviceCreate,
   DeviceListQuery,
   DeviceUpdate,
@@ -25,6 +27,15 @@ export const devicesApi = {
 
   update: (id: number, payload: DeviceUpdate): Promise<Device> =>
     apiClient.patch<Device>(`${BASE}/${id}`, payload),
+
+  assignZone: (
+    id: number,
+    payload: DeviceAssignZoneRequest,
+  ): Promise<DeviceAssignZoneResponse> =>
+    apiClient.put<DeviceAssignZoneResponse>(`${BASE}/${id}/heating-zone`, payload),
+
+  detachZone: (id: number): Promise<DeviceAssignZoneResponse> =>
+    apiClient.delete<DeviceAssignZoneResponse>(`${BASE}/${id}/heating-zone`),
 
   sensorReadings: (
     id: number,
