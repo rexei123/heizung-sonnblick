@@ -1110,6 +1110,9 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11y-2 | `manual_override id=12` (20→26, source=device, 2026-05-11 09:57 UTC) und `id=13` (26→29, 2026-05-11 10:28 UTC) auf heizung-test manuell revoken vor Sprint 9.12. UPDATE 2 Zeilen ausgefuehrt 2026-05-11 11:06:48 UTC via Claude Code SSH, `revoked_reason='Sprint-9.11y-Closeout-Cleanup, blocked-after-Kaeltepack-Test'` | ✅ erledigt 2026-05-11 |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
+| B-9.13a-1 | Local-Dev-Onboarding-Checkliste (alte API-Image-Dependencies, Docker-Web-Container vs. `npm run dev` Port-Kollision auf 3000, Next.js Rewrite-Default `http://api:8000` ohne `API_PROXY_TARGET`-Override). Anlass: Cowork-Visual-Review Sprint 9.13a — drei Setup-Hindernisse vor erstem Screenshot, alle nicht-Sprint-bezogen aber dokumentationswürdig. Vorschlag: Block in `RUNBOOK.md` oder `frontend/README.md` | 🟡 |
+| B-9.13a-2 | Inline-Edit-Input mit aktuellem Label vorbefüllen (statt leer mit Placeholder) — UX-Verfeinerung. Heutige Implementierung folgt Wizard-Step-4-Konvention („leer lassen, um zu behalten"), wirkt aber auf Listen-Inline-Edit ungewohnt. Cowork-Befund Sprint 9.13a §2/05 | 🟢 |
+| B-9.13a-3 | Frontend-Cache-Reset-Pattern dokumentieren (Playwright `webServer.reuseExistingServer` + `.next/`-Stale-Cache). Anlass: Sprint 9.13a TA5-Test-Lauf — alter dev-Server auf Port 3000 zeigte Pre-Branch-Code, Tests rot. Fix: `Stop-Process node` + `Remove-Item .next` + neuer Test-Run. Frontend-Equivalent zu CLAUDE.md §5.11 (`docker compose pull` ist nicht beweisend). Vorschlag: neue Lesson §5.29 in CLAUDE.md | 🟡 |
 
 ### 6.3 — Operative Aufgaben
 
