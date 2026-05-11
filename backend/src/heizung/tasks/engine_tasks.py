@@ -254,6 +254,31 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
         if room_obj is not None:
             room_obj.last_evaluated_at = now
             room_obj.next_transition_at = now + _td(seconds=60)
+
+        # Sprint 9.11y: Passiver Inferred-Window-Detector (AE-47).
+        # Laeuft NACH der regulaeren Engine-Pipeline + ControlCommand-
+        # Insert: keine Setpoint-Aenderung, nur event_log-Eintrag bei
+        # Treffer. Atomar in derselben Session/Transaction.
+        try:
+            from heizung.rules.inferred_window import detect_inferred_window
+            from heizung.services.event_log import log_inferred_window_event
+
+            inferred = await detect_inferred_window(session, room_id, now)
+            if inferred is not None:
+                await log_inferred_window_event(session, inferred)
+                logger.info(
+                    "event_type=INFERRED_WINDOW_OBSERVATION room_id=%s "
+                    "delta_c=%s devices=%s setpoint_c=%s",
+                    inferred.room_id,
+                    inferred.delta_c,
+                    inferred.devices_observed,
+                    inferred.setpoint_c,
+                )
+        except Exception:
+            # Inferred-Detection ist nicht engine-kritisch — failure
+            # darf den regulaeren Eval-Commit nicht blockieren.
+            logger.exception("inferred_window detector fehlgeschlagen room_id=%s", room_id)
+
         await session.commit()
 
         return {

@@ -205,3 +205,95 @@ def test_codec_mirror_setpoint(setpoint: int, vendor_bytes: list[int]) -> None:
     Rahmen der AE-48-Erweiterung."""
     actual = list(_encode_setpoint_payload(setpoint))
     assert actual == vendor_bytes
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.11y T5 — Inferred-Window event_log-Format-Mirror
+# ---------------------------------------------------------------------------
+#
+# Wachposten gegen S3-Audit-Trail-Drift: ``log_inferred_window_event``
+# muss event_log mit den Vendor-Spec-Feldern schreiben (Layer-Enum,
+# Reason-Enum, setpoint_in==setpoint_out, details-Struktur). Bricht
+# der Helper das Format, brechen Frontend-Decision-Panel-Renderer +
+# Diagnose-Queries.
+
+
+async def test_inferred_window_log_format_with_setpoint() -> None:
+    """Standardfall: setpoint_c=20 → setpoint_in==setpoint_out==20,
+    Layer/Reason korrekt, details enthaelt delta_c + devices_observed."""
+    from datetime import UTC, datetime
+    from typing import Any
+
+    from heizung.models.enums import CommandReason, EventLogLayer
+    from heizung.rules.inferred_window import InferredWindowResult
+    from heizung.services.event_log import log_inferred_window_event
+
+    captured: list[Any] = []
+
+    class _FakeSession:
+        def add(self, obj: Any) -> None:
+            captured.append(obj)
+
+    result = InferredWindowResult(
+        room_id=42,
+        detected_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
+        delta_c=Decimal("0.7"),
+        devices_observed=["aabbccdd11223344", "11223344aabbccdd"],
+        setpoint_c=20,
+    )
+
+    await log_inferred_window_event(_FakeSession(), result)  # type: ignore[arg-type]
+
+    assert len(captured) == 1
+    ev = captured[0]
+    assert ev.room_id == 42
+    assert ev.layer == EventLogLayer.INFERRED_WINDOW_OBSERVATION
+    assert ev.reason == CommandReason.INFERRED_WINDOW
+    assert ev.time == result.detected_at
+    # setpoint_in == setpoint_out markiert passive Beobachtung (kein Effekt).
+    assert ev.setpoint_in == Decimal(20)
+    assert ev.setpoint_out == Decimal(20)
+    # details: detail-String + strukturierte Felder fuer Frontend/Queries.
+    assert "detail" in ev.details
+    assert ev.details["delta_c"] == "0.7"
+    assert ev.details["devices_observed"] == [
+        "aabbccdd11223344",
+        "11223344aabbccdd",
+    ]
+    # evaluation_id ist UUID (eigene Mini-Eval, nicht mit Engine-Eval gemischt).
+    assert ev.evaluation_id is not None
+
+
+async def test_inferred_window_log_format_none_setpoint() -> None:
+    """Edge-Case: setpoint_c=None (noch nie CC gesendet) → setpoint_in/out
+    bleiben None, restliche Felder unveraendert."""
+    from datetime import UTC, datetime
+    from typing import Any
+
+    from heizung.models.enums import CommandReason, EventLogLayer
+    from heizung.rules.inferred_window import InferredWindowResult
+    from heizung.services.event_log import log_inferred_window_event
+
+    captured: list[Any] = []
+
+    class _FakeSession:
+        def add(self, obj: Any) -> None:
+            captured.append(obj)
+
+    result = InferredWindowResult(
+        room_id=99,
+        detected_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
+        delta_c=Decimal("0.5"),
+        devices_observed=["dev0"],
+        setpoint_c=None,
+    )
+
+    await log_inferred_window_event(_FakeSession(), result)  # type: ignore[arg-type]
+
+    assert len(captured) == 1
+    ev = captured[0]
+    assert ev.layer == EventLogLayer.INFERRED_WINDOW_OBSERVATION
+    assert ev.reason == CommandReason.INFERRED_WINDOW
+    assert ev.setpoint_in is None
+    assert ev.setpoint_out is None
+    assert ev.details["delta_c"] == "0.5"
