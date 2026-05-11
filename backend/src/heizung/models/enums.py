@@ -100,6 +100,7 @@ class CommandReason(enum.StrEnum):
     CHECKOUT_SETBACK = "checkout_setback"
     WINDOW_OPEN = "window_open"
     DEVICE_DETACHED = "device_detached"
+    INFERRED_WINDOW = "inferred_window"
     GUEST_OVERRIDE = "guest_override"
     LONG_VACANT = "long_vacant"
     FROST_PROTECTION = "frost_protection"
@@ -167,3 +168,4 @@ class EventLogLayer(enum.StrEnum):
     WINDOW_SAFETY = "window_safety"
     DEVICE_DETACHED = "device_detached"
     HARD_CLAMP = "hard_clamp"
+    INFERRED_WINDOW_OBSERVATION = "inferred_window_observation"
