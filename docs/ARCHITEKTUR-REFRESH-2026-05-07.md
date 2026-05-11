@@ -176,36 +176,48 @@ Ergibt sich aus §2.3 und der Sidebar-Migration. Konkrete Routen:
 
 ## 6. Sidebar-Migration
 
-Von heute (7 flache Einträge) auf Strategie-Konform (14 Einträge in 5
-Gruppen):
+Von heute (6 flache Einträge in `app-shell.tsx`) auf Strategie-Konform
+(14 Einträge in 5 Gruppen):
 
-ÜBERSICHT
+ÜBERSICHT (3)
 - Dashboard `/`
 - Zimmerübersicht `/zimmer`
 - Belegungen `/belegungen`
 
-STEUERUNG
-- Temperaturen & Zeiten `/einstellungen/temperaturen-zeiten` [NEU]
+STEUERUNG (4)
+- Temperaturen & Zeiten `/einstellungen/temperaturen-zeiten` [NEU, 9.14]
 - Raumtypen `/raumtypen`
-- Profile `/profile` [NEU]
-- Szenarien `/szenarien` [NEU]
+- Profile `/profile` [NEU, 9.15]
+- Szenarien `/szenarien` [NEU, 9.16]
 
-GERÄTE
-- Thermostate `/devices`
-- Pairing `/devices/pair` [NEU]
-- Gateway `/einstellungen/gateway` [NEU, später]
+GERÄTE (2)
+- Thermostate `/devices` (Pairing erreichbar als CTA-Button auf der
+  Liste, nicht als eigener Sidebar-Eintrag — Betterspace-Pattern)
+- Gateway `/einstellungen/gateway` [NEU, 9.21]
 
-ANALYSE
-- Algorithmenverlauf — Tab in `/zimmer/[id]` (existiert)
-- Temperaturverlauf `/analyse/temperaturverlauf` [NEU, später]
+ANALYSE (1)
+- Temperaturverlauf `/analyse/temperaturverlauf` [NEU, 9.19]
 
-EINSTELLUNGEN
+EINSTELLUNGEN (4)
 - Hotel `/einstellungen/hotel`
-- Saison `/einstellungen/saison` [NEU, später]
-- Benutzer `/einstellungen/benutzer` [mit NextAuth]
-- API & Webhooks `/einstellungen/api` [NEU, später]
+- Saison `/einstellungen/saison` [NEU, 9.16]
+- Benutzer `/einstellungen/benutzer` [NEU, 9.17 NextAuth]
+- API & Webhooks `/einstellungen/api` [NEU, 9.20]
 
-Migration in Sprint 9.13 (mit Geräte-Pairing).
+**Algorithmenverlauf** bleibt als Tab in `/zimmer/[id]` (existierender
+Engine-Tab), kein eigener Sidebar-Eintrag. **Pairing** (Route
+`/devices/pair`, Sprint 9.13 TA1) wird als CTA-Button auf
+`/devices`-Liste erreicht, nicht als Sidebar-Eintrag.
+
+Migration in Sprint 9.13 (mit Geräte-Pairing-UI).
+
+> **Update 2026-05-11 (Sprint 9.12.1):** Liste auf kanonische 14 Einträge
+> konsolidiert. Algorithmenverlauf bleibt Tab in `/zimmer/[id]`, Pairing
+> wird über CTA-Button auf `/devices`-Liste erreicht (Betterspace-Pattern).
+> Diskrepanz zur SPRINT-PLAN.md SP9.13-DoD »14 Einträge« hiermit
+> aufgelöst — die 7 Empty-State-Stubs aus TB2 (Profile, Szenarien, Saison,
+> Gateway, API, Temperaturverlauf, Benutzer) decken sich exakt mit den
+> 7 NEU-Einträgen oben.
 
 ## 7. Sprint-Plan-Adaption
 

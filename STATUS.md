@@ -6,10 +6,11 @@ Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in 
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-07
+**Stichtag:** 2026-05-11
 **Aktueller Branch:** develop
-**Letzter Tag:** `v0.2.0-architektur-refresh`
-**Nächster Sprint:** 9.11a Geräte-Zuordnungs-API (siehe `docs/SPRINT-PLAN.md`)
+**Letzter Tag:** `v0.1.9-rc6-live-test-2` (Sprint 9.11y)
+**Nächster Sprint:** 9.13 Geräte-Pairing-UI + Sidebar-Migration
+(siehe `docs/SPRINT-PLAN.md`)
 **Architektur-Refresh:** durchgeführt 2026-05-07, siehe
 `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
 
@@ -986,15 +987,15 @@ Nächster Sprint: 9.13 Geräte-Pairing-UI + Sidebar-Migration.
 - Python 3.12, FastAPI >=0.110, SQLAlchemy >=2.0, Pydantic >=2.6, Alembic >=1.13
 - Celery >=5.3 + Redis >=5.0 (Worker + Beat-Scheduler), aiomqtt >=2.3
 - 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable, ab Sprint 9.10 mit `open_window`), event_log (Hypertable), control_command
-- Alembic-Migrationen 0001-0004 + 0008 + 0009 (0003 in zwei Files: 0003a Stammdaten + 0003b event_log-Hypertable; 0008 manual_override aus 9.9; 0009 sensor_reading.open_window aus 9.10)
-- Engine: 6-Layer-Pipeline vollständig — Layer 0 Sommer / 1 Base / 2 Temporal / 3 Manual / 4 Window-Detection / 5 Hard-Clamp + Hysterese. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40) abgesichert.
-- ~25 Test-Dateien, 190 Test-Cases lokal grün (+10 pre-existing psycopg2-Failures, kein 9.10-Bezug)
+- Alembic-Migrationen 0001, 0002, 0003a (Stammdaten), 0003b (event_log-Hypertable), 0004 (room_eval_timestamps), 0008 (manual_override, 9.9), 0009 (sensor_reading.open_window, 9.10), 0010 (device.firmware_version + sensor_reading.attached_backplate, 9.11x)
+- Engine: 6-Layer-Pipeline vollständig — Layer 0 Sommer / 1 Base / 2 Temporal / 3 Manual / 4 Window-Detection / 5 Hard-Clamp + Hysterese. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40) abgesichert. Sprint 9.11x: Layer 4 erweitert um `device_detached`-Trigger (2-Frame-Hysterese auf `attached_backplate=false`). Sprint 9.11x.b: Vicki-Downlink-Helper-Architektur (AE-48) mit `send_raw_downlink` + typisierten Wrappern (Setpoint, Firmware-Query, Open-Window-Aktivierung). Sprint 9.11y: passiver Inferred-Window-Logger (AE-47 §Passiver Trigger) loggt Δ-T-Hinweise off-pipeline ins event_log, kein Setpoint-Effekt.
+- ~30 Test-Dateien, 261 Test-Cases lokal grün + 1 xfailed (Stand 9.11y); B-9.11x-1 psycopg2-Failures lokal-only, CI grün
 
 ### Frontend (Next.js 14.2 App Router + Tailwind)
 - Next.js 14.2.15, React 18.3.1, TypeScript 5.6.3 strict
 - Tailwind 3.4.14, Design-Strategie 2.0.1 (Rosé `#DD3C71`, Roboto, Material Symbols Outlined)
 - TanStack Query 5.100.5 für Server-State, recharts 3.8.1 für Charts
-- Eigene UI-Komponenten unter `components/ui/` (Button, ConfirmDialog) — kein shadcn/ui
+- UI-Komponenten unter `components/ui/`: button, confirm-dialog, alert-dialog, dialog, input, select (shadcn/ui-konform mit `@radix-ui`-Primitives, `components.json` + `lib/utils.ts` `cn`-Helper, migriert in Sprint 9.8d). Pattern-Komponenten unter `components/patterns/`: app-shell, engine-decision-panel, engine-window-indicator, heating-zone-list, manual-override-panel, occupancy-form, room-form, room-type-form, sensor-readings-chart.
 - AppShell mit 200 px Sidebar
 - Playwright E2E (`smoke.spec.ts`, `devices.spec.ts` unter `frontend/tests/e2e/`) — `sprint8.spec.ts` noch nicht erstellt, siehe Backlog
 
@@ -1024,6 +1025,7 @@ Nächster Sprint: 9.13 Geräte-Pairing-UI + Sidebar-Migration.
 ### Backend-API (`/api/v1/...`)
 
 - `/api/v1/devices/*` — CRUD Devices, GET `{device_id}/sensor-readings`
+- `/api/v1/devices/{device_id}/heating-zone` — PUT Assign Gerät → Heizzone, DELETE Detach (Sprint 9.11a, AE-43)
 - `/api/v1/rooms/*` — CRUD Rooms, GET `{room_id}/engine-trace`
 - `/api/v1/room-types/*` — CRUD Raumtypen
 - `/api/v1/rooms/{room_id}/heating-zones` — CRUD Heating-Zones (nested unter Rooms)
@@ -1173,3 +1175,12 @@ Secrets liegen in:
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
 *Sprints 9.11x, 9.11x.b, 9.11x.c: kein eigener Tag — Familie schließt mit `v0.1.9-rc6-live-test-2` auf 9.11y.*
+
+*`v0.2.0-architektur-refresh` war geplant, nicht vergeben — der Refresh
+wurde über mehrere kleine Tags `v0.1.9-rc4` bis `v0.1.9-rc6` ausgerollt.
+Tag-Slot `v0.2.0` bleibt frei für späteren Meilenstein.*
+
+*`v0.1.10-frost-protection` war für Sprint 9.12 (Frostschutz pro Raumtyp)
+geplant. Sprint zurückgestellt 2026-05-11 (siehe §2aa, AE-42).
+Tag-Slot `v0.1.10` bleibt ungenutzt als sprechender Marker für den
+zurückgestellten Sprint.*

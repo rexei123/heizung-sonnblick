@@ -4,97 +4,73 @@
 **Halte das File schlank** (Ziel < 100 Zeilen). Alte Sprints kommen NICHT hierher — die stehen in STATUS.md.
 **Pflicht:** Am Ende jedes Sprints aktualisieren. Wenn das nicht passiert ist, ist der Sprint nicht "Done".
 
+> **Hinweis ab 2026-05-07:** Code-Sessions starten zusätzlich mit der
+> Trigger-Phrase aus `docs/SESSION-START.md`. CONTEXT.md bleibt Boot-Anker
+> für Strategie-Chat-Sessions, ergänzt SESSION-START für die Code-Rolle.
+
 ---
 
-## Aktueller Stand
+## Aktueller Stand (2026-05-11)
 
-- **Letzter Tag:** `v0.1.9-rc1-walking-skeleton` (2026-05-04, **develop**) — Walking-Skeleton-Snapshot. Auf main bleibt `v0.1.8-stammdaten`.
-- **Letzter Sprint abgeschlossen:** Sprint 9.6b (Bug-Cleanup, alle 5 9.x-Bugs gruen)
-- **Aktiver Sprint:** Sprint 9 weiter — fehlt: 9.7 Sommermodus + Scheduler / 9.8 Layer 2 Temporal / 9.9 Layer 3+4 / 9.11 Live-Test #2 / 9.12 Final-Tag v0.1.9-engine auf main
-- **Live-Test bestaetigt 2026-05-03:** Vicki-001 reagiert auf Engine-Trigger mit Setpoint-Aenderung im Display (18°C). Walking-Skeleton produktiv.
+- **Letzter Tag:** `v0.1.9-rc6-live-test-2` (2026-05-11, develop) — Sprint-9.11-Familie geschlossen, Engine-Pipeline live verifiziert mit Hardware-Kältepack (AE-47-Bestätigung), AE-45-Auto-Override live demonstriert. Auf main bleibt `v0.1.8-stammdaten`.
+- **Letzte Sprints abgeschlossen:** 9.11a (Geräte-Zuordnungs-API), 9.11x/x.b/x.c (Backplate-Persistenz + Vicki-Downlink-Helper + FW-Decoder-Fix), 9.11y (Synthetic-Tests + Inferred-Window-Logger).
+- **Sprint 9.12 zurückgestellt** 2026-05-11 (Frostschutz pro Raumtyp — kein realer Schmerz, AE-42 zurückgestellt, R8 wieder globale Konstante, siehe STATUS.md §2aa). Tag-Slot `v0.1.10` bewusst ungenutzt.
+- **Aktueller Mini-Sprint:** 9.12.1 Doku-Refresh (dieser Sprint).
+- **Nächster echter Sprint:** 9.13 Geräte-Pairing-UI + Sidebar-Migration (BR-2, AE-43).
 
 ## Was JETZT der naechste konkrete Schritt ist
 
-1. Sprint 9.7 starten: Layer 0 Sommermodus (`global_config.summer_mode_active`) + Celery-Beat-Service `celery_beat` als 5. Compose-Container + Migration 0004 fuer `room.next_transition_at`-Spalte + Periodic Task `evaluate_due_rooms` (60 s)
-2. Sprint 9.8 Layer 2 Temporal (Vorheizen + Nachtabsenkung) baut auf 9.7-Scheduler auf
-3. Codec-Backlog Task #86/#87 sind durch Sprint 9.0 erledigt
-4. Sprint 8.8 (Integration-Tests gegen echte Postgres) bleibt auf Sprint 13 verschoben
+1. Sprint 9.13 starten: Pairing-Wizard `/devices/pair` (TA1, Multi-Step ohne bestehendes Pattern, von Grund auf bauen) + Detach-Button im `/zimmer/[id]/geraete`-Tab (TA2, API existiert seit 9.11a) + Sidebar-Migration auf 14 Einträge in 5 Gruppen (TB1-TB4) + Empty-State-Stubs für Profile/Szenarien/Saison/Gateway/API/Temperaturverlauf/Benutzer (TB2)
+2. 9.13-Voraussetzungen erfüllt: 9.11a-API liefert PUT/DELETE `/devices/{id}/heating-zone`. shadcn/ui ist installiert (Sprint 9.8d) — Sheet-/Drawer-Komponenten nutzbar für Mobile-Sidebar-Verhalten
+3. Nach 9.13: 9.14 Globale Temperaturen+Zeiten-UI, 9.15 Profile, 9.16 Szenarien+Saison, 9.17 NextAuth (vor Go-Live)
 
-## Sprint-9-Walking-Skeleton-Status (2026-05-04)
+## Architektur-Konsens (Stand 2026-05-11)
 
-- **Vicki-001** ist via Heizzone 91 ("Schlafzimmer") an Zimmer 101 gekoppelt. Weitere 3 Vicki sind im DB ohne Zone — Backlog.
-- **ChirpStack-App-ID** `b7d74615-6ea9-4b54-aa05-fd094e3c2cae` in `.env` von heizung-test gesetzt; default in `config.py` ist identisch.
-- **Engine-Trigger** funktioniert via `evaluate_room.delay(room_id)` aus API-Container oder Belegung-POST/Cancel.
-- **Vicki-Display** aendert sich im naechsten Class-A-Uplink-Fenster (~30 Sek bis 30 Min).
-- **Engine-Decision-Panel** unter `/zimmer/{id}` Tab "Engine" zeigt Layer-Trace mit Stale-Hinweis bei > 1h.
-
-## Architektur-Konsens (Stand 2026-05-02)
-
-- **Master-Plan freigegeben:** `docs/working/2026-05-02-master-plan-heizungssteuerung.md`
-- **ADRs AE-26 bis AE-35:** in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` v1.3
-- **Datenmodell-Erweiterung Migration 0003:** `season`, `scenario`, `scenario_assignment`, `global_config` (Singleton), `manual_setpoint_event`, `event_log` (Hypertable), plus `room_type.max_temp/min_temp/long_vacant_hours`
-- **Engine:** 5-Schichten-Pipeline (AE-06) erweitert um Layer 0 Sommermodus + Saison-Resolution in Layer 1
-- **UI:** 6-Bereiche-Sidebar (Heute / Zimmer / Regeln / Geraete / Analyse / Einstellungen). Alte Sprint-7-Sidebar wird in Sprint 11 abgeloest.
-- **Sprint-Bogen:** ✅ 8 Stammdaten -> 9 Engine (naechster) -> 10 Saison/Szenarien/Sommermodus -> 11 Dashboard/Floorplan/shadcn -> 12 Mobile/PWA -> 13 Pilot-Reife (inkl. Integration-Tests H-4).
-- **Sprint-8-Inkremente:** 8.1 Models, 8.2 Migrationen, 8.3 Schemas+Seed, 8.4 API rooms/types/zones, 8.5 Belegungs-API + OccupancyService, 8.6 global_config-API, 8.7 Device-Zone (existing), 8.9 Frontend Raumtypen, 8.10 Zimmer + Detail-Tabs, 8.11 Belegungen, 8.12 Hotel-Stammdaten, 8.13 Playwright-E2E + Doku, 8.14 Tag.
+- **Source-of-Truth-Hierarchie** (CLAUDE.md §0.2): `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` schlägt STRATEGIE.md, SPRINT-PLAN.md ist verbindlich für aktuelle Sprints.
+- **Engine:** 6-Schichten-Pipeline (AE-31): Layer 0 Sommer (9.7) / 1 Base / 2 Temporal / 3 Manual (9.9) / 4 Window-Detection (9.10 + 9.11x Detached + 9.11y Inferred-Logger off-pipeline) / 5 Hard-Clamp + Hysterese.
+- **Hardware-Realität (CLAUDE.md §5.27 + AE-45 + AE-47):** Vicki-Open-Window-Detection im Default disabled (durch 9.11x.b-Bulk-Aktivierung gesetzt), Algorithmus-Trägheit live bestätigt. Layer-4-Triggers: `open_window` (Vicki-Flag), `device_detached` (Backplate-Bit), passiv `inferred_window` (Off-Pipeline-Logger).
+- **Vicki-Downlinks** über MQTT (AE-48), nicht gRPC. Helper in `backend/src/heizung/services/downlink_adapter.py` mit `send_raw_downlink` + typisierten Wrappern.
+- **Stabilitätsregeln S1-S6** (CLAUDE.md §0, AE-44) verbindlich. Autonomie-Default Stufe 2 (CLAUDE.md §0.1).
+- **Datenmodell:** 14 Modelle, Migrations 0001-0004 + 0008-0010. `room_type.frost_protection_c` NICHT vorhanden (AE-42 zurückgestellt).
+- **UI:** AppShell mit 200 px Sidebar (heute 6 flache Einträge, Soll 14 in 5 Gruppen — Migration in 9.13). shadcn/ui-konform mit `@radix-ui` (seit 9.8d).
+- **Sprint-Bogen ab 9.13:** 9.13 Pairing-UI+Sidebar → 9.14 Global-Settings → 9.15 Profile → 9.16 Szenarien+Saison → 9.17 NextAuth → 9.18 Dashboard → 9.19 Analytics → 9.20 API+Webhooks → 9.21 Gateway-UI → 10 Hygiene → 11 PMS-Casablanca → 12 Production-Migration → 13 Wetter → 14 v1.0.0 Go-Live.
 
 ## Workflow-Modus
 
-- **Ultra-autonom** vereinbart 2026-05-02. Keine Phase-Gates pro Sub-Sprint. User meldet sich nur bei Findings auf Test-Server. Claude arbeitet Brief, Sprintplan, Code, Tests, PR autonom durch.
-
-## Memory-Disziplin (gegen Wiederholungs-Schlaufen)
-
-- Bei jedem neuen Chat zuerst CONTEXT.md, dann CLAUDE.md, dann das in CONTEXT verlinkte aktuelle Sprint-Doku.
-- STATUS.md ist Historie. NICHT bei jedem Boot komplett lesen. Nur den Top-Bereich (aktueller Stand) checken.
-- Bei jeder Sprint-Schliessung: CONTEXT.md aktualisieren VOR dem Tag.
-- Bei jedem ADR: AE-Nummer in CONTEXT.md unter "Architektur-Konsens" referenzieren.
-
-## Browser-Tests: IMMER Claude-fuer-Chrome (mcp__Claude_in_Chrome__*) nutzen
-
-**Pflicht (User-Wunsch 2026-05-03):** Wenn UI getestet werden muss (Sprint-Abnahme, Bug-Reproduktion, Verifikation), Claude oeffnet selbst den Browser via MCP-Tools (`mcp__Claude_in_Chrome__navigate`, `read_page`, `find`, `form_input`, etc.). Nicht den User durchklicken lassen. Wenn ein Tool nicht aufrufbar ist (Permission, Verbindung, Schema): SOFORT melden, nicht stillschweigend zur User-Schritt-Anleitung wechseln. User fixt dann.
+- Trigger-Phrase pro Code-Session (siehe `docs/SESSION-START.md`): »Architektur-Refresh aktiv ab 2026-05-07. Lies docs/SESSION-START.md und bestätige.« Die Session beginnt mit der Pflicht-Bestätigung im definierten Format.
+- Autonomie-Default Stufe 2 (CLAUDE.md §0.1). Sprint-Brief kann Stufe 1 (Engine-Touch, Hardware-Pfad) oder Stufe 3 (reine Doku) explizit setzen.
+- Pflicht-Stops: Brief-Abweichung, Phase-0-Befund, S1-Verstoß-Verdacht, Test-Failure außerhalb Task, fremde Datei-Errors, vor PR/Tag/Live-Deploy, S1-S6-Verdacht.
 
 ## Bekannte Stolperfallen (Quintessenz aus CLAUDE.md §5)
 
-- Cowork-Mount sync ist nicht zuverlaessig — Edits via Sandbox sofort in PowerShell `git diff --stat <file>` verifizieren.
-- PS5 + Bash-Skripte: BOM-Toedlich. ASCII-only oder `[System.IO.File]::WriteAllText` mit `UTF8Encoding $false`.
-- Branch-Naming `chore/<slug>` schreitet im Cowork-Mount fehl — flacher Name `chore-<slug>` als Workaround. Branch-Erstellung IMMER in PowerShell.
-- Sandbox-git landet NICHT im Windows-Repo. Branch + Commit + Push: PowerShell.
-- `gh pr merge --merge` aendert SHA — Sync-PRs immer ERST nach main-Merge erstellen, nie davor.
-- ChirpStack v4 macht keine `${VAR}`-Substitution in TOML — `envsubst`-Sidecar (AE-20).
-- ChirpStack-Goja JS-Engine ist strict-mode — alle Variablen mit `var` deklarieren (Lessons Sprint 6.8).
-- **deploy-pull.sh git fetch scheitert mit "dubious ownership"** — auf neuen Servern oder nach OS-Updates `git config --global --add safe.directory /opt/heizung-sonnblick` als root setzen. Pull-Timer schweigt sonst stundenlang. Logs via `journalctl -u heizung-deploy-pull -n 50`.
-- **Frontend AppShell NICHT in Page-Komponenten wrappen** — `frontend/src/app/layout.tsx` macht das bereits. Doppelt -> Sidebar zweimal nebeneinander gerendert. Sprint-7-Pattern (`/devices`) ist die korrekte Vorlage.
-- **Pull-Timer + Image-Tag-Caching:** `docker compose up -d` ohne `--force-recreate` startet Container nicht neu, wenn das `:develop`-Tag das gleiche heisst. Bei verdaechtigem alten UI-Stand: `docker compose pull web && docker compose up -d --force-recreate web`.
+- `gh pr create` braucht IMMER `--base develop` (CLAUDE.md §3.11) — sonst Default `main`, Branch-Modell gebrochen.
+- `gh pr merge` triggert `build-images.yml` nicht zuverlaessig (§5.10) — nach Frontend-/Backend-Merge ggf. manuell `gh workflow run build-images.yml --ref develop`.
+- `gh pr checks --watch` zeigt manchmal stale concurrency-cancel'd Runs (§5.25) — bei Merge-Fail »Required status check in progress« zweiten Watch-Durchlauf abwarten.
+- ChirpStack-Codec-Deploy ist NICHT automatisch (§5.22) — Repo-Codec-Touch erfordert UI-Re-Paste auf jedem Server, Verify im Events-Tab.
+- Vicki-Codec-Routing über `bytes[0]` Cmd-Byte, NICHT fPort (§5.21).
+- Engine-Trace-Konsistenz: alle Layer schreiben immer LayerStep, auch Pass-Through (§5.23).
+- `ruff check` und `ruff format --check` sind verschiedene CI-Gates (§5.24) — vor Push beide laufen lassen oder lokale Pre-Push-Toolchain nutzen (CLAUDE.md §6).
+- Frontend AppShell NICHT in Page-Komponenten wrappen (§5.8).
+- `deploy-pull.sh` git-fetch scheitert mit "dubious ownership" (§5.7) — `git config --system --add safe.directory /opt/heizung-sonnblick` (system, nicht global).
 
 ## Server-Stand
 
-- **heizung-test:** `https://heizung-test.hoteltec.at` — `:develop`-Pull, K-1 Caddy-Basic-Auth aktiv, 4 Vicki + 1 UG65 live
-- **heizung-main:** `https://heizung.hoteltec.at` — `:main`-Pull, K-1 Caddy-Basic-Auth aktiv
-- **ChirpStack-UI Test:** `https://cs-test.hoteltec.at`
-- **MQTT-Broker:** `heizung-test:1883` (anonymous, Backlog M-14 echte Auth)
-
-## Backlog (priorisiert, nicht in den naechsten 6 Sprints)
-
-- K-4 ChirpStack ohne root
-- K-5 CSP-Header in Caddyfiles (gemeinsames Snippet, M-2 mit erledigt)
-- H-6 SHA-Pinning fuer GHCR-Tags (eigener Sprint, build-images.yml + deploy-pull synchron)
-- H-8 Backup-Strategie `pg_dump` + Off-Site (Sprint 13 spaeter, evtl. vorgezogen als Hotfix-Sprint)
-- WT101 Milesight Codec + Pairing (eigener Sprint)
-- Vicki-002 Reichweite verbessern (RSSI -114, naeher zum UG65 stellen)
-- Frontend-CI-Skip-Hack (H-7) entfernen, sobald Branch-Protection-Matcher smarter wird
-- ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup
+- **heizung-test:** `https://heizung-test.hoteltec.at` — `:develop`-Pull, K-1 Caddy-Basic-Auth aktiv, 4 Vickis (alle 4 mit `firmware_version=4.4`, Open-Window-Detection aktiviert in 9.11x.b) + 1 UG65 live. ChirpStack-UI: `https://cs-test.hoteltec.at`.
+- **heizung-main:** `https://heizung.hoteltec.at` — `:main`-Pull, alter Sprint-9.8a-Stand, B-9.11x-2 (Sanierung vor v0.2.0) noch offen.
+- **MQTT-Broker:** `heizung-test:1883` (anonymous, Backlog).
 
 ## Wichtige Doku-Links
 
-- `docs/STRATEGIE.md` — Vollstrategie v1.0
-- `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log v1.3
-- `docs/working/2026-05-02-master-plan-heizungssteuerung.md` — aktueller Master-Plan
-- `docs/SPEC-FRAMEWORK.md` — Code-/Sicherheits-/DoD-Regeln
-- `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow (Ultra-Autonom-Modus 2026-05-02 vereinbart)
-- `docs/RUNBOOK.md` — Operations + Rescue
-- `STATUS.md` — Sprint-Historie (Append-only-Log, NICHT als Boot-Doku lesen)
-- `CLAUDE.md` — Goldene Regeln + Lessons Learned (Pflicht-Lektuere fuer KI-Boot)
+- `docs/SESSION-START.md` — Pflicht-Pre-Read pro Session (Code-Rolle: SESSION-START + CLAUDE.md + SPRINT-PLAN + STATUS §1 + Brief)
+- `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` — Master nach Refresh
+- `docs/SPRINT-PLAN.md` — verbindlicher Sprint-Plan ab 9.11
+- `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` — ADR-Log inkl. AE-42 (zurückgestellt), AE-43-48
+- `docs/STRATEGIE.md` — Vollstrategie v1.1 (Header-Hinweis 2026-05-11)
+- `docs/RUNBOOK.md` — Operations + Rescue + §10e Vicki-Downlink-Konfiguration
+- `docs/vendor/mclimate-vicki/` — Hersteller-Doku (FW-Tabelle, Command-Cheat-Sheet)
+- `STATUS.md` §2aa — jüngster Sprint-Eintrag (Sprint 9.12 zurückgestellt)
+- `CLAUDE.md` — Stabilitätsregeln + Lessons (Pflicht-Lektüre, §5.x)
 
 ---
 
-*Aktualisiert 2026-05-02 nach Master-Plan-Freigabe. Naechste Aktualisierung: nach Vicki-Spike-Resultat.*
+*Aktualisiert 2026-05-11 (Sprint 9.12.1 Doku-Refresh). Nächste Aktualisierung: nach Sprint-9.13-Abschluss.*
