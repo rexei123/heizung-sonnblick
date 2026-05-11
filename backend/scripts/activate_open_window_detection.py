@@ -171,14 +171,31 @@ async def _load_target_devices() -> list[tuple[int, str, str | None]]:
         return [(row[0], row[1], row[2]) for row in result.all()]
 
 
-async def main_async(wait_secs: int) -> int:
+async def main_async(wait_secs: int, fw_only: bool) -> int:
     devices = await _load_target_devices()
     if not devices:
         print("Keine Thermostat-Devices mit Heating-Zone gefunden — Abbruch.")
         return 0
 
-    print(f"Gefunden: {len(devices)} Vicki(s) — beginne Bulk-Aktivierung.")
+    mode_hint = "FW-Query NUR (--fw-only)" if fw_only else "Bulk-Aktivierung"
+    print(f"Gefunden: {len(devices)} Vicki(s) — beginne {mode_hint}.")
     await _phase1_query_firmware(devices)
+
+    if fw_only:
+        print(
+            "\n=== --fw-only: Phase 1 abgeschlossen, kein Wait, keine "
+            "Phase 3. ===\n    Re-Run von Phase 3 spaeter via "
+            "`activate_open_window_detection.py` ohne --fw-only "
+            "(wenn neu aktiviert werden soll)."
+        )
+        print(
+            "\n    DB-Update der firmware_version passiert asynchron beim "
+            "naechsten Vicki-Keepalive (~10 Min). Verify via:\n"
+            "    docker exec deploy-db-1 psql -U heizung -d heizung -c "
+            '"SELECT label, dev_eui, firmware_version FROM device '
+            "WHERE kind='thermostat' ORDER BY label;\""
+        )
+        return 0
 
     print(f"\n=== Warte {wait_secs} s auf FW-Antworten (Periodic-Cycle ~10 Min) ===")
     print("    Best-effort. FW=NULL nach Wait -> Device wird in Phase 3 geskippt.")
@@ -207,9 +224,17 @@ def main() -> int:
         "(Aktivierung). Default 60 (best-effort). Realistisch fuer 4 Vickis "
         "wegen 10-Min-Periodic-Cycle: 600-1200.",
     )
+    parser.add_argument(
+        "--fw-only",
+        action="store_true",
+        help="Nur Phase 1 (0x04-FW-Query) ausfuehren. Phase 3 (Aktivierung "
+        "0x45+0x46) wird geskippt. Sinnvoll fuer Sprint 9.11x.c-Re-Run nach "
+        "Decoder-Fix B-9.11x.b-5 — Vickis sind bereits OW-aktiviert, nur "
+        "die firmware_version-Strings sollen korrekt nachgezogen werden.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    return asyncio.run(main_async(args.wait_secs))
+    return asyncio.run(main_async(args.wait_secs, args.fw_only))
 
 
 if __name__ == "__main__":

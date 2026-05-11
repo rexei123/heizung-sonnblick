@@ -271,19 +271,39 @@ async def _handle_firmware_version_report(uplink: ChirpStackUplink) -> None:
             fw,
         )
         return
+    rowcount: int | None = None
     try:
         async with SessionLocal() as session:
-            await session.execute(
+            result = await session.execute(
                 update(Device).where(Device.dev_eui == dev_eui).values(firmware_version=fw)
             )
             await session.commit()
-            logger.info(
-                "firmware_version persistiert dev_eui=%s fw=%s",
-                dev_eui,
-                fw,
-            )
+            # rowcount ist auf SQLAlchemy-AsyncResult fuer UPDATE-Statements
+            # vorhanden, aber nicht im statischen Result[Any]-Typ — getattr
+            # mit Default umgeht den mypy-attr-defined-Error.
+            rowcount = getattr(result, "rowcount", None)
     except Exception:
         logger.exception("firmware_version-update-fehler dev_eui=%s", dev_eui)
+        return
+
+    # Sprint 9.11x.c (B-9.11x.b-6 Fix): Log AUSSERHALB des async-with-
+    # Blocks und mit rowcount-Diagnose. In 9.11x.b feuerte der info-Log
+    # auf heizung-test nicht zuverlaessig (vermutlich Context-Manager-
+    # Exit-Race oder Buffer). Plus: UPDATE auf nicht-existente dev_eui
+    # waere bisher silent durchgelaufen — jetzt sichtbar als WARNING.
+    if rowcount == 0:
+        logger.warning(
+            "firmware_version: UPDATE matched 0 rows dev_eui=%s — Device nicht in DB? fw=%s",
+            dev_eui,
+            fw,
+        )
+        return
+    logger.info(
+        "firmware_version persistiert dev_eui=%s fw=%s rows=%s",
+        dev_eui,
+        fw,
+        rowcount if rowcount is not None else "?",
+    )
 
 
 async def _handle_override_detection(uplink: ChirpStackUplink) -> None:

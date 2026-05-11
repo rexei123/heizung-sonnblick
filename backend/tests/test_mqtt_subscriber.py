@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from heizung.services.mqtt_subscriber import (
     ChirpStackUplink,
     _battery_pct_from_volts,
+    _handle_firmware_version_report,
     _map_to_reading,
     _persist_uplink,
     _to_decimal,
@@ -424,3 +425,138 @@ async def test_persist_uplink_unknown_dev_eui_no_eval(
     await _persist_uplink(uplink)
 
     assert delay_calls == [], "unbekannte DevEUI darf evaluate_room nicht triggern"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.11x.c B-9.11x.b-6: FW-Persist-Logger feuert
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_firmware_version_persists_and_logs(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Echtes Device mit dev_eui in DB -> UPDATE matched 1 row,
+    logger.info "firmware_version persistiert" feuert mit der korrekten
+    Message und enthaelt rowcount=1 zur Diagnose.
+
+    Wachposten gegen B-9.11x.b-6 (Log feuerte auf heizung-test nicht
+    zuverlaessig — Fix: Log AUSSERHALB des async-with-Blocks).
+
+    Test-Order-Defensive: andere Tests koennen ``propagate=False`` auf
+    dem Subscriber-Logger setzen (z.B. via ``heizung.main``-Import,
+    der ``logging.basicConfig`` ruft). Wir erzwingen Propagation
+    explizit, damit caplog die Records auch in voller Suite sieht.
+    """
+    import logging as _stdlib_logging
+
+    from heizung.models.device import Device
+    from heizung.models.enums import DeviceKind, DeviceVendor
+    from heizung.services import mqtt_subscriber as sub_module
+
+    suffix = uuid.uuid4().hex[:8]
+    dev_eui = f"fwtest00{suffix}"
+    device = Device(
+        dev_eui=dev_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+    )
+    db_session_for_persist.add(device)
+    await db_session_for_persist.flush()
+
+    class _FakeContext:
+        async def __aenter__(self) -> AsyncSession:
+            return db_session_for_persist
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(sub_module, "SessionLocal", lambda: _FakeContext())
+
+    uplink = ChirpStackUplink.model_validate(
+        {
+            "deviceInfo": {"devEui": dev_eui.upper()},  # Case-Insensitive-Check
+            "fCnt": 1,
+            "object": {
+                "firmware_version": "4.4",
+                "report_type": "firmware_version_reply",
+            },
+        }
+    )
+
+    sub_logger = _stdlib_logging.getLogger("heizung.services.mqtt_subscriber")
+    monkeypatch.setattr(sub_logger, "propagate", True)
+    monkeypatch.setattr(sub_logger, "disabled", False)
+    caplog.set_level(_stdlib_logging.INFO, logger="heizung.services.mqtt_subscriber")
+
+    await _handle_firmware_version_report(uplink)
+
+    info_messages = [r.getMessage() for r in caplog.records if r.levelname == "INFO"]
+    assert any("firmware_version persistiert" in m for m in info_messages), (
+        f"erwarte INFO-Log mit 'firmware_version persistiert', gefunden: {info_messages}"
+    )
+    assert any(dev_eui in m for m in info_messages), "log muss dev_eui enthalten (lowercase)"
+    assert any("fw=4.4" in m for m in info_messages), "log muss fw=4.4 enthalten"
+
+
+async def test_handle_firmware_version_unknown_dev_eui_logs_warning(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """dev_eui nicht in DB -> UPDATE matched 0 rows, WARNING-Log statt
+    silent passthrough (B-9.11x.b-6 Defensive-Erweiterung)."""
+    import logging as _stdlib_logging
+
+    from heizung.services import mqtt_subscriber as sub_module
+
+    class _FakeContext:
+        async def __aenter__(self) -> AsyncSession:
+            return db_session_for_persist
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(sub_module, "SessionLocal", lambda: _FakeContext())
+
+    uplink = ChirpStackUplink.model_validate(
+        {
+            "deviceInfo": {"devEui": "ffffffffffffffff"},  # nicht in DB
+            "fCnt": 1,
+            "object": {"firmware_version": "4.4"},
+        }
+    )
+
+    sub_logger = _stdlib_logging.getLogger("heizung.services.mqtt_subscriber")
+    monkeypatch.setattr(sub_logger, "propagate", True)
+    monkeypatch.setattr(sub_logger, "disabled", False)
+    caplog.set_level(_stdlib_logging.WARNING, logger="heizung.services.mqtt_subscriber")
+
+    await _handle_firmware_version_report(uplink)
+
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("UPDATE matched 0 rows" in m for m in warning_messages), (
+        f"erwarte WARNING fuer unbekannte dev_eui, gefunden: {warning_messages}"
+    )
+
+
+async def test_handle_firmware_version_none_silent_skip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """firmware_version fehlt im object -> silent return, kein Log,
+    kein DB-Touch."""
+    uplink = ChirpStackUplink.model_validate(
+        {
+            "deviceInfo": {"devEui": "aa00aa00aa00aa00"},
+            "fCnt": 1,
+            "object": {"temperature": 22.0},  # kein firmware_version
+        }
+    )
+    with caplog.at_level("DEBUG", logger="heizung.services.mqtt_subscriber"):
+        await _handle_firmware_version_report(uplink)
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("firmware_version" in m for m in messages), (
+        f"erwarte KEINE firmware_version-Logs, gefunden: {messages}"
+    )

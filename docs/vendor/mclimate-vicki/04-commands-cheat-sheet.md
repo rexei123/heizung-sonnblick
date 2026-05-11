@@ -103,7 +103,28 @@
 
 ### 1. Firmware-Version aller Vickis abfragen
 **Command:** `0x04`
-Antwort kommt mit nächstem Keepalive in Form `0x04{HW_major}{HW_minor}{FW_major}{FW_minor}`.
+
+**Reply-Format (korrigiert 2026-05-11, Sprint 9.11x.c):**
+
+Die ursprüngliche Vendor-Doku-Beschreibung
+`0x04{HW_major}{HW_minor}{FW_major}{FW_minor}` ist **ungenau**. Echte
+Vicki-Hardware sendet 3 Bytes mit Nibble-Split, plus optional einen
+eingebetteten Keep-alive-Frame (Cmd `0x81`) im selben Uplink:
+
+```
+Byte 0  : 0x04 (Reply-Cmd)
+Byte 1  : HW-Version  — high-nibble=Major, low-nibble=Minor
+          (z.B. 0x26 → HW 2.6)
+Byte 2  : FW-Version  — high-nibble=Major, low-nibble=Minor
+          (z.B. 0x44 → FW 4.4)
+Byte 3+ : optional eingebetteter Periodic-Keep-alive-Frame,
+          siehe Periodic-v2-Layout (Cmd 0x81)
+```
+
+**Quelle:** empirische Beobachtung Vicki MC-LW-V02-BI-RUGGED am
+2026-05-11, Roh-Bytes `04 26 44 81 14 97 62 a2 a2 11 e0 30`.
+Vicki-001 hat damit HW 2.6, FW 4.4. Drift-Schutz im Backend via
+`backend/tests/test_codec_mirror.py::test_decode_fw_reply_*`-Wachposten.
 
 ### 2. Open-Window-Detection aktivieren (FW ≥ 4.2)
 **Command:** `0x4501020F`

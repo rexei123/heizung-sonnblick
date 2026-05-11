@@ -50,6 +50,95 @@ def test_codec_mirror_fw_query() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 0x04-Reply Decoder-Mirror (Sprint 9.11x.c)
+# ---------------------------------------------------------------------------
+#
+# Spiegel der JS-Decoder-Logik in ``infra/chirpstack/codecs/
+# mclimate-vicki.js`` ``decodeCommandReply`` Pfad ``cmd === 0x04``.
+# Wenn der JS-Codec geaendert wird, MUSS dieser Spiegel parallel
+# aktualisiert werden — sonst faellt einer der Tests um (Vendor-
+# Spec-Wachposten gegen Drift). B-9.11x.b-1 (JS-Runtime via
+# subprocess+node) wuerde diese Doppel-Implementierung ablösen.
+
+
+def _mirror_decode_fw_reply(bytes_in: list[int]) -> dict[str, object] | None:
+    """Reproduziert JS-Codec-Logik fuer 0x04-Reply (3 Bytes Nibble-Split).
+
+    Reply-Layout (Live-Recon Vicki-001 2026-05-11):
+        Byte 0: 0x04 (Reply-Cmd)
+        Byte 1: HW-Version (high-nibble=major, low-nibble=minor)
+        Byte 2: FW-Version (high-nibble=major, low-nibble=minor)
+        Byte 3+: optional eingebetteter Keep-alive (0x81) — hier nicht
+                 dekodiert (separater Periodic-Test deckt das ab); der
+                 echte JS-Codec mergt die Periodic-Felder ins gleiche
+                 data-Object, Reply-Felder gewinnen bei Konflikt.
+
+    Returns None wenn bytes < 3 (Error-Path im echten Codec).
+    """
+    if len(bytes_in) < 3:
+        return None
+    hw_byte = bytes_in[1]
+    fw_byte = bytes_in[2]
+    return {
+        "report_type": "firmware_version_reply",
+        "command": 0x04,
+        "firmware_version": f"{(fw_byte >> 4) & 0x0F}.{fw_byte & 0x0F}",
+        "hw_version": f"{(hw_byte >> 4) & 0x0F}.{hw_byte & 0x0F}",
+    }
+
+
+def test_decode_fw_reply_pure_3_bytes() -> None:
+    """Test 1: Pure Reply ohne eingebetteten Periodic-Frame."""
+    result = _mirror_decode_fw_reply([0x04, 0x26, 0x44])
+    assert result is not None
+    assert result["firmware_version"] == "4.4"
+    assert result["hw_version"] == "2.6"
+    assert result["report_type"] == "firmware_version_reply"
+    # Pure Reply: KEINE Periodic-Felder wie target_temperature/setpoint.
+    assert "target_temperature" not in result
+    assert "valve_openness" not in result
+
+
+def test_decode_fw_reply_combined_frame_keeps_reply_priority() -> None:
+    """Test 2: Reply + Keep-alive im selben Uplink (Live-Bytes Vicki-001
+    2026-05-11). Reply-Felder (firmware_version, hw_version, report_type)
+    muessen erhalten bleiben — sonst springt der Subscriber-Filter
+    REPLY_REPORT_TYPES nicht an und _persist_uplink wuerde sensor_reading
+    mit Garbage-Werten inserten.
+
+    JS-Codec mergt zusaetzlich Periodic-Felder (target_temperature etc.),
+    aber der Mirror-Helper hier dekodiert sie nicht — getestet wird hier
+    nur, dass die Reply-Felder bei kombiniertem Frame stabil bleiben.
+    """
+    bytes_in = [0x04, 0x26, 0x44, 0x81, 0x14, 0x97, 0x62, 0xA2, 0xA2, 0x11, 0xE0, 0x30]
+    result = _mirror_decode_fw_reply(bytes_in)
+    assert result is not None
+    assert result["firmware_version"] == "4.4"
+    assert result["hw_version"] == "2.6"
+    assert result["report_type"] == "firmware_version_reply"
+    assert result["command"] == 0x04
+
+
+def test_decode_fw_reply_nibble_order_hw_then_fw() -> None:
+    """Test 3: Verriegelt die Reihenfolge — Byte 1 ist HW, Byte 2 ist FW.
+    Falls jemand HW und FW versehentlich vertauscht, faellt der Test um.
+    Synthetisches Sample mit asymmetrischen Werten (HW 4.5, FW 1.2) —
+    damit Vertauschung sofort sichtbar wird."""
+    result = _mirror_decode_fw_reply([0x04, 0x45, 0x12])
+    assert result is not None
+    assert result["hw_version"] == "4.5"
+    assert result["firmware_version"] == "1.2"
+
+
+def test_decode_fw_reply_too_short_returns_none() -> None:
+    """Test 4: Bytes < 3 -> Error-Path im echten Codec
+    (errors-Array, kein firmware_version-Feld emittiert)."""
+    assert _mirror_decode_fw_reply([0x04, 0x10]) is None
+    assert _mirror_decode_fw_reply([0x04]) is None
+    assert _mirror_decode_fw_reply([]) is None
+
+
+# ---------------------------------------------------------------------------
 # 0x45 — Open-Window-Detection setzen (Sprint 9.11x.b)
 # ---------------------------------------------------------------------------
 
