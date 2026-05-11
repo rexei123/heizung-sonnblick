@@ -731,6 +731,85 @@ Tests 5/6/8 sind die AND-Wachposten. Test 9 wächt AE-47. Test 10 verriegelt den
 
 ---
 
+## 2x. Sprint 9.11x.b Vicki-Downlink-Helper + Open-Window-Aktivierung (2026-05-11, abgeschlossen)
+
+**Ziel:** AE-48 (Hybrid-Helper-Architektur) implementieren, drei neue Vicki-Commands (0x04 FW-Query, 0x45 OW-Set, 0x46 OW-Get) via MQTT-Pfad, Bulk-Aktivierung Open-Window-Detection auf den 4 Hotel-Sonnblick-Vickis. Vorbereitet Live-Test #2 (9.11y).
+
+**Ergebnis:** Sprint inhaltlich abgeschlossen — alle 4 Vickis haben Open-Window-Detection aktiviert (`enabled=True, duration_min=10, delta_c=1.5`, Vendor-Bytes `0x4501020F`). Verifiziert via `MAINTENANCE_VICKI_CONFIG_REPORT`-Logs auf heizung-test. Zwei Bugs aufgedeckt (B-9.11x.b-5/6), nicht Sprint-blockierend.
+
+**Diff-Stats:** 7 Files, 1036 insertions, 37 deletions (PR #123). Plus 1 File, 3 insertions (PR #124, Dockerfile-Fix).
+
+**Architektur (AE-48):**
+
+```
+send_raw_downlink(dev_eui, payload_bytes, *, fport=1, confirmed=False) -> str   # generisch
+query_firmware_version(dev_eui) -> str       # 0x04
+set_open_window_detection(dev_eui, enabled, duration_min, delta_c: Decimal) -> str  # 0x45
+get_open_window_detection(dev_eui) -> str    # 0x46
+send_setpoint(dev_eui, setpoint_c) -> str    # 0x51 (refactored, verhalten-treu)
+```
+
+`delta_c` ist Decimal-Pflicht (CLAUDE.md §6). `duration_min ∈ {5, 10, ..., 1275}`, `delta_c ∈ [0.1, 6.4]` °C. ROUND_HALF_UP-Rundung mit 6er-Matrix-Test verriegelt.
+
+**Vendor-Konformität (verriegelt durch 9 Codec-Mirror-Tests):**
+
+| Input | Bytes | Vendor-Hex |
+|---|---|---|
+| `set_open_window_detection(True, 10, Decimal("1.5"))` | `[0x45, 0x01, 0x02, 0x0F]` | `0x4501020F` |
+| `set_open_window_detection(True, 30, Decimal("1.3"))` | `[0x45, 0x01, 0x06, 0x0D]` | `0x4501060D` |
+
+**Subscriber-Erweiterung:**
+- `_handle_firmware_version_report` → `device.firmware_version` UPDATE (defensive Parse)
+- `_handle_open_window_status_report` → strukturierter `logger.info` mit `event_type=MAINTENANCE_VICKI_CONFIG_REPORT` (S6-Option B, kein Schema-Drift)
+- `REPLY_REPORT_TYPES`-frozenset filtert alle Reply-Typen sauber (verhindert NULL-Garbage-Inserts in `sensor_reading`)
+
+**Bulk-Aktivierungs-Skript** `backend/scripts/activate_open_window_detection.py`:
+- 3-Phasen (FW-Query → Wait → FW-Check + 0x45+0x46)
+- `--wait-secs N` CLI-Arg (default 60, empfohlen 600-1200)
+- Tabellen-Output, idempotent
+
+**Tests:** 246 passed + 1 xfailed lokal (mit B-9.11x-1 psycopg2-Ignores). Davon 23 neue Wrapper-/Validation-Tests + 9 Codec-Mirror-Tests + 26 Subscriber-Regression-Tests.
+
+**Brief-Drifts (vorab freigegeben):**
+
+| # | Brief | Auflösung |
+|---|---|---|
+| 1 | `tests/services/test_*.py` | flacher Pfad `tests/test_*.py` |
+| 2 | `send_raw_downlink → None` | AE-48: `→ str` |
+| 3 | Wrapper `def` (sync) | AE-48: `async def` |
+| 4 | `duration_byte = duration_min` | **Vendor-Doku-Korrektur**: `duration_min // 5` (Brief-Code-Bug — 10 Min wäre als 50 Min gesendet worden, S4-Hardware-Risiko) |
+| 5 | `event_log MAINTENANCE-Eintrag` | Option B: Logger-only |
+| 6 | `60s warten` | Brief-treu mit `--wait-secs N` CLI-Override |
+| 7 | FW-String "4.5.1" | Codec emittiert `firmware_version: "FW_maj.FW_min"` (Vendor: 4 Bytes), `hw_version` separat |
+
+T5-Reopening: `REPLY_REPORT_TYPES`-Erweiterung als Konsequenz aus T6 Codec-Output — User-bestätigt, S5-konform (Defensive-by-default).
+
+**PR-Reihenfolge (saubere `--base develop`-Anwendung von §3.11):**
+
+- **PR #123** (Code): Sprint 9.11x.b Hauptmerge, mergeCommit `7774768`, CI grün.
+- **PR #124** (Dockerfile-Fix): `scripts/` ins API-Image kopieren, mergeCommit `8a0bcc4`, CI grün. Befund nach #123-Merge: Bulk-Skript fehlte im Container, weil Dockerfile `scripts/` nicht kopierte.
+
+**Live-Aktivierung auf heizung-test (2026-05-11):**
+- Codec-Re-Paste in ChirpStack-UI durch User
+- Periodic-Verify Vicki-001 (kein Regress)
+- `docker exec deploy-api-1 python scripts/activate_open_window_detection.py --wait-secs 1200`
+- Ergebnis: alle 4 Vickis OW-Detection aktiv (`enabled=True, duration_min=10.0, delta_c=1.5`), `MAINTENANCE_VICKI_CONFIG_REPORT`-Logs vorhanden.
+
+**Live aufgedeckte Bugs (Backlog, nicht Sprint-blockierend):**
+
+- **B-9.11x.b-5**: 0x04-Decoder im `mclimate-vicki.js` liefert falsche FW-Strings. `device.firmware_version` zeigt `"129.20", "129.10", "129.18", "129.10"` — Vicki-FW ist im 4.x-Bereich. Wahrscheinlich Byte-Offset-Bug: Codec interpretiert Reply-Command-Byte (0x81 = 129 decimal) als FW-Major statt Byte 3. Vendor-Spec: `[Reply-Cmd, HW_maj, HW_min, FW_maj, FW_min]` — Codec liest vermutlich Index 0/1 statt 3/4. Fix in 9.11x.c: Codec-Patch + Re-Run FW-Query (Sub-Modus `--fw-only` damit OW nicht erneut angestoßen wird).
+- **B-9.11x.b-6**: Subscriber-Log `firmware_version persistiert` feuert nicht, obwohl DB-Write läuft. T4-Implementierung in `_handle_firmware_version_report` weicht von Brief-Spec ab. Trivial-Fix, in 9.11x.c mit B-9.11x.b-5 zusammen.
+
+Encoder ist von beiden Bugs nicht betroffen — Vendor-Bytes `0x4501020F` korrekt, OW-Aktivierung erfolgreich. Encoder-Seite verriegelt durch Codec-Mirror-Tests. Decoder-Seite hat keinen Mirror-Test (siehe B-9.11x.b-1 — JS-Runtime-Variante würde Decoder mitschützen).
+
+**Pre-Push-Toolchain:** Backend grün (`ruff format/check`, `mypy strict`, `pytest -x` mit B-9.11x-1-Ignores). Frontend `type-check` grün (kein Touch erwartet).
+
+**Tag-Vergabe:** keiner. Tag `v0.1.9-rc6-live-test-2` in 9.11y nach Live-Synthetic-Test.
+
+**Backlog-Items aus diesem Sprint:** B-9.11x.b-1 bis B-9.11x.b-6 — siehe §6.2.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -865,6 +944,12 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11x-3 | celery_beat unhealthy auf heizung-test (vermutet aus 9.11x-Diagnose) — Healthcheck-Konfiguration prüfen, ggf. Backlog mit B-9.11-4 zusammenführen | 🟡 |
 | B-9.11x-4 | Status-Dashboard: zentrale Sicht auf Pull-Timer + Container-Health + letzte Engine-Eval pro Raum (heizung-test + heizung-main), aktuell verteilt über `journalctl`/`docker ps`/SQL — 9.13+ | 🟡 |
 | B-9.11x-5 | Quick-Win: Zimmer-Spalte in Geräte-Liste (`/devices`) und Geräte-Detailseite (`/devices/[id]`). Aktuelle Tabelle zeigt Bezeichnung, DevEUI, Hersteller/Modell, Status, Zuletzt-gesehen — aber nicht die Heizzonen-/Zimmer-Zuordnung. Read-Only-Erweiterung, kein neuer Endpoint nötig (Device-API liefert `heating_zone_id`, Heating-Zone-API liefert `room_id`). 30-60 Min, vor Sprint 9.13. Anlass: Hotelier-Feedback 2026-05-10 | 🟡 |
+| B-9.11x.b-1 | JS-Runtime-Codec-Spiegel-Test (`py_mini_racer` / `subprocess+node`) statt hardcoded Vendor-Bytes. Würde auch `decodeUplink` mit-schützen (Bug B-9.11x.b-5 wäre damit gefangen). Hygiene-Sprint | 🟡 |
+| B-9.11x.b-2 | 0x06-Fallback-Encoder für FW < 4.2 (alte 1.0 °C-Variante, Vendor-Doku §01). Bulk-Skript skipped FW<4.2-Devices aktuell mit Hinweis auf dieses Item | 🟡 |
+| B-9.11x.b-3 | `_consume_loop` Trio-Handler in `post_uplink_hook` konsolidieren (FW + OW-Status + Override-Detection) — DRY für die zwei Aufrufstellen | 🟢 |
+| B-9.11x.b-4 | Dockerfile-COPY-Konvention prüfen, dass zukünftige neue Top-Level-Verzeichnisse standardmäßig mit ins Image gehen, oder ein conftest existiert das eine Inventur macht. Anlass: `scripts/` fehlte im Image (PR #124) | 🟡 |
+| B-9.11x.b-5 | 0x04-Decoder Byte-Offset-Bug in `mclimate-vicki.js`. `device.firmware_version` zeigt "129.20" statt "4.x". Codec liest Reply-Command-Byte (0x81 = 129) als FW-Major statt Byte 3. Fix-Pfad: Decoder-Patch + Re-Run FW-Query via `--fw-only`-Sub-Modus des Bulk-Skripts (damit OW nicht nochmal angestoßen wird). Sprint 9.11x.c oder 9.11y-Closeout-Fix | 🔴 |
+| B-9.11x.b-6 | Subscriber-Log "firmware_version persistiert" feuert nicht, obwohl DB-Write läuft. `_handle_firmware_version_report` (T4) weicht von Brief-Spec ab — `logger.info`-Aufruf fehlt oder Log-Level falsch. Trivial-Fix, gemeinsam mit B-9.11x.b-5 in 9.11x.c | 🟡 |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
