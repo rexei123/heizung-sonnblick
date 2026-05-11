@@ -148,8 +148,12 @@ gilt nicht mehr für Pläne, gilt für Lessons, falls dort enthalten.
 
 Folgende Inhalte gelten ab 2026-05-07 als überholt:
 
-- **STRATEGIE.md §6.2 R8 (alte Fassung)**: „Frostschutz absolut, nicht
-  konfigurierbar". → Gilt jetzt: zweistufig (siehe AE-42)
+- ~~**STRATEGIE.md §6.2 R8 (alte Fassung)**: „Frostschutz absolut, nicht
+  konfigurierbar". → Gilt jetzt: zweistufig (siehe AE-42)~~
+  **Update 2026-05-11:** Diese Markierung ist hinfällig. Der Schwenk auf
+  zweistufigen Frostschutz wurde zurückgenommen. R8 gilt wieder als
+  globale Konstante; AE-42 wurde auf „zurückgestellt" gesetzt. Eintrag
+  bleibt als Historie stehen.
 - **STRATEGIE.md §9.3 (7-Phasen-Modell)**: → Gilt jetzt: 5 Phasen aus
   WORKFLOW.md
 - **Alle Sprint-Briefe in `docs/features/` mit Datum vor 2026-05-07**:
@@ -159,8 +163,8 @@ Folgende Inhalte gelten ab 2026-05-07 als überholt:
 
 ## Wenn die KI alte Logik wiedergibt
 
-Symptom: Eine KI sagt „laut Strategie ist Frostschutz nicht konfigurierbar"
-oder „nächster Sprint ist 9.11 mit allen Layern auf einmal".
+Symptom: Eine KI sagt „nächster Sprint ist 9.11 mit allen Layern auf
+einmal" oder „Sommer braucht volle 6-Layer-Pipeline".
 
 Reaktion User: **„Stop. Lies ARCHITEKTUR-REFRESH-2026-05-07.md §2.1
 [oder §3 / §7] und korrigiere."**
@@ -168,6 +172,12 @@ Reaktion User: **„Stop. Lies ARCHITEKTUR-REFRESH-2026-05-07.md §2.1
 Das passiert in den ersten 2-3 Wochen häufig, weil ältere Embeddings
 durchschlagen. Konsequente Korrektur durch Dokument-Verweis ist die
 wirksamste Mitigation.
+
+> **Historische Notiz 2026-05-11:** Bis 2026-05-11 stand hier zusätzlich
+> das Beispiel „laut Strategie ist Frostschutz nicht konfigurierbar".
+> Nach Rücknahme des Frostschutz-Schwenks (AE-42 zurückgestellt, R8 wieder
+> globale Konstante) ist diese Aussage wieder korrekt — Beispiel entfernt,
+> um falsche Korrektur-Reflexe zu vermeiden.
 
 ## Pflicht-Bestätigung am Ende
 

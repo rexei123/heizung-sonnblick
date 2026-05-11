@@ -611,31 +611,40 @@ statt sich auf substantielle Entscheidungen zu konzentrieren.
 
 ---
 
-## AE-42 — Frostschutz zweistufig (2026-05-07)
+## AE-42 — Frostschutz pro Raumtyp (zurückgestellt 2026-05-11)
 
-**Kontext:** Cowork-Inventarisierung Betterspace zeigt: untere
-Temperaturgrenzen werden in der Praxis pro Raumtyp differenziert.
-Bad mit Handtuchwärmer braucht andere untere Grenze als Flur.
+**Entscheidung:** Frostschutz bleibt systemweit
+`FROST_PROTECTION_C = Decimal("10.0")` in
+`backend/src/heizung/rules/constants.py`. Engine-Layer 0, 4, 5 lesen
+die Konstante direkt, ohne Helper.
 
-**Entscheidung:** Frostschutz in zwei Ebenen.
+Pro-Raumtyp-Override wurde 2026-05-07 entworfen (siehe Historie unten),
+aber 2026-05-11 zurückgestellt: kein realer Frostschaden-Fall im Hotel
+Sonnblick, kein Hotelier-Bedarf, S6 zieht. Wenn das Feature später
+kommt, ist der Migrations-Pfad klein und additiv:
 
-1. Hard-Cap als Code-Konstante `FROST_PROTECTION_C = Decimal("10.0")`
-   in `constants.py`. Nicht UI-änderbar.
-2. Optionaler Override pro Raumtyp via Spalte
-   `room_type.frost_protection_c NUMERIC(4,1) NULL`. Default NULL,
-   fällt auf Hard-Cap. Kann höher gesetzt werden, nie niedriger.
+- Migration: `room_type.frost_protection_c NUMERIC(4,1) NULL`
+- Helper: `_resolve_frost_protection(room_type)` in `engine.py`
+- Layer 0, 4, 5 rufen Helper statt Konstante
+- Pydantic-Field optional in `RoomTypeUpdate`-Schema
+- UI-Feld in `/raumtypen/[id]`-Form
 
-Effektiver Frostschutz: `MAX(HARD_CAP, room_type.frost_protection_c)`.
+Bis dahin gilt: untere Grenze ist die Konstante, nicht konfigurierbar.
 
-Engine-Layer 0, 4, 5 lesen diesen Wert.
+**Historie 2026-05-07 (zur Nachvollziehbarkeit der zurückgestellten
+Variante):** Cowork-Inventarisierung Betterspace zeigte, dass untere
+Temperaturgrenzen pro Raumtyp differenziert werden (Bad mit
+Handtuchwärmer vs. Flur, Cowork S107 Use-Case 7). Entworfen war eine
+zweistufige Modellierung — Hard-Cap im Code plus optionaler
+Raumtyp-Override `room_type.frost_protection_c NUMERIC(4,1) NULL` mit
+`MAX(HARD_CAP, room_type.frost_protection_c)` als effektivem Wert.
+Strategie-Chat-Review 2026-05-11 hat die Option geprüft und bewusst
+zurückgestellt — nicht vergessen, sondern aktivierbar bei konkretem
+Bedarf.
 
-**Konsequenzen:**
-- DB-Migration in Sprint 9.12 (eine neue Spalte)
-- Engine-Helper `_resolve_frost_protection(room_type)` in `engine.py`
-- Tests pro Layer mit Override
-
-**Status:** akzeptiert
-**Ersetzt:** ältere Fassung von R8 in STRATEGIE.md §6.2
+**Status:** zurückgestellt 2026-05-11, später aktivierbar
+**Bezug:** STRATEGIE.md §6.2 R8 (globale Konstante),
+ARCHITEKTUR-REFRESH §2.1 (Update-Box 2026-05-11)
 
 ---
 
