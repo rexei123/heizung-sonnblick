@@ -810,6 +810,70 @@ Encoder ist von beiden Bugs nicht betroffen — Vendor-Bytes `0x4501020F` korrek
 
 ---
 
+## 2y. Sprint 9.11x.c FW-Decoder-Fix + FW-Persist-Logger-Fix (2026-05-11, abgeschlossen)
+
+**Ziel:** Mini-Hotfix für die beiden 9.11x.b-Live-Befunde B-9.11x.b-5 (0x04-Decoder Byte-Offset-Bug) und B-9.11x.b-6 (FW-Persist-Logger feuert nicht). Re-Run FW-Query auf den 4 produktiven Vickis, korrekte FW-Versionen in DB.
+
+**Ergebnis:** Sprint inhaltlich abgeschlossen, beide Bugs verifiziert gefixt. Live-Verify auf heizung-test grün — alle 4 Hotel-Sonnblick-Vickis zeigen jetzt `firmware_version=4.4` in der DB, FW-Persist-Logger feuert mit `rows=1`-Diagnose-Info.
+
+**Diff-Stats:** 6 Files, 356 insertions, 26 deletions (PR #126, mergeCommit `2a0cc0c`).
+
+**Root-Cause B-9.11x.b-5** (mit Live-Bytes-Beleg):
+
+Vendor-Doku-Spec `0x04{HW_major}{HW_minor}{FW_major}{FW_minor}` meinte **Nibbles**, nicht **Bytes**. Echte Vicki sendet 3 Bytes plus optional einen eingebetteten Keep-alive im selben Uplink-Frame.
+
+Bytes Vicki-001 (2026-05-11): `04 26 44 81 14 97 62 a2 a2 11 e0 30`
+- `0x26` → HW 2.6, `0x44` → FW 4.4 (Reply-Anteil, 3 Bytes)
+- Rest `81 14 ...` → Keep-alive Cmd 0x81 mit `target_temperature=20°C`
+
+Vorher-Bug: `bytes[3]=0x81=129` wurde als FW-Major gelesen → DB zeigte "129.20".
+
+**Fix-Strategie:**
+
+| Bereich | Fix |
+|---|---|
+| Codec `mclimate-vicki.js` | 3-Byte-Nibble-Decoder + Frame-Merge mit Reply-Priorität (`report_type`, `command` bleiben) |
+| Subscriber `mqtt_subscriber.py` | `logger.info` AUSSERHALB des `async-with`-Blocks + `rowcount`-Diagnose + WARNING bei UPDATE matched 0 rows |
+| Vendor-Doku `04-commands-cheat-sheet.md` | §1 korrigiert mit echtem 3-Byte-Nibble-Layout + Roh-Bytes-Beleg |
+| Bulk-Skript `activate_open_window_detection.py` | `--fw-only`-Flag für Re-Run nach Decoder-Fix |
+
+**Tests (7 neu, alle grün):**
+
+- 4 Codec-Mirror-Decode-Tests (`test_codec_mirror.py`): pure 3-Byte Reply, kombinierter Frame (Live-Sample, 12 Bytes), Nibble-Reihenfolge-Wachposten HW vor FW, Bytes < 3 Error-Path
+- 3 Subscriber-caplog-Tests (`test_mqtt_subscriber.py`): persists + INFO-Log mit rowcount, unknown dev_eui → WARNING-Log (Defensive), `firmware_version=None` → silent skip
+
+Plus Test-Order-Defensive: explizit `propagate=True` + `caplog.set_level` mit logger-Argument, damit andere Test-Module die Subscriber-Logger-Propagation nicht killen können.
+
+**Pre-Push-Toolchain:** Backend grün (`ruff format/check`, `mypy src`, `pytest -x`: **253 passed, 1 xfailed** mit B-9.11x-1-Ignores). Frontend `type-check` grün (kein Touch).
+
+**Live-Aktivierung auf heizung-test (2026-05-11):**
+
+Vor dem Re-Run hat User den Codec in der ChirpStack-UI re-pasted (RUNBOOK §10c). Periodic-Verify Vicki-001 zeigt sauberes Object (`temperature=21.82`, `target_temperature=20`, `openWindow=false`, `attachedBackplate=true`, `battery_voltage=3.4`, 24 Keys, keine NULLs) — **kein Regress durch den Codec-Re-Paste**.
+
+Anschließend `--fw-only`-Run:
+
+```
+docker exec deploy-api-1 python scripts/activate_open_window_detection.py --fw-only
+```
+
+**DB-Verify nach ~15 Min:**
+
+| Label | dev_eui | firmware_version |
+|---|---|---|
+| Vicki-001 (Pairing-Test) | 70b3d52dd3034de4 | 4.4 |
+| Vicki-002 | 70b3d52dd3034de5 | 4.4 |
+| Vicki-003 | 70b3d52dd3034d7b | 4.4 |
+| Vicki-004 | 70b3d52dd3034e53 | 4.4 |
+
+**Logger-Verify** (`docker logs deploy-api-1 | grep "firmware_version persistiert"`, 08:07–08:12 UTC):
+- 4× `firmware_version persistiert ... fw=4.4 rows=1`
+
+Beide Bugs **B-9.11x.b-5** und **B-9.11x.b-6** ✅ geschlossen.
+
+**Tag-Vergabe:** keiner. Tag `v0.1.9-rc6-live-test-2` in 9.11y nach Live-Synthetic-Test.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -948,8 +1012,8 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11x.b-2 | 0x06-Fallback-Encoder für FW < 4.2 (alte 1.0 °C-Variante, Vendor-Doku §01). Bulk-Skript skipped FW<4.2-Devices aktuell mit Hinweis auf dieses Item | 🟡 |
 | B-9.11x.b-3 | `_consume_loop` Trio-Handler in `post_uplink_hook` konsolidieren (FW + OW-Status + Override-Detection) — DRY für die zwei Aufrufstellen | 🟢 |
 | B-9.11x.b-4 | Dockerfile-COPY-Konvention prüfen, dass zukünftige neue Top-Level-Verzeichnisse standardmäßig mit ins Image gehen, oder ein conftest existiert das eine Inventur macht. Anlass: `scripts/` fehlte im Image (PR #124) | 🟡 |
-| B-9.11x.b-5 | 0x04-Decoder Byte-Offset-Bug in `mclimate-vicki.js`. `device.firmware_version` zeigt "129.20" statt "4.x". Codec liest Reply-Command-Byte (0x81 = 129) als FW-Major statt Byte 3. Fix-Pfad: Decoder-Patch + Re-Run FW-Query via `--fw-only`-Sub-Modus des Bulk-Skripts (damit OW nicht nochmal angestoßen wird). Sprint 9.11x.c oder 9.11y-Closeout-Fix | 🔴 |
-| B-9.11x.b-6 | Subscriber-Log "firmware_version persistiert" feuert nicht, obwohl DB-Write läuft. `_handle_firmware_version_report` (T4) weicht von Brief-Spec ab — `logger.info`-Aufruf fehlt oder Log-Level falsch. Trivial-Fix, gemeinsam mit B-9.11x.b-5 in 9.11x.c | 🟡 |
+| B-9.11x.b-5 | 0x04-Decoder Byte-Offset-Bug in `mclimate-vicki.js`. Vendor-Doku-Spec war ungenau (Bytes statt Nibbles + Vicki packt Reply + Keep-alive im selben Uplink). Fix in Sprint 9.11x.c via 3-Byte-Nibble-Decoder + Frame-Merge mit Reply-Priorität. Live-Verify: alle 4 Vickis zeigen `firmware_version=4.4` | ✅ erledigt 2026-05-11 (PR #126) |
+| B-9.11x.b-6 | Subscriber-Log "firmware_version persistiert" feuert nicht. Fix in Sprint 9.11x.c: `logger.info` AUSSERHALB des `async-with`-Blocks + `rowcount`-Diagnose. Live-Verify: 4× `firmware_version persistiert ... fw=4.4 rows=1` im `docker logs` (08:07–08:12 UTC) | ✅ erledigt 2026-05-11 (PR #126) |
 | B-9.11a-1 | Audit aller `docs/*.md` auf Null-Byte-Pollution + Trailing-Garbage | 🟡 |
 | B-9.11a-2 | Live-Verify Vicki-002/003/004 Zuweisung nach Merge | ✅ erledigt 2026-05-09 |
 
