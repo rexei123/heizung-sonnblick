@@ -36,6 +36,7 @@ from heizung.schemas.device import (
     DeviceUpdate,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
+from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,20 @@ async def assign_device_to_zone(
             "heating_zone_id_new": device.heating_zone_id,
         },
     )
+
+    # Sprint HF-9.13a-2: Engine-Tick triggern, damit der Layer-4-Detached-
+    # Trace und das Engine-Decision-Panel sofort den neuen Stand zeigen
+    # (sonst erst beim naechsten 60-s-Beat-Tick). AE-47 Hardware-First
+    # bleibt: Engine sieht weiter die sensor_reading-Frame-Historie.
+    evaluate_room.delay(zone.room_id)
+    logger.info(
+        "engine_tick_triggered",
+        extra={
+            "device_id": device.id,
+            "room_id": zone.room_id,
+            "trigger": "device_zone_changed",
+        },
+    )
     return device
 
 
@@ -252,6 +267,22 @@ async def detach_device_from_zone(
             "heating_zone_id_prev": prev,
         },
     )
+
+    # Sprint HF-9.13a-2: Engine-Tick fuer das ALTE Zimmer triggern. Es hat
+    # jetzt ein Geraet weniger; Layer-4-Detached-Aggregation aendert sich
+    # (z.B. von "1 von 2 detached" zu "no_devices_in_zone"). Symmetrisch
+    # zum PUT-Handler.
+    old_zone = await session.get(HeatingZone, prev)
+    if old_zone is not None:
+        evaluate_room.delay(old_zone.room_id)
+        logger.info(
+            "engine_tick_triggered",
+            extra={
+                "device_id": device.id,
+                "room_id": old_zone.room_id,
+                "trigger": "device_zone_detached",
+            },
+        )
     return device
 
 
