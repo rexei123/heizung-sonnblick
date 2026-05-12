@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -304,3 +305,88 @@ async def test_detach_returns_404_when_device_missing(http_client: httpx.AsyncCl
     resp = await http_client.delete("/api/v1/devices/99999/heating-zone")
     assert resp.status_code == 404, resp.text
     assert resp.json()["detail"] == "device_not_found"
+
+
+# ---------------------------------------------------------------------------
+# HF-9.13a-2: Engine-Tick-Trigger nach Zone-Aenderung (B-LT-2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_evaluate_room(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Ersetzt das im API-Modul importierte ``evaluate_room`` durch einen
+    MagicMock. ``mock.delay`` wird dann automatisch zum Tracker.
+    """
+    mock = MagicMock()
+    monkeypatch.setattr("heizung.api.v1.devices.evaluate_room", mock)
+    return mock
+
+
+async def test_assign_triggers_evaluate_room(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    setup: _Setup,
+    mock_evaluate_room: MagicMock,
+) -> None:
+    """PUT auf ein bisher unzugeordnetes Geraet triggert evaluate_room.delay
+    fuer das Zimmer der gewaehlten Zone."""
+    device_id, _, _ = await _create_device(setup_engine, setup["suffix"], None)
+
+    resp = await http_client.put(
+        f"/api/v1/devices/{device_id}/heating-zone",
+        json={"heating_zone_id": setup["zone_a_id"]},
+    )
+
+    assert resp.status_code == 200, resp.text
+    mock_evaluate_room.delay.assert_called_once_with(setup["room_id"])
+
+
+async def test_detach_triggers_evaluate_room_for_previous_room(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    setup: _Setup,
+    mock_evaluate_room: MagicMock,
+) -> None:
+    """DELETE triggert evaluate_room.delay fuer das ALTE Zimmer (das jetzt
+    ein Geraet weniger hat)."""
+    device_id, _, _ = await _create_device(setup_engine, setup["suffix"], setup["zone_a_id"])
+
+    resp = await http_client.delete(f"/api/v1/devices/{device_id}/heating-zone")
+
+    assert resp.status_code == 200, resp.text
+    mock_evaluate_room.delay.assert_called_once_with(setup["room_id"])
+
+
+async def test_assign_idempotent_does_not_trigger_evaluate_room(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    setup: _Setup,
+    mock_evaluate_room: MagicMock,
+) -> None:
+    """PUT mit derselben heating_zone_id wie bereits gesetzt: Idempotenz-
+    Shortcut greift VOR dem Trigger, evaluate_room.delay NICHT gerufen."""
+    device_id, _, _ = await _create_device(setup_engine, setup["suffix"], setup["zone_a_id"])
+
+    resp = await http_client.put(
+        f"/api/v1/devices/{device_id}/heating-zone",
+        json={"heating_zone_id": setup["zone_a_id"]},
+    )
+
+    assert resp.status_code == 200, resp.text
+    mock_evaluate_room.delay.assert_not_called()
+
+
+async def test_detach_idempotent_does_not_trigger_evaluate_room(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    setup: _Setup,
+    mock_evaluate_room: MagicMock,
+) -> None:
+    """DELETE auf ein bereits unzugeordnetes Geraet: Idempotenz-Shortcut
+    greift, evaluate_room.delay NICHT gerufen."""
+    device_id, _, _ = await _create_device(setup_engine, setup["suffix"], None)
+
+    resp = await http_client.delete(f"/api/v1/devices/{device_id}/heating-zone")
+
+    assert resp.status_code == 200, resp.text
+    mock_evaluate_room.delay.assert_not_called()
