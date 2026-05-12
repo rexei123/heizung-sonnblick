@@ -244,6 +244,7 @@ function LabelCell({ device: d }: { device: Device }) {
             onKeyDown={onKey}
             onBlur={() => void save()}
             autoFocus
+            autoComplete="off"
             disabled={updateMut.isPending}
             className="h-8 text-sm"
             aria-label="Bezeichnung bearbeiten"

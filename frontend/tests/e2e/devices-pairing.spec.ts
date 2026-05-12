@@ -147,4 +147,23 @@ test.describe("Sprint 9.13a Pairing-Wizard", () => {
     await expect(page.getByText(/„Vicki-001"/)).toBeVisible();
     await expect(page.getByText(/„Schlafzimmer"/)).toBeVisible();
   });
+
+  test("Inline-Edit-Input hat autoComplete=off und zeigt aktuellen Label-Wert (HF-9.13a-1)", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/devices*", (r) => mockJson(r, [VICKI_ASSIGNED]));
+    await page.route("**/api/v1/rooms*", (r) => mockJson(r, [ROOM_101]));
+
+    await page.goto("/devices");
+
+    // Edit-Pencil neben dem Label öffnen
+    await page.getByRole("button", { name: "Bezeichnung bearbeiten" }).first().click();
+
+    const input = page.getByRole("textbox", { name: "Bezeichnung bearbeiten" });
+    await expect(input).toBeVisible();
+    // Hardening gegen Browser-Autofill (B-LT-1 Hypothese b)
+    await expect(input).toHaveAttribute("autocomplete", "off");
+    // Input zeigt aktuellen Label-Wert beim Edit-Click (B-9.13a-2)
+    await expect(input).toHaveValue("Vicki-001");
+  });
 });
