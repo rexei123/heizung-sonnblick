@@ -57,7 +57,7 @@ test.describe("Frontend-Dashboard (Sprint 7)", () => {
 
     await page.goto("/devices");
 
-    await expect(page.getByRole("heading", { name: "Geräte" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Geräte" })).toBeVisible();
     await expect(page.getByText("Vicki Test 101")).toBeVisible();
     await expect(page.getByText("0011223344556677")).toBeVisible();
     await expect(page.getByText("aktiv")).toBeVisible();
