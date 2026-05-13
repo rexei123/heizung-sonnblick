@@ -18,6 +18,8 @@ import { useState, type ReactNode } from "react";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
 
@@ -189,6 +191,10 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
             </button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-sidebar flex flex-col gap-0">
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SheetDescription className="sr-only">
+              Hauptnavigation der Heizungssteuerung
+            </SheetDescription>
             <SidebarBrand />
             <NavList pathname={pathname} onNavigate={() => setMobileOpen(false)} />
             <SidebarFooter />

@@ -52,6 +52,10 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     const dashboardLink = page.getByRole("link", { name: /Dashboard/i });
     await expect(dashboardLink).toBeVisible();
 
+    // A11y-Labels (sr-only, Radix DialogTitle/Description Requirement)
+    await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+    await expect(page.getByText("Hauptnavigation der Heizungssteuerung")).toBeAttached();
+
     // Klick schliesst Sheet automatisch (onNavigate)
     await page.getByRole("link", { name: /Zimmerübersicht/i }).click();
     await expect(page).toHaveURL(/\/zimmer$/);
