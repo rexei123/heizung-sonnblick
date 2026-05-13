@@ -30,3 +30,11 @@ MAX_GUEST_OVERRIDE_C: Final[Decimal] = Decimal("24.0")
 # Absolute Untergrenze fuer Gast-Override. Unter diesem Wert greift die
 # Belegungs-Regel oder Frostschutz, der Gast kann nicht runterregeln.
 MIN_GUEST_OVERRIDE_C: Final[Decimal] = Decimal("19.0")
+
+# Sprint 9.10 / 9.13c: Reading-Alter, ab dem ``open_window``- und
+# ``attached_backplate``-Frames als veraltet gelten. 30 Min entspricht
+# zwei verpassten Vicki-Periodic-Reports (Default 15 Min) — robust
+# gegen Einzel-Ausfall, eng genug, dass nach Funkloch nicht stundenlang
+# fehlhaltend. Geteilte Quelle fuer Layer 4 (Window + Detached) und den
+# Hardware-Status-Endpoint (``/api/v1/devices/{id}/hardware-status``).
+WINDOW_STALE_THRESHOLD_MIN: Final[int] = 30

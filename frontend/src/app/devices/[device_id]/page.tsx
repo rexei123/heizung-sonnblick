@@ -4,12 +4,12 @@ import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { useMemo } from "react";
 
+import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { useDevice, useSensorReadings } from "@/lib/api/hooks";
 import {
   formatDateTime,
   formatPercent,
-  formatRelative,
   formatRssi,
   formatSnr,
   formatTemperature,
@@ -96,7 +96,7 @@ export default function DeviceDetailPage() {
                   DevEUI {device.dev_eui}
                 </p>
               </div>
-              <div className="text-right text-sm">
+              <div className="text-right text-sm space-y-2">
                 <div>
                   {device.is_active ? (
                     <span className="px-2 py-0.5 rounded-sm bg-success-soft text-success text-xs font-medium">
@@ -108,14 +108,9 @@ export default function DeviceDetailPage() {
                     </span>
                   )}
                 </div>
-                <div className="mt-2 text-text-secondary">
-                  Zuletzt gesehen
-                  <div
-                    className="text-text-primary"
-                    title={formatDateTime(device.last_seen_at)}
-                  >
-                    {formatRelative(device.last_seen_at)}
-                  </div>
+                <div className="text-text-secondary">
+                  <div className="mb-1">Hardware-Status</div>
+                  <HardwareStatusBadge deviceId={device.id} variant="detailed" />
                 </div>
               </div>
             </div>

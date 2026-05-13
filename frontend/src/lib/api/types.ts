@@ -86,6 +86,19 @@ export interface DeviceAssignZoneResponse {
 }
 
 /**
+ * Hardware-Status-Snapshot (Sprint 9.13c). Spiegelt
+ * ``HardwareStatusResponse`` aus ``schemas/device.py``. Datenquelle ist
+ * ``sensor_reading.attached_backplate`` der letzten ``window_minutes``
+ * Minuten — siehe Backend-Docstring.
+ */
+export interface HardwareStatusResponse {
+  status: "active" | "inactive";
+  last_seen: string | null;
+  frames_in_window: number;
+  window_minutes: number;
+}
+
+/**
  * API-Fehler-Schema (FastAPI default: { detail: string | object[] }).
  */
 export interface ApiError {

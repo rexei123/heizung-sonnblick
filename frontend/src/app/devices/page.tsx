@@ -5,11 +5,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type KeyboardEvent } from "react";
 
+import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
-import { formatDateTime, formatRelative } from "@/lib/format";
 
 type SortMode = "status" | "label";
 
@@ -150,7 +150,7 @@ function DevicesTable({ devices }: { devices: Device[] }) {
             <th className="text-left px-4 py-3 font-medium">DevEUI</th>
             <th className="text-left px-4 py-3 font-medium">Hersteller / Modell</th>
             <th className="text-left px-4 py-3 font-medium">Status</th>
-            <th className="text-left px-4 py-3 font-medium">Zuletzt gesehen</th>
+            <th className="text-left px-4 py-3 font-medium">Hardware-Status</th>
           </tr>
         </thead>
         <tbody>
@@ -184,11 +184,8 @@ function DeviceRow({ device: d }: { device: Device }) {
           </span>
         )}
       </td>
-      <td
-        className="px-4 py-3 text-text-secondary"
-        title={formatDateTime(d.last_seen_at)}
-      >
-        {formatRelative(d.last_seen_at)}
+      <td className="px-4 py-3">
+        <HardwareStatusBadge deviceId={d.id} variant="detailed" />
       </td>
     </tr>
   );

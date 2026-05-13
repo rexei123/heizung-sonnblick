@@ -10,6 +10,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
+import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { ManualOverridePanel } from "@/components/patterns/manual-override-panel";
 import { RoomForm } from "@/components/patterns/room-form";
@@ -229,8 +230,11 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
                 className="flex items-center justify-between px-3 py-2 border-b border-border last:border-b-0"
               >
                 <div>
-                  <div className="font-medium text-text-primary text-sm">
-                    {d.label ?? d.dev_eui}
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-text-primary text-sm">
+                      {d.label ?? d.dev_eui}
+                    </span>
+                    <HardwareStatusBadge deviceId={d.id} variant="compact" />
                   </div>
                   <div className="text-xs text-text-tertiary">
                     {d.vendor} {d.model} · Zone {zone?.name ?? "?"}
