@@ -10,6 +10,7 @@ import type {
   DeviceCreate,
   DeviceListQuery,
   DeviceUpdate,
+  HardwareStatusResponse,
   SensorReading,
   SensorReadingsQuery,
 } from "./types";
@@ -42,4 +43,7 @@ export const devicesApi = {
     q: SensorReadingsQuery = {},
   ): Promise<SensorReading[]> =>
     apiClient.get<SensorReading[]>(`${BASE}/${id}/sensor-readings${queryString(q)}`),
+
+  hardwareStatus: (id: number): Promise<HardwareStatusResponse> =>
+    apiClient.get<HardwareStatusResponse>(`${BASE}/${id}/hardware-status`),
 };

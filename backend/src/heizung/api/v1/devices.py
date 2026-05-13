@@ -17,10 +17,10 @@ Geraete-Zone-Zuordnung (Sprint 9.11a):
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,12 +28,14 @@ from heizung.db import get_session
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.constants import WINDOW_STALE_THRESHOLD_MIN
 from heizung.schemas.device import (
     DeviceAssignZoneRequest,
     DeviceAssignZoneResponse,
     DeviceCreate,
     DeviceRead,
     DeviceUpdate,
+    HardwareStatusResponse,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.tasks.engine_tasks import evaluate_room
@@ -323,3 +325,58 @@ async def list_sensor_readings(
 
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Hardware-Status (Sprint 9.13c, B-LT-2-followup-1)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{device_id}/hardware-status",
+    response_model=HardwareStatusResponse,
+    summary="Hardware-Status (attached_backplate) im 30-Min-Fenster",
+)
+async def get_hardware_status(
+    device_id: int = DeviceIdPath,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> HardwareStatusResponse:
+    """Binaerer Hardware-Status fuer das Frontend-Badge.
+
+    Liest ``sensor_reading.attached_backplate`` der letzten
+    ``WINDOW_STALE_THRESHOLD_MIN`` Minuten:
+      - ``status="active"`` wenn mindestens ein Frame ``attached_backplate=True``
+        existiert; ``last_seen`` ist dessen Zeitstempel.
+      - ``status="inactive"`` sonst (alle False, alle NULL, oder keine Frames).
+      - ``frames_in_window`` zaehlt Frames mit ``attached_backplate IS NOT NULL``
+        (NULL-Frames aus FW < 4.1 / Recovery-Daten werden bewusst ausgeschlossen,
+        konsistent zu Layer 4 Detached, siehe ``rules/engine.py``).
+
+    Reine Lese-Aggregation, kein Engine-Pfad und kein Cache. AE-47
+    Hardware-First bleibt unveraendert.
+    """
+    await _get_or_404(session, device_id)
+
+    now = datetime.now(UTC)
+    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
+
+    frames_stmt = select(func.count()).where(
+        SensorReading.device_id == device_id,
+        SensorReading.time >= threshold,
+        SensorReading.attached_backplate.is_not(None),
+    )
+    frames_in_window = (await session.execute(frames_stmt)).scalar_one()
+
+    last_seen_stmt = select(func.max(SensorReading.time)).where(
+        SensorReading.device_id == device_id,
+        SensorReading.time >= threshold,
+        SensorReading.attached_backplate.is_(True),
+    )
+    last_seen = (await session.execute(last_seen_stmt)).scalar_one()
+
+    return HardwareStatusResponse(
+        status="active" if last_seen is not None else "inactive",
+        last_seen=last_seen,
+        frames_in_window=frames_in_window,
+        window_minutes=WINDOW_STALE_THRESHOLD_MIN,
+    )

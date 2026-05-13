@@ -36,7 +36,7 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
-from heizung.rules.constants import FROST_PROTECTION_C
+from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_MIN
 from heizung.services import override_service
 
 if TYPE_CHECKING:
@@ -49,13 +49,6 @@ HYSTERESIS_C: int = 1
 HEARTBEAT_INTERVAL: timedelta = timedelta(hours=6)
 MAX_SETPOINT_C: int = 30
 MIN_SETPOINT_C: int = int(FROST_PROTECTION_C)
-
-# Sprint 9.10: Reading-Alter, ab dem ein open_window-Flag als veraltet gilt
-# und Layer 4 nicht mehr aktiviert. 30 Min entspricht zwei verpassten
-# Vicki-Periodic-Reports (Default 15 Min) — robust gegen Einzel-Ausfall,
-# eng genug, dass nach Funkloch nicht stundenlang fehlhaltend.
-WINDOW_STALE_THRESHOLD_MIN: int = 30
-
 
 # ---------------------------------------------------------------------------
 # Datenklassen

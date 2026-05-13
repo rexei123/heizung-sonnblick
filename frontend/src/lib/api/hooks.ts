@@ -21,6 +21,7 @@ import type {
   DeviceCreate,
   DeviceListQuery,
   DeviceUpdate,
+  HardwareStatusResponse,
   SensorReading,
   SensorReadingsQuery,
 } from "./types";
@@ -29,6 +30,7 @@ const KEYS = {
   devicesAll: ["devices"] as const,
   devicesList: (q: DeviceListQuery) => ["devices", q] as const,
   device: (id: number) => ["device", id] as const,
+  hardwareStatus: (id: number) => ["device", id, "hardware-status"] as const,
   sensorReadings: (id: number, q: SensorReadingsQuery) =>
     ["sensor-readings", id, q] as const,
 };
@@ -50,6 +52,23 @@ export function useDevice(
     queryKey: KEYS.device(id ?? -1),
     queryFn: () => devicesApi.get(id!),
     enabled: id !== null && id > 0,
+    refetchInterval: opts.refetchInterval ?? 30_000,
+  });
+}
+
+/**
+ * Hardware-Status eines Geraets (Sprint 9.13c, B-LT-2-followup-1).
+ * Refetch alle 30 s — Hardware-Latenz von Vicki-Periodic-Reports ist
+ * 15 Min, aber Engine-Tick und Layer-4-Detached koennen frueher reagieren.
+ */
+export function useHardwareStatus(
+  deviceId: number | null,
+  opts: { refetchInterval?: number } = {},
+): UseQueryResult<HardwareStatusResponse> {
+  return useQuery({
+    queryKey: KEYS.hardwareStatus(deviceId ?? -1),
+    queryFn: () => devicesApi.hardwareStatus(deviceId!),
+    enabled: deviceId !== null && deviceId > 0,
     refetchInterval: opts.refetchInterval ?? 30_000,
   });
 }
