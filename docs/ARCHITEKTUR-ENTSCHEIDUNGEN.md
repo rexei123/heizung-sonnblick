@@ -366,6 +366,13 @@ Die Engine liest beim Evaluieren beide Tabellen und mapped Szenarien auf Regel-L
 
 ## AE-31 · Engine als reine Funktion mit 6 Layern (Erweiterung von AE-06 + AE-08)
 
+**Status:** HISTORISCH — abgelöst durch AE-49 (Sprint 9.16, 2026-05-14).
+Die in AE-31 beschriebene Soll-Pipeline (3a/3b-Splitting, „Aktive
+Szenarien"-Quelle für Layer 2, Layer 4 als ein Block) entspricht nicht
+mehr der tatsächlich laufenden Engine. Inhalt bleibt referenzierbar als
+Konflikt-Auflösungs-Argument und für die ursprüngliche Architektur-
+Begründung. Für die aktuelle Pipeline siehe AE-49.
+
 **Kontext.** AE-06 entwarf 5 Schichten. AE-08 forderte reine Funktion plus vollstaendiges Event-Log. AE-26 fuehrt Saison ein. AE-27 fuehrt Szenarien ein. AE-29 fuehrt manuelle Events ein. Wir brauchen eine konsolidierte Pipeline-Definition.
 
 **Entscheidung.** `evaluate(ctx: RuleContext) -> RuleResult` mit 6 Layern:
@@ -953,3 +960,101 @@ S4 (Hardware-Schutz):
 - `infra/chirpstack/codecs/mclimate-vicki.js` (Encoder-Spiegel)
 - `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md` (Hex-Definitionen)
 - AE-47 (Window-Detection-Hybrid, der diese Helper braucht)
+
+---
+
+# AE-49 — Engine-Pipeline-Stand 2026-05-14 (löst AE-31 ab) (Sprint 9.16)
+
+**Datum:** 2026-05-14
+**Status:** Akzeptiert
+**Bezug:** AE-27 (Szenarien), AE-31 (historisch), AE-46 (config_audit), Sprint 9.16
+
+## Kontext
+
+AE-31 beschrieb die Soll-Pipeline (5 Layer + Hard-Clamp, Layer 3 als
+3a/3b-Splitting, Layer 2 mit aktiver Szenario-Auflösung). Sprint 9.10c
+bis 9.13 haben die Engine in mehreren Punkten anders implementiert,
+ohne ADR-Nachzug:
+
+- Layer 2 (`temporal_override`) liest `rule_config` direkt
+  (`preheat_minutes_before_checkin`, `night_start`, `night_end`,
+  `t_night`) — **keine** `scenario_assignment`-Auflösung.
+- Layer 3a (`manual_setpoint_event`) und Layer 3b (Gast-Override-Cap)
+  wurden in Sprint 9.9 zu **einem** `layer_manual_override`
+  konsolidiert, der die `manual_override`-Tabelle liest
+  (Frontend- und Device-Overrides mit `OverrideSource`-Enum).
+- Layer 4 wurde in Sprint 9.10 (`layer_window_open`,
+  `sensor_reading.open_window`) und 9.11x (`layer_device_detached`,
+  `sensor_reading.attached_backplate`) **gesplittet** in zwei
+  aufeinanderfolgende Schichten — beide unter eigener
+  `EventLogLayer`.
+- Sprint 9.11y hat einen **passiven** `inferred_window`-Logger
+  (off-pipeline, schreibt `EventLogLayer.INFERRED_WINDOW_OBSERVATION`
+  ins `event_log` ohne Setpoint-Effekt).
+
+Sprint 9.16 (AE-49) stellt zusätzlich Layer 0 von
+`global_config.summer_mode_active` (Boolean-Spalte, gedroppt) auf
+`scenario_assignment(code='summer_mode', scope='global')` um. Reason
+wechselt auf `SCENARIO_SUMMER_MODE`; `CommandReason.SUMMER_MODE`
+bleibt deprecated im Enum (historische `event_log`-Einträge).
+
+## Entscheidung
+
+Doku gleicht sich der laufenden Realität an. Aktuelle Pipeline
+(Stand 2026-05-14) in `backend/src/heizung/rules/engine.py`
+`evaluate_room`:
+
+| # | Funktion | Quelle | Wirkung |
+|---|---|---|---|
+| 0 | `layer_summer_mode` | `scenario_assignment(code='summer_mode', scope='global')` via `rules/scenarios.is_summer_mode_active` (Sprint 9.16, AE-49) | Aktiv ⇒ Setpoint `FROST_PROTECTION_C`, Reason `SCENARIO_SUMMER_MODE`, Layer 1–4 übersprungen ⇒ Fast-Path zu Layer 5 |
+| 1 | `layer_base_target` | `rule_config`-Hierarchie ROOM > ROOM_TYPE > GLOBAL (`t_occupied`/`t_vacant`), Fallback `room_type.default_*` (Sprint 9.3/9.8a) | Belegt/frei/Blocked-Setpoint |
+| 2 | `layer_temporal` | `rule_config`-Felder direkt (Sprint 9.8) | Vorheizen oder Nachtabsenkung; Passthrough sonst |
+| 3 | `layer_manual_override` | `manual_override`-Tabelle (Sprint 9.9) — konsolidiert für Frontend- und Device-Overrides | Override-Setpoint oder Pass-Through |
+| 4a | `layer_window_open` | `sensor_reading.open_window` der letzten 30 Min (Sprint 9.10) | Frostschutz wenn frisches True; sonst Pass-Through |
+| 4b | `layer_device_detached` | `sensor_reading.attached_backplate` AND über alle Zone-Devices (Sprint 9.11x) | Frostschutz wenn alle detached; sonst Pass-Through |
+| 5 | `layer_clamp` | `MAX_SETPOINT_C=30`, `MIN_SETPOINT_C=10` (`rules/constants.py`) | Garantierte Grenzen, Reason wird durchgereicht (AE-37) |
+
+Plus off-pipeline:
+
+- **Hysterese** (`evaluate_room`-Tail, AE-32): 1 °C-Schwelle plus
+  6-h-Heartbeat; verhindert/erlaubt Downlink, keine eigene
+  `LayerStep`.
+- **Inferred-Window-Logger** (Sprint 9.11y, passiv): schreibt
+  `EventLogLayer.INFERRED_WINDOW_OBSERVATION` ins `event_log`, kein
+  Setpoint-Effekt.
+
+Alle Layer sind always-on (Sprint 9.10d), liefern auch im No-Effect-
+Fall einen `LayerStep` mit `setpoint_in == setpoint_out` und
+snake_case-`detail`-Token (Backlog B-9.10d-1: detail-Konvention
+weiter vereinheitlichen).
+
+## Konsequenzen
+
+- **Kein Engine-Code-Refactor durch diesen ADR.** Nur Doku-Update.
+  Die Engine-Implementation ist Stand 2026-05-14 die Quelle der
+  Wahrheit.
+- AE-31 bleibt referenzierbar als Konflikt-Auflösungs-Argument für
+  die ursprüngliche Architektur-Begründung (5 Layer + Hard-Clamp,
+  Audit-Vollständigkeit). Status-Header markiert sie als historisch.
+- Für die Erweiterung von Layer 2 zu vollwertiger
+  `scenario_assignment`-Auflösung gibt es Sprint 9.16b (Brief sagt
+  „nach erstem Winter mit Live-Daten").
+- Pflicht-Pre-Read in `SESSION-START.md` muss AE-49 statt AE-31 als
+  Pipeline-Referenz nutzen.
+
+## Alternativen verworfen
+
+- **Engine-Refactor in Sprint 9.16** (Brief-AE-3 explizit out-of-scope):
+  Manual-Override 3a/3b zurück-splitten, Layer 4 zusammenführen,
+  Inferred-Window in Pipeline ziehen, Szenario-Auflösung für Layer 2
+  bauen. Aufwand groß, ohne realen Live-Schmerz (S6).
+- **AE-31 inline updaten:** verfälscht die historische Begründung
+  und macht Diff-Reviews schwerer.
+
+## Referenzen
+
+- `backend/src/heizung/rules/engine.py` (`evaluate_room` ab Zeile 781)
+- `backend/src/heizung/rules/scenarios.py` (Sprint 9.16, Helper für Layer 0)
+- AE-31 (historisch), AE-27 (Szenarien-Konzept), AE-37
+  (Hard-Clamp-Reason), AE-32 (Hysterese), AE-46 (config_audit)
+- CLAUDE.md §5.23 (Engine-Trace-Konsistenz), §5.27 (Vicki-Open-Window-Default)

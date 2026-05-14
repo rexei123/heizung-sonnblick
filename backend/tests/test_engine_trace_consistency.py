@@ -24,13 +24,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.config import get_settings
-from heizung.models.enums import EventLogLayer
+from heizung.models.enums import EventLogLayer, ScenarioScope
 from heizung.models.event_log import EventLog
-from heizung.models.global_config import GlobalConfig
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.models.scenario import Scenario
+from heizung.models.scenario_assignment import ScenarioAssignment
 from heizung.rules.constants import FROST_PROTECTION_C
 from heizung.rules.engine import evaluate_room
+from heizung.rules.scenarios import SUMMER_MODE_CODE
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
@@ -64,14 +66,40 @@ async def room_id(db_session: AsyncSession) -> AsyncIterator[int]:
 
 
 async def _set_summer_mode(session: AsyncSession, *, active: bool) -> None:
-    """Singleton GlobalConfig(id=1) entweder anlegen oder Flag setzen.
-    Fixture rollback macht's nach Test wieder weg."""
-    cfg = await session.get(GlobalConfig, 1)
-    if cfg is None:
-        cfg = GlobalConfig(id=1, summer_mode_active=active)
-        session.add(cfg)
+    """Sprint 9.16 (AE-49): Sommermodus wird ueber scenario_assignment
+    aktiviert, nicht mehr ueber global_config.summer_mode_active.
+
+    Helper sucht/erstellt scenario(code='summer_mode') und legt eine
+    GLOBAL-Assignment an bzw. setzt deren ``is_active``. Fixture-
+    Rollback raeumt nach Test wieder auf.
+    """
+    scen = (
+        await session.execute(select(Scenario).where(Scenario.code == SUMMER_MODE_CODE))
+    ).scalar_one_or_none()
+    if scen is None:
+        scen = Scenario(code=SUMMER_MODE_CODE, name="Sommermodus", is_system=True)
+        session.add(scen)
+        await session.flush()
+
+    asgn = (
+        await session.execute(
+            select(ScenarioAssignment)
+            .where(ScenarioAssignment.scenario_id == scen.id)
+            .where(ScenarioAssignment.scope == ScenarioScope.GLOBAL)
+            .where(ScenarioAssignment.room_type_id.is_(None))
+            .where(ScenarioAssignment.room_id.is_(None))
+            .where(ScenarioAssignment.season_id.is_(None))
+        )
+    ).scalar_one_or_none()
+    if asgn is None:
+        asgn = ScenarioAssignment(
+            scenario_id=scen.id,
+            scope=ScenarioScope.GLOBAL,
+            is_active=active,
+        )
+        session.add(asgn)
     else:
-        cfg.summer_mode_active = active
+        asgn.is_active = active
     await session.flush()
 
 

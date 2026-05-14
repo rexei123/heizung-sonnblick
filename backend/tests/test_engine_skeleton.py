@@ -108,26 +108,34 @@ def _ctx(
 
 
 def test_summer_mode_inactive_emits_passthrough_step() -> None:
-    """Sprint 9.10d T2.5: Layer 0 ist always-on, im Inactive-Pfad
-    ``setpoint_c=None`` (Layer hat keinen eigenen Setpoint-Beitrag) mit
-    ``detail="summer_mode_inactive"``."""
+    """Sprint 9.10d T2.5 + Sprint 9.16 (AE-49): Layer 0 ist always-on,
+    im Inactive-Pfad ``setpoint_c=None`` mit ``detail="summer_mode_inactive"``.
+    Reason ist seit 9.16 ``SCENARIO_SUMMER_MODE`` (vorher SUMMER_MODE)."""
     step = layer_summer_mode(_ctx(summer_mode_active=False))
     assert step is not None
     assert step.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
     assert step.setpoint_c is None
     assert step.detail == "summer_mode_inactive"
-    assert step.reason == CommandReason.SUMMER_MODE
-    assert step.extras is None
+    assert step.reason == CommandReason.SCENARIO_SUMMER_MODE
+    assert step.extras == {
+        "source": "scenario_assignment",
+        "scenario_code": "summer_mode",
+    }
 
 
 def test_summer_mode_active_returns_frost_protection() -> None:
-    """Aktiv -> alle Raeume bekommen Frostschutz, reason=summer_mode."""
+    """Aktiv -> alle Raeume bekommen Frostschutz, reason=scenario_summer_mode
+    (Sprint 9.16, AE-48)."""
     step = layer_summer_mode(_ctx(summer_mode_active=True))
     assert step is not None
     assert step.layer == EventLogLayer.SUMMER_MODE_FAST_PATH
     assert step.setpoint_c == int(FROST_PROTECTION_C)
-    assert step.reason == CommandReason.SUMMER_MODE
+    assert step.reason == CommandReason.SCENARIO_SUMMER_MODE
     assert step.detail == "summer_mode_active=true"
+    assert step.extras == {
+        "source": "scenario_assignment",
+        "scenario_code": "summer_mode",
+    }
 
 
 def test_summer_mode_overrides_room_status() -> None:

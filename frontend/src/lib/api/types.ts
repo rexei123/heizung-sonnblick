@@ -311,6 +311,34 @@ export interface GlobalConfig {
   updated_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Szenarien (Sprint 9.16, AE-48)
+// ---------------------------------------------------------------------------
+
+/**
+ * Szenario-Listen-Item mit aktuellem GLOBAL-Aktivierungs-Status.
+ * Spiegelt `ScenarioListItem` aus `backend/src/heizung/api/v1/scenarios.py`.
+ */
+export interface Scenario {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  default_active: boolean;
+  parameter_schema: Record<string, unknown> | null;
+  default_parameters: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  current_global_assignment_active: boolean;
+}
+
+export type ScenarioScopeApi = "global";
+
+export interface ScenarioToggleRequest {
+  scope: ScenarioScopeApi;
+}
+
 /**
  * Globale RuleConfig — die 6 Engine-gelesenen Felder (Sprint 9.14, AE-46).
  * Spiegelt `RuleConfigGlobalRead` aus

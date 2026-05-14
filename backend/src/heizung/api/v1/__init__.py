@@ -10,6 +10,7 @@ from heizung.api.v1.overrides import router as overrides_router
 from heizung.api.v1.room_types import router as room_types_router
 from heizung.api.v1.rooms import router as rooms_router
 from heizung.api.v1.rule_configs import router as rule_configs_router
+from heizung.api.v1.scenarios import router as scenarios_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(devices_router)
@@ -19,6 +20,7 @@ router.include_router(heating_zones_router)
 router.include_router(occupancies_router)
 router.include_router(global_config_router)
 router.include_router(rule_configs_router)
+router.include_router(scenarios_router)
 router.include_router(overrides_router)
 
 __all__ = ["router"]
