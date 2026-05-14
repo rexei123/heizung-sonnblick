@@ -1158,6 +1158,20 @@ Nächster Sprint: 9.17 NextAuth + User-UI (Pflicht-Verschluss aller
 `AUTH_TODO_9_17`-Marker) oder 9.15 Profile (Wochentag-Schedule) je
 nach Strategie-Chat-Reihenfolge.
 
+**Sprint 9.16a Hotfix (2026-05-14):** Umlaut-Drift im
+Sommermodus-Seed (`uebernimmt`/`Raeume` statt `übernimmt`/`Räume` in
+`scenario.description`) via Migration `0013_fix_summer_mode_encoding`
+auf der Live-DB behoben, Migration `0012_summer_mode_scenario`
+nachträglich korrigiert (UTF-8 ohne BOM). Encoding-Regression-Test
+in `backend/tests/test_seed_scenarios.py` sichert ab. Lokaler
+Auf-Ab-Auf-Test mit Mojibake-Reset bestätigt: 0013 greift wenn
+Live-DB im alten Mojibake-Stand ist; idempotent. Audit-Befund:
+weitere Mojibake-Stellen im Backend existieren nur in Docstrings /
+Inline-Kommentaren (0003b/0004/0011 + `engine.py`, `engine_tasks.py`,
+`room_types.py`, `global_config.py`, `manual_setpoint_event.py`) —
+nicht persistiert, kein User-sichtbarer Effekt, **out of scope** für
+diesen Hotfix.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -1319,6 +1333,9 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.13c-3 | Wording-Audit auf weiteren Pages (Pairing-Wizard, Belegungen, Raumtypen-Detail, sonstige `aktiv`/`inaktiv`-Stellen). Cowork hat im Live-Test 9.13c noch nicht alle Pages durchgeklickt — der Wording-Fix #140 wurde gezielt für `/devices`-Liste und `/devices/[id]`-Detail-Header gebaut. Andere Stellen, die `is_active`/Activity-Status anzeigen, könnten mit derselben „Eingerichtet"-Semantik konsistenter werden. Bundling mit anderen Polish-Items möglich. | 🟢 |
 | B-9.16-1 | Sprint 9.16b — weitere System-Szenarien (Tagabsenkung, Wartung, Schließzeit, Renovierung) plus volle Szenario-Auflösung in Engine Layer 2 (ROOM > ROOM_TYPE > GLOBAL Hierarchie analog `rule_config`). Plus Saison-UI auf `/einstellungen/saison` mit Tag-Monat-Range und saisonaler `rule_config` über `season_id`-FK (SPRINT-PLAN.md 9.16 T3-T5). Bewusst aufgeschoben „nach erstem Winter mit Live-Daten" (Brief 9.16 AE-3) — heute fehlt der Erfahrungsschatz, welche Szenarien realer Hotelier-Bedarf sind. | 🟢 (in 9.16b) |
 | B-9.16-2 🟡 | Migration `0012_summer_mode_scenario` manuell Auf-Ab-Auf gegen Live-Postgres verifiziert, kein automatisierter Roundtrip-Test in CI. Blockiert durch B-9.11x-1 (psycopg2-Test-DB-Setup). Pflicht-Punkt für Sprint 10 (Hygiene): `test_migrations_roundtrip` reparieren UND `test_migration_0012_atomar_auf_ab_auf` + `test_migration_preserves_*` nachziehen. |
+| B-9.16-3 🟢 (info) | Doppel-GET auf `/api/v1/scenarios` im Dev-Mode (vermutlich React-StrictMode-Artefakt, analog B-9.14-5). Nicht produktionskritisch, beobachtet im Cowork-Visual-Review Sprint 9.16. |
+| B-9.16-4 🟢 (info) | axe-DevTools-Lighthouse-A11y-Score nicht formal verifiziert für `/szenarien` (Cowork-Tooling-Limitation, kein funktionaler Befund). Stichprobe via Tab-Reihenfolge + aria-label hat keinen Verstoss ergeben. |
+| B-9.16-5 🟡 | Sprint 9.16a Hotfix-Anlass: Audit-Befund zeigt deutsche Umlaute in Backend-Docstrings (`engine.py`, `engine_tasks.py`, `room_types.py`, `global_config.py`, `manual_setpoint_event.py`, Migrations 0003b/0004/0011) durchgehend als ASCII-Replacement (`ue`/`ae`/`oe`) gepflegt — Repo-Konvention, nicht User-sichtbar. Einheitlichkeit-Audit oder ASCII-only-Policy für Backend-Docstrings in einem Hygiene-Sprint klären; bis dahin: User-sichtbare DB-Strings müssen UTF-8 sein (CLAUDE.md-Lesson kandidat). |
 
 ### 6.3 — Operative Aufgaben
 
