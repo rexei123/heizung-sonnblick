@@ -996,6 +996,38 @@ dokumentiert.
 
 ---
 
+## 2ac. Sprint 9.13c abgeschlossen (2026-05-12)
+
+Hardware-Status-Badge (B-LT-2-followup-1) in zwei PRs abgeschlossen:
+
+- #139 `feat(sprint9.13c)` Backend-Endpoint
+  `/api/v1/devices/{id}/hardware-status` + `HardwareStatusBadge`-
+  Komponente + 3 Integrationsstellen (`/devices`, `/devices/[id]`,
+  `/zimmer/[id]`)
+- #140 `fix(sprint9.13c)` Wording-Korrektur: Spalte „Status" wurde
+  „Eingerichtet" (ja/nein mit `check_circle`/`cancel`), Spalte
+  „Hardware-Status" wurde „Status" (Hardware-Badge bleibt). Folge
+  der Aktiv-Doppelung-Beobachtung im Cowork-Visual-Review.
+
+Cowork-Live-Test 2026-05-12 (BEFUND in
+`cowork-output/sprint9-13c-live-test/BEFUND.md`): 5/5
+Pflicht-Prüfungen erfolgreich. Vicki-002-Edge-Case visuell
+bestätigt: „Status: Inaktiv, noch nie" + „Eingerichtet: ja" —
+Hardware antwortet nicht, App-Flag ist gesetzt, genau der Use-Case
+der UX-Lücke.
+
+B-LT-2-Story komplett abgeschlossen: Engine-Trigger (#135) +
+Hardware-Status-Anzeige (#139/#140). AE-47 Hardware-First-Semantik
+unverändert.
+
+Kleine 30-Min-Konstante `WINDOW_STALE_THRESHOLD_MIN` aus `engine.py`
+nach `rules/constants.py` extrahiert — geteilte Quelle zwischen
+Layer-4 und Hardware-Status-Endpoint.
+
+Nächster Sprint: 9.14 Temperaturen & Zeiten.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1145,12 +1177,14 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.13a-2 | Inline-Edit-Input mit aktuellem Label vorbefüllen (statt leer mit Placeholder) — UX-Verfeinerung. Heutige Implementierung folgt Wizard-Step-4-Konvention („leer lassen, um zu behalten"), wirkt aber auf Listen-Inline-Edit ungewohnt. Cowork-Befund Sprint 9.13a §2/05 | ✅ erledigt 2026-05-12 (HF-9.13a-1). Lösung via beibehaltenes State-Init `useState(d.label ?? "")` plus `autoComplete="off"`-Hardening am Input. User sieht beim Edit-Click den aktuellen Label-Wert und kann editieren statt neu zu tippen; `autoComplete="off"` schließt Browser-Autofill als B-LT-1-Hypothese (b) aus. |
 | B-LT-1 | Inline-Label-Edit Render-Verkettung in /devices-Tabelle (z.B. „Vicki-002Vicki-002-Live-Test-2026-05-11"). Cowork-Live-Test 2026-05-11 (`cowork-output/sprint9-13a-live-test/BEFUND.md` §6). **Status nicht-reproducible 2026-05-12 (HF-9.13a-1):** Frontend-Render-Code verifiziert — keine Konkatenation, kein `name`-Feld im Schema, drei Render-Stellen (LabelCell `/devices`, Detail-Header, DevicesInRoom) alle defensive `??`-Ketten, lokal mit Playwright nicht reproducierbar. Vier offene Hypothesen: (a) RSC-503-Race aus BEFUND §5, (b) Browser-Autocomplete im autoFocus-Input, (c) TanStack-Query Cache-Race, (d) visueller Wahrnehmungsfehler. Hardening via HF-9.13a-1 (`autoComplete="off"`) schließt (b) aus. Bei nächstem Live-Auftreten sofort DevTools öffnen und Outer-HTML der Zelle zitieren plus Network-Tab auf RSC-503-Errors prüfen. **Update 2026-05-12 (Bündel B Live-Test):** nach autoComplete-Hardening erneut keine Wiederholung beobachtet (`cowork-output/sprint9-13b-live-test/BEFUND.md`) — Status bleibt nicht-reproducible. | 🟢 nicht-reproducible |
 | B-LT-2 | Engine-Layer-4 sieht nach UI-Re-Attach weiterhin detached, klemmt Setpoint auf 10 °C bis nächster 60-s-Beat-Tick. Cowork-Live-Test 2026-05-11 (`cowork-output/sprint9-13a-live-test/BEFUND.md` §3+§6). **Phase-0-Diagnose 2026-05-12:** Wurzel ist nicht ein Cache-Bug (es gibt keinen Cache — Layer-4 berechnet `detached_devices` jedes Mal frisch aus `sensor_reading`-Hypertable), sondern fehlender `evaluate_room.delay`-Trigger im PUT/DELETE-Handler von `/api/v1/devices/{id}/heating-zone`. UI-Aktion war damit für die Engine unsichtbar bis zum nächsten Beat. | ✅ erledigt 2026-05-12 (HF-9.13a-2, PR #135), live-verifiziert 2026-05-12 durch Cowork auf heizung-test (Tick-Latenz 5–6 Sek nach API-Call beobachtet, AE-47-Semantik hält wie geplant, BEFUND in `cowork-output/sprint9-13a-hf2-live-test/BEFUND.md`). PUT- und DELETE-Handler triggern nach Commit `evaluate_room.delay(zone.room_id)`. AE-47 Hardware-First bleibt unverändert: Engine sieht weiter `sensor_reading.attached_backplate`-Historie, aber wenigstens auf neuestem Stand. |
-| B-LT-2-followup-1 | Hardware-Status-Badge + UI-Banner im Frontend: „Wartet auf Hardware-Bestätigung" / „Aktiv" / „Keine Bestätigung" plus Banner „Letzter Frame meldet detached — Backplate-Recovery erforderlich" wenn Layer 4 nach Re-Attach noch detached zeigt. Basierend auf `sensor_reading.attached_backplate`-Historie der letzten 30 Min (Datenquelle existiert bereits). Frontend-Komponente und ggf. neuer API-Endpoint `/api/v1/devices/{id}/hardware-status` nötig. Macht AE-47 Hardware-First-Latenz nach Re-Attach für den Hotelier transparent — Cowork-Live-Test HF-9.13a-2 hat genau diesen Fall reproduziert (Vicki-002 nach Re-Attach klemmt auf 10 °C bis Hardware `attachedBackplate=true` meldet). Kommt in Bündel B oder eigener Sprint. | ✅ erledigt 2026-05-13 (Sprint 9.13c). Backend-Endpoint `GET /api/v1/devices/{id}/hardware-status` (30-Min-Fenster auf `sensor_reading.attached_backplate`, 6 DB-Tests). Frontend `HardwareStatusBadge` (compact/detailed) integriert an drei Stellen: `/devices`-Liste (neue Spalte „Hardware-Status" ersetzt „Zuletzt gesehen" — User-Decision-D aus Strategie-Frage), `/devices/[id]`-Detail-Header, `/zimmer/[id]`-Geräte-Tab (compact). 30-Min-Konstante `WINDOW_STALE_THRESHOLD_MIN` nach `rules/constants.py` extrahiert, geteilte Quelle mit Layer 4. Separater UI-Banner-Aspekt entfällt — der Badge zeigt den Hardware-Status klar genug, zusätzlicher Banner wäre Doppelung. |
+| B-LT-2-followup-1 | Hardware-Status-Badge + UI-Banner im Frontend: „Wartet auf Hardware-Bestätigung" / „Aktiv" / „Keine Bestätigung" plus Banner „Letzter Frame meldet detached — Backplate-Recovery erforderlich" wenn Layer 4 nach Re-Attach noch detached zeigt. Basierend auf `sensor_reading.attached_backplate`-Historie der letzten 30 Min (Datenquelle existiert bereits). Frontend-Komponente und ggf. neuer API-Endpoint `/api/v1/devices/{id}/hardware-status` nötig. Macht AE-47 Hardware-First-Latenz nach Re-Attach für den Hotelier transparent — Cowork-Live-Test HF-9.13a-2 hat genau diesen Fall reproduziert (Vicki-002 nach Re-Attach klemmt auf 10 °C bis Hardware `attachedBackplate=true` meldet). Kommt in Bündel B oder eigener Sprint. | ✅ erledigt 2026-05-12 (Sprint 9.13c, PR #139 + PR #140). Backend-Endpoint `GET /api/v1/devices/{id}/hardware-status` (30-Min-Fenster auf `sensor_reading.attached_backplate`, 6 DB-Tests). Frontend `HardwareStatusBadge` (compact/detailed) integriert an drei Stellen: `/devices`-Liste (neue Spalten-Semantik nach Wording-Fix #140: „Eingerichtet" mit ja/nein + `check_circle`/`cancel`-Icons für `is_active`, „Status" für Hardware-Badge mit `last_seen`), `/devices/[id]`-Detail-Header (Label „Status" oben, „Eingerichtet: ja/nein" als kleine Zeile darunter), `/zimmer/[id]`-Geräte-Tab (compact-Badge neben Bezeichnung). 30-Min-Konstante `WINDOW_STALE_THRESHOLD_MIN` nach `rules/constants.py` extrahiert, geteilte Quelle mit Layer 4. Live-verifiziert 2026-05-12 durch Cowork auf heizung-test (Vicki-002 zeigt „Status: Inaktiv, noch nie" + „Eingerichtet: ja" — exakt der UX-Use-Case, BEFUND in `cowork-output/sprint9-13c-live-test/BEFUND.md`). Separater UI-Banner-Aspekt entfällt — der Badge zeigt den Hardware-Status klar genug, zusätzlicher Banner wäre Doppelung. |
 | B-9.13a-3 | Frontend-Cache-Reset-Pattern dokumentieren (Playwright `webServer.reuseExistingServer` + `.next/`-Stale-Cache). Anlass: Sprint 9.13a TA5-Test-Lauf — alter dev-Server auf Port 3000 zeigte Pre-Branch-Code, Tests rot. Fix: `Stop-Process node` + `Remove-Item .next` + neuer Test-Run. Frontend-Equivalent zu CLAUDE.md §5.11 (`docker compose pull` ist nicht beweisend). Vorschlag: neue Lesson §5.29 in CLAUDE.md | 🟡 |
 | B-9.13a-hf2-1 | `/api/v1/_meta`-Endpoint für Server-Side-Build-SHA-Verifikation. Cowork hatte im Live-Test 2026-05-12 keinen zuverlässigen Weg, den Deploy-Stand direkt zu prüfen — musste Build-Stand indirekt über das beobachtbare Engine-Tick-Verhalten verifizieren (`cowork-output/sprint9-13a-hf2-live-test/BEFUND.md` §0). Endpoint-Vorschlag: `{"sha": "<git-sha>", "build_ts": "<iso>", "version": "<app>"}`. Hilft bei künftigen Live-Tests und Deploy-Verifikation. | 🟢 |
 | B-9.13a-hf2-2 | Engine-Tick-Trigger-Latenz-SLA dokumentieren. Beobachtet im Live-Test HF-9.13a-2 auf heizung-test 2026-05-12: 5–6 Sek von API-Call bis sichtbarem Engine-Tick (Celery-Queue-Pickup + DB-Commit + Engine-Pipeline). Doku-Eintrag in CLAUDE.md §6 oder STATUS.md §5 als verbindliche Erwartung („innerhalb 5–10 Sek nach API-Call"). Bei Abweichung > 30 Sek ist Performance-Investigation nötig (Worker-Backpressure, Redis-Lock-Hold-Time, DB-Connection-Pool). | 🟢 |
 | B-9.13b-1 | Cache-Busting nach Frontend-Deploys. Live-Test Bündel B 2026-05-12 (`cowork-output/sprint9-13b-live-test/BEFUND.md`) beobachtete, dass Hotelier nach Pull-Deploy einen Hard-Reload braucht, um die neue Sidebar zu sehen. Mögliche Lösungen: Service-Worker mit Skip-Waiting, Build-Hash in HTML-Meta, Cache-Control-Header für `index.html` auf `no-cache`. Nicht produktionskritisch, kommt in eigenem kleinen Sprint nach Hardware-Status-Badge (B-LT-2-followup-1). | 🟢 |
 | B-9.13c-1 | Skalierungs-Limit Hardware-Status-Badge: 1 Refetch alle 30 s pro Badge bedeutet bei N Devices in `/devices`-Liste N parallele Calls/30 s. Heute 4 Vickis irrelevant, bei 100+ Devices Optimierung über Batch-Endpoint `/api/v1/devices/hardware-status?ids=...` oder zentralen Polling-Hook (eine Query → Map deviceId → Status). Anlass: Sprint 9.13c Pre-Push-Beobachtung — Polling-Konstante hardcoded auf 30 s pro Hook-Instanz. | 🟢 |
+| B-9.13c-2 | `cancel`-Icon für „Eingerichtet: nein" nicht visuell demonstrierbar mangels Test-Daten (alle Vickis auf heizung-test sind `is_active=true`). Schema ist implementiert, Code-Pfad funktioniert per Test-Mock. Bei nächstem geeigneten Vicki-Test-Pairing oder Deaktivierungs-Vorgang: Screenshot des „Eingerichtet: nein"-Zustands machen, als BEFUND-Anhang sichern. Anlass: Sprint 9.13c Cowork-Live-Test 2026-05-12. | 🟢 |
+| B-9.13c-3 | Wording-Audit auf weiteren Pages (Pairing-Wizard, Belegungen, Raumtypen-Detail, sonstige `aktiv`/`inaktiv`-Stellen). Cowork hat im Live-Test 9.13c noch nicht alle Pages durchgeklickt — der Wording-Fix #140 wurde gezielt für `/devices`-Liste und `/devices/[id]`-Detail-Header gebaut. Andere Stellen, die `is_active`/Activity-Status anzeigen, könnten mit derselben „Eingerichtet"-Semantik konsistenter werden. Bundling mit anderen Polish-Items möglich. | 🟢 |
 
 ### 6.3 — Operative Aufgaben
 
