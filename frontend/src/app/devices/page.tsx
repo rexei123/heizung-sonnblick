@@ -149,8 +149,8 @@ function DevicesTable({ devices }: { devices: Device[] }) {
             <th className="text-left px-4 py-3 font-medium">Bezeichnung</th>
             <th className="text-left px-4 py-3 font-medium">DevEUI</th>
             <th className="text-left px-4 py-3 font-medium">Hersteller / Modell</th>
+            <th className="text-left px-4 py-3 font-medium">Eingerichtet</th>
             <th className="text-left px-4 py-3 font-medium">Status</th>
-            <th className="text-left px-4 py-3 font-medium">Hardware-Status</th>
           </tr>
         </thead>
         <tbody>
@@ -175,12 +175,26 @@ function DeviceRow({ device: d }: { device: Device }) {
       </td>
       <td className="px-4 py-3">
         {d.is_active ? (
-          <span className="px-2 py-0.5 rounded-sm bg-success-soft text-success text-xs font-medium">
-            aktiv
+          <span className="inline-flex items-center gap-1 text-text-primary text-sm">
+            <span
+              className="material-symbols-outlined text-success"
+              aria-hidden
+              style={{ fontSize: 16 }}
+            >
+              check_circle
+            </span>
+            ja
           </span>
         ) : (
-          <span className="px-2 py-0.5 rounded-sm bg-surface-alt text-text-tertiary text-xs font-medium">
-            inaktiv
+          <span className="inline-flex items-center gap-1 text-text-tertiary text-sm">
+            <span
+              className="material-symbols-outlined"
+              aria-hidden
+              style={{ fontSize: 16 }}
+            >
+              cancel
+            </span>
+            nein
           </span>
         )}
       </td>

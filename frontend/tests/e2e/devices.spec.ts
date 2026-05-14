@@ -60,7 +60,8 @@ test.describe("Frontend-Dashboard (Sprint 7)", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Geräte" })).toBeVisible();
     await expect(page.getByText("Vicki Test 101")).toBeVisible();
     await expect(page.getByText("0011223344556677")).toBeVisible();
-    await expect(page.getByText("aktiv")).toBeVisible();
+    // Sprint 9.13c Wording: "Eingerichtet"-Spalte zeigt "ja" / "nein"
+    await expect(page.locator("td").filter({ hasText: "ja" }).first()).toBeVisible();
   });
 
   test("Empty-State erscheint bei leerer Liste", async ({ page }) => {
