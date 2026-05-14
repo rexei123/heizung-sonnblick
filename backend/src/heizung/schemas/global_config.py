@@ -17,7 +17,9 @@ class GlobalConfigUpdate(BaseModel):
     timezone: str | None = Field(default=None, min_length=3, max_length=50)
     default_checkin_time: time | None = None
     default_checkout_time: time | None = None
-    summer_mode_active: bool | None = None
+    # Sprint 9.16: ``summer_mode_active`` ist auf ``scenario_assignment``
+    # umgezogen (AE-49). Aktivierung erfolgt ueber den
+    # /api/v1/scenarios/{code}/activate-Endpoint, nicht mehr hier.
     summer_mode_starts_on: date | None = None
     summer_mode_ends_on: date | None = None
     alert_email: EmailStr | None = None
@@ -50,7 +52,6 @@ class GlobalConfigRead(BaseModel):
     timezone: str
     default_checkin_time: time
     default_checkout_time: time
-    summer_mode_active: bool
     summer_mode_starts_on: date | None
     summer_mode_ends_on: date | None
     alert_email: str | None

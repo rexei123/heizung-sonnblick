@@ -1089,6 +1089,77 @@ Nächster Sprint: 9.15 Profile (Wochentag-Schedule).
 
 ---
 
+## 2ae. Sprint 9.16 abgeschlossen (2026-05-14)
+
+Szenario-Engine aktiviert: Sommermodus ist das erste Szenario, gesteuert
+über `scenario_assignment(code='summer_mode', scope='global')` statt
+`global_config.summer_mode_active` (Boolean-Spalte gedroppt). AE-31 als
+historisch markiert, AE-49 dokumentiert die heute laufende Engine-
+Pipeline.
+
+**Backend:**
+- Migration `0012_summer_mode_scenario`: atomarer Daten-Erhalt
+  (`scenario` seeden, `global_config.summer_mode_active=true` ⇒
+  `scenario_assignment(global, is_active=true)`, dann Spalte droppen).
+  Lokaler Auf-Ab-Auf-Zyklus mit Daten-Erhalt verifiziert vor T2.
+- `GlobalConfig`-Model + Pydantic-Schemas ohne
+  `summer_mode_active` (Sommermodus-Datumsfelder bleiben informativ).
+- `rules/scenarios.py` mit `is_summer_mode_active(session)` als
+  Layer-0-Quelle.
+- Engine Layer 0 nutzt neuen Helper; Reason wechselt auf
+  `CommandReason.SCENARIO_SUMMER_MODE`, `SUMMER_MODE` bleibt
+  deprecated im Enum (historische `event_log`-Einträge).
+- Neuer Router `api/v1/scenarios.py`: `GET /api/v1/scenarios`,
+  `POST /api/v1/scenarios/{code}/activate`, `POST /api/v1/scenarios/{code}/deactivate`.
+  Heute nur `scope=global`; `room_type`/`room` ⇒ 422 (Pydantic-Literal).
+- `config_audit`-Eintrag pro (De-)Aktivierung; `# AUTH_TODO_9_17` an
+  beiden POST-Handlern, `request.client.host` als `request_ip`.
+
+**Frontend:**
+- `components/ui/{tabs (9.14), switch (9.16), card (9.16)}.tsx` —
+  Switch + Card neu (radix-react-switch installiert).
+- `components/scenario-card.tsx`: Card mit Switch + ConfirmDialog;
+  Aktivieren = `destructive`-Intent, Deaktivieren = `primary`.
+- `/szenarien` (Stub aus 9.13b ersetzt) — responsive Grid, heute
+  eine Card (Sommermodus). Toast „aktiviert/deaktiviert — Engine
+  übernimmt in ≤ 60 s".
+- Warn-Banner auf `/einstellungen/temperaturen-zeiten` (gelber
+  `bg-warning-soft`-Stil, Material-Symbol `warning`) bei aktivem
+  Sommermodus + Link „Verwalten → /szenarien".
+
+**Tests:**
+- Backend: 7 API-Tests in `test_api_scenarios.py` (Liste, Activate,
+  Idempotenz, Audit, Deactivate-Audit, Scope-Reject, 404).
+  Layer-0-Tests in `test_engine_skeleton.py` + `test_engine_trace_consistency.py`
+  auf neue Reason + scenario_assignment-Quelle umgestellt.
+- Frontend Playwright: `szenarien.spec.ts` (Switch → AlertDialog →
+  Toast → Status-Wechsel), `temperaturen-zeiten-warn-banner.spec.ts`
+  (Banner an/aus). `sidebar.spec.ts`-Stub-Liste um `/szenarien`
+  reduziert, da Page nun echt ist.
+
+**Out of Scope (Brief-konform):**
+- Auth/NextAuth (kommt mit 9.17).
+- Weitere Szenarien + volle Szenario-Auflösung in Layer 2 (kommt
+  mit zurückgestelltem 9.16b, „nach erstem Winter mit Live-Daten").
+- Saison-UI (ebenfalls 9.16b).
+- Engine-Refactor Layer 2/3/4 (Drift wird nur via AE-49 dokumentiert).
+
+**Tag-Vorschlag:** `v0.1.13-szenario-engine` (Strategie-Chat-Freigabe
+nach Cowork-Visual-Review abwarten).
+
+**Doku-Naming-Hinweise:**
+- Brief sagte „STATUS.md §2af"; nächster freier nach §2ad ist §2ae —
+  pragmatisch übernommen.
+- Brief sagte „ADR AE-48"; AE-48 ist bereits Vicki-Downlink-Helper
+  (CLAUDE.md §5.28). Neuer ADR wurde als **AE-49** angelegt, AE-31
+  verweist darauf.
+
+Nächster Sprint: 9.17 NextAuth + User-UI (Pflicht-Verschluss aller
+`AUTH_TODO_9_17`-Marker) oder 9.15 Profile (Wochentag-Schedule) je
+nach Strategie-Chat-Reihenfolge.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1246,6 +1317,8 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.13c-1 | Skalierungs-Limit Hardware-Status-Badge: 1 Refetch alle 30 s pro Badge bedeutet bei N Devices in `/devices`-Liste N parallele Calls/30 s. Heute 4 Vickis irrelevant, bei 100+ Devices Optimierung über Batch-Endpoint `/api/v1/devices/hardware-status?ids=...` oder zentralen Polling-Hook (eine Query → Map deviceId → Status). Anlass: Sprint 9.13c Pre-Push-Beobachtung — Polling-Konstante hardcoded auf 30 s pro Hook-Instanz. | 🟢 |
 | B-9.13c-2 | `cancel`-Icon für „Eingerichtet: nein" nicht visuell demonstrierbar mangels Test-Daten (alle Vickis auf heizung-test sind `is_active=true`). Schema ist implementiert, Code-Pfad funktioniert per Test-Mock. Bei nächstem geeigneten Vicki-Test-Pairing oder Deaktivierungs-Vorgang: Screenshot des „Eingerichtet: nein"-Zustands machen, als BEFUND-Anhang sichern. Anlass: Sprint 9.13c Cowork-Live-Test 2026-05-12. | 🟢 |
 | B-9.13c-3 | Wording-Audit auf weiteren Pages (Pairing-Wizard, Belegungen, Raumtypen-Detail, sonstige `aktiv`/`inaktiv`-Stellen). Cowork hat im Live-Test 9.13c noch nicht alle Pages durchgeklickt — der Wording-Fix #140 wurde gezielt für `/devices`-Liste und `/devices/[id]`-Detail-Header gebaut. Andere Stellen, die `is_active`/Activity-Status anzeigen, könnten mit derselben „Eingerichtet"-Semantik konsistenter werden. Bundling mit anderen Polish-Items möglich. | 🟢 |
+| B-9.16-1 | Sprint 9.16b — weitere System-Szenarien (Tagabsenkung, Wartung, Schließzeit, Renovierung) plus volle Szenario-Auflösung in Engine Layer 2 (ROOM > ROOM_TYPE > GLOBAL Hierarchie analog `rule_config`). Plus Saison-UI auf `/einstellungen/saison` mit Tag-Monat-Range und saisonaler `rule_config` über `season_id`-FK (SPRINT-PLAN.md 9.16 T3-T5). Bewusst aufgeschoben „nach erstem Winter mit Live-Daten" (Brief 9.16 AE-3) — heute fehlt der Erfahrungsschatz, welche Szenarien realer Hotelier-Bedarf sind. | 🟢 (in 9.16b) |
+| B-9.16-2 🟡 | Migration `0012_summer_mode_scenario` manuell Auf-Ab-Auf gegen Live-Postgres verifiziert, kein automatisierter Roundtrip-Test in CI. Blockiert durch B-9.11x-1 (psycopg2-Test-DB-Setup). Pflicht-Punkt für Sprint 10 (Hygiene): `test_migrations_roundtrip` reparieren UND `test_migration_0012_atomar_auf_ab_auf` + `test_migration_preserves_*` nachziehen. |
 
 ### 6.3 — Operative Aufgaben
 

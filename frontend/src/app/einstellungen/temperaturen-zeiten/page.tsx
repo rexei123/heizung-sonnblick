@@ -11,11 +11,13 @@
  * Engine uebernimmt neue Werte beim naechsten Beat-Tick (<= 60 s).
  */
 
+import Link from "next/link";
 import { useState } from "react";
 import { z } from "zod";
 
 import { InlineEditCell } from "@/components/inline-edit-cell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useScenarios } from "@/lib/api/hooks-scenarios";
 import {
   useGlobalRuleConfig,
   useUpdateGlobalRuleConfig,
@@ -57,6 +59,10 @@ function formatMinutes(v: number): string {
 export default function TemperaturenZeitenPage() {
   const cfg = useGlobalRuleConfig();
   const updateMut = useUpdateGlobalRuleConfig();
+  const scenariosQ = useScenarios();
+  const summerActive = (scenariosQ.data ?? []).some(
+    (s) => s.code === "summer_mode" && s.current_global_assignment_active,
+  );
   const [toast, setToast] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
@@ -114,6 +120,33 @@ export default function TemperaturenZeitenPage() {
           übernimmt Änderungen beim nächsten Tick (≤ 60 s).
         </p>
       </header>
+
+      {summerActive ? (
+        <div
+          role="alert"
+          className="mb-6 flex items-start gap-3 rounded-md border border-warning/30 bg-warning-soft text-warning px-4 py-3 text-sm"
+        >
+          <span
+            className="material-symbols-outlined"
+            aria-hidden
+            style={{ fontSize: 20 }}
+          >
+            warning
+          </span>
+          <div className="flex-1">
+            <p className="font-medium">Sommermodus aktiv.</p>
+            <p className="opacity-90">
+              Globale Werte wirken nicht — alle Räume sind auf Frostschutz.
+            </p>
+          </div>
+          <Link
+            href="/szenarien"
+            className="font-medium underline hover:no-underline"
+          >
+            Verwalten →
+          </Link>
+        </div>
+      ) : null}
 
       <Tabs defaultValue="zeiten" className="w-full">
         <TabsList>

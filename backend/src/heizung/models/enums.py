@@ -104,7 +104,11 @@ class CommandReason(enum.StrEnum):
     GUEST_OVERRIDE = "guest_override"
     LONG_VACANT = "long_vacant"
     FROST_PROTECTION = "frost_protection"
+    # SUMMER_MODE ist seit Sprint 9.16 (AE-49) deprecated zugunsten von
+    # SCENARIO_SUMMER_MODE. Wert bleibt im Enum, damit historische
+    # event_log-Eintraege weiterhin lesbar sind.
     SUMMER_MODE = "summer_mode"
+    SCENARIO_SUMMER_MODE = "scenario_summer_mode"
     MANUAL = "manual"
     MANUAL_EVENT = "manual_event"
 

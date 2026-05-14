@@ -30,13 +30,13 @@ from sqlalchemy.orm import joinedload
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
-from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_MIN
+from heizung.rules.scenarios import is_summer_mode_active
 from heizung.services import override_service
 
 if TYPE_CHECKING:
@@ -140,36 +140,46 @@ def _resolve_t(field_name: str, ctx: _RoomContext) -> Decimal | None:
 
 
 def layer_summer_mode(ctx: _RoomContext) -> LayerStep:
-    """Layer 0: Sommermodus-Fast-Path (AE-31, AE-34).
+    """Layer 0: Sommermodus-Fast-Path (AE-31 historisch, AE-49 aktuell).
 
     Sprint 9.10d: Layer ist always-on, liefert IMMER einen LayerStep — auch
     im inaktiven Fall —, damit das Engine-Decision-Panel pro Eval einen
     Trace-Eintrag fuer Layer 0 zeigt. Der Fast-Path-Skip (Layer 1-4
-    ueberspringen) wird vom Caller via ``ctx.summer_mode_active`` gesteuert,
-    NICHT mehr ueber ``is None``.
+    ueberspringen) wird vom Caller via ``ctx.summer_mode_active`` gesteuert.
 
-    Aktiv (``summer_mode_active=True``): Setpoint ``FROST_PROTECTION_C``,
-    Reason ``SUMMER_MODE``, ``detail="summer_mode_active=true"``.
+    Sprint 9.16 (AE-49): Datenquelle ist ``scenario_assignment`` mit
+    ``code='summer_mode'`` und ``scope='global'`` (Helper
+    ``rules.scenarios.is_summer_mode_active``). Reason wechselt auf
+    ``SCENARIO_SUMMER_MODE``; ``CommandReason.SUMMER_MODE`` bleibt im
+    Enum, ist aber deprecated (historische event_log-Eintraege).
 
-    Inaktiv: Passthrough-Marker mit ``setpoint_c=None`` (Layer 0 hat keinen
-    eigenen Setpoint-Beitrag — der finale Wert kommt aus Layer 1+), Reason
-    ``SUMMER_MODE``, ``detail="summer_mode_inactive"``. T2.5 (Sprint 9.10d):
-    None statt MIN_SETPOINT_C-Platzhalter, weil Layer 0 als erste Schicht
-    kein "in" hat und die Pass-Through-Konvention setpoint_in==setpoint_out
-    hier nicht greift.
+    Aktiv: Setpoint ``FROST_PROTECTION_C``, Reason
+    ``SCENARIO_SUMMER_MODE``, ``detail="summer_mode_active=true"``,
+    ``extras={"source":"scenario_assignment","scenario_code":"summer_mode"}``.
+
+    Inaktiv: Passthrough-Marker mit ``setpoint_c=None``, Reason
+    ``SCENARIO_SUMMER_MODE``, ``detail="summer_mode_inactive"``.
     """
     if ctx.summer_mode_active:
         return LayerStep(
             layer=EventLogLayer.SUMMER_MODE_FAST_PATH,
             setpoint_c=int(FROST_PROTECTION_C),
-            reason=CommandReason.SUMMER_MODE,
+            reason=CommandReason.SCENARIO_SUMMER_MODE,
             detail="summer_mode_active=true",
+            extras={
+                "source": "scenario_assignment",
+                "scenario_code": "summer_mode",
+            },
         )
     return LayerStep(
         layer=EventLogLayer.SUMMER_MODE_FAST_PATH,
         setpoint_c=None,
-        reason=CommandReason.SUMMER_MODE,
+        reason=CommandReason.SCENARIO_SUMMER_MODE,
         detail="summer_mode_inactive",
+        extras={
+            "source": "scenario_assignment",
+            "scenario_code": "summer_mode",
+        },
     )
 
 
@@ -722,9 +732,10 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     )
     rule_configs = list((await session.execute(rc_stmt)).scalars().all())
 
-    # Sprint 9.7: Sommermodus-Flag aus Singleton-global_config.
-    cfg = await session.get(GlobalConfig, 1)
-    summer_active = bool(cfg.summer_mode_active) if cfg else False
+    # Sprint 9.7/9.16: Sommermodus-Flag. Sprint 9.16 (AE-49) hat die
+    # Quelle von ``global_config.summer_mode_active`` (gedroppt) auf
+    # ``scenario_assignment(code='summer_mode', scope='global')`` umgestellt.
+    summer_active = await is_summer_mode_active(session)
 
     # Sprint 9.8: naechste aktive Belegung fuer Vorheizen-Logik.
     now = datetime.now(tz=UTC)

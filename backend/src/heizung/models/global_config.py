@@ -17,7 +17,6 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -44,8 +43,8 @@ class GlobalConfig(Base):
     default_checkin_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(14, 0))
     default_checkout_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(11, 0))
 
-    # Sommermodus (Layer 0 in der Engine)
-    summer_mode_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Sommermodus-Zeitraum (informativ; Aktivierung liegt seit Sprint 9.16
+    # in ``scenario_assignment(code='summer_mode', scope='global')``).
     summer_mode_starts_on: Mapped[date | None] = mapped_column(Date)
     summer_mode_ends_on: Mapped[date | None] = mapped_column(Date)
 
