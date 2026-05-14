@@ -97,20 +97,12 @@ export default function DeviceDetailPage() {
                 </p>
               </div>
               <div className="text-right text-sm space-y-2">
-                <div>
-                  {device.is_active ? (
-                    <span className="px-2 py-0.5 rounded-sm bg-success-soft text-success text-xs font-medium">
-                      aktiv
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-sm bg-surface-alt text-text-tertiary text-xs font-medium">
-                      inaktiv
-                    </span>
-                  )}
-                </div>
                 <div className="text-text-secondary">
-                  <div className="mb-1">Hardware-Status</div>
+                  <div className="mb-1">Status</div>
                   <HardwareStatusBadge deviceId={device.id} variant="detailed" />
+                </div>
+                <div className="text-xs text-text-tertiary">
+                  Eingerichtet: {device.is_active ? "ja" : "nein"}
                 </div>
               </div>
             </div>

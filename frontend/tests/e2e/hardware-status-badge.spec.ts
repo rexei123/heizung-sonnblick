@@ -75,7 +75,8 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
 
     await page.goto("/devices");
 
-    await expect(page.locator("th").filter({ hasText: "Hardware-Status" })).toBeVisible();
+    // Sprint 9.13c Wording: Spalte heisst jetzt "Status" (Hardware-Status-Badge)
+    await expect(page.locator("th").filter({ hasText: "Status" })).toBeVisible();
     // Detailed-Variante: Badge mit "Aktiv" plus "Zuletzt: ..."-Hinweis
     await expect(page.getByText("Aktiv").first()).toBeVisible();
     await expect(page.getByText(/Zuletzt:/)).toBeVisible();
@@ -110,7 +111,8 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
 
     await page.goto(`/devices/${SAMPLE_DEVICE.id}`);
 
-    await expect(page.getByText("Hardware-Status")).toBeVisible();
+    // Sprint 9.13c Wording: Detail-Page-Label heisst jetzt "Status"
+    await expect(page.getByText("Status", { exact: true })).toBeVisible();
     // Detailed-Variante: Aktiv-Label + Zuletzt-Hinweis
     await expect(page.getByText("Aktiv").first()).toBeVisible();
     await expect(page.getByText(/Zuletzt:/)).toBeVisible();
