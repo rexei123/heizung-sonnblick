@@ -66,17 +66,17 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
   test("Stub-Pages laden mit EmptyState-Komponente", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    // Sprint 9.16: /szenarien hat die echte Page bekommen (Sommermodus-
-    // Toggle) — daher hier nur noch die verbliebenen Stubs.
-    const stubs: { path: string; title: string; sprint: string }[] = [
-      { path: "/profile", title: "Profile", sprint: "Sprint 9.15" },
-      { path: "/einstellungen/saison", title: "Saison", sprint: "Sprint 9.16" },
+    // Sprint 9.17 (T10): Sprint-Nummer-Badges sind raus, Stubs zeigen
+    // einheitlich „In Vorbereitung".
+    const stubs: { path: string; title: string }[] = [
+      { path: "/profile", title: "Profile" },
+      { path: "/einstellungen/saison", title: "Saison" },
     ];
 
     for (const stub of stubs) {
       await page.goto(stub.path);
       await expect(page.getByRole("heading", { level: 1, name: stub.title })).toBeVisible();
-      await expect(page.getByText(`Kommt in ${stub.sprint}`)).toBeVisible();
+      await expect(page.getByText("In Vorbereitung")).toBeVisible();
     }
   });
 

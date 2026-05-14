@@ -15,9 +15,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.models.user import User
 from heizung.schemas.room_type import RoomTypeCreate, RoomTypeRead, RoomTypeUpdate
 
 # Postgres int4-Range. IDs > 2^31-1 wuerden DataError werfen → 500.
@@ -51,6 +53,7 @@ async def _get_or_404(session: AsyncSession, room_type_id: int) -> RoomType:
 )
 async def create_room_type(
     payload: RoomTypeCreate,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RoomType:
     rt = RoomType(**payload.model_dump())
@@ -106,6 +109,7 @@ async def get_room_type(
 async def update_room_type(
     payload: RoomTypeUpdate,
     room_type_id: int = RoomTypeIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RoomType:
     rt = await _get_or_404(session, room_type_id)
@@ -136,6 +140,7 @@ async def update_room_type(
 )
 async def delete_room_type(
     room_type_id: int = RoomTypeIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
     rt = await _get_or_404(session, room_type_id)

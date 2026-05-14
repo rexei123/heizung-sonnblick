@@ -19,9 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
+from heizung.models.user import User
 from heizung.schemas.heating_zone import (
     HeatingZoneCreate,
     HeatingZoneRead,
@@ -89,6 +91,7 @@ async def list_heating_zones(
 async def create_heating_zone(
     payload: HeatingZoneCreate,
     room_id: int = RoomIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> HeatingZone:
     await _ensure_room_exists(session, room_id)
@@ -128,6 +131,7 @@ async def update_heating_zone(
     payload: HeatingZoneUpdate,
     room_id: int = RoomIdPath,
     zone_id: int = ZoneIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> HeatingZone:
     zone = await _get_zone_or_404(session, room_id, zone_id)
@@ -159,6 +163,7 @@ async def update_heating_zone(
 async def delete_heating_zone(
     room_id: int = RoomIdPath,
     zone_id: int = ZoneIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
     zone = await _get_zone_or_404(session, room_id, zone_id)

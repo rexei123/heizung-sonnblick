@@ -1,4 +1,4 @@
-"""rule_config-API (Sprint 9.14, AE-46).
+"""rule_config-API (Sprint 9.14, AE-46; Sprint 9.17 admin-secured).
 
 Heute nur Scope=GLOBAL. Roomtyp- und Room-Scope kommen mit Sprint 9.15/9.16
 (Profile/Szenarien) — Out-of-Scope fuer 9.14.
@@ -8,11 +8,8 @@ Heute nur Scope=GLOBAL. Roomtyp- und Room-Scope kommen mit Sprint 9.15/9.16
 
 Audit: jeder geaenderte Feld-Wert schreibt einen Eintrag in
 ``config_audit`` (Service ``record_config_change``), atomar mit dem
-eigentlichen UPDATE in derselben Transaktion.
-
-AUTH_TODO_9_17: Heute kein Auth-Schutz. NextAuth-Integration ist
-Sprint 9.17 — bis dahin loggt der Handler ``request.client.host`` als
-``request_ip`` ins Audit (Best-Effort-Identifikation).
+eigentlichen UPDATE in derselben Transaktion. ``user_id`` wird seit
+Sprint 9.17 aus dem eingeloggten Admin-Account uebernommen.
 """
 
 from __future__ import annotations
@@ -21,9 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.enums import RuleConfigScope
 from heizung.models.rule_config import RuleConfig
+from heizung.models.user import User
 from heizung.schemas.rule_config import RuleConfigGlobalRead, RuleConfigGlobalUpdate
 from heizung.services.config_audit_service import record_config_change
 
@@ -68,17 +67,15 @@ async def get_global_rule_config(
     return await _get_global_or_404(session)
 
 
-# AUTH_TODO_9_17: NextAuth-Schutz fuer PATCH-Handler einfuegen, sobald
-# Sprint 9.17 NextAuth bereitstellt. Bis dahin ist der Endpoint offen
-# und wird per ``request_ip`` in ``config_audit`` getrackt.
 @router.patch(
     "/global",
     response_model=RuleConfigGlobalRead,
-    summary="Globale RuleConfig partiell aktualisieren (config_audit pro Feld)",
+    summary="Globale RuleConfig partiell aktualisieren (admin, config_audit pro Feld)",
 )
 async def update_global_rule_config(
     payload: RuleConfigGlobalUpdate,
     request: Request,
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RuleConfig:
     updates = payload.model_dump(exclude_unset=True)
@@ -105,6 +102,7 @@ async def update_global_rule_config(
             column_name=field,
             old_value=old_value,
             new_value=new_value,
+            user_id=admin.id,
             request_ip=request_ip,
         )
 

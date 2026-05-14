@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from heizung.api.v1.auth import router as auth_router
 from heizung.api.v1.devices import router as devices_router
 from heizung.api.v1.global_config import router as global_config_router
 from heizung.api.v1.heating_zones import router as heating_zones_router
@@ -11,8 +12,11 @@ from heizung.api.v1.room_types import router as room_types_router
 from heizung.api.v1.rooms import router as rooms_router
 from heizung.api.v1.rule_configs import router as rule_configs_router
 from heizung.api.v1.scenarios import router as scenarios_router
+from heizung.api.v1.users import router as users_router
 
 router = APIRouter(prefix="/api/v1")
+router.include_router(auth_router)
+router.include_router(users_router)
 router.include_router(devices_router)
 router.include_router(room_types_router)
 router.include_router(rooms_router)

@@ -36,6 +36,26 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     secret_key: str = Field(default=_DEFAULT_SECRET_KEY, min_length=16)
 
+    # --- Auth (Sprint 9.17, AE-50) ---
+    # Feature-Flag fuer kontrollierte Aktivierung. AE-6: Default false,
+    # heizung-test wird mit false released, Strategie-Chat kippt nach
+    # erfolgreichem Bootstrap-Admin-Login auf true.
+    auth_enabled: bool = False
+    # JWT signing. Bei None: Fallback auf ``secret_key`` (operativ
+    # einfacher; bei separatem Geheimnis explizit setzen).
+    jwt_secret_key: str | None = None
+    jwt_algorithm: str = "HS256"
+    access_token_expire_hours: int = 12
+    auth_cookie_name: str = "heizung_session"
+    # Cookie secure-Flag: in production HTTPS-only, lokal HTTP zulassen.
+    auth_cookie_secure: bool = True
+    # Rate-Limit auf /auth/login (slowapi). 5 Versuche pro Minute pro IP.
+    auth_login_rate_limit: str = "5/minute"
+    # Bootstrap-Admin via ENV (AE-5). Migration 0014 nutzt diese Werte
+    # einmalig beim alembic upgrade, wenn user-Tabelle leer ist.
+    initial_admin_email: str | None = None
+    initial_admin_password_hash: str | None = None
+
     # --- Infrastruktur ---
     database_url: str = "postgresql+asyncpg://heizung:heizung_dev@localhost:5432/heizung"
     redis_url: str = "redis://localhost:6379/0"

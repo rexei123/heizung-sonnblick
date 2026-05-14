@@ -1174,6 +1174,122 @@ diesen Hotfix.
 
 ---
 
+## 2af. Sprint 9.17 abgeschlossen (2026-05-14)
+
+Authentifizierung produktiv. FastAPI-native JWT-Cookie-Auth statt
+NextAuth, 2 Rollen (`admin` / `mitarbeiter`), `business_audit` als
+zweite Audit-Domain neben `config_audit`. AE-50 verankert die acht
+Entscheidungen. SPRINT-PLAN-9.17-Eintrag korrigiert (T0): vorher
+„NextAuth + 5 Rollen", jetzt „Auth + 2-Rollen + business_audit".
+
+**Backend:**
+- Migration `0014_auth_and_business_audit`: `user`-Tabelle (id, email,
+  password_hash, role, is_active, must_change_password, timestamps,
+  last_login_at), `business_audit`-Tabelle (user_id FK,
+  action/target_type/target_id, JSONB-Werte, INET-IP),
+  `config_audit.user_id` FK auf `user.id`. Bootstrap-Admin via ENV
+  `INITIAL_ADMIN_EMAIL` + `INITIAL_ADMIN_PASSWORD_HASH` bei leerer
+  `user`-Tabelle. Auf-Ab-Auf-Test gegen Live-Postgres bestanden.
+- Auth-Modul `heizung.auth`: JWT (HS256, 12h, `python-jose`), bcrypt
+  (work-factor 12, direktes `bcrypt`-Package — Brief sah passlib vor,
+  ist aber unmaintained und inkompatibel mit `bcrypt>=4.1`, siehe
+  CLAUDE.md §5.29 / AE-50 AE-1), Dependencies `get_current_user` /
+  `require_admin` / `require_mitarbeiter`, Rate-Limit-Singleton
+  (`slowapi`, 5/Minute pro IP auf `/auth/login`).
+- Settings erweitert: `auth_enabled` (Default `false`),
+  `jwt_secret_key` (Fallback auf `secret_key`), `jwt_algorithm`,
+  `access_token_expire_hours`, `auth_cookie_name`,
+  `auth_cookie_secure`, `auth_login_rate_limit`,
+  `initial_admin_email`/`initial_admin_password_hash`.
+- CLI `python -m heizung.cli.hash_password '<klartext>'` erzeugt
+  bcrypt-Hash für ENV-Setting.
+- Neue Router:
+  - `/api/v1/auth/{login,logout,me,change-password}` mit
+    Rate-Limit auf login, generische Fehlermeldung (kein
+    User-Enumeration), business_audit-Hook bei change-password.
+  - `/api/v1/users/*` admin-only mit Liste, Create, Patch
+    (Rolle/is_active), Reset-Password (business_audit), Delete.
+    Bricked-System-Schutz: Admin darf eigene Rolle nicht
+    aendern; letzter aktiver Admin nicht deaktivierbar /
+    loeschbar.
+- Bestehende Endpoints (T1-Inventar): 21 mutierende Routen mit
+  `require_admin` / `require_mitarbeiter` ausgestattet.
+  Belegungs- und Override-Endpoints schreiben `business_audit`
+  (OCCUPANCY_CREATE, OCCUPANCY_CANCEL, MANUAL_OVERRIDE_SET,
+  MANUAL_OVERRIDE_CLEAR). Stammdaten- und Konfigurations-Audits
+  bekommen jetzt `user_id`. **`X-User-Email`-Header in
+  `overrides.py` entfernt** (AE-50 AE-8); `user.email` ist
+  `created_by` in `manual_override`.
+- Alle 7 `# AUTH_TODO_9_17`-Marker aus 9.14/9.16 ersetzt durch
+  echte Dependencies.
+
+**Frontend:**
+- `AuthContext` mit `useAuth`-Hook (`/me` beim Mount, Login,
+  Logout, refresh). `useInactivityLogout` (15 Min, keydown/click/
+  touchstart, BroadcastChannel `heizung-auth` für Multi-Tab,
+  Hard-Cut ohne Modal — AE-50 AE-4).
+- `/login`, `/auth/change-password`,
+  `/einstellungen/benutzer` (ersetzt Stub aus 9.13b).
+  Mitarbeiter-Liste mit Inline-Rolle-Toggle, Aktionen-Buttons
+  (Passwort, Aktivieren/Deaktivieren, Loeschen) plus
+  ConfirmDialog für destruktive Aktionen.
+- Sidebar-Footer: User-Email + Rolle + Logout-Button.
+- Stub-Cleanup (T10): Sprint-Nummer-Badges raus,
+  EmptyState zeigt „In Vorbereitung" wenn `plannedSprint`
+  nicht gesetzt. Saison, Profile, API, Gateway,
+  Temperaturverlauf entsprechend angepasst.
+- shadcn `Label` neu (Pure-CSS, kein neuer Radix-Dep).
+
+**Tests:**
+- Backend pytest gegen Live-Postgres: 308 passed + 1 xfailed
+  (23 neu in T12). `test_api_auth.py` (Login success/fail/
+  inactive, generische Fehler, Rate-Limit 5/min, Logout,
+  /me-Cookie-Pfad, change-password mit business_audit-Hook).
+  `test_api_users.py` (admin-only, mitarbeiter→403, duplicate-
+  email 409, PATCH-Rolle, eigene-Rolle-Schutz, letzter-Admin-
+  Schutz, reset-password mit business_audit, DELETE).
+- Frontend Playwright: 32/32 green (24 alt + 8 neu in
+  `auth.spec.ts`). Login-Formular, falsche Credentials
+  Inline-Fehler, Login-Redirect Dashboard,
+  must_change_password-Redirect, /einstellungen/benutzer Guard
+  (Mitarbeiter→/, Admin sieht Liste, Dialog), Sidebar-Footer
+  zeigt User+Logout.
+- T12-Pflicht-Stop: passlib 1.7.4 + bcrypt 5.0 inkompatibel
+  (passlib unmaintained seit 2020-10, `detect_wrap_bug`-Init
+  triggert ValueError fuer >72-Byte-Test-Secrets, jeder erste
+  `hash_password()`-Call crasht). `password.py` auf direktes
+  `bcrypt` umgestellt, `passlib[bcrypt]` aus `pyproject.toml`
+  entfernt. Brief-Abweichung in AE-50 Punkt 1, Lesson in
+  CLAUDE.md §5.29.
+
+**Tag-Vorschlag:** `v0.1.14-auth` (Strategie-Chat-Freigabe nach
+Cowork-Visual-Review abwarten).
+
+**Out of Scope (Brief-konform):**
+- Self-Service-Passwort-Reset via E-Mail (B-9.17-1)
+- E-Mail-Versand-Infrastruktur generell
+- Audit-UI im Frontend (B-9.17-2)
+- OAuth-Provider, Magic-Link-Login, 2FA
+- Multi-Mandanten-Tenant-Trennung (kommt mit 11+)
+- Owner-Rolle, Hotelier/Techniker/Reception-Differenzierung
+
+**Aktivierungs-Hinweis fuer heizung-test:**
+Sprint mergt mit `AUTH_ENABLED=false`. Reihenfolge zum Aktivieren:
+1. ENV setzen: `INITIAL_ADMIN_EMAIL=admin@…`,
+   `INITIAL_ADMIN_PASSWORD_HASH=<bcrypt>` (via
+   `python -m heizung.cli.hash_password`),
+   optional `JWT_SECRET_KEY=<openssl rand -hex 32>`.
+2. Pull-Deploy laeuft, Migration 0014 legt Bootstrap-Admin an.
+3. Test-Login auf `/login` mit Initial-Passwort. Bei Erfolg:
+   `must_change_password=true` ⇒ Wechsel-Page.
+4. ENV `AUTH_ENABLED=true` setzen + Container neu starten.
+   Ab jetzt schuetzt Backend alle mutierenden Endpoints scharf.
+
+Nächster Sprint: offen — Strategie-Chat entscheidet (Kandidaten:
+9.15 Profile, 9.18 Dashboard, 9.16b Saison + weitere Szenarien).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1336,6 +1452,8 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.16-3 🟢 (info) | Doppel-GET auf `/api/v1/scenarios` im Dev-Mode (vermutlich React-StrictMode-Artefakt, analog B-9.14-5). Nicht produktionskritisch, beobachtet im Cowork-Visual-Review Sprint 9.16. |
 | B-9.16-4 🟢 (info) | axe-DevTools-Lighthouse-A11y-Score nicht formal verifiziert für `/szenarien` (Cowork-Tooling-Limitation, kein funktionaler Befund). Stichprobe via Tab-Reihenfolge + aria-label hat keinen Verstoss ergeben. |
 | B-9.16-5 🟡 | Sprint 9.16a Hotfix-Anlass: Audit-Befund zeigt deutsche Umlaute in Backend-Docstrings (`engine.py`, `engine_tasks.py`, `room_types.py`, `global_config.py`, `manual_setpoint_event.py`, Migrations 0003b/0004/0011) durchgehend als ASCII-Replacement (`ue`/`ae`/`oe`) gepflegt — Repo-Konvention, nicht User-sichtbar. Einheitlichkeit-Audit oder ASCII-only-Policy für Backend-Docstrings in einem Hygiene-Sprint klären; bis dahin: User-sichtbare DB-Strings müssen UTF-8 sein (CLAUDE.md-Lesson kandidat). |
+| B-9.17-1 🟢 | Self-Service-Passwort-Reset via E-Mail. Heute kann nur Admin Passwoerter zuruecksetzen (AE-50 AE-7). Sobald E-Mail-Infrastruktur entschieden ist (SMTP-Setup oder Provider), eigener Sprint: `/auth/forgot-password` → Token → `/auth/reset-password?token=…`. Bis dahin: Admin-Reset reicht fuer den Single-Mandant-Betrieb. |
+| B-9.17-2 🟢 (info) | Audit-UI im Frontend fuer `config_audit` und `business_audit`. Heute sind beide Tabellen reine Backend-Tabellen — kein UI-Endpoint, keine Anzeige. Separater Sprint nach erstem Hotelier-Feedback („was passierte am Mittwoch um 14:00?"). Spaeter ggf. mit Filter nach `user_id` / `target_type` / Zeitraum. |
 
 ### 6.3 — Operative Aufgaben
 

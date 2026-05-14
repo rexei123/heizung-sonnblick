@@ -655,6 +655,42 @@ spätere gRPC-Anbindung (Backlog B-9.10c-1: Codec-Bootstrap-Skript), aber
 - AE-48 in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
 - `backend/src/heizung/services/downlink_adapter.py` (bestehender Pfad)
 
+### 5.29 passlib + bcrypt: unmaintained Wrapper bricht aktuelle Backend-Lib (Sprint 9.17 Lesson)
+
+**Befund 2026-05-14 (Sprint 9.17 T12):**
+
+`passlib 1.7.4` ist seit 2020-10 unmaintained und inkompatibel mit
+`bcrypt >= 4.1`. Beim ersten `hash_password()`-Call läuft passlib's
+`detect_wrap_bug`-Init durch, der probiert ein > 72-Byte-Secret zu
+hashen — bcrypt 4.1+ wirft dafür `ValueError` statt zu truncaten, und
+passlib's Backend-Mixin-Initialisierung crasht. Konsequenz wäre in
+Production: CLI `hash_password`, `change-password`, `reset-password`
+und User-`POST /users` werfen alle 500 beim ersten Aufruf.
+
+Detection: nur möglich, wenn ein Test tatsächlich `hash_password()`
+aufruft. Die 285 Bestandstests in Sprint 9.17 deckten den Pfad nicht
+ab (Bootstrap-Admin wurde mit Placeholder-Hash inserted), die neuen
+`test_api_auth`-Tests trafen ihn beim ersten Run.
+
+**Regel für Auth-/Crypto-Libraries:** Wrapper-Libraries wie passlib,
+die nicht aktiv gepflegt werden, sind ein verstecktes
+Stabilitätsrisiko (S5: defensive bei externen Quellen — eine
+unmaintained Library ist eine externe Quelle in Stasis). Wenn die
+darunterliegende Lib (`bcrypt`, `cryptography`) eine direkte und
+stabile API hat, ist der Direkt-Call die bessere Wahl: ein
+Abhängigkeits-Glied weniger, kein Bug-Backlog bei Upstream-Breaks.
+
+**Pflicht für Sprint-Briefe mit Auth-/Crypto-Stack:** Bei jeder
+Wrapper-Library erst prüfen, ob sie überhaupt aktiv ist. Letzter
+Release älter als 18 Monate → Risiko, Direkt-Call evaluieren.
+
+**Konkret in 9.17 umgesetzt:**
+- `backend/src/heizung/auth/password.py` ruft `bcrypt.hashpw` /
+  `bcrypt.checkpw` direkt.
+- `backend/pyproject.toml`: `passlib[bcrypt]>=1.7` ersetzt durch
+  `bcrypt>=4.2`.
+- AE-50 Punkt 1 dokumentiert die Brief-Abweichung.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

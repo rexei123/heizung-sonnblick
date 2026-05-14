@@ -5,7 +5,6 @@ export default function SaisonPage() {
     <EmptyState
       title="Saison"
       description="Sommer-/Winter-Umschaltung und Saisonzeiten."
-      plannedSprint="Sprint 9.16"
       icon="wb_sunny"
     />
   );

@@ -5,7 +5,6 @@ export default function ApiWebhooksPage() {
     <EmptyState
       title="API & Webhooks"
       description="API-Tokens, Webhook-Endpunkte und Integrationen."
-      plannedSprint="Sprint 9.20"
       icon="api"
     />
   );

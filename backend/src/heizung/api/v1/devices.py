@@ -24,10 +24,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
+from heizung.models.user import User
 from heizung.rules.constants import WINDOW_STALE_THRESHOLD_MIN
 from heizung.schemas.device import (
     DeviceAssignZoneRequest,
@@ -95,6 +97,7 @@ async def _ensure_zone_exists(session: AsyncSession, zone_id: int | None) -> Non
 )
 async def create_device(
     payload: DeviceCreate,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     await _ensure_zone_exists(session, payload.heating_zone_id)
@@ -158,6 +161,7 @@ async def get_device(
 async def update_device(
     payload: DeviceUpdate,
     device_id: int = DeviceIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     device = await _get_or_404(session, device_id)
@@ -188,6 +192,7 @@ async def update_device(
 async def assign_device_to_zone(
     payload: DeviceAssignZoneRequest,
     device_id: int = DeviceIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     device = await session.get(Device, device_id)
@@ -244,6 +249,7 @@ async def assign_device_to_zone(
 )
 async def detach_device_from_zone(
     device_id: int = DeviceIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     device = await session.get(Device, device_id)

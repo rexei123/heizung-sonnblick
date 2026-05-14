@@ -5,7 +5,6 @@ export default function TemperaturverlaufPage() {
     <EmptyState
       title="Temperaturverlauf"
       description="Historische Temperaturentwicklung pro Raum und Gerät."
-      plannedSprint="Sprint 9.19"
       icon="monitoring"
     />
   );

@@ -15,12 +15,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.enums import RoomStatus
 from heizung.models.event_log import EventLog
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.models.user import User
 from heizung.schemas.event_log import EventLogRead
 from heizung.schemas.room import RoomCreate, RoomRead, RoomUpdate
 
@@ -63,6 +65,7 @@ async def _ensure_room_type_exists(session: AsyncSession, room_type_id: int) -> 
 )
 async def create_room(
     payload: RoomCreate,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Room:
     await _ensure_room_type_exists(session, payload.room_type_id)
@@ -125,6 +128,7 @@ async def get_room(
 async def update_room(
     payload: RoomUpdate,
     room_id: int = RoomIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Room:
     room = await _get_or_404(session, room_id)
@@ -183,6 +187,7 @@ async def engine_trace(
 )
 async def delete_room(
     room_id: int = RoomIdPath,
+    _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
     room = await _get_or_404(session, room_id)

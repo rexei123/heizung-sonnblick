@@ -5,7 +5,6 @@ export default function GatewayPage() {
     <EmptyState
       title="Gateway"
       description="ChirpStack-Gateway-Konfiguration und Status."
-      plannedSprint="Sprint 9.21"
       icon="router"
     />
   );
