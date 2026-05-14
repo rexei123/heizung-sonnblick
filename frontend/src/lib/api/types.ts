@@ -311,6 +311,35 @@ export interface GlobalConfig {
   updated_at: string;
 }
 
+/**
+ * Globale RuleConfig — die 6 Engine-gelesenen Felder (Sprint 9.14, AE-46).
+ * Spiegelt `RuleConfigGlobalRead` aus
+ * `backend/src/heizung/schemas/rule_config.py`.
+ *
+ * Decimal-Werte kommen als String (volle Praezision aus Pydantic-Serialisierung).
+ * Time-Werte kommen als ISO-String `HH:MM:SS`.
+ */
+export interface RuleConfigGlobal {
+  id: number;
+  t_occupied: string | null;
+  t_vacant: string | null;
+  t_night: string | null;
+  night_start: string | null;
+  night_end: string | null;
+  preheat_minutes_before_checkin: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RuleConfigGlobalUpdate {
+  t_occupied?: string;
+  t_vacant?: string;
+  t_night?: string;
+  night_start?: string;
+  night_end?: string;
+  preheat_minutes_before_checkin?: number;
+}
+
 export interface GlobalConfigUpdate {
   hotel_name?: string;
   timezone?: string;

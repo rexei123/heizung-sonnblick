@@ -1028,6 +1028,67 @@ Nächster Sprint: 9.14 Temperaturen & Zeiten.
 
 ---
 
+## 2ad. Sprint 9.14 abgeschlossen (2026-05-14)
+
+Globale Temperaturen + Zeiten UI für die 6 Engine-gelesenen
+`rule_config`-Felder. AE-46 verankert die Settings-Editor-Architektur.
+
+**Backend:**
+- Migration `0011_config_audit` legt neue Tabelle an (id, ts,
+  user_id?, source, table_name, scope_qualifier?, column_name,
+  old_value JSONB, new_value JSONB, request_ip? INET).
+- Model `ConfigAudit`, Pydantic `ConfigAuditRead`, Service
+  `record_config_change` (atomar pro Feld in derselben Transaktion).
+- Neuer Router `api/v1/rule_configs.py`:
+  - `GET /api/v1/rule-configs/global` — 6 Engine-Felder + Timestamps
+  - `PATCH /api/v1/rule-configs/global` — partielle Updates mit
+    Range-Validierung (16–26 / 10–22 / 14–22 / 0–240) und
+    Nachtfenster-Konsistenz; pro geändertem Feld config_audit
+- Bestehender `PATCH /api/v1/global-config` um config_audit-Hook
+  erweitert (analog).
+- `# AUTH_TODO_9_17`-Marker an beiden PATCH-Handlern; bis NextAuth
+  steht, wird `request.client.host` als `request_ip` getrackt.
+
+**Frontend:**
+- Generische Komponente `components/inline-edit-cell.tsx` mit
+  Klick → Edit → Tab/Blur → Validate → Save (AE-3 Auto-Save-on-Blur).
+  `LabelCell` in `/devices` bleibt unangetastet.
+- shadcn Tabs (`components/ui/tabs.tsx`, neue Deps `zod` +
+  `@radix-ui/react-tabs`).
+- `/einstellungen/temperaturen-zeiten` mit 2 Tabs:
+  „Globale Zeiten" (night_start, night_end,
+  preheat_minutes_before_checkin) und „Globale Temperaturen"
+  (t_occupied, t_vacant, t_night).
+- Toast „Gespeichert — Engine übernimmt in ≤ 60 s" nach jedem Save;
+  Error-Toast bei Save-Fehler, Inline-Error bei Validate-Fehler.
+
+**Tests:**
+- 5 Backend-Tests (`tests/test_api_rule_configs.py`): Range,
+  config_audit pro Feld, Decimal-Praezision (kein Float),
+  Nachtfenster, Engine-liest-neuen-Wert-nach-PATCH.
+- 1 Playwright-Test (`tests/e2e/temperaturen-zeiten.spec.ts`):
+  Tabs, Inline-Edit, Out-of-Range-Block, Save → Toast → Reload-
+  Persistenz.
+
+**Out of Scope (Brief-konform):**
+- Klima-Tab gestrichen.
+- Sommermodus-Toggle (kommt mit 9.16).
+- Auth/NextAuth (kommt mit 9.17).
+- UI für config_audit-History.
+- Die 8 nicht-Engine-gelesenen rule_config-Felder bleiben in der
+  DB außerhalb der API-Domain (YAGNI / S6).
+
+**Tag-Vorschlag:** `v0.1.12-global-config-ui` (Strategie-Chat-
+Freigabe nach Cowork-Visual-Review abwarten).
+
+**Doku-Naming-Hinweis:** Brief sagte „STATUS.md §2v"; §2v ist
+bereits Sprint 9.11 Live-Test #2. Pragmatisch §2ad genommen
+(nächster freier Buchstabe nach §2ac).
+
+Nächster Sprint: 9.15 Profile (Wochentag-Schedule).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

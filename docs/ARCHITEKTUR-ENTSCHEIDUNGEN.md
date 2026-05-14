@@ -737,6 +737,30 @@ Freigabe.
 
 ---
 
+## AE-46 — Settings-Editor: typisiertes `rule_config`, `config_audit` als getrennte Domain, Auto-Save-on-Blur (Sprint 9.14, 2026-05-12)
+
+**Kontext:** Sprint 9.14 macht die globalen Engine-Parameter Hotelier-editierbar. Phase-0-Befund (`docs/features/2026-05-12-sprint9-14-phase0.md`) zeigte: `rule_config` ist heute typisierte Tabelle (kein EAV) mit 14 Spalten, von denen Engine 6 liest. `event_log` ist Hypertable für Engine-Decisions; eine `config_audit`-Tabelle existiert nicht; PATCH-Routen sind heute unauthentisiert (NextAuth folgt erst Sprint 9.17).
+
+**Entscheidungen:**
+
+1. **`rule_config` bleibt typisiert.** PATCH-Schema enthält explizit die 6 Engine-gelesenen Spalten (`t_occupied`, `t_vacant`, `t_night`, `night_start`, `night_end`, `preheat_minutes_before_checkin`). Keine EAV-Erweiterung. Die 8 nicht-gelesenen Spalten (`setback_minutes_after_checkout`, `long_vacant_*`, `guest_override_*`, `window_open_*`) bleiben in der DB, aber außerhalb der API-Domain bis ein Sprint sie aktiviert (YAGNI / S6).
+2. **`config_audit` als eigene Tabelle, getrennt von `event_log`.** Zwei orthogonale Audit-Zwecke (Engine-Decisions vs. Hotelier-Aktionen) mit unterschiedlichen Konsumenten und Lebensdauern. Aufbau: `(id, ts, user_id?, source, table_name, scope_qualifier?, column_name, old_value JSONB, new_value JSONB, request_ip?)` plus Index `(table_name, column_name, ts DESC)`. Schreibt pro geändertem Feld einen Eintrag, atomar mit dem UPDATE in derselben Transaktion (Service `record_config_change` in `heizung/services/config_audit_service.py`).
+3. **Auto-Save-on-Blur als Edit-Pattern.** Kein expliziter Save-Button. Klick auf Wert → Edit-Mode → Enter/Tab/Blur → Validate → Save. Zod-Validator clientseitig, Pydantic-Validator serverseitig. Generische Komponente `frontend/src/components/inline-edit-cell.tsx`. Vorbestehendes `LabelCell` in `/devices/page.tsx` bleibt unangetastet, weil dort eine Edit-Button-Interaktion bewusst gewählt wurde (Link-First-Verhalten der Bezeichnung).
+4. **Auth-Provisorium.** PATCH-Routen tragen Code-Marker `# AUTH_TODO_9_17` und loggen `request.client.host` als `request_ip` ins Audit. NextAuth-Integration wird in Sprint 9.17 nachgezogen — bestehende Markierung dient als Such-Anker.
+5. **Sommermodus + 8 ungenutzte Spalten Out-of-Scope.** Sommermodus-Toggle kommt mit 9.16 (Saison-UI). Klima-Tab aus SPRINT-PLAN.md gestrichen.
+
+**Konsequenzen:**
+
+- Engine hat keinen Cache (Phase-0-Befund C2) → Änderung wirkt beim nächsten Beat-Tick (≤ 60 s). Akzeptanzkriterium aus 9.14 hält.
+- Audit-Eintrag landet auch dann in `config_audit`, wenn der PATCH-Wert identisch zum Vorwert ist — wir filtern Idempotenz vor dem Audit ab (`if old_value == new_value: continue`), damit kein Lärm im Trail entsteht.
+- `config_audit` ist Sprint-9.14-Domain. Read-API (History-Anzeige im Frontend) ist Out-of-Scope; wenn nötig, kommt sie in einem späteren Sprint.
+- Für Sprint 9.15 (Profile, Wochentag-Schedule) und 9.16 (Szenarien/Saison) gilt dasselbe Pattern: weiterhin typisierte Spalten, `config_audit`-Hook im PATCH-Handler, InlineEditCell als Bauteil.
+
+**Status:** akzeptiert
+**Querverweise:** AE-28 (`global_config` Singleton), AE-31 (Engine als 6-Layer-Pipeline), AE-43 (Geräte-Lifecycle).
+
+---
+
 # AE-47 Window-Detection: Hardware-First mit passiver Backend-Diagnose
 
 **Datum:** 2026-05-09
