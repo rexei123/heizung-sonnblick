@@ -47,8 +47,8 @@ def upgrade() -> None:
                               default_parameters, created_at, updated_at)
         VALUES ('summer_mode',
                 'Sommermodus',
-                'Heizthermostate funktionslos — Klimaanlage uebernimmt. '
-                'Alle Raeume auf Frostschutz.',
+                'Heizthermostate funktionslos — Klimaanlage übernimmt. '
+                'Alle Räume auf Frostschutz.',
                 true, false, NULL, NULL, now(), now())
         ON CONFLICT (code) DO NOTHING
         """
