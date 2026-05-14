@@ -312,6 +312,52 @@ export interface GlobalConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Auth + User (Sprint 9.17, AE-50)
+// ---------------------------------------------------------------------------
+
+export type UserRole = "admin" | "mitarbeiter";
+
+export interface User {
+  id: number;
+  email: string;
+  role: UserRole;
+  is_active: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  user: User;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export interface UserCreate {
+  email: string;
+  role: UserRole;
+  initial_password: string;
+}
+
+export interface UserUpdate {
+  role?: UserRole;
+  is_active?: boolean;
+}
+
+export interface UserPasswordReset {
+  new_password: string;
+}
+
+// ---------------------------------------------------------------------------
 // Szenarien (Sprint 9.16, AE-48)
 // ---------------------------------------------------------------------------
 

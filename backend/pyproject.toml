@@ -17,6 +17,10 @@ dependencies = [
     "python-json-logger>=2.0",
     "aiomqtt>=2.3",
     "greenlet>=3.0",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.2",
+    "python-multipart>=0.0.9",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

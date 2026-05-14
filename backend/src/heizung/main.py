@@ -9,10 +9,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import DBAPIError
 
 from heizung import __version__
 from heizung.api.v1 import router as v1_router
+from heizung.auth.rate_limit import limiter
 from heizung.config import get_settings
 from heizung.services.mqtt_subscriber import start_subscriber, stop_subscriber
 
@@ -46,6 +49,10 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+# Sprint 9.17 (AE-50 / R3): slowapi-Rate-Limit auf /auth/login.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
 app.include_router(v1_router)
 
 

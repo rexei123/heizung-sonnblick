@@ -78,6 +78,23 @@ class OccupancySource(enum.StrEnum):
     PMS = "pms"
 
 
+class UserRole(enum.StrEnum):
+    """Benutzer-Rolle (Sprint 9.17, AE-50).
+
+    Zwei Rollen-Modell:
+      - ``admin``       — kann alles (Stammdaten, Konfiguration,
+                          User-Verwaltung).
+      - ``mitarbeiter`` — kann Belegungen + Manual-Overrides setzen,
+                          lesen alles ausser User-Verwaltung.
+
+    Owner / Hotelier / Techniker / Reception aus dem alten
+    SPRINT-PLAN sind bewusst nicht abgebildet (YAGNI, AE-50 AE-2).
+    """
+
+    ADMIN = "admin"
+    MITARBEITER = "mitarbeiter"
+
+
 class RuleConfigScope(enum.StrEnum):
     """Gültigkeitsbereich einer Regelkonfiguration.
 

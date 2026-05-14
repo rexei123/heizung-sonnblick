@@ -391,29 +391,44 @@ Aktivierung der bereits angelegten `scenario`/`scenario_assignment` plus
 
 ---
 
-# SPRINT 9.17 — NextAuth + User-UI
+# SPRINT 9.17 — Auth + 2-Rollen-Modell + Audit (FastAPI-native)
 
 **Priorität:** 🔴 (vor Go-Live)
-**Geschätzte Dauer:** 5-7 h
-**Autonomiestufe:** 1 (Auth-Flow)
-**Voraussetzung:** 9.13 (Sidebar)
-**Tag nach Abschluss:** `v0.1.15-auth`
+**Geschätzte Dauer:** 10-12 h
+**Autonomiestufe:** 1 (Auth-Flow + DB-Schema + Migrations)
+**Voraussetzung:** 9.16 (Szenarien-Engine), Phase-0-Befund 2026-05-14
+**Tag nach Abschluss:** `v0.1.14-auth`
 
 ## Ziel
 
-NextAuth + rollenbasierte Permissions (Owner / Admin / Hotelier /
-Techniker / Reception). Multi-Mandanten-fähig (Sprint 11 Vorbereitung).
+Authentifizierung produktiv. FastAPI-native JWT-Auth in HttpOnly-
+Cookie (kein NextAuth). Zwei Rollen: `admin` (alles) und
+`mitarbeiter` (lesen + Belegungen + Manual-Overrides). Feature-Flag
+`AUTH_ENABLED` zur kontrollierten Aktivierung. `business_audit`-
+Domain für operative Aktionen, `config_audit.user_id` wird befüllt.
 
 ## Tasks
 
-- T1: NextAuth-Setup mit Credentials-Provider, JWT
-- T2: User-Tabelle, Role-Tabelle, User-Hotel-Pivot
-- T3: Middleware für Route-Protection in Next.js
-- T4: API-Endpoint-Schutz mit Role-Check (FastAPI Dependency)
-- T5: `/einstellungen/benutzer` Settings-Layout mit User-Liste +
-  Add/Remove/Role-Edit
-- T6: Login-Page mit Hotel-Auswahl (für Multi-Tenant)
-- T7: Tests: Role-Matrix-Tests (5 Rollen × 5 Routen)
+- T0: SPRINT-PLAN.md-Korrektur (dieser Eintrag)
+- T1: Endpoint-Inventar (Pflicht-Stop)
+- T2: Migration `0014_auth_and_business_audit` — `user`-Tabelle,
+  `business_audit`, `config_audit`-FK, Bootstrap-Admin via ENV
+  (Pflicht-Stop nach Auf-Ab-Auf)
+- T3: Auth-Infrastruktur (JWT, bcrypt, Dependencies,
+  Feature-Flag-Middleware, CLI für Password-Hash)
+- T4: Auth-Endpoints `/api/v1/auth/{login,logout,me,change-password}`
+  mit Rate-Limit auf login
+- T5: User-Verwaltung-Endpoints `/api/v1/users/*` (admin-only,
+  Bricked-System-Schutz)
+- T6: Bestehende Endpoints absichern mit `require_admin` /
+  `require_mitarbeiter` (Pflicht-Stop nach Grep-Verifikation)
+- T7: `business_audit`-Hooks in Belegungs- und Override-Endpoints
+- T8: Frontend AuthContext + Inaktivitäts-Logout (15 Min, ohne Modal)
+- T9: Frontend `/login`, `/auth/change-password`,
+  `/einstellungen/benutzer`
+- T10: Sidebar-Stub-Cleanup (Sprint-Nummer-Badges entfernen)
+- T11: Doku — ADR AE-50, STATUS §2af, Brief-Kopie + Inventar-Anhang
+- T12: Tests Backend + Frontend Playwright
 
 ---
 

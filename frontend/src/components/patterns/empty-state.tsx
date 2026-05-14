@@ -9,12 +9,23 @@ import Link from "next/link";
 export interface EmptyStateProps {
   title: string;
   description: string;
-  plannedSprint: string;
+  /**
+   * Sprint 9.17: ``plannedSprint`` ist optional. Wenn weggelassen oder
+   * leer, zeigt das Badge „In Vorbereitung" — kein Sprint-Nummer-Drift
+   * mehr in produktiven Stubs.
+   */
+  plannedSprint?: string;
   /** Material-Symbol-Name (z.B. "schedule"). */
   icon: string;
 }
 
-export function EmptyState({ title, description, plannedSprint, icon }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  description,
+  plannedSprint,
+  icon,
+}: EmptyStateProps) {
+  const badgeText = plannedSprint ? `Kommt in ${plannedSprint}` : "In Vorbereitung";
   return (
     <div className="p-6 max-w-content mx-auto">
       <div className="flex flex-col items-center text-center py-16">
@@ -28,7 +39,7 @@ export function EmptyState({ title, description, plannedSprint, icon }: EmptySta
         <h1 className="text-2xl font-medium text-text-primary">{title}</h1>
         <p className="mt-2 text-sm text-text-secondary max-w-md">{description}</p>
         <span className="mt-6 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary-soft text-primary text-xs font-medium">
-          Kommt in {plannedSprint}
+          {badgeText}
         </span>
         <Link
           href={"/" as Route}

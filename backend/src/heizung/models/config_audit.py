@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Index, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,8 +26,9 @@ class ConfigAudit(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    # NextAuth-Vorbereitung (Sprint 9.17): nullable solange keine Auth aktiv ist.
-    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Sprint 9.17 (AE-50): FK auf user.id, nullable solange
+    # AUTH_ENABLED=false. Wenn Feature-Flag scharf: handelnde Person.
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("user.id"), nullable=True)
 
     # Aktions-Quelle. Heute "api" fuer PATCH-Routen. Spaeter z.B. "seed" / "cli".
     source: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -48,8 +49,9 @@ class ConfigAudit(Base):
         JSONB, nullable=False
     )
 
-    # AUTH_TODO_9_17: Solange keine Auth aktiv ist, identifiziert request_ip
-    # den Hotelier-Client (Best-Effort, keine starke Garantie).
+    # Bei AUTH_ENABLED=false identifiziert request_ip den Client
+    # (Best-Effort). Sobald Feature-Flag scharf, ergaenzt user_id die
+    # Person.
     request_ip: Mapped[str | None] = mapped_column(INET, nullable=True)
 
     __table_args__ = (

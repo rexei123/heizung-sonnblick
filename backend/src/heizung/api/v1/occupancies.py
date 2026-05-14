@@ -17,14 +17,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_mitarbeiter
 from heizung.db import get_session
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
+from heizung.models.user import User
 from heizung.schemas.occupancy import OccupancyCancel, OccupancyCreate, OccupancyRead
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import has_overlap, sync_room_status
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
@@ -67,6 +70,8 @@ async def _ensure_room_exists(session: AsyncSession, room_id: int) -> None:
 )
 async def create_occupancy(
     payload: OccupancyCreate,
+    request: Request,
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Occupancy:
     await _ensure_room_exists(session, payload.room_id)
@@ -84,6 +89,20 @@ async def create_occupancy(
     session.add(occ)
     await session.flush()  # ID generieren
     await sync_room_status(session, payload.room_id)
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="OCCUPANCY_CREATE",
+        target_type="room",
+        target_id=payload.room_id,
+        old_value=None,
+        new_value={
+            "occupancy_id": occ.id,
+            "check_in": payload.check_in,
+            "check_out": payload.check_out,
+        },
+        request_ip=request.client.host if request.client else None,
+    )
     await session.commit()
     await session.refresh(occ)
     # Sprint 9.4 Trigger: Engine-Re-Eval anstossen, sobald Belegung feststeht.
@@ -147,7 +166,9 @@ async def get_occupancy(
 )
 async def cancel_occupancy(
     payload: OccupancyCancel,
+    request: Request,
     occupancy_id: int = OccupancyIdPath,
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Occupancy:
     if not payload.cancel:
@@ -166,6 +187,20 @@ async def cancel_occupancy(
     occ.is_active = False
     occ.cancelled_at = datetime.now(tz=UTC)
     await sync_room_status(session, occ.room_id)
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="OCCUPANCY_CANCEL",
+        target_type="room",
+        target_id=occ.room_id,
+        old_value={"occupancy_id": occ.id, "is_active": True},
+        new_value={
+            "occupancy_id": occ.id,
+            "is_active": False,
+            "cancelled_at": occ.cancelled_at,
+        },
+        request_ip=request.client.host if request.client else None,
+    )
     await session.commit()
     await session.refresh(occ)
     # Sprint 9.4 Trigger: bei Storno auch re-evaluieren (Setpoint geht zurueck).

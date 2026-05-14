@@ -22,6 +22,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useAuth } from "@/contexts/auth-context";
 
 interface NavItem {
   href: Route;
@@ -163,9 +164,40 @@ function SidebarBrand(): ReactNode {
 }
 
 function SidebarFooter(): ReactNode {
+  const { user, logout } = useAuth();
   return (
-    <div className="p-3 text-xs text-text-tertiary border-t border-border shrink-0">
-      v0.1.x · Test-Stage
+    <div className="p-3 text-xs text-text-tertiary border-t border-border shrink-0 space-y-2">
+      {user ? (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div
+              className="text-text-primary truncate"
+              title={user.email}
+            >
+              {user.email}
+            </div>
+            <div className="text-text-tertiary">
+              {user.role === "admin" ? "Administrator" : "Mitarbeiter"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            aria-label="Abmelden"
+            title="Abmelden"
+            className="text-text-secondary hover:text-text-primary"
+          >
+            <span
+              className="material-symbols-outlined"
+              aria-hidden
+              style={{ fontSize: 20 }}
+            >
+              logout
+            </span>
+          </button>
+        </div>
+      ) : null}
+      <div>v0.1.x · Test-Stage</div>
     </div>
   );
 }

@@ -16,8 +16,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.global_config import GlobalConfig
+from heizung.models.user import User
 from heizung.schemas.global_config import GlobalConfigRead, GlobalConfigUpdate
 from heizung.services.config_audit_service import record_config_change
 
@@ -51,17 +53,15 @@ async def get_global_config(
     return await _get_or_create_singleton(session)
 
 
-# AUTH_TODO_9_17: NextAuth-Schutz fuer PATCH-Handler einfuegen, sobald
-# Sprint 9.17 NextAuth bereitstellt. Bis dahin ist der Endpoint offen
-# und wird per ``request_ip`` in ``config_audit`` getrackt.
 @router.patch(
     "",
     response_model=GlobalConfigRead,
-    summary="Hotel-globale Konfiguration partiell aktualisieren",
+    summary="Hotel-globale Konfiguration partiell aktualisieren (admin)",
 )
 async def update_global_config(
     payload: GlobalConfigUpdate,
     request: Request,
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> GlobalConfig:
     updates = payload.model_dump(exclude_unset=True)
@@ -87,6 +87,7 @@ async def update_global_config(
             column_name=field,
             old_value=old_value,
             new_value=new_value,
+            user_id=admin.id,
             request_ip=request_ip,
         )
 

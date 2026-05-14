@@ -1,12 +1,15 @@
-"""Manual-Override-API (Sprint 9.9 T4).
+"""Manual-Override-API (Sprint 9.9 T4; Sprint 9.17 auth-secured).
 
 REST-Schicht ueber ``override_service``. Bewusst zwei Pfade:
 
 - ``GET/POST  /api/v1/rooms/{room_id}/overrides``  (raumbezogen, Listen + Anlage)
 - ``DELETE    /api/v1/overrides/{override_id}``    (id-basiert, Revoke)
 
-Auth: vorerst offen. ``X-User-Email``-Header wird optional als
-``created_by`` durchgereicht (Audit-Vorbereitung; NextAuth in Sprint 11+).
+Auth (Sprint 9.17, AE-50 / AE-8): ``require_mitarbeiter``.
+``X-User-Email``-Header aus 9.9-Vorbereitung ist entfernt — der
+authentifizierte User-Account ist die Quelle der Wahrheit. ``created_by``
+in ``manual_override`` wird mit ``user.email`` gefuellt; ``business_audit``
+trackt die operative Aktion separat.
 """
 
 from __future__ import annotations
@@ -14,20 +17,23 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_mitarbeiter
 from heizung.db import get_session
 from heizung.models.enums import OverrideSource
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
+from heizung.models.user import User
 from heizung.schemas.manual_override import (
     ManualOverrideCreate,
     ManualOverrideResponse,
     ManualOverrideRevoke,
 )
 from heizung.services import override_service
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import next_active_checkout
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
@@ -86,8 +92,9 @@ async def list_room_overrides(
 )
 async def create_room_override(
     payload: ManualOverrideCreate,
+    request: Request,
     room_id: int = RoomIdPath,
-    x_user_email: str | None = Header(default=None, alias="X-User-Email"),  # noqa: B008
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ManualOverride:
     await _ensure_room_exists(session, room_id)
@@ -129,7 +136,7 @@ async def create_room_override(
             source=source,
             expires_at=expires_at,
             reason=payload.reason,
-            created_by=x_user_email,
+            created_by=user.email,
         )
     except ValueError as e:
         raise HTTPException(
@@ -137,6 +144,21 @@ async def create_room_override(
             detail=str(e),
         ) from e
 
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="MANUAL_OVERRIDE_SET",
+        target_type="room",
+        target_id=room_id,
+        old_value=None,
+        new_value={
+            "override_id": override.id,
+            "setpoint": payload.setpoint,
+            "source": source.value,
+            "expires_at": expires_at,
+        },
+        request_ip=request.client.host if request.client else None,
+    )
     await session.commit()
     await session.refresh(override)
     # Sprint 9.9a Hotfix A1: Engine-Re-Eval anstossen, damit Layer 3 sofort
@@ -151,8 +173,10 @@ async def create_room_override(
     summary="Override revoken (kein Hard-Delete)",
 )
 async def revoke_override(
+    request: Request,
     payload: ManualOverrideRevoke | None = None,
     override_id: int = OverrideIdPath,
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ManualOverride:
     existing = await session.get(ManualOverride, override_id)
@@ -176,6 +200,16 @@ async def revoke_override(
             detail=str(e),
         ) from e
 
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="MANUAL_OVERRIDE_CLEAR",
+        target_type="room",
+        target_id=override.room_id,
+        old_value={"override_id": override.id, "is_active": True},
+        new_value={"override_id": override.id, "revoked_reason": revoked_reason},
+        request_ip=request.client.host if request.client else None,
+    )
     await session.commit()
     await session.refresh(override)
     # Sprint 9.9a Hotfix A1: Engine-Re-Eval nach Revoke - Setpoint faellt

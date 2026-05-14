@@ -7,10 +7,7 @@
 Heute nur ``scope=global``. ``room_type`` / ``room`` liefern 400 mit
 Hinweis auf Sprint 9.16b. Jede (De-)Aktivierung erzeugt einen
 ``config_audit``-Eintrag, atomar mit dem UPDATE in derselben Transaktion.
-
-AUTH_TODO_9_17: Heute kein Auth-Schutz. NextAuth-Integration ist
-Sprint 9.17 — bis dahin loggt der Handler ``request.client.host`` als
-``request_ip``.
+Seit Sprint 9.17 ist der Handler admin-only.
 """
 
 from __future__ import annotations
@@ -22,10 +19,12 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.models.enums import ScenarioScope
 from heizung.models.scenario import Scenario
 from heizung.models.scenario_assignment import ScenarioAssignment
+from heizung.models.user import User
 from heizung.schemas.scenario import ScenarioRead
 from heizung.services.config_audit_service import record_config_change
 
@@ -120,6 +119,7 @@ async def _set_active(
     *,
     code: str,
     request: Request,
+    user_id: int,
     new_active: bool,
 ) -> ScenarioAssignment:
     scen = await _get_scenario_or_404(session, code)
@@ -149,6 +149,7 @@ async def _set_active(
         column_name=AUDIT_COLUMN,
         old_value=_audit_payload(code, "global", old_active),
         new_value=_audit_payload(code, "global", new_active),
+        user_id=user_id,
         request_ip=request_ip,
     )
     await session.commit()
@@ -167,22 +168,20 @@ def _reject_non_global(scope: str) -> None:
         )
 
 
-# AUTH_TODO_9_17: NextAuth-Schutz fuer beide POST-Handler einfuegen,
-# sobald Sprint 9.17 NextAuth bereitstellt. Bis dahin ist der Endpoint
-# offen und wird per ``request_ip`` in ``config_audit`` getrackt.
 @router.post(
     "/{code}/activate",
     response_model=ScenarioListItem,
-    summary="Szenario global aktivieren (idempotent)",
+    summary="Szenario global aktivieren (admin, idempotent)",
 )
 async def activate_scenario(
     payload: ScenarioToggleRequest,
     request: Request,
     code: str = Path(..., min_length=1, max_length=50),
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ScenarioListItem:
     _reject_non_global(payload.scope)
-    asgn = await _set_active(session, code=code, request=request, new_active=True)
+    asgn = await _set_active(session, code=code, request=request, user_id=admin.id, new_active=True)
     scen = await _get_scenario_or_404(session, code)
     return ScenarioListItem.model_validate(
         {
@@ -201,20 +200,22 @@ async def activate_scenario(
     )
 
 
-# AUTH_TODO_9_17: siehe activate_scenario.
 @router.post(
     "/{code}/deactivate",
     response_model=ScenarioListItem,
-    summary="Szenario global deaktivieren (idempotent)",
+    summary="Szenario global deaktivieren (admin, idempotent)",
 )
 async def deactivate_scenario(
     payload: ScenarioToggleRequest,
     request: Request,
     code: str = Path(..., min_length=1, max_length=50),
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ScenarioListItem:
     _reject_non_global(payload.scope)
-    asgn = await _set_active(session, code=code, request=request, new_active=False)
+    asgn = await _set_active(
+        session, code=code, request=request, user_id=admin.id, new_active=False
+    )
     scen = await _get_scenario_or_404(session, code)
     return ScenarioListItem.model_validate(
         {

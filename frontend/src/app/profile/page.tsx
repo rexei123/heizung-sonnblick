@@ -5,7 +5,6 @@ export default function ProfilePage() {
     <EmptyState
       title="Profile"
       description="Tag-, Nacht- und Wochenend-Heizprofile für Räume."
-      plannedSprint="Sprint 9.15"
       icon="assignment_ind"
     />
   );

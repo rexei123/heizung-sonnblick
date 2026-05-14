@@ -1058,3 +1058,127 @@ weiter vereinheitlichen).
 - AE-31 (historisch), AE-27 (Szenarien-Konzept), AE-37
   (Hard-Clamp-Reason), AE-32 (Hysterese), AE-46 (config_audit)
 - CLAUDE.md §5.23 (Engine-Trace-Konsistenz), §5.27 (Vicki-Open-Window-Default)
+
+---
+
+# AE-50 — FastAPI-native Auth + 2-Rollen-Modell + business_audit (Sprint 9.17)
+
+**Datum:** 2026-05-14
+**Status:** Akzeptiert
+**Bezug:** Sprint 9.17, AE-46 (config_audit), AE-29 (manual_override),
+SPRINT-PLAN.md (alter Eintrag „NextAuth + 5 Rollen" verworfen)
+
+## Kontext
+
+Vor produktiver Inbetriebnahme braucht das System Auth. SPRINT-PLAN-
+Eintrag hatte NextAuth + 5 Rollen (Owner/Admin/Hotelier/Techniker/
+Reception) für Multi-Mandanten-Vorbereitung. Strategie-Chat-Refresh
+2026-05-14 hat das auf einen schlankeren Schnitt umgesteuert: heute ist
+Hotel Sonnblick Single-Mandant (AE-46 / S6 YAGNI), 5 Rollen sind
+ueberzogen für einen Hotelier-Betrieb mit faktisch zwei Tätigkeits-
+profilen (alles bedienen vs. taegliche Belegungen + Overrides).
+
+NextAuth bringt Boilerplate (eigene API-Routes unter ``/api/auth``,
+DB-Adapter, Session-Tabellen) für einen Use-Case, den FastAPI nativ
+mit weniger Code abbildet. Plus: Backend braucht die User-Tabelle
+ohnehin für ``config_audit.user_id``/``business_audit.user_id`` —
+NextAuth doppeltes Datenmodell waere unnoetiger Komplexitaet (S6).
+
+## Entscheidung
+
+1. **JWT in HttpOnly-Cookie, FastAPI-native.** ``python-jose`` für
+   Signing (HS256, 12h-Lifetime), direktes ``bcrypt`` für Password-
+   Hashes (work-factor 12), ``slowapi`` für Login-Rate-Limit
+   (5/Minute pro IP). *Abweichung gegenüber initialem Brief: dort
+   stand ``passlib[bcrypt]``. In T12 fiel auf, dass passlib 1.7.4
+   (letzter Release 2020-10) inkompatibel mit ``bcrypt>=4.1`` ist —
+   ``detect_wrap_bug``-Init-Test triggert ValueError und blockiert
+   jeden ``hash_password()``-Call. Umstieg auf direktes ``bcrypt``
+   ist API-leichter und nicht von einer unmaintained Library
+   abhängig. Siehe CLAUDE.md §5.29.*
+2. **Zwei Rollen:** ``admin`` (alles) und ``mitarbeiter`` (Belegungen
+   + Manual-Overrides + eigenes Passwort). Erweiterung auf weitere
+   Rollen ist additiv, bricht keine Migration.
+3. **Audit-Domain-Trennung.** ``config_audit`` (Sprint 9.14 AE-46)
+   für alle Konfigurations- und Stammdaten-Mutationen — globale
+   Settings, ``rule_configs``, ``scenarios``, ``rooms``,
+   ``room_types``, ``heating_zones``, ``devices``, ``users``. Neue
+   ``business_audit``-Tabelle für operative Mitarbeiter-Aktionen —
+   Belegungs-CRUD, Manual-Override-Set/Clear, Password-Change,
+   Admin-Reset.
+4. **Hard-Cut-Inaktivitäts-Logout 15 Min ohne Warn-Modal.** Frontend-
+   Hook trackt ``keydown`` / ``click`` / ``touchstart`` (KEIN
+   ``mousemove`` / ``visibilitychange``), BroadcastChannel
+   ``heizung-auth`` synchronisiert Aktivitaet ueber Multi-Tabs.
+   Server-JWT laeuft unabhaengig nach 12h ab.
+5. **Bootstrap-Admin via ENV.** Migration 0014 liest
+   ``INITIAL_ADMIN_EMAIL`` und ``INITIAL_ADMIN_PASSWORD_HASH`` (bcrypt-
+   Hash, erzeugt via ``python -m heizung.cli.hash_password``).
+   Bei leerer ``user``-Tabelle wird Initial-Admin angelegt mit
+   ``must_change_password=true``.
+6. **Feature-Flag ``AUTH_ENABLED`` (Default ``false``).** Sprint
+   mergt mit Flag aus; nach manuellem Login-Smoke-Test gegen
+   Bootstrap-Admin auf heizung-test wird Flag auf ``true`` gekippt
+   (RUNBOOK-Eintrag). Bei ``false``: alle Endpoints offen wie heute,
+   ``get_current_user`` faellt auf den ersten aktiven Admin als
+   System-User zurück; ``config_audit``/``business_audit`` tragen
+   diese ``user_id`` ein. Bei ``true``: ohne gueltiges JWT-Cookie
+   401 auf geschuetzten Routen.
+7. **Passwort-Reset ausschliesslich durch Admin.** Kein Self-Service
+   per E-Mail in 9.17 (E-Mail-Infrastruktur ist eigener Sprint,
+   siehe B-9.17-1). Admin setzt neues Passwort auf
+   ``/einstellungen/benutzer``, User wird beim naechsten Login
+   zum Wechsel gezwungen.
+8. **``X-User-Email``-Header in ``overrides.py`` vollstaendig
+   entfernt.** Sprint-9.9-Vorbereitung ist abgeloest durch
+   ``require_mitarbeiter``-Dependency; ``user.email`` wird als
+   ``created_by`` in ``manual_override`` gefuehrt.
+
+## Konsequenzen
+
+- **`AUTH_TODO_9_17`-Marker sind weg.** Sprint 9.14/9.16 haben sie
+  als Such-Anker gesetzt — alle 7 Treffer wurden in Sprint 9.17 durch
+  ``Depends(require_admin)`` / ``Depends(require_mitarbeiter)``
+  ersetzt. ``config_audit.user_id`` ist FK auf ``user.id``, nullable
+  solange Bootstrap-Admin id=1 zugleich System-User-Fallback ist.
+- **Feature-Flag-Pattern ist neu im Stack.** Kandidat fuer
+  Wiederverwendung in zukuenftigen Cutover-kritischen Sprints
+  (z.B. neue Engine-Layer, die parallel laufen sollen). Lesson:
+  Flag-Default ist ``false`` bei Merge, Aktivierung ist explizit
+  und reversibel.
+- **2-Rollen-Modell ist additiv erweiterbar.** Migration ``role``
+  als ``VARCHAR(32)`` plus CHECK-Constraint — neue Rolle braucht
+  CHECK-Anpassung + neuen Enum-Wert in ``UserRole``, keine
+  Schema-Aenderung.
+- **Multi-Mandant bleibt explizit Out-of-Scope** (S6). Wenn ein
+  zweites Hotel kommt: ``user_hotel``-Pivot, ``hotel_id``-FK auf
+  allen Stammdaten-Tabellen. Sauber nachziehbar.
+- **Frontend-Boilerplate fuer Auth lebt nur im Heizung-Repo.**
+  ``contexts/auth-context.tsx``, ``hooks/use-inactivity-logout.ts``,
+  ``/login``, ``/auth/change-password``, ``/einstellungen/benutzer``
+  — alle ohne externe Auth-Library. Wenn die Bedarfslage in
+  Sprint 11+ doch in Richtung NextAuth schwenkt, ist der Migrations-
+  Aufwand isoliert.
+
+## Alternativen verworfen
+
+- **NextAuth + Credentials-Provider:** Doppeltes Datenmodell (NextAuth
+  Session-Tabellen plus eigene User-Tabelle fuer Audit), Boilerplate
+  fuer ``/api/auth/*``-Routes, fremde Auth-Logik im Stack. Kein
+  Mehrwert bei Single-Mandant.
+- **5-Rollen-Modell (Owner/Admin/Hotelier/Techniker/Reception):**
+  Mitarbeiter-Bedarf des Hotels Sonnblick deckt sich nicht damit.
+  Differenzierung waere kuenstlich. Erweiterung bleibt additiv.
+- **OAuth-Provider / Magic-Link / 2FA:** Operativ ueberzogen fuer
+  zweistelligen User-Kreis. 2FA als Backlog wenn Phishing-Bedarf
+  steigt.
+
+## Referenzen
+
+- `backend/src/heizung/auth/` (jwt, password, dependencies, rate_limit)
+- `backend/src/heizung/api/v1/{auth,users}.py`
+- `backend/alembic/versions/0014_auth_and_business_audit.py`
+- `frontend/src/contexts/auth-context.tsx`,
+  `frontend/src/hooks/use-inactivity-logout.ts`
+- AE-46 (config_audit als Pattern), AE-49 (Engine-Pipeline)
+- B-9.17-1 (E-Mail-Self-Service-Reset), B-9.17-2 (Audit-UI)
