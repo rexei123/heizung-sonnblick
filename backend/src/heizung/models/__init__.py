@@ -4,6 +4,7 @@ Alle Modelle werden hier re-exportiert, damit Alembic sie über
 ``import heizung.models`` in einer Zeile aufsammeln kann.
 """
 
+from heizung.models.config_audit import ConfigAudit
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import (
@@ -36,6 +37,7 @@ from heizung.models.sensor_reading import SensorReading
 
 __all__ = [
     "CommandReason",
+    "ConfigAudit",
     "ControlCommand",
     "Device",
     "DeviceKind",
