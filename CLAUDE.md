@@ -776,6 +776,78 @@ Heute verlassen wir uns auf Browser-Cookie-Cleanup; ein gestohlener
 JWT-Token bleibt 12h gültig. Für Single-Mandant-Hotelbetrieb
 akzeptabel, für Multi-Mandant nicht. B-9.17b-1 (info).
 
+### 5.32 Akzeptierter Container-Healthcheck-Drift ohne Engine-Auswirkung (Sprint 10 T3 Lesson)
+
+Nicht jeder unhealthy-State im Container-Stack ist ein Stabilitätsrisiko.
+Der celery_beat-Container auf heizung-test ist seit Wochen unhealthy
+(435 FailingStreak im Snapshot 2026-05-15), aber Engine-Eval läuft
+ungebremst.
+
+**Wurzel des Drifts:** Das geteilte API-Image `heizung-api` bringt im
+Dockerfile einen HEALTHCHECK mit
+(`curl -f http://localhost:8000/health || exit 1`). Der greift für den
+`api`-Container, weil dort uvicorn auf Port 8000 horcht.
+`celery_worker` überschreibt im Compose-File diesen HEALTHCHECK auf
+`celery -A heizung.celery_app inspect ping -t 5` → healthy.
+`celery_beat` hat KEINE Compose-Override → erbt den Dockerfile-HEALTHCHECK
+→ curl gegen 8000 schlägt fehl, weil beat keinen uvicorn fährt → unhealthy.
+
+**Warum trotzdem akzeptiert:**
+
+1. **Kein depends_on auf celery_beat-Health.** Kein Service nutzt
+   `condition: service_healthy` mit celery_beat. Worker startet
+   unabhängig, api startet unabhängig.
+2. **Beat schedulet weiter zuverlässig.** Log auf heizung-test zeigt
+   `evaluate-due-rooms-every-60s` mit konstanter 60-s-Kadenz, kein
+   Tick verloren.
+3. **Engine-Eval läuft im Worker, nicht im Beat.** Beat ist nur
+   Scheduler — er steckt Tasks in die Redis-Queue. Die werden vom
+   gesunden celery_worker ausgeführt.
+4. **`restart: always` reagiert auf Crash, nicht auf unhealthy.**
+   Docker restartet bei Exit-Code, nicht bei failed HEALTHCHECK
+   (außer mit Swarm/Kubernetes-Orchestrierung, die wir nicht haben).
+   Unhealthy ohne Crash → kein Restart-Loop.
+
+**Konsequenz für Hotelier-Wahrnehmung:** `docker ps` zeigt
+celery_beat als unhealthy, das macht das Status-Dashboard rot —
+aber die Steuerung läuft. Hotelier wird informiert, dass dieser
+spezifische unhealthy-State akzeptiert ist und nicht alarmiert.
+
+**Regel:** Vor einem unhealthy-Container-Fix erst Diagnose:
+
+- Welcher Process läuft tatsächlich im Container?
+- Welcher HEALTHCHECK ist effektiv (Compose ≻ Dockerfile)?
+- Hat irgendwas anderes `depends_on` mit `condition: service_healthy`
+  drauf?
+- Funktioniert die fachliche Aufgabe (hier: Task-Scheduling)?
+
+Wenn (1) keine Engine-Auswirkung + (2) niemand `service_healthy`
+verlangt + (3) der Process tut seinen Job: **akzeptierter Drift**,
+Backlog-Eintrag mit klarer Status-Beschreibung, KEIN Hotfix.
+
+**Wenn doch fixen:** Compose-Override für celery_beat-Healthcheck
+einbauen. Optionen:
+
+- Healthcheck disabled: `healthcheck: disable: true` — am einfachsten,
+  aber `docker ps`-Status bleibt `(starting)` ohne State.
+- Realistischer Check: `celery -A heizung.celery_app inspect scheduled`
+  oder Schedule-File-Mtime-Check
+  (`stat /tmp/celerybeat-schedule | grep -q '60 seconds ago'`).
+- Status-Dashboard (B-9.11x-4) explizit unhealthy-celery_beat
+  ausblenden, weil-Doku im UI.
+
+Bis ein Status-Dashboard die Sicht zentralisiert: Diese Lesson +
+B-9.11-4 als „akzeptiert"-Marker reichen.
+
+**Querverweise:** §5.10 (Cosmetic vs. functional Drift bei
+build-images.yml), §5.20 (Doku-Drift in Steuerlogik — gegenteilig:
+dort produktive Pfade, hier reine Observability), AE-40 (Engine-Lock
+isoliert beat von worker), B-9.11-4 (Backlog-Eintrag).
+
+**Backlog für später:** Status-Dashboard (B-9.11x-4) zeigt
+celery_beat-„healthy" basierend auf Schedule-Tick-Latenz, nicht
+auf Dockerfile-HEALTHCHECK.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
