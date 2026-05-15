@@ -1468,6 +1468,40 @@ Schließt zwei Befunde aus dem Post-Cutover-Smoke-Test 9.17a:
 - AE-50 Nachtrag erweitert.
 - SPRINT-PLAN.md 9.17b-Block.
 
+**Tag-Vergabe:** `v0.1.14-auth` auf Commit `41a8dcf` am 2026-05-15
+12:09 CEST gesetzt. Annotated Tag mit Auth-Track-Zusammenfassung
+(9.17 Foundation + 9.17a Cutover-Coverage + 9.17b Logout-Fix).
+URL: https://github.com/rexei123/heizung-sonnblick/releases/tag/v0.1.14-auth
+
+**Live-Verifikation 2026-05-15:**
+- Cookie-Lösch-Header per Browser-Devtools dokumentiert:
+  `Set-Cookie: heizung_session=""; expires=<jetzt>; HttpOnly; Max-Age=0;
+  Path=/; SameSite=Lax; Secure` (alle Schutz-Attribute korrekt).
+- Browser-Cookie-Jar nach Logout-Klick leer.
+- Direktzugriff auf `/zimmer` ohne Auth → HTTP 401 (Caddy-Schicht
+  davor greift schneller als Backend; beide Schichten korrekt
+  geschützt).
+- Cowork-Smoke-Test 9.17a (7 TC) + manueller Re-Smoke 9.17b
+  (4 Beweisschritte) bestätigen Funktion.
+
+**Backlog-Abhakung:**
+- B-9.17a-1 (Logout-Cookie-Invalidation) ✅
+- B-9.17a-2 (Rate-Limit-Wording) ✅ (via Backend-Body-Assertion in
+  bestehendem Test, Frontend-Wording-Pfad bereits in 9.17a T4 fertig)
+
+**Cutover-Status:**
+- `AUTH_ENABLED=true` auf heizung-test seit 2026-05-15 10:18 UTC
+  stabil.
+- Caddy-Basic-Auth-Schicht (HOTEL_BASIC_AUTH_HASH) bleibt aktiv
+  als äußere Hülle bis Tailscale-Hardening (Sprint 12+).
+- heizung-main noch nicht migriert. Wartet auf produktive
+  Bestätigung auf heizung-test über 1-2 Wochen, dann separater
+  Cutover-Sprint.
+
+**Auth-Track 9.17/9.17a/9.17b abgeschlossen.** FastAPI-native JWT-
+Cookie-Auth ist live. Architektur-Entscheidung AE-50 vollständig
+implementiert.
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -1643,6 +1677,12 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.17-9 🟡 | Forced-Change-Page kann nicht zwischen „Aktuelles Passwort falsch" und „Neue Passwoerter stimmen nicht ueberein" unterscheiden — beides generischer roter Text unter dem Formular. UX-Konfusion bei Mehrfachfehler. |
 | B-9.17-10 🔴 **Cutover-Blocker** | Bei `AUTH_ENABLED=false` liefert `get_current_user` den System-User-Fallback (verwaltung, id=1) unabhaengig vom tatsaechlich eingeloggten User. `/change-password` vergleicht `current_password` gegen System-User-Hash statt gegen echten User-Hash. Konsequenz: Forced-Change unter `AUTH_ENABLED=false` unmoeglich — 400 „Aktuelles Passwort falsch" trotz korrekter Eingabe. **Fix:** User-Identitaets-kritische Endpoints (`/change-password`, `/auth/me` als User-spezifisch) muessen bei `AUTH_ENABLED=false` einen 503/409 mit klarer Meldung liefern statt das System-User-Fallback-Verhalten zu nutzen. |
 | B-9.17-S1 🟢 (info) | Secret-Rotation auf heizung-test notwendig. `POSTGRES_PASSWORD` und `SECRET_KEY` wurden waehrend Cutover-Diagnose 2026-05-14 versehentlich im Strategie-Chat exposed (Editor-Screenshot mit `.env`-Inhalt). Kein direkter Schaden, weil Tailscale-Zugang noetig, aber Hygiene-Massnahme fuer Sprint 10. |
+| B-9.17b-4 🟠 (vor Heizperiode) | **Vicki-002 und Vicki-004 senden seit Pairing keinen Heartbeat.** Status "Inaktiv, noch nie" in Geräte-Detail-Page. Vicki-003 als Kontrollgruppe (gepaired, aktiv, ohne Backplate) sendet sauber. Hypothesen: (1) Pairing in ChirpStack unvollständig, (2) Codec-Routing-Bug analog §5.21, (3) Firmware-Backplate-Flag-Verhalten. Vor Produktiv-Einsatz an Heizkörpern klären — sonst keine Heizungssteuerung in diesen Zimmern. |
+| B-9.17b-3 🟡 | **Batterie-Wert-Plausibilität Vicki-001/-002/-003/-004.** Werte zeigen 33-42% trotz neuer Batterien, auf Vicki-001 seit Tagen konstant 33% ohne Variabilität. Hypothesen: (1) Codec-Decoder-Bug (Batterie-Byte-Position/Skalierung falsch), (2) veralteter Wert wird gehalten weil nicht jeder Status-Report Batterie sendet. Querverweise §5.21, §5.27. Diagnose-Sprint nach 9.17b-4-Klärung. |
+| B-9.17b-2 🟡 | **Sidebar-Sichtbarkeit auf /login.** In Browser-Screenshot während Logout-Test 2026-05-15 war kurz nach Logout-Redirect die AppShell-Sidebar auf /login sichtbar. Möglicher AppShell-Wrapping-Bug analog §5.8 (Sprint 8.13a Doppel-Render). Verifizieren beim nächsten Frontend-Touch — Login-Page sollte ohne AppShell rendern. |
+| B-9.17b-5 🟢 | **Klarstellung Vicki-Hardware-Stand heizung-test.** heizung-test hat aktuell: 1 produktiv montierte Vicki (-001 in Zimmer 101), 1 Test-Gerät funktechnisch aktiv aber unmontiert (-003, früherer Verifikations-Doppelgänger zu -001), 2 nie produktiv eingebuchte Geräte (-002, -004). Sommermodus-Beobachtungsphase 14.5.-15.5. basiert auf 1 Gerät, nicht auf 4. Diese Klarstellung in STATUS-Doku spätestens beim ersten heizung-main-Touch nachziehen, damit später keine Drift entsteht. |
+| B-9.17b-6 🟢 (info) | **Cookie-Namen-Konsistenz.** Frontend zeigt `heizung_session`-Cookie, Backend setzt es ebenfalls als `heizung_session`. An einer Stelle in Doku oder Code-Kommentaren tauchte `access_token` als generischer Name auf — bei nächstem Auth-Modul-Touch konsistent prüfen. |
+| B-9.17b-1 🟢 (info, Sprint 11+) | **Server-side JWT-Blacklisting bei Logout.** Heute: Browser-Cookie-Cleanup, gestohlener JWT-Token bleibt 12h gültig. Akzeptabel für Single-Mandant-Hotelbetrieb. Bei Multi-Mandant-Schritt (Sprint 11+) nötig. Realisierungs-Optionen: Redis-Blacklist mit JWT-Jti, oder Datenbank-Token-Tabelle mit Revoke-Spalte. Querverweis CLAUDE.md §5.31. |
 
 ### 6.3 — Operative Aufgaben
 
