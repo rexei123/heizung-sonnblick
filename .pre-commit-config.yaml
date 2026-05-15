@@ -1,0 +1,32 @@
+# Pre-commit-Konfiguration (Sprint 10 T8, B-9.10d-6).
+#
+# Zweck: §5.24-Wiederholungsfehler verhindern — lokal vergessen
+# `ruff format`, CI bricht. Hook blockt Commit/Push, wenn `ruff format
+# --check` oder `ruff check` rot ist.
+#
+# Setup pro Klon (einmalig):
+#   pip install pre-commit
+#   pre-commit install
+#
+# Manuell laufen lassen ueber alle Files:
+#   pre-commit run --all-files
+#
+# Versionspflege:
+#   pre-commit autoupdate
+#
+# Die rev hier muss zur ruff-Version in backend/pyproject.toml
+# ([project.optional-dependencies] dev) und zum CI-Workflow
+# (.github/workflows/backend-ci.yml) passen — sonst kommt es zu
+# Format-Drift zwischen Local + CI.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        name: ruff check (backend)
+        files: ^backend/(src|tests)/.*\.py$
+        args: [--fix]
+      - id: ruff-format
+        name: ruff format --check (backend)
+        files: ^backend/(src|tests)/.*\.py$

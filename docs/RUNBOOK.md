@@ -986,6 +986,59 @@ Re-Run-Indikation:
 
 ---
 
+## 10f. Pre-commit-Hook (Sprint 10 T8, B-9.10d-6)
+
+Lokaler Hook, der vor jedem Commit `ruff check` und
+`ruff format --check` auf `backend/(src|tests)/` ausfuehrt. Konfig:
+`.pre-commit-config.yaml` im Repo-Root.
+
+Zweck: §5.24-Wiederholungsfehler (lokal vergessen `ruff format`, CI
+bricht) blockieren, bevor der Commit raus geht.
+
+### Setup pro Klon (einmalig)
+
+```powershell
+# PowerShell (Windows lokal), Working-Tree muss heizung-sonnblick sein
+pip install pre-commit
+pre-commit install
+```
+
+`pip` ist hier das System-Python oder eine globale venv — der Hook
+laeuft NICHT durch die `backend/.venv`, sondern via `pre-commit`'s
+isolierte Tool-Envs.
+
+### Versionspflege
+
+`.pre-commit-config.yaml` pinnt `ruff-pre-commit` auf eine konkrete
+Version (heute `v0.15.12`). Diese MUSS zur ruff-Version in
+`backend/pyproject.toml [project.optional-dependencies] dev` und zum
+CI-Workflow `.github/workflows/backend-ci.yml` passen — sonst entsteht
+Format-Drift (lokal greener als CI oder umgekehrt).
+
+Update-Workflow:
+
+```powershell
+pre-commit autoupdate          # zieht neueste ruff-pre-commit rev
+# anschliessend backend/pyproject.toml `ruff>=...` Pflicht-Bump
+```
+
+### Manueller Lauf ueber alle Files
+
+```powershell
+pre-commit run --all-files
+```
+
+Praktisch nach `pre-commit install` einmal anstossen, damit alle Files
+durch sind und nicht beim ersten Commit eine grosse Diff aufpoppt.
+
+### Hook umgehen
+
+`git commit --no-verify` umgeht den Hook. CLAUDE.md erlaubt das nur
+nach expliziter User-Anweisung. Bei Hook-Fail: Format-Fix einarbeiten,
+neu commiten.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
