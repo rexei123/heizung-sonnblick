@@ -691,6 +691,36 @@ Release älter als 18 Monate → Risiko, Direkt-Call evaluieren.
   `bcrypt>=4.2`.
 - AE-50 Punkt 1 dokumentiert die Brief-Abweichung.
 
+### 5.30 Auth-Sprints: alle Endpoints absichern, nicht nur mutierende (Sprint 9.17a Lesson)
+
+Sprint 9.17 hat das T6-Briefmandat 1:1 umgesetzt — "alle 21 mutierenden
+Endpoints absichern". GET-Endpoints standen nicht im Inventar. Resultat:
+nach Cutover lieferten 17 GET-Endpoints in 9 Routern Daten ohne
+Auth-Check (Cowork-Befund 2026-05-14, im 9.17a-T1-Inventar bestätigt
+— erste Schätzung "~9 in 5 Routern" war zu niedrig).
+
+Brief-Lücke, nicht Implementierungs-Bug. Aber Konsequenz wäre Daten-Leak
+sobald die Caddy-Basic-Auth-Schicht wegfällt.
+
+**Regel für Auth-/Permission-Sprints:** Der Brief verlangt ein
+vollständiges Endpoint-Inventar als Pflicht-Stop vor der eigentlichen
+Absicherung. Inventar muss ALLE Methoden enthalten (GET inklusive), nicht
+nur die mutierenden. Mitarbeiter-Lese-Recht ist ein authentifiziertes
+Lese-Recht, nicht "darf jeder ohne Cookie sehen".
+
+**Pflicht im Brief:** "T1: Endpoint-Inventar mit Soll-Dependency pro
+Methode + Pfad, Pflicht-Stop für User-Review vor Absicherungs-Task".
+
+**Brief-Regel-Abweichung dokumentieren (Sprint 9.17a Beispiel):**
+`GET /users` blieb `require_admin` statt der allgemeinen GET→`require_user`-
+Regel, weil User-Liste sensible Daten enthält (E-Mails, Rollen,
+is_active). Solche Ausnahmen gehören in den T1-Inventar-Stop-Bericht
+und in die finale Doku — nicht als stillschweigende Annahme im Code.
+
+**Querverweise:** §5.20 (aspirative Kommentare als Doku-Drift — analog:
+unvollständiger Brief als Risiko), AE-50 Punkt 6 (Feature-Flag-Pattern),
+§5.29 (Auth-Library-Wahl, Sprint 9.17 Lesson).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

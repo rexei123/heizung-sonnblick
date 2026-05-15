@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.enums import ScenarioScope
 from heizung.models.scenario import Scenario
@@ -88,6 +88,7 @@ def _audit_payload(scenario_code: str, scope: str, is_active: bool) -> dict[str,
     summary="Szenario-Liste mit aktuellem GLOBAL-Aktivierungs-Status",
 )
 async def list_scenarios(
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[ScenarioListItem]:
     scens = list((await session.execute(select(Scenario).order_by(Scenario.id))).scalars().all())

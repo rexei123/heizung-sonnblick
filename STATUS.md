@@ -1312,6 +1312,107 @@ Nächster Sprint: offen — Strategie-Chat entscheidet (Kandidaten:
 
 ---
 
+## 2ag. Sprint 9.17a Auth-Cutover-Hotfix (2026-05-15, abgeschlossen)
+
+**Status:**
+- **Code:** auf `develop` gemerged, siehe PR. Cutover-Blocker beseitigt,
+  `AUTH_ENABLED=true` auf heizung-test übertragbar.
+- **Tag:** noch NICHT vergeben (`v0.1.14-auth` Strategie-Chat
+  vergibt nach erfolgreichem Live-Cutover, **nicht** aus 9.17a heraus).
+- **Pflicht-Stops:** T1 (Endpoint-Inventar) und T3 (Identitäts-Pattern)
+  beide vom User am 2026-05-15 freigegeben.
+
+Schließt zwei harte Cutover-Blocker (B-9.17-4, B-9.17-10) plus fünf
+UX-Defekte (B-9.17-5, -6, -7, -8, -9) aus der Cutover-Episode 2026-05-14.
+
+**Backend:**
+- T1 Endpoint-Inventar (`docs/features/2026-05-15-sprint-9-17a-endpoint-inventar.md`):
+  48 Endpoints in 11 Routern; 17 GET-Endpoints in 9 Routern
+  unauthentifiziert. Lesson §5.30-Schätzung "~9 GETs in 5 Routern" war
+  zu niedrig.
+- T2 Coverage: neue Dependency `require_user` (Admin+Mitarbeiter,
+  semantisch für lesendes Recht; technisch heute identisch zu
+  `require_mitarbeiter`, eigener Name für zukunftssichere
+  Rollen-Erweiterung). 17 GET-Endpoints abgesichert, plus
+  `DELETE /occupancies/{id}` (immer-405-Stub) mit
+  `require_mitarbeiter` vor 405. GET `/users` bleibt
+  `require_admin` (sensible User-Daten — Brief-Regel-Abweichung
+  in §5.30 dokumentiert).
+- T3 Identitäts-Pattern: neue Dependency `require_real_user` (kein
+  System-User-Fallback). `/auth/me` und `/auth/change-password`
+  liefern unter `AUTH_ENABLED=false` 503 statt falscher Identität
+  (B-9.17-10 Fix). `/auth/login` und `/auth/logout` unverändert.
+
+**Frontend:**
+- T4 Wording 401/429/503 (B-9.17-5): Login + Change-Password mit
+  differenzierten Fehlertexten. 429 → "Zu viele Versuche. Bitte
+  60 Sekunden warten." 503 → "Anmeldung gerade nicht möglich.
+  Bitte später erneut versuchen oder die Verwaltung kontaktieren."
+- T5 Mojibake (B-9.17-7): "Passwoerter ueberein" → "Passwörter
+  überein" in change-password. Audit Plus: aria-label "Passwort
+  zuruecksetzen" → "Passwort zurücksetzen" + Doku-Kommentar in
+  benutzer/page.tsx.
+- T6 Password-Sichtbarkeits-Toggle (B-9.17-8): neue
+  `<PasswordInput>`-Komponente mit visibility/visibility_off-
+  Toggle und dynamischem aria-label. Eingebaut: Login,
+  Change-Password (3 Felder), Admin-Reset-Dialog.
+- T7 Inline-Fehler Forced-Change (B-9.17-9): pro Feld eigener
+  Inline-Fehler (`current_password`, `new_password`,
+  `repeat`). Generischer Block bleibt nur für 429/503/500-
+  Server-Fallback.
+- T8 Saison-Stub (B-9.17-6): Custom-Page mit Link zu
+  `/szenarien` (Sommermodus-Soforttoggle).
+
+**Tests:**
+- Backend pytest: erwartet ≥ 320 passed + 1 xfailed
+  (Vor-Sprint 308 + 12+ neu in `test_api_read_endpoints_auth.py`
+  + `test_api_auth.py`-Erweiterungen).
+  - Neues File `test_api_read_endpoints_auth.py`: 17 GET-Endpoints
+    × 3 Cases (no-cookie/mitarbeiter/admin) + DELETE-occupancy
+    × 3 Cases (gebündelt in 6 Tests via Listen-Iteration).
+  - `test_api_auth.py` erweitert: 4 neue T3-Tests (AUTH=false→503
+    für /me und /change-password, AUTH=false /logout läuft,
+    AUTH=true ohne Cookie /change-password→401).
+- Frontend Playwright: erwartet ≥ 41 passed (32 alt + 9 neu).
+  - 4 Tests Wording-Differenzierung 429/503
+  - 3 Tests Inline-Fehler Forced-Change
+  - 1 Test Mojibake-Audit
+  - 1 Test Password-Toggle
+
+**Brief-Abweichungen (dokumentiert):**
+- Neues Test-File `test_api_read_endpoints_auth.py` angelegt.
+  Brief sagte "keine neuen Test-Files anlegen, bestehende
+  test_api_*.py erweitern". Für 5 betroffene Domains (rooms,
+  heating_zones, occupancies, room_types, global_config)
+  existierten keine test_api_<domain>.py-Files — wörtliche
+  Brief-Erfüllung unmöglich. Pragmatik: ein einziges Sammel-
+  File statt fünf neue.
+
+**Backlog-Abhakung:**
+- ✅ B-9.17-4 (GET-Endpoint-Coverage)
+- ✅ B-9.17-5 (Wording 401/429/503)
+- ✅ B-9.17-6 (Saison-Stub-Verweis)
+- ✅ B-9.17-7 (Mojibake Forced-Change)
+- ✅ B-9.17-8 (Password-Toggle)
+- ✅ B-9.17-9 (Forced-Change Inline-Fehler)
+- ✅ B-9.17-10 (Identitäts-Fallback-Fix)
+
+**Offen für Sprint 10 / separate Sprints:**
+- B-9.17-1 (Self-Service-Reset via E-Mail)
+- B-9.17-2 (Audit-UI Frontend)
+- B-9.17-3 (`celery_beat` unhealthy)
+- B-9.17-S1 (Secret-Rotation)
+
+**Doku:**
+- CLAUDE.md §5.30 neue Lesson "Auth-/Permission-Sprints: alle
+  Endpoints absichern, nicht nur mutierende".
+- AE-50 Querverweis ergänzt: Cutover-Befund 2026-05-14 + Hotfix
+  9.17a, Inventar-Pflicht für Auth-Sprints jetzt Standard.
+- SPRINT-PLAN.md 9.17a-Block direkt nach 9.17.
+- Endpoint-Inventar als Feature-Doku.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

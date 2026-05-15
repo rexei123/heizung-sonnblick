@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
@@ -129,6 +129,7 @@ async def list_devices(
     vendor: str | None = Query(default=None),  # noqa: B008
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[Device]:
     stmt = select(Device)
@@ -148,6 +149,7 @@ async def list_devices(
 )
 async def get_device(
     device_id: int = DeviceIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     return await _get_or_404(session, device_id)
@@ -318,6 +320,7 @@ async def list_sensor_readings(
     limit: int = Query(  # noqa: B008
         default=100, ge=1, le=1000, description="Max. Anzahl Eintraege."
     ),
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[SensorReading]:
     await _get_or_404(session, device_id)
@@ -345,6 +348,7 @@ async def list_sensor_readings(
 )
 async def get_hardware_status(
     device_id: int = DeviceIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> HardwareStatusResponse:
     """Binaerer Hardware-Status fuer das Frontend-Badge.

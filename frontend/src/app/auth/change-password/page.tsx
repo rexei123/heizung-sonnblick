@@ -1,25 +1,36 @@
 "use client";
 
 /**
- * /auth/change-password (Sprint 9.17, AE-50).
+ * /auth/change-password (Sprint 9.17, AE-50; 9.17a B-9.17-5/-7/-8/-9).
  *
- * Eingeloggte User koennen ihr eigenes Passwort wechseln. Bei
+ * Eingeloggte User können ihr eigenes Passwort wechseln. Bei
  * ``must_change_password=true`` wird man nach Login automatisch
  * hierher geleitet.
  *
- * Validierung clientseitig: min 12 Zeichen, neues + wiederholtes
- * Passwort gleich.
+ * Sprint 9.17a:
+ *  - Inline-Fehler pro Feld (current_password, new_password, repeat).
+ *  - Password-Sichtbarkeits-Toggle pro Feld.
+ *  - Differenzierte Server-Fehler-Texte (400/429/503).
+ *  - Mojibake "Passwoerter ueberein" → "Passwörter überein".
  */
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { useAuth } from "@/contexts/auth-context";
 import { authApi } from "@/lib/api/auth";
 import type { ApiError } from "@/lib/api/types";
+
+const MIN_PASSWORD_LENGTH = 12;
+
+type FieldErrors = {
+  current?: string;
+  next?: string;
+  repeat?: string;
+};
 
 export default function ChangePasswordPage() {
   const { user, loading, refreshUser } = useAuth();
@@ -27,7 +38,8 @@ export default function ChangePasswordPage() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -36,15 +48,21 @@ export default function ChangePasswordPage() {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError(null);
-    if (next.length < 12) {
-      setError("Neues Passwort muss mindestens 12 Zeichen lang sein.");
-      return;
+    setServerError(null);
+
+    const errors: FieldErrors = {};
+    if (next.length < MIN_PASSWORD_LENGTH) {
+      errors.next = `Passwort zu kurz (mindestens ${MIN_PASSWORD_LENGTH} Zeichen).`;
     }
     if (next !== repeat) {
-      setError("Die beiden Passwoerter stimmen nicht ueberein.");
+      errors.repeat = "Passwörter stimmen nicht überein.";
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
+    setFieldErrors({});
+
     setSubmitting(true);
     try {
       await authApi.changePassword({
@@ -56,9 +74,15 @@ export default function ChangePasswordPage() {
     } catch (e) {
       const err = e as ApiError;
       if (err?.status === 400) {
-        setError("Aktuelles Passwort ist falsch.");
+        setFieldErrors({ current: "Aktuelles Passwort falsch." });
+      } else if (err?.status === 429) {
+        setServerError("Zu viele Versuche. Bitte 60 Sekunden warten.");
+      } else if (err?.status === 503) {
+        setServerError(
+          "Anmeldung gerade nicht möglich. Bitte später erneut versuchen oder die Verwaltung kontaktieren.",
+        );
       } else {
-        setError("Speichern fehlgeschlagen.");
+        setServerError("Speichern fehlgeschlagen.");
       }
     } finally {
       setSubmitting(false);
@@ -72,52 +96,70 @@ export default function ChangePasswordPage() {
           Passwort ändern
         </h1>
         <p className="text-sm text-text-secondary mt-1">
-          Mindestens 12 Zeichen. Beide Eingaben müssen übereinstimmen.
+          Mindestens {MIN_PASSWORD_LENGTH} Zeichen. Beide Eingaben müssen übereinstimmen.
         </p>
       </header>
 
       <form className="space-y-4" onSubmit={handleSubmit} noValidate>
         <div className="space-y-1">
           <Label htmlFor="current">Aktuelles Passwort</Label>
-          <Input
+          <PasswordInput
             id="current"
-            type="password"
             autoComplete="current-password"
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
             disabled={submitting}
             required
             autoFocus
+            aria-invalid={fieldErrors.current ? "true" : undefined}
+            aria-describedby={fieldErrors.current ? "current-error" : undefined}
           />
+          {fieldErrors.current ? (
+            <p id="current-error" role="alert" className="text-sm text-error">
+              {fieldErrors.current}
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1">
           <Label htmlFor="new">Neues Passwort</Label>
-          <Input
+          <PasswordInput
             id="new"
-            type="password"
             autoComplete="new-password"
             value={next}
             onChange={(e) => setNext(e.target.value)}
             disabled={submitting}
             required
+            aria-invalid={fieldErrors.next ? "true" : undefined}
+            aria-describedby={fieldErrors.next ? "new-error" : undefined}
           />
+          {fieldErrors.next ? (
+            <p id="new-error" role="alert" className="text-sm text-error">
+              {fieldErrors.next}
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1">
           <Label htmlFor="repeat">Neues Passwort wiederholen</Label>
-          <Input
+          <PasswordInput
             id="repeat"
-            type="password"
             autoComplete="new-password"
             value={repeat}
             onChange={(e) => setRepeat(e.target.value)}
             disabled={submitting}
             required
+            aria-invalid={fieldErrors.repeat ? "true" : undefined}
+            aria-describedby={fieldErrors.repeat ? "repeat-error" : undefined}
           />
+          {fieldErrors.repeat ? (
+            <p id="repeat-error" role="alert" className="text-sm text-error">
+              {fieldErrors.repeat}
+            </p>
+          ) : null}
         </div>
 
-        {error ? (
+        {serverError ? (
           <p role="alert" className="text-sm text-error">
-            {error}
+            {serverError}
           </p>
         ) : null}
 

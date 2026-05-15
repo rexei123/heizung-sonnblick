@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.enums import RoomStatus
 from heizung.models.event_log import EventLog
@@ -94,6 +94,7 @@ async def list_rooms(
     floor: int | None = Query(default=None),  # noqa: B008
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[Room]:
     stmt = select(Room)
@@ -115,6 +116,7 @@ async def list_rooms(
 )
 async def get_room(
     room_id: int = RoomIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Room:
     return await _get_or_404(session, room_id)
@@ -162,6 +164,7 @@ async def update_room(
 async def engine_trace(
     room_id: int = RoomIdPath,
     limit: int = Query(default=50, ge=1, le=500),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[EventLog]:
     """Liest die letzten N event_log-Eintraege fuer einen Raum.

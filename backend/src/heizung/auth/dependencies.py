@@ -1,14 +1,24 @@
-"""FastAPI-Dependencies fuer Auth (Sprint 9.17, AE-50).
+"""FastAPI-Dependencies fuer Auth (Sprint 9.17, AE-50; 9.17a Endpoint-Coverage).
 
 - ``get_current_user``      laedt den eingeloggten User aus dem
                             HttpOnly-Cookie und der DB.
+- ``require_user``          akzeptiert ``admin`` UND ``mitarbeiter``;
+                            semantisch fuer lesendes Recht (Sprint 9.17a).
 - ``require_admin``         403 fuer Mitarbeiter / Anonyme.
-- ``require_mitarbeiter``   akzeptiert ``admin`` UND ``mitarbeiter``.
+- ``require_mitarbeiter``   akzeptiert ``admin`` UND ``mitarbeiter``;
+                            semantisch fuer operative Schreib-Rechte
+                            (occupancies, manual_overrides).
+- ``require_real_user``     wie ``get_current_user``, aber lehnt den
+                            System-User-Fallback unter
+                            ``AUTH_ENABLED=false`` mit 503 ab. Nur fuer
+                            Identitaets-kritische Endpoints
+                            (``/auth/me``, ``/auth/change-password``)
+                            verwenden — siehe Sprint 9.17a B-9.17-10.
 
 Feature-Flag ``AUTH_ENABLED`` (AE-6): bei ``false`` werden alle
-Dependencies auf den System-User (id=1) abgebildet — vorausgesetzt
-der Bootstrap-Admin existiert. Andernfalls 503 (System-Setup
-unvollstaendig).
+nicht-identitaets-kritischen Dependencies auf den System-User (id=1)
+abgebildet — vorausgesetzt der Bootstrap-Admin existiert. Andernfalls
+503 (System-Setup unvollstaendig).
 """
 
 from __future__ import annotations
@@ -101,6 +111,18 @@ async def get_current_user(
     return user
 
 
+def require_user(user: User = Depends(get_current_user)) -> User:  # noqa: B008
+    """Admin oder Mitarbeiter — semantisch fuer lesende Endpoints
+    (Sprint 9.17a). Heute identisch zu ``require_mitarbeiter``;
+    eigener Name, weil sich die Soll-Rollen-Menge fuer „lesen" und
+    „operativ schreiben" in Zukunft auseinanderentwickeln kann (z.B.
+    Rolle ``gast``, ``audit-leser``).
+    """
+    if user.role not in {UserRole.ADMIN, UserRole.MITARBEITER}:
+        raise _FORBIDDEN
+    return user
+
+
 def require_admin(user: User = Depends(get_current_user)) -> User:  # noqa: B008
     if user.role != UserRole.ADMIN:
         raise _FORBIDDEN
@@ -111,4 +133,53 @@ def require_mitarbeiter(user: User = Depends(get_current_user)) -> User:  # noqa
     """Admin oder Mitarbeiter — beide duerfen Belegungen + Overrides."""
     if user.role not in {UserRole.ADMIN, UserRole.MITARBEITER}:
         raise _FORBIDDEN
+    return user
+
+
+async def require_real_user(
+    request: Request,
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> User:
+    """Wie ``get_current_user`` mit Cookie-Pflicht — KEIN System-User-
+    Fallback unter ``AUTH_ENABLED=false``. Fuer identitaets-kritische
+    Endpoints (``/auth/me``, ``/auth/change-password``), bei denen
+    der ``id=1``-Fallback einen falschen User zurueckgeben wuerde
+    (Sprint 9.17a B-9.17-10).
+
+    Verhalten:
+      - ``AUTH_ENABLED=false`` -> 503 mit Hinweis-Text.
+      - ``AUTH_ENABLED=true``  -> dieselbe Cookie-Logik wie
+        ``get_current_user`` (401 bei fehlendem / ungueltigem Cookie).
+    """
+    settings = get_settings()
+    if not settings.auth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Auth ist im Wartungsmodus deaktiviert. /me und "
+                "/change-password sind nicht verfuegbar, bis Auth "
+                "aktiviert wird."
+            ),
+        )
+
+    token = request.cookies.get(settings.auth_cookie_name)
+    if not token:
+        raise _UNAUTHORIZED
+
+    payload = decode_access_token(token)
+    if payload is None:
+        raise _UNAUTHORIZED
+
+    sub = payload.get("sub")
+    if sub is None:
+        raise _UNAUTHORIZED
+
+    try:
+        user_id = int(sub)
+    except (TypeError, ValueError):
+        raise _UNAUTHORIZED from None
+
+    user = await _load_user(session, user_id)
+    if user is None:
+        raise _UNAUTHORIZED
     return user

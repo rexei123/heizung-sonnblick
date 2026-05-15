@@ -1182,3 +1182,18 @@ NextAuth doppeltes Datenmodell waere unnoetiger Komplexitaet (S6).
   `frontend/src/hooks/use-inactivity-logout.ts`
 - AE-46 (config_audit als Pattern), AE-49 (Engine-Pipeline)
 - B-9.17-1 (E-Mail-Self-Service-Reset), B-9.17-2 (Audit-UI)
+
+## Nachträge
+
+- **Cutover-Befund 2026-05-14 + Hotfix 9.17a:** Das T6-Briefmandat
+  "alle 21 mutierenden Endpoints absichern" hat 17 GET-Endpoints in
+  9 Routern unauthentifiziert gelassen. Sprint 9.17a hat die Lücke
+  geschlossen mit neuer Dependency ``require_user`` (Lese-Recht für
+  Admin+Mitarbeiter) und einer neuen ``require_real_user``-
+  Dependency für identitätskritische Endpoints (``/auth/me``,
+  ``/auth/change-password``), die unter ``AUTH_ENABLED=false`` 503
+  liefert statt fälschlich den System-User zurückzugeben. Siehe
+  CLAUDE.md §5.30. **Inventar-Pflicht für Auth-Sprints ist jetzt
+  Standard:** Brief-Pflicht-Stop "T1 Endpoint-Inventar mit
+  Soll-Dependency pro Methode + Pfad". Kein neues ADR — Hotfix
+  korrigiert Brief-Lücke, nicht die Architektur.

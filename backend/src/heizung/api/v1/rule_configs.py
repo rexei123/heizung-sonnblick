@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.enums import RuleConfigScope
 from heizung.models.rule_config import RuleConfig
@@ -62,6 +62,7 @@ async def _get_global_or_404(session: AsyncSession) -> RuleConfig:
     summary="Globale RuleConfig lesen (6 Engine-Felder)",
 )
 async def get_global_rule_config(
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RuleConfig:
     return await _get_global_or_404(session)
