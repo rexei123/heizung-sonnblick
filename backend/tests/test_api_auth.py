@@ -392,3 +392,72 @@ async def test_change_password_with_too_short_new_password_returns_422(
         },
     )
     assert resp.status_code == 422
+
+
+async def test_change_password_without_cookie_under_auth_enabled_returns_401(
+    http_client: httpx.AsyncClient, setup: _Setup
+) -> None:
+    """Sprint 9.17a T3: AUTH_ENABLED=true + kein Cookie -> 401 (nicht 503,
+    weil Auth grundsaetzlich aktiv ist; nur das Cookie fehlt)."""
+    http_client.cookies.clear()
+    resp = await http_client.post(
+        "/api/v1/auth/change-password",
+        json={
+            "current_password": "Whatever1234567!",
+            "new_password": "BrandNewPassword99!",
+        },
+    )
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.17a T3 - Identitaets-kritische Endpoints unter AUTH_ENABLED=false
+# B-9.17-10: /me und /change-password duerfen NICHT den System-User-Fallback
+# nutzen. 503 statt Falsch-Identitaet.
+# ---------------------------------------------------------------------------
+
+
+async def test_me_under_auth_disabled_returns_503(
+    http_client: httpx.AsyncClient, setup: _Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        resp = await http_client.get("/api/v1/auth/me")
+        assert resp.status_code == 503
+        assert "Wartungsmodus" in resp.json()["detail"]
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_change_password_under_auth_disabled_returns_503(
+    http_client: httpx.AsyncClient, setup: _Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        resp = await http_client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "current_password": "Whatever1234567!",
+                "new_password": "BrandNewPassword99!",
+            },
+        )
+        assert resp.status_code == 503
+        assert "Wartungsmodus" in resp.json()["detail"]
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_logout_under_auth_disabled_still_works(
+    http_client: httpx.AsyncClient, setup: _Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Brief T3: /logout laeuft auch unter AUTH_ENABLED=false
+    (Cookie-Cleanup ist unschaedlich)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        resp = await http_client.post("/api/v1/auth/logout")
+        assert resp.status_code == 204
+    finally:
+        get_settings.cache_clear()

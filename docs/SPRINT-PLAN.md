@@ -432,6 +432,50 @@ Domain für operative Aktionen, `config_audit.user_id` wird befüllt.
 
 ---
 
+# SPRINT 9.17a — Auth-Cutover-Hotfix
+
+**Priorität:** 🔴 (Cutover-Blocker)
+**Geschätzte Dauer:** 3-4 h
+**Autonomiestufe:** 2 mit zwei Pflicht-Stops (T1 + T3)
+**Voraussetzung:** 9.17 gemerged (`d879fd6`), `AUTH_ENABLED=false`
+**Tag nach Abschluss:** Strategie-Chat vergibt `v0.1.14-auth` NACH
+9.17a-Merge UND erfolgreichem Live-Cutover auf heizung-test. Kein Tag
+aus 9.17a heraus.
+
+## Ziel
+
+Zwei harte Cutover-Blocker (B-9.17-4, -10) und fünf UX-Defekte
+(B-9.17-5, -6, -7, -8, -9) aus der Cutover-Episode 2026-05-14 beheben.
+Inventar-Pflicht für Auth-Sprints in CLAUDE.md §5.30 verankern.
+
+## Tasks
+
+- T1: Endpoint-Inventar (Pflicht-Stop) — alle Methoden, alle Pfade,
+  Soll-Dependency pro Endpoint
+- T2: GET-Endpoints + übersehene mutierende Endpoints absichern mit
+  neuer `require_user`-Dependency
+- T3: Identitäts-kritische Endpoints unter `AUTH_ENABLED=false`
+  (Pflicht-Stop) — `require_real_user`-Dependency, 503 statt
+  System-User-Fallback für `/me` und `/change-password`
+- T4: Frontend-Wording 401/429/503 differenzieren (B-9.17-5)
+- T5: Mojibake Forced-Change-Page (B-9.17-7)
+- T6: Password-Sichtbarkeits-Toggle als `<PasswordInput>` (B-9.17-8)
+- T7: Forced-Change Inline-Fehler pro Feld (B-9.17-9)
+- T8: Saison-Stub Verweis auf `/szenarien` (B-9.17-6)
+- T9: Doku — CLAUDE.md §5.30, STATUS §2ag, SPRINT-PLAN-9.17a-Block,
+  AE-50-Nachtrag, Endpoint-Inventar-Feature-Doku
+- T10: Tests-Sammlung + Pre-Push-Verifikation
+
+## Out of Scope
+
+- Tag-Vergabe (Strategie-Chat nach Cutover-Erfolg)
+- Cutover-Schritt selbst (`AUTH_ENABLED=true`-Flip) — separater
+  Strategie-Chat-Block NACH 9.17a-Merge
+- B-9.17-1 (E-Mail-Reset), -2 (Audit-UI), -3 (celery_beat),
+  -S1 (Secret-Rotation) — andere Sprints
+
+---
+
 # SPRINT 9.18 — Dashboard mit KPI-Cards
 
 **Priorität:** 🟡

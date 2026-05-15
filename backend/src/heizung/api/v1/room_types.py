@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
@@ -79,6 +79,7 @@ async def list_room_types(
     is_bookable: bool | None = Query(default=None),  # noqa: B008
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[RoomType]:
     stmt = select(RoomType)
@@ -96,6 +97,7 @@ async def list_room_types(
 )
 async def get_room_type(
     room_type_id: int = RoomTypeIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RoomType:
     return await _get_or_404(session, room_type_id)

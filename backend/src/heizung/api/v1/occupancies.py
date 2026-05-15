@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_mitarbeiter
+from heizung.auth.dependencies import require_mitarbeiter, require_user
 from heizung.db import get_session
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
@@ -131,6 +131,7 @@ async def list_occupancies(
     ),
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[Occupancy]:
     stmt = select(Occupancy)
@@ -154,6 +155,7 @@ async def list_occupancies(
 )
 async def get_occupancy(
     occupancy_id: int = OccupancyIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Occupancy:
     return await _get_or_404(session, occupancy_id)
@@ -215,6 +217,7 @@ async def cancel_occupancy(
 )
 async def delete_occupancy(
     occupancy_id: int = OccupancyIdPath,
+    _user: User = Depends(require_mitarbeiter),  # noqa: B008
 ) -> None:
     raise HTTPException(
         status_code=status.HTTP_405_METHOD_NOT_ALLOWED,

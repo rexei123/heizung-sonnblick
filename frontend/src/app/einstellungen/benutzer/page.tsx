@@ -4,7 +4,7 @@
  * /einstellungen/benutzer (Sprint 9.17, AE-50).
  *
  * Admin-only Benutzerverwaltung: Liste, Anlegen, Rolle wechseln,
- * Passwort zuruecksetzen, Aktivieren/Deaktivieren, Loeschen.
+ * Passwort zurücksetzen, Aktivieren/Deaktivieren, Löschen.
  * Mitarbeiter und nicht-eingeloggte User werden auf /login bzw. die
  * 403-Hinweis-Seite umgeleitet (Frontend-Guard + Backend-403).
  */
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import {
   Tabs,
   TabsContent,
@@ -454,7 +455,7 @@ function ResetPasswordDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Passwort zuruecksetzen"
+      aria-label="Passwort zurücksetzen"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
       <div className="w-full max-w-md bg-surface border border-border rounded-lg shadow-md p-6 space-y-4">
@@ -467,9 +468,8 @@ function ResetPasswordDialog({
         </p>
         <div className="space-y-1">
           <Label htmlFor="reset-pw">Neues Passwort (min. 12 Zeichen)</Label>
-          <Input
+          <PasswordInput
             id="reset-pw"
-            type="text"
             autoComplete="off"
             value={pw}
             onChange={(e) => setPw(e.target.value)}

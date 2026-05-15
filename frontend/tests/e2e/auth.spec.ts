@@ -56,7 +56,12 @@ const MOCK_MITARBEITER: MockUser = {
  */
 async function mockApi(
   page: Page,
-  opts: { me?: MockUser | null; loginResult?: "ok" | "401" | "401-then-ok"; users?: MockUser[] } = {},
+  opts: {
+    me?: MockUser | null;
+    loginResult?: "ok" | "401" | "401-then-ok" | "429" | "503";
+    users?: MockUser[];
+    changePasswordResult?: "ok" | "400" | "429" | "503";
+  } = {},
 ): Promise<void> {
   const me = opts.me === undefined ? null : opts.me;
 
@@ -94,6 +99,22 @@ async function mockApi(
       });
       return;
     }
+    if (opts.loginResult === "429") {
+      await route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Rate limit exceeded" }),
+      });
+      return;
+    }
+    if (opts.loginResult === "503") {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Service unavailable" }),
+      });
+      return;
+    }
     if (opts.loginResult === "401-then-ok" && loginCalls === 1) {
       await route.fulfill({
         status: 401,
@@ -106,6 +127,38 @@ async function mockApi(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ user: me ?? MOCK_ADMIN }),
+    });
+  });
+
+  await page.route("**/api/v1/auth/change-password", async (route: Route) => {
+    if (opts.changePasswordResult === "400") {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Aktuelles Passwort falsch" }),
+      });
+      return;
+    }
+    if (opts.changePasswordResult === "429") {
+      await route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Rate limit exceeded" }),
+      });
+      return;
+    }
+    if (opts.changePasswordResult === "503") {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Service unavailable" }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(me ?? MOCK_ADMIN),
     });
   });
 
@@ -128,7 +181,7 @@ test.describe("Sprint 9.17 Auth — Login-Flow", () => {
     await page.goto("/login");
     await expect(page.getByRole("heading", { name: "Heizung Sonnblick" })).toBeVisible();
     await expect(page.getByLabel("E-Mail")).toBeVisible();
-    await expect(page.getByLabel("Passwort")).toBeVisible();
+    await expect(page.getByLabel("Passwort", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Anmelden" })).toBeVisible();
   });
 
@@ -136,7 +189,7 @@ test.describe("Sprint 9.17 Auth — Login-Flow", () => {
     await mockApi(page, { me: null, loginResult: "401" });
     await page.goto("/login");
     await page.getByLabel("E-Mail").fill("admin@hotel.example.com");
-    await page.getByLabel("Passwort").fill("wrong");
+    await page.getByLabel("Passwort", { exact: true }).fill("wrong");
     await page.getByRole("button", { name: "Anmelden" }).click();
     await expect(
       page.getByText("E-Mail oder Passwort falsch.", { exact: true }),
@@ -147,7 +200,7 @@ test.describe("Sprint 9.17 Auth — Login-Flow", () => {
     await mockApi(page, { me: MOCK_ADMIN, loginResult: "ok" });
     await page.goto("/login");
     await page.getByLabel("E-Mail").fill("admin@hotel.example.com");
-    await page.getByLabel("Passwort").fill("AdminPassword123!");
+    await page.getByLabel("Passwort", { exact: true }).fill("AdminPassword123!");
     await page.getByRole("button", { name: "Anmelden" }).click();
     await expect(page).toHaveURL(/\/$/);
   });
@@ -157,9 +210,134 @@ test.describe("Sprint 9.17 Auth — Login-Flow", () => {
     await mockApi(page, { me: mustChangeUser, loginResult: "ok" });
     await page.goto("/login");
     await page.getByLabel("E-Mail").fill("admin@hotel.example.com");
-    await page.getByLabel("Passwort").fill("AdminPassword123!");
+    await page.getByLabel("Passwort", { exact: true }).fill("AdminPassword123!");
     await page.getByRole("button", { name: "Anmelden" }).click();
     await expect(page).toHaveURL(/\/auth\/change-password$/);
+  });
+});
+
+test.describe("Sprint 9.17a Auth — Wording 429/503 differenzieren (B-9.17-5)", () => {
+  test("Login: 429 zeigt Wartezeit-Hinweis", async ({ page }) => {
+    await mockApi(page, { me: null, loginResult: "429" });
+    await page.goto("/login");
+    await page.getByLabel("E-Mail").fill("admin@hotel.example.com");
+    await page.getByLabel("Passwort", { exact: true }).fill("AdminPassword123!");
+    await page.getByRole("button", { name: "Anmelden" }).click();
+    await expect(
+      page.getByText("Zu viele Versuche. Bitte 60 Sekunden warten.", { exact: true }),
+    ).toBeVisible();
+  });
+
+  test("Login: 503 zeigt Wartungsmodus-Hinweis", async ({ page }) => {
+    await mockApi(page, { me: null, loginResult: "503" });
+    await page.goto("/login");
+    await page.getByLabel("E-Mail").fill("admin@hotel.example.com");
+    await page.getByLabel("Passwort", { exact: true }).fill("AdminPassword123!");
+    await page.getByRole("button", { name: "Anmelden" }).click();
+    await expect(
+      page.getByText(/Anmeldung gerade nicht möglich/, { exact: false }),
+    ).toBeVisible();
+  });
+
+  test("Change-Password: 429 zeigt Wartezeit-Hinweis", async ({ page }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser, changePasswordResult: "429" });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("OldPasswordXXX1");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("BrandNewPwd123!");
+    await page.getByLabel("Neues Passwort wiederholen").fill("BrandNewPwd123!");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    await expect(
+      page.getByText("Zu viele Versuche. Bitte 60 Sekunden warten.", { exact: true }),
+    ).toBeVisible();
+  });
+
+  test("Change-Password: 503 zeigt Wartungsmodus-Hinweis", async ({ page }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser, changePasswordResult: "503" });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("OldPasswordXXX1");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("BrandNewPwd123!");
+    await page.getByLabel("Neues Passwort wiederholen").fill("BrandNewPwd123!");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    await expect(
+      page.getByText(/Anmeldung gerade nicht möglich/, { exact: false }),
+    ).toBeVisible();
+  });
+});
+
+test.describe("Sprint 9.17a Auth — Change-Password Inline-Fehler (B-9.17-9)", () => {
+  test("Aktuelles Passwort falsch zeigt Inline-Fehler unter current-Feld", async ({
+    page,
+  }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser, changePasswordResult: "400" });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("WrongOld12345!");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("BrandNewPwd123!");
+    await page.getByLabel("Neues Passwort wiederholen").fill("BrandNewPwd123!");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    const err = page.locator("#current-error");
+    await expect(err).toHaveText("Aktuelles Passwort falsch.");
+  });
+
+  test("Passwort zu kurz zeigt Inline-Fehler unter new-Feld", async ({ page }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("OldPasswordXXX1");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("kurz");
+    await page.getByLabel("Neues Passwort wiederholen").fill("kurz");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    const err = page.locator("#new-error");
+    await expect(err).toContainText("mindestens 12 Zeichen");
+  });
+
+  test("Passwoerter ungleich zeigt Inline-Fehler unter repeat-Feld", async ({
+    page,
+  }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("OldPasswordXXX1");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("BrandNewPwd123!");
+    await page.getByLabel("Neues Passwort wiederholen").fill("DifferentPwd456!");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    const err = page.locator("#repeat-error");
+    await expect(err).toHaveText("Passwörter stimmen nicht überein.");
+  });
+});
+
+test.describe("Sprint 9.17a Auth — Mojibake-Audit (B-9.17-7)", () => {
+  test("Keine ASCII-Umlaut-Workarounds in Change-Password-User-Strings", async ({
+    page,
+  }) => {
+    const mustChangeUser: MockUser = { ...MOCK_ADMIN, must_change_password: true };
+    await mockApi(page, { me: mustChangeUser });
+    await page.goto("/auth/change-password");
+    await page.getByLabel("Aktuelles Passwort").fill("OldPasswordXXX1");
+    await page.getByLabel("Neues Passwort", { exact: true }).fill("BrandNewPwd123!");
+    await page.getByLabel("Neues Passwort wiederholen").fill("DifferentPwd456!");
+    await page.getByRole("button", { name: /Passwort ändern/ }).click();
+    // Sichtbaren Body-Text greifen und auf Workaround-Tokens pruefen
+    const body = await page.locator("body").innerText();
+    expect(body).not.toContain("Passwoerter");
+    expect(body).not.toContain("ueberein");
+    expect(body).not.toContain("zuruecksetzen");
+  });
+});
+
+test.describe("Sprint 9.17a Auth — Password-Sichtbarkeits-Toggle (B-9.17-8)", () => {
+  test("Login: Toggle wechselt zwischen password und text", async ({ page }) => {
+    await mockApi(page, { me: null });
+    await page.goto("/login");
+    const pwInput = page.getByLabel("Passwort", { exact: true });
+    await pwInput.fill("MeinPasswort123!");
+    await expect(pwInput).toHaveAttribute("type", "password");
+    await page.getByRole("button", { name: "Passwort sichtbar machen" }).click();
+    await expect(pwInput).toHaveAttribute("type", "text");
+    await page.getByRole("button", { name: "Passwort verbergen" }).click();
+    await expect(pwInput).toHaveAttribute("type", "password");
   });
 });
 

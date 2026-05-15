@@ -18,6 +18,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { useAuth } from "@/contexts/auth-context";
 import type { ApiError } from "@/lib/api/types";
 
@@ -43,7 +44,11 @@ export default function LoginPage() {
     } catch (e) {
       const err = e as ApiError;
       if (err?.status === 429) {
-        setError("Zu viele Login-Versuche. Bitte einen Moment warten.");
+        setError("Zu viele Versuche. Bitte 60 Sekunden warten.");
+      } else if (err?.status === 503) {
+        setError(
+          "Anmeldung gerade nicht möglich. Bitte später erneut versuchen oder die Verwaltung kontaktieren.",
+        );
       } else {
         setError("E-Mail oder Passwort falsch.");
       }
@@ -84,9 +89,8 @@ export default function LoginPage() {
           </div>
           <div className="space-y-1">
             <Label htmlFor="password">Passwort</Label>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               required
               value={password}

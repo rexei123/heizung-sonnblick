@@ -16,7 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.global_config import GlobalConfig
 from heizung.models.user import User
@@ -48,6 +48,7 @@ async def _get_or_create_singleton(session: AsyncSession) -> GlobalConfig:
     summary="Hotel-globale Konfiguration lesen",
 )
 async def get_global_config(
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> GlobalConfig:
     return await _get_or_create_singleton(session)

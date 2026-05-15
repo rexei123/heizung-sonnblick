@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import get_current_user
+from heizung.auth.dependencies import require_real_user
 from heizung.auth.jwt import create_access_token
 from heizung.auth.password import hash_password, verify_password
 from heizung.auth.rate_limit import limiter
@@ -117,7 +117,7 @@ async def logout(response: Response) -> Response:
     response_model=UserRead,
     summary="Aktueller User (eingelogt)",
 )
-async def me(user: User = Depends(get_current_user)) -> User:  # noqa: B008
+async def me(user: User = Depends(require_real_user)) -> User:  # noqa: B008
     return user
 
 
@@ -129,7 +129,7 @@ async def me(user: User = Depends(get_current_user)) -> User:  # noqa: B008
 async def change_password(
     payload: ChangePasswordRequest,
     request: Request,
-    user: User = Depends(get_current_user),  # noqa: B008
+    user: User = Depends(require_real_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> User:
     if not verify_password(payload.current_password, user.password_hash):

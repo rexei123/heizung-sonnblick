@@ -20,7 +20,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_mitarbeiter
+from heizung.auth.dependencies import require_mitarbeiter, require_user
 from heizung.db import get_session
 from heizung.models.enums import OverrideSource
 from heizung.models.global_config import GlobalConfig
@@ -73,6 +73,7 @@ async def list_room_overrides(
     room_id: int = RoomIdPath,
     limit: int = Query(default=50, ge=1, le=200),  # noqa: B008
     include_expired: bool = Query(default=True),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[ManualOverride]:
     await _ensure_room_exists(session, room_id)
