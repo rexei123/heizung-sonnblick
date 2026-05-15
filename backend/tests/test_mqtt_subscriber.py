@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -72,7 +73,7 @@ def test_to_decimal_returns_none_for_garbage() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _valid_payload() -> dict:
+def _valid_payload() -> dict[str, Any]:
     return {
         "deviceInfo": {"devEui": "0011223344556677"},
         "fCnt": 1,

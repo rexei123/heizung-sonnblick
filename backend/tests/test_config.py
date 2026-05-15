@@ -47,7 +47,7 @@ def test_environment_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
     # Cwd-Wechsel nicht moeglich; pydantic raised wenn weder kwarg
     # noch env_file noch env-Var einen Wert liefert.
     with pytest.raises(ValueError, match="environment"):
-        Settings(_env_file=None)  # type: ignore[call-arg]
+        Settings(_env_file=None)
 
 
 def test_environment_rejects_invalid_value(
@@ -56,4 +56,4 @@ def test_environment_rejects_invalid_value(
     """Literal verhindert Tippfehler wie 'prod' oder 'dev'."""
     monkeypatch.setenv("ALLOW_DEFAULT_SECRETS", "1")
     with pytest.raises(ValueError):
-        Settings(environment="prod")  # type: ignore[arg-type]
+        Settings(environment="prod")
