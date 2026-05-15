@@ -258,12 +258,19 @@ async def test_login_rate_limit_blocks_after_5_attempts_per_ip(
     """
     payload = {"email": setup["admin_email"], "password": "WrongPassword12345!"}
     statuses: list[int] = []
+    last_body: dict = {}
     for _ in range(6):
         resp = await http_client.post("/api/v1/auth/login", json=payload)
         statuses.append(resp.status_code)
+        if resp.status_code == 429:
+            last_body = resp.json()
     # Erste 5 sind 401, der 6. ist 429
     assert statuses[:5] == [401, 401, 401, 401, 401]
     assert statuses[5] == 429
+    # Sprint 9.17b T3: Body enthaelt slowapi-Detail-String (Frontend mappt
+    # 429 auf "Zu viele Versuche..." — siehe login/page.tsx).
+    detail = str(last_body.get("error") or last_body.get("detail") or "").lower()
+    assert detail, f"Erwartet 429-Body mit error/detail-Feld, war: {last_body}"
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +399,41 @@ async def test_change_password_with_too_short_new_password_returns_422(
         },
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Sprint 9.17b T2 — Logout-Cookie-Invalidierung (B-9.17a-1)
+# Bug 9.17: _clear_auth_cookie wirkte auf injizierten response-Parameter,
+# wurde durch explizit zurueckgegebenes neues Response-Objekt ueberschrieben.
+# Logout lieferte 204 OHNE Set-Cookie-Header → Cookie blieb im Browser.
+# Test prueft direkt den Response-Header — der frueher gruene
+# test_logout_clears_cookie hat manuell cookies.clear() gemacht und das
+# Symptom verdeckt.
+# ---------------------------------------------------------------------------
+
+
+async def test_logout_response_carries_cookie_deletion_header(
+    http_client: httpx.AsyncClient, setup: _Setup
+) -> None:
+    login = await http_client.post(
+        "/api/v1/auth/login",
+        json={"email": setup["admin_email"], "password": setup["admin_password"]},
+    )
+    assert login.status_code == 200
+
+    resp = await http_client.post("/api/v1/auth/logout")
+    assert resp.status_code == 204
+
+    set_cookie = resp.headers.get("set-cookie")
+    assert set_cookie is not None, (
+        "Logout-Response muss set-cookie-Header liefern, sonst behaelt der "
+        "Browser das JWT-Cookie. Siehe CLAUDE.md §5.31."
+    )
+    assert "heizung_session" in set_cookie, set_cookie
+    # Cookie-Loeschung manifestiert sich als Max-Age=0 ODER Expires-Datum
+    # in der Vergangenheit. Starlette schickt "Max-Age=0; ...; expires=Thu, 01 Jan 1970 ...".
+    lowered = set_cookie.lower()
+    assert "max-age=0" in lowered or "expires=thu, 01 jan 1970" in lowered, set_cookie
 
 
 async def test_change_password_without_cookie_under_auth_enabled_returns_401(

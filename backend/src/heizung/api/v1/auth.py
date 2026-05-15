@@ -107,9 +107,15 @@ async def login(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Logout (loescht HttpOnly-Cookie)",
 )
-async def logout(response: Response) -> Response:
+async def logout() -> Response:
+    # Sprint 9.17b B-9.17a-1: NICHT den injizierten response-Parameter
+    # mutieren und dann ein neues Response zurueckgeben — FastAPI verwirft
+    # dann die delete_cookie-Header-Aenderung. Eigenes Response-Objekt
+    # erzeugen, Cookie darauf loeschen, dieses zurueckgeben.
+    # Siehe CLAUDE.md §5.31.
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_auth_cookie(response)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return response
 
 
 @router.get(
