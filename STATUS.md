@@ -1545,6 +1545,50 @@ Vorgänger-Dokument, nicht ersetzt.
 
 ---
 
+## 2aj. Sprint 10 CI-Hygiene + Test-Coverage (2026-05-15, abgeschlossen)
+
+Erster Stabilisierungs-Sprint der neuen Phasen-Logik (§2ai). Hygiene-
+Sprint ohne Engine-Touch. Autonomiestufe 2 mit zwei Pflicht-Stops:
+T6-Secrets-Rotation (Strategie-Chat-Freigabe vor Execute), PR-Erstellung
+(Sprint-Bericht-Review).
+
+**Task-Status:**
+
+| Task | Inhalt | Status |
+|---|---|---|
+| T1 | `psycopg2-binary` in `backend/pyproject.toml [dev]`-extras (B-9.10-6, B-9.11x-1). | ✅ Pass — lokal `pytest tests/test_migrations_roundtrip.py tests/test_manual_override_model.py -x`: 12 skipped (kein psycopg2-Import-Fehler mehr). |
+| T2 | Roundtrip-Tests fuer Migration 0012 (B-9.16-2). Plus env.py-Fix: `TEST_DATABASE_URL` hat Vorrang vor `settings.database_url` (Bug, der test_migrations_roundtrip gegen die Dev-/Prod-DB laufen liess statt gegen die Test-DB). CI-Workflow legt `heizung_migration_test` mit TimescaleDB-Extension an. | ✅ Pass — 8/8 Tests gegen lokale `heizung_migration_test` gruen. |
+| T3 | celery_beat-Healthcheck-Diagnose + Backlog-Konsolidierung (B-9.11-4 Master, B-9.11x-3 + B-9.17-3 Duplikate). | ✅ Pass — Diagnose 2026-05-15 auf heizung-test bestaetigt: kein depends_on-Service-Healthy auf celery_beat, beat schedulet mit konstanter 60-s-Kadenz, Engine-Eval laeuft im healthy celery_worker. Akzeptanz-Lesson CLAUDE.md §5.32. |
+| T4 | mypy strict in `backend/tests/` reduzieren (B-9.10d-2). | ✅ Pass — Sprint-Start war bereits 32 Errors (9.17a/b/c hatte zwischenzeitlich reduziert vom 71-Brief-Stand), Final-Stand 0. AsyncIterator-, dict-Type-Args und unused `# type: ignore[...]` adressiert. |
+| T5 | AppShell-Sidebar auf `/login` + `/auth/*` ausblenden (B-9.17b-2). | ✅ Pass — `app-shell.tsx` prueft `usePathname()`. Playwright-Test `sidebar.spec.ts` deckt Regression ab; lokal via `npm run dev` + curl-HTML-Snapshot verifiziert. |
+| T6 | Secrets-Rotation auf heizung-test (B-9.17-S1, Pflicht-Stop). | ✅ Pass — `/tmp/rotate-secrets.sh` (Backup, ALTER USER via STDIN-Heredoc, sed-Inplace), Browser-Verify durch Strategie-Chat: Login `kaprun@hotel-sonnblick.at` funktional, Sidebar zeigt Glyphen, `/zimmer` laedt Daten. Backup `.env.bak-pre-rotation-20260515T135700Z` bleibt 7 Tage auf Server. |
+| T7 | Backlog-Konsolidierung in STATUS.md §6.2. | ✅ Pass — Duplikate B-9.11x-3 + B-9.17-3 auf B-9.11-4 zusammengefuehrt. ✅-Markierungen fuer alle Sprint-10-Items. Material-Symbols-Aspekt aus B-9.13b-1 (✅ via PR #154) abgespalten von Cache-Busting-Aspekt (neu B-10-5 fuer Frontend-Polish-Sprint). |
+| T8 | pre-commit-Hook fuer `ruff format --check` + `ruff check` (B-9.10d-6). | ✅ Pass — `.pre-commit-config.yaml` mit ruff-pre-commit `v0.15.12` (matched backend/pyproject.toml + CI-Workflow). RUNBOOK §10f Setup + Versionspflege. Lokal verifiziert via absichtlichem Format-Fehler (Hook blockt + reformatiert). |
+
+**Pre-Push-Toolchain-Status (lokal, vor Final-Commit):**
+
+- Backend: `ruff check` clean, `ruff format --check` clean, `mypy src` Success no issues, `pytest` 181 passed + 154 skipped (Test-DB-Skip ohne TEST_DATABASE_URL).
+- Frontend: `npm run type-check` clean, `npm run lint` no ESLint warnings/errors, `npm run build` erfolgreich.
+
+**Backlog-Konsolidierungs-Bilanz (§6.2):**
+
+- Erledigt durch Sprint 10: B-9.10-6, B-9.10d-2, B-9.10d-6, B-9.11x-1, B-9.16-2, B-9.17-S1, B-9.17b-2, B-9.13b-1 (Material-Symbols-Aspekt).
+- Konsolidiert: B-9.11x-3 + B-9.17-3 als ✅ Duplikat von B-9.11-4.
+- Umformuliert: B-9.11-4 als „akzeptierter Healthcheck-Drift ohne Engine-Auswirkung" mit Verweis CLAUDE.md §5.32.
+- Neu: B-10-5 Cache-Busting nach Frontend-Deploys (abgespalten aus B-9.13b-1, eigener Frontend-Polish-Scope).
+
+**Neue Lessons:** CLAUDE.md §5.32 Akzeptierter Container-Healthcheck-Drift
+ohne Engine-Auswirkung (Diagnose-Checkliste vor Fix-Versuchen).
+
+**Tag-Vergabe:** keiner — Hygiene-Sprint, kein Feature, kein Release-Marker.
+
+**Out of Scope (Bestaetigung):** Hardware-Diagnose Vicki (Sprint 10a), asyncpg-Umstellung (nicht im Sprint-10-Scope; pyproject-Variante in T1 gewaehlt), celery_beat-Healthcheck-Code-Fix (per §5.32-Doku-Akzeptanz erspart), Frostschutz-Reaktivierung (Sprint 11), fail2ban-Konfig (B-10-3 in 10c oder Security-Hardening-Sprint), DST-Phase-0-Diagnose (B-10-4 in 10a oder eigener Sprint), Caddy-Touch (B-10-2 bereits via PR #154 erledigt).
+
+**Querverweise:** SPRINT-PLAN.md Sprint 10, STRATEGIE-REFRESH-2026-05-15.md
+Phase 1, CLAUDE.md §5.32, AE-50 (Auth + JWT_SECRET_KEY-Fallback).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
