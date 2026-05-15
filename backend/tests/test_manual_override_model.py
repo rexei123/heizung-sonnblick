@@ -16,6 +16,7 @@ DB bereits auf head ist.
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -50,8 +51,12 @@ def engine() -> Iterator[Engine]:
 def room_id(engine: Engine) -> Iterator[int]:
     """Legt einen Test-RoomType + Test-Room an, gibt room_id zurueck,
     raeumt im Teardown wieder ab. Eindeutige number/name pro Test, damit
-    parallele Laeufe nicht kollidieren."""
-    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    parallele Laeufe nicht kollidieren.
+
+    CLAUDE.md §5.18: 8 Hex-Zeichen statt strftime, sonst VARCHAR(20)
+    Overflow.
+    """
+    suffix = uuid.uuid4().hex[:8]
     type_name = f"t9-9-type-{suffix}"
     room_number = f"t9-9-{suffix}"
 
@@ -162,8 +167,12 @@ def test_numeric_4_1_rejects_overflow(engine: Engine, room_id: int) -> None:
 
 
 def test_on_delete_cascade(engine: Engine) -> None:
-    """ON DELETE CASCADE: Loescht der Raum, verschwinden die Overrides mit."""
-    suffix = datetime.now(tz=UTC).strftime("cascade%H%M%S%f")
+    """ON DELETE CASCADE: Loescht der Raum, verschwinden die Overrides mit.
+
+    CLAUDE.md §5.18: 8 Hex-Zeichen statt 'cascade'+strftime, sonst
+    VARCHAR(20)-Overflow.
+    """
+    suffix = f"cd{uuid.uuid4().hex[:8]}"
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
 
     with engine.begin() as conn:

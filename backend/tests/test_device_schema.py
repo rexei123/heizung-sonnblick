@@ -6,6 +6,8 @@ einfuehren - aktuell deckt diese Suite die Validierungs-Logik.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -17,7 +19,7 @@ from heizung.schemas.device import DeviceCreate, DeviceUpdate
 # ---------------------------------------------------------------------------
 
 
-def _valid_create_payload() -> dict:
+def _valid_create_payload() -> dict[str, Any]:
     return {
         "dev_eui": "0011223344556677",
         "kind": "thermostat",

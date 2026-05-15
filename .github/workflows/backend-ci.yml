@@ -72,6 +72,13 @@ jobs:
         env:
           ENVIRONMENT: test
           DATABASE_URL: postgresql+asyncpg://heizung:heizung_test@localhost:5432/heizung_test
+          # TEST_DATABASE_URL == DATABASE_URL: viele Tests nutzen TEST_DATABASE_URL
+          # direkt fuer DB-Verbindung (engine_layer3/4, manual_override_model,
+          # migrations_roundtrip). Eigene heizung_migration_test wuerde dann
+          # nicht durch conftest._ensure_test_admin migriert werden.
+          # test_migrations_roundtrip wipt/restored die DB innerhalb seines
+          # Moduls — andere Module migrieren zu Beginn neu via _ensure_test_admin.
+          TEST_DATABASE_URL: postgresql+asyncpg://heizung:heizung_test@localhost:5432/heizung_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci-only-32chars
         run: pytest --cov=heizung --cov-report=term-missing

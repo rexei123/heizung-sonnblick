@@ -5,6 +5,7 @@ mit der asynchronen Engine aus.
 """
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -22,9 +23,24 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# URL aus den Anwendungs-Settings übernehmen
+# URL-Aufloesung in drei Stufen:
+# 1. Aufrufer hat ``cfg.set_main_option("sqlalchemy.url", ...)`` explizit
+#    gesetzt (z. B. ``test_migrations_roundtrip`` oder ``conftest._ensure_test_admin``).
+# 2. ``TEST_DATABASE_URL`` env-Var ist gesetzt (CLI-Lauf ueber alembic.ini
+#    mit Default-Empty, fuer Test-DB-Setup).
+# 3. Fallback ``settings.database_url`` (Produktion/Dev).
+#
+# Reihenfolge wichtig: Schritt 1 verhindert, dass das in CI gesetzte
+# ``TEST_DATABASE_URL`` (fuer Roundtrip-Tests) versehentlich die
+# ``DATABASE_URL``-DB ueberschreibt, wenn conftest die App-DB migriert
+# (B-9.16-2-Follow-up).
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+url = (
+    config.get_main_option("sqlalchemy.url")
+    or os.environ.get("TEST_DATABASE_URL")
+    or settings.database_url
+)
+config.set_main_option("sqlalchemy.url", url)
 
 # Ziel-Metadaten (alle deklarierten ORM-Modelle)
 target_metadata = Base.metadata

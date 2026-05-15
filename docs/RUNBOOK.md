@@ -986,6 +986,175 @@ Re-Run-Indikation:
 
 ---
 
+## 10f. Pre-commit-Hook (Sprint 10 T8, B-9.10d-6)
+
+Lokaler Hook, der vor jedem Commit `ruff check` und
+`ruff format --check` auf `backend/(src|tests)/` ausfuehrt. Konfig:
+`.pre-commit-config.yaml` im Repo-Root.
+
+Zweck: §5.24-Wiederholungsfehler (lokal vergessen `ruff format`, CI
+bricht) blockieren, bevor der Commit raus geht.
+
+### Setup pro Klon (einmalig)
+
+```powershell
+# PowerShell (Windows lokal), Working-Tree muss heizung-sonnblick sein
+pip install pre-commit
+pre-commit install
+```
+
+`pip` ist hier das System-Python oder eine globale venv — der Hook
+laeuft NICHT durch die `backend/.venv`, sondern via `pre-commit`'s
+isolierte Tool-Envs.
+
+### Versionspflege
+
+`.pre-commit-config.yaml` pinnt `ruff-pre-commit` auf eine konkrete
+Version (heute `v0.15.12`). Diese MUSS zur ruff-Version in
+`backend/pyproject.toml [project.optional-dependencies] dev` und zum
+CI-Workflow `.github/workflows/backend-ci.yml` passen — sonst entsteht
+Format-Drift (lokal greener als CI oder umgekehrt).
+
+Update-Workflow:
+
+```powershell
+pre-commit autoupdate          # zieht neueste ruff-pre-commit rev
+# anschliessend backend/pyproject.toml `ruff>=...` Pflicht-Bump
+```
+
+### Manueller Lauf ueber alle Files
+
+```powershell
+pre-commit run --all-files
+```
+
+Praktisch nach `pre-commit install` einmal anstossen, damit alle Files
+durch sind und nicht beim ersten Commit eine grosse Diff aufpoppt.
+
+### Hook umgehen
+
+`git commit --no-verify` umgeht den Hook. CLAUDE.md erlaubt das nur
+nach expliziter User-Anweisung. Bei Hook-Fail: Format-Fix einarbeiten,
+neu commiten.
+
+---
+
+## 10g. Secrets-Rotation auf heizung-test / heizung-main (Sprint 10 T6, B-9.17-S1)
+
+`POSTGRES_PASSWORD` + `SECRET_KEY` rotieren ohne die Werte ueber den
+Strategie-Chat oder shell-history zu leaken. Werkzeug:
+`infra/deploy/rotate-secrets.sh` — One-Shot-Tool, generiert die neuen
+Werte direkt auf dem Server (`openssl rand -hex 32`), wechselt das
+Postgres-Userpasswort via `ALTER USER ... STDIN-Heredoc`, aktualisiert
+`.env` per `sed -i` (POSTGRES_PASSWORD, SECRET_KEY, DATABASE_URL-embed),
+restartet den Stack.
+
+### Pflicht-Stop vor Lauf
+
+Strategie-Chat-Freigabe einholen mit:
+
+- Aktueller `.env`-Pfad (`/opt/heizung-sonnblick/infra/deploy/.env`).
+- Geplante Backup-Konvention: `.env.bak-pre-rotation-<UTC-ISO-Compact>`
+  (z.B. `.env.bak-pre-rotation-20260515T135700Z`).
+- Test-Login-Credential bereit (operativer Admin, z.B.
+  `kaprun@hotel-sonnblick.at`).
+- Rollback-Plan dokumentiert (siehe unten).
+
+### Lauf
+
+```powershell
+# PowerShell (Windows lokal), aus Repo-Root
+scp -i $HOME\.ssh\id_ed25519_heizung `
+    infra/deploy/rotate-secrets.sh `
+    root@heizung-test:/tmp/rotate-secrets.sh
+
+ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test `
+    "cat -n /tmp/rotate-secrets.sh"
+# Sichtpruefung aller Zeilen, dann:
+
+ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test `
+    "bash /tmp/rotate-secrets.sh"
+```
+
+Erwarteter Output (Schritte [1/8] bis [8/8]):
+
+- `BACKUP: .env.bak-pre-rotation-<TS>`
+- `ALTER ROLE`
+- compose-Restart-Block, am Ende Container-Status-Tabelle.
+
+### Verify (Login-Roundtrip, lokal)
+
+```bash
+# Bash (Git Bash auf Windows oder Linux-Shell). Passwort versteckt.
+read -rsp "kaprun@hotel-sonnblick.at PW: " P; echo
+curl -s -o /tmp/lv.body -D /tmp/lv.headers -w "status=%{http_code}\n" \
+  -X POST https://heizung-test.hoteltec.at/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"kaprun@hotel-sonnblick.at\",\"password\":\"$P\"}"
+unset P
+grep -i "set-cookie" /tmp/lv.headers || echo "NO COOKIE"
+rm -f /tmp/lv.body /tmp/lv.headers
+```
+
+Erwartung: `status=200`, `Set-Cookie: heizung_session=...` Zeile. Plus
+Browser-Smoke auf `https://<host>/zimmer` (Sidebar zeigt Glyphen,
+Inhalte laden).
+
+### Cleanup (7 Tage nach Rotation)
+
+```bash
+# SSH (heizung-test, root)
+cd /opt/heizung-sonnblick/infra/deploy
+ls -la .env.bak-pre-rotation-*
+# Manuell loeschen, sobald 7 Tage verstrichen sind und Rotation
+# als stabil bestaetigt wurde:
+rm .env.bak-pre-rotation-<TS>
+```
+
+7-Tage-Retention deckt: Verzoegerte Fehler (z.B. JWT-Ablauf nach 12h
+sichtbar erst beim naechsten Login-Versuch), Rollback-Reaktion auf
+Hotelier-Beschwerden, externe Service-Drifts. Laenger als 7 Tage ist
+Risiko (gestohlene Server-FS-Snapshots koennten den OLD-Wert
+zurueckziehen).
+
+### Rollback bei Verify-Fail
+
+Wenn Login-Verify rot oder Container nicht hochkommen:
+
+```bash
+# SSH (Server, root)
+cd /opt/heizung-sonnblick/infra/deploy
+
+BACKUP=$(ls -t .env.bak-pre-rotation-* | head -1)
+[ -n "$BACKUP" ] || { echo "no backup"; exit 1; }
+echo "rolling back from: $BACKUP"
+
+OLD_PWD=$(grep '^POSTGRES_PASSWORD=' "$BACKUP" | cut -d= -f2-)
+
+docker exec -i deploy-db-1 psql -U heizung -d postgres <<SQL
+ALTER USER heizung WITH PASSWORD '$OLD_PWD';
+SQL
+
+cp -p "$BACKUP" .env
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Nach Rollback: Strategie-Chat-Stop, kein zweiter Rotation-Versuch
+ohne Diagnose der Failure-Ursache.
+
+### Was nicht ueber dieses Skript laeuft
+
+- `MQTT_*_PASSWORD`, `CHIRPSTACK_*` Secrets: nicht in Sprint-10-T6-
+  Scope. Eigene Rotation, weil sie zusaetzlich Mosquitto-passwd-Datei
+  + ChirpStack-DB-User-Update brauchen (RUNBOOK §10a fuer MQTT-Setup,
+  spaetere Sprint-Backlog fuer reguläre Rotation).
+- GHCR-PAT: RUNBOOK §6.1.
+- Caddy-Basic-Auth-Hash (`HOTEL_BASIC_AUTH_HASH`,
+  `CHIRPSTACK_BASIC_AUTH_HASH`): RUNBOOK §10b.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

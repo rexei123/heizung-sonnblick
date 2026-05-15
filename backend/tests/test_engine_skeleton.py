@@ -93,7 +93,7 @@ def _ctx(
     summer_mode_active: bool = False,
     next_occupancy: SimpleNamespace | None = None,
 ) -> _RoomContext:
-    return _RoomContext(  # type: ignore[arg-type]
+    return _RoomContext(
         room=_make_room(status),
         room_type=room_type or _make_room_type(),
         rule_configs=rule_configs or [],

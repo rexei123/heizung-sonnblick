@@ -18,7 +18,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import httpx
 import pytest
@@ -26,7 +26,12 @@ import pytest_asyncio
 from alembic.config import Config
 from httpx import ASGITransport
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from alembic import command
 from heizung.auth.password import hash_password
@@ -104,7 +109,7 @@ async def setup_engine() -> AsyncIterator[AsyncEngine]:
 async def http_client(setup_engine: AsyncEngine) -> AsyncIterator[httpx.AsyncClient]:
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
 
-    async def _override_get_session() -> AsyncIterator:
+    async def _override_get_session() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as session:
             yield session
 
@@ -258,7 +263,7 @@ async def test_login_rate_limit_blocks_after_5_attempts_per_ip(
     """
     payload = {"email": setup["admin_email"], "password": "WrongPassword12345!"}
     statuses: list[int] = []
-    last_body: dict = {}
+    last_body: dict[str, Any] = {}
     for _ in range(6):
         resp = await http_client.post("/api/v1/auth/login", json=payload)
         statuses.append(resp.status_code)

@@ -242,7 +242,7 @@ async def test_inferred_window_log_format_with_setpoint() -> None:
         setpoint_c=20,
     )
 
-    await log_inferred_window_event(_FakeSession(), result)  # type: ignore[arg-type]
+    await log_inferred_window_event(_FakeSession(), result)
 
     assert len(captured) == 1
     ev = captured[0]
@@ -288,7 +288,7 @@ async def test_inferred_window_log_format_none_setpoint() -> None:
         setpoint_c=None,
     )
 
-    await log_inferred_window_event(_FakeSession(), result)  # type: ignore[arg-type]
+    await log_inferred_window_event(_FakeSession(), result)
 
     assert len(captured) == 1
     ev = captured[0]

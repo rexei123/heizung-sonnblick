@@ -16,7 +16,12 @@ import pytest_asyncio
 from alembic.config import Config
 from httpx import ASGITransport
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from alembic import command
 from heizung.db import get_session
@@ -59,7 +64,7 @@ async def setup_engine() -> AsyncIterator[AsyncEngine]:
 async def http_client(setup_engine: AsyncEngine) -> AsyncIterator[httpx.AsyncClient]:
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
 
-    async def _override_get_session() -> AsyncIterator:
+    async def _override_get_session() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as session:
             yield session
 

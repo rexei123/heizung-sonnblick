@@ -202,9 +202,23 @@ function SidebarFooter(): ReactNode {
   );
 }
 
+/**
+ * Pre-Login-Routen: /login (B-9.17b-2) + /auth/* (z. B. /auth/change-password
+ * im Forced-Change-Flow). Auf diesen Routen rendert AppShell ohne Sidebar,
+ * sonst war beim Logout-Redirect die Navigation kurz auf /login sichtbar
+ * (Befund 2026-05-15) und die Brand wuerde Hotelier-Daten leaken.
+ */
+function isPreLoginRoute(pathname: string): boolean {
+  return pathname === "/login" || pathname.startsWith("/auth/");
+}
+
 export function AppShell({ children }: { children: ReactNode }): ReactNode {
   const pathname = usePathname() ?? "/";
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  if (isPreLoginRoute(pathname)) {
+    return <main className="min-h-screen bg-bg">{children}</main>;
+  }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-bg">

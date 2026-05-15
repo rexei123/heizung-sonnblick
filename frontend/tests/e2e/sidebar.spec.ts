@@ -80,6 +80,22 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     }
   });
 
+  test("Pre-Login-Routen (/login, /auth/*) zeigen KEINE Sidebar", async ({ page }) => {
+    // B-9.17b-2: AppShell-Sidebar war kurz auf /login sichtbar nach Logout-Redirect.
+    // AppShell blendet jetzt fuer /login + /auth/* die Sidebar aus.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route("**/api/v1/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+
+    for (const path of ["/login", "/auth/change-password"]) {
+      await page.goto(path);
+      // Sidebar darf weder als Desktop-Nav noch als Mobile-Hamburger sichtbar sein
+      await expect(page.getByRole("navigation", { name: "Hauptnavigation" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Navigation öffnen" })).toHaveCount(0);
+    }
+  });
+
   test("Active-Route-Highlight greift auch bei Untermenue", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.route("**/api/v1/**", (r) =>
