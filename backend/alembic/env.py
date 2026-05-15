@@ -5,6 +5,7 @@ mit der asynchronen Engine aus.
 """
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -22,9 +23,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# URL aus den Anwendungs-Settings übernehmen
+# URL aus den Anwendungs-Settings uebernehmen. Tests setzen
+# TEST_DATABASE_URL und erwarten, dass Migrationen dort laufen — sonst
+# trifft test_migrations_roundtrip die Produktiv-/Dev-DB (B-9.16-2).
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+url = os.environ.get("TEST_DATABASE_URL") or settings.database_url
+config.set_main_option("sqlalchemy.url", url)
 
 # Ziel-Metadaten (alle deklarierten ORM-Modelle)
 target_metadata = Base.metadata
