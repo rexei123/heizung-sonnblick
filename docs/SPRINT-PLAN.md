@@ -1,20 +1,46 @@
 # Sprint-Plan — Heizungssteuerung Hotel Sonnblick
 
-**Status:** Verbindlich ab 2026-05-07
-**Letzte Aktualisierung:** 2026-05-07 (Architektur-Refresh)
+**Status:** Verbindlich ab 2026-05-15
+**Letzte Aktualisierung:** 2026-05-15 (Strategie-Refresh nach
+Auth-Cutover-Erfolg)
 **Ersetzt:** Alle Sprint-Briefe in `docs/features/` mit Datum vor 2026-05-07
-**Bezug:** ARCHITEKTUR-REFRESH-2026-05-07.md
+**Bezug:** `docs/STRATEGIE-REFRESH-2026-05-15.md` (Phasen-Logik),
+`docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Architektur-Master)
+
+## Phasen-Logik (verbindlich ab 2026-05-15)
+
+Nach Auth-Cutover-Erfolg auf heizung-test (Tag `v0.1.14-auth`,
+2026-05-15) wurde die Sprint-Reihenfolge auf Stabilisierung-vor-
+Features umgestellt. Sechs Phasen mit klaren Abschluss-Kriterien:
+
+| Phase | Zeitraum | Sprints | Inhalt |
+|---|---|---|---|
+| 1 Stabilisierung | Mai-Juni 2026 | 10, 10a, 10b, 10c | CI-Hygiene, Vicki-Diagnose, Code-Fixes, Polish |
+| 2 Live-Beobachtung | Juni-Juli 2026 | — | Hotelier produktiv auf heizung-test, Befund-Sprints ad-hoc |
+| 3 Frostschutz | Juli 2026 | 11 | AE-42-Reaktivierung, Engine Layer 5 nutzt `min_temp_celsius` |
+| 4 heizung-main-Migration | Juli-August 2026 | 12 | B-9.11x-2, Auth-Cutover analog 9.17a/b, Backup-Cron |
+| 5 PMS-Casablanca | August 2026 | 13 | Casablanca-Anbindung, Fallback manuelle Pflege |
+| 6 Go-Live | September 2026 | 14 | Tag v1.0.0, produktiv vor Heizperiode 01.10.2026 |
+| 7 Features | Winter 2026+ | 15+ | Nach Hotelier-Bedarf: Dashboard, Analytics, API-Keys, Gateway-UI, Wetter, ... |
+
+**Heizperiode-Start:** 1. Oktober 2026, Hotel Sonnblick Kaprun.
+Phasen-Plan hat zwei Wochen Puffer pro Phase.
+
+Details siehe `docs/STRATEGIE-REFRESH-2026-05-15.md`.
 
 ## Konventionen
 
-- **Sprint-Nummern** sind fortlaufend ab 9.11 (alles davor abgeschlossen)
-- **Sub-Sprints** mit Suffix a/b/c für Hotfixes oder Aufteilungen (z. B. 9.11a)
-- **Autonomie-Stufen** nach CLAUDE.md §0.1: 1=Engine-Concurrency, 2=Standard,
-  3=Markdown-only
+- **Sprint-Nummern** entsprechen der Zeit-Reihenfolge (Variante 2
+  aus Strategie-Refresh)
+- **Sub-Sprints** mit Suffix a/b/c für Hotfixes oder Aufteilungen
+  (z. B. 10a, 10b, 10c)
+- **Autonomie-Stufen** nach CLAUDE.md §0.1: 1=Engine-Concurrency,
+  2=Standard, 3=Markdown-only
 - **Definition of Done** gilt pro Sprint zusätzlich zu globaler DoD
-- **Meilensteine** sind harte Tags, die nie ohne Strategie-Chat-Freigabe
-  gesetzt werden
-- **Priorität:** 🔴 blockierend, 🟡 wichtig, 🟢 nice-to-have
+- **Meilensteine** sind harte Tags, die nie ohne Strategie-Chat-
+  Freigabe gesetzt werden
+- **Priorität:** 🔴 blockierend, 🟠 vor Heizperiode klärungsbedürftig,
+  🟡 wichtig, 🟢 nice-to-have
 
 ## Globale Definition of Done (gilt für alle Sprints)
 
@@ -513,215 +539,247 @@ korrigiert.
 
 ---
 
-# SPRINT 9.18 — Dashboard mit KPI-Cards
+# SPRINT 10 — CI-Hygiene + Test-Coverage (Phase 1)
 
-**Priorität:** 🟡
-**Geschätzte Dauer:** 3-4 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 9.17 (User-Begrüßung braucht Auth)
-**Tag nach Abschluss:** `v0.1.16-dashboard`
-
-## Ziel
-
-Dashboard mit 6 KPI-Cards (Strategie §8.4): Belegung, Ø-Temperatur,
-Geräte-Online, Energiestatus, Nächster Check-in, Außentemperatur.
-
-## Tasks
-
-- T1: API-Aggregations-Route `/api/v1/dashboard/kpi`
-- T2: Frontend `/` mit 6 KPI-Cards
-- T3: Begrüßung „Hallo, [Name]" mit User-Session
-- T4: Refresh alle 60s
-
----
-
-# SPRINT 9.19 — Temperaturverlauf-Analytics
-
-**Priorität:** 🟢
-**Geschätzte Dauer:** 4-5 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 9.18
-**Tag nach Abschluss:** `v0.1.17-analytics`
+**Priorität:** 🔴 (Stabilisierung vor weiteren Features)
+**Geschätzte Dauer:** 6-8 h
+**Autonomiestufe:** 2 (Default)
+**Voraussetzung:** Tag `v0.1.14-auth` gesetzt, develop ist auf
+Sprint-9.17c-Stand
+**Tag nach Abschluss:** keiner (Hygiene-Sprint, kein Feature)
 
 ## Ziel
 
-Eigene Analytics-Seite mit Temperaturverlauf-Chart pro Zimmer/Raum,
-Zeitraum-Filter, Wunsch- vs. Ist-Temperatur (analog Betterspace).
+Test-Coverage und CI-Pipeline stabilisieren. psycopg2-Ignores aus
+pytest entfernen. mypy-Vorlast in `tests/` deutlich reduzieren.
+celery_beat-Backlog-Konsolidierung. Sidebar-Bug auf `/login` fixen.
+Secrets-Rotation auf heizung-test. Backlog-Müll aufräumen.
 
 ## Tasks
 
-- T1: API `/api/v1/analytics/temperature-history` mit Zeitraum-Param
-- T2: Recharts Line-Chart, Wunsch + Ist als zwei Linien
-- T3: Filter: Zeitraum, Raum, Gerät
-- T4: TimescaleDB-Aggregation für lange Zeiträume
+- T1: psycopg2-Failures fixen (B-9.10-6, B-9.11x-1). Entweder
+  `psycopg2-binary` in `pyproject.toml [dev]`-extras aufnehmen ODER
+  betroffene Test-Files auf asyncpg umstellen. Empfehlung:
+  `pyproject.toml` — einfacher und CI-Mirror-tauglich. Erwartete
+  Diff: 3 failed + 7 errors lokal → 0 nach Fix.
+- T2: Migration-Roundtrip-Tests reparieren (B-9.16-2). Hängt an T1.
+- T3: celery_beat-Backlog-Konsolidierung. Drei Backlog-IDs für
+  dasselbe Problem (B-9.11-4, B-9.11x-3, B-9.17-3) auf eine
+  reduzieren. Healthcheck-Konfig untersuchen — entweder fixen oder
+  formal als „Container-Healthcheck-Anomalie ohne Engine-
+  Auswirkung" dokumentieren mit Begründung warum kein Fix nötig.
+- T4: mypy-Vorlast in `tests/` reduzieren (B-9.10d-2). Ziel: 71 →
+  unter 20 mypy-Errors. Keine Refactor-Aktionen außerhalb `tests/`,
+  nur Type-Annotations und Cast-Fixes in Test-Files.
+- T5: Sidebar-Sichtbarkeit auf `/login` fixen (B-9.17b-2). AppShell
+  rendert nicht auf `/login`, `/auth/change-password` und ähnlichen
+  Pre-Login-Routen.
+- T6: Secrets-Rotation auf heizung-test (B-9.17-S1).
+  `POSTGRES_PASSWORD` und `SECRET_KEY` rotieren. Backup .env
+  vorher. Rollback-Plan dokumentiert.
+- T7: Backlog-Konsolidierung in STATUS.md §6.2. Duplikate auflösen
+  (celery_beat-IDs, ähnliche). Sortierung nach Priorität neu
+  prüfen. Erledigte Items als ✅ markieren mit Verweis auf Sprint,
+  der sie abgehakt hat.
+- T8: Pre-Push-Hook für `ruff format --check` (B-9.10d-6). Husky
+  oder git-Hook lokal. Verhindert §5.24-Wiederholungsfehler.
+- T9: Doku — STATUS.md §2aj (neu), keine CLAUDE.md-Änderung nötig.
+
+## Definition of Done
+
+- pytest auf grün lokal OHNE psycopg2-Ignores (B-9.11x-1 fix
+  verifiziert)
+- pytest auf grün in CI ebenfalls
+- mypy `tests/` < 20 Errors
+- celery_beat-Backlog auf eine ID reduziert, mit klarer
+  Status-Beschreibung
+- `/login` rendert ohne AppShell-Sidebar (Browser-Verify)
+- Secrets rotiert, Container nach Restart healthy
+- STATUS.md §6.2 entrümpelt
+- PR auf develop gemerged
+
+## Out of Scope
+
+- Code-Logik-Änderungen außerhalb des Hygiene-Themas
+- Hardware-Diagnose Vicki (kommt in 10a)
+- Frontend-Polish Wording-Audit (kommt in 10c)
+- Frostschutz-Reaktivierung (Sprint 11)
 
 ---
 
-# SPRINT 9.20 — API-Keys + Webhooks
+# SPRINT 10a — Vicki-Diagnose (Phase 1)
 
-**Priorität:** 🟢
-**Geschätzte Dauer:** 4 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 9.17
-**Tag nach Abschluss:** `v0.1.18-api-webhooks`
+**Priorität:** 🟠 (vor Heizperiode klärungsbedürftig)
+**Geschätzte Dauer:** 4-6 h Diagnose, Fix-Aufwand offen je nach
+Befund
+**Autonomiestufe:** 1 (Hardware-Diagnose, Pflicht-Stops)
+**Voraussetzung:** Sprint 10 abgeschlossen, CI grün, Backlog
+konsolidiert
+**Tag nach Abschluss:** keiner (Diagnose-Sprint)
 
 ## Ziel
 
-API-Keys für externe Integrationen (Sprint 11 Casablanca-PMS) und
-Webhooks für Outbound-Events.
+Zwei Hardware-Befunde aus dem Auth-Cutover-Smoke-Test 2026-05-15
+klären:
 
-## Tasks
+- B-9.17b-3 Batterie-Wert-Plausibilität (33% / 42% statt erwartetem
+  Verlauf nach neuer Batterie)
+- B-9.17b-4 Vicki-002 und -004 senden seit Pairing keinen Heartbeat
+  („Inaktiv, noch nie")
 
-- T1: Tabelle `api_key` + `webhook_subscription`
-- T2: Auth-Middleware für API-Key-Header
-- T3: `/einstellungen/api` Settings-Layout
-- T4: Webhook-Dispatcher als Celery-Task
+Vicki-003 als Kontrollgruppe (gepaired, aktiv, ohne Backplate) für
+beide Befunde verfügbar.
+
+## Tasks (Phase-0-orientiert)
+
+- T1: Diagnose Batterie-Decoder im Codec
+- T2: Diagnose Subscriber-Persistierung der Batterie
+- T3: Diagnose Pairing-Status Vicki-002 und -004 in ChirpStack
+- T4: Hardware-Test Vicki-002/-004 in Funk-Distanz, falls
+  ChirpStack-Pairing korrekt aussieht
+- T5: Phase-0-Bericht mit Klassifikation: Codec-Bug, Subscriber-
+  Bug, oder Hardware-Befund. Pro Variante Fix-Plan-Skizze.
+
+## Definition of Done (Diagnose)
+
+- Vier Vickis kategorisiert als: produktiv-fähig, mit Codec-Fix
+  produktiv-fähig, oder nicht-pairing-fähig (mit Hardware-
+  Begründung)
+- Phase-0-Bericht in
+  `docs/features/2026-05-XX-sprint-10a-vicki-diagnose.md`
+- Falls Fix-Bedarf: Sprint-10b-Brief vorbereitet
 
 ---
 
-# SPRINT 9.21 — Gateway-Status-UI
+# SPRINT 10b — Vicki-Code-Fixes (Phase 1, conditional)
+
+**Priorität:** 🟡 (nur falls 10a Code-Fix verlangt)
+**Voraussetzung:** Sprint 10a-Diagnose-Bericht
+**Inhalt:** Codec-Fix oder Subscriber-Fix je nach 10a-Befund
+
+---
+
+# SPRINT 10c — Frontend-Polish-Reste (Phase 1, optional)
 
 **Priorität:** 🟢
 **Geschätzte Dauer:** 2-3 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 9.13
-**Tag nach Abschluss:** kein eigener Tag (kleine UI-Erweiterung)
-
-## Ziel
-
-`/einstellungen/gateway` zeigt ChirpStack-Status, letzte Heartbeats,
-verbundene Geräte.
+**Voraussetzung:** Sprint 10 + 10a abgeschlossen
 
 ## Tasks
 
-- T1: API `/api/v1/gateway/status` (proxied an ChirpStack-API)
-- T2: Settings-Layout mit Status-Cards
-- T3: Refresh alle 30s
+- Wording-Audit aktiv/inaktiv auf weiteren Pages (B-9.13c-3)
+- Cookie-Namen-Konsistenz Backend↔Doku (B-9.17b-6)
+- Cache-Busting nach Frontend-Deploys (B-9.13b-1)
+- `/login`-Sidebar (falls nicht in Sprint 10 erledigt)
 
 ---
 
-# SPRINT 10 — Hygiene-Sprint
+# SPRINT 11 — Frostschutz-Reaktivierung (Phase 3)
 
-**Priorität:** 🔴 (vor Final-Tag `v0.1.9-engine`)
-**Geschätzte Dauer:** 4-5 h
+**Priorität:** 🔴 (vor Heizperiode Pflicht)
+**Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 2
-**Voraussetzung:** 9.11 abgeschlossen (alle Live-Test-Befunde gefixt)
-**Tag nach Abschluss:** `v0.1.19-hygiene`
+**Voraussetzung:** Phase 2 Live-Beobachtung abgeschlossen (zwei
+Wochen ohne neue 🔴/🟠-Befunde)
+**Tag nach Abschluss:** `v0.2.0-frostschutz`
 
 ## Ziel
 
-Alle B-9.10*-Backlog-Punkte abräumen.
+AE-42 aus dem zurückgestellten Zustand (STATUS §2aa) aktivieren.
+Frostschutz pro Raumtyp konfigurierbar. Engine Layer 5 nutzt
+`min_temp_celsius` statt globaler Konstante. Live-Test vor
+Heizperiode-Beginn.
 
-## Tasks
+## Tasks (Skizze, Detail-Brief später)
 
-- T1: B-9.10d-1 detail-Konvention auf snake_case-Tokens vereinheitlichen
-- T2: B-9.10d-2 mypy-Vorlast 71 Errors in tests/ beheben
-- T3: B-9.10d-3 Type-Inkonsistenz Engine `int` vs. EventLog `Decimal`
-- T4: B-9.10d-5 engine_tasks DB-Session per Dependency-Injection
-- T5: B-9.10d-6 Pre-Push-Hook für `ruff format --check`
-- T6: B-9.10-6 psycopg2-Failures
-- T7: B-9.10c-1 ChirpStack-Codec-Bootstrap-Skript
-- T8: B-9.11-1 celery_beat Healthcheck korrigieren
-
----
-
-# SPRINT 11 — PMS-Casablanca-Integration
-
-**Priorität:** 🔴 (vor Go-Live)
-**Geschätzte Dauer:** 8-10 h (in 2-3 Sub-Sprints)
-**Autonomiestufe:** 1 (externe Integration)
-**Voraussetzung:** 9.17 (Auth + API-Keys)
-**Tag nach Abschluss:** `v0.2.0-pms-casablanca`
-
-## Ziel
-
-Echte Anbindung an Casablanca-PMS, nicht nur Daten-Import. Polling oder
-Event-basiert je nach API-Fähigkeit.
-
-## Sub-Sprints (vorläufig)
-
-- 11a: PMS-Connector-Skeleton + API-Spec lesen
-- 11b: Polling-Implementation + Mapping-Layer
-- 11c: Fallback-Logik + Audit + Tests
-
-## Tasks (vorläufig, präzisiert in 11a)
-
-- T1: Casablanca-API-Spec analysieren
-- T2: Connector-Modul `backend/src/heizung/integrations/casablanca/`
-- T3: Mapping PMS-Status → RoomStatus (konfigurierbar)
-- T4: Polling-Scheduler oder Event-Listener
-- T5: Fallback bei PMS-Ausfall: letzter bekannter Status mit Zeitstempel
-- T6: Audit-Trail für jede PMS-Statusänderung
+- Migration: `min_temp_celsius` pro `room_type` aktivieren (Spalte
+  existiert bereits, war nur nicht engine-aktiv)
+- Engine Layer 5: Nutzung `min_temp_celsius` mit Fallback auf
+  globale Konstante falls room_type-Wert NULL
+- API: PATCH `/room-types` um `min_temp_celsius` zu setzen
+- Frontend: Inline-Edit auf `/raumtypen` für `min_temp_celsius`
+- Tests: Layer 5 mit verschiedenen `min_temp_celsius`-Werten
+- Live-Verify auf heizung-test mit künstlich niedrigen
+  Sensor-Readings (oder Wartezeit auf kalten Tag)
 
 ---
 
-# SPRINT 12 — Backup + Production-Migration
+# SPRINT 12 — heizung-main-Migration (Phase 4)
 
-**Priorität:** 🔴 (vor Go-Live)
-**Geschätzte Dauer:** 4-6 h
+**Priorität:** 🔴 (vor Go-Live Pflicht)
+**Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 1 (Production-Migration)
-**Voraussetzung:** 11 abgeschlossen
-**Tag nach Abschluss:** `v0.2.1-production-ready`
+**Voraussetzung:** Sprint 11 abgeschlossen, vier Vickis produktiv
+montiert auf heizung-main
+**Tag nach Abschluss:** `v0.2.1-main-cutover`
 
 ## Ziel
 
-Heizung-test-Stand auf heizung-main übertragen. Backup-Strategie
-operativ.
+heizung-main vom Sprint-9.8a-Stand auf aktuellen develop-Stand
+bringen. Auth-Cutover analog 9.17a/b. Backup-Cron. Off-Site-
+Replikation. Alle Vickis auf heizung-main produktiv.
 
-## Tasks
+## Tasks (Skizze)
 
-- T1: Backup-Cron auf db-Container (TimescaleDB-Backup, off-site)
-- T2: Restore-Test (Disaster Recovery Drill)
-- T3: heizung-main Bootstrap (Compose, .env, Caddy, ChirpStack-Codec
-  via B-9.10c-2)
-- T4: DNS-Switch-Plan (heizung-test → heizung-main)
-- T5: Smoke-Test-Plan für heizung-main
-- T6: RUNBOOK §12 Production-Migration-Sektion
+- B-9.11x-2 heizung-main-Sanierung
+- `safe.directory`-Fix (CLAUDE.md §5.7)
+- Migrationen 0005-0014 anwenden
+- Auth-Bootstrap mit echten Hotel-User-Daten
+- `AUTH_ENABLED=true`-Cutover analog Sprint 9.17a/b
+- Backup-Cron einrichten (OP-1)
+- Off-Site-Replikation
+- Live-Verifikation Engine + Hardware + Auth
 
 ---
 
-# SPRINT 13 — Wetterdaten-Service aktivieren
+# SPRINT 13 — PMS-Casablanca-Integration (Phase 5)
 
-**Priorität:** 🟡
-**Geschätzte Dauer:** 3-4 h
-**Autonomiestufe:** 2
-**Voraussetzung:** 12 (Production läuft)
-**Tag nach Abschluss:** `v0.2.2-weather`
+**Priorität:** 🔴 (vor Go-Live, sonst manuelle Pflege)
+**Geschätzte Dauer:** 2-3 Wochen
+**Autonomiestufe:** 1 (externe Integration)
+**Voraussetzung:** Casablanca-FIAS-Antwort liegt vor (erwartet
+Mai 2026), Sprint 12 abgeschlossen
+**Tag nach Abschluss:** `v0.2.2-pms-casablanca`
 
 ## Ziel
 
-Wetterdaten-Service operativ. Heute liegt Modell `weather_observation`
-vor, aber kein Service zieht Daten.
+Casablanca-PMS-Anbindung produktiv. Belegungs-Updates kommen
+automatisch. Engine reagiert mit Vorheizen/Setback. Manuelle Pflege
+bleibt als Fallback.
 
-## Tasks
+## Tasks (Skizze)
 
-- T1: Wetter-API auswählen (DWD, OpenWeather, Open-Meteo)
-- T2: Celery-Task `fetch_weather_observation` alle 10 min
-- T3: Korrelation mit `event_log` für spätere KI-Layer-Vorbereitung
-- T4: Dashboard-KPI „Außentemperatur" lesefähig
+- FIAS-Antwort auswerten, Polling- vs. Event-Strategie wählen
+- PMS-Adapter-Service implementieren
+- Mapping PMS-Status → `occupancy`-Tabelle
+- Caching mit klarer Invalidierungs-Strategie
+- Audit-Trail (`business_audit`)
+- Fallback bei PMS-Ausfall: letzter bekannter Stand mit Zeitstempel
+- Live-Test mit echten Buchungsdaten
 
 ---
 
-# SPRINT 14 — Final-Tag `v1.0.0` + Go-Live
+# SPRINT 14 — Go-Live + Tag `v1.0.0` (Phase 6)
 
 **Priorität:** 🎯 Meilenstein
-**Geschätzte Dauer:** 1 h Tag-Vergabe + Monitoring-Setup
+**Geschätzte Dauer:** 1 Woche
 **Autonomiestufe:** 1
-**Voraussetzung:** 13 abgeschlossen + Stabilitäts-Testperiode
+**Voraussetzung:** Sprint 13 abgeschlossen oder PMS-Manual-Fallback-OK
 **Tag nach Abschluss:** `v1.0.0`
 
 ## Ziel
 
-Offizielles Go-Live. heizung-main läuft seit mindestens 2 Wochen
-stabil mit allen Sprints integriert.
+Heizungssteuerung produktiv im Hotelbetrieb. Strategie-Chat
+wechselt in Beobachtungs-Modus. Heizperiode-Start 01.10.2026 mit
+laufender Steuerung.
 
-## Tasks
+## Tasks (Skizze)
 
-- T1: Final-Doku-Pass: STATUS.md auf 100% reflective state
-- T2: README.md für Repo-Root
-- T3: Tag `v1.0.0` mit Release-Notes
-- T4: Monitoring-Alert-Schwellen final justieren
-- T5: Stakeholder-Mitteilung (du + Hotelier + Techniker)
+- Final-Verifikation aller Phasen-Abschluss-Kriterien
+- README + Hotelier-Doku final
+- Tag `v1.0.0` auf produktivem Stand
+- Live-Beobachtungs-Plan für ersten Heizmonat
+- Stakeholder-Mitteilung (Strategie-Chat + Hotelier + Techniker)
 
 ---
 
@@ -731,11 +789,109 @@ stabil mit allen Sprints integriert.
 |---|---|
 | `v0.1.9-rc6-live-test-2` | Engine-Pipeline live verifiziert |
 | `v0.1.11-device-pairing` | Geräte-Verwaltung produktiv |
-| `v0.1.15-auth` | Multi-User produktiv |
-| `v0.1.19-hygiene` | Technische Schuld abgebaut |
-| `v0.2.0-pms-casablanca` | PMS-Integration produktiv |
-| `v0.2.1-production-ready` | heizung-main steht |
-| `v1.0.0` | Go-Live |
+| `v0.1.14-auth` | Auth-Track komplett (9.17 + 9.17a + 9.17b) |
+| `v0.2.0-frostschutz` | Frostschutz pro Raumtyp aktiv (Phase 3) |
+| `v0.2.1-main-cutover` | heizung-main produktiv (Phase 4) |
+| `v0.2.2-pms-casablanca` | PMS-Integration produktiv (Phase 5) |
+| `v1.0.0` | Go-Live (Phase 6, vor 01.10.2026) |
+
+---
+
+# Phase 7 — Features (nach Go-Live, Sprint 15+)
+
+Reihenfolge nach realem Hotelier-Bedarf, nicht nach Plan-
+Erinnerungen. Die folgenden Sprint-Skizzen stammen aus dem
+Architektur-Refresh 2026-05-07 und sind als Kandidaten für Phase 7
+vermerkt, ohne Sprint-Nummern (werden bei Aktivierung neu
+vergeben).
+
+## Feature-Kandidaten
+
+### Dashboard mit KPI-Cards (alt 9.18)
+
+**Geschätzte Dauer:** 3-4 h
+**Tag-Vorschlag:** `v0.3.x-dashboard`
+
+Dashboard mit 6 KPI-Cards (Strategie §8.4): Belegung, Ø-Temperatur,
+Geräte-Online, Energiestatus, Nächster Check-in, Außentemperatur.
+
+Tasks:
+- API-Aggregations-Route `/api/v1/dashboard/kpi`
+- Frontend `/` mit 6 KPI-Cards
+- Begrüßung „Hallo, [Name]" mit User-Session
+- Refresh alle 60s
+
+### Temperaturverlauf-Analytics (alt 9.19)
+
+**Geschätzte Dauer:** 4-5 h
+**Tag-Vorschlag:** `v0.3.x-analytics`
+
+Eigene Analytics-Seite mit Temperaturverlauf-Chart pro Zimmer/Raum,
+Zeitraum-Filter, Wunsch- vs. Ist-Temperatur (analog Betterspace).
+
+Tasks:
+- API `/api/v1/analytics/temperature-history` mit Zeitraum-Param
+- Recharts Line-Chart, Wunsch + Ist als zwei Linien
+- Filter: Zeitraum, Raum, Gerät
+- TimescaleDB-Aggregation für lange Zeiträume
+
+### API-Keys + Webhooks (alt 9.20)
+
+**Geschätzte Dauer:** 4 h
+**Tag-Vorschlag:** `v0.3.x-api-webhooks`
+
+API-Keys für externe Integrationen und Webhooks für
+Outbound-Events.
+
+Tasks:
+- Tabelle `api_key` + `webhook_subscription`
+- Auth-Middleware für API-Key-Header
+- `/einstellungen/api` Settings-Layout
+- Webhook-Dispatcher als Celery-Task
+
+### Gateway-Status-UI (alt 9.21)
+
+**Geschätzte Dauer:** 2-3 h
+**Tag-Vorschlag:** kein eigener Tag (kleine UI-Erweiterung)
+
+`/einstellungen/gateway` zeigt ChirpStack-Status, letzte Heartbeats,
+verbundene Geräte.
+
+Tasks:
+- API `/api/v1/gateway/status` (proxied an ChirpStack-API)
+- Settings-Layout mit Status-Cards
+- Refresh alle 30s
+
+### Wetterdaten-Service aktivieren (alt 13)
+
+**Geschätzte Dauer:** 3-4 h
+**Tag-Vorschlag:** `v0.3.x-weather`
+
+Wetterdaten-Service operativ. Heute liegt Modell
+`weather_observation` vor, aber kein Service zieht Daten.
+
+Tasks:
+- Wetter-API auswählen (DWD, OpenWeather, Open-Meteo)
+- Celery-Task `fetch_weather_observation` alle 10 min
+- Korrelation mit `event_log` für spätere KI-Layer-Vorbereitung
+- Dashboard-KPI „Außentemperatur" lesefähig
+
+### Weitere System-Szenarien (alt 9.16b, zurückgestellt)
+
+Tagabsenkung, Wartung, Schließzeit, Renovierung. Plus volle
+Szenario-Auflösung in Engine Layer 2 (ROOM > ROOM_TYPE > GLOBAL
+Hierarchie analog `rule_config`). Plus Saison-UI auf
+`/einstellungen/saison` mit Tag-Monat-Range und saisonaler
+`rule_config` über `season_id`-FK.
+
+### Backlog-Items als Feature-Kandidaten
+
+- B-9.17-1 Self-Service-Passwort-Reset (via E-Mail)
+- B-9.17-2 Audit-UI im Frontend
+- B-9.17b-1 Server-side JWT-Blacklisting (Multi-Mandant-Pflicht)
+- B-9.13a-hf2-1 Server-Side-Build-SHA-Endpoint
+- B-9.11x-4 Status-Dashboard zentral (Pull-Timer + Container-Health
+  + Engine-Eval)
 
 ## Was nach Go-Live kommt (außerhalb dieses Plans)
 

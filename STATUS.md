@@ -1504,6 +1504,47 @@ implementiert.
 
 ---
 
+## 2ai. Sprint 10-Doku Strategie-Refresh (2026-05-15, abgeschlossen)
+
+Strategie-Re-Priorisierung nach Auth-Cutover-Erfolg. Hotelier-
+Statement: „System extrem stabil laufen bevor weitere Features dazu
+kommen. Casablanca im Extremfall umgehbar, weil Belegung auch
+manuell pflegbar."
+
+**Phasen-Logik neu (verbindlich ab 2026-05-15):**
+
+- Phase 1 Stabilisierung (Sprint 10/10a/10b/10c, Mai-Juni)
+- Phase 2 Live-Beobachtung heizung-test (Juni-Juli)
+- Phase 3 Frostschutz-Reaktivierung (Sprint 11, Juli)
+- Phase 4 heizung-main-Migration (Sprint 12, Juli-August)
+- Phase 5 PMS-Casablanca (Sprint 13, August)
+- Phase 6 Go-Live + Tag v1.0.0 (Sprint 14, September)
+- Phase 7 Features (Sprint 15+, Winter und danach)
+
+**Heizperiode-Start:** 1. Oktober 2026, Hotel Sonnblick Kaprun.
+
+**Sprint-Renumerierung:** Alte Feature-Sprints 9.18-9.21 in Phase 7
+verschoben. Alter Sprint 10 (Hygiene) bleibt Sprint 10. Alter
+Sprint 11 (PMS) wird Sprint 13. Alter Sprint 12 (Backup) wird
+Sprint 12 (heizung-main-Migration, jetzt umfassender). Alter
+Sprint 13 (Wetterdaten) in Phase 7 verschoben. Neuer Sprint 11
+= Frostschutz-Reaktivierung. Sprint 14 = Go-Live bleibt.
+
+**Geänderte Dokumente:**
+- `docs/STRATEGIE-REFRESH-2026-05-15.md` neu angelegt
+- `docs/SPRINT-PLAN.md` umstrukturiert nach Phasen-Logik
+- `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` §7 als überholt markiert
+- `CLAUDE.md` §0.2 Source-of-Truth-Hierarchie um Strategie-Refresh
+  ergänzt
+
+**Querverweise:** STRATEGIE-REFRESH-2026-05-15.md, SPRINT-PLAN.md
+neu strukturiert. ARCHITEKTUR-REFRESH-2026-05-07.md bleibt
+Vorgänger-Dokument, nicht ersetzt.
+
+**Tag-Vergabe:** keiner — Doku-Sprint.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
