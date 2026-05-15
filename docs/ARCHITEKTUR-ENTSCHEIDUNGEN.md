@@ -1210,3 +1210,13 @@ NextAuth doppeltes Datenmodell waere unnoetiger Komplexitaet (S6).
   **Response-Pattern jetzt Standard für Auth-Endpoints**, mit
   Backend-Test der den Response-Header explizit prüft. Siehe
   CLAUDE.md §5.31.
+
+- **Nachtrag 2026-05-15 — Tag v0.1.14-auth:** Auth-Track komplett
+  abgeschlossen mit Sprint 9.17 (Foundation), 9.17a (Cutover-
+  Coverage + UX), 9.17b (Logout-Fix). Live-Cutover auf heizung-test
+  am 2026-05-15 10:18 UTC erfolgreich. AUTH_ENABLED=true seither
+  stabil. Sechs neue Backlog-Items aus Verifikations-Phase:
+  B-9.17b-1 (JWT-Blacklisting, Multi-Mandant), B-9.17b-2 (/login-
+  Sidebar), B-9.17b-3 (Batterie-Werte), B-9.17b-4 (Vicki-002/-004
+  Pairing), B-9.17b-5 (Hardware-Stand-Klarstellung), B-9.17b-6
+  (Cookie-Namen-Konsistenz). Siehe STATUS.md §6.2.
