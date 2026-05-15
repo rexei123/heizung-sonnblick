@@ -1174,9 +1174,29 @@ diesen Hotfix.
 
 ---
 
-## 2af. Sprint 9.17 abgeschlossen (2026-05-14)
+## 2af. Sprint 9.17 — Code gemerged, Cutover blockiert (2026-05-14)
 
-Authentifizierung produktiv. FastAPI-native JWT-Cookie-Auth statt
+**Status:**
+- **Code:** auf `develop` gemerged via PR #148 squash, Commit
+  `d879fd6` (2026-05-14). GHCR-Build-Images `:develop`-Tag
+  aktualisiert (workflow run `25873310750`, beide Images grün).
+- **Tag:** noch NICHT vergeben (`v0.1.14-auth` als Vorschlag,
+  vergibt der Strategie-Chat NACH Cutover-Freigabe).
+- **Cutover (`AUTH_ENABLED=false` → `true` auf heizung-test):**
+  blockiert. Zwei harte Cutover-Blocker aus der Cutover-Episode
+  vom 2026-05-14 (siehe Backlog §6.2):
+  - **B-9.17-4** 🔴 — ~9 GET-Endpoints in `devices`, `rooms`,
+    `heating_zones`, `room_types`, `occupancies` ungeschuetzt
+    (Brief-T6-Luecke, MUSS in 9.17a vor Cutover).
+  - **B-9.17-10** 🔴 — `get_current_user`-System-User-Fallback
+    macht `/change-password` unter `AUTH_ENABLED=false`
+    unbenutzbar; Forced-Change-Flow gebrochen. MUSS abgefangen
+    werden (503/409 statt Fallback).
+  Plus 7 weitere 🟡/🟢-Items aus derselben Episode (B-9.17-3,
+  -5..-9, -S1) als Sprint-9.17a- bzw. Sprint-10-Kandidaten.
+  Bis dahin laeuft heizung-test mit `AUTH_ENABLED=false`.
+
+Authentifizierung implementiert. FastAPI-native JWT-Cookie-Auth statt
 NextAuth, 2 Rollen (`admin` / `mitarbeiter`), `business_audit` als
 zweite Audit-Domain neben `config_audit`. AE-50 verankert die acht
 Entscheidungen. SPRINT-PLAN-9.17-Eintrag korrigiert (T0): vorher
@@ -1262,8 +1282,9 @@ Entscheidungen. SPRINT-PLAN-9.17-Eintrag korrigiert (T0): vorher
   entfernt. Brief-Abweichung in AE-50 Punkt 1, Lesson in
   CLAUDE.md §5.29.
 
-**Tag-Vorschlag:** `v0.1.14-auth` (Strategie-Chat-Freigabe nach
-Cowork-Visual-Review abwarten).
+**Tag-Vorschlag:** `v0.1.14-auth` — **noch NICHT vergeben**.
+Vergabe erst nach Cutover-Freigabe (Strategie-Chat) und Cowork-
+Visual-Review.
 
 **Out of Scope (Brief-konform):**
 - Self-Service-Passwort-Reset via E-Mail (B-9.17-1)
@@ -1273,7 +1294,8 @@ Cowork-Visual-Review abwarten).
 - Multi-Mandanten-Tenant-Trennung (kommt mit 11+)
 - Owner-Rolle, Hotelier/Techniker/Reception-Differenzierung
 
-**Aktivierungs-Hinweis fuer heizung-test:**
+**Aktivierungs-Hinweis fuer heizung-test (gesperrt bis Backlog-
+B-9.17-Liste abgearbeitet + Strategie-Chat-Freigabe):**
 Sprint mergt mit `AUTH_ENABLED=false`. Reihenfolge zum Aktivieren:
 1. ENV setzen: `INITIAL_ADMIN_EMAIL=admin@…`,
    `INITIAL_ADMIN_PASSWORD_HASH=<bcrypt>` (via
@@ -1452,8 +1474,17 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.16-3 🟢 (info) | Doppel-GET auf `/api/v1/scenarios` im Dev-Mode (vermutlich React-StrictMode-Artefakt, analog B-9.14-5). Nicht produktionskritisch, beobachtet im Cowork-Visual-Review Sprint 9.16. |
 | B-9.16-4 🟢 (info) | axe-DevTools-Lighthouse-A11y-Score nicht formal verifiziert für `/szenarien` (Cowork-Tooling-Limitation, kein funktionaler Befund). Stichprobe via Tab-Reihenfolge + aria-label hat keinen Verstoss ergeben. |
 | B-9.16-5 🟡 | Sprint 9.16a Hotfix-Anlass: Audit-Befund zeigt deutsche Umlaute in Backend-Docstrings (`engine.py`, `engine_tasks.py`, `room_types.py`, `global_config.py`, `manual_setpoint_event.py`, Migrations 0003b/0004/0011) durchgehend als ASCII-Replacement (`ue`/`ae`/`oe`) gepflegt — Repo-Konvention, nicht User-sichtbar. Einheitlichkeit-Audit oder ASCII-only-Policy für Backend-Docstrings in einem Hygiene-Sprint klären; bis dahin: User-sichtbare DB-Strings müssen UTF-8 sein (CLAUDE.md-Lesson kandidat). |
-| B-9.17-1 🟢 | Self-Service-Passwort-Reset via E-Mail. Heute kann nur Admin Passwoerter zuruecksetzen (AE-50 AE-7). Sobald E-Mail-Infrastruktur entschieden ist (SMTP-Setup oder Provider), eigener Sprint: `/auth/forgot-password` → Token → `/auth/reset-password?token=…`. Bis dahin: Admin-Reset reicht fuer den Single-Mandant-Betrieb. |
+| B-9.17-1 🟢 (info) | Self-Service-Passwort-Reset via E-Mail. Heute kann nur Admin Passwoerter zuruecksetzen (AE-50 AE-7). Sobald E-Mail-Infrastruktur entschieden ist (SMTP-Setup oder Provider), eigener Sprint: `/auth/forgot-password` → Token → `/auth/reset-password?token=…`. Bis dahin: Admin-Reset reicht fuer den Single-Mandant-Betrieb. |
 | B-9.17-2 🟢 (info) | Audit-UI im Frontend fuer `config_audit` und `business_audit`. Heute sind beide Tabellen reine Backend-Tabellen — kein UI-Endpoint, keine Anzeige. Separater Sprint nach erstem Hotelier-Feedback („was passierte am Mittwoch um 14:00?"). Spaeter ggf. mit Filter nach `user_id` / `target_type` / Zeitraum. |
+| B-9.17-3 🟢 (info) | `celery_beat`-Container unhealthy seit mehreren Deploy-Cycles. Pre-existing, NICHT 9.17-bezogen. Aus Cowork-Visual-Review 2026-05-14. Sprint 10 Hygiene. |
+| B-9.17-4 🔴 **Cutover-Blocker** | GET-Endpoints in Routern `devices`, `rooms`, `heating_zones`, `room_types`, `occupancies` sind ungeschuetzt. Sprint-9.17-Brief T6 hatte nur mutierende Endpoints spezifiziert — Brief-Luecke, nicht Implementierungs-Bug. ~9 GET-Endpoints betroffen. **MUSS in 9.17a behoben werden vor `AUTH_ENABLED=true`** (Tag `v0.1.14-auth` haengt daran). |
+| B-9.17-5 🟡 | Frontend-Wording bei 429 (slowapi Rate-Limit) und 503 ist identisch zu 401 („E-Mail oder Passwort falsch"). Differenzieren auf „Zu viele Versuche, bitte 60 Sekunden warten." bzw. eine 503-spezifische Meldung. Login-Page + Forced-Change-Page. |
+| B-9.17-6 🟡 | `/einstellungen/saison`-Stub fehlt Verweis auf `/szenarien`. Beschreibung erweitern um Sommermodus-Hinweis: „Sommermodus-Soforttoggle bereits unter Szenarien verfuegbar." |
+| B-9.17-7 🟡 | Mojibake in Forced-Change-Page-Fehlermeldung. „Die beiden Passwoerter stimmen nicht ueberein" sollte „Passwoerter" → „Passwörter" und „ueberein" → „überein" sein. Analog zu B-9.16-1 (Sommermodus-Seed Sprint 9.16a). |
+| B-9.17-8 🟡 | Password-Felder brauchen Sichtbarkeits-Toggle (Auge-Icon). Bei 12-Zeichen-Mindestlaenge zu fehleranfaellig ohne visuelles Feedback. Drei Stellen: Login-Page, Forced-Change-Page, Admin-Reset-Dialog. |
+| B-9.17-9 🟡 | Forced-Change-Page kann nicht zwischen „Aktuelles Passwort falsch" und „Neue Passwoerter stimmen nicht ueberein" unterscheiden — beides generischer roter Text unter dem Formular. UX-Konfusion bei Mehrfachfehler. |
+| B-9.17-10 🔴 **Cutover-Blocker** | Bei `AUTH_ENABLED=false` liefert `get_current_user` den System-User-Fallback (verwaltung, id=1) unabhaengig vom tatsaechlich eingeloggten User. `/change-password` vergleicht `current_password` gegen System-User-Hash statt gegen echten User-Hash. Konsequenz: Forced-Change unter `AUTH_ENABLED=false` unmoeglich — 400 „Aktuelles Passwort falsch" trotz korrekter Eingabe. **Fix:** User-Identitaets-kritische Endpoints (`/change-password`, `/auth/me` als User-spezifisch) muessen bei `AUTH_ENABLED=false` einen 503/409 mit klarer Meldung liefern statt das System-User-Fallback-Verhalten zu nutzen. |
+| B-9.17-S1 🟢 (info) | Secret-Rotation auf heizung-test notwendig. `POSTGRES_PASSWORD` und `SECRET_KEY` wurden waehrend Cutover-Diagnose 2026-05-14 versehentlich im Strategie-Chat exposed (Editor-Screenshot mit `.env`-Inhalt). Kein direkter Schaden, weil Tailscale-Zugang noetig, aber Hygiene-Massnahme fuer Sprint 10. |
 
 ### 6.3 — Operative Aufgaben
 
