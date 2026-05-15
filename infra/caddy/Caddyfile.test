@@ -15,11 +15,15 @@
 {$PUBLIC_HOSTNAME} {
     encode zstd gzip
 
-    # K-1 (QA-Audit 2026-04-29): Site-weite Basic-Auth, /health + /healthz public.
-    # Browser cached Auth pro Origin nur dann, wenn der initiale
-    # Page-Load Auth verlangt. Ohne Site-Schutz wuerde der Browser bei
-    # jedem fetch() vom Frontend einen neuen Login-Prompt zeigen.
-    # Setup-Anleitung: RUNBOOK §10b.
+    # Auth-Architektur Stand 2026-05-15 (Sprint 10-Prep):
+    # - /health + /healthz: public (Monitoring)
+    # - /openapi.json + /docs + /redoc: Caddy-Basic-Auth (Reconnaissance-Schutz,
+    #   FastAPI hat kein eigenes Auth-Layer dort)
+    # - /api/*: Backend-Auth via JWT-Cookie (Sprint 9.17a/b, AE-50)
+    # - Frontend: Backend-Auth via JWT-Cookie (Login-Page ist Public)
+    #
+    # Vorher (Sprint 8a, K-1): Site-weite Basic-Auth weil Backend ungeschützt war.
+    # Aufgelöst nach AE-50-Implementierung in Sprint 9.17.
     route {
         # 1. Public: Backend-Liveness /health (Uptime-Monitoring)
         @backend_health path /health
@@ -33,18 +37,30 @@
             reverse_proxy web:3000
         }
 
-        # 3. Ab hier alles Auth-pflichtig
-        basicauth {
-            hotel {$HOTEL_BASIC_AUTH_HASH}
+        # 3. API-Doku bleibt Caddy-Basic-Auth-geschützt
+        # Sprint-10-Prep (2026-05-15): FastAPI hat kein eigenes Auth-Layer
+        # auf /openapi.json /docs /redoc. Caddy-Schicht erhält
+        # Reconnaissance-Schutz. Backend-Endpoints (/api/*) haben
+        # eigenes Auth via JWT-Cookie (Sprint 9.17a/b, AE-50).
+        @api_docs path /openapi.json /docs /docs/* /redoc /redoc/*
+        handle @api_docs {
+            basicauth {
+                hotel {$HOTEL_BASIC_AUTH_HASH}
+            }
+            reverse_proxy api:8000
         }
 
-        # 4. API + Doku -> FastAPI
-        @api path /api/* /openapi.json /docs /redoc
+        # 4. API-Endpoints: Backend-Auth übernimmt
+        # Sprint 9.17a hat 17 GETs + alle mutierenden Endpoints mit
+        # require_user / require_admin / require_real_user abgesichert.
+        # Sprint 9.17b hat Logout-Cookie-Invalidation gefixt.
+        @api path /api/*
         handle @api {
             reverse_proxy api:8000
         }
 
-        # 5. Default -> Frontend
+        # 5. Frontend: Backend-Auth schützt über JWT-Cookie
+        # Login-Page (/login, /auth/*) selbst ist Public.
         reverse_proxy web:3000
     }
 
