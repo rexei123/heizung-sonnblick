@@ -221,6 +221,12 @@ Migration in Sprint 9.13 (mit Geräte-Pairing-UI).
 
 ## 7. Sprint-Plan-Adaption
 
+> **Hinweis 2026-05-15:** Die unten stehende Sprint-Reihenfolge wurde
+> durch Strategie-Refresh 2026-05-15 abgelöst. Aktuelle
+> Phasen-Logik: siehe `docs/STRATEGIE-REFRESH-2026-05-15.md`.
+> Diese Tabelle bleibt als Vorgänger-Dokument bestehen, gilt aber
+> nicht mehr für neue Pläne.
+
 Detaillierter Sprint-Plan in `docs/SPRINT-PLAN.md`. Übersicht:
 
 | Sprint | Inhalt | Priorität |

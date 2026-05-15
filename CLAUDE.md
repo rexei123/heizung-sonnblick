@@ -129,20 +129,23 @@ Stufe explizit setzen:
 Begründung der Stufe steht im Sprint-Brief, nicht im
 Strategie-Chat.
 
-## §0.2 — Source-of-Truth-Hierarchie nach Architektur-Refresh 2026-05-07
+## §0.2 — Source-of-Truth-Hierarchie nach Strategie-Refresh 2026-05-15
 
 Bei Konflikt zwischen Dokumenten gilt diese Reihenfolge (oben schlägt
 unten):
 
-1. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-2. `docs/SPRINT-PLAN.md`
-3. `STATUS.md` (für laufenden Stand)
-4. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
-5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
-6. `docs/STRATEGIE.md`
-7. `docs/RUNBOOK.md`
-8. `docs/WORKFLOW.md`
-9. `Design-Strategie-2_0_1.docx`
+1. `docs/STRATEGIE-REFRESH-2026-05-15.md` (neuestes Strategie-Update,
+   Phasen-Logik)
+2. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Architektur-Master; §7
+   Sprint-Plan-Adaption ist durch 1. überholt)
+3. `docs/SPRINT-PLAN.md`
+4. `STATUS.md` (für laufenden Stand)
+5. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
+6. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
+7. `docs/STRATEGIE.md`
+8. `docs/RUNBOOK.md`
+9. `docs/WORKFLOW.md`
+10. `Design-Strategie-2_0_1.docx`
 
 Alles in `docs/features/` mit Datum vor 2026-05-07 ist historisch —
 gilt nicht mehr für Pläne, gilt für Lessons.
