@@ -1197,3 +1197,16 @@ NextAuth doppeltes Datenmodell waere unnoetiger Komplexitaet (S6).
   Standard:** Brief-Pflicht-Stop "T1 Endpoint-Inventar mit
   Soll-Dependency pro Methode + Pfad". Kein neues ADR — Hotfix
   korrigiert Brief-Lücke, nicht die Architektur.
+
+- **Logout-Implementierungs-Detail in 9.17b nachgezogen:** Punkt 4
+  (Inaktivitäts-Logout-Pattern) und der `/auth/logout`-Endpoint
+  teilen denselben Cookie-Cleanup-Pfad. Sprint 9.17 hatte ein
+  FastAPI-Response-Parameter-Anti-Pattern (``_clear_auth_cookie``
+  wirkte auf den injizierten Parameter, das explizit
+  zurückgegebene neue Response-Objekt überschrieb es), wodurch der
+  Logout-204 keinen Set-Cookie-Header lieferte und die Session im
+  Browser aktiv blieb. Sprint 9.17b nutzt jetzt Variante B
+  (eigenes Response erzeugen, Cookie darauf löschen, returnen).
+  **Response-Pattern jetzt Standard für Auth-Endpoints**, mit
+  Backend-Test der den Response-Header explizit prüft. Siehe
+  CLAUDE.md §5.31.

@@ -1413,6 +1413,63 @@ UX-Defekte (B-9.17-5, -6, -7, -8, -9) aus der Cutover-Episode 2026-05-14.
 
 ---
 
+## 2ah. Sprint 9.17b Logout-Cookie-Fix + Rate-Limit-Verifikation (2026-05-15, abgeschlossen)
+
+**Status:**
+- **Code:** auf `develop` gemerged via PR.
+- **Tag:** noch NICHT vergeben (`v0.1.14-auth` Strategie-Chat
+  vergibt NACH zweitem erfolgreichem Cowork-Smoke / TC6-Re-Run).
+- **Cutover:** `AUTH_ENABLED=true` bleibt aktiv. Kein Re-Flip nötig.
+
+Schließt zwei Befunde aus dem Post-Cutover-Smoke-Test 9.17a:
+- **B-9.17a-1** 🔴 Logout-Cookie wurde nicht invalidiert
+  (FastAPI Response-Parameter-Bug, Session blieb aktiv).
+- **B-9.17a-2** 🟡 Rate-Limit-Wording-Pfad verifiziert.
+
+**Backend:**
+- T1 Fix `backend/src/heizung/api/v1/auth.py`: Logout-Handler nutzt
+  Variante B (eigenes `Response`-Objekt erzeugen, `_clear_auth_cookie`
+  darauf anwenden, dieses zurückgeben). 3-Zeilen-Änderung +
+  Kommentar mit Lesson-Querverweis §5.31.
+- T2 Backend-Test `test_logout_response_carries_cookie_deletion_header`
+  in `test_api_auth.py`: prüft Status 204, `set-cookie`-Header
+  vorhanden, Header enthält `Max-Age=0` oder `Expires=Thu, 01 Jan 1970`
+  (Cookie-Lösch-Indikator). Schliesst die false-positive-Lücke des
+  alten `test_logout_clears_cookie`-Tests, der manuell den Cookie-
+  Jar geleert hatte.
+- T3 Rate-Limit-Test: bestehender
+  `test_login_rate_limit_blocks_after_5_attempts_per_ip` aus
+  Sprint 9.17 erweitert um Body-Assertion (slowapi-Detail-Feld muss
+  gesetzt sein, sonst kein Mapping zum Frontend-Wording möglich).
+
+**Frontend:**
+- T4 429-Wording: bestehende Sprint-9.17a-Tests ("Login: 429 zeigt
+  Wartezeit-Hinweis", "Change-Password: 429 zeigt Wartezeit-Hinweis")
+  decken den Pfad bereits ab. Verifiziert grün, keine Code-Änderung.
+
+**Tests:**
+- Backend pytest: erwartet **321 passed + 1 xfailed** (320 alt + 1
+  neu T2). Soll-Zahl ≥ 322 Brief: nicht erreicht, weil T3 als
+  Body-Erweiterung in bestehendem Test landete statt als neuer Test.
+  Die Soll-Zahlen-Differenz dokumentiert.
+- Frontend Playwright: **41 passed** (unverändert; T4 deckte schon ab).
+
+**Backlog-Abhakung:**
+- ✅ B-9.17a-1 (Logout-Cookie-Invalidierung)
+- ✅ B-9.17a-2 (Rate-Limit-Wording-Pfad verifiziert)
+
+**Neuer Backlog-Eintrag:**
+- B-9.17b-1 (info): Server-side JWT-Blacklisting bei Logout —
+  Single-Mandant-akzeptabel, für Multi-Mandant nötig.
+
+**Doku:**
+- CLAUDE.md §5.31 neue Lesson "FastAPI Response-Parameter vs.
+  explicit Response-Return: zwei verschiedene Objekte".
+- AE-50 Nachtrag erweitert.
+- SPRINT-PLAN.md 9.17b-Block.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

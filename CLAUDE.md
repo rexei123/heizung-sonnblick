@@ -721,6 +721,58 @@ und in die finale Doku — nicht als stillschweigende Annahme im Code.
 unvollständiger Brief als Risiko), AE-50 Punkt 6 (Feature-Flag-Pattern),
 §5.29 (Auth-Library-Wahl, Sprint 9.17 Lesson).
 
+### 5.31 FastAPI Response-Parameter vs. explicit Response-Return: zwei verschiedene Objekte (Sprint 9.17b Lesson)
+
+Sprint 9.17 hatte Logout als
+
+```python
+async def logout(response: Response) -> Response:
+    _clear_auth_cookie(response)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+implementiert. Die `delete_cookie`-Operation auf dem injizierten
+`response`-Parameter wurde durch das explizit zurückgegebene neue
+Response-Objekt überschrieben. Resultat: Logout liefert 204 ohne
+Set-Cookie-Header, Browser behält das JWT-Cookie, Session bleibt
+aktiv. B-9.17a-1 (Cowork-Smoke 9.17a). Der Sprint-9.17-Backend-Test
+`test_logout_clears_cookie` war false-positive — er hat manuell
+`http_client.cookies.clear()` gemacht und dann 401 verifiziert, statt
+den Response-Header zu prüfen.
+
+**Regel:** Bei FastAPI-Endpoints, die Cookies oder Header über
+`response.set_cookie` / `response.delete_cookie` setzen, NIE
+gleichzeitig ein neues Response-Objekt explizit zurückgeben. Entweder:
+
+- Variante A: den injizierten `response`-Parameter mutieren + None
+  zurückgeben (FastAPI nimmt dann den Parameter als finale Response).
+- Variante B (verbindlich): eigenes Response-Objekt erzeugen UND die
+  Header-Operation darauf anwenden, dann dieses zurückgeben:
+
+```python
+async def logout() -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_auth_cookie(response)
+    return response
+```
+
+Variante B ist die saubere Form, weil Datenfluss-Richtung eindeutig:
+ein Objekt, eine Operation, ein Return.
+
+**Pflicht für Auth-/Cookie-Sprints:** jeder Endpoint mit Cookie-
+Set/Delete hat einen Backend-Test, der den Response-Header explizit
+prüft (z.B. `assert "max-age=0" in resp.headers["set-cookie"].lower()`).
+Browser-Smoke-Test allein reicht nicht — dort sieht man nur die
+Folge-Symptome.
+
+**Querverweise:** §5.30 (Endpoint-Inventar-Pflicht), AE-50 Punkt 4
+(Inaktivitäts-Logout-Pattern — gleicher Stack betroffen).
+
+**Backlog für später:** Server-side JWT-Blacklisting bei Logout.
+Heute verlassen wir uns auf Browser-Cookie-Cleanup; ein gestohlener
+JWT-Token bleibt 12h gültig. Für Single-Mandant-Hotelbetrieb
+akzeptabel, für Multi-Mandant nicht. B-9.17b-1 (info).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

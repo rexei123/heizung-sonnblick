@@ -476,6 +476,48 @@ Inventar-Pflicht für Auth-Sprints in CLAUDE.md §5.30 verankern.
 
 ---
 
+# SPRINT 9.17b — Logout-Cookie-Fix + Rate-Limit-Verifikation
+
+**Priorität:** 🔴 (Cutover-Blocker für Tag-Vergabe)
+**Geschätzte Dauer:** 1.5-2 h
+**Autonomiestufe:** 2 (kein Pflicht-Stop)
+**Voraussetzung:** 9.17a gemerged (`8ac1b40`), Auth live auf
+heizung-test mit `AUTH_ENABLED=true`
+**Tag nach Abschluss:** Strategie-Chat vergibt `v0.1.14-auth` NACH
+9.17b-Merge UND zweitem erfolgreichem Cowork-Smoke (TC6-Re-Run).
+
+## Ziel
+
+Zwei Befunde aus dem Post-Cutover-Smoke 9.17a beheben:
+- B-9.17a-1 🔴 Logout-Cookie wird nicht invalidiert
+  (FastAPI Response-Parameter-Pattern-Bug)
+- B-9.17a-2 🟡 Rate-Limit-Wording-Pfad verifizieren
+
+Plus Lesson §5.31 in CLAUDE.md verankern.
+
+## Tasks
+
+- T1: Logout-Endpoint-Fix mit Variante-B-Pattern (eigenes Response-
+  Objekt erzeugen, Cookie darauf löschen, return)
+- T2: Backend-Test der den `set-cookie`-Header explizit prüft
+  (Status 204, Header gesetzt, Cookie-Lösch-Indikator)
+- T3: Rate-Limit-Backend-Test (bestehender Test um Body-Assertion
+  erweitern)
+- T4: Frontend-Playwright-Test für 429-Wording (bestehende
+  9.17a-Tests verifizieren grün)
+- T5: Doku — CLAUDE.md §5.31, STATUS §2ah, SPRINT-PLAN 9.17b-Block,
+  AE-50-Querverweis-Erweiterung
+- T6: Pre-Push-Verifikation + PR
+
+## Out of Scope
+
+- Tag-Vergabe (Strategie-Chat nach zweitem Cowork-Smoke)
+- Server-side JWT-Blacklisting (B-9.17b-1 info, Sprint 11+)
+- Backplate-Detach / Vicki-Pairing-Befunde (separate Sprints)
+- Batterie-Wert-Diagnose (separater Sprint)
+
+---
+
 # SPRINT 9.18 — Dashboard mit KPI-Cards
 
 **Priorität:** 🟡
