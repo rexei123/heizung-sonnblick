@@ -159,7 +159,7 @@ gesprochen" zu haben. Wenn das passiert: Stop-Point, User klärt.
 | Symptom | Ursache | Reaktion |
 |---|---|---|
 | KI antwortet ohne SESSION-START-Bestätigung | Trigger-Phrase fehlte | User: „Lies SESSION-START.md und bestätige." |
-| KI bezieht sich auf alte Strategie-Inhalte | Embedding-Drift, kein Refresh-Read | User: „Stop. Lies ARCHITEKTUR-REFRESH-2026-05-07.md §X." |
+| KI bezieht sich auf alte Strategie-Inhalte | Embedding-Drift, kein Refresh-Read | User: „Stop. Lies `ARCHITEKTUR-REFRESH-2026-05-07.md` §X bzw. `STRATEGIE-REFRESH-2026-05-15.md` §Y (Phasen-Logik 1-7)." |
 | Claude Code committet ohne PR | Brief-Abweichung | User: revert, neuer Brief mit klarem Stop-Point |
 | Cowork ändert Daten | Auftrag-Verstoß | User: Stop, ggf. Daten manuell zurücksetzen |
 | Strategie-Chat schreibt zu viel Code | Rollen-Verwischung | User: „Das ist Claude-Code-Job. Schreibe stattdessen einen Brief." |

@@ -1610,15 +1610,15 @@ aus Strategie-Chat 2026-05-15. Master-Quelle:
 | T3 | `docs/STRATEGIE.md` §6.2 R5 belegungs-abhängig + neuer §6.5 Health-Monitoring + §7.1 Begriffs-Konsolidierung. | ✅ Commit `96e13b7`. |
 | T4 | `docs/STRATEGIE-REFRESH-2026-05-15.md` Phasen 1-7 konkretisiert (Phase 4b Pre-Pairing neu, Phase 6 zeit-definiert), §5 Migrations-Tabelle, §6 Sprint-Renumerierung. | ✅ Commit `dc0d95d`. |
 | T5 | `docs/SPRINT-PLAN.md` Sprint 11..17 + 14b arc42-Konsolidierung, Sprint 10b annotiert „verschoben"; Mini-Patch STRATEGIE-REFRESH §3/§5/§6 für Sprint 16a (PMS conditional). | ✅ Commit `b167702`. |
-| T6 | `STATUS.md` §2ak + §6.2 B-11prep-1..8. | 🔄 in Arbeit (dieser Edit). |
-| T7 | `CLAUDE.md` §5.32 + §5.33 (Lessons knapp, 3-5 Zeilen, Zeiger auf Master-Quelle). | ⏳ ausstehend. |
-| T8 | `docs/SESSION-START.md` Pre-Read für Sprint 11-17. | ⏳ ausstehend. |
-| T9 | `docs/CHANGELOG-Design-Strategie.md` Eintrag 2026-05-15. | ⏳ ausstehend. |
-| T10 | `docs/RUNBOOK.md` §10f Pre-Pairing-Workflow-Stub. | ⏳ ausstehend. |
-| T11 | `docs/AI-ROLES.md` Check (kein Commit falls keine Anpassung nötig). | ⏳ ausstehend. |
-| T12 | Cross-Referenz-Check über alle angepassten Dateien. | ⏳ ausstehend (kein Commit). |
-| T13 | Markdown-Lint. | ⏳ ausstehend (kein Commit bei Style-Warnings). |
-| T14 | Sprint-Abschluss-Bericht + Bitte um Push-/Tag-Freigabe. | ⏳ ausstehend. |
+| T6 | `STATUS.md` §2ak + §6.2 B-11prep-1..8. | ✅ Commit `1f3602c`. |
+| T7 | `CLAUDE.md` §5.33 + §5.34 (Lessons knapp, 3-5 Zeilen, Zeiger auf Master-Quelle; §5.32 durch Sprint 10 belegt, Numerierung +1). | ✅ Commit `2713240`. |
+| T8 | `docs/SESSION-START.md` Pre-Read für Sprint 11-17 (plus Doku-Drift-Fix aus Sprint 10: STRATEGIE-REFRESH-2026-05-15.md ergänzt). | ✅ Commit `45067c1`. |
+| T9 | `docs/CHANGELOG-Design-Strategie.md` Eintrag 2026-05-15. | ↪ entfallen — S6 Doppel-Doku-Vermeidung; Info bereits in T1/T2/T6/T7 verankert, CHANGELOG-Design-Strategie ist auf Design-System (Tokens/Icons/Komponenten) fokussiert, Architektur-Strategie passt thematisch nicht. |
+| T10 | `docs/RUNBOOK.md` §10h Pre-Pairing-Workflow-Stub + §10d.6 Health-Status-Stub (§10f durch Sprint 10 T8 / §10g durch Sprint 10 T6 belegt, Numerierung +2). | ✅ Commit `4432f41`. |
+| T11 | `docs/AI-ROLES.md` Check. | ✅ no-op gesichtet, keine Anpassung nötig; optionale Mini-Erweiterung der Fehlerbilder-Tabelle in T14-Cleanup. |
+| T12 | Cross-Referenz-Check über alle angepassten Dateien. | ✅ no-op alle Patterns grün (AE-51..54-Range-Verweise konsistent, Master-Quelle in 9 Dateien vernetzt, 5/5 T1-T5-Commit-Hashes match). |
+| T13 | Markdown-Lint via Grep-Spot-Check (Code-Fence-Parität, Broken-Links, Tabellen-Pipe-Konsistenz). | ✅ no-op alle kritischen Patterns grün; §6.2-Spalten-Drift pre-existing, Tooling-Setup als Backlog-Idee für Sprint 14b notiert. |
+| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | 🔄 in Arbeit. |
 
 **Geänderte Dokumente bisher (T1-T5):**
 
