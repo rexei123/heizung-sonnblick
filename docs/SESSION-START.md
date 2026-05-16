@@ -1,8 +1,11 @@
 # Session-Start — Pflicht-Pre-Read für jede KI-Session
 
-**Status:** Verbindlich ab 2026-05-07
+**Status:** Verbindlich ab 2026-05-07, aktualisiert 2026-05-15
 **Gültig für:** Strategie-Chat (Claude.ai), Claude Code, Cowork
-**Bezug:** ARCHITEKTUR-REFRESH-2026-05-07.md
+**Bezug:** `ARCHITEKTUR-REFRESH-2026-05-07.md` (Architektur-Master) +
+`STRATEGIE-REFRESH-2026-05-15.md` (Phasen-Logik 1-7 verbindlich) +
+`STRATEGIE-THERMOSTAT-ZUORDNUNG.md` (Master-Quelle Zuordnungs-
+Architektur, Pflicht für Sprint 11-17 und Sprint 14b)
 
 ## Trigger-Phrase
 
@@ -36,12 +39,17 @@ In dieser Reihenfolge lesen:
    Wird beim Chat-Start automatisch geladen, MUSS aber bewusst gelesen
    und befolgt werden, nicht überflogen.
 1. `docs/SESSION-START.md` (dieses Dokument)
-2. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Master)
-3. `docs/SPRINT-PLAN.md` (aktueller + nächster Sprint)
-4. `STATUS.md` §1 (Aktueller Stand) + §2 letzter Eintrag
-5. `CLAUDE.md` §0 (Stabilitätsregeln) + §0.1 (Autonomie-Default)
-6. **Kritische Hardware-Befunde** (siehe Sektion unten in diesem Dokument)
-7. `docs/AI-ROLES.md` (eigene Rolle)
+2. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Architektur-Master)
+3. `docs/STRATEGIE-REFRESH-2026-05-15.md` (Phasen-Logik 1-7;
+   überholt §7 im 2026-05-07-Refresh)
+4. `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` (Master-Quelle
+   Zuordnungs-Architektur, AE-51..AE-54; Pflicht für Sprint 11-17
+   und Sprint 14b)
+5. `docs/SPRINT-PLAN.md` (aktueller + nächster Sprint)
+6. `STATUS.md` §1 (Aktueller Stand) + §2 letzter Eintrag
+7. `CLAUDE.md` §0 (Stabilitätsregeln) + §0.1 (Autonomie-Default)
+8. **Kritische Hardware-Befunde** (siehe Sektion unten in diesem Dokument)
+9. `docs/AI-ROLES.md` (eigene Rolle)
 
 **Was die Strategie-Chat-Rolle tut:**
 - Sprint-Briefe schreiben
@@ -62,10 +70,14 @@ In dieser Reihenfolge lesen:
 1. `docs/SESSION-START.md`
 2. **Kritische Hardware-Befunde** (siehe Sektion unten in diesem Dokument)
 3. `CLAUDE.md` (komplett — alle Lessons §5.x)
-4. `docs/SPRINT-PLAN.md` (nur den aktuellen Sprint-Eintrag)
-5. `STATUS.md` §1
-6. Ggf. `RUNBOOK.md` für SSH/Deploy-Kontext
-7. Den vom Strategie-Chat gelieferten Brief (im User-Prompt)
+4. `docs/STRATEGIE-REFRESH-2026-05-15.md` (Phasen-Logik 1-7)
+5. `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` (Pflicht für Sprint
+   11-17 und Sprint 14b — Zuordnungs-Architektur, AE-51..AE-54;
+   für Hardware-Diagnose Sprint 10a/b/c nicht erforderlich)
+6. `docs/SPRINT-PLAN.md` (nur den aktuellen Sprint-Eintrag)
+7. `STATUS.md` §1
+8. Ggf. `RUNBOOK.md` für SSH/Deploy-Kontext
+9. Den vom Strategie-Chat gelieferten Brief (im User-Prompt)
 
 **Was Claude Code tut:**
 - Code schreiben nach Brief 1:1
@@ -129,17 +141,20 @@ CLAUDE.md anlegen UND hier verlinken. Inhalt nicht doppelt pflegen.
 ## Source-of-Truth-Hierarchie
 
 Bei Konflikt zwischen Dokumenten gilt diese Reihenfolge (oben schlägt
-unten):
+unten). Identisch zu `CLAUDE.md` §0.2:
 
-1. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
-2. `docs/SPRINT-PLAN.md`
-3. `STATUS.md` (für laufenden Stand)
-4. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
-5. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
-6. `docs/STRATEGIE.md`
-7. `docs/RUNBOOK.md`
-8. `docs/WORKFLOW.md`
-9. `Design-Strategie-2_0_1.docx`
+1. `docs/STRATEGIE-REFRESH-2026-05-15.md` (neuestes Strategie-Update,
+   Phasen-Logik)
+2. `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` (Architektur-Master; §7
+   Sprint-Plan-Adaption ist durch 1. überholt)
+3. `docs/SPRINT-PLAN.md`
+4. `STATUS.md` (für laufenden Stand)
+5. `CLAUDE.md` (für Stabilitätsregeln + Lessons)
+6. `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`
+7. `docs/STRATEGIE.md`
+8. `docs/RUNBOOK.md`
+9. `docs/WORKFLOW.md`
+10. `Design-Strategie-2_0_1.docx`
 
 Alles in `docs/features/` mit Datum vor 2026-05-07 ist **historisch** —
 gilt nicht mehr für Pläne, gilt für Lessons, falls dort enthalten.
