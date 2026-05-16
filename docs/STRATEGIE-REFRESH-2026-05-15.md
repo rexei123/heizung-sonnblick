@@ -110,19 +110,20 @@ Eingangstest (Setpoint hoch → Ventil hörbar auf, Setpoint runter
 - Hotelier kennt Rückbau-Pfad (5 Min pro Zimmer; Betterspace
   bleibt jederzeit als Fallback verfügbar)
 
-### Phase 5 — PMS-Casablanca-Integration (Sprint 16 bedingt)
+### Phase 5 — PMS-Casablanca-Integration (Sprint 16a bedingt)
 
 **Voraussetzung:** Casablanca-FIAS-Antwort (B-11prep-1) liegt
 vor. Hotelier-Antwort steht aus (Stand 2026-05-15).
 
 Falls vor Sprint-17-Start verfügbar: Anbindung mit Polling oder
-Event-Stream je nach FIAS-Fähigkeit als Sprint 16. Mapping
-PMS-Status → Heizlogik in Engine-Layer 1, Fallback bei PMS-Ausfall
-letzter bekannter Stand mit Zeitstempel, Audit-Trail über
-`business_audit`.
+Event-Stream je nach FIAS-Fähigkeit als **Sprint 16a** (additiv
+zwischen Sprint 16 Test→Main-Sync und Sprint 17 Pre-Pairing).
+Mapping PMS-Status → Heizlogik in Engine-Layer 1, Fallback bei
+PMS-Ausfall letzter bekannter Stand mit Zeitstempel, Audit-Trail
+über `business_audit`.
 
-Falls FIAS-Antwort ausbleibt: PMS rutscht in Phase 7, manuelle
-Belegungs-Pflege bleibt Fallback (§4).
+Falls FIAS-Antwort ausbleibt: Sprint 16a entfällt, PMS rutscht in
+Phase 7, manuelle Belegungs-Pflege bleibt Fallback (§4).
 
 **Abschluss-Kriterium (falls aktiviert):**
 - PMS-getriebene Check-in/Check-out-Updates kommen automatisch
@@ -200,7 +201,7 @@ Hauptaktion und Hotel-Steuerung pro Zeitfenster:
 | Zeitraum | Hauptaktion | Hotel-Steuerung |
 |---|---|---|
 | Mai-Juli | Stabilisierung + Zuordnungs-Architektur + arc42 auf heizung-test (Phase 1) | Betterspace |
-| August | heizung-main-Migration leer (Phase 4); optional PMS Sprint 16 (Phase 5) | Betterspace |
+| August | heizung-main-Migration leer (Phase 4, Sprint 15 + 16); optional PMS Sprint 16a (Phase 5) | Betterspace |
 | September | Pre-Pairing aller ~100 Vickis ohne Montage (Phase 4b) | Betterspace |
 | Oktober Woche 1 | 5 Pilot-Zimmer umgerüstet, Pilot-Go-Live (Phase 6), Tag `v1.0.0-pilot` | 5 Vicki + Rest Betterspace |
 | Oktober-Frühjahr 2027 | Schrittweiser Rückbau pro Zimmer (Phase 7); danach Betterspace-Kündigung, Tag `v1.0.0` | gemischt → nur Vicki |
@@ -221,7 +222,7 @@ bleiben:
 | 9.20 | API-Keys + Webhooks | 18+ | Phase 7 Features |
 | 9.21 | Gateway-Status-UI | 18+ | Phase 7 Features |
 | 10 (alt) | Hygiene-Sprint | 10 | Phase 1 CI-Hygiene |
-| 11 (alt) | PMS-Casablanca | 16 (bedingt) | Phase 5 PMS-Casablanca, nur bei FIAS-Antwort |
+| 11 (alt) | PMS-Casablanca | 16a (bedingt) | Phase 5 PMS-Casablanca, nur bei FIAS-Antwort |
 | 12 (alt) | Backup + Production-Migration | 15 | Phase 4 heizung-main-Migration (umfassender, „leer") |
 | 13 (alt) | Wetterdaten | 18+ | Phase 7 Features |
 | 14 (alt) | Final-Tag v1.0.0 + Go-Live | — | Phase 6 zeit-definiert (Oktober Woche 1), Tag `v1.0.0-pilot`; voller `v1.0.0` erst Frühjahr 2027 |
@@ -233,7 +234,8 @@ bleiben:
 | (neu) | — | 13 | Phase 1: Pairing-Wizard inkl. ChirpStack-Stufe + Vicki-Eingangstest + Mass-Pairing-CSV |
 | (neu) | — | 14 | Phase 1: Cross-Sicht-UI + Health-Badges + Mail-Platzhalter |
 | (neu) | — | 14b | Phase 1: arc42-Konsolidierung der Architektur-Doku |
-| (neu) | — | 16 | Phase 4 oder 5: Test→Main-Sync + Last-Test + Bug-Fixing (oder PMS bei FIAS-Antwort) |
+| (neu) | — | 16 | Phase 4: Test→Main-Sync + Last-Test + Bug-Fixing |
+| (neu) | — | 16a | Phase 5 (bedingt): PMS-Casablanca-Integration falls FIAS-Antwort vorliegt |
 | (neu) | — | 17 | Phase 4b: Pre-Pairing September (Mass-Pairing aller Vickis ohne Montage) |
 
 ## 7. Was unberührt bleibt
