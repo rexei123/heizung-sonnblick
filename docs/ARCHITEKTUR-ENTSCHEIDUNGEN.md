@@ -1220,3 +1220,218 @@ NextAuth doppeltes Datenmodell waere unnoetiger Komplexitaet (S6).
   Sidebar), B-9.17b-3 (Batterie-Werte), B-9.17b-4 (Vicki-002/-004
   Pairing), B-9.17b-5 (Hardware-Stand-Klarstellung), B-9.17b-6
   (Cookie-Namen-Konsistenz). Siehe STATUS.md §6.2.
+
+---
+
+# AE-51 — Zone-Aggregat-Modell für Mehrfach-Vicki (Sprint 11)
+
+**Datum:** 2026-05-15
+**Status:** Akzeptiert
+**Bezug:** AE-31 (Engine-Pipeline), AE-29 (manual_setpoint_event),
+AE-32 (Hysterese), STRATEGIE-THERMOSTAT-ZUORDNUNG.md §4
+
+## Kontext
+
+Zonen können 0..n Vickis haben — Normalfall für Zimmer mit zwei
+Heizkörpern im selben Raum. Lesen (Ist-Temp, Fenster-Status),
+Schreiben (Setpoint-Downlinks) und Override-Wirkung müssen
+einheitlich definiert sein. Ohne klare Aggregat-Regel entstehen
+widersprüchliche Zustände bei Mehrfach-Vicki-Zonen, und die
+Engine müsste pro Vicki entscheiden statt pro Zone.
+
+## Entscheidung
+
+1. **Ist-Temperatur der Zone** = arithmetischer Mittelwert über
+   alle als `healthy` markierten Vickis der Zone. Offline-Vickis
+   (Status `silent` oder `degraded` aus AE-53) fließen nicht ins
+   Aggregat.
+2. **Fenster-Status der Zone** = OR über alle `healthy` Vickis
+   (eine sagt offen → Zone gilt als offen).
+3. **Setpoint-Schreiben symmetrisch**: alle Vickis einer Zone
+   bekommen denselben Setpoint. Hysterese 0.5°C (AE-32) gilt
+   pro Vicki — Downlink nur bei tatsächlicher Setpoint-Änderung.
+4. **Override wirkt immer auf Zone-Ebene**, niemals pro Vicki.
+   Wenn ein Gast nur eine Vicki einer Mehrfach-Vicki-Zone dreht,
+   übernimmt die Zone den gemeldeten Wert; alle Vickis der Zone
+   fahren symmetrisch auf diesen Setpoint.
+5. **Backplate-Status, Batterie, Signalqualität** bleiben pro
+   Vicki sichtbar (fließen ins Device-Health), nicht ins
+   Zone-Aggregat.
+
+## Konsequenzen
+
+- Aggregat-Logik im Engine-Context-Loader (`_load_room_context`):
+  Filterung Offline-Devices, Mittelwert-Bildung, OR-Aggregation
+  für Fenster-Status.
+- Engine bleibt zone-granular — keine pro-Vicki-Setpoints im
+  Trace, kein pro-Vicki-Override-Pfad.
+- Wenn alle Vickis einer Zone offline: Zone-Status wird `silent`
+  (AE-53), Engine evaluiert weiter (Setpoint wird berechnet und
+  gespeichert), kein Downlink-Versuch.
+- Akzeptierte Konsequenz: Lokale Temperatur-Unterschiede im Raum
+  (Bett warm, Fenster kühl) werden nicht ausgeglichen — physikalisch
+  und durch die Architektur des Raums bedingt, nicht durch die
+  Software lösbar.
+
+---
+
+# AE-52 — Fenster-offen-Logik belegungs-abhängig (Sprint 12)
+
+**Datum:** 2026-05-15
+**Status:** Akzeptiert
+**Bezug:** AE-31 Layer 4, AE-42 (Frostschutz 10°C), AE-47
+(Window-Detection Hardware-First), RUNBOOK §10c (Codec-
+Verifikation), STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5
+
+## Kontext
+
+Bisher senkt Engine Layer 4 bei Fenster offen immer auf
+Frostschutz 10°C. Bei belegtem Zimmer friert der Gast bei
+geöffnetem Fenster — fachlich falsch, weil ein belegter Gast
+typischerweise nur kurz lüftet und währenddessen nicht auf
+Frostschutz fallen soll. Zusätzlich gab es keine klare Regel,
+wie sich ein Gast-Override während offenem Fenster verhalten
+muss.
+
+## Entscheidung
+
+1. **Engine Layer 4 liest den Belegungs-Status der Zone** und
+   reagiert differenziert:
+   - Zone frei + Fenster offen → Frostschutz (10°C, AE-42)
+   - Zone belegt + Fenster offen → Frei-Sollwert aus
+     `room_type.free_target_c`
+2. **Override während Fenster offen wird komplett ignoriert** —
+   nicht gespeichert, nicht angewendet, nicht nach Fenster-
+   Schließen reaktiviert. Pädagogische Wirkung: Gast lernt
+   „Drehen am Vicki bringt nichts" und schließt das Fenster.
+3. **Mitarbeiter-Override im UI während Fenster offen** wird
+   ebenfalls ignoriert; UI muss diesen Zustand explizit anzeigen,
+   damit der Mitarbeiter weiß, dass seine Eingabe wirkungslos
+   bleibt.
+4. **Rückkehr zum Normal-Setpoint** sobald eine beliebige Vicki
+   der Zone `openWindow=false` meldet.
+
+## Konsequenzen
+
+- Engine Layer 4 Signatur-Erweiterung um `occupancy_state`-
+  Argument (oder Lookup im Context).
+- Neue Default-Quelle aus `room_type.free_target_c` statt
+  hartcodierter Frostschutz-Konstante als Layer-4-Output.
+- Frontend muss „Fenster offen — Override ignoriert" als
+  expliziten Zustand kommunizieren (Override-UI deaktiviert
+  oder mit Hinweis).
+- BR-16 (Backend-Window-Detection) bleibt im Backlog; bis
+  dahin ist `vicki.openWindow`-Flag die einzige Quelle.
+
+---
+
+# AE-53 — Health-State-Modell für Device + Zone, Plausi-Grenzen, 3-Stufen-Alarm (Sprint 11)
+
+**Datum:** 2026-05-15
+**Status:** Akzeptiert
+**Bezug:** AE-44 S5 (Defensive bei externen Quellen), STATUS.md
+A23 (Monitoring), AE-47 (Window-Detection Hardware-First),
+STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7
+
+## Kontext
+
+Mit ~100 Vickis ab Oktober 2026 (Vollausbau-Ziel, siehe
+STRATEGIE-THERMOSTAT-ZUORDNUNG.md §14) braucht es systematische
+Sichtbarkeit von Hardware-Ausfällen und Plausibilitätsproblemen,
+ohne Cascade-Failure und ohne Alarm-Müdigkeit. Heute fehlen
+sowohl die Erkennung implausibler Sensor-Readings als auch ein
+strukturiertes Health-Modell pro Device und Zone — Ausfälle
+werden erst beim manuellen Drill-Down sichtbar.
+
+## Entscheidung
+
+1. **`device.health_state`** in {`healthy`, `degraded`, `silent`,
+   `suspicious`}, abgeleitet aus Uplink-Latenz und Reading-
+   Plausibilität:
+   - `healthy`: letzter Uplink < 2 h, alle Readings plausibel
+   - `degraded`: 2-24 h, oder ≥ 1 implausibles Reading in 24 h
+   - `silent`: > 24 h, oder ≥ 10 implausible Readings in 24 h
+   - `suspicious`: Outlier gegen Zone-Geschwister > 7°C Differenz
+2. **`heating_zone.health_state`** abgeleitet aus den
+   zugeordneten Devices (alle healthy → healthy, mindestens eine
+   degraded/suspicious → degraded, alle silent → silent, keine
+   Devices → no_device).
+3. **Plausi-Grenzen [-20°C, 60°C]** im MQTT-Subscriber:
+   Ist-Temperatur außerhalb dieses Bereichs → Reading verwerfen,
+   Logger-Event `implausible_reading`, nicht persistieren. Grenzen
+   bewusst weit gefasst, damit Fenster-offen-Szenarien (kalte Luft
+   direkt an Vicki) nicht versehentlich gefiltert werden.
+4. **3-Stufen-Alarm**:
+   - Stufe 1 (offline 2-24 h): Dashboard-Warnung, kein Mail
+   - Stufe 2 (offline > 24 h): Mail an Hotelier, Zone-Health silent
+   - Stufe 3 (> 10 implausible Readings / 24 h): Mail an Hotelier
+5. **Mail-Versand initial als Logger-Platzhalter**
+   (`logger.warning(...)`). Echter SMTP-Versand wird nach erstem
+   Winter in eigenem Sprint nachgereicht.
+6. **Kein automatischer Software-Workaround bei Ausfall** —
+   Hotelier fixt physisch. Versuche, eine Offline-Vicki durch
+   andere zu kompensieren, verschleiern das Problem statt es
+   zu lösen.
+
+## Konsequenzen
+
+- 2 neue DB-Spalten (`device.health_state`,
+  `heating_zone.health_state`) als VARCHAR mit CHECK-Constraint;
+  Migration in Sprint 11.
+- Neuer Celery-Beat-Task für periodische Health-State-Berechnung
+  (Uplink-Latenz, Plausi-Statistik der letzten 24 h, Outlier-
+  Vergleich mit Zone-Geschwistern).
+- Mail-Stub als Logger-Platzhalter; echter SMTP-Pfad ist eigener
+  Sprint nach Heizperiode.
+- UI-Badges in Geräte-Liste, Zimmer-Detail, Zone-Detail und
+  Dashboard (Sprint 14, Cross-Sicht-Pflicht aus
+  STRATEGIE-THERMOSTAT-ZUORDNUNG.md §9).
+- Drift-Erkennung statistisch (KI-Vorbereitung) und tiefer-
+  greifende Outlier-Erkennung bleiben im Backlog —
+  evaluiert nach Heizperiode 2027.
+
+---
+
+# AE-54 — Engine-Zone-Isolation (Sprint 11)
+
+**Datum:** 2026-05-15
+**Status:** Akzeptiert
+**Bezug:** AE-44 S1 (Stabilität) und S5 (Defensive),
+AE-31 (Engine-Pipeline), STRATEGIE-THERMOSTAT-ZUORDNUNG.md §8
+
+## Kontext
+
+Crash in einer Zone (Datenfehler, fehlende Foreign-Key-Daten,
+Codec-Problem in einem einzelnen Reading) darf nie die gesamte
+Engine-Eval-Schleife killen. Im Code-Stand ist das faktisch
+schon teilweise so umgesetzt, aber nicht verbindlich verankert —
+eine spätere Refactor-Welle könnte die Eigenschaft unbeabsichtigt
+brechen, und es gibt keine Test-Garantien dafür.
+
+## Entscheidung
+
+1. **`evaluate_all_zones()` iteriert mit `try/except` pro Zone.**
+2. Failure in einer Zone → Log (Zone-ID + Stack-Trace) + Skip +
+   Zone-Health auf `degraded` (AE-53), **kein Abbruch der
+   Schleife**.
+3. Andere Zonen werden normal weiter evaluiert.
+4. Wiederholter Eval-Fehler über mehrere Tick-Zyklen hinweg hält
+   Zone-Health auf `degraded`; bei dauerhaftem Crash bleibt die
+   Zone aus der Setpoint-Berechnung ausgeschlossen, ohne das
+   Gesamtsystem zu blockieren.
+
+## Konsequenzen
+
+- Kleiner Engine-Refactor in `engine_tasks.py` /
+  `evaluate_all_zones`: Pro-Zone-Iteration in try/except
+  einkleiden, Exception-Logging mit Zone-ID und Stack-Trace.
+- Neue Test-Klasse für Failure-Modes: kaputte FK, implausibles
+  Reading-Persisting (sollte durch AE-53-Plausi-Filter
+  abgefangen sein, aber doppelter Boden), Codec-Exception in
+  einem Vicki einer Mehrfach-Vicki-Zone. Jeweils Verifikation,
+  dass die Schleife weiter läuft und andere Zonen normal
+  evaluiert werden.
+- Verankert formal eine Eigenschaft, die im Code bereits
+  teilweise existiert — Sprint 11 zieht sie über alle
+  Zone-Iterationen einheitlich durch und sichert sie mit Tests
+  gegen Refactor-Drift ab.
