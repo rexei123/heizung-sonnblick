@@ -653,6 +653,13 @@ beide Befunde verfügbar.
 
 # SPRINT 10b — Vicki-Code-Fixes (Phase 1, conditional)
 
+> **Status (2026-05-15):** Verschoben, neue Einordnung nach
+> Sprint 11. Mit der Phase-1-Restrukturierung aus Strategie-Chat
+> 2026-05-15 (AE-51..AE-54, Sprint 11-14 + 14b) ist die zeitliche
+> Lage von 10b offen. Doku-Spur bewusst erhalten; finale
+> Einordnung erfolgt nach Sprint-11-Abschluss. Siehe
+> STRATEGIE-REFRESH-2026-05-15.md §6.
+
 **Priorität:** 🟡 (nur falls 10a Code-Fix verlangt)
 **Voraussetzung:** Sprint 10a-Diagnose-Bericht
 **Inhalt:** Codec-Fix oder Subscriber-Fix je nach 10a-Befund
@@ -674,78 +681,237 @@ beide Befunde verfügbar.
 
 ---
 
-# SPRINT 11 — Frostschutz-Reaktivierung (Phase 3)
+# SPRINT 11-Prep — Doku-Konsolidierung Zuordnungs-Architektur (Phase 1)
 
-**Priorität:** 🔴 (vor Heizperiode Pflicht)
-**Geschätzte Dauer:** 1-2 Wochen
+**Priorität:** 🔴 (Vorbedingung für Sprint 11)
+**Geschätzte Dauer:** 4-6 h (reines Doku-Schreiben + Cross-Referenz-Pflege)
 **Autonomiestufe:** 2
-**Voraussetzung:** Phase 2 Live-Beobachtung abgeschlossen (zwei
-Wochen ohne neue 🔴/🟠-Befunde)
-**Tag nach Abschluss:** `v0.2.0-frostschutz`
+**Voraussetzung:** Sprint 10a abgeschlossen oder parallel laufend
+**Tag nach Abschluss:** `v0.1.15-zuordnungs-architektur-doku`
 
 ## Ziel
 
-AE-42 aus dem zurückgestellten Zustand (STATUS §2aa) aktivieren.
-Frostschutz pro Raumtyp konfigurierbar. Engine Layer 5 nutzt
-`min_temp_celsius` statt globaler Konstante. Live-Test vor
-Heizperiode-Beginn.
+Konsolidierte Strategie aus Strategie-Chat 2026-05-15 in alle
+relevanten Doku-Dateien einarbeiten, bevor Sprint 11 startet.
+Neue Master-Quelle: `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md`.
+ADRs AE-51..AE-54 (Zone-Aggregat, Fenster belegungs-abhängig,
+Health-State, Engine-Zone-Isolation).
 
-## Tasks (Skizze, Detail-Brief später)
+## Tasks (Skizze)
 
-- Migration: `min_temp_celsius` pro `room_type` aktivieren (Spalte
-  existiert bereits, war nur nicht engine-aktiv)
-- Engine Layer 5: Nutzung `min_temp_celsius` mit Fallback auf
-  globale Konstante falls room_type-Wert NULL
-- API: PATCH `/room-types` um `min_temp_celsius` zu setzen
-- Frontend: Inline-Edit auf `/raumtypen` für `min_temp_celsius`
-- Tests: Layer 5 mit verschiedenen `min_temp_celsius`-Werten
-- Live-Verify auf heizung-test mit künstlich niedrigen
-  Sensor-Readings (oder Wartezeit auf kalten Tag)
+Vollbrief in eigener Datei. Hauptschritte: STRATEGIE-THERMOSTAT-
+ZUORDNUNG.md anlegen, AE-51..54 in ARCHITEKTUR-ENTSCHEIDUNGEN.md
+ergänzen, STRATEGIE.md / STRATEGIE-REFRESH / SPRINT-PLAN / STATUS
+/ CLAUDE / SESSION-START / CHANGELOG-Design-Strategie / RUNBOOK
+ergänzen, Cross-Referenz-Check, Lint, Abschluss-Bericht.
 
 ---
 
-# SPRINT 12 — heizung-main-Migration (Phase 4)
+# SPRINT 11 — Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (Phase 1)
 
-**Priorität:** 🔴 (vor Go-Live Pflicht)
+**Priorität:** 🔴 (Phase 1, Voraussetzung Sprint 12)
+**Geschätzte Dauer:** 1-2 Wochen
+**Autonomiestufe:** 2
+**Voraussetzung:** Sprint 11-Prep abgeschlossen; Sprint 10/10a/b/c durch
+**Tag nach Abschluss:** `v0.1.16-health-aggregat`
+
+## Ziel
+
+AE-51 (Aggregat-Lesen), AE-53 (Health-State-Modell + Plausi-
+Filter [-20°C, 60°C] + 3-Stufen-Alarm) und AE-54 (Engine-Zone-
+Isolation via `try/except`) implementieren. Mehrfach-Vicki-Zonen
+lesen Ist-Temp als Mittelwert über `healthy` Vickis, Fenster-OR.
+
+## Tasks (Skizze, Detail-Brief später)
+
+- Migration: `device.health_state` + `heating_zone.health_state` (VARCHAR + CHECK)
+- MQTT-Subscriber: Plausi-Filter [-20°C, 60°C], `implausible_reading`-Logger
+- Celery-Beat: Health-State-Compute-Task (Uplink-Latenz, Plausi-Statistik, Outlier > 7°C)
+- Engine `_load_room_context`: Aggregat-Lesen (Mittelwert + OR), Offline-Filterung
+- Engine `evaluate_all_zones`: try/except pro Zone, Failure → Zone-Health=degraded
+- Mail-Stub `logger.warning(...)` für Alarm-Stufen 2 + 3
+- Tests: Aggregat-Lesen, Plausi-Verwerfen, Zone-Isolation-Failure-Modes
+
+---
+
+# SPRINT 12 — Mehrfach-Vicki Schreiben + Fenster belegungs-abhängig (Phase 1)
+
+**Priorität:** 🔴 (Phase 1)
+**Geschätzte Dauer:** 1-2 Wochen
+**Autonomiestufe:** 2
+**Voraussetzung:** Sprint 11 abgeschlossen
+**Tag nach Abschluss:** `v0.1.17-multivicki-fenster`
+
+## Ziel
+
+AE-51 (Schreiben symmetrisch) + AE-52 (Fenster belegungs-
+abhängig) implementieren. Setpoint-Downlinks symmetrisch an alle
+Vickis einer Zone. Engine Layer 4 reagiert auf `occupancy_state`:
+Zone frei + Fenster offen → Frostschutz 10°C, Zone belegt + Fenster
+offen → Frei-Sollwert aus Raumtyp. Override während Fenster offen
+wird ignoriert (Gast und Mitarbeiter).
+
+## Tasks (Skizze)
+
+- Engine Layer 4: Signatur-Erweiterung um `occupancy_state`, neue Default-Quelle aus `room_type.free_target_c`
+- Downlink-Adapter: symmetrisches Setpoint-Schreiben für alle Vickis einer Zone
+- Override-Pfad: Ignorieren während Fenster offen (Gast via `manual_setpoint`-Field, Mitarbeiter via UI)
+- Frontend: Hinweis „Fenster offen — Override wirkt nicht" auf Override-UI
+- Tests: belegungs-abhängige Reaktion, Override-Ignorieren, symmetrische Downlinks
+
+---
+
+# SPRINT 13 — Pairing-Wizard + Mass-Pairing-CSV + Vicki-Eingangstest (Phase 1)
+
+**Priorität:** 🟠 (Vorbedingung Phase 4b Pre-Pairing)
+**Geschätzte Dauer:** 2-3 Wochen
+**Autonomiestufe:** 2
+**Voraussetzung:** Sprint 12 abgeschlossen
+**Tag nach Abschluss:** `v0.1.18-pairing-wizard`
+
+## Ziel
+
+Pairing-Wizard dreistufig (Zimmer → Zone → Label) mit
+vorgeschalteter ChirpStack-Pairing-Stufe und Vicki-Eingangstest
+am Wizard-Ende. Mass-Pairing-CSV-Import oder Batch-Wizard für
+~100 Vickis (Vorbereitung Phase 4b im September).
+
+## Tasks (Skizze)
+
+- Wizard-Stufe ChirpStack-Pairing: Device-Profile + Codec via gRPC-Bootstrap
+- Wizard-Stufe Zimmer → Zone → Label (bestehende Logik erweitert)
+- Wizard-Stufe Vicki-Eingangstest: Setpoint hoch → Ventil hörbar auf, runter → hörbar zu
+- Mass-Pairing-CSV-Import (B-11prep-2) für 100-Vicki-Batch
+- Tests: CSV-Format-Validierung, Eingangstest-Verifikation, Wizard-Flow E2E
+
+---
+
+# SPRINT 14 — Cross-Sicht-UI + Health-Badges + Mail-Platzhalter (Phase 1)
+
+**Priorität:** 🟠 (Phase-1-Abschluss vor 14b)
+**Geschätzte Dauer:** 1-2 Wochen
+**Autonomiestufe:** 2
+**Voraussetzung:** Sprint 13 abgeschlossen
+**Tag nach Abschluss:** `v0.1.19-cross-sicht-ui`
+
+## Ziel
+
+Cross-Sicht-UI umsetzen (Geräte-Liste mit Zimmer + Zone, Zimmer-
+Detail mit Zone-Karten + Thermostat-Bubbles, Zone-Detail-Sicht,
+Dashboard mit Health-Indikator pro Zone). Health-Badges überall
+sichtbar. Mail-Platzhalter (`logger.warning(...)`) für Alarm-
+Stufen 2/3 aktivieren.
+
+## Tasks (Skizze)
+
+- Geräte-Liste: Spalten Zimmer + Zone als Pflicht (B-9.11x-5)
+- Zimmer-Detail: Zone-Karten mit Soll/Ist + Thermostat-Bubbles (Health, Batterie, Signal)
+- Zone-Detail-Sicht: Thermostat-Liste mit Health-Badge
+- Dashboard: Health-Indikator pro Zone, Warnungen ohne Drill-Down
+- Mail-Platzhalter aktivieren, Test gegen Logger-Output
+- Tests: UI-Snapshots, Cross-Sicht-Konsistenz
+
+---
+
+# SPRINT 14b — arc42-Konsolidierung der Architektur-Doku (Phase 1)
+
+**Priorität:** 🟢 (Phase-1-Abschluss, Vorbedingung Sprint 15)
+**Geschätzte Dauer:** 6-8 h (4-6 h Mapping + 1-2 h Aufräumen)
+**Autonomiestufe:** 3 (reine Doku, keine Code-Berührung)
+**Voraussetzung:** Sprint 14 abgeschlossen; Lessons aus Vicki-Diagnose (10a/b/c) und CI-Hygiene (Sprint 10) eingearbeitet
+**Tag nach Abschluss:** `v0.1.20-arc42-konsolidierung`
+
+## Ziel
+
+Bestehende Architektur-Dokumente (STRATEGIE.md, ARCHITEKTUR-
+REFRESH-2026-05-07, STRATEGIE-REFRESH-2026-05-15, ARCHITEKTUR-
+ENTSCHEIDUNGEN.md, CLAUDE.md §5 Lessons) als arc42-Skelett mit
+12 Kapiteln umstrukturieren. Mapping statt Neuschreiben. Source-
+of-Truth-Hierarchie (CLAUDE.md §0.2) wird strukturell und kann
+entfallen.
+
+## Tasks (Skizze)
+
+- arc42-Skelett (12 Kapitel) als Master-Datei anlegen
+- Bestehende Inhalte auf Kapitel mappen (Tabelle Quell-Doku → Ziel-Kapitel)
+- CLAUDE.md §5 Lessons als Block nach Kapitel 11 verschieben
+- Source-of-Truth-Hierarchie strukturell auflösen
+- Diskussions-Grundlage aus Strategie-Chat 2026-05-15
+
+## Out of Scope
+
+- MkDocs- oder anderer Renderer-Einsatz (erst bei externer Übergabe geprüft)
+- Vollständige Neuformulierung historisch gewachsener Texte
+
+---
+
+# SPRINT 15 — heizung-main-Migration „leer" (Phase 4)
+
+**Priorität:** 🔴 (vor Phase 4b Pflicht)
 **Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 1 (Production-Migration)
-**Voraussetzung:** Sprint 11 abgeschlossen, vier Vickis produktiv
-montiert auf heizung-main
-**Tag nach Abschluss:** `v0.2.1-main-cutover`
+**Voraussetzung:** Sprint 14b abgeschlossen (Doku in arc42-Form sauber)
+**Tag nach Abschluss:** `v0.2.0-main-cutover`
 
 ## Ziel
 
 heizung-main vom Sprint-9.8a-Stand auf aktuellen develop-Stand
-bringen. Auth-Cutover analog 9.17a/b. Backup-Cron. Off-Site-
-Replikation. Alle Vickis auf heizung-main produktiv.
+bringen, zunächst „leer" (ohne Live-Devices). Migrationen 0005-
+0014+ inkl. Sprint-11-Health-State-Migrationen anwenden, Auth-
+Cutover analog 9.17a/b, Backup-Cron + Off-Site-Replikation,
+Disaster-Recovery-Drill, Migrations-Trockenlauf. Vier bisherige
+Vickis bleiben in Phase 4 zunächst auf heizung-test.
 
 ## Tasks (Skizze)
 
 - B-9.11x-2 heizung-main-Sanierung
 - `safe.directory`-Fix (CLAUDE.md §5.7)
-- Migrationen 0005-0014 anwenden
+- Migrationen 0005-0014+ anwenden (inkl. Health-State-Spalten aus Sprint 11)
 - Auth-Bootstrap mit echten Hotel-User-Daten
 - `AUTH_ENABLED=true`-Cutover analog Sprint 9.17a/b
-- Backup-Cron einrichten (OP-1)
-- Off-Site-Replikation
-- Live-Verifikation Engine + Hardware + Auth
+- Backup-Cron (OP-1) + Off-Site-Replikation
+- Disaster-Recovery-Drill bestanden
+- Migrations-Trockenlauf gegen heizung-test-Datenstand
 
 ---
 
-# SPRINT 13 — PMS-Casablanca-Integration (Phase 5)
+# SPRINT 16 — Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4)
 
-**Priorität:** 🔴 (vor Go-Live, sonst manuelle Pflege)
+**Priorität:** 🔴 (vor Phase 4b Pflicht)
+**Geschätzte Dauer:** 1 Woche
+**Autonomiestufe:** 1
+**Voraussetzung:** Sprint 15 abgeschlossen
+**Tag nach Abschluss:** `v0.2.1-test-main-sync`
+
+## Ziel
+
+heizung-test und heizung-main funktional gleichziehen. Last-Test
+mit synthetischen Sensor-Readings (Skalierung auf ~100 Vickis
+verifizieren). Bug-Fixing aus Phase-2-Live-Beobachtung.
+
+## Tasks (Skizze)
+
+- Test→Main-Sync: Migrationen + Konfiguration angleichen
+- Last-Test: synthetische Readings für ~100 Vickis, Engine-Performance + Beat-Tick-Latenz prüfen
+- Bug-Fixing aus Phase-2-Live-Beobachtungs-Befunden
+- Verifikation: Health-State + Plausi-Filter + Engine-Zone-Isolation unter Last
+
+---
+
+# SPRINT 16a — PMS-Casablanca-Integration (Phase 5, conditional)
+
+**Priorität:** 🟠 (conditional auf FIAS-Antwort B-11prep-1)
 **Geschätzte Dauer:** 2-3 Wochen
 **Autonomiestufe:** 1 (externe Integration)
-**Voraussetzung:** Casablanca-FIAS-Antwort liegt vor (erwartet
-Mai 2026), Sprint 12 abgeschlossen
-**Tag nach Abschluss:** `v0.2.2-pms-casablanca`
+**Voraussetzung:** Casablanca-FIAS-Antwort liegt vor; Sprint 16 abgeschlossen
+**Tag nach Abschluss:** `v0.2.2-pms-fias`
 
 ## Ziel
 
 Casablanca-PMS-Anbindung produktiv. Belegungs-Updates kommen
-automatisch. Engine reagiert mit Vorheizen/Setback. Manuelle Pflege
-bleibt als Fallback.
+automatisch im System an. Engine reagiert mit Vorheizen vor
+Anreise und Setback nach Abreise. Manuelle Pflege bleibt
+funktionsfähig als Fallback.
 
 ## Tasks (Skizze)
 
@@ -757,29 +923,37 @@ bleibt als Fallback.
 - Fallback bei PMS-Ausfall: letzter bekannter Stand mit Zeitstempel
 - Live-Test mit echten Buchungsdaten
 
+## Bedingung
+
+Falls Casablanca-FIAS-Antwort bis Sprint-17-Start nicht vorliegt,
+entfällt dieser Sprint. PMS-Integration rutscht in Phase 7
+(Sprint 18+). Manuelle Belegungs-Pflege bleibt Fallback.
+
 ---
 
-# SPRINT 14 — Go-Live + Tag `v1.0.0` (Phase 6)
+# SPRINT 17 — Pre-Pairing September (Phase 4b)
 
-**Priorität:** 🎯 Meilenstein
-**Geschätzte Dauer:** 1 Woche
-**Autonomiestufe:** 1
-**Voraussetzung:** Sprint 13 abgeschlossen oder PMS-Manual-Fallback-OK
-**Tag nach Abschluss:** `v1.0.0`
+**Priorität:** 🔴 (Vorbedingung Phase 6 Pilot-Go-Live)
+**Geschätzte Dauer:** 1-2 Wochen
+**Autonomiestufe:** 1 (Hardware-Massen-Inbetriebnahme)
+**Voraussetzung:** Sprint 16 abgeschlossen (Sprint 16a optional, falls FIAS)
+**Tag nach Abschluss:** `v0.2.3-pre-pairing`
 
 ## Ziel
 
-Heizungssteuerung produktiv im Hotelbetrieb. Strategie-Chat
-wechselt in Beobachtungs-Modus. Heizperiode-Start 01.10.2026 mit
-laufender Steuerung.
+Mass-Pairing-Vorbereitung aller ~100 Vickis auf einem Tisch im
+Hotel-Office, ohne Montage. Pro Vicki Eingangstest. Pilot-Zimmer-
+Auswahl finalisiert. Schulung Hotelier. Vorbereitung Phase 6
+Pilot-Go-Live Oktober Woche 1.
 
 ## Tasks (Skizze)
 
-- Final-Verifikation aller Phasen-Abschluss-Kriterien
-- README + Hotelier-Doku final
-- Tag `v1.0.0` auf produktivem Stand
-- Live-Beobachtungs-Plan für ersten Heizmonat
-- Stakeholder-Mitteilung (Strategie-Chat + Hotelier + Techniker)
+- Mass-Pairing-CSV-Import (aus Sprint 13) für ~100 Vickis
+- Vicki-Eingangstest pro Gerät (Setpoint hoch/runter, Ventil hörbar)
+- Pilot-Zimmer-Auswahl: 5 Zimmer maximaler Vielfalt (Standard + Suite + Mehrfach-Vicki + Funk-Rand + häufiger Wechsel, B-11prep-4)
+- Schulung Hotelier: Rückbau-Pfad (~5 Min pro Zimmer), Pre-Pairing-Workflow, Health-Dashboard
+- RUNBOOK §10f Pre-Pairing-Workflow finalisieren
+- LoRaWAN-Funklast-Monitoring UG65 Setup (B-11prep-5)
 
 ---
 
@@ -790,10 +964,18 @@ laufender Steuerung.
 | `v0.1.9-rc6-live-test-2` | Engine-Pipeline live verifiziert |
 | `v0.1.11-device-pairing` | Geräte-Verwaltung produktiv |
 | `v0.1.14-auth` | Auth-Track komplett (9.17 + 9.17a + 9.17b) |
-| `v0.2.0-frostschutz` | Frostschutz pro Raumtyp aktiv (Phase 3) |
-| `v0.2.1-main-cutover` | heizung-main produktiv (Phase 4) |
-| `v0.2.2-pms-casablanca` | PMS-Integration produktiv (Phase 5) |
-| `v1.0.0` | Go-Live (Phase 6, vor 01.10.2026) |
+| `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep: Doku-Konsolidierung Zuordnungs-Architektur |
+| `v0.1.16-health-aggregat` | Sprint 11: Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (AE-51/53/54) |
+| `v0.1.17-multivicki-fenster` | Sprint 12: Mehrfach-Vicki Schreiben + Fenster belegungs-abhängig (AE-51/52) |
+| `v0.1.18-pairing-wizard` | Sprint 13: Pairing-Wizard + Mass-Pairing-CSV + Eingangstest |
+| `v0.1.19-cross-sicht-ui` | Sprint 14: Cross-Sicht-UI + Health-Badges + Mail-Platzhalter |
+| `v0.1.20-arc42-konsolidierung` | Sprint 14b: arc42-Doku-Konsolidierung (Phase-1-Abschluss) |
+| `v0.2.0-main-cutover` | Sprint 15: heizung-main-Migration „leer" (Phase 4) |
+| `v0.2.1-test-main-sync` | Sprint 16: Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4) |
+| `v0.2.2-pms-fias` | Sprint 16a (conditional): PMS-Casablanca-Integration (Phase 5) |
+| `v0.2.3-pre-pairing` | Sprint 17: Pre-Pairing September (Phase 4b) |
+| `v1.0.0-pilot` | Phase 6 Pilot-Go-Live (Oktober Woche 1, 5 Pilot-Zimmer) |
+| `v1.0.0` | Vollausbau-Migration abgeschlossen (Frühjahr 2027) |
 
 ---
 

@@ -6,13 +6,16 @@ Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in 
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-11
+**Stichtag:** 2026-05-15
 **Aktueller Branch:** develop
-**Letzter Tag:** `v0.1.9-rc6-live-test-2` (Sprint 9.11y)
-**Nächster Sprint:** 9.13 Geräte-Pairing-UI + Sidebar-Migration
-(siehe `docs/SPRINT-PLAN.md`)
-**Architektur-Refresh:** durchgeführt 2026-05-07, siehe
-`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`
+**Letzter Tag:** `v0.1.14-auth` (Sprint 9.17b, Auth-Track komplett)
+**Aktueller Sprint:** Sprint 11-Prep — Doku-Konsolidierung
+Zuordnungs-Architektur (in Arbeit, siehe §2ak)
+**Nächster Sprint:** Sprint 11 — Health-State + Plausi +
+Zone-Isolation + Aggregat-Lesen (siehe `docs/SPRINT-PLAN.md`)
+**Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
+**Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
+Phasen 1-7 verbindlich, AE-51..AE-54)
 
 ### Server heizung-test
 
@@ -1589,6 +1592,54 @@ Phase 1, CLAUDE.md §5.32, AE-50 (Auth + JWT_SECRET_KEY-Fallback).
 
 ---
 
+## 2ak. Sprint 11-Prep Doku-Konsolidierung Zuordnungs-Architektur (2026-05-15, in Arbeit)
+
+Doku-only-Sprint zur Konsolidierung der Brainstorming-Ergebnisse
+aus Strategie-Chat 2026-05-15. Master-Quelle:
+`docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md`. Vier neue ADRs
+(AE-51..AE-54). Vorbedingung für Sprint 11.
+
+**Autonomiestufe:** 2 (reine Doku, keine Code-/Server-Berührung).
+
+**Task-Status (Stand 2026-05-15, T1-T5 abgeschlossen):**
+
+| Task | Inhalt | Status |
+|---|---|---|
+| T1 | `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` als Master-Quelle anlegen. | ✅ Commit `64ad4ec`. |
+| T2 | AE-51..AE-54 in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` ergänzen. | ✅ Commit `34523f4`. |
+| T3 | `docs/STRATEGIE.md` §6.2 R5 belegungs-abhängig + neuer §6.5 Health-Monitoring + §7.1 Begriffs-Konsolidierung. | ✅ Commit `96e13b7`. |
+| T4 | `docs/STRATEGIE-REFRESH-2026-05-15.md` Phasen 1-7 konkretisiert (Phase 4b Pre-Pairing neu, Phase 6 zeit-definiert), §5 Migrations-Tabelle, §6 Sprint-Renumerierung. | ✅ Commit `dc0d95d`. |
+| T5 | `docs/SPRINT-PLAN.md` Sprint 11..17 + 14b arc42-Konsolidierung, Sprint 10b annotiert „verschoben"; Mini-Patch STRATEGIE-REFRESH §3/§5/§6 für Sprint 16a (PMS conditional). | ✅ Commit `b167702`. |
+| T6 | `STATUS.md` §2ak + §6.2 B-11prep-1..8. | ✅ Commit `1f3602c`. |
+| T7 | `CLAUDE.md` §5.33 + §5.34 (Lessons knapp, 3-5 Zeilen, Zeiger auf Master-Quelle; §5.32 durch Sprint 10 belegt, Numerierung +1). | ✅ Commit `2713240`. |
+| T8 | `docs/SESSION-START.md` Pre-Read für Sprint 11-17 (plus Doku-Drift-Fix aus Sprint 10: STRATEGIE-REFRESH-2026-05-15.md ergänzt). | ✅ Commit `45067c1`. |
+| T9 | `docs/CHANGELOG-Design-Strategie.md` Eintrag 2026-05-15. | ↪ entfallen — S6 Doppel-Doku-Vermeidung; Info bereits in T1/T2/T6/T7 verankert, CHANGELOG-Design-Strategie ist auf Design-System (Tokens/Icons/Komponenten) fokussiert, Architektur-Strategie passt thematisch nicht. |
+| T10 | `docs/RUNBOOK.md` §10h Pre-Pairing-Workflow-Stub + §10d.6 Health-Status-Stub (§10f durch Sprint 10 T8 / §10g durch Sprint 10 T6 belegt, Numerierung +2). | ✅ Commit `4432f41`. |
+| T11 | `docs/AI-ROLES.md` Check. | ✅ no-op gesichtet, keine Anpassung nötig; optionale Mini-Erweiterung der Fehlerbilder-Tabelle in T14-Cleanup. |
+| T12 | Cross-Referenz-Check über alle angepassten Dateien. | ✅ no-op alle Patterns grün (AE-51..54-Range-Verweise konsistent, Master-Quelle in 9 Dateien vernetzt, 5/5 T1-T5-Commit-Hashes match). |
+| T13 | Markdown-Lint via Grep-Spot-Check (Code-Fence-Parität, Broken-Links, Tabellen-Pipe-Konsistenz). | ✅ no-op alle kritischen Patterns grün; §6.2-Spalten-Drift pre-existing, Tooling-Setup als Backlog-Idee für Sprint 14b notiert. |
+| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | 🔄 in Arbeit. |
+
+**Geänderte Dokumente bisher (T1-T5):**
+
+- `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` (neu, Master-Quelle 314 Zeilen)
+- `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` (+AE-51..54, +215 Zeilen)
+- `docs/STRATEGIE.md` (+§6.5 Health-Monitoring, +Begriffs-Box §7.1, R5 belegungs-abhängig)
+- `docs/STRATEGIE-REFRESH-2026-05-15.md` (Phasen 1-7 konkretisiert, Phase 4b/6 neu, §5 Migrations-Tabelle, §6 Sprint-Renumerierung)
+- `docs/SPRINT-PLAN.md` (Sprint 11-Prep, 11, 12, 13, 14, 14b, 15, 16, 16a, 17 als Outlines; Sprint 10b annotiert)
+
+**Tag-Vergabe:** `v0.1.15-zuordnungs-architektur-doku` nach T14 +
+expliziter Push-Freigabe durch Strategie-Chat (entgegen
+Autonomie-Default — Doku-Sprint mit Stop-Disziplin, jeder Task
+hat Pflicht-Stop für Strategie-Chat-Review).
+
+**Querverweise:** SPRINT-PLAN.md Sprint 11-Prep,
+STRATEGIE-THERMOSTAT-ZUORDNUNG.md (Master-Quelle),
+ARCHITEKTUR-ENTSCHEIDUNGEN.md AE-51..54,
+STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1772,6 +1823,14 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-10-2 ✅ | **Caddy-Basic-Auth-Konflikt mit Backend-Auth.** Nach Sprint-9.17a/b-Cutover liefen zwei parallele Auth-Schichten — Site-weite Caddy-Basic-Auth (Sprint 8a K-1) + FastAPI-JWT-Cookie (AE-50). Browser fragte mehrfach Basic-Auth pro Session, Session instabil, Material-Symbols-Font-Race (siehe B-9.13b-1). Sprint-10-Prep-Hotfix 2026-05-15: Caddy-Basic-Auth nur noch für `/openapi.json /docs /docs/* /redoc /redoc/*` (Reconnaissance-Schutz, FastAPI hat dort kein eigenes Auth-Layer); `/api/*` und Frontend laufen über Backend-Auth (JWT-Cookie via `require_user`/`require_admin`/`require_real_user`/`require_mitarbeiter`). `/health` + `/healthz` bleiben public (Monitoring + Docker-HEALTHCHECK). Live-verifiziert auf heizung-test 2026-05-15 nach Caddy-Reload: kein Caddy-Popup auf Frontend, Login als kaprun funktioniert, `/devices` lädt, `/openapi.json` weiterhin Caddy-Basic-Auth. Out-of-scope: `Caddyfile.main` (Sprint 12, heizung-main-Migration). PR #154, commit `196e83c`. | ✅ erledigt 2026-05-15 |
 | B-10-3 🟢 | **Vulnerability-Scanner-Traffic im Caddy-Log.** Beobachtet 2026-05-15 nach Sprint-10-Prep-Caddy-Hotfix: z.B. IP `192.253.248.169` scannt nach `/crm/.env.local`, `/staging/.env` und weiteren Standard-Pfaden. Caddy antwortet korrekt mit 308-Redirects, kein Daten-Leak. Hardening-Optionen: fail2ban auf wiederholte 4xx-/308-Antworten, Caddy-eigenes Rate-Limit-Modul, oder ein einfacher `@scanner`-Matcher mit `respond 444`. Sprint 10 (CI-Hygiene) oder eigener Security-Hardening-Sprint. |
 | B-10-4 🟠 (vor Sprint 11) | **DST-Verhalten (Sommer-/Winterzeit Österreich) in zeit-gesteuerten Engine-Pfaden.** Erster relevanter Wechsel im Produktivbetrieb: **25.10.2026** (drei Wochen nach Heizperiode-Start). Phase-0-Diagnose aller zeit-gesteuerten Engine-Pfade nötig: Layer 2 Temporal (Frostschutz-Fenster), occupancy-Zeitfenster (`occupancy.day_*`-Zeitstempel), Celery-Beat-Schedules (Engine-Tick, Override-Cleanup, deploy-pull-Timer-Sync), Trace-Zeitstempel im `event_log` (UTC vs. lokal). Risiko: doppelte Tick-Ausführung im „Stunde zurück"-Fall oder ein-Stunden-Aussetzer im „Stunde vor"-Fall. Sprint 10a (zwischen 10 und 11) oder eigener DST-Sprint. |
+| B-11prep-1 🟠 (vor Sprint 17) | **Casablanca-FIAS-Anbindung — Hotelier-Antwort steht aus** (Stand 2026-05-15). Phase 5 (PMS) hängt davon ab. Falls FIAS-Antwort bis Sprint-17-Start nicht vorliegt: Sprint 16a entfällt, PMS rutscht in Phase 7, manuelle Belegungs-Pflege bleibt Fallback. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §13. |
+| B-11prep-2 🟠 (in Sprint 13) | **Mass-Pairing-Werkzeug.** CSV-Import oder Batch-Wizard für ~100 Vickis. Realisiert in Sprint 13 (Pairing-Wizard), genutzt in Sprint 17 (Pre-Pairing September). Vorbereitung Phase 4b. |
+| B-11prep-3 🟢 (nach Heizperiode) | **Alarm-Schwellen-Härtung gegen 100-Vicki-Skalierung.** AE-53-3-Stufen-Alarm (Mail-Stub via `logger.warning`) ist heute auf 4 Vickis ausgelegt; bei 100 Vickis ist Alarm-Müdigkeit realistisch. Nach erster Heizperiode 2026/27 empirisch nachjustieren. |
+| B-11prep-4 🟠 (Mitte August) | **Pilot-Zimmer-Auswahl finalisieren.** 5 Zimmer maximaler Vielfalt: Standard + Suite + Mehrfach-Vicki + Funk-Rand + häufiger Gästewechsel. Vorbereitung Phase 6 Pilot-Go-Live Oktober Woche 1. Gemeinsam Strategie-Chat + Hotelier. |
+| B-11prep-5 🟠 (nach Pre-Pairing September) | **LoRaWAN-Funklast-Monitoring UG65** in ersten Wochen nach Mass-Pairing. Bei ~100 Vickis ist Funk-Auslastung des einzigen Gateways relevant. Backlog für eigenes Monitoring-Item; vor Heizperiode-Start empirisch verifizieren. |
+| B-11prep-6 🟢 (nach Heizperiode) | **Drift-Erkennung statistisch** als KI-Vorbereitung. Aufbau eines Modells für Abweichungen einzelner Vickis von Zone-Geschwistern über Tage/Wochen. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7.3 + §13 (bewusst nicht in MVP). |
+| B-11prep-7 🟢 (nach Heizperiode) | **Backend-Plausi für Fenster (BR-16).** Heute reine Vicki-Flag-Logik (`vicki.openWindow`-Uplink, AE-47). Backend-Eigenlogik (Temperatursturz-Heuristik o.ä.) als Ergänzung evaluieren, sobald Heizperiode-Daten zeigen, ob Vicki-Flag allein reicht. STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5.1. |
+| B-11prep-8 🟢 (in Sprint 14b) | **arc42-Konsolidierung der Architektur-Doku.** Migration als Sprint 14b geplant (zwischen Sprint 14 UI-Erweiterungen und Sprint 15 heizung-main-Migration). Bestehende Inhalte (STRATEGIE.md, ARCHITEKTUR-REFRESH-2026-05-07, STRATEGIE-REFRESH-2026-05-15, ARCHITEKTUR-ENTSCHEIDUNGEN.md, CLAUDE.md §5 Lessons) werden auf arc42-12-Kapitel-Skelett gemappt, nicht neu geschrieben. Source-of-Truth-Hierarchie in CLAUDE.md §0.2 wird dann strukturell und kann entfallen. MkDocs/Renderer-Entscheidung bewusst aufgeschoben (reines Markdown reicht für Solo-Betrieb, Renderer erst bei externer Übergabe geprüft). Diskussions-Grundlage: Strategie-Chat 2026-05-15. |
 
 ### 6.3 — Operative Aufgaben
 

@@ -271,8 +271,23 @@ Pro Raumtyp existieren zwei Soll-Werte: T_belegt und T_frei. Bei Check-in → T_
 **Regel 4 – Nachtabsenkung (belegtes Zimmer):**
 Zwischen 00:00 und 06:00 Uhr wird auf T_Nacht reduziert (Standard: 19 °C). Morgens rechtzeitig wieder auf T_belegt.
 
-**Regel 5 – Fenster-offen-Erkennung (softwarebasiert):**
-Temperatursturz > 2 °C innerhalb von 5 Minuten bei aktiver Heizung → Ventil schließen (Frostschutz 4,5 °C). Automatische Rückkehr nach Temperaturanstieg oder 30 Minuten. Schwellenwerte konfigurierbar pro Raumtyp.
+**Regel 5 – Fenster-offen-Erkennung:**
+Erkennung erfolgt über das `vicki.openWindow`-Flag im Uplink
+(Hardware-First, siehe AE-47). Reaktion belegungs-abhängig
+(AE-52, ausführlich in STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5):
+
+- Zone frei + Fenster offen → Frostschutz 10 °C (R8 / AE-42)
+- Zone belegt + Fenster offen → Frei-Sollwert aus Raumtyp
+
+Override am Vicki oder im UI wird während offenem Fenster
+ignoriert (nicht gespeichert, nicht nach Fenster-Schließen
+reaktiviert). Rückkehr zum Normal-Setpoint, sobald eine
+beliebige Vicki der Zone `openWindow=false` meldet. Backend-
+seitige Plausibilitäts-Erkennung (BR-16) bleibt im Backlog,
+Reevaluation nach Heizperiode-Auswertung Frühjahr 2027. Die
+historische Software-Schwellwert-Variante (Temperatursturz
+> 2 °C / 5 min, Frostschutz 4,5 °C) ist mit AE-42/AE-47/AE-52
+abgelöst.
 
 **Regel 6 – Manueller Gast-Override:**
 Gast ändert Soll-Temperatur am Thermostat. Wert wird gecapped auf konfigurierbare Grenzen (Standard: 19–24 °C). Dauer: bis zum nächsten Profil-Schaltpunkt oder maximal 4 Stunden. Danach Reset auf Algorithmus-Wert.
@@ -321,11 +336,72 @@ z. B. „Zimmer 107 hat einen sensiblen Stammgast – Maximum 25 °C."
 - Stammgast-Personalisierung
 - Wartungsprognose (Batterie, Ventilleistung)
 
+### 6.5 Health-Monitoring (Strategie-Refresh 2026-05-15)
+
+Aus AE-53. Master-Quelle: STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7.
+
+**Device-Health (`device.health_state`):**
+
+| Status | Bedingung |
+|---|---|
+| `healthy` | letzter Uplink < 2 h, alle Readings plausibel |
+| `degraded` | letzter Uplink 2-24 h, oder ≥ 1 implausibles Reading in 24 h |
+| `silent` | letzter Uplink > 24 h, oder ≥ 10 implausible Readings in 24 h |
+| `suspicious` | Outlier gegen Zone-Geschwister > 7 °C Differenz |
+
+**Zone-Health (`heating_zone.health_state`)** abgeleitet aus den
+zugeordneten Devices: alle `healthy` → `healthy`, mindestens eine
+`degraded`/`suspicious` → `degraded`, alle `silent` → `silent`,
+keine Devices zugeordnet → `no_device`.
+
+**Plausibilitäts-Filter** im MQTT-Subscriber: Ist-Temperatur
+außerhalb [-20 °C, 60 °C] → Reading verwerfen, nicht persistieren,
+Logger-Event `implausible_reading`. Grenzen bewusst weit gefasst,
+damit Fenster-offen-Szenarien (kalte Luft direkt an Vicki) nicht
+versehentlich gefiltert werden.
+
+**3-Stufen-Alarmierung:**
+
+| Stufe | Bedingung | Aktion |
+|---|---|---|
+| 1 | offline 2-24 h | Dashboard-Warnung, kein Mail |
+| 2 | offline > 24 h | Mail an Hotelier, Zone-Health `silent` |
+| 3 | > 10 implausible Readings in 24 h | Mail, Device-Health `silent` |
+
+**Mail-Versand initial als Logger-Platzhalter**
+(`logger.warning(...)`). Echter SMTP-Versand wird nach erster
+Heizperiode in eigenem Sprint nachgereicht.
+
+**Kein automatischer Software-Workaround bei Ausfall** — Hotelier
+fixt physisch (Batterie tauschen, Vicki neu paaren).
+
+**Engine-Zone-Isolation** (AE-54): Crash in einer Zone → Log +
+Skip + Zone-Health `degraded`, keine Cascade-Failures auf andere
+Zonen.
+
 ---
 
 ## 7. Datenmodell
 
 ### 7.1 Kernentitäten
+
+> **Begriffs-Konsolidierung (Stand 2026-05-15, AE-51..AE-54):**
+> Master-Quelle für die Zuordnungs-Architektur ist
+> `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md`. Bei Konflikt zwischen
+> historischer Strategie-Tabelle und Code-Stand gewinnt der Code-
+> Stand.
+>
+> | Begriff (UI / Doku, ab 2026-05-15) | DB-Tabelle (Code) | Strategie-Tabelle (historisch in §7.1) |
+> |---|---|---|
+> | Zimmer | `room` | hier `units` |
+> | Zone | `heating_zone` | hier `rooms` |
+> | Raumtyp | `room_type` | hier `room_types` |
+> | Thermostat | `device` | hier `devices` |
+>
+> Die historischen Begriffe in den folgenden Entitäten-Beschreibungen
+> sind nicht ersetzt; das Mapping oben ist verbindlich. Code-Naming
+> bleibt `heating_zone`; UI-Sprache darf „Raum" verwenden
+> (gastgeberischer, AE-51-konform).
 
 **hotels:** Mandantentabelle. Hotel Sonnblick = Mandant Nr. 1. Vorbereitet für Multi-Hotel.
 
