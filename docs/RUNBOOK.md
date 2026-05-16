@@ -743,6 +743,7 @@ Erwartet nach Sprint 9.11a Live-Setup: alle 4 Vickis mit
 | 404 | `device_not_found` | Device-ID existiert nicht |
 | 404 | `heating_zone_not_found` | Zone-ID existiert nicht |
 | 422 | Pydantic-Default | Body fehlt, `heating_zone_id <= 0`, oder Extra-Feld |
+| — | (Stub) | Device-Health-Status per API abrufbar — siehe Sprint 11 (AE-53). Endpoint folgt mit Health-State-Modell. |
 
 ### 10d.7 Verwandte API-Endpunkte (Sprint 9.11 verifiziert)
 
@@ -1152,6 +1153,54 @@ ohne Diagnose der Failure-Ursache.
 - GHCR-PAT: RUNBOOK §6.1.
 - Caddy-Basic-Auth-Hash (`HOTEL_BASIC_AUTH_HASH`,
   `CHIRPSTACK_BASIC_AUTH_HASH`): RUNBOOK §10b.
+
+---
+
+## 10h. Pre-Pairing-Workflow September 2026 (Stub)
+
+> **Status (2026-05-15):** Stub. Vollständige Anleitung folgt aus
+> Sprint 13 (Pairing-Wizard inkl. Mass-Pairing-CSV) und Sprint 17
+> (Pre-Pairing September, Phase 4b). Dieser Abschnitt existiert,
+> damit der Hotelier später weiß, wo gesucht werden muss.
+>
+> Bezug: STRATEGIE-THERMOSTAT-ZUORDNUNG.md §15 (Migrations-Plan),
+> SPRINT-PLAN.md Sprint 13 + Sprint 17.
+
+### 10h.1 Vicki-Eingangstest (5 Schritte pro Gerät)
+
+Pro Vicki vor der Montage auf dem Tisch im Hotel-Office:
+
+1. **Vicki einschalten + pairen.** Pairing-Wizard durchlaufen
+   (ChirpStack-Stufe + Zimmer/Zone/Label). Erster Uplink
+   erwartet innerhalb von 2 Min.
+2. **Temperatur lesen.** Plausi 15-30 °C im Lagerraum (sonst
+   AE-53 Plausi-Filter [-20 °C, 60 °C] greift; Werte ausserhalb
+   sind Hardware-/Sensor-Befund).
+3. **Setpoint 25 °C senden.** Downlink-Bestätigung im
+   ChirpStack-Event-Tab abwarten, Ventil hörbar auf.
+4. **Setpoint 10 °C senden.** Downlink-Bestätigung, Ventil
+   hörbar zu.
+5. **Backplate-Bit prüfen.** `attachedBackplate=false` ist
+   erwartet, weil Vicki nicht montiert ist. Falls `true`:
+   Backplate sitzt am Tisch fest oder Codec-Befund (siehe
+   CLAUDE.md §5.21 fPort-Routing).
+
+Bestandene Geräte werden als „eingangsgetestet" markiert und
+wandern in den Montage-Pool für Sprint 17 / Phase 6.
+
+### 10h.2 Mass-Pairing-CSV-Format (TBD, Sprint 13)
+
+CSV-Format für Batch-Import von ~100 Vickis. Spezifikation
+folgt aus Sprint 13 (Pairing-Wizard + B-11prep-2). Bis dahin:
+einzeln pairen via Wizard.
+
+### 10h.3 Zimmer-Zuordnungs-Workflow ohne Montage (TBD, Sprint 17)
+
+Workflow zum Pre-Zuordnen aller ~100 Vickis zu Zimmern/Zonen
+ohne physische Montage. Spezifikation folgt aus Sprint 17 +
+Hotelier-Schulung (Pilot-Zimmer-Auswahl B-11prep-4). Bis
+dahin: vorläufig in „Pre-Pairing-Pool" parken, finale Zimmer-
+Zuordnung in Sprint 17.
 
 ---
 
