@@ -848,6 +848,36 @@ isoliert beat von worker), B-9.11-4 (Backlog-Eintrag).
 celery_beat-„healthy" basierend auf Schedule-Tick-Latenz, nicht
 auf Dockerfile-HEALTHCHECK.
 
+### 5.33 Architektur-Entscheidungen Strategie-Chat 2026-05-15 (Sprint 11-Prep Lesson)
+
+Vier neue ADRs verankern Mehrfach-Vicki, Fenster-Logik,
+Health-State und Engine-Isolation:
+
+- **Mehrfach-Vicki als Aggregat:** Lesen = Mittelwert, Schreiben
+  symmetrisch (AE-51).
+- **Fenster belegungs-abhängig:** frei → Frostschutz, belegt →
+  Frei-Sollwert (AE-52).
+- **Health-State-Modell** mit Plausi-Grenzen [-20 °C, 60 °C]
+  (AE-53).
+- **Engine-Zone-Isolation** als Pflicht — try/except pro Zone
+  (AE-54).
+
+**Master-Quelle:** `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md`.
+**ADRs:** AE-51..AE-54 in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`.
+
+### 5.34 Migrations-Plan Phasen-Modell statt Big-Bang (Sprint 11-Prep Lesson)
+
+Vicki-Rollout in Phasen, nicht als Cutover:
+
+- **Betterspace** läuft parallel bis Frühjahr 2027.
+- **Pre-Pairing** September auf Tisch im Hotel-Office, ohne
+  Montage (alle ~100 Vickis).
+- **Zimmerweiser Rückbau** ab Oktober Woche 1, ~5 Min pro Zimmer.
+- **Fallback** jederzeit möglich (Vicki ab, Betterspace-eQ-3
+  wieder dran).
+
+**Details:** `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §15.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
