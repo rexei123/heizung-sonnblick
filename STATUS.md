@@ -6,13 +6,14 @@ Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in 
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-15
+**Stichtag:** 2026-05-16
 **Aktueller Branch:** develop
-**Letzter Tag:** `v0.1.14-auth` (Sprint 9.17b, Auth-Track komplett)
-**Aktueller Sprint:** Sprint 11-Prep — Doku-Konsolidierung
-Zuordnungs-Architektur (in Arbeit, siehe §2ak)
-**Nächster Sprint:** Sprint 11 — Health-State + Plausi +
-Zone-Isolation + Aggregat-Lesen (siehe `docs/SPRINT-PLAN.md`)
+**Letzter Tag:** `v0.1.15-zuordnungs-architektur-doku` (Sprint 11-Prep,
+Doku-Konsolidierung Zuordnungs-Architektur)
+**Aktueller Sprint:** Sprint 11 — Health-State + Plausi +
+Zone-Isolation + Aggregat-Lesen (in Arbeit, siehe `docs/SPRINT-PLAN.md`)
+**Nächster Sprint:** Sprint 12 — Mehrfach-Vicki Schreiben +
+Fenster belegungs-abhängig (siehe `docs/SPRINT-PLAN.md`)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
