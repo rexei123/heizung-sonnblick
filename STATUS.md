@@ -1592,7 +1592,7 @@ Phase 1, CLAUDE.md §5.32, AE-50 (Auth + JWT_SECRET_KEY-Fallback).
 
 ---
 
-## 2ak. Sprint 11-Prep Doku-Konsolidierung Zuordnungs-Architektur (2026-05-15, in Arbeit)
+## 2ak. Sprint 11-Prep Doku-Konsolidierung Zuordnungs-Architektur (2026-05-15..2026-05-16, abgeschlossen)
 
 Doku-only-Sprint zur Konsolidierung der Brainstorming-Ergebnisse
 aus Strategie-Chat 2026-05-15. Master-Quelle:
@@ -1618,7 +1618,7 @@ aus Strategie-Chat 2026-05-15. Master-Quelle:
 | T11 | `docs/AI-ROLES.md` Check. | ✅ no-op gesichtet, keine Anpassung nötig; optionale Mini-Erweiterung der Fehlerbilder-Tabelle in T14-Cleanup. |
 | T12 | Cross-Referenz-Check über alle angepassten Dateien. | ✅ no-op alle Patterns grün (AE-51..54-Range-Verweise konsistent, Master-Quelle in 9 Dateien vernetzt, 5/5 T1-T5-Commit-Hashes match). |
 | T13 | Markdown-Lint via Grep-Spot-Check (Code-Fence-Parität, Broken-Links, Tabellen-Pipe-Konsistenz). | ✅ no-op alle kritischen Patterns grün; §6.2-Spalten-Drift pre-existing, Tooling-Setup als Backlog-Idee für Sprint 14b notiert. |
-| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | 🔄 in Arbeit. |
+| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | ✅ Cleanup-Commit `931c546` (STATUS.md + AI-ROLES.md kosmetisch), PR #157 gemerged 2026-05-16 auf `c0d931e`. |
 
 **Geänderte Dokumente bisher (T1-T5):**
 
@@ -1632,6 +1632,7 @@ aus Strategie-Chat 2026-05-15. Master-Quelle:
 expliziter Push-Freigabe durch Strategie-Chat (entgegen
 Autonomie-Default — Doku-Sprint mit Stop-Disziplin, jeder Task
 hat Pflicht-Stop für Strategie-Chat-Review).
+Vergeben am 2026-05-16 10:20 +0200 auf Merge-Commit `c0d931e`.
 
 **Querverweise:** SPRINT-PLAN.md Sprint 11-Prep,
 STRATEGIE-THERMOSTAT-ZUORDNUNG.md (Master-Quelle),
