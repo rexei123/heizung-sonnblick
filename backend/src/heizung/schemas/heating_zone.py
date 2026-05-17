@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,5 +36,6 @@ class HeatingZoneRead(BaseModel):
     kind: HeatingZoneKind
     name: str
     is_towel_warmer: bool
+    health_state: Literal["healthy", "degraded", "silent", "no_device"]
     created_at: datetime
     updated_at: datetime

@@ -256,3 +256,173 @@ def test_migration_0012_preserves_inactive_state(alembic_cfg: Config) -> None:
         assert assignment is None, "Inaktiver Sommermodus darf kein Assignment erzeugen"
 
     command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0015_atomar_auf_ab_auf(alembic_cfg: Config) -> None:
+    """Migration 0015 muss upgrade -> downgrade -> upgrade ohne Fehler durchlaufen.
+
+    Sprint 11 T1: device.health_state + heating_zone.health_state additiv.
+    Catcht: vergessenes drop_constraint im downgrade, falsche Reihenfolge
+    der drop-Aufrufe (Constraint vor Column), Idempotenz bei Re-Run.
+    """
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "0015_health_state")
+    command.downgrade(alembic_cfg, "0014_auth_and_business_audit")
+    command.upgrade(alembic_cfg, "0015_health_state")
+    command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0015_default_value_after_upgrade(alembic_cfg: Config) -> None:
+    """Bestehende device/heating_zone Rows bekommen nach 0015 health_state='silent'.
+
+    Szenario:
+    1. DB auf 0014 (vor 0015, ohne health_state-Spalten)
+    2. Test-Rows einfuegen (room_type, room, heating_zone, device)
+    3. Upgrade auf 0015 -> Spalten werden mit server_default='silent'
+       atomar angelegt und befuellt
+    4. Verify: bestehende Rows haben health_state='silent'
+
+    Backfill aller bestehenden Rows ist der Pflicht-Pfad fuer Defensive
+    nach S5 — Compute-Task aus T5 hebt spaeter selektiv auf 'healthy'.
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "0014_auth_and_business_audit")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    rt_id: int | None = None
+    room_id: int | None = None
+    zone_id: int | None = None
+    dev_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            rt_id = conn.execute(
+                text("INSERT INTO room_type (name) VALUES ('rt_0015_default') RETURNING id")
+            ).scalar_one()
+            room_id = conn.execute(
+                text(
+                    "INSERT INTO room (number, room_type_id, status) "
+                    "VALUES ('r-0015d', :rt, 'vacant') RETURNING id"
+                ),
+                {"rt": rt_id},
+            ).scalar_one()
+            zone_id = conn.execute(
+                text(
+                    "INSERT INTO heating_zone "
+                    "(room_id, kind, name, is_towel_warmer) "
+                    "VALUES (:r, 'bedroom', 'zone-0015d', false) RETURNING id"
+                ),
+                {"r": room_id},
+            ).scalar_one()
+            dev_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, is_active) "
+                    "VALUES ('00000000000015de', 'thermostat', 'mclimate', "
+                    "'vicki', true) RETURNING id"
+                )
+            ).scalar_one()
+            conn.commit()
+
+        command.upgrade(alembic_cfg, "0015_health_state")
+
+        with engine.connect() as conn:
+            dev_hs = conn.execute(
+                text("SELECT health_state FROM device WHERE id = :id"),
+                {"id": dev_id},
+            ).scalar_one()
+            zone_hs = conn.execute(
+                text("SELECT health_state FROM heating_zone WHERE id = :id"),
+                {"id": zone_id},
+            ).scalar_one()
+
+        assert dev_hs == "silent", f"device.health_state sollte 'silent' sein, ist {dev_hs!r}"
+        assert zone_hs == "silent", (
+            f"heating_zone.health_state sollte 'silent' sein, ist {zone_hs!r}"
+        )
+    finally:
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as conn:
+            if dev_id is not None:
+                conn.execute(text("DELETE FROM device WHERE id = :id"), {"id": dev_id})
+            if zone_id is not None:
+                conn.execute(text("DELETE FROM heating_zone WHERE id = :id"), {"id": zone_id})
+            if room_id is not None:
+                conn.execute(text("DELETE FROM room WHERE id = :id"), {"id": room_id})
+            if rt_id is not None:
+                conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0015_check_constraint_rejects_invalid(alembic_cfg: Config) -> None:
+    """CHECK-Constraints blocken health_state='unknown' fuer device UND heating_zone.
+
+    Zwei direkte INSERTs mit invalidem health_state-Wert. Beide muessen
+    IntegrityError werfen (CHECK-Verletzung auf DB-Ebene). Sichert die
+    Werte-Whitelist gegen Umgehung via Raw-SQL oder Engine-Bug.
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    rt_id: int | None = None
+    room_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            rt_id = conn.execute(
+                text("INSERT INTO room_type (name) VALUES ('rt_0015_chk') RETURNING id")
+            ).scalar_one()
+            room_id = conn.execute(
+                text(
+                    "INSERT INTO room (number, room_type_id, status) "
+                    "VALUES ('r-0015c', :rt, 'vacant') RETURNING id"
+                ),
+                {"rt": rt_id},
+            ).scalar_one()
+            conn.commit()
+
+        # device: invalid health_state -> CHECK-Verletzung
+        with engine.connect() as conn, pytest.raises(IntegrityError):
+            conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, is_active, health_state) "
+                    "VALUES ('00000000000015c1', 'thermostat', 'mclimate', "
+                    "'vicki', true, 'unknown')"
+                )
+            )
+            conn.commit()
+
+        # heating_zone: invalid health_state -> CHECK-Verletzung
+        with engine.connect() as conn, pytest.raises(IntegrityError):
+            conn.execute(
+                text(
+                    "INSERT INTO heating_zone "
+                    "(room_id, kind, name, is_towel_warmer, health_state) "
+                    "VALUES (:r, 'bedroom', 'zone-0015c', false, 'unknown')"
+                ),
+                {"r": room_id},
+            )
+            conn.commit()
+    finally:
+        with engine.connect() as conn:
+            if room_id is not None:
+                conn.execute(text("DELETE FROM room WHERE id = :id"), {"id": room_id})
+            if rt_id is not None:
+                conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
+            conn.commit()

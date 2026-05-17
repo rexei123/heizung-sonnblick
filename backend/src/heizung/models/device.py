@@ -75,6 +75,11 @@ class Device(Base):
     # In 9.11x ungenutzt, in 9.11x.b vom MQTT-Subscriber gepflegt.
     firmware_version: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
+    # Sprint 11 (AE-53): Compute-Task aus T5 setzt den Wert periodisch.
+    # DB-Default 'silent' ist Source of Truth — kein Python-Default,
+    # sonst entstuenden zwei Wahrheiten.
+    health_state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="silent")
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
