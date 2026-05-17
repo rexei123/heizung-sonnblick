@@ -34,6 +34,7 @@ from heizung.db import SessionLocal
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.constants import PLAUSI_TEMP_MAX_C, PLAUSI_TEMP_MIN_C
 from heizung.services.device_adapter import handle_uplink_for_override
 from heizung.tasks.engine_tasks import evaluate_room
 
@@ -160,6 +161,27 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
                 "uplink für unbekannte DevEUI verworfen: %s (fcnt=%s)",
                 dev_eui,
                 uplink.fCnt,
+            )
+            return
+
+        # Sprint 11 T2 (AE-53): Plausi-Filter auf Ist-Temperatur. Werte
+        # ausserhalb [-20, 60] °C werden verworfen — kein Insert in
+        # sensor_reading, kein evaluate_room.delay-Trigger. Engine sieht
+        # den Wert nie. Defensive nach S5 (externe Quelle = Vicki +
+        # Codec-Drift). Decimal-Vergleich, kein Float. None bleibt None
+        # (reines Battery-Frame ohne Temperatur faellt nicht hierdurch).
+        obj = uplink.object or {}
+        temperature = _to_decimal(obj.get("temperature"))
+        if temperature is not None and not (PLAUSI_TEMP_MIN_C <= temperature <= PLAUSI_TEMP_MAX_C):
+            logger.warning(
+                "implausible_reading",
+                extra={
+                    "dev_eui": dev_eui,
+                    "temperature": str(temperature),
+                    "raw_payload": uplink.data,
+                    "reason": "out_of_bounds",
+                    "bounds": f"[{PLAUSI_TEMP_MIN_C}, {PLAUSI_TEMP_MAX_C}]",
+                },
             )
             return
 

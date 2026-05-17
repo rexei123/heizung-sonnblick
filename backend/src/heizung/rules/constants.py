@@ -38,3 +38,12 @@ MIN_GUEST_OVERRIDE_C: Final[Decimal] = Decimal("19.0")
 # fehlhaltend. Geteilte Quelle fuer Layer 4 (Window + Detached) und den
 # Hardware-Status-Endpoint (``/api/v1/devices/{id}/hardware-status``).
 WINDOW_STALE_THRESHOLD_MIN: Final[int] = 30
+
+# Sprint 11 T2 (AE-53): Plausibilitaetsgrenzen fuer Ist-Temperatur-
+# Readings. Bewusst weit gefasst, damit Fenster-offen-Szenarien
+# (kalte Luft direkt am Vicki im Hochwinter) nicht versehentlich
+# gefiltert werden. Grenzen sind inklusiv — exakt -20.0 und 60.0
+# werden noch akzeptiert. Quelle: STRATEGIE-THERMOSTAT-ZUORDNUNG.md
+# §4 / Sprint-11-Brief.
+PLAUSI_TEMP_MIN_C: Final[Decimal] = Decimal("-20.0")
+PLAUSI_TEMP_MAX_C: Final[Decimal] = Decimal("60.0")

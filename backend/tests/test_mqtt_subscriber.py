@@ -561,3 +561,211 @@ async def test_handle_firmware_version_none_silent_skip(
     assert not any("firmware_version" in m for m in messages), (
         f"erwarte KEINE firmware_version-Logs, gefunden: {messages}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 11 T2: Plausi-Filter [-20 °C, 60 °C] auf temperature (AE-53)
+# ---------------------------------------------------------------------------
+
+
+async def _setup_plausi_device(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, int, list[tuple[int, ...]]]:
+    """Setup-Helper: RoomType + Room + HeatingZone + Device + Mocks.
+
+    Liefert (dev_eui, expected_room_id, delay_calls_list) zurueck.
+    SessionLocal wird so monkeypatched, dass ``_persist_uplink`` die
+    test-fixture-Session wiederverwendet. ``evaluate_room.delay`` wird
+    durch eine Liste ersetzt, die jeder Call anhaengt — Tests pruefen
+    die Liste statt Redis zu beruehren.
+    """
+    from heizung.models.device import Device
+    from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+    from heizung.models.heating_zone import HeatingZone
+    from heizung.models.room import Room
+    from heizung.models.room_type import RoomType
+    from heizung.services import mqtt_subscriber as sub_module
+
+    suffix = uuid.uuid4().hex[:8]
+    rt = RoomType(name=f"plausi-rt-{suffix}")
+    session.add(rt)
+    await session.flush()
+    room = Room(number=f"plausi-{suffix}", room_type_id=rt.id)
+    session.add(room)
+    await session.flush()
+    zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="bedroom")
+    session.add(zone)
+    await session.flush()
+    dev_eui = f"deadbeef{suffix}"
+    device = Device(
+        dev_eui=dev_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=zone.id,
+    )
+    session.add(device)
+    await session.flush()
+
+    class _FakeContext:
+        async def __aenter__(self) -> AsyncSession:
+            return session
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(sub_module, "SessionLocal", lambda: _FakeContext())
+
+    delay_calls: list[tuple[int, ...]] = []
+    monkeypatch.setattr(
+        sub_module.evaluate_room,
+        "delay",
+        lambda *args: delay_calls.append(args),
+    )
+
+    return dev_eui, room.id, delay_calls
+
+
+def _enable_subscriber_log_propagation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """caplog-Defensive analog Sprint 9.11x.c: erzwingt Propagation auf
+    den Subscriber-Logger, damit ``caplog`` Records in voller Suite sieht."""
+    import logging as _stdlib_logging
+
+    sub_logger = _stdlib_logging.getLogger("heizung.services.mqtt_subscriber")
+    monkeypatch.setattr(sub_logger, "propagate", True)
+    monkeypatch.setattr(sub_logger, "disabled", False)
+
+
+async def test_subscriber_rejects_temperature_below_minus_20_implausible(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """temperature=-25 °C -> kein Insert, kein evaluate_room.delay,
+    WARNING ``implausible_reading`` mit extra-Feldern.
+    """
+    import logging as _stdlib_logging
+
+    dev_eui, _expected_room_id, delay_calls = await _setup_plausi_device(
+        db_session_for_persist, monkeypatch
+    )
+    _enable_subscriber_log_propagation(monkeypatch)
+    caplog.set_level(_stdlib_logging.WARNING, logger="heizung.services.mqtt_subscriber")
+
+    payload = {
+        "deviceInfo": {"devEui": dev_eui},
+        "fCnt": 1,
+        "fPort": 1,
+        "time": "2026-05-17T08:00:00Z",
+        "object": {"temperature": -25.0},
+        "data": "implausible-low",
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [], (
+        f"implausible Reading darf evaluate_room nicht triggern, gefunden: {delay_calls}"
+    )
+    plausi_records = [r for r in caplog.records if r.getMessage() == "implausible_reading"]
+    assert plausi_records, (
+        f"erwarte WARNING 'implausible_reading', gefunden: "
+        f"{[(r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
+    rec = plausi_records[0]
+    assert rec.levelname == "WARNING"
+    assert getattr(rec, "dev_eui", None) == dev_eui
+    assert getattr(rec, "temperature", None) == "-25.0"
+    assert getattr(rec, "reason", None) == "out_of_bounds"
+    assert getattr(rec, "raw_payload", None) == "implausible-low"
+
+
+async def test_subscriber_rejects_temperature_above_60_implausible(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """temperature=65 °C -> kein Insert, kein evaluate_room.delay,
+    WARNING ``implausible_reading`` (analog Lower-Bound)."""
+    import logging as _stdlib_logging
+
+    dev_eui, _expected_room_id, delay_calls = await _setup_plausi_device(
+        db_session_for_persist, monkeypatch
+    )
+    _enable_subscriber_log_propagation(monkeypatch)
+    caplog.set_level(_stdlib_logging.WARNING, logger="heizung.services.mqtt_subscriber")
+
+    payload = {
+        "deviceInfo": {"devEui": dev_eui},
+        "fCnt": 1,
+        "fPort": 1,
+        "time": "2026-05-17T08:00:00Z",
+        "object": {"temperature": 65.0},
+        "data": "implausible-high",
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [], (
+        f"implausible Reading darf evaluate_room nicht triggern, gefunden: {delay_calls}"
+    )
+    plausi_records = [r for r in caplog.records if r.getMessage() == "implausible_reading"]
+    assert plausi_records, (
+        f"erwarte WARNING 'implausible_reading', gefunden: "
+        f"{[(r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
+    rec = plausi_records[0]
+    assert getattr(rec, "temperature", None) == "65.0"
+    assert getattr(rec, "reason", None) == "out_of_bounds"
+
+
+async def test_subscriber_accepts_temperature_at_lower_bound(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """temperature=-20.0 °C ist Grenze inklusiv -> Reading persistiert,
+    evaluate_room.delay() laeuft genau einmal mit der richtigen room_id."""
+    dev_eui, expected_room_id, delay_calls = await _setup_plausi_device(
+        db_session_for_persist, monkeypatch
+    )
+
+    payload = {
+        "deviceInfo": {"devEui": dev_eui},
+        "fCnt": 1,
+        "fPort": 1,
+        "time": "2026-05-17T08:00:00Z",
+        "object": {"temperature": -20.0, "target_temperature": 21.0},
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [(expected_room_id,)], (
+        f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
+    )
+
+
+async def test_subscriber_accepts_temperature_in_normal_range(
+    db_session_for_persist: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """temperature=20.0 °C ist plausibel -> normaler Pfad wie heute."""
+    dev_eui, expected_room_id, delay_calls = await _setup_plausi_device(
+        db_session_for_persist, monkeypatch
+    )
+
+    payload = {
+        "deviceInfo": {"devEui": dev_eui},
+        "fCnt": 1,
+        "fPort": 1,
+        "time": "2026-05-17T08:00:00Z",
+        "object": {"temperature": 20.0, "target_temperature": 21.0},
+    }
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    await _persist_uplink(uplink)
+
+    assert delay_calls == [(expected_room_id,)], (
+        f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
+    )
