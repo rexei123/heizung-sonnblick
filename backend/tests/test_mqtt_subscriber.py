@@ -13,12 +13,14 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from heizung.services import redis_client
 from heizung.services.mqtt_subscriber import (
     ChirpStackUplink,
     _battery_pct_from_volts,
@@ -565,7 +567,22 @@ async def test_handle_firmware_version_none_silent_skip(
 
 # ---------------------------------------------------------------------------
 # Sprint 11 T2: Plausi-Filter [-20 °C, 60 °C] auf temperature (AE-53)
+# Sprint 11 T5: Plus Redis-Implausible-Counter (Pipeline: incr + expire 86400).
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Mockt ``redis_client.get_redis_client`` fuer die T2-Tests.
+
+    Sprint 11 T5: implausible Readings rufen
+    ``_increment_implausible_counter`` (Pipeline: incr + expire). Tests
+    verifizieren die Pipeline-Aufrufe ueber Aufruf-Tracking, ohne echtes
+    Redis zu brauchen.
+    """
+    fake = MagicMock()
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: fake)
+    return fake
 
 
 async def _setup_plausi_device(
@@ -640,9 +657,13 @@ async def test_subscriber_rejects_temperature_below_minus_20_implausible(
     db_session_for_persist: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    fake_redis: MagicMock,
 ) -> None:
     """temperature=-25 °C -> kein Insert, kein evaluate_room.delay,
     WARNING ``implausible_reading`` mit extra-Feldern.
+
+    Sprint 11 T5: zusaetzlich Implausible-Counter via Pipeline
+    (incr + expire 86400) — Reject-Pfad muss den Pipeline-INCR aufrufen.
     """
     import logging as _stdlib_logging
 
@@ -679,14 +700,24 @@ async def test_subscriber_rejects_temperature_below_minus_20_implausible(
     assert getattr(rec, "reason", None) == "out_of_bounds"
     assert getattr(rec, "raw_payload", None) == "implausible-low"
 
+    # T5: Redis-Counter-Pipeline wurde aufgerufen (incr + expire).
+    pipe = fake_redis.pipeline.return_value
+    pipe.incr.assert_called_once_with(f"implausible:{dev_eui}")
+    pipe.expire.assert_called_once_with(f"implausible:{dev_eui}", 86400)
+    pipe.execute.assert_called_once()
+
 
 async def test_subscriber_rejects_temperature_above_60_implausible(
     db_session_for_persist: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    fake_redis: MagicMock,
 ) -> None:
     """temperature=65 °C -> kein Insert, kein evaluate_room.delay,
-    WARNING ``implausible_reading`` (analog Lower-Bound)."""
+    WARNING ``implausible_reading`` (analog Lower-Bound).
+
+    Sprint 11 T5: zusaetzlich Pipeline-INCR + EXPIRE.
+    """
     import logging as _stdlib_logging
 
     dev_eui, _expected_room_id, delay_calls = await _setup_plausi_device(
@@ -719,13 +750,24 @@ async def test_subscriber_rejects_temperature_above_60_implausible(
     assert getattr(rec, "temperature", None) == "65.0"
     assert getattr(rec, "reason", None) == "out_of_bounds"
 
+    # T5: Redis-Counter-Pipeline wurde aufgerufen.
+    pipe = fake_redis.pipeline.return_value
+    pipe.incr.assert_called_once_with(f"implausible:{dev_eui}")
+    pipe.expire.assert_called_once_with(f"implausible:{dev_eui}", 86400)
+    pipe.execute.assert_called_once()
+
 
 async def test_subscriber_accepts_temperature_at_lower_bound(
     db_session_for_persist: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
+    fake_redis: MagicMock,
 ) -> None:
     """temperature=-20.0 °C ist Grenze inklusiv -> Reading persistiert,
-    evaluate_room.delay() laeuft genau einmal mit der richtigen room_id."""
+    evaluate_room.delay() laeuft genau einmal mit der richtigen room_id.
+
+    Sprint 11 T5: Counter-Pipeline darf NICHT angefasst werden (akzeptiertes
+    Reading ist kein Implausible-Trigger).
+    """
     dev_eui, expected_room_id, delay_calls = await _setup_plausi_device(
         db_session_for_persist, monkeypatch
     )
@@ -744,13 +786,18 @@ async def test_subscriber_accepts_temperature_at_lower_bound(
     assert delay_calls == [(expected_room_id,)], (
         f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
     )
+    fake_redis.pipeline.assert_not_called()
 
 
 async def test_subscriber_accepts_temperature_in_normal_range(
     db_session_for_persist: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
+    fake_redis: MagicMock,
 ) -> None:
-    """temperature=20.0 °C ist plausibel -> normaler Pfad wie heute."""
+    """temperature=20.0 °C ist plausibel -> normaler Pfad wie heute.
+
+    Sprint 11 T5: Counter-Pipeline darf nicht angefasst werden.
+    """
     dev_eui, expected_room_id, delay_calls = await _setup_plausi_device(
         db_session_for_persist, monkeypatch
     )
@@ -769,3 +816,4 @@ async def test_subscriber_accepts_temperature_in_normal_range(
     assert delay_calls == [(expected_room_id,)], (
         f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
     )
+    fake_redis.pipeline.assert_not_called()
