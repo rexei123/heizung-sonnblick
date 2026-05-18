@@ -40,6 +40,7 @@ from sqlalchemy import select
 from heizung.celery_app import app
 from heizung.models import Device, HeatingZone, SensorReading
 from heizung.services import redis_client
+from heizung.services.health_alerts import emit_health_alert
 from heizung.tasks.engine_tasks import _task_session
 
 logger = logging.getLogger(__name__)
@@ -259,6 +260,25 @@ async def _compute_health_state_async() -> dict[str, Any]:
                 z.health_state = new_zone_state
 
         await session.commit()
+
+    # Phase 6: Health-Alerts emittieren fuer alle silent_transitions.
+    # T6 (AE-53): Stufe-2 (reason="offline_24h") oder Stufe-3
+    # (reason="implausible_readings_24h"). Heute Logger-Stub,
+    # SMTP-Versand ist eigener Sprint nach Heizperiode. Reihenfolge
+    # NACH commit() ist wichtig: nur persistierter State loest Alarm
+    # aus — bei transientem DB-Fehler waere die session bereits in
+    # rolled-back-Zustand und kein Phantom-Alarm wuerde rausgehen.
+    # silent_transitions-Sammlung in Phase 4 enthaelt bauartbedingt
+    # nur previous!=silent->new==silent-Uebergaenge, kein Re-Mail-
+    # Sturm beim 5-min-Beat-Tick.
+    for transition in silent_transitions:
+        level = 3 if transition["reason"] == "implausible_readings_24h" else 2
+        emit_health_alert(
+            level=level,
+            device_id=transition["device_id"],
+            dev_eui=transition["dev_eui"],
+            reason=transition["reason"],
+        )
 
     return {
         "devices_processed": len(devices),
