@@ -32,20 +32,12 @@ import logging
 
 import redis
 
-from heizung.config import get_settings
+from heizung.services import redis_client
 
 logger = logging.getLogger(__name__)
 
 LOCK_KEY_TEMPLATE = "engine:eval:lock:{room_id}"
 LOCK_TTL_S = 30
-
-
-def _client() -> redis.Redis:
-    """Sync-Redis-Client. Bewusst neu pro Call: get_settings() ist
-    lru_cache't, ``redis.from_url`` baut intern einen Pool — somit
-    teilen sich Calls innerhalb desselben Prozesses die Connections.
-    """
-    return redis.from_url(get_settings().redis_url, socket_timeout=2)
 
 
 def lock_key(room_id: int) -> str:
@@ -55,7 +47,7 @@ def lock_key(room_id: int) -> str:
 def try_acquire(room_id: int, *, ttl_s: int = LOCK_TTL_S) -> bool:
     """SET key NX EX ttl — True wenn der Lock fuer diesen Raum frei war."""
     key = lock_key(room_id)
-    acquired = _client().set(key, "1", nx=True, ex=ttl_s)
+    acquired = redis_client.get_redis_client().set(key, "1", nx=True, ex=ttl_s)
     return bool(acquired)
 
 
@@ -65,7 +57,7 @@ def release(room_id: int) -> None:
     """
     key = lock_key(room_id)
     try:
-        _client().delete(key)
+        redis_client.get_redis_client().delete(key)
     except redis.RedisError:
         logger.warning(
             "engine_lock.release: redis-fehler fuer key=%s (TTL faellt zurueck)",

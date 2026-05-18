@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from heizung.services import engine_lock
+from heizung.services import engine_lock, redis_client
 from heizung.tasks import engine_tasks
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ class _FakeRedis:
 @pytest.fixture
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
     fake = _FakeRedis()
-    monkeypatch.setattr(engine_lock, "_client", lambda: fake)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: fake)
     return fake
 
 
