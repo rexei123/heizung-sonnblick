@@ -878,6 +878,87 @@ Vicki-Rollout in Phasen, nicht als Cutover:
 
 **Details:** `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §15.
 
+### 5.35 Phase-0-Quellcheck muss Signaturen explizit ausweisen (Sprint 11 T4)
+
+Brief-Annahmen ueber Funktions-Signaturen (Argumente, Return-Type,
+sync/async) muessen vor jedem Code-Touch durch direkten Source-Check
+verifiziert werden. T4-Brief schrieb `evaluate_all_zones`-Iteration
+und `_evaluate_room_async -> None` — Code-Realitaet war Room-zentrisch
+mit Dict-Return. Folge: Refactor-Welle mitten in der Implementation.
+Pflicht ab Sprint 12: Phase-0-Bericht listet pro angefasster Funktion
+die exakte Signatur aus dem File.
+
+### 5.36 pytest-asyncio + caplog Quirk im Async-Call-Path (Sprint 11 T4)
+
+In async-Tests, die ueber `pytest-asyncio` laufen und einen
+`heizung.*`-Logger via `caplog` beobachten wollen, sind Records nach
+dem await-Punkt nicht in `caplog.records` sichtbar. Workaround:
+Verhaltens-Asserts statt Logger-Asserts. Falls Logger-Asserts
+unverzichtbar: `_enable_subscriber_log_propagation`-Pattern aus
+`tests/test_mqtt_subscriber.py` (monkeypatch auf `propagate=True` +
+`disabled=False`).
+
+### 5.37 caplog-Quirk betrifft ALLE heizung.*-Logger, nicht nur async (Sprint 11 T6)
+
+§5.36 war zu eng formuliert. T6 hat gezeigt: sync-Tests mit `caplog`
+auf `heizung.*`-Logger laufen ebenfalls leer, trotz `set_level
+(logging.WARNING)`. Ursache vermutlich Repo-weite Logger-Konfiguration
+in `heizung.main`-Import-Pfad (conftest.py importiert das). Strategie:
+
+- Bei sync-Logger-Tests: gleiche Workaround-Familie wie §5.36
+- Bevorzugt: Verhaltens-Smoke-Tests + Code-Review + journalctl-Audit
+- T7-Backlog: Konsolidierung als `enable_heizung_log_propagation(...)`
+  in `tests/conftest.py`
+
+### 5.38 Async-Session-ORM-Zugriff nach expire_all (Sprint 11 T5)
+
+`AsyncSession.expire_all()` markiert alle Attribute aller ORM-Objekte
+in der Session als expired. Nach diesem Aufruf darf `obj.attr` (z.B.
+`device.id`) nicht in Argument-Position weiterer async-Aufrufe stehen
+— SQLAlchemy versucht dann einen sync-bridged Refresh, der unter dem
+async-asyncpg-Dialekt mit `MissingGreenlet` knallt. Pattern: IDs vor
+`commit()`/`expire_all` in lokale int-Variablen capturen, in Asserts
+diese Variablen nutzen. Production-Code ist nicht betroffen, weil dort
+kein `expire_all` aufgerufen wird.
+
+### 5.39 DB-Tests gegen globalen Compute-Task brauchen Cleanup-Fixture + own_ids-Filter (Sprint 11 T5)
+
+Tasks, die ueber alle Devices/Rows einer Tabelle iterieren (Health-
+Compute, Engine-Eval, Cleanup-Tasks), produzieren Cross-Test-Leakage
+wenn DB-Leftovers aus frueheren Test-Runs existieren. Two-Layer-
+Defense:
+
+1. Autouse-Fixture loescht test-spezifische Leftovers vor + nach
+   jedem Test (Prefix-Pattern wie `t11t5-%`)
+2. Asserts auf Compute-Returns filtern auf `own_ids = {device_id, ...}`,
+   damit Tests bei Cleanup-Luecken trotzdem deterministisch sind
+
+Pattern in `tests/test_health_compute.py` als Referenz. T7-Backlog:
+Konsolidierung als wiederverwendbarer Helper in `tests/conftest.py`,
+weil Sprint 12 das in MQTT-Subscriber-Tests genauso brauchen wird.
+
+### 5.40 §5.1-Verletzung in T4 Diagnose-Phase (Sprint 11 T4)
+
+§5.1 (STOP, NACHDENKEN, DIAGNOSE bei Fail) gilt auch wenn Bugs
+"harmlos" wirken. T4 hatte einen mypy-Fehler nach Test-Patch, Claude
+Code hat reaktiv `cast(...)` eingefuegt ohne Strategie-Chat-Freigabe.
+Folge: zweite Diagnose-Runde noetig, weil `cast` zwar funktional
+korrekt war, aber der Strategie-Chat haette zuerst alternative
+Type-Narrowing-Varianten gegen `cast` abwaegen wollen. Regel
+bestaetigt: Bei jedem Fail STOP + voller Diagnose-Bericht + Optionen
+mit Empfehlung, dann Strategie-Chat-Freigabe. Kein Eigen-Edit auch
+bei trivialen Fixes.
+
+### 5.41 Brief-Async/Sync-Annahmen ueber bestehende Helper explizit klaeren (Sprint 11 T5-prep)
+
+T5-Brief nahm an, der Redis-Client in `services/engine_lock.py` sei
+async. Code-Realitaet: sync via `redis.Redis()`. Folge: Mini-Refactor
+T5-prep noetig (`get_redis_client()`-Helper aus `engine_lock._client`
+in `services/redis_client.py` extrahiert), bevor T5-Hauptcode starten
+konnte. Vor Brief-Verfassung: Phase-0-Check auf existierende Helper-
+Signaturen (`grep "def get_" services/`, `grep "async def" services/`)
+um sync/async-Annahmen zu verifizieren.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
