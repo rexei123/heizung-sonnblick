@@ -709,11 +709,14 @@ ergänzen, Cross-Referenz-Check, Lint, Abschluss-Bericht.
 
 # SPRINT 11 — Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (Phase 1)
 
-**Priorität:** 🔴 (Phase 1, Voraussetzung Sprint 12)
+**Priorität:** ✅ abgeschlossen 2026-05-18 (Tag pending: `v0.1.16-health-aggregat` nach Merge)
 **Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 2
 **Voraussetzung:** Sprint 11-Prep abgeschlossen; Sprint 10/10a/b/c durch
 **Tag nach Abschluss:** `v0.1.16-health-aggregat`
+**Abgeschlossen:** 2026-05-18, 9 Commits auf Branch `feature/sprint-11-health-aggregat` (9 ahead develop), PR #<TBD nach gh pr create>
+**Test-Counts:** 261+1 (vor Sprint 11) → 360+1 (nach T6), +99 neue Tests
+**Implementiert:** AE-51 §4.1 (Aggregat-Lesen), AE-53 (Health-State + Plausi + 3-Stufen-Alarm), AE-54 (Engine-Isolation, Room-zentrisch — Zone-granular kommt Sprint 12)
 
 ## Ziel
 
@@ -731,6 +734,16 @@ lesen Ist-Temp als Mittelwert über `healthy` Vickis, Fenster-OR.
 - Engine `evaluate_all_zones`: try/except pro Zone, Failure → Zone-Health=degraded
 - Mail-Stub `logger.warning(...)` für Alarm-Stufen 2 + 3
 - Tests: Aggregat-Lesen, Plausi-Verwerfen, Zone-Isolation-Failure-Modes
+
+## Folge-Sprint-Backlog (T7-Vormerke aus Sprint 11)
+
+- Counter-Read-Parallelisierung via `asyncio.gather` wenn ~100 Vickis produktiv (heute <20 nicht spuerbar)
+- Latest-Reading-Lookup als Single-Roundtrip-Query (DISTINCT ON / Window-Function) bei >500 Devices (heute N+1 bewusst akzeptiert)
+- Status-Konstanten-Cleanup: Literal-Type/Enum fuer Compute-Returns ("success"/"skipped_no_room"/"failed_marked_degraded") und silent_transitions-Reasons ("offline_24h"/"implausible_readings_24h")
+- Test-Infrastruktur-Pattern: Cleanup-Fixture als wiederverwendbarer Helper in `tests/conftest.py` (Sprint 12 wird das auch brauchen)
+- SMTP-Versand-Implementation als eigener Sprint nach Heizperiode 2026/27, inkl. Re-Mail-Dedupe (Redis-Key `health_alert_sent:{dev_eui}` mit TTL)
+- Konsolidierung des caplog-Propagations-Workarounds in `tests/conftest.py` als `enable_heizung_log_propagation(...)`
+- AE-54-Wording-Drift in ADR selbst (`docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`) per Klarstellungs-Block korrigieren (kommt in T7-Schritt zur ADR)
 
 ---
 
@@ -866,7 +879,7 @@ Vickis bleiben in Phase 4 zunächst auf heizung-test.
 
 - B-9.11x-2 heizung-main-Sanierung
 - `safe.directory`-Fix (CLAUDE.md §5.7)
-- Migrationen 0005-0014+ anwenden (inkl. Health-State-Spalten aus Sprint 11)
+- Migrationen 0005-0015 anwenden (inkl. 0015_health_state aus Sprint 11)
 - Auth-Bootstrap mit echten Hotel-User-Daten
 - `AUTH_ENABLED=true`-Cutover analog Sprint 9.17a/b
 - Backup-Cron (OP-1) + Off-Site-Replikation

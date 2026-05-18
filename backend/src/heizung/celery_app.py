@@ -39,6 +39,7 @@ app: Celery = Celery(
     backend=_settings.redis_url,
     include=[
         "heizung.tasks.engine_tasks",
+        "heizung.tasks.health_tasks",
         "heizung.tasks.override_cleanup_tasks",
     ],
 )
@@ -77,6 +78,15 @@ app.conf.update(
         "cleanup-expired-overrides-daily": {
             "task": "heizung.cleanup_expired_overrides",
             "schedule": crontab(hour=3, minute=0),
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 11 T5 (AE-53): Health-State-Compute alle 5 min.
+        # Liest sensor_reading.MAX(time) pro Device + Redis-Implausible-
+        # Counter, leitet device.health_state + heating_zone.health_state
+        # ab. Returns silent_transitions-Liste (T6-Mail-Stub-Input).
+        "compute-health-state-every-5min": {
+            "task": "heizung.tasks.health_tasks.compute_health_state",
+            "schedule": 300.0,
             "options": {"queue": "heizung_default"},
         },
     },

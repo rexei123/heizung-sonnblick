@@ -417,6 +417,14 @@ async def layer_window_open(
     # JOIN-Pfad SensorReading -> Device -> HeatingZone -> room_id grenzt
     # auf Devices dieses Raums ein. Devices ohne heating_zone (Provisioning)
     # fallen durch den INNER JOIN raus — das ist gewollt.
+    #
+    # Sprint 11 T3 (AE-51 §4.1): Devices mit
+    # ``health_state != 'healthy'`` fliessen NICHT in die OR-Aggregation.
+    # Compute-Task aus T5 ist Source of Truth fuer health_state;
+    # ``silent``/``degraded``/``suspicious`` werden hier ausgeblendet.
+    # Wenn keine healthy Devices in der Zone Readings haben: leere rows,
+    # bekannter ``no_readings``-Pfad weiter unten (kein Eingriff, kein
+    # Downlink — Hysterese skipt).
     stmt = (
         select(
             SensorReading.device_id,
@@ -427,6 +435,7 @@ async def layer_window_open(
         .join(Device, Device.id == SensorReading.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(Device.health_state == "healthy")
         .order_by(SensorReading.device_id, SensorReading.time.desc())
         .distinct(SensorReading.device_id)
     )

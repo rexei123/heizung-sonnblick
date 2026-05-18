@@ -88,6 +88,7 @@ class DeviceRead(BaseModel):
     is_active: bool
     last_seen_at: datetime | None
     firmware_version: str | None = None
+    health_state: Literal["healthy", "degraded", "silent", "suspicious"]
     created_at: datetime
     updated_at: datetime
 

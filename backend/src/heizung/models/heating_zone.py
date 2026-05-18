@@ -53,6 +53,10 @@ class HeatingZone(Base):
     # bei Belegung an, sonst Frostschutz.
     is_towel_warmer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Sprint 11 (AE-53): aus Device-Health abgeleitet im Compute-Task T5.
+    # DB-Default 'silent' ist Source of Truth — kein Python-Default.
+    health_state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="silent")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

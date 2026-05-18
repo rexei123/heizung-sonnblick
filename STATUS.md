@@ -1,18 +1,15 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-Stand: 2026-05-05. Sprints 0-9.8 abgeschlossen, Sprint 9.8c (Hygiene-Sprint) in Arbeit.
+**Stand:** 2026-05-18. Sprints 0-11 abgeschlossen, Sprint 11 PR pending vor Merge auf develop.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-15
-**Aktueller Branch:** develop
-**Letzter Tag:** `v0.1.14-auth` (Sprint 9.17b, Auth-Track komplett)
-**Aktueller Sprint:** Sprint 11-Prep — Doku-Konsolidierung
-Zuordnungs-Architektur (in Arbeit, siehe §2ak)
-**Nächster Sprint:** Sprint 11 — Health-State + Plausi +
-Zone-Isolation + Aggregat-Lesen (siehe `docs/SPRINT-PLAN.md`)
+**Stichtag:** 2026-05-18
+**Letzter Tag:** `v0.1.15-zuordnungs-architektur-doku` (`v0.1.16-health-aggregat` pending nach Merge)
+**Aktueller Sprint:** Sprint 11 abgeschlossen 2026-05-18, PR pending
+**Naechst-aktiv:** Sprint 12 — Mehrfach-Vicki Schreiben + Fenster belegungs-abhaengig (AE-51 §4.2 + AE-52)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1592,7 +1589,7 @@ Phase 1, CLAUDE.md §5.32, AE-50 (Auth + JWT_SECRET_KEY-Fallback).
 
 ---
 
-## 2ak. Sprint 11-Prep Doku-Konsolidierung Zuordnungs-Architektur (2026-05-15, in Arbeit)
+## 2ak. Sprint 11-Prep Doku-Konsolidierung Zuordnungs-Architektur (2026-05-15..2026-05-16, abgeschlossen)
 
 Doku-only-Sprint zur Konsolidierung der Brainstorming-Ergebnisse
 aus Strategie-Chat 2026-05-15. Master-Quelle:
@@ -1618,7 +1615,7 @@ aus Strategie-Chat 2026-05-15. Master-Quelle:
 | T11 | `docs/AI-ROLES.md` Check. | ✅ no-op gesichtet, keine Anpassung nötig; optionale Mini-Erweiterung der Fehlerbilder-Tabelle in T14-Cleanup. |
 | T12 | Cross-Referenz-Check über alle angepassten Dateien. | ✅ no-op alle Patterns grün (AE-51..54-Range-Verweise konsistent, Master-Quelle in 9 Dateien vernetzt, 5/5 T1-T5-Commit-Hashes match). |
 | T13 | Markdown-Lint via Grep-Spot-Check (Code-Fence-Parität, Broken-Links, Tabellen-Pipe-Konsistenz). | ✅ no-op alle kritischen Patterns grün; §6.2-Spalten-Drift pre-existing, Tooling-Setup als Backlog-Idee für Sprint 14b notiert. |
-| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | 🔄 in Arbeit. |
+| T14 | Sprint-Abschluss-Bericht + Cleanup-Commit + Bitte um Push-/Tag-Freigabe. | ✅ Cleanup-Commit `931c546` (STATUS.md + AI-ROLES.md kosmetisch), PR #157 gemerged 2026-05-16 auf `c0d931e`. |
 
 **Geänderte Dokumente bisher (T1-T5):**
 
@@ -1632,11 +1629,49 @@ aus Strategie-Chat 2026-05-15. Master-Quelle:
 expliziter Push-Freigabe durch Strategie-Chat (entgegen
 Autonomie-Default — Doku-Sprint mit Stop-Disziplin, jeder Task
 hat Pflicht-Stop für Strategie-Chat-Review).
+Vergeben am 2026-05-16 10:20 +0200 auf Merge-Commit `c0d931e`.
 
 **Querverweise:** SPRINT-PLAN.md Sprint 11-Prep,
 STRATEGIE-THERMOSTAT-ZUORDNUNG.md (Master-Quelle),
 ARCHITEKTUR-ENTSCHEIDUNGEN.md AE-51..54,
 STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
+
+## 2al. Sprint 11 Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (2026-05-17..2026-05-18, abgeschlossen)
+
+**Ziel:** AE-51 §4.1 (Aggregat-Lesen ueber healthy Vickis), AE-53 (Health-State-Modell + Plausi-Filter + 3-Stufen-Alarm) und AE-54 (Engine-Zone-Isolation) implementieren. Mehrfach-Vicki-Zonen lesen Ist-Temp als Mittelwert ueber `healthy`-Devices, Fenster-OR; Crashes in einer Zone reissen nicht den Engine-Worker.
+
+**Branch:** `feature/sprint-11-health-aggregat` (9 Commits ahead develop nach T6).
+
+**Task-Reihenfolge:**
+
+| Task | Commit | Inhalt |
+|------|--------|--------|
+| T0a | `9b78b81` | chore: T13/T14 Doku-Loose-Ends |
+| T0b | `dfbeeba` | chore: STATUS.md §1 Header zu Sprint 11 state |
+| T1 | `bf5573a` | feat: `health_state`-Spalten + Migration `0015_health_state` |
+| T2 | `f738179` | feat: Plausi-Filter [-20°C, 60°C] in mqtt_subscriber |
+| T3 | `024bba0` | feat: Zone-Aggregat-Helper + healthy-Filter Layer 4 (AE-51 §4.1) |
+| T4 | `17ba2ca` | feat: Room-Eval Failure-Hardening + zone=degraded on crash (AE-54) |
+| T5-prep | `e16c408` | chore: Redis-Client-Helper aus engine_lock extrahiert |
+| T5 | `3115cde` | feat: Health-State Compute-Task (5min-Beat) + Implausible-Counter (AE-53) |
+| T6 | `7b12ff9` | feat: Health-Alert Logger-Stub fuer silent transitions (AE-53) |
+
+**Test-Counts:** 261+1 (vor Sprint 11) → 360+1 (nach T6), +99 neue Tests verteilt auf 4 neue Test-Dateien (`test_engine_aggregate.py`, `test_engine_isolation.py`, `test_health_compute.py`, `test_health_alerts.py`).
+
+**Sprint-Drifts (alle dokumentiert in Commit-Messages + Strategie-Chat 2026-05-17..2026-05-18):**
+
+1. T1 Migration-Nummer 0011 → 0015 (Phase-0-Befund: 0011-0014 belegt)
+2. T3 Brief-Annahme `_load_room_context` laedt Readings — Code-Realitaet anders, Option-B-Refactor verworfen, Aggregat-Helper als Pure-Function in `rules/aggregation.py` verankert
+3. T4 Brief-Wortlaut `evaluate_all_zones` existiert nicht, Engine ist Room-zentrisch — Room-Iteration mit Zone-Health-Mutation fuer alle Zonen des Raums; HeatingZone-granulare Iteration kommt Sprint 12
+4. T4 Brief-Wortlaut `_evaluate_room_async -> None` — bestehender Code returnt Dict, Brief-Patch Option B (Status-Dict-Return sanktioniert)
+5. T4 §5.1-Verletzung in Diagnose-Phase (Eigen-Reparatur ohne Stop) — als Lesson §5.40 verankert
+6. T5 Brief-Annahme async-Redis-Client — bestehender Code nutzt sync via engine_lock-Helper, Variante b (asyncio.to_thread) gewaehlt + Helper extrahiert (T5-prep)
+7. T5 Zone-State-Regel-Erweiterung Mischung silent+healthy → degraded (Brief-Sanktion 2026-05-18)
+8. T6 caplog-Quirk nicht async-spezifisch — Logger-Asserts gestrichen, Smoke-Tests genuegen; Audit via Code-Review + journalctl
+
+**Folge-Sprint-Backlog (7 T7-Vormerke):** siehe `SPRINT-PLAN.md` Sprint-11-Sektion ## Folge-Sprint-Backlog.
+
+**Querverweise:** AE-51 §4.1 + §4.2, AE-53, AE-54 (alle in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`), Strategie-Chat-Logs 2026-05-17 + 2026-05-18, CLAUDE.md §5.35-§5.41 (7 neue Lessons).
 
 ---
 
@@ -1662,9 +1697,23 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 - Python 3.12, FastAPI >=0.110, SQLAlchemy >=2.0, Pydantic >=2.6, Alembic >=1.13
 - Celery >=5.3 + Redis >=5.0 (Worker + Beat-Scheduler), aiomqtt >=2.3
 - 14 Modelle: device, heating_zone, room, room_type, occupancy, rule_config, global_config, manual_setpoint_event, scenario, scenario_assignment, season, sensor_reading (Hypertable, ab Sprint 9.10 mit `open_window`), event_log (Hypertable), control_command
-- Alembic-Migrationen 0001, 0002, 0003a (Stammdaten), 0003b (event_log-Hypertable), 0004 (room_eval_timestamps), 0008 (manual_override, 9.9), 0009 (sensor_reading.open_window, 9.10), 0010 (device.firmware_version + sensor_reading.attached_backplate, 9.11x)
-- Engine: 6-Layer-Pipeline vollständig — Layer 0 Sommer / 1 Base / 2 Temporal / 3 Manual / 4 Window-Detection / 5 Hard-Clamp + Hysterese. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40) abgesichert. Sprint 9.11x: Layer 4 erweitert um `device_detached`-Trigger (2-Frame-Hysterese auf `attached_backplate=false`). Sprint 9.11x.b: Vicki-Downlink-Helper-Architektur (AE-48) mit `send_raw_downlink` + typisierten Wrappern (Setpoint, Firmware-Query, Open-Window-Aktivierung). Sprint 9.11y: passiver Inferred-Window-Logger (AE-47 §Passiver Trigger) loggt Δ-T-Hinweise off-pipeline ins event_log, kein Setpoint-Effekt.
-- ~30 Test-Dateien, 261 Test-Cases lokal grün + 1 xfailed (Stand 9.11y); B-9.11x-1 psycopg2-Failures lokal-only, CI grün
+- Alembic-Migrationen 0001..0015: 0001_initial_domain_model, 0002_audit_event_log, 0003a/b (Hypertable + Index-Fix), 0004_room_eval_timestamps, 0008_manual_override (9.9), 0009_sensor_reading_open_window (9.10), 0010_device_firmware_version_attached_backplate (9.11x), 0011_config_audit (Sprint 9.13), 0012_summer_mode_scenario (Sprint 9.16), 0013_fix_summer_mode_encoding (Sprint 9.16a), 0014_auth_and_business_audit (Sprint 9.17), 0015_health_state (Sprint 11 T1: device.health_state + heating_zone.health_state als VARCHAR(16) mit CHECK-Constraint)
+- Engine 6-Layer-Pipeline (`rules/engine.py`, AE-31): Layer 0 Sommermodus, Layer 1 Override, Layer 2 Belegung, Layer 3 Heizprofil, Layer 4 Fenster-Sicherheit + Inferred-Window (Sprint 9.10/9.11x/9.11y), Layer 5 Frostschutz. Sprint 9.10: Reading-Trigger feuert Re-Eval, Race-Condition durch Redis-SETNX-Lock (AE-40). Sprint 9.11x: Layer 4 erweitert um `device_detached`-Trigger (2-Frame-Hysterese auf `attached_backplate=false`). Sprint 9.11x.b: Vicki-Downlink-Helper-Architektur (AE-48) mit `send_raw_downlink` + typisierten Wrappern. Sprint 9.11y: passiver Inferred-Window-Logger (AE-47) off-pipeline ins event_log. Sprint 11 Erweiterungen:
+  - **T3 (AE-51 §4.1):** Layer 4 `layer_window_open`-Query filtert auf `device.health_state = 'healthy'` (Mehrfach-Vicki-Zonen aggregieren OR ueber healthy Vickis). Zone-Aggregat-Helper `aggregate_zone_readings` als Pure-Function in `rules/aggregation.py` (Mittelwert + OR, ROUND_HALF_EVEN auf 0.1°C). `_load_room_context` selbst laedt heute KEINE Reading-Daten — Helper-Konsumenten kommen Sprint 12 (Schreib-Pfad) + Sprint 14 (UI-API).
+  - **T4 (AE-54):** Top-Level-try/except in `_evaluate_room_async` (`tasks/engine_tasks.py`) als Sicherheitsgurt; Crash setzt alle HeatingZones des Raums auf `health_state='degraded'`. Per-Room-Isolation strukturell ueber Celery-Task-Boundary. Zone-granulare Iteration kommt Sprint 12.
+  - **T5 (AE-53):** Periodischer Health-State-Compute-Task (5-min-Beat in `tasks/health_tasks.py`), 5-Phasen-Logik (Basis-State aus `last_uplink_age`, Outlier-Check via Zone-Median, Implausible-Counter aus Redis, Apply mit Idempotenz, Zone-State-Ableitung). Redis-Client extrahiert in `services/redis_client.py` (T5-prep). Implausible-Counter im MQTT-Subscriber (`_increment_implausible_counter` via `asyncio.to_thread`, Pipeline INCR+EXPIRE 86400).
+  - **T6 (AE-53):** Health-Alert-Logger-Stub `emit_health_alert` in `services/health_alerts.py`, Aufruf als Phase 6 in `_compute_health_state_async`. Kein SMTP-Versand (Folge-Sprint nach Heizperiode 2026/27).
+- ~38 Test-Dateien, 360 Test-Cases + 1 xfailed (Stand Sprint 11 abgeschlossen, 2026-05-18). Sprint-11-Tests: `test_engine_aggregate.py` (6), `test_engine_isolation.py` (4), `test_health_compute.py` (7), `test_health_alerts.py` (2), plus T1 +3 Migrations-Tests, T2 +4 Plausi-Tests, T5 +0 (Mock-Erweiterung der bestehenden T2-Tests).
+
+**Begriffs-Mapping Code ↔ Strategie:** STATUS.md, Code und `docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` verwenden teils unterschiedliche Begriffe.
+
+| Code (DB-Modell) | Strategie-Sprache | Beispiel |
+|------------------|-------------------|----------|
+| `Room` | Unit / Hotel-Zimmer | Zimmer 101 |
+| `HeatingZone` | Zone / Heizkreis | Schlafzimmer 101, Bad 101 |
+| `Device` | Vicki / Thermostat | konkretes Geraet |
+
+Sprint 11 hat die Code-Granularitaet Room-zentrisch belassen (`_evaluate_room_async` iteriert ueber Raeume, nicht ueber HeatingZones). HeatingZone-granulare Iteration kommt Sprint 12 (AE-51 §4.2). Bis dahin: HeatingZone wird im Code nur als JOIN-Filter genutzt und mit eigenem `health_state` versehen.
 
 ### Frontend (Next.js 14.2 App Router + Tailwind)
 - Next.js 14.2.15, React 18.3.1, TypeScript 5.6.3 strict

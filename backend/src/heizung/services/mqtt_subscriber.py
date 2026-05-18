@@ -25,6 +25,7 @@ from decimal import Decimal
 from typing import Any
 
 import aiomqtt
+import redis
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,6 +35,8 @@ from heizung.db import SessionLocal
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.constants import PLAUSI_TEMP_MAX_C, PLAUSI_TEMP_MIN_C
+from heizung.services import redis_client
 from heizung.services.device_adapter import handle_uplink_for_override
 from heizung.tasks.engine_tasks import evaluate_room
 
@@ -141,6 +144,40 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Implausible-Counter (Sprint 11 T5, AE-53)
+# ---------------------------------------------------------------------------
+
+
+async def _increment_implausible_counter(dev_eui: str) -> None:
+    """Erhoeht den ``implausible:{dev_eui}``-Counter in Redis um 1.
+
+    Pipeline (INCR + EXPIRE 86400) ist atomar — Counter bekommt bei
+    Erstanlage automatisch eine 24h-Lebensdauer (rolling 24h-Fenster).
+    Health-Compute-Task (5-min-Beat) liest den Counter und triggert
+    silent-State bei >= 10 (Stufe-3-Trigger).
+
+    Sync-Redis-Client via ``asyncio.to_thread``, damit der Event-Loop
+    nicht blockiert. Bei Redis-Offline: Logger-Warning, kein Subscriber-
+    Crash, Counter-Verlust akzeptiert (S6, nicht-kritischer Audit).
+    """
+
+    def _sync_incr() -> None:
+        client = redis_client.get_redis_client()
+        pipe = client.pipeline()
+        pipe.incr(f"implausible:{dev_eui}")
+        pipe.expire(f"implausible:{dev_eui}", 86400)
+        pipe.execute()
+
+    try:
+        await asyncio.to_thread(_sync_incr)
+    except redis.RedisError as exc:
+        logger.warning(
+            "implausible_counter_failed",
+            extra={"dev_eui": dev_eui, "error": str(exc)},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Persistenz
 # ---------------------------------------------------------------------------
 
@@ -161,6 +198,28 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
                 dev_eui,
                 uplink.fCnt,
             )
+            return
+
+        # Sprint 11 T2 (AE-53): Plausi-Filter auf Ist-Temperatur. Werte
+        # ausserhalb [-20, 60] °C werden verworfen — kein Insert in
+        # sensor_reading, kein evaluate_room.delay-Trigger. Engine sieht
+        # den Wert nie. Defensive nach S5 (externe Quelle = Vicki +
+        # Codec-Drift). Decimal-Vergleich, kein Float. None bleibt None
+        # (reines Battery-Frame ohne Temperatur faellt nicht hierdurch).
+        obj = uplink.object or {}
+        temperature = _to_decimal(obj.get("temperature"))
+        if temperature is not None and not (PLAUSI_TEMP_MIN_C <= temperature <= PLAUSI_TEMP_MAX_C):
+            logger.warning(
+                "implausible_reading",
+                extra={
+                    "dev_eui": dev_eui,
+                    "temperature": str(temperature),
+                    "raw_payload": uplink.data,
+                    "reason": "out_of_bounds",
+                    "bounds": f"[{PLAUSI_TEMP_MIN_C}, {PLAUSI_TEMP_MAX_C}]",
+                },
+            )
+            await _increment_implausible_counter(dev_eui)
             return
 
         values = _map_to_reading(uplink, device_id)

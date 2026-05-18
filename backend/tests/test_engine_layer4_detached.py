@@ -96,6 +96,10 @@ async def setup_single_device(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone.id,
+        # Sprint 11 T3: Layer 4 (window_safety) aggregiert nur ueber
+        # healthy Devices; setup_single_device speist auch den
+        # superseded_by_window-Test, der Window-Layer aktiv braucht.
+        health_state="healthy",
     )
     db_session.add(device)
     await db_session.flush()
@@ -139,6 +143,10 @@ async def setup_two_devices(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone_a.id,
+        # Sprint 11 T3: Layer 4 (window_safety) aggregiert nur ueber
+        # healthy Devices. Multi-Device-Detached-Tests sind cross-layer
+        # — Window-Layer muss in seinen Fenster-Frames sichtbar bleiben.
+        health_state="healthy",
     )
     device_b = Device(
         dev_eui=f"11223344{suffix}",
@@ -146,6 +154,7 @@ async def setup_two_devices(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone_b.id,
+        health_state="healthy",
     )
     db_session.add_all([device_a, device_b])
     await db_session.flush()

@@ -95,6 +95,8 @@ async def setup_room(db_session: AsyncSession) -> AsyncIterator[dict[str, int]]:
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone.id,
+        # Sprint 11 T3: Layer 4 aggregiert nur ueber healthy Devices.
+        health_state="healthy",
     )
     db_session.add(device)
     await db_session.flush()
@@ -238,6 +240,8 @@ async def test_layer4_only_open_zones_listed(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone2.id,
+        # Sprint 11 T3: Layer 4 aggregiert nur ueber healthy Devices.
+        health_state="healthy",
     )
     db_session.add(device2)
     await db_session.flush()

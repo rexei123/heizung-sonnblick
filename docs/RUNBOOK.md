@@ -791,6 +791,79 @@ curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
 
 Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelöscht werden.
 
+### 10d.8 Health-Status-Compute-Task (Sprint 11 T5, AE-53)
+
+Periodische Health-State-Berechnung laeuft via Celery-Beat alle
+5 Minuten in `tasks/health_tasks.py::compute_health_state`. Pure-
+Function-Helper `_compute_health_state_async` ist separat importier-
+bar fuer Tests und Ad-hoc-Trigger.
+
+**Beat-Schedule-Verifikation:**
+
+```bash
+# Im Container (heizung-test oder heizung-main)
+celery -A heizung.celery_app inspect scheduled
+# Erwarteter Eintrag: compute-health-state-every-5min, schedule=300.0s,
+# queue=heizung_default
+```
+
+**Manueller Trigger (Debug/Diagnose):**
+
+```bash
+# SSH auf heizung-test
+docker exec -it heizung-worker python -c \
+  "from heizung.tasks.health_tasks import compute_health_state; print(compute_health_state.delay())"
+# Async-Result-ID wird ausgegeben; Status via celery inspect oder
+# direkten Aufruf des Pure-Function-Helpers fuer sync-Debug:
+docker exec -it heizung-worker python -c \
+  "import asyncio; from heizung.tasks.health_tasks import _compute_health_state_async; print(asyncio.run(_compute_health_state_async()))"
+```
+
+**Container-Log-Filter:**
+
+```bash
+# Live-Tail aller Health-Alerts (Stufe 2 + 3)
+journalctl -u heizung-worker -f | grep health_alert
+
+# Letzte 100 Health-Alerts retrospektiv
+journalctl -u heizung-worker -n 1000 | grep health_alert | tail -100
+```
+
+**Erwarteter Output bei Stufe-2-Alarm (offline > 24h):**
+
+```
+WARNING ... heizung.services.health_alerts ... health_alert
+  [level=2, device_id=42, dev_eui="58a0cb..", reason="offline_24h"]
+```
+
+**Erwarteter Output bei Stufe-3-Alarm (implausible Readings >= 10):**
+
+```
+WARNING ... heizung.services.health_alerts ... health_alert
+  [level=3, device_id=17, dev_eui="58a0cb..", reason="implausible_readings_24h"]
+```
+
+**Implausible-Counter im Redis pruefen:**
+
+```bash
+docker exec -it heizung-redis redis-cli
+> KEYS implausible:*
+> GET implausible:58a0cb1234567890
+> TTL implausible:58a0cb1234567890   # Sekunden bis 86400-TTL ablaeuft
+```
+
+**Troubleshooting:**
+
+- Compute-Task laeuft nicht: `celery inspect active` pruefen, ob Worker
+  ueberhaupt aktiv ist. Beat-Process kann via `ps aux | grep celery.*beat`
+  gefunden werden (oder `-B`-Flag im Worker bei Embedded-Beat-Deployment).
+- Keine `health_alert`-Logs trotz Compute-Task-Laufs: vermutlich kein
+  Device im `silent_transitions`-Pfad (Devices, die zwar silent sind,
+  aber schon vorher silent waren, loesen KEINEN Alarm aus — Idempotenz).
+- Falsche `health_state`-Werte: `_compute_health_state_async` ist pure-
+  function-tauglich, kann lokal gegen Test-DB laufen (siehe
+  `tests/test_health_compute.py`).
+
 ---
 
 ## 10e. Vicki-Konfiguration via Downlink (Sprint 9.11x.b)

@@ -1435,3 +1435,31 @@ brechen, und es gibt keine Test-Garantien dafür.
   teilweise existiert — Sprint 11 zieht sie über alle
   Zone-Iterationen einheitlich durch und sichert sie mit Tests
   gegen Refactor-Drift ab.
+
+## Klarstellung Sprint 11 Implementation (2026-05-18)
+
+ADR-Text spricht von „Zone-Iteration in `evaluate_all_zones`". Code-
+Realitaet im Sprint-11-Implementation-Stand: Engine ist Room-zentrisch
+ueber `_evaluate_room_async` (Celery-Task pro Raum, gespawnt aus
+`evaluate_due_rooms`). `HeatingZone` wird nur als JOIN-Filter gelesen,
+nicht als Iterations-Granular.
+
+Sprint 11 hat das AE-54-Versprechen folgendermassen umgesetzt:
+
+- Top-Level-try/except in `_evaluate_room_async` als Sicherheitsgurt
+  (verhindert Worker-Laehmung durch Celery-Retries bei kaputter Zone)
+- Per-Room-Isolation via Celery-Task-Boundary (war strukturell schon
+  vorhanden, jetzt verbindlich verankert)
+- Zone-Health-Mutation auf `degraded` fuer ALLE Zonen des Raums bei
+  Crash (`_mark_room_health_degraded`-Helper)
+
+HeatingZone-granulare Iteration kommt mit Sprint 12 (AE-51 §4.2,
+Schreib-Pfad). Dann ist auch ein zonenscharfes try/except moeglich,
+das nur eine `HeatingZone` als `degraded` markiert statt aller Zonen
+des Raums.
+
+Begriffs-Mapping (Code ↔ Strategie):
+
+- `Room` (Code) = Hotel-Zimmer = strategisch „Unit"
+- `HeatingZone` (Code) = Heizkreis-Bereich (z.B. Schlafzimmer,
+  Badezimmer) = strategisch „Zone"
