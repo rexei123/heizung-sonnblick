@@ -154,141 +154,196 @@ async def _evaluate_due_rooms_async() -> dict[str, Any]:
 
 
 async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
-    eval_id = uuid.uuid4()
-    async with _task_session() as session:
-        result = await _engine_evaluate_room(session, room_id)
-        if result is None:
-            logger.warning("evaluate_room: room_id=%s nicht gefunden — skip", room_id)
+    # Sprint 11 T4 (AE-54): Top-Level-Sicherheitsgurt. Ein beliebiger
+    # Crash innerhalb der Eval (Layer-Funktion, DB-Connection-Loss
+    # ausserhalb des Pool-Pre-Pings, unerwartete Exception aus einer
+    # Library) wird hier gefangen, geloggt, und alle HeatingZones des
+    # Raums werden auf health_state='degraded' gesetzt. Kein Re-Raise:
+    # `evaluate_room.max_retries=3` greift nur fuer transiente Fehler,
+    # die in tieferen try/except nicht abgefangen werden — ein finaler
+    # Crash hier wuerde sonst den Worker bei 100 Vickis x 60-s-Beat
+    # mit Retry-Backlog laehmen. Source of Truth fuer den Uebergang
+    # zurueck nach 'healthy' bleibt der Compute-Task aus T5.
+    # ``Exception`` (nicht ``BaseException``): KeyboardInterrupt,
+    # SystemExit, asyncio.CancelledError muessen durchkommen.
+    try:
+        eval_id = uuid.uuid4()
+        async with _task_session() as session:
+            result = await _engine_evaluate_room(session, room_id)
+            if result is None:
+                logger.warning("evaluate_room: room_id=%s nicht gefunden — skip", room_id)
+                return {
+                    "room_id": room_id,
+                    "evaluation_id": str(eval_id),
+                    "status": "skipped_no_room",
+                }
+
+            prev = await _last_command_for_room(session, room_id)
+            prev_setpoint, prev_at = (None, None) if prev is None else prev
+            decision = hysteresis_decision(
+                prev_setpoint_c=prev_setpoint,
+                prev_issued_at=prev_at,
+                new_setpoint_c=result.setpoint_c,
+            )
+
+            # Audit-Log: pro Layer eine Row
+            for layer in result.layers:
+                session.add(
+                    EventLog(
+                        room_id=room_id,
+                        evaluation_id=eval_id,
+                        layer=layer.layer,
+                        setpoint_in=Decimal(prev_setpoint) if prev_setpoint is not None else None,
+                        # Sprint 9.10d T2.5: ``layer.setpoint_c`` kann None sein
+                        # (aktuell nur Layer 0 inaktiv — Layer hat keinen
+                        # Setpoint-Beitrag). EventLog.setpoint_out ist nullable.
+                        setpoint_out=(
+                            Decimal(layer.setpoint_c) if layer.setpoint_c is not None else None
+                        ),
+                        reason=layer.reason,
+                        details={
+                            "detail": layer.detail,
+                            "hysteresis_decision": {
+                                "should_send": decision.should_send,
+                                "reason": decision.reason,
+                            },
+                            **(layer.extras or {}),
+                        },
+                    )
+                )
+
+            sent_devices: list[dict[str, Any]] = []
+            if decision.should_send:
+                devices = await _get_room_devices(session, room_id)
+                if not devices:
+                    logger.info(
+                        "evaluate_room: room_id=%s hat keine aktiven Devices — kein Downlink",
+                        room_id,
+                    )
+                for dev in devices:
+                    cc = ControlCommand(
+                        device_id=dev.id,
+                        target_setpoint=Decimal(result.setpoint_c),
+                        reason=result.base_reason,
+                        rule_context=json.dumps(
+                            {
+                                "evaluation_id": str(eval_id),
+                                "layers": [
+                                    {
+                                        "layer": layer.layer.value,
+                                        "setpoint_c": layer.setpoint_c,
+                                        "reason": layer.reason.value,
+                                    }
+                                    for layer in result.layers
+                                ],
+                            }
+                        ),
+                    )
+                    session.add(cc)
+                    try:
+                        await send_setpoint(dev.dev_eui, result.setpoint_c)
+                        cc.sent_to_gateway_at = datetime.now(tz=UTC)
+                        sent_devices.append(
+                            {"id": dev.id, "dev_eui": dev.dev_eui, "status": "sent"}
+                        )
+                    except (aiomqtt.MqttError, DownlinkError) as e:
+                        logger.exception(
+                            "downlink-fehler dev_eui=%s setpoint=%s err=%s",
+                            dev.dev_eui,
+                            result.setpoint_c,
+                            e,
+                        )
+                        sent_devices.append(
+                            {"id": dev.id, "dev_eui": dev.dev_eui, "status": "failed"}
+                        )
+
+            # Sprint 9.7: Heartbeat. Layer 2 (9.8) ueberschreibt next_transition_at
+            # mit echten Schaltpunkten (Vorheiz-Beginn, Nachtabsenkung-Wechsel).
+            from datetime import timedelta as _td
+
+            from heizung.models.room import Room as _Room
+
+            now = datetime.now(tz=UTC)
+            await session.execute(
+                select(_Room).where(_Room.id == room_id)
+            )  # warm-up der relation map; ergebnis irrelevant
+            room_obj = await session.get(_Room, room_id)
+            if room_obj is not None:
+                room_obj.last_evaluated_at = now
+                room_obj.next_transition_at = now + _td(seconds=60)
+
+            # Sprint 9.11y: Passiver Inferred-Window-Detector (AE-47).
+            # Laeuft NACH der regulaeren Engine-Pipeline + ControlCommand-
+            # Insert: keine Setpoint-Aenderung, nur event_log-Eintrag bei
+            # Treffer. Atomar in derselben Session/Transaction.
+            try:
+                from heizung.rules.inferred_window import detect_inferred_window
+                from heizung.services.event_log import log_inferred_window_event
+
+                inferred = await detect_inferred_window(session, room_id, now)
+                if inferred is not None:
+                    await log_inferred_window_event(session, inferred)
+                    logger.info(
+                        "event_type=INFERRED_WINDOW_OBSERVATION room_id=%s "
+                        "delta_c=%s devices=%s setpoint_c=%s",
+                        inferred.room_id,
+                        inferred.delta_c,
+                        inferred.devices_observed,
+                        inferred.setpoint_c,
+                    )
+            except Exception:
+                # Inferred-Detection ist nicht engine-kritisch — failure
+                # darf den regulaeren Eval-Commit nicht blockieren.
+                logger.exception("inferred_window detector fehlgeschlagen room_id=%s", room_id)
+
+            await session.commit()
+
             return {
                 "room_id": room_id,
                 "evaluation_id": str(eval_id),
-                "status": "skipped_no_room",
+                "setpoint_c": result.setpoint_c,
+                "should_send": decision.should_send,
+                "hysteresis": decision.reason,
+                "devices": sent_devices,
             }
+    except Exception:
+        logger.exception("room_eval_failed", extra={"room_id": room_id})
+        await _mark_room_health_degraded(room_id)
+        return {"room_id": room_id, "status": "failed_marked_degraded"}
 
-        prev = await _last_command_for_room(session, room_id)
-        prev_setpoint, prev_at = (None, None) if prev is None else prev
-        decision = hysteresis_decision(
-            prev_setpoint_c=prev_setpoint,
-            prev_issued_at=prev_at,
-            new_setpoint_c=result.setpoint_c,
+
+async def _mark_room_health_degraded(room_id: int) -> None:
+    """Setzt ``heating_zone.health_state='degraded'`` fuer alle Zonen des Raums.
+
+    Aufruf nur im except-Pfad von ``_evaluate_room_async`` (Sprint 11 T4,
+    AE-54). Erfolgreicher Eval-Pfad aendert ``health_state`` NICHT — Source
+    of Truth fuer den Uebergang zurueck nach ``healthy`` ist der
+    Compute-Task aus T5.
+
+    Idempotent: ist die Zone bereits ``degraded``, wird kein Attribut
+    geschrieben (vermeidet UPDATE-Spam bei Dauer-Crashes und nutzt das
+    SQLAlchemy-Attribut-Tracking aus — Wert-Identitaet ohne Setter-Aufruf
+    triggert kein ``before_update``).
+
+    Bei nicht-existentem ``room_id``: zones-Liste ist leer, for-Schleife
+    noop, ``commit`` ist no-op. Bewusste Eigenschaft (kein FK-/Existence-
+    Check) — der Aufrufer ist der except-Pfad einer bereits gescheiterten
+    Eval und soll nicht selbst nochmal kippen koennen.
+
+    Eigene Session-Boundary via ``_task_session()``: separat von der
+    Eval-Session, die im Exception-Zustand sein kann (rolled-back oder
+    transient-broken).
+    """
+    async with _task_session() as session:
+        zones = (
+            (await session.execute(select(HeatingZone).where(HeatingZone.room_id == room_id)))
+            .scalars()
+            .all()
         )
-
-        # Audit-Log: pro Layer eine Row
-        for layer in result.layers:
-            session.add(
-                EventLog(
-                    room_id=room_id,
-                    evaluation_id=eval_id,
-                    layer=layer.layer,
-                    setpoint_in=Decimal(prev_setpoint) if prev_setpoint is not None else None,
-                    # Sprint 9.10d T2.5: ``layer.setpoint_c`` kann None sein
-                    # (aktuell nur Layer 0 inaktiv — Layer hat keinen
-                    # Setpoint-Beitrag). EventLog.setpoint_out ist nullable.
-                    setpoint_out=(
-                        Decimal(layer.setpoint_c) if layer.setpoint_c is not None else None
-                    ),
-                    reason=layer.reason,
-                    details={
-                        "detail": layer.detail,
-                        "hysteresis_decision": {
-                            "should_send": decision.should_send,
-                            "reason": decision.reason,
-                        },
-                        **(layer.extras or {}),
-                    },
-                )
-            )
-
-        sent_devices: list[dict[str, Any]] = []
-        if decision.should_send:
-            devices = await _get_room_devices(session, room_id)
-            if not devices:
-                logger.info(
-                    "evaluate_room: room_id=%s hat keine aktiven Devices — kein Downlink",
-                    room_id,
-                )
-            for dev in devices:
-                cc = ControlCommand(
-                    device_id=dev.id,
-                    target_setpoint=Decimal(result.setpoint_c),
-                    reason=result.base_reason,
-                    rule_context=json.dumps(
-                        {
-                            "evaluation_id": str(eval_id),
-                            "layers": [
-                                {
-                                    "layer": layer.layer.value,
-                                    "setpoint_c": layer.setpoint_c,
-                                    "reason": layer.reason.value,
-                                }
-                                for layer in result.layers
-                            ],
-                        }
-                    ),
-                )
-                session.add(cc)
-                try:
-                    await send_setpoint(dev.dev_eui, result.setpoint_c)
-                    cc.sent_to_gateway_at = datetime.now(tz=UTC)
-                    sent_devices.append({"id": dev.id, "dev_eui": dev.dev_eui, "status": "sent"})
-                except (aiomqtt.MqttError, DownlinkError) as e:
-                    logger.exception(
-                        "downlink-fehler dev_eui=%s setpoint=%s err=%s",
-                        dev.dev_eui,
-                        result.setpoint_c,
-                        e,
-                    )
-                    sent_devices.append({"id": dev.id, "dev_eui": dev.dev_eui, "status": "failed"})
-
-        # Sprint 9.7: Heartbeat. Layer 2 (9.8) ueberschreibt next_transition_at
-        # mit echten Schaltpunkten (Vorheiz-Beginn, Nachtabsenkung-Wechsel).
-        from datetime import timedelta as _td
-
-        from heizung.models.room import Room as _Room
-
-        now = datetime.now(tz=UTC)
-        await session.execute(
-            select(_Room).where(_Room.id == room_id)
-        )  # warm-up der relation map; ergebnis irrelevant
-        room_obj = await session.get(_Room, room_id)
-        if room_obj is not None:
-            room_obj.last_evaluated_at = now
-            room_obj.next_transition_at = now + _td(seconds=60)
-
-        # Sprint 9.11y: Passiver Inferred-Window-Detector (AE-47).
-        # Laeuft NACH der regulaeren Engine-Pipeline + ControlCommand-
-        # Insert: keine Setpoint-Aenderung, nur event_log-Eintrag bei
-        # Treffer. Atomar in derselben Session/Transaction.
-        try:
-            from heizung.rules.inferred_window import detect_inferred_window
-            from heizung.services.event_log import log_inferred_window_event
-
-            inferred = await detect_inferred_window(session, room_id, now)
-            if inferred is not None:
-                await log_inferred_window_event(session, inferred)
-                logger.info(
-                    "event_type=INFERRED_WINDOW_OBSERVATION room_id=%s "
-                    "delta_c=%s devices=%s setpoint_c=%s",
-                    inferred.room_id,
-                    inferred.delta_c,
-                    inferred.devices_observed,
-                    inferred.setpoint_c,
-                )
-        except Exception:
-            # Inferred-Detection ist nicht engine-kritisch — failure
-            # darf den regulaeren Eval-Commit nicht blockieren.
-            logger.exception("inferred_window detector fehlgeschlagen room_id=%s", room_id)
-
+        for zone in zones:
+            if zone.health_state != "degraded":
+                zone.health_state = "degraded"
         await session.commit()
-
-        return {
-            "room_id": room_id,
-            "evaluation_id": str(eval_id),
-            "setpoint_c": result.setpoint_c,
-            "should_send": decision.should_send,
-            "hysteresis": decision.reason,
-            "devices": sent_devices,
-        }
 
 
 async def _get_room_devices(session: Any, room_id: int) -> list[Device]:
