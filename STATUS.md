@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-18. Sprints 0-11 abgeschlossen, Sprint 11 PR pending vor Merge auf develop.
+**Stand:** 2026-05-19. Sprints 0-12 abgeschlossen, Tag `v0.1.17-multivicki-fenster` auf develop (PR #160 squash-merged, Commit `c9f58d1`). Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) vorbereitet.
 
 ---
 
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-19
-**Letzter Tag:** `v0.1.16-health-aggregat` (Sprint 11, Merge-Commit `6a8f2ae`, 2026-05-18). `v0.1.17-multivicki-fenster` (Sprint 12) wird nach PR-Merge gesetzt.
-**Aktueller Sprint:** Sprint 12 abgeschlossen 2026-05-19 (T2-T5 lokal auf `feat/sprint-12-multivicki-fenster`, T6 Doku-Update lokal, PR pending). Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) als Folge-Sprint vorbereitet, Start nach Sprint-12-Merge.
+**Letzter Tag:** `v0.1.17-multivicki-fenster` (Sprint 12, Squash-Commit `c9f58d1`, gemerged 2026-05-19).
+**Aktueller Sprint:** Sprint 12 abgeschlossen 2026-05-19, PR #160 squash-merged, Tag gesetzt. Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) als Folge-Sprint in SPRINT-PLAN.md vorbereitet, Start nach Strategie-Chat-Freigabe.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1678,13 +1678,13 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 
 **Ziel:** AE-51 P3 (Multi-Vicki-Dispatch symmetrisch) + AE-52 (Layer 4 occupancy-aware + Override-Reject 409). Schreib-Pfad iteriert pro Zone, healthy-Filter, parallele Submission, per-Vicki-Hysterese. Layer 4 differenziert VACANT (Frostschutz 10 degC) vs OCCUPIED (`default_t_vacant` Setback). Override-Service rejected mit HTTP 409 + JSONB-Body bei offenem Fenster, kein DB-Insert.
 
-**Tag-Vorschlag:** `v0.1.17-multivicki-fenster` (gesetzt nach PR-Merge).
+**Tag:** `v0.1.17-multivicki-fenster` (annotated, gesetzt 2026-05-19 auf Squash-Commit `c9f58d1`; Tag-Objekt `ac45305`).
 
-**PR:** tbd (wird nach `gh pr create` ergaenzt).
+**PR:** [#160](https://github.com/rexei123/heizung-sonnblick/pull/160) squash-merged 2026-05-19T13:38:48Z (Squash-Commit `c9f58d1`).
 
-**Branch:** `feat/sprint-12-multivicki-fenster` (4 Commits ueber develop@`93b1305`).
+**Branch:** `feat/sprint-12-multivicki-fenster` (6 Commits T2-T7 ueber develop@`93b1305`, nach Merge geloescht).
 
-**Commit-Range:** `168e2b2..5da9f1b` (T2..T5) plus T6-Doku-Commit (folgt). Stat-Summary:
+**Commit-Range im Feature-Branch:** `168e2b2..18275ba` (T2..T7), squash-merged als Single-Commit `c9f58d1` auf develop. Stat-Summary pro Original-Commit:
 
 | Commit | Subject | Stat |
 |--------|---------|------|
@@ -1692,8 +1692,10 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 | `2ee8a96` (T3) | feat(engine): layer 4 room_status output-determinant (AE-52) | 2 files, +211/-13 |
 | `cd96952` (T4) | feat(override): reject creation when window open (AE-52, 409) | 7 files, +491/-39 |
 | `5da9f1b` (T5) | test(sprint12): e2e verbund-szenarien fuer multivicki + fenster + override-reject | 1 file, +746 |
+| `83f19b9` (T6) | docs(sprint-12): status, lessons, adrs, sprint-plan + sprint-12a block | 5 files, +478/-24 |
+| `18275ba` (T7) | fix(sprint-12-t7): test-fixture varchar-constraint + eventlog details-key + lokal-db-runbook + claude-lessons §5.49 §5.50 | 4 files, +182/-19 |
 
-**Total:** ~13 files changed, **+2270 insertions / -126 deletions**. Neues Modul `rules/window_state.py`. **+25 neue Tests** (T2: +7 Schreib-Pfad, T3: +3 Layer-4-room_status + Test-6-Enhancement, T4: +8 Helper/Service/API, T5: +7 E2E-Verbund).
+**Total Squash-Merge `c9f58d1` (15 files):** **+2910 insertions / -149 deletions** (gemaess PR-Merge-Output). Neues Modul `rules/window_state.py`. **+25 neue Tests** (T2: +7 Schreib-Pfad, T3: +3 Layer-4-room_status + Test-6-Enhancement, T4: +8 Helper/Service/API, T5: +7 E2E-Verbund). T7-Hotfix: 0 neue Tests, behoben 9 bestehende Fixture-Bugs.
 
 **Kern-Liefergegenstaende:**
 
@@ -1997,7 +1999,7 @@ Secrets liegen in:
 | `v0.1.14-auth` | Sprint 9.17 + 9.17a + 9.17b (Auth + 2-Rollen-Modell + Audit + Logout-Cookie-Fix, PR #151) | 2026-05-15 |
 | `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep (Doku-Konsolidierung Zuordnungs-Architektur, STRATEGIE-THERMOSTAT-ZUORDNUNG + AE-51..AE-54, PR #157) | 2026-05-16 |
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
-| `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52, PR tbd) | wird nach PR-Merge gesetzt |
+| `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
