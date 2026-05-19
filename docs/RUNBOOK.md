@@ -1290,6 +1290,101 @@ Zuordnung in Sprint 17.
 
 ---
 
+## 10i. Lokale Test-DB starten (Sprint 12 T7-Hotfix)
+
+Pflicht vor Push bei neuen DB-Tests (siehe CLAUDE.md §5.50). Patternfolgt
+exakt der CI-Konfiguration aus `.github/workflows/backend-ci.yml`
+(timescaledb-Image, Port-Mapping, User/Passwort/DB-Name) — damit lokal
+und CI dieselben Schema-Constraints + Migration-Pfade sehen.
+
+> Hinweis Numerierung: Brief der T7-Hotfix-Sektion bezog sich auf
+> „§10e", aber §10e ist seit Sprint 9.11x.b durch
+> Vicki-Konfiguration-via-Downlink belegt — und §10f/§10g/§10h
+> ebenfalls. Erste freie Sektion ist §10i.
+
+### 10i.1 Container starten (einmalig pro Session)
+
+```bash
+docker run -d --name heizung-test-db --rm \
+  -e POSTGRES_USER=heizung \
+  -e POSTGRES_PASSWORD=heizung_test \
+  -e POSTGRES_DB=heizung_test \
+  -p 5433:5432 \
+  timescale/timescaledb:latest-pg16
+```
+
+Port-Mapping `5433:5432` lokal — vermeidet Konflikt mit
+`docker-compose.yml`-Dev-DB auf `5432`. Volumen ist nicht gemountet,
+DB ist nicht-persistent: nach `docker stop` weg, naechste Session
+hat frische DB.
+
+### 10i.2 Container bereit verifizieren
+
+```bash
+docker exec heizung-test-db pg_isready -U heizung -d heizung_test
+```
+
+Erwartung: `/var/run/postgresql:5432 - accepting connections`.
+
+### 10i.3 Tests gegen Container laufen (Backend-Dir)
+
+Linux/Mac/Git-Bash:
+
+```bash
+cd backend
+export TEST_DATABASE_URL=postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test
+export DATABASE_URL=$TEST_DATABASE_URL
+export ENVIRONMENT=test
+export ALLOW_DEFAULT_SECRETS=1
+.venv/Scripts/pytest -q
+```
+
+PowerShell (Windows):
+
+```powershell
+cd backend
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test"
+$env:DATABASE_URL = $env:TEST_DATABASE_URL
+$env:ENVIRONMENT = "test"
+$env:ALLOW_DEFAULT_SECRETS = "1"
+.venv\Scripts\pytest -q
+```
+
+Beim ersten Aufruf migriert `conftest._ensure_test_admin` automatisch
+auf `head` (alembic upgrade) und legt einen Test-Admin-User an.
+Idempotent — folgende Test-Runs ueberspringen das.
+
+Erwartete Test-Counts mit gestartetem Container (Stand Sprint 12 T7):
+- ohne Container:  ~189 passed, ~197 skipped (DB-Tests skip)
+- mit Container:   ~370-390 passed, ~10-20 skipped (nur reine
+  PMS-Stubs / Test-API-Skip-Faelle bleiben skipped)
+
+### 10i.4 Container stoppen (nach Session)
+
+```bash
+docker stop heizung-test-db
+```
+
+Container hat `--rm`-Flag, wird beim Stop automatisch entfernt.
+Daten sind nicht-persistent — Re-Start liefert frische DB.
+
+### 10i.5 Troubleshooting
+
+- **Port 5433 belegt**: anderer Container/Service nutzt 5433. Entweder
+  diesen Container auf anderen Port mappen
+  (`-p 5434:5432` und `TEST_DATABASE_URL` entsprechend), oder den
+  bestehenden Belegungs-Prozess identifizieren
+  (`netstat -an | grep 5433` / `ss -tlnp | grep 5433`).
+- **`asyncpg.exceptions.InvalidCatalogNameError: database "heizung_test"
+  does not exist`**: Container wurde mit anderen ENV-Vars gestartet —
+  `docker stop heizung-test-db && docker run …` erneut mit korrekten
+  Env-Vars.
+- **Test-Failures nach Code-Push, lokal grun**: nicht alle Tests
+  gegen Container gefahren — vor Push die Test-Counts mit/ohne
+  Container vergleichen (siehe §10i.3).
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

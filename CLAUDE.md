@@ -1089,6 +1089,62 @@ conftest-Fixture.
 - Konsolidierung der beiden env-Var-Konventionen in einem dedizierten
   Hygiene-Sprint (siehe SPRINT-PLAN.md Backlog).
 
+### 5.49 VARCHAR-Constraint-Pflicht-Check fuer Test-Fixtures (Sprint 12 T7-Hotfix)
+
+Test-Fixtures muessen Schema-Constraints (VARCHAR-Laengen, NOT NULL,
+CHECK, FK) respektieren. Bei jeder neuen Test-Helper-Funktion, die
+DB-Records erzeugt: Schema-Definitionen aus `models/` pruefen, bevor
+String-Felder mit Test-Prefixen + Suffixen befuellt werden.
+
+Anlass: Sprint 12 T7-Hotfix. Sechs Tests in
+`test_engine_multivicki_write.py` hatten `Room.number`-Suffixe mit
+30 chars, Schema ist `VARCHAR(20)`. Lokal skipped (kein Postgres
+auf Win-Host), CI rot mit
+``asyncpg.exceptions.StringDataRightTruncationError: value too long
+for type character varying(20)``.
+
+Konsequenz fuer neue Test-Helper-Funktionen (`_make_room`,
+`_make_device`, `_make_zone`, etc.): Schema-Constraint im
+Helper-Docstring als ``# schema_constraint: <Tabelle>.<Spalte> max
+N chars`` kommentieren oder analog fuer NOT NULL / CHECK. Plus
+Pattern-Beispiel im Docstring (Beispiel-Wert + Char-Count), damit
+spaetere Aenderungen das Limit nicht verletzen. Querverweis zu
+§5.18 (Sprint 9.10 Vorbote dieser Lesson).
+
+### 5.50 Lokal-DB-Verify-Pflicht fuer neue DB-Test-Dateien (Sprint 12 T7-Hotfix)
+
+Bei jedem neuen Test-File mit ``@pytest.mark.db``,
+``pytestmark = pytest.mark.db``, oder DB-Skip-Fixture
+(`pytest.skip("TEST_DATABASE_URL nicht gesetzt")`-Pattern): VOR Push
+muss das Test-File mit gestartetem Postgres-Container und gesetzter
+``TEST_DATABASE_URL`` ausgefuehrt werden. Skipped-Tests in lokaler
+Test-Run-Ausgabe sind KEIN Verify-Ersatz — sie verbergen
+Schema-Constraint-Verletzungen (§5.49), Migration-Konflikte und
+async-Fixture-Bugs.
+
+Setup-Anleitung: ``docs/RUNBOOK.md`` §10i.
+
+Anlass: Sprint 12 T7-Hotfix. 9 CI-Failures in T2 + T5 durch
+nicht-lokal-verifizierte DB-Tests. Das Pattern „lokal gruen + CI rot"
+ist im Backlog seit Sprint 9.10 (§5.18, §5.19) — Sprint 12 hat es
+wiederholt, weil kein Lokal-DB-Setup-Pattern im RUNBOOK dokumentiert
+war. Mit §10i jetzt strukturell behoben.
+
+Pre-Push-Backend-Skript (vor Push bei neuen DB-Tests):
+```
+docker run -d --name heizung-test-db --rm \
+  -e POSTGRES_USER=heizung -e POSTGRES_PASSWORD=heizung_test \
+  -e POSTGRES_DB=heizung_test -p 5433:5432 \
+  timescale/timescaledb:latest-pg16
+docker exec heizung-test-db pg_isready -U heizung -d heizung_test
+# (PowerShell: $env:TEST_DATABASE_URL=...)
+TEST_DATABASE_URL=postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test \
+DATABASE_URL=$TEST_DATABASE_URL \
+ENVIRONMENT=test ALLOW_DEFAULT_SECRETS=1 \
+.venv/Scripts/pytest -q
+docker stop heizung-test-db  # nach Session
+```
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

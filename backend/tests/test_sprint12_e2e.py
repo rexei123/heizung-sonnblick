@@ -416,8 +416,8 @@ async def test_e2e_b_window_open_vacant_frost(
     assert window_row.details["setpoint_source"] == "frost_protection"
     assert window_row.details["occupancy_state"] == "vacant"
     assert window_row.details["override_overridden_by_window_open"] is False
-    assert window_row.detail is not None
-    assert window_row.detail.startswith("window_open_room_free_frost_protection ")
+    assert window_row.details["detail"] is not None
+    assert window_row.details["detail"].startswith("window_open_room_free_frost_protection ")
 
 
 # ---------------------------------------------------------------------------
@@ -460,8 +460,8 @@ async def test_e2e_c_window_open_occupied_setback(
     assert window_row.details is not None
     assert window_row.details["setpoint_source"] == "default_t_vacant"
     assert window_row.details["occupancy_state"] == "occupied"
-    assert window_row.detail is not None
-    assert window_row.detail.startswith("window_open_room_occupied_setback ")
+    assert window_row.details["detail"] is not None
+    assert window_row.details["detail"].startswith("window_open_room_occupied_setback ")
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +576,8 @@ async def test_e2e_e_override_masked_by_window_between_ticks(
     assert window_row.details is not None
     assert window_row.details["override_overridden_by_window_open"] is True
     assert window_row.details["setpoint_source"] == "default_t_vacant"
-    assert window_row.detail is not None
-    assert window_row.detail.startswith(
+    assert window_row.details["detail"] is not None
+    assert window_row.details["detail"].startswith(
         "override_overridden_by_window_open window_open_room_occupied_setback "
     )
 

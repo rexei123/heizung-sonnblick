@@ -44,7 +44,10 @@ from tests.conftest import purge_test_data_by_prefix
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt — DB-Tests brauchen Postgres"
-PREFIX = "t12t2"
+# schema_constraint: Room.number = VARCHAR(20). Pattern f"{PREFIX}-{marker}-{4-hex}"
+# = 3 + 1 + 2-4 + 1 + 4 = max 13 chars. PREFIX 3 chars statt 5 (war "t12t2"),
+# 4-hex statt 8-hex — Sprint 12 T7 Fix nach VARCHAR(20)-CI-Failure (D18/§5.49).
+PREFIX = "t12"
 DEV_EUI_PATTERN = "deadbeef%"
 
 
@@ -113,16 +116,25 @@ def mock_send_setpoint(
 async def _make_room(
     session: AsyncSession,
     *,
-    suffix: str,
+    marker: str,
 ) -> tuple[Room, RoomType]:
-    """Setzt einen frischen Room + RoomType auf, prefix t12t2-."""
-    short = uuid.uuid4().hex[:8]
-    rt = RoomType(name=f"{PREFIX}-rt-{suffix}-{short}")
+    """Setzt einen frischen Room + RoomType auf.
+
+    Sprint 12 T7 (D18 / §5.49): ``Room.number`` ist ``VARCHAR(20)``.
+    Pattern ``f"{PREFIX}-{marker}-{4-hex}"`` mit ``PREFIX="t12"``
+    (3 chars) und ``marker`` 2-4 chars + 4-hex-Suffix = max 13 chars
+    total. ``marker`` muss pro Test eindeutig sein, damit
+    Test-Daten-Cleanup ueber den Prefix funktioniert.
+
+    ``RoomType.name`` ist ``VARCHAR(100)`` — kein Längen-Risiko.
+    """
+    short = uuid.uuid4().hex[:4]
+    rt = RoomType(name=f"{PREFIX}-rt-{marker}-{short}")
     session.add(rt)
     await session.flush()
 
     room = Room(
-        number=f"{PREFIX}-{suffix}-{short}",
+        number=f"{PREFIX}-{marker}-{short}",
         room_type_id=rt.id,
     )
     session.add(room)
@@ -205,7 +217,7 @@ async def test_zone_3_vicki_all_healthy_3_downlinks(
 ) -> None:
     """1-Zone-3-Vicki, alle healthy, kein Vorgaenger-CC → 3 Downlinks parallel."""
     recorded, _ = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-allhealthy")
+    room, _ = await _make_room(db_session, marker="ah")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -261,7 +273,7 @@ async def test_zone_3_vicki_2_healthy_1_silent_2_downlinks(
     angesteuert (kein ControlCommand-Row, kein per_device_results-Eintrag).
     """
     recorded, _ = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-mix")
+    room, _ = await _make_room(db_session, marker="hs")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -306,7 +318,7 @@ async def test_zone_3_vicki_1_in_hysteresis_band_2_downlinks(
     Row).
     """
     recorded, _ = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-hyst1")
+    room, _ = await _make_room(db_session, marker="h1")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -355,7 +367,7 @@ async def test_zone_3_vicki_all_in_hysteresis_band_0_downlinks(
     per_zone_status.
     """
     recorded, _ = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-allhyst")
+    room, _ = await _make_room(db_session, marker="ha")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -396,7 +408,7 @@ async def test_zone_3_vicki_1_exception_2_sent_1_failed(
     zeigt 2x ``sent`` + 1x ``failed`` mit error-Feld.
     """
     recorded, exceptions = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-exc")
+    room, _ = await _make_room(db_session, marker="e1")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -456,7 +468,7 @@ async def test_2_zone_room_1_vicki_each_2_downlinks_same_setpoint(
     beide success.
     """
     recorded, _ = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="2z2d")
+    room, _ = await _make_room(db_session, marker="2z")
     zone_bed, devs_bed = await _make_zone_with_devices(
         db_session,
         room=room,
@@ -506,7 +518,7 @@ async def test_zone_3_vicki_all_fail_all_failed_marker(
     ControlCommand-Rows ohne sent_to_gateway_at.
     """
     recorded, exceptions = mock_send_setpoint
-    room, _ = await _make_room(db_session, suffix="1z3d-allfail")
+    room, _ = await _make_room(db_session, marker="af")
     zone, devices = await _make_zone_with_devices(
         db_session,
         room=room,
