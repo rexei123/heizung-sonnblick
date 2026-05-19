@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.enums import OverrideSource
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
+from heizung.rules.window_state import detect_open_window_zones
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,35 @@ MAX_SETPOINT = Decimal("30.0")
 HARD_MAX_DURATION_DAYS = 7
 HISTORY_LIMIT_CAP = 200
 DEFAULT_TIMEZONE = "Europe/Vienna"
+
+
+class OverrideRejectedWindowOpenError(Exception):
+    """Sprint 12 T4 (AE-52): Override-Anlage wird abgewiesen, wenn
+    mindestens eine HeatingZone des Raums ein offenes Fenster meldet.
+
+    AE-52-Wortlaut: „Override-Eingabe wird ignoriert — nicht gespeichert,
+    nicht angewendet, nicht nach Fenster-Schliessen reaktiviert."
+    Implementiert als hartes Reject im Service: kein DB-Insert, kein
+    Audit-Eintrag. API-Layer mappt auf HTTP 409.
+
+    Bewusst in diesem Modul (nicht in einem generischen
+    ``exceptions.py``), damit die Fehler-Klasse zur Domain ``override``
+    gehoert und der API-Layer sie aus dem gleichen Import-Pfad
+    bekommt wie die Funktion, die sie wirft.
+
+    :param zones: Liste der offenen Zonen aus
+        ``rules.window_state.detect_open_window_zones`` — wird vom
+        API-Layer als Teil des 409-Response-Bodys gerendert
+        (zone_id ist pflicht, reading_at optional).
+    """
+
+    def __init__(self, zones: list[dict[str, Any]]) -> None:
+        self.zones = zones
+        zone_ids = [z.get("zone_id") for z in zones]
+        super().__init__(
+            f"Override-Anlage abgewiesen: Fenster offen in Zone(n) {zone_ids}. "
+            "Bitte Fenster schliessen und erneut versuchen."
+        )
 
 
 def _now() -> datetime:
@@ -102,7 +133,13 @@ async def create(
     reason: str | None = None,
     created_by: str | None = None,
 ) -> ManualOverride:
-    """Legt einen neuen Override an. ``ValueError`` bei out-of-range Setpoint."""
+    """Legt einen neuen Override an.
+
+    :raises ValueError: setpoint out-of-range [MIN_SETPOINT, MAX_SETPOINT].
+    :raises OverrideRejectedWindowOpenError: Sprint 12 T4 (AE-52) — eine
+        oder mehrere HeatingZones des Raums melden gerade ``open_window=
+        True`` mit frischem Reading. Override wird NICHT persistiert.
+    """
     quantized = _quantize(setpoint)
     if quantized < MIN_SETPOINT or quantized > MAX_SETPOINT:
         raise ValueError(
@@ -110,6 +147,17 @@ async def create(
         )
 
     now = _now()
+
+    # Sprint 12 T4 (AE-52): Pre-Insert Window-Check. Wenn mindestens eine
+    # Zone des Raums Fenster offen meldet, wird der Override abgewiesen
+    # OHNE DB-Insert. Brief-Wortlaut: „nicht gespeichert, nicht angewendet,
+    # nicht nach Fenster-Schliessen reaktiviert". Engine-Maskierung (T3)
+    # gilt nur fuer bestehende Overrides; T4 ist die symmetrische Reject-
+    # Logik fuer neu angelegte Overrides.
+    open_zones = await detect_open_window_zones(session, room_id, now)
+    if open_zones:
+        raise OverrideRejectedWindowOpenError(open_zones)
+
     capped_expires_at, was_capped = _hard_cap(expires_at, now)
     if was_capped:
         # TODO Sprint 9.9 Backlog: dedizierter event_log-Eintrag fuer Cap-Events.

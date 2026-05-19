@@ -35,6 +35,7 @@ from heizung.schemas.manual_override import (
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import next_active_checkout
+from heizung.services.override_service import OverrideRejectedWindowOpenError
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
@@ -143,6 +144,21 @@ async def create_room_override(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
+        ) from e
+    except OverrideRejectedWindowOpenError as e:
+        # Sprint 12 T4 (AE-52): Fenster offen -> Override-Anlage abgewiesen.
+        # zones-Liste: nur zone_id + reading_at exponieren (keine
+        # device-internal Felder, kein Health-State). Frontend zeigt einen
+        # "Fenster offen — Override nicht moeglich"-Hinweis (kommt in
+        # Sprint 13).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "override_rejected_window_open",
+                "zones": [
+                    {"zone_id": z["zone_id"], "reading_at": z.get("reading_at")} for z in e.zones
+                ],
+            },
         ) from e
 
     await record_business_action(

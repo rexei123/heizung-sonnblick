@@ -959,6 +959,192 @@ konnte. Vor Brief-Verfassung: Phase-0-Check auf existierende Helper-
 Signaturen (`grep "def get_" services/`, `grep "async def" services/`)
 um sync/async-Annahmen zu verifizieren.
 
+### 5.42 Sprint-Brief-Push-Pfad gegen Branch-Protection pruefen (Sprint 12 T0)
+
+Sprint 12 T0 hatte „Commit direkt auf develop" im Brief und verstiess
+damit gegen CLAUDE.md §3.9 (Branch-Protection auf `develop` ist aktiv).
+Korrektur: T0 wurde via `git reset --soft HEAD~1` auf einen Feature-
+Branch (`chore/sprint-12-t0-doku-und-fixtures`) umgebogen + PR #159
+geoeffnet.
+
+**Regel:** Strategie-Chat muss bei T0-Mini-Commits und allen anderen
+Doku-/Code-Aenderungen den CLAUDE.md §3.9-Branch-Protection-Pfad
+explizit pruefen. Default ist Feature-Branch + PR — direkter Commit
+auf `develop` ist NICHT erlaubt, auch bei Mini-Doku-Commits.
+
+### 5.43 Phase-0-Annahmen via grep belegen, nicht aus Modell-Feldern folgern (Sprint 12 T1)
+
+Sprint 12 Brief enthielt US2 „Hotelier: Bad mit Handtuchtrockner-Logik
+(Sprint 9) wird unabhaengig vom Schlafzimmer geregelt." Annahme
+basierte auf dem `is_towel_warmer`-Feld in `HeatingZone`. Phase-0-grep
+zeigte: das Feld ist reiner DB-Marker, in `models/`, `schemas/`,
+`seed.py` referenziert — **keine** `engine.py`-Logik. Brief wurde
+revidiert, US2 entfernt.
+
+**Regel:** Brief-Annahmen ueber bestehende Engine-Verhalten muessen
+durch `grep -rn <feature> backend/src/heizung/{services,rules,tasks}/`
+belegt werden. Aus DB-Modell-Feldern allein kann man nicht auf
+Engine-Logik schliessen — viele Felder sind Schema-Vorbereitungen
+ohne Konsumenten.
+
+### 5.44 EventLog-PK-Constraint zwingt Audit-Detail in JSONB (Sprint 12 T2)
+
+T2-Brief verlangte „Sub-Trace pro Vicki" als Engine-Trace-Erweiterung.
+`EventLog`-PK ist `(time, room_id, evaluation_id, layer)` — keine
+eigenen Rows pro Device ohne PK-Migration moeglich (mehrere Rows mit
+gleichem `(time, room_id, evaluation_id, layer)`-Tuple wuerden
+kollidieren).
+
+Loesung: JSONB-Aggregat-Pattern. `details["downlink_per_device"]` +
+`details["downlink_zone_status"]` im `HARD_CLAMP`-Layer-Row (semantisch
+„was wurde gesendet"). S3-Auditierbarkeit erhalten, PK-Migration auf
+Hypertable verschoben bis konkreter Analytics-Bedarf (AE-55).
+
+**Regel:** Per-Entity-Sub-Audits in Engine-Tick-Output kommen via
+JSONB-Aggregat im bestehenden Layer-Row, **nicht** via neuer Tabellen-
+Spalte oder PK-Migration, solange kein Analytics-Use-Case (z.B.
+SQL-Query auf per-Vicki-Setpoint-Verlauf ueber Wochen) das verlangt.
+
+### 5.45 CommandReason-Enum-Length-30 zwingt Detail-Differenzierung (Sprint 12 T3)
+
+T3-Brief verlangte `reason="window_open_room_free_frost_protection"`
+(38 chars) und `reason="window_open_room_occupied_setback"` (33 chars).
+`CommandReason` ist als `SQLEnum(..., length=30, native_enum=False)` mit
+default `create_constraint=True` (also mit DB-CHECK-Constraint auf den
+existierenden Werten) definiert. Neue 30+-chars-Werte wuerden eine
+Migration der `control_command.reason`- UND
+`event_log_reason`-CHECKs erfordern.
+
+Loesung: `reason` bleibt `CommandReason.WINDOW_OPEN`, Differenzierung
+ueber `detail`-String-Prefix (`window_open_room_free_frost_protection`
+oder `window_open_room_occupied_setback`) und `extras["setpoint_source"]`
+(`frost_protection` / `default_t_vacant` /
+`frost_protection_room_lookup_failed`). Konsistent mit Layer-3-Muster
+(generischer MANUAL-Reason + `detail` mit `override_id source=...`).
+
+**Regel:** Vor Reason-Enum-Erweiterungen Length-30-Constraint pruefen.
+Falls neuer Wert > 30 chars: entweder
+(a) shorten,
+(b) Migration auf VARCHAR(50)+CHECK,
+(c) Differenzierung in `extras` / `detail` packen.
+Default ist (c), weil Migrationen DB-Schema-Aenderungen sind und nur
+bei harten Analytics-Anforderungen rechtfertigbar.
+
+### 5.46 Engine-internes Modul-Layout vermeidet zirkulaere Imports (Sprint 12 T4)
+
+T4 Helper-Extraktion: `detect_open_window_zones` musste aus
+`rules/engine.py` raus, weil `engine.py` bereits
+`services/override_service` importiert (Layer 3 nutzt
+`override_service.get_active`). Direkter Import `from
+heizung.rules.engine import detect_open_window_zones` in
+`override_service.py` waere zirkulaer (engine.py importiert
+override_service, override_service importiert engine.py).
+
+Loesung: Neutrales Modul `rules/window_state.py` mit dem Helper.
+Sowohl `engine.py` als auch `services/override_service.py` importieren
+von dort. Modul abhaengt nur von models + constants, nicht von Engine
+oder Services.
+
+**Regel:** Helper, die von `services/` UND `rules/engine` geteilt
+werden, gehoeren in ein eigenes `rules/`-Modul (z.B.
+`rules/<thema>_state.py`), nicht in `engine.py`. Lazy/Late-Imports
+sind moeglich, aber haesslicher als sauberes Modul-Layout.
+
+### 5.47 Helper-Extraktion muss verhaltensneutral sein, Tests beweisen es (Sprint 12 T4)
+
+T4-Brief verlangte explizit: „alle bestehenden Layer-4-Tests gruen
+OHNE Anpassung. Falls auch nur ein Test rot: Pflicht-Stop, Refactor-
+Bug." Das hat als Sanity-Check funktioniert — nach
+Helper-Extraktion liefen alle 7 bestehenden Layer-4-Tests
+(test_engine_layer4.py) ohne Anpassung weiter.
+
+**Regel:** Bei Helper-Extraktion aus bestehender Funktion ist die
+Test-Suite-Greenness vor und nach Extraktion das Akzeptanz-Kriterium.
+Test-Anpassung im selben Commit = Refactor war nicht
+verhaltensneutral; dann separates Refactor + Verhaltens-Change-Commit
+mit explizitem Brief-Hinweis.
+
+### 5.48 TEST_DATABASE_URL vs DATABASE_URL-Split (Sprint 12 T5)
+
+Bestands-Konvention zeigt Inkonsistenz:
+
+- `test_engine_isolation.py`, `test_engine_aggregate.py`,
+  `test_health_compute.py`, `test_engine_multivicki_write.py`,
+  `test_engine_layer4.py` nutzen `TEST_DATABASE_URL`.
+- `test_api_overrides.py` nutzt `DATABASE_URL`.
+- `conftest.py:_ensure_test_admin` nutzt `DATABASE_URL`.
+
+Sprint-12-E2E-Tests (`test_sprint12_e2e.py`) mischen beide Welten
+(Engine-Tick + HTTP). Loesung: `TEST_DATABASE_URL` als primaere
+Skip-Bedingung, `pin_database_url`-Fixture pinnt `DATABASE_URL` =
+`TEST_DATABASE_URL` zur Laufzeit + clears `get_settings`-Cache. Eigene
+module-scoped `_migrate_and_seed_admin`-Fixture parallel zu
+conftest-Fixture.
+
+**Konvention (ab Sprint 12):**
+- `TEST_DATABASE_URL` hat Vorrang fuer Engine-Tick- und Pure-DB-Tests.
+- `DATABASE_URL` fuer reine HTTP-API-Tests (Settings/App-Init).
+- E2E-Verbund-Tests pinnen `DATABASE_URL = TEST_DATABASE_URL` via
+  Fixture.
+- Konsolidierung der beiden env-Var-Konventionen in einem dedizierten
+  Hygiene-Sprint (siehe SPRINT-PLAN.md Backlog).
+
+### 5.49 VARCHAR-Constraint-Pflicht-Check fuer Test-Fixtures (Sprint 12 T7-Hotfix)
+
+Test-Fixtures muessen Schema-Constraints (VARCHAR-Laengen, NOT NULL,
+CHECK, FK) respektieren. Bei jeder neuen Test-Helper-Funktion, die
+DB-Records erzeugt: Schema-Definitionen aus `models/` pruefen, bevor
+String-Felder mit Test-Prefixen + Suffixen befuellt werden.
+
+Anlass: Sprint 12 T7-Hotfix. Sechs Tests in
+`test_engine_multivicki_write.py` hatten `Room.number`-Suffixe mit
+30 chars, Schema ist `VARCHAR(20)`. Lokal skipped (kein Postgres
+auf Win-Host), CI rot mit
+``asyncpg.exceptions.StringDataRightTruncationError: value too long
+for type character varying(20)``.
+
+Konsequenz fuer neue Test-Helper-Funktionen (`_make_room`,
+`_make_device`, `_make_zone`, etc.): Schema-Constraint im
+Helper-Docstring als ``# schema_constraint: <Tabelle>.<Spalte> max
+N chars`` kommentieren oder analog fuer NOT NULL / CHECK. Plus
+Pattern-Beispiel im Docstring (Beispiel-Wert + Char-Count), damit
+spaetere Aenderungen das Limit nicht verletzen. Querverweis zu
+§5.18 (Sprint 9.10 Vorbote dieser Lesson).
+
+### 5.50 Lokal-DB-Verify-Pflicht fuer neue DB-Test-Dateien (Sprint 12 T7-Hotfix)
+
+Bei jedem neuen Test-File mit ``@pytest.mark.db``,
+``pytestmark = pytest.mark.db``, oder DB-Skip-Fixture
+(`pytest.skip("TEST_DATABASE_URL nicht gesetzt")`-Pattern): VOR Push
+muss das Test-File mit gestartetem Postgres-Container und gesetzter
+``TEST_DATABASE_URL`` ausgefuehrt werden. Skipped-Tests in lokaler
+Test-Run-Ausgabe sind KEIN Verify-Ersatz — sie verbergen
+Schema-Constraint-Verletzungen (§5.49), Migration-Konflikte und
+async-Fixture-Bugs.
+
+Setup-Anleitung: ``docs/RUNBOOK.md`` §10i.
+
+Anlass: Sprint 12 T7-Hotfix. 9 CI-Failures in T2 + T5 durch
+nicht-lokal-verifizierte DB-Tests. Das Pattern „lokal gruen + CI rot"
+ist im Backlog seit Sprint 9.10 (§5.18, §5.19) — Sprint 12 hat es
+wiederholt, weil kein Lokal-DB-Setup-Pattern im RUNBOOK dokumentiert
+war. Mit §10i jetzt strukturell behoben.
+
+Pre-Push-Backend-Skript (vor Push bei neuen DB-Tests):
+```
+docker run -d --name heizung-test-db --rm \
+  -e POSTGRES_USER=heizung -e POSTGRES_PASSWORD=heizung_test \
+  -e POSTGRES_DB=heizung_test -p 5433:5432 \
+  timescale/timescaledb:latest-pg16
+docker exec heizung-test-db pg_isready -U heizung -d heizung_test
+# (PowerShell: $env:TEST_DATABASE_URL=...)
+TEST_DATABASE_URL=postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test \
+DATABASE_URL=$TEST_DATABASE_URL \
+ENVIRONMENT=test ALLOW_DEFAULT_SECRETS=1 \
+.venv/Scripts/pytest -q
+docker stop heizung-test-db  # nach Session
+```
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

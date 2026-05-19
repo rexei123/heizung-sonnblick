@@ -7,8 +7,8 @@
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-19
-**Letzter Tag:** `v0.1.16-health-aggregat` (Sprint 11, Merge-Commit `6a8f2ae`, 2026-05-18)
-**Aktueller Sprint:** Sprint 12 in Arbeit, ausgehend von Tag `v0.1.16-health-aggregat` (`6a8f2ae`) — Zone-Granular Engine + Multi-Vicki-Schreiben + Fenster belegungs-abhaengig (STRATEGIE-THERMOSTAT-ZUORDNUNG §4.2 + AE-52)
+**Letzter Tag:** `v0.1.16-health-aggregat` (Sprint 11, Merge-Commit `6a8f2ae`, 2026-05-18). `v0.1.17-multivicki-fenster` (Sprint 12) wird nach PR-Merge gesetzt.
+**Aktueller Sprint:** Sprint 12 abgeschlossen 2026-05-19 (T2-T5 lokal auf `feat/sprint-12-multivicki-fenster`, T6 Doku-Update lokal, PR pending). Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) als Folge-Sprint vorbereitet, Start nach Sprint-12-Merge.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1674,6 +1674,57 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 
 ---
 
+## 2am. Sprint 12 Multi-Vicki-Schreibpfad + Fenster belegungs-abhaengig + Override-Reject (2026-05-19, abgeschlossen)
+
+**Ziel:** AE-51 P3 (Multi-Vicki-Dispatch symmetrisch) + AE-52 (Layer 4 occupancy-aware + Override-Reject 409). Schreib-Pfad iteriert pro Zone, healthy-Filter, parallele Submission, per-Vicki-Hysterese. Layer 4 differenziert VACANT (Frostschutz 10 degC) vs OCCUPIED (`default_t_vacant` Setback). Override-Service rejected mit HTTP 409 + JSONB-Body bei offenem Fenster, kein DB-Insert.
+
+**Tag-Vorschlag:** `v0.1.17-multivicki-fenster` (gesetzt nach PR-Merge).
+
+**PR:** tbd (wird nach `gh pr create` ergaenzt).
+
+**Branch:** `feat/sprint-12-multivicki-fenster` (4 Commits ueber develop@`93b1305`).
+
+**Commit-Range:** `168e2b2..5da9f1b` (T2..T5) plus T6-Doku-Commit (folgt). Stat-Summary:
+
+| Commit | Subject | Stat |
+|--------|---------|------|
+| `168e2b2` (T2) | feat(sprint-12-t2): multi-vicki schreib-pfad symmetrisch (STRATEGIE §4.2, AE-51 P3) | 3 files, +822/-74 |
+| `2ee8a96` (T3) | feat(engine): layer 4 room_status output-determinant (AE-52) | 2 files, +211/-13 |
+| `cd96952` (T4) | feat(override): reject creation when window open (AE-52, 409) | 7 files, +491/-39 |
+| `5da9f1b` (T5) | test(sprint12): e2e verbund-szenarien fuer multivicki + fenster + override-reject | 1 file, +746 |
+
+**Total:** ~13 files changed, **+2270 insertions / -126 deletions**. Neues Modul `rules/window_state.py`. **+25 neue Tests** (T2: +7 Schreib-Pfad, T3: +3 Layer-4-room_status + Test-6-Enhancement, T4: +8 Helper/Service/API, T5: +7 E2E-Verbund).
+
+**Kern-Liefergegenstaende:**
+
+- `_dispatch_downlinks_per_zone(...)` in `tasks/engine_tasks.py` — per-Zone-Iteration, `asyncio.gather` mit `return_exceptions=True`, individuelles try/except pro Vicki, kein Rollback bei Teil-Erfolg.
+- `_last_command_for_device` in `rules/engine.py` (Per-Vicki-Hysterese). `_last_command_for_room` als deprecated markiert, bleibt fuer `EventLog.setpoint_in`-Audit.
+- `detect_open_window_zones(session, room_id, now)` als geteilter Helper in neuem `rules/window_state.py`-Modul.
+- `layer_window_open` jetzt belegungs-abhaengig + Override-Maskierungs-Marker (`extras["override_overridden_by_window_open"] = True` + `detail`-Prefix).
+- `OverrideRejectedWindowOpenError` in `services/override_service.py`, API-409-Mapping in `api/v1/overrides.py`.
+- `tests/test_sprint12_e2e.py` mit Szenarien A-G (Engine-Tick A-E, HTTP F-G).
+
+**Drift-Befunde (in CLAUDE.md §5.42-§5.48 verankert):**
+
+- **D7** (§5.44) — EventLog-PK zwingt JSONB-Sub-Trace statt eigener Rows pro Vicki (`details["downlink_per_device"]` + `["downlink_zone_status"]` im HARD_CLAMP-Layer-Row).
+- **D8** (§5.45) — `CommandReason`-Enum-Length-30-DB-CHECK zwingt Detail-Differenzierung (Reason bleibt `WINDOW_OPEN`, Variante via `detail`-Prefix + `extras["setpoint_source"]`).
+- **D11** — Pass-Through-Pfad in Layer 4 macht jetzt 2 Queries (Helper + Diagnostic). Akzeptabel, Optimierungs-Backlog in SPRINT-PLAN §Backlog.
+- **D12** (§5.46) — Helper in eigenem `rules/window_state.py`-Modul, vermeidet zirk. Import zwischen `engine.py` und `services/override_service.py`.
+- **D14** — Override-Reject filtert auf healthy-Devices (Symmetrie zu Layer 4). UX-Konsequenz: bei All-Unhealthy-Cluster geht Override durch trotz physisch offenem Fenster. In E2E-Test G verankert. Frontend-Hinweis kommt in Sprint 12a.
+- **D15** — `purge_test_data_by_prefix` (T0-Helper) räumt Devices nicht auf — Orphan via FK `SET NULL`. Lokaler `_purge_orphan_devices`-Helper in `test_sprint12_e2e.py` ergänzt. Backlog: T0-Helper erweitern.
+- **D16** — `TEST_DATABASE_URL` vs `DATABASE_URL`-Konvention im Bestand inkonsistent. Sprint-12-E2E pinnt `TEST_DATABASE_URL`. Konsolidierung als Hygiene-Backlog (§5.48).
+
+**Nicht-Ziele eingehalten:**
+
+- Engine-Decision-Iteration bleibt room-zentrisch (AE-54-Klarstellung aktualisiert) — zone-granular kommt erst mit pro-Zone-differenzierender Decision-Logik.
+- Override-DB-Migration auf `zone_id` verschoben → Sprint 12a.
+- Frontend Override-Panel pro Zone + Fenster-Vorpruefung verschoben → Sprint 12a.
+- Handtuchtrockner-Spezial-Logik weiterhin nicht implementiert (US2 in Brief revidiert entfernt, D1-Befund aus T1).
+
+**Querverweise:** AE-52 (Wortlaut-Praezisierung Sprint 12), AE-54-Klarstellung (Schreib-Pfad zonen-iteriert), AE-55 (JSONB-Sub-Trace-Pattern, D7), AE-56 (Window-State-Modul, D12), CLAUDE.md §5.42-§5.48 (7 neue Lessons aus Sprint 12).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1946,6 +1997,7 @@ Secrets liegen in:
 | `v0.1.14-auth` | Sprint 9.17 + 9.17a + 9.17b (Auth + 2-Rollen-Modell + Audit + Logout-Cookie-Fix, PR #151) | 2026-05-15 |
 | `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep (Doku-Konsolidierung Zuordnungs-Architektur, STRATEGIE-THERMOSTAT-ZUORDNUNG + AE-51..AE-54, PR #157) | 2026-05-16 |
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
+| `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52, PR tbd) | wird nach PR-Merge gesetzt |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 

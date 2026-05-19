@@ -29,9 +29,11 @@ from heizung.models.enums import (
     DeviceVendor,
     EventLogLayer,
     HeatingZoneKind,
+    OverrideSource,
     RoomStatus,
 )
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
@@ -267,16 +269,25 @@ async def test_layer4_only_open_zones_listed(
 async def test_layer4_occupancy_state_reflects_room_status(
     db_session: AsyncSession, setup_room: dict[str, int]
 ) -> None:
+    """Sprint 12 T3 (AE-52) erweitert: ``occupancy_state`` in extras
+    spiegelt nicht nur ``room.status``, sondern entscheidet auch den
+    Setpoint bei Fenster offen. Test prueft Setpoint UND
+    setpoint_source pro Pfad (§5.20-Drift-Vermeidung: kein semantisch
+    verwaister Test, der nur einen Marker prueft waehrend das
+    Verhalten daran haengt).
+    """
     await _add_reading(db_session, device_id=setup_room["device_id"], open_window=True, age_min=2)
 
-    # 6a: vacant
+    # 6a: vacant + open -> Frostschutz (MIN_SETPOINT_C=10)
     result = await evaluate_room(db_session, setup_room["room_id"])
     assert result is not None
     layer4 = _layer4(result.layers)
     assert layer4.extras is not None
     assert layer4.extras["occupancy_state"] == "vacant"
+    assert layer4.setpoint_c == MIN_SETPOINT_C
+    assert layer4.extras["setpoint_source"] == "frost_protection"
 
-    # 6b: occupied
+    # 6b: occupied + open -> default_t_vacant Setback (18 degC default)
     room = await db_session.get(Room, setup_room["room_id"])
     assert room is not None
     room.status = RoomStatus.OCCUPIED
@@ -287,6 +298,8 @@ async def test_layer4_occupancy_state_reflects_room_status(
     layer4_b = _layer4(result2.layers)
     assert layer4_b.extras is not None
     assert layer4_b.extras["occupancy_state"] == "occupied"
+    assert layer4_b.setpoint_c == 18
+    assert layer4_b.extras["setpoint_source"] == "default_t_vacant"
 
 
 # ---------------------------------------------------------------------------
@@ -303,3 +316,187 @@ async def test_layer4_null_open_window_is_treated_as_closed(
     layer4 = _layer4(result.layers)
     assert layer4.setpoint_c == 18
     assert layer4.detail == "no_open_window"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T3 (AE-52) — room_status entscheidet Setpoint bei Fenster offen
+# ---------------------------------------------------------------------------
+
+
+async def test_layer4_closed_occupied_passthrough(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """T3 (b): Fenster zu + OCCUPIED -> Pass-Through, kein Eingriff.
+
+    Layer 4 reicht prev_setpoint (= OCCUPIED-Base 21 degC default) und
+    prev_reason unveraendert durch. setpoint_source ist NICHT gesetzt
+    (kein open_zones-Pfad), occupancy_state == "occupied".
+    """
+    room = await db_session.get(Room, setup_room["room_id"])
+    assert room is not None
+    room.status = RoomStatus.OCCUPIED
+    await db_session.flush()
+
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=False, age_min=2)
+    result = await evaluate_room(db_session, setup_room["room_id"])
+    assert result is not None
+    layer4 = _layer4(result.layers)
+    # OCCUPIED-Base = default_t_occupied = 21 degC. Layer 4 = Pass-Through.
+    assert layer4.setpoint_c == 21
+    assert layer4.reason == CommandReason.OCCUPIED_SETPOINT
+    assert layer4.detail == "no_open_window"
+    assert layer4.extras is not None
+    assert layer4.extras["open_zones"] == []
+    assert layer4.extras["occupancy_state"] == "occupied"
+    # Setback-Pfad nicht durchlaufen -> kein setpoint_source-Eintrag.
+    assert "setpoint_source" not in layer4.extras
+
+
+async def test_layer4_open_occupied_setback_to_default_t_vacant(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """T3 (d): Fenster offen + OCCUPIED -> Setpoint=default_t_vacant
+    (AE-52 Setback, NICHT 10 degC Frostschutz). reason bleibt WINDOW_OPEN,
+    detail-Prefix differenziert.
+    """
+    room = await db_session.get(Room, setup_room["room_id"])
+    assert room is not None
+    room.status = RoomStatus.OCCUPIED
+    await db_session.flush()
+
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=True, age_min=2)
+    result = await evaluate_room(db_session, setup_room["room_id"])
+    assert result is not None
+    layer4 = _layer4(result.layers)
+    # default_t_vacant = 18 degC im RoomType-Default (D2-Fix:
+    # NICHT free_target_c, das Feld existiert nicht).
+    assert layer4.setpoint_c == 18
+    assert layer4.reason == CommandReason.WINDOW_OPEN
+    assert layer4.detail is not None
+    assert layer4.detail.startswith("window_open_room_occupied_setback ")
+    assert "open_zones=" in layer4.detail
+    assert layer4.extras is not None
+    assert layer4.extras["setpoint_source"] == "default_t_vacant"
+    assert layer4.extras["occupancy_state"] == "occupied"
+    assert layer4.extras["override_overridden_by_window_open"] is False
+    # Layer 5 Clamp laesst 18 unveraendert (innerhalb [MIN, MAX]).
+    assert result.setpoint_c == 18
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T4 — detect_open_window_zones Helper (Pure-Output-Tests)
+# ---------------------------------------------------------------------------
+
+
+async def test_detect_open_window_zones_returns_empty_when_no_readings(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: keine Readings im Raum -> leere Liste."""
+    from heizung.rules.window_state import detect_open_window_zones
+
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert open_zones == []
+
+
+async def test_detect_open_window_zones_returns_open_zone_with_keys(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: 1 Zone mit Fenster offen + frischem Reading -> 1 Eintrag
+    mit den Keys ``zone_id`` und ``reading_at`` (ISO-String).
+    """
+    from heizung.rules.window_state import detect_open_window_zones
+
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=True, age_min=2)
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert len(open_zones) == 1
+    assert open_zones[0]["zone_id"] == setup_room["zone_id"]
+    assert isinstance(open_zones[0]["reading_at"], str)
+    # ISO-Parse-fest:
+    parsed = datetime.fromisoformat(open_zones[0]["reading_at"])
+    assert parsed.tzinfo is not None  # timezone-aware ISO
+
+
+async def test_detect_open_window_zones_filters_stale_and_closed(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: stale Reading + closed Reading -> beide ignoriert,
+    leere Liste."""
+    from heizung.rules.window_state import detect_open_window_zones
+
+    # Stale + open (sollte raus durch threshold)
+    await _add_reading(
+        db_session,
+        device_id=setup_room["device_id"],
+        open_window=True,
+        age_min=WINDOW_STALE_THRESHOLD_MIN + 5,
+    )
+    # Fresh + closed (sollte raus durch open_window=False)
+    # (replace via newer reading on same device — DISTINCT-ON gibt das juengste)
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=False, age_min=1)
+
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert open_zones == []
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T3 — Layer 4 Override-Masking-Test (war bereits oben)
+# ---------------------------------------------------------------------------
+
+
+async def test_layer4_open_occupied_masks_active_manual_override(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """T3 (e): Fenster offen + OCCUPIED + aktiver Manual-Override
+    -> Layer 4 ueberschreibt den Override mit default_t_vacant.
+
+    Verifiziert die Override-Maskierungs-Logik aus AE-52 (Gast lernt
+    "Drehen am Vicki bringt nichts"). Marker im Layer-4-detail und
+    extras["override_overridden_by_window_open"] = True. Der Override
+    selbst bleibt in der Datenbank — Layer 3 Trace zeigt ihn als aktiv,
+    Layer 4 dokumentiert die Maskierung.
+    """
+    room = await db_session.get(Room, setup_room["room_id"])
+    assert room is not None
+    room.status = RoomStatus.OCCUPIED
+    await db_session.flush()
+
+    # Aktiver Manual-Override (setpoint 24 — Gast hat hochgedreht)
+    now = datetime.now(tz=UTC)
+    override = ManualOverride(
+        room_id=setup_room["room_id"],
+        setpoint=Decimal("24.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=now + timedelta(hours=4),
+    )
+    db_session.add(override)
+    await db_session.flush()
+
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=True, age_min=2)
+
+    result = await evaluate_room(db_session, setup_room["room_id"])
+    assert result is not None
+
+    # Layer 3 muss den Override gesehen haben — prev_reason fuer Layer 4
+    # ist CommandReason.MANUAL.
+    layer3 = next(layer for layer in result.layers if layer.layer == EventLogLayer.MANUAL_OVERRIDE)
+    assert layer3.setpoint_c == 24
+    assert layer3.reason == CommandReason.MANUAL
+
+    # Layer 4 ueberschreibt: setpoint = default_t_vacant, NICHT 24 (Override)
+    # und NICHT 10 (Frost — das waere VACANT-Pfad).
+    layer4 = _layer4(result.layers)
+    assert layer4.setpoint_c == 18
+    assert layer4.reason == CommandReason.WINDOW_OPEN
+    assert layer4.detail is not None
+    assert layer4.detail.startswith(
+        "override_overridden_by_window_open window_open_room_occupied_setback "
+    )
+    assert layer4.extras is not None
+    assert layer4.extras["override_overridden_by_window_open"] is True
+    assert layer4.extras["setpoint_source"] == "default_t_vacant"
+
+    # Finale Engine-Entscheidung -> 18 degC, Override-Setpoint 24 hat keinen Effekt.
+    assert result.setpoint_c == 18

@@ -762,7 +762,20 @@ Erlaubte `source`-Werte:
 - `frontend_midnight` — gültig bis 00:00
 - `frontend_checkout` — gültig bis Check-out der aktiven Belegung
 
-`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 400 abgelehnt).
+`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 422 abgelehnt).
+
+**Sprint 12 (AE-52):** Bei mindestens einer HeatingZone des Raums mit aktivem `open_window=True`-Reading (frisch, healthy Device) wird der POST mit HTTP 409 abgelehnt. Body:
+
+```json
+{
+  "detail": {
+    "error": "override_rejected_window_open",
+    "zones": [{"zone_id": 42, "reading_at": "2026-05-19T09:18:12.123456+00:00"}]
+  }
+}
+```
+
+Kein DB-Insert in `manual_override`, kein `business_audit`-Eintrag, kein Engine-Trigger. Fenster schliessen, dann erneut versuchen. Symmetrie-Caveat: Helper filtert auf `Device.health_state='healthy'` — bei All-Unhealthy-Cluster geht der Override durch, obwohl physisch ein Fenster offen sein koennte (Sprint-12a-Frontend-Hinweis dazu kommt).
 
 #### Manual-Override revoken
 
@@ -1274,6 +1287,101 @@ ohne physische Montage. Spezifikation folgt aus Sprint 17 +
 Hotelier-Schulung (Pilot-Zimmer-Auswahl B-11prep-4). Bis
 dahin: vorläufig in „Pre-Pairing-Pool" parken, finale Zimmer-
 Zuordnung in Sprint 17.
+
+---
+
+## 10i. Lokale Test-DB starten (Sprint 12 T7-Hotfix)
+
+Pflicht vor Push bei neuen DB-Tests (siehe CLAUDE.md §5.50). Patternfolgt
+exakt der CI-Konfiguration aus `.github/workflows/backend-ci.yml`
+(timescaledb-Image, Port-Mapping, User/Passwort/DB-Name) — damit lokal
+und CI dieselben Schema-Constraints + Migration-Pfade sehen.
+
+> Hinweis Numerierung: Brief der T7-Hotfix-Sektion bezog sich auf
+> „§10e", aber §10e ist seit Sprint 9.11x.b durch
+> Vicki-Konfiguration-via-Downlink belegt — und §10f/§10g/§10h
+> ebenfalls. Erste freie Sektion ist §10i.
+
+### 10i.1 Container starten (einmalig pro Session)
+
+```bash
+docker run -d --name heizung-test-db --rm \
+  -e POSTGRES_USER=heizung \
+  -e POSTGRES_PASSWORD=heizung_test \
+  -e POSTGRES_DB=heizung_test \
+  -p 5433:5432 \
+  timescale/timescaledb:latest-pg16
+```
+
+Port-Mapping `5433:5432` lokal — vermeidet Konflikt mit
+`docker-compose.yml`-Dev-DB auf `5432`. Volumen ist nicht gemountet,
+DB ist nicht-persistent: nach `docker stop` weg, naechste Session
+hat frische DB.
+
+### 10i.2 Container bereit verifizieren
+
+```bash
+docker exec heizung-test-db pg_isready -U heizung -d heizung_test
+```
+
+Erwartung: `/var/run/postgresql:5432 - accepting connections`.
+
+### 10i.3 Tests gegen Container laufen (Backend-Dir)
+
+Linux/Mac/Git-Bash:
+
+```bash
+cd backend
+export TEST_DATABASE_URL=postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test
+export DATABASE_URL=$TEST_DATABASE_URL
+export ENVIRONMENT=test
+export ALLOW_DEFAULT_SECRETS=1
+.venv/Scripts/pytest -q
+```
+
+PowerShell (Windows):
+
+```powershell
+cd backend
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://heizung:heizung_test@localhost:5433/heizung_test"
+$env:DATABASE_URL = $env:TEST_DATABASE_URL
+$env:ENVIRONMENT = "test"
+$env:ALLOW_DEFAULT_SECRETS = "1"
+.venv\Scripts\pytest -q
+```
+
+Beim ersten Aufruf migriert `conftest._ensure_test_admin` automatisch
+auf `head` (alembic upgrade) und legt einen Test-Admin-User an.
+Idempotent — folgende Test-Runs ueberspringen das.
+
+Erwartete Test-Counts mit gestartetem Container (Stand Sprint 12 T7):
+- ohne Container:  ~189 passed, ~197 skipped (DB-Tests skip)
+- mit Container:   ~370-390 passed, ~10-20 skipped (nur reine
+  PMS-Stubs / Test-API-Skip-Faelle bleiben skipped)
+
+### 10i.4 Container stoppen (nach Session)
+
+```bash
+docker stop heizung-test-db
+```
+
+Container hat `--rm`-Flag, wird beim Stop automatisch entfernt.
+Daten sind nicht-persistent — Re-Start liefert frische DB.
+
+### 10i.5 Troubleshooting
+
+- **Port 5433 belegt**: anderer Container/Service nutzt 5433. Entweder
+  diesen Container auf anderen Port mappen
+  (`-p 5434:5432` und `TEST_DATABASE_URL` entsprechend), oder den
+  bestehenden Belegungs-Prozess identifizieren
+  (`netstat -an | grep 5433` / `ss -tlnp | grep 5433`).
+- **`asyncpg.exceptions.InvalidCatalogNameError: database "heizung_test"
+  does not exist`**: Container wurde mit anderen ENV-Vars gestartet —
+  `docker stop heizung-test-db && docker run …` erneut mit korrekten
+  Env-Vars.
+- **Test-Failures nach Code-Push, lokal grun**: nicht alle Tests
+  gegen Container gefahren — vor Push die Test-Counts mit/ohne
+  Container vergleichen (siehe §10i.3).
 
 ---
 

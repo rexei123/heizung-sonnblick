@@ -37,6 +37,7 @@ from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_MIN
 from heizung.rules.scenarios import is_summer_mode_active
+from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
 
 if TYPE_CHECKING:
@@ -382,25 +383,41 @@ async def layer_window_open(
     room_status: RoomStatus,
     now: datetime,
 ) -> LayerStep:
-    """Layer 4: Fenster-Sicherheit (Sprint 9.10 T2).
+    """Layer 4: Fenster-Sicherheit (Sprint 9.10 T2, AE-52 Sprint 12 T3).
 
     Liefert IMMER einen ``LayerStep`` (auch im no-op-Fall), damit das
     Engine-Decision-Panel pro Eval einen Trace-Eintrag fuer Layer 4 zeigt.
 
     Aktiv: mindestens ein Geraet im Raum hat ein **frisches** Reading
     (Alter <= ``WINDOW_STALE_THRESHOLD_MIN``) mit ``open_window=True``.
-    Setpoint -> ``MIN_SETPOINT_C`` (= System-Frostschutz aus
-    ``rules/constants.py``), Reason -> ``WINDOW_OPEN``.
+    ``room_status`` entscheidet den Setpoint bei Fenster offen (AE-52):
 
-    Passthrough: ``prev_setpoint_c`` / ``prev_reason`` unveraendert. ``detail``
+    - ``VACANT`` (oder anderer Nicht-OCCUPIED-Status) → ``MIN_SETPOINT_C``
+      (Frostschutz aus ``rules/constants.py``),
+      ``detail`` prefix ``"window_open_room_free_frost_protection"``.
+    - ``OCCUPIED`` → ``room_type.default_t_vacant`` (Setback statt Frost,
+      damit Gast bei kurzem Lueften nicht friert),
+      ``detail`` prefix ``"window_open_room_occupied_setback"``.
+
+    Reason bleibt in beiden Faellen ``CommandReason.WINDOW_OPEN`` —
+    der enum hat ``length=30`` mit DB-CHECK; die spezifische Variante
+    wird per ``detail``-Text und ``extras["setpoint_source"]`` markiert
+    statt neue Enum-Werte einzufuehren.
+
+    **Override-Maskierung (AE-52):** wenn ein Layer 3 (Manual-Override)
+    durchgereicht hat (``prev_reason == CommandReason.MANUAL``), wird
+    Layer 4 ihn ueberschreiben. Der ``detail``-Prefix wird um
+    ``"override_overridden_by_window_open "`` ergaenzt und
+    ``extras["override_overridden_by_window_open"] = True`` gesetzt.
+
+    Passthrough (``window_signal=closed`` / no_readings / stale_reading):
+    ``prev_setpoint_c`` / ``prev_reason`` unveraendert. ``detail``
     haelt fest WARUM kein Eingriff erfolgte (no_readings / stale_reading /
     no_open_window) — wichtig fuer Operator-Diagnose.
 
     ``extras`` ist immer befuellt mit ``open_zones`` (Liste mit
     ``zone_id`` + ``reading_at``) und ``occupancy_state`` (occupied/vacant
-    abgeleitet aus ``room_status``). ``occupancy_state`` beeinflusst
-    Layer 4 NICHT — es wird nur fuer einen spaeteren Notification-Sprint
-    mitgeschrieben (Doppel-Auswertung gegen Layer 1 vermieden).
+    abgeleitet aus ``room_status``).
 
     NULL-Werte in ``open_window`` (alter Codec / Vicki ohne Sensor) gelten
     als ``False`` und aktivieren Layer 4 NICHT.
@@ -409,29 +426,83 @@ async def layer_window_open(
     ``now`` werden vom Caller mitgegeben, statt erneut DB-Roundtrip oder
     ``datetime.now()`` intern. Macht Tests deterministisch und nutzt den
     bereits geladenen ``ctx.room.status``.
+
+    Sprint 12 T3 fuegt eine zusaetzliche inline-Query auf
+    ``Room.room_type.default_t_vacant`` ein — nur im OCCUPIED+open-Pfad
+    aktiv, damit der VACANT/Pass-Through-Pfad kostenneutral bleibt.
     """
-    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
     occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
 
-    # DISTINCT ON (device_id) liefert pro Geraet das juengste Reading.
-    # JOIN-Pfad SensorReading -> Device -> HeatingZone -> room_id grenzt
-    # auf Devices dieses Raums ein. Devices ohne heating_zone (Provisioning)
-    # fallen durch den INNER JOIN raus — das ist gewollt.
-    #
-    # Sprint 11 T3 (AE-51 §4.1): Devices mit
-    # ``health_state != 'healthy'`` fliessen NICHT in die OR-Aggregation.
-    # Compute-Task aus T5 ist Source of Truth fuer health_state;
-    # ``silent``/``degraded``/``suspicious`` werden hier ausgeblendet.
-    # Wenn keine healthy Devices in der Zone Readings haben: leere rows,
-    # bekannter ``no_readings``-Pfad weiter unten (kein Eingriff, kein
-    # Downlink — Hysterese skipt).
-    stmt = (
-        select(
-            SensorReading.device_id,
-            SensorReading.time,
-            SensorReading.open_window,
-            Device.heating_zone_id,
+    # Sprint 12 T4: Helper-extracted aus ehemals Inline-Code. Geteilte
+    # Source-of-Truth mit ``services.override_service`` (Reject-Pfad bei
+    # Override-Anlage waehrend Fenster offen). Helper macht die DISTINCT-ON-
+    # Query inkl. ``health_state='healthy'``-Filter (AE-51 §4.1) und
+    # Stale-Threshold (``WINDOW_STALE_THRESHOLD_MIN``).
+    open_zones: list[dict[str, Any]] = await detect_open_window_zones(session, room_id, now)
+
+    if open_zones:
+        # Sprint 12 T3 (AE-52): room_status-abhaengiger Setpoint.
+        # VACANT  -> Frostschutz (MIN_SETPOINT_C).
+        # OCCUPIED -> room_type.default_t_vacant (Setback). Inline-Query
+        # nur in diesem Pfad — VACANT bleibt kostenneutral.
+        if room_status == RoomStatus.OCCUPIED:
+            room_stmt = select(Room).where(Room.id == room_id).options(joinedload(Room.room_type))
+            room_row = (await session.execute(room_stmt)).unique().scalar_one_or_none()
+            if room_row is not None and room_row.room_type is not None:
+                new_setpoint_c = _quantize(room_row.room_type.default_t_vacant)
+                setpoint_source = "default_t_vacant"
+                detail_prefix = "window_open_room_occupied_setback"
+            else:
+                # Defensive: Room verschwand zwischen ``evaluate_room``-Start
+                # und Layer 4. Frostschutz als sicherer Fallback statt
+                # Default-Setpoint zu erfinden.
+                new_setpoint_c = MIN_SETPOINT_C
+                setpoint_source = "frost_protection_room_lookup_failed"
+                detail_prefix = "window_open_room_occupied_setback_fallback_frost"
+        else:
+            new_setpoint_c = MIN_SETPOINT_C
+            setpoint_source = "frost_protection"
+            detail_prefix = "window_open_room_free_frost_protection"
+
+        # Sprint 12 T3 (AE-52): Override-Maskierungs-Marker. Wenn Layer 3
+        # einen Manual-Override durchgereicht hat (prev_reason=MANUAL),
+        # ueberschreibt Layer 4 ihn — kein Frieren-bei-offenem-Fenster
+        # trotz Gast-Setpoint. Der Marker macht das im Engine-Trace
+        # sichtbar; eine zusaetzliche EventLog-Row waere doppelt, weil
+        # der WINDOW_SAFETY-Row bereits die finale Decision-Row ist und
+        # Layer 3 in derselben Eval seinen Override-Set-Trace schreibt.
+        zones_summary = [z["zone_id"] for z in open_zones]
+        override_overridden = prev_reason == CommandReason.MANUAL
+        if override_overridden:
+            detail = (
+                f"override_overridden_by_window_open {detail_prefix} open_zones={zones_summary}"
+            )
+        else:
+            detail = f"{detail_prefix} open_zones={zones_summary}"
+
+        return LayerStep(
+            layer=EventLogLayer.WINDOW_SAFETY,
+            setpoint_c=new_setpoint_c,
+            reason=CommandReason.WINDOW_OPEN,
+            detail=detail,
+            extras={
+                "open_zones": open_zones,
+                "occupancy_state": occupancy_state,
+                "setpoint_source": setpoint_source,
+                "override_overridden_by_window_open": override_overridden,
+            },
         )
+
+    # Pass-Through-Pfad: Helper hat keine offenen Zonen geliefert. Fuer das
+    # diagnostische ``detail`` brauchen wir aber noch total-rows + fresh-
+    # count. Trade-off der T4-Helper-Extraktion: pass-through-Path macht
+    # eine zweite Light-Query (gleiche JOIN/DISTINCT-ON-Struktur, nur
+    # Zeit-Spalte). Optimierungs-Backlog: helper-of-helper, der
+    # ``(open_zones, diagnostic_counts)`` liefert — aktuell bewusst NICHT
+    # gemacht, weil Brief-Signatur ``list[dict]`` strict ist.
+    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
+    diag_stmt = (
+        select(SensorReading.device_id, SensorReading.time)
         .join(Device, Device.id == SensorReading.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
@@ -439,27 +510,9 @@ async def layer_window_open(
         .order_by(SensorReading.device_id, SensorReading.time.desc())
         .distinct(SensorReading.device_id)
     )
-    rows = (await session.execute(stmt)).all()
-
-    open_zones: list[dict[str, Any]] = []
-    fresh_count = 0
-    for _device_id, reading_time, open_window, zone_id in rows:
-        if reading_time < threshold:
-            continue
-        fresh_count += 1
-        if open_window is True:
-            open_zones.append({"zone_id": zone_id, "reading_at": reading_time.isoformat()})
-
-    if open_zones:
-        return LayerStep(
-            layer=EventLogLayer.WINDOW_SAFETY,
-            setpoint_c=MIN_SETPOINT_C,
-            reason=CommandReason.WINDOW_OPEN,
-            detail=f"open_zones={[z['zone_id'] for z in open_zones]}",
-            extras={"open_zones": open_zones, "occupancy_state": occupancy_state},
-        )
-
-    if not rows:
+    diag_rows = (await session.execute(diag_stmt)).all()
+    fresh_count = sum(1 for _device_id, reading_time in diag_rows if reading_time >= threshold)
+    if not diag_rows:
         detail = "no_readings"
     elif fresh_count == 0:
         detail = "stale_reading"
@@ -772,16 +825,57 @@ async def _last_command_for_room(
 ) -> tuple[int, datetime] | None:
     """Letzter erfolgreich gesendeter ControlCommand fuer ein Device des Raums.
 
-    Hysterese arbeitet auf der Pro-Raum-Ebene (Engine-Output ist 1 Setpoint
-    pro Raum). Wenn ein Raum mehrere Devices hat, ist der juengste Command
-    eines beliebigen Device der Vergleichswert — bei Multi-Device-Raeumen
-    bleibt das in Sprint 9 ein bekannter Approximationsfehler (Backlog).
+    DEPRECATED ab Sprint 12 T2 (AE-51 P3 + D5): Hysterese ist ab Sprint 12
+    per-Vicki via ``_last_command_for_device``. Funktion bleibt
+    **ausschliesslich fuer Legacy-Lookups** erhalten (z.B. Engine-Trace-
+    Konsistenz mit historischen control_command-Rows), **NICHT in
+    Decision-Pfade einbinden**.
+
+    Verbleibender legitimer Aufrufer: ``setpoint_in``-Lookup in
+    ``_evaluate_room_async`` (reines Audit, kein Decision-Gate). Bei
+    Cleanup-Sprint: ``setpoint_in`` zuerst Per-Vicki migrieren, dann
+    diese Funktion entfernen.
+
+    Hysterese arbeitete vor Sprint 12 auf der Pro-Raum-Ebene (Engine-Output
+    ist 1 Setpoint pro Raum). Wenn ein Raum mehrere Devices hat, ist der
+    juengste Command eines beliebigen Device der Vergleichswert — bei
+    Multi-Device-Raeumen war das ein bekannter Approximationsfehler. Sprint
+    12 loest das auf, indem jeder Vicki seinen eigenen Hysterese-Check
+    gegen seinen eigenen letzten Setpoint bekommt.
     """
     stmt = (
         select(ControlCommand.target_setpoint, ControlCommand.issued_at)
         .join(Device, Device.id == ControlCommand.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(ControlCommand.sent_to_gateway_at.is_not(None))
+        .order_by(ControlCommand.issued_at.desc())
+        .limit(1)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        return None
+    setpoint, issued_at = row
+    return _quantize(setpoint), issued_at
+
+
+async def _last_command_for_device(
+    session: AsyncSession, device_id: int
+) -> tuple[int, datetime] | None:
+    """Letzter erfolgreich gesendeter ControlCommand fuer ein spezifisches
+    Device (Sprint 12 T2, AE-51 P3 + D5).
+
+    Pro-Vicki-Hysterese: jeder Vicki bekommt seinen eigenen Hysterese-
+    Check basierend auf seinem letzten gesendeten Setpoint, NICHT auf
+    dem Raum-Approximations-Setpoint aus ``_last_command_for_room``
+    (deprecated).
+
+    Returns: ``(setpoint_c_int, issued_at)`` oder ``None`` wenn kein
+    erfolgreich gesendeter ControlCommand fuer dieses Device existiert.
+    """
+    stmt = (
+        select(ControlCommand.target_setpoint, ControlCommand.issued_at)
+        .where(ControlCommand.device_id == device_id)
         .where(ControlCommand.sent_to_gateway_at.is_not(None))
         .order_by(ControlCommand.issued_at.desc())
         .limit(1)

@@ -24,18 +24,18 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-import aiomqtt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import joinedload
 
 from heizung.celery_app import app
 from heizung.config import get_settings
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
+from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.rules.engine import (
+    _last_command_for_device,
     _last_command_for_room,
     hysteresis_decision,
 )
@@ -43,7 +43,7 @@ from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
 from heizung.services import engine_lock
-from heizung.services.downlink_adapter import DownlinkError, send_setpoint
+from heizung.services.downlink_adapter import send_setpoint
 
 # Sprint 9.10 T3.5: Re-Trigger-Verzoegerung wenn der Lock fuer einen Raum
 # anderweitig gehalten wird. 5 s ist kurz genug, dass der Burst-Trigger
@@ -178,16 +178,44 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                     "status": "skipped_no_room",
                 }
 
+            # Sprint 12 T2: nur ``prev_setpoint`` aus ``_last_command_for_room``
+            # uebrig, ausschliesslich als Audit-Info in
+            # ``EventLog.setpoint_in`` jeder Layer-Row. Per-Vicki-Hysterese
+            # uebernimmt ``_dispatch_downlinks_per_zone`` mit
+            # ``_last_command_for_device``. Room-Level-``decision`` und ihre
+            # Return-Dict-Keys ``should_send``/``hysteresis`` wurden
+            # entfernt — verhaltensirrelevant + §5.20-Drift-Muster
+            # (irrefuehrende Info im Audit-Pfad).
             prev = await _last_command_for_room(session, room_id)
-            prev_setpoint, prev_at = (None, None) if prev is None else prev
-            decision = hysteresis_decision(
-                prev_setpoint_c=prev_setpoint,
-                prev_issued_at=prev_at,
-                new_setpoint_c=result.setpoint_c,
-            )
+            prev_setpoint = None if prev is None else prev[0]
 
-            # Audit-Log: pro Layer eine Row
+            # Sprint 12 T2: Multi-Vicki Schreib-Pfad (STRATEGIE §4.2,
+            # AE-51 P3 + D5). Per-Zone-Iteration, healthy-Filter,
+            # per-Vicki-Hysterese, parallele Submission via asyncio.gather,
+            # individuelles try/except. Kein Rollback bei Teil-Erfolg
+            # (Annahme A2 aus Sprint-12-Brief).
+            per_device_results, per_zone_status = await _dispatch_downlinks_per_zone(
+                session=session,
+                room_id=room_id,
+                target_setpoint_c=result.setpoint_c,
+                base_reason=result.base_reason,
+                eval_id=eval_id,
+            )
+            sent_devices = per_device_results
+
+            # Audit-Log: pro Layer eine Row. HARD_CLAMP-Row bekommt
+            # zusaetzlich die per-Vicki-Sub-Traces in JSONB — EventLog-PK
+            # (time, room_id, evaluation_id, layer) erlaubt KEINE eigenen
+            # Rows pro Vicki ohne PK-Migration (Drift D7); Aggregat in
+            # details statt PK-Erweiterung.
             for layer in result.layers:
+                base_details: dict[str, Any] = {
+                    "detail": layer.detail,
+                    **(layer.extras or {}),
+                }
+                if layer.layer == EventLogLayer.HARD_CLAMP:
+                    base_details["downlink_per_device"] = per_device_results
+                    base_details["downlink_zone_status"] = per_zone_status
                 session.add(
                     EventLog(
                         room_id=room_id,
@@ -201,61 +229,9 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                             Decimal(layer.setpoint_c) if layer.setpoint_c is not None else None
                         ),
                         reason=layer.reason,
-                        details={
-                            "detail": layer.detail,
-                            "hysteresis_decision": {
-                                "should_send": decision.should_send,
-                                "reason": decision.reason,
-                            },
-                            **(layer.extras or {}),
-                        },
+                        details=base_details,
                     )
                 )
-
-            sent_devices: list[dict[str, Any]] = []
-            if decision.should_send:
-                devices = await _get_room_devices(session, room_id)
-                if not devices:
-                    logger.info(
-                        "evaluate_room: room_id=%s hat keine aktiven Devices — kein Downlink",
-                        room_id,
-                    )
-                for dev in devices:
-                    cc = ControlCommand(
-                        device_id=dev.id,
-                        target_setpoint=Decimal(result.setpoint_c),
-                        reason=result.base_reason,
-                        rule_context=json.dumps(
-                            {
-                                "evaluation_id": str(eval_id),
-                                "layers": [
-                                    {
-                                        "layer": layer.layer.value,
-                                        "setpoint_c": layer.setpoint_c,
-                                        "reason": layer.reason.value,
-                                    }
-                                    for layer in result.layers
-                                ],
-                            }
-                        ),
-                    )
-                    session.add(cc)
-                    try:
-                        await send_setpoint(dev.dev_eui, result.setpoint_c)
-                        cc.sent_to_gateway_at = datetime.now(tz=UTC)
-                        sent_devices.append(
-                            {"id": dev.id, "dev_eui": dev.dev_eui, "status": "sent"}
-                        )
-                    except (aiomqtt.MqttError, DownlinkError) as e:
-                        logger.exception(
-                            "downlink-fehler dev_eui=%s setpoint=%s err=%s",
-                            dev.dev_eui,
-                            result.setpoint_c,
-                            e,
-                        )
-                        sent_devices.append(
-                            {"id": dev.id, "dev_eui": dev.dev_eui, "status": "failed"}
-                        )
 
             # Sprint 9.7: Heartbeat. Layer 2 (9.8) ueberschreibt next_transition_at
             # mit echten Schaltpunkten (Vorheiz-Beginn, Nachtabsenkung-Wechsel).
@@ -302,8 +278,6 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 "room_id": room_id,
                 "evaluation_id": str(eval_id),
                 "setpoint_c": result.setpoint_c,
-                "should_send": decision.should_send,
-                "hysteresis": decision.reason,
                 "devices": sent_devices,
             }
     except Exception:
@@ -346,13 +320,201 @@ async def _mark_room_health_degraded(room_id: int) -> None:
         await session.commit()
 
 
-async def _get_room_devices(session: Any, room_id: int) -> list[Device]:
-    """Alle aktiven Devices, die Heizzonen dieses Raums zugeordnet sind."""
+async def _get_zones_for_room(session: AsyncSession, room_id: int) -> list[HeatingZone]:
+    """Alle HeatingZones eines Raums (Sprint 12 T2).
+
+    Pro-Zone-Iteration im Schreib-Pfad. Reihenfolge ueber ``id ASC`` fuer
+    deterministisches Verhalten in Tests + Trace.
+    """
+    stmt = select(HeatingZone).where(HeatingZone.room_id == room_id).order_by(HeatingZone.id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]:
+    """Aktive + healthy Devices einer Zone (Sprint 12 T2, AE-51 P3 + D3).
+
+    Filter: ``is_active=True`` UND ``health_state='healthy'``. Devices in
+    Status ``silent``, ``degraded`` oder ``suspicious`` (AE-53) werden
+    NICHT angesteuert — kein Downlink-Versuch, keine ControlCommand-Row.
+    Reihenfolge ueber ``id ASC`` fuer deterministisches Verhalten in
+    Tests + Trace (asyncio.gather ist intern parallel, aber die Reihenfolge
+    der per-device-results bleibt durch zip(send_payloads, outcomes)
+    deterministisch).
+    """
     stmt = (
         select(Device)
-        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
-        .where(HeatingZone.room_id == room_id)
+        .where(Device.heating_zone_id == zone_id)
         .where(Device.is_active.is_(True))
-        .options(joinedload(Device.heating_zone))
+        .where(Device.health_state == "healthy")
+        .order_by(Device.id)
     )
-    return list((await session.execute(stmt)).unique().scalars().all())
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def _dispatch_downlinks_per_zone(
+    *,
+    session: AsyncSession,
+    room_id: int,
+    target_setpoint_c: int,
+    base_reason: CommandReason,
+    eval_id: uuid.UUID,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
+
+    Iteriert pro Zone des Raums, fuehrt per-Vicki-Hysterese aus, schickt
+    die Setpoint-Downlinks paralle ueber ``asyncio.gather`` mit
+    ``return_exceptions=True``. Pro Erfolg/Fehler ein ``ControlCommand``-
+    Eintrag (Erfolg setzt ``sent_to_gateway_at``, Fehler laesst es NULL).
+
+    Hysterese-Bypass: hysterese-skipped Vickis bekommen KEINEN
+    ControlCommand-Eintrag (nur Trace via per_device_results), weil kein
+    Downlink-Versuch stattfindet.
+
+    Returns:
+        ``(per_device_results, per_zone_status)``
+
+        - ``per_device_results``: pro versuchten Vicki ein Dict mit
+          ``zone_id``, ``device_id``, ``dev_eui``, ``status``
+          (``sent`` | ``failed`` | ``skipped_hysteresis``),
+          ``hysteresis_reason``, ``error`` (str | None).
+        - ``per_zone_status``: pro Zone des Raums ein Dict mit
+          ``zone_id``, ``count_sent``, ``count_failed``, ``count_skipped``,
+          ``all_failed`` (bool, true wenn count_sent==0 UND count_failed>0).
+
+    ``target_setpoint_c`` ist bereits int aus ``engine.py``'s _quantize —
+    ganzzahlig vor Hysterese-Check (RUNBOOK §10d.7 / Vicki-Hardware-Constraint).
+    """
+    zones = await _get_zones_for_room(session, room_id)
+    per_device_results: list[dict[str, Any]] = []
+    per_zone_status: list[dict[str, Any]] = []
+
+    for zone in zones:
+        devices = await _get_zone_devices(session, zone.id)
+        if not devices:
+            per_zone_status.append(
+                {
+                    "zone_id": zone.id,
+                    "count_sent": 0,
+                    "count_failed": 0,
+                    "count_skipped": 0,
+                    "all_failed": False,
+                    "detail": "no_healthy_active_devices",
+                }
+            )
+            continue
+
+        # Per-Vicki-Hysterese-Check
+        send_payloads: list[tuple[Device, ControlCommand, str]] = []
+        skipped_count = 0
+        for dev in devices:
+            prev = await _last_command_for_device(session, dev.id)
+            prev_sp, prev_at = (None, None) if prev is None else prev
+            dev_decision = hysteresis_decision(
+                prev_setpoint_c=prev_sp,
+                prev_issued_at=prev_at,
+                new_setpoint_c=target_setpoint_c,
+            )
+            if not dev_decision.should_send:
+                skipped_count += 1
+                per_device_results.append(
+                    {
+                        "zone_id": zone.id,
+                        "device_id": dev.id,
+                        "dev_eui": dev.dev_eui,
+                        "status": "skipped_hysteresis",
+                        "hysteresis_reason": dev_decision.reason,
+                        "error": None,
+                    }
+                )
+                continue
+            cc = ControlCommand(
+                device_id=dev.id,
+                target_setpoint=Decimal(target_setpoint_c),
+                reason=base_reason,
+                rule_context=json.dumps(
+                    {
+                        "evaluation_id": str(eval_id),
+                        "zone_id": zone.id,
+                        "hysteresis_reason": dev_decision.reason,
+                    }
+                ),
+            )
+            session.add(cc)
+            send_payloads.append((dev, cc, dev_decision.reason))
+
+        if not send_payloads:
+            per_zone_status.append(
+                {
+                    "zone_id": zone.id,
+                    "count_sent": 0,
+                    "count_failed": 0,
+                    "count_skipped": skipped_count,
+                    "all_failed": False,
+                    "detail": "all_hysteresis_skipped",
+                }
+            )
+            continue
+
+        # Parallele Downlink-Submission via asyncio.gather. ``return_exceptions=
+        # True`` macht aus jeder Exception einen Wert in ``outcomes`` — KEINE
+        # asyncio.gather()-Cascade-Cancellation, kein Rollback (A2).
+        coros = [send_setpoint(dev.dev_eui, target_setpoint_c) for dev, _, _ in send_payloads]
+        outcomes = await asyncio.gather(*coros, return_exceptions=True)
+
+        count_sent = 0
+        count_failed = 0
+        now_sent = datetime.now(tz=UTC)
+        for (dev, cc, hyst_reason), outcome in zip(send_payloads, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                count_failed += 1
+                logger.exception(
+                    "downlink_failed dev_eui=%s device_id=%s zone_id=%s setpoint_c=%s",
+                    dev.dev_eui,
+                    dev.id,
+                    zone.id,
+                    target_setpoint_c,
+                    exc_info=outcome,
+                )
+                per_device_results.append(
+                    {
+                        "zone_id": zone.id,
+                        "device_id": dev.id,
+                        "dev_eui": dev.dev_eui,
+                        "status": "failed",
+                        "hysteresis_reason": hyst_reason,
+                        "error": f"{type(outcome).__name__}: {outcome}",
+                    }
+                )
+            else:
+                count_sent += 1
+                cc.sent_to_gateway_at = now_sent
+                per_device_results.append(
+                    {
+                        "zone_id": zone.id,
+                        "device_id": dev.id,
+                        "dev_eui": dev.dev_eui,
+                        "status": "sent",
+                        "hysteresis_reason": hyst_reason,
+                        "error": None,
+                    }
+                )
+
+        all_failed = count_sent == 0 and count_failed > 0
+        per_zone_status.append(
+            {
+                "zone_id": zone.id,
+                "count_sent": count_sent,
+                "count_failed": count_failed,
+                "count_skipped": skipped_count,
+                "all_failed": all_failed,
+            }
+        )
+        if all_failed:
+            logger.warning(
+                "downlink_failed_all_zone zone_id=%s room_id=%s setpoint_c=%s",
+                zone.id,
+                room_id,
+                target_setpoint_c,
+            )
+
+    return per_device_results, per_zone_status
