@@ -6,10 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-18
-**Letzter Tag:** `v0.1.15-zuordnungs-architektur-doku` (`v0.1.16-health-aggregat` pending nach Merge)
-**Aktueller Sprint:** Sprint 11 abgeschlossen 2026-05-18, PR pending
-**Naechst-aktiv:** Sprint 12 — Mehrfach-Vicki Schreiben + Fenster belegungs-abhaengig (AE-51 §4.2 + AE-52)
+**Stichtag:** 2026-05-19
+**Letzter Tag:** `v0.1.16-health-aggregat` (Sprint 11, Merge-Commit `6a8f2ae`, 2026-05-18)
+**Aktueller Sprint:** Sprint 12 in Arbeit, ausgehend von Tag `v0.1.16-health-aggregat` (`6a8f2ae`) — Zone-Granular Engine + Multi-Vicki-Schreiben + Fenster belegungs-abhaengig (STRATEGIE-THERMOSTAT-ZUORDNUNG §4.2 + AE-52)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1941,6 +1940,12 @@ Secrets liegen in:
 | `v0.1.9-rc2-manual-override` | Sprint 9.9 + 9.9a (Engine Layer 3 + UI + Hotfix) | 2026-05-06 |
 | `v0.1.9-rc3-window-detection` | Sprint 9.10 (Engine Layer 4 Window-Detection + AE-40 Engine-Task-Lock) | 2026-05-07 |
 | `v0.1.9-rc6-live-test-2` | Sprint 9.11y (Synthetic-Layer-4-Tests + Inferred-Window-Logger + Hardware-Kältepack-Verify, Sprint-9.11-Familie abgeschlossen) | 2026-05-11 |
+| `v0.1.11-device-pairing` | Sprint 9.13 / 9.13b (Pairing-UI + Sidebar-Migration + Empty-State-Stubs, PR #137) | 2026-05-13 |
+| `v0.1.12-global-config-ui` | Sprint 9.14 (Global-Config-UI: rule_config + config_audit + Inline-Edit, PR #143) | 2026-05-14 |
+| `v0.1.13-szenario-engine` | Sprint 9.16 + 9.16a (Szenario-Engine + Umlaut-Drift-Fix Sommermodus-Seed Migration 0013, PR #146; Sprint 9.15 Profile mit 9.16 fusioniert) | 2026-05-14 |
+| `v0.1.14-auth` | Sprint 9.17 + 9.17a + 9.17b (Auth + 2-Rollen-Modell + Audit + Logout-Cookie-Fix, PR #151) | 2026-05-15 |
+| `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep (Doku-Konsolidierung Zuordnungs-Architektur, STRATEGIE-THERMOSTAT-ZUORDNUNG + AE-51..AE-54, PR #157) | 2026-05-16 |
+| `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
