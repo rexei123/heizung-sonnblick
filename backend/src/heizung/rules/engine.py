@@ -37,6 +37,7 @@ from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_MIN
 from heizung.rules.scenarios import is_summer_mode_active
+from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
 
 if TYPE_CHECKING:
@@ -430,45 +431,14 @@ async def layer_window_open(
     ``Room.room_type.default_t_vacant`` ein — nur im OCCUPIED+open-Pfad
     aktiv, damit der VACANT/Pass-Through-Pfad kostenneutral bleibt.
     """
-    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
     occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
 
-    # DISTINCT ON (device_id) liefert pro Geraet das juengste Reading.
-    # JOIN-Pfad SensorReading -> Device -> HeatingZone -> room_id grenzt
-    # auf Devices dieses Raums ein. Devices ohne heating_zone (Provisioning)
-    # fallen durch den INNER JOIN raus — das ist gewollt.
-    #
-    # Sprint 11 T3 (AE-51 §4.1): Devices mit
-    # ``health_state != 'healthy'`` fliessen NICHT in die OR-Aggregation.
-    # Compute-Task aus T5 ist Source of Truth fuer health_state;
-    # ``silent``/``degraded``/``suspicious`` werden hier ausgeblendet.
-    # Wenn keine healthy Devices in der Zone Readings haben: leere rows,
-    # bekannter ``no_readings``-Pfad weiter unten (kein Eingriff, kein
-    # Downlink — Hysterese skipt).
-    stmt = (
-        select(
-            SensorReading.device_id,
-            SensorReading.time,
-            SensorReading.open_window,
-            Device.heating_zone_id,
-        )
-        .join(Device, Device.id == SensorReading.device_id)
-        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
-        .where(HeatingZone.room_id == room_id)
-        .where(Device.health_state == "healthy")
-        .order_by(SensorReading.device_id, SensorReading.time.desc())
-        .distinct(SensorReading.device_id)
-    )
-    rows = (await session.execute(stmt)).all()
-
-    open_zones: list[dict[str, Any]] = []
-    fresh_count = 0
-    for _device_id, reading_time, open_window, zone_id in rows:
-        if reading_time < threshold:
-            continue
-        fresh_count += 1
-        if open_window is True:
-            open_zones.append({"zone_id": zone_id, "reading_at": reading_time.isoformat()})
+    # Sprint 12 T4: Helper-extracted aus ehemals Inline-Code. Geteilte
+    # Source-of-Truth mit ``services.override_service`` (Reject-Pfad bei
+    # Override-Anlage waehrend Fenster offen). Helper macht die DISTINCT-ON-
+    # Query inkl. ``health_state='healthy'``-Filter (AE-51 §4.1) und
+    # Stale-Threshold (``WINDOW_STALE_THRESHOLD_MIN``).
+    open_zones: list[dict[str, Any]] = await detect_open_window_zones(session, room_id, now)
 
     if open_zones:
         # Sprint 12 T3 (AE-52): room_status-abhaengiger Setpoint.
@@ -523,7 +493,26 @@ async def layer_window_open(
             },
         )
 
-    if not rows:
+    # Pass-Through-Pfad: Helper hat keine offenen Zonen geliefert. Fuer das
+    # diagnostische ``detail`` brauchen wir aber noch total-rows + fresh-
+    # count. Trade-off der T4-Helper-Extraktion: pass-through-Path macht
+    # eine zweite Light-Query (gleiche JOIN/DISTINCT-ON-Struktur, nur
+    # Zeit-Spalte). Optimierungs-Backlog: helper-of-helper, der
+    # ``(open_zones, diagnostic_counts)`` liefert — aktuell bewusst NICHT
+    # gemacht, weil Brief-Signatur ``list[dict]`` strict ist.
+    threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
+    diag_stmt = (
+        select(SensorReading.device_id, SensorReading.time)
+        .join(Device, Device.id == SensorReading.device_id)
+        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
+        .where(HeatingZone.room_id == room_id)
+        .where(Device.health_state == "healthy")
+        .order_by(SensorReading.device_id, SensorReading.time.desc())
+        .distinct(SensorReading.device_id)
+    )
+    diag_rows = (await session.execute(diag_stmt)).all()
+    fresh_count = sum(1 for _device_id, reading_time in diag_rows if reading_time >= threshold)
+    if not diag_rows:
         detail = "no_readings"
     elif fresh_count == 0:
         detail = "stale_reading"

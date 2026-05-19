@@ -298,3 +298,144 @@ async def test_cleanup_expired_marks_only_expired(db_session: AsyncSession, room
     assert expired.revoked_at is not None
     assert expired.revoked_reason == "auto: expired"
     assert active.revoked_at is None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T4 (AE-52) — Window-Reject in create()
+# ---------------------------------------------------------------------------
+
+
+async def _add_zone_with_device(
+    session: AsyncSession, *, room_id: int, zone_name: str, dev_eui: str
+) -> tuple[int, int]:
+    """Setup-Helper: Eine HeatingZone + ein healthy Device im Raum."""
+    from heizung.models.device import Device
+    from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+    from heizung.models.heating_zone import HeatingZone
+
+    zone = HeatingZone(room_id=room_id, kind=HeatingZoneKind.BEDROOM, name=zone_name)
+    session.add(zone)
+    await session.flush()
+    device = Device(
+        dev_eui=dev_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=zone.id,
+        is_active=True,
+        health_state="healthy",
+    )
+    session.add(device)
+    await session.flush()
+    return zone.id, device.id
+
+
+async def _add_reading(
+    session: AsyncSession, *, device_id: int, open_window: bool, age_min: int = 2
+) -> None:
+    """Setup-Helper: SensorReading mit ``open_window``-Flag + frischem Alter."""
+    from heizung.models.sensor_reading import SensorReading
+
+    reading = SensorReading(
+        time=datetime.now(tz=UTC) - timedelta(minutes=age_min),
+        device_id=device_id,
+        fcnt=1,
+        temperature=Decimal("21.0"),
+        open_window=open_window,
+    )
+    session.add(reading)
+    await session.flush()
+
+
+async def test_create_rejects_when_window_open(db_session: AsyncSession, room_id: int) -> None:
+    """T4 (a): create() + 1 Zone Fenster offen -> raises
+    OverrideRejectedWindowOpenError, manual_override-Tabelle leer.
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    zone_id, device_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bedroom", dev_eui=f"deadbeef{suffix}"
+    )
+    await _add_reading(db_session, device_id=device_id, open_window=True)
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    with pytest.raises(override_service.OverrideRejectedWindowOpenError) as exc_info:
+        await override_service.create(
+            db_session,
+            room_id=room_id,
+            setpoint=Decimal("22.0"),
+            source=OverrideSource.FRONTEND_4H,
+            expires_at=expires,
+        )
+    # Exception fuehrt die offene Zone in zones:
+    assert len(exc_info.value.zones) == 1
+    assert exc_info.value.zones[0]["zone_id"] == zone_id
+    assert "reading_at" in exc_info.value.zones[0]
+
+    # manual_override-Tabelle bleibt leer fuer diesen Raum:
+    from sqlalchemy import select
+
+    rows = list(
+        (await db_session.execute(select(ManualOverride).where(ManualOverride.room_id == room_id)))
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def test_create_persists_when_window_closed(db_session: AsyncSession, room_id: int) -> None:
+    """T4 (b): create() + Fenster zu -> Eintrag persistiert wie heute."""
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    _zone_id, device_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bedroom", dev_eui=f"deadbeef{suffix}"
+    )
+    await _add_reading(db_session, device_id=device_id, open_window=False)
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    override = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    assert override.id is not None
+    assert override.setpoint == Decimal("22.0")
+
+
+async def test_create_rejects_when_one_of_two_zones_open(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """T4 (c): create() + 2 Zonen, eine offen -> 409, leere Tabelle."""
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    zone1_id, device1_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bedroom", dev_eui=f"deadbeef{suffix}"
+    )
+    suffix2 = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    _zone2_id, device2_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bath", dev_eui=f"cafef00d{suffix2}"
+    )
+    # Zone 1 offen, Zone 2 zu
+    await _add_reading(db_session, device_id=device1_id, open_window=True)
+    await _add_reading(db_session, device_id=device2_id, open_window=False)
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    with pytest.raises(override_service.OverrideRejectedWindowOpenError) as exc_info:
+        await override_service.create(
+            db_session,
+            room_id=room_id,
+            setpoint=Decimal("22.0"),
+            source=OverrideSource.FRONTEND_4H,
+            expires_at=expires,
+        )
+    # Nur die offene Zone (zone1) im Reject-Detail:
+    zone_ids = [z["zone_id"] for z in exc_info.value.zones]
+    assert zone_ids == [zone1_id]
+
+    from sqlalchemy import select
+
+    rows = list(
+        (await db_session.execute(select(ManualOverride).where(ManualOverride.room_id == room_id)))
+        .scalars()
+        .all()
+    )
+    assert rows == []

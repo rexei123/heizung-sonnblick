@@ -278,3 +278,108 @@ async def test_post_setpoint_with_half_step_returns_422(
     )
     assert resp.status_code == 422, resp.text
     assert "ganzen °C-Schritten" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T4 (AE-52) — Window-Reject 409
+# ---------------------------------------------------------------------------
+
+
+async def _seed_zone_with_window_state(
+    setup_engine: AsyncEngine, *, room_id: int, open_window: bool, suffix: str
+) -> tuple[int, int]:
+    """Setup-Helper: HeatingZone + healthy Device + frisches Reading mit
+    angegebenem ``open_window``-Flag. Eigene Session ueber setup_engine
+    (kein Reuse des http_client-Pools, weil parallel zur App-Eval).
+    """
+    from heizung.models.device import Device
+    from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+    from heizung.models.heating_zone import HeatingZone
+    from heizung.models.sensor_reading import SensorReading
+
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        zone = HeatingZone(room_id=room_id, kind=HeatingZoneKind.BEDROOM, name=f"z-{suffix}")
+        session.add(zone)
+        await session.flush()
+        device = Device(
+            dev_eui=f"deadbeef{suffix[:8]}",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="vicki",
+            heating_zone_id=zone.id,
+            is_active=True,
+            health_state="healthy",
+        )
+        session.add(device)
+        await session.flush()
+        reading = SensorReading(
+            time=datetime.now(tz=UTC) - timedelta(minutes=2),
+            device_id=device.id,
+            fcnt=1,
+            temperature=Decimal("21.0"),
+            open_window=open_window,
+        )
+        session.add(reading)
+        await session.commit()
+        return zone.id, device.id
+
+
+async def test_post_returns_409_when_window_open(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    room_id: int,
+) -> None:
+    """T4 (d): POST /override + Fenster offen -> HTTP 409 mit
+    {"error": "override_rejected_window_open", "zones": [{"zone_id", "reading_at"}]}.
+    manual_override-Tabelle bleibt leer.
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    zone_id, _device_id = await _seed_zone_with_window_state(
+        setup_engine, room_id=room_id, open_window=True, suffix=suffix
+    )
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22", "source": "frontend_4h"},
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    # FastAPI HTTPException(detail=...) wrapped as {"detail": ...}
+    assert "detail" in body
+    assert body["detail"]["error"] == "override_rejected_window_open"
+    assert isinstance(body["detail"]["zones"], list)
+    assert len(body["detail"]["zones"]) == 1
+    assert body["detail"]["zones"][0]["zone_id"] == zone_id
+    assert "reading_at" in body["detail"]["zones"][0]
+
+    # manual_override-Tabelle leer fuer diesen Raum:
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM manual_override WHERE room_id = :r"),
+            {"r": room_id},
+        )
+        count = result.scalar_one()
+    assert count == 0
+
+
+async def test_post_returns_201_when_window_closed(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    room_id: int,
+) -> None:
+    """T4 (e): POST /override + alle Fenster zu -> 201 + Eintrag in DB."""
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    await _seed_zone_with_window_state(
+        setup_engine, room_id=room_id, open_window=False, suffix=suffix
+    )
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22", "source": "frontend_4h"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["room_id"] == room_id
+    assert Decimal(body["setpoint"]) == Decimal("22")

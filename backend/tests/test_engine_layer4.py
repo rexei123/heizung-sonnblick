@@ -383,6 +383,69 @@ async def test_layer4_open_occupied_setback_to_default_t_vacant(
     assert result.setpoint_c == 18
 
 
+# ---------------------------------------------------------------------------
+# Sprint 12 T4 — detect_open_window_zones Helper (Pure-Output-Tests)
+# ---------------------------------------------------------------------------
+
+
+async def test_detect_open_window_zones_returns_empty_when_no_readings(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: keine Readings im Raum -> leere Liste."""
+    from heizung.rules.window_state import detect_open_window_zones
+
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert open_zones == []
+
+
+async def test_detect_open_window_zones_returns_open_zone_with_keys(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: 1 Zone mit Fenster offen + frischem Reading -> 1 Eintrag
+    mit den Keys ``zone_id`` und ``reading_at`` (ISO-String).
+    """
+    from heizung.rules.window_state import detect_open_window_zones
+
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=True, age_min=2)
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert len(open_zones) == 1
+    assert open_zones[0]["zone_id"] == setup_room["zone_id"]
+    assert isinstance(open_zones[0]["reading_at"], str)
+    # ISO-Parse-fest:
+    parsed = datetime.fromisoformat(open_zones[0]["reading_at"])
+    assert parsed.tzinfo is not None  # timezone-aware ISO
+
+
+async def test_detect_open_window_zones_filters_stale_and_closed(
+    db_session: AsyncSession, setup_room: dict[str, int]
+) -> None:
+    """Helper-Test: stale Reading + closed Reading -> beide ignoriert,
+    leere Liste."""
+    from heizung.rules.window_state import detect_open_window_zones
+
+    # Stale + open (sollte raus durch threshold)
+    await _add_reading(
+        db_session,
+        device_id=setup_room["device_id"],
+        open_window=True,
+        age_min=WINDOW_STALE_THRESHOLD_MIN + 5,
+    )
+    # Fresh + closed (sollte raus durch open_window=False)
+    # (replace via newer reading on same device — DISTINCT-ON gibt das juengste)
+    await _add_reading(db_session, device_id=setup_room["device_id"], open_window=False, age_min=1)
+
+    now = datetime.now(tz=UTC)
+    open_zones = await detect_open_window_zones(db_session, setup_room["room_id"], now)
+    assert open_zones == []
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12 T3 — Layer 4 Override-Masking-Test (war bereits oben)
+# ---------------------------------------------------------------------------
+
+
 async def test_layer4_open_occupied_masks_active_manual_override(
     db_session: AsyncSession, setup_room: dict[str, int]
 ) -> None:
