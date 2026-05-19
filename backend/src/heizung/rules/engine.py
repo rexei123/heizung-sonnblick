@@ -382,25 +382,41 @@ async def layer_window_open(
     room_status: RoomStatus,
     now: datetime,
 ) -> LayerStep:
-    """Layer 4: Fenster-Sicherheit (Sprint 9.10 T2).
+    """Layer 4: Fenster-Sicherheit (Sprint 9.10 T2, AE-52 Sprint 12 T3).
 
     Liefert IMMER einen ``LayerStep`` (auch im no-op-Fall), damit das
     Engine-Decision-Panel pro Eval einen Trace-Eintrag fuer Layer 4 zeigt.
 
     Aktiv: mindestens ein Geraet im Raum hat ein **frisches** Reading
     (Alter <= ``WINDOW_STALE_THRESHOLD_MIN``) mit ``open_window=True``.
-    Setpoint -> ``MIN_SETPOINT_C`` (= System-Frostschutz aus
-    ``rules/constants.py``), Reason -> ``WINDOW_OPEN``.
+    ``room_status`` entscheidet den Setpoint bei Fenster offen (AE-52):
 
-    Passthrough: ``prev_setpoint_c`` / ``prev_reason`` unveraendert. ``detail``
+    - ``VACANT`` (oder anderer Nicht-OCCUPIED-Status) → ``MIN_SETPOINT_C``
+      (Frostschutz aus ``rules/constants.py``),
+      ``detail`` prefix ``"window_open_room_free_frost_protection"``.
+    - ``OCCUPIED`` → ``room_type.default_t_vacant`` (Setback statt Frost,
+      damit Gast bei kurzem Lueften nicht friert),
+      ``detail`` prefix ``"window_open_room_occupied_setback"``.
+
+    Reason bleibt in beiden Faellen ``CommandReason.WINDOW_OPEN`` —
+    der enum hat ``length=30`` mit DB-CHECK; die spezifische Variante
+    wird per ``detail``-Text und ``extras["setpoint_source"]`` markiert
+    statt neue Enum-Werte einzufuehren.
+
+    **Override-Maskierung (AE-52):** wenn ein Layer 3 (Manual-Override)
+    durchgereicht hat (``prev_reason == CommandReason.MANUAL``), wird
+    Layer 4 ihn ueberschreiben. Der ``detail``-Prefix wird um
+    ``"override_overridden_by_window_open "`` ergaenzt und
+    ``extras["override_overridden_by_window_open"] = True`` gesetzt.
+
+    Passthrough (``window_signal=closed`` / no_readings / stale_reading):
+    ``prev_setpoint_c`` / ``prev_reason`` unveraendert. ``detail``
     haelt fest WARUM kein Eingriff erfolgte (no_readings / stale_reading /
     no_open_window) — wichtig fuer Operator-Diagnose.
 
     ``extras`` ist immer befuellt mit ``open_zones`` (Liste mit
     ``zone_id`` + ``reading_at``) und ``occupancy_state`` (occupied/vacant
-    abgeleitet aus ``room_status``). ``occupancy_state`` beeinflusst
-    Layer 4 NICHT — es wird nur fuer einen spaeteren Notification-Sprint
-    mitgeschrieben (Doppel-Auswertung gegen Layer 1 vermieden).
+    abgeleitet aus ``room_status``).
 
     NULL-Werte in ``open_window`` (alter Codec / Vicki ohne Sensor) gelten
     als ``False`` und aktivieren Layer 4 NICHT.
@@ -409,6 +425,10 @@ async def layer_window_open(
     ``now`` werden vom Caller mitgegeben, statt erneut DB-Roundtrip oder
     ``datetime.now()`` intern. Macht Tests deterministisch und nutzt den
     bereits geladenen ``ctx.room.status``.
+
+    Sprint 12 T3 fuegt eine zusaetzliche inline-Query auf
+    ``Room.room_type.default_t_vacant`` ein — nur im OCCUPIED+open-Pfad
+    aktiv, damit der VACANT/Pass-Through-Pfad kostenneutral bleibt.
     """
     threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
     occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
@@ -451,12 +471,56 @@ async def layer_window_open(
             open_zones.append({"zone_id": zone_id, "reading_at": reading_time.isoformat()})
 
     if open_zones:
+        # Sprint 12 T3 (AE-52): room_status-abhaengiger Setpoint.
+        # VACANT  -> Frostschutz (MIN_SETPOINT_C).
+        # OCCUPIED -> room_type.default_t_vacant (Setback). Inline-Query
+        # nur in diesem Pfad — VACANT bleibt kostenneutral.
+        if room_status == RoomStatus.OCCUPIED:
+            room_stmt = select(Room).where(Room.id == room_id).options(joinedload(Room.room_type))
+            room_row = (await session.execute(room_stmt)).unique().scalar_one_or_none()
+            if room_row is not None and room_row.room_type is not None:
+                new_setpoint_c = _quantize(room_row.room_type.default_t_vacant)
+                setpoint_source = "default_t_vacant"
+                detail_prefix = "window_open_room_occupied_setback"
+            else:
+                # Defensive: Room verschwand zwischen ``evaluate_room``-Start
+                # und Layer 4. Frostschutz als sicherer Fallback statt
+                # Default-Setpoint zu erfinden.
+                new_setpoint_c = MIN_SETPOINT_C
+                setpoint_source = "frost_protection_room_lookup_failed"
+                detail_prefix = "window_open_room_occupied_setback_fallback_frost"
+        else:
+            new_setpoint_c = MIN_SETPOINT_C
+            setpoint_source = "frost_protection"
+            detail_prefix = "window_open_room_free_frost_protection"
+
+        # Sprint 12 T3 (AE-52): Override-Maskierungs-Marker. Wenn Layer 3
+        # einen Manual-Override durchgereicht hat (prev_reason=MANUAL),
+        # ueberschreibt Layer 4 ihn — kein Frieren-bei-offenem-Fenster
+        # trotz Gast-Setpoint. Der Marker macht das im Engine-Trace
+        # sichtbar; eine zusaetzliche EventLog-Row waere doppelt, weil
+        # der WINDOW_SAFETY-Row bereits die finale Decision-Row ist und
+        # Layer 3 in derselben Eval seinen Override-Set-Trace schreibt.
+        zones_summary = [z["zone_id"] for z in open_zones]
+        override_overridden = prev_reason == CommandReason.MANUAL
+        if override_overridden:
+            detail = (
+                f"override_overridden_by_window_open {detail_prefix} open_zones={zones_summary}"
+            )
+        else:
+            detail = f"{detail_prefix} open_zones={zones_summary}"
+
         return LayerStep(
             layer=EventLogLayer.WINDOW_SAFETY,
-            setpoint_c=MIN_SETPOINT_C,
+            setpoint_c=new_setpoint_c,
             reason=CommandReason.WINDOW_OPEN,
-            detail=f"open_zones={[z['zone_id'] for z in open_zones]}",
-            extras={"open_zones": open_zones, "occupancy_state": occupancy_state},
+            detail=detail,
+            extras={
+                "open_zones": open_zones,
+                "occupancy_state": occupancy_state,
+                "setpoint_source": setpoint_source,
+                "override_overridden_by_window_open": override_overridden,
+            },
         )
 
     if not rows:
