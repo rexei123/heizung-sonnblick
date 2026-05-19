@@ -1323,6 +1323,49 @@ muss.
 - BR-16 (Backend-Window-Detection) bleibt im Backlog; bis
   dahin ist `vicki.openWindow`-Flag die einzige Quelle.
 
+## Wortlaut-Praezisierung Sprint 12 Implementation (2026-05-19)
+
+Die Implementation in Sprint 12 hat zwei Wortlaut-Drifts gegenueber
+dem ADR aufgeloest:
+
+**1. Feldname:** `room_type.free_target_c` existiert nicht in
+`models/room_type.py`. Das semantisch passende Feld heisst
+`default_t_vacant` (Decimal, Numeric(4,1), Default 18.0 degC). Sprint
+12 nutzt dieses Feld; ADR-Wortlaut „free_target_c" steht weiter im
+Text als historische Notiz.
+
+**2. Override-Handhabung — exakter Verhaltens-Vertrag:**
+
+- **Neu-Anlage waehrend Fenster offen:** Override-Service `create()`
+  in `services/override_service.py` rejected mit
+  `OverrideRejectedWindowOpenError`. API-Layer `POST
+  /api/v1/rooms/{room_id}/overrides` mappt auf HTTP 409 mit Body
+  `{"detail": {"error": "override_rejected_window_open", "zones":
+  [{"zone_id": int, "reading_at": str}, ...]}}`. **KEIN DB-Insert**
+  in `manual_override`-Tabelle, kein `business_audit`-Eintrag, kein
+  `evaluate_room.delay`-Trigger.
+- **Bestehender Override + Fenster geht waehrend Laufzeit auf:**
+  Layer 4 (`rules/engine.py:layer_window_open`) maskiert den Override
+  — Setpoint kommt aus Layer 4 (`MIN_SETPOINT_C` bei VACANT,
+  `room_type.default_t_vacant` bei OCCUPIED), Reason
+  `CommandReason.WINDOW_OPEN`. Die `WINDOW_SAFETY`-EventLog-Row
+  enthaelt `extras["override_overridden_by_window_open"]=True` und
+  `detail`-Prefix `"override_overridden_by_window_open
+  window_open_room_{free_frost_protection|occupied_setback} ..."`.
+  Override-Tabellen-Eintrag bleibt bestehen bis TTL — kein Loeschen,
+  kein Reaktivieren.
+- **Fenster schliesst (Layer-4-Helper liefert leere Liste):** ab
+  naechstem Engine-Tick gilt wieder der regulaere Layer-3-Output;
+  Override-Setpoint wirkt regulaer, sofern Override-TTL nicht
+  abgelaufen.
+
+**3. Symmetrie-Caveat:** Helper `detect_open_window_zones` filtert auf
+`Device.health_state='healthy'` (AE-51 §4.1-Symmetrie). Bei All-
+Unhealthy-Cluster + physisch offenem Fenster geht ein neuer Override
+durch (System-Sicht „kein Fenster offen") — Frontend-Hinweis dazu
+kommt in Sprint 12a. Test G in `tests/test_sprint12_e2e.py` verankert
+den Befund.
+
 ---
 
 # AE-53 — Health-State-Modell für Device + Zone, Plausi-Grenzen, 3-Stufen-Alarm (Sprint 11)
@@ -1453,16 +1496,124 @@ Sprint 11 hat das AE-54-Versprechen folgendermassen umgesetzt:
 - Zone-Health-Mutation auf `degraded` fuer ALLE Zonen des Raums bei
   Crash (`_mark_room_health_degraded`-Helper)
 
-HeatingZone-granulare Iteration kommt mit Sprint 12
-(`docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §4.2 als Master-Quelle,
-inhaltlich gespiegelt in AE-51 Punkt 3 — der urspruengliche Querverweis
-„AE-51 §4.2" in dieser Klarstellung war ein Schreibfehler, AE-51 hat
-keine §-Untergliederung). Dann ist auch ein zonenscharfes try/except
-moeglich, das nur eine `HeatingZone` als `degraded` markiert statt aller
-Zonen des Raums.
+HeatingZone-granulare Iteration im **Schreib-Pfad** (Multi-Vicki-
+Dispatch, `tasks/engine_tasks.py:_dispatch_downlinks_per_zone`) ist in
+Sprint 12 umgesetzt (siehe STATUS.md §2am). **Engine-Decision-
+Iteration** bleibt room-zentrisch — `_evaluate_room_async` iteriert
+weiterhin pro Raum, Decision-Layers (Base/Temporal/Manual/Window/
+Detached/Clamp) operieren auf Room-Kontext. Verschoben bis erster
+konkreter Anwendungsfall mit pro-Zone-differenzierender Decision-
+Logik (heute existiert keine — `is_towel_warmer`-Feld auf
+`HeatingZone` ist DB-Marker ohne Engine-Konsumenten, T1-Befund aus
+Sprint 12).
+
+Zonenscharfes try/except ist damit Teil-erfuellt: Top-Level-Wrap im
+`_evaluate_room_async` bleibt Room-granular, aber `_dispatch_downlinks_
+per_zone` macht pro Vicki ein eigenes try/except + `asyncio.gather` mit
+`return_exceptions=True` — eine fehlgeschlagene Vicki blockiert die
+anderen Vickis derselben Zone nicht (Sprint-12 T2). Vollstaendige
+HeatingZone-granulare Decision-Iteration bleibt im Backlog.
+
+`docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §4.2 ist Master-Quelle fuer
+das symmetrische Schreiben (inhaltlich gespiegelt in AE-51 Punkt 3 —
+der urspruengliche Querverweis „AE-51 §4.2" in dieser Klarstellung
+war ein Schreibfehler, AE-51 hat keine §-Untergliederung).
 
 Begriffs-Mapping (Code ↔ Strategie):
 
 - `Room` (Code) = Hotel-Zimmer = strategisch „Unit"
 - `HeatingZone` (Code) = Heizkreis-Bereich (z.B. Schlafzimmer,
   Badezimmer) = strategisch „Zone"
+
+---
+
+# AE-55 — JSONB-Sub-Trace-Pattern fuer Per-Entity-Audits (Sprint 12)
+
+**Datum:** 2026-05-19
+**Status:** Akzeptiert
+**Bezug:** AE-51 P3, CLAUDE.md §5.44 (Lesson aus T2-Implementation),
+EventLog-Schema (`models/event_log.py`)
+
+## Kontext
+
+Sprint 12 T2 brauchte einen pro-Vicki-Audit-Trail im Engine-Tick
+(welcher Vicki bekam Setpoint X, mit welchem Status — sent / failed /
+skipped_hysteresis). Brief-Wortlaut „Sub-Trace pro Vicki" suggerierte
+eine Row pro Vicki im `event_log`. `EventLog`-PK ist `(time, room_id,
+evaluation_id, layer)` — mehrere Rows pro Evaluation mit demselben
+Layer sind nicht moeglich (PK-Conflict).
+
+## Entscheidung
+
+Per-Entity-Sub-Audits in Engine-Tick-Output werden via **JSONB-
+Aggregat** im bestehenden Layer-Row gespeichert, **nicht** via neuer
+Tabellen-Zeilen oder PK-Migration:
+
+1. **Sub-Trace-Position:** `HARD_CLAMP`-Layer-Row (letzte Layer-Row
+   der Pipeline, semantisch „was wurde gesendet"). Bei kuenftigen
+   Layer-Erweiterungen ggf. anderer Layer.
+2. **Schema-Konvention:**
+   - `details["downlink_per_device"] = list[dict]` mit pro Vicki
+     ``{"zone_id", "device_id", "dev_eui", "status",
+     "hysteresis_reason", "error"}``.
+   - `details["downlink_zone_status"] = list[dict]` mit pro Zone
+     ``{"zone_id", "count_sent", "count_failed", "count_skipped",
+     "all_failed"}``.
+3. **ControlCommand bleibt pro Device:** `control_command`-Tabelle
+   ist weiterhin der dedizierte Audit-Pfad pro Device-Downlink
+   (Status via `sent_to_gateway_at`-NULL).
+
+## Konsequenzen
+
+- EventLog-PK bleibt unveraendert (keine Migration).
+- Frontend Engine-Decision-Panel zeigt per-Vicki-Info aus
+  `details["downlink_per_device"]` (separate Frontend-Sprint).
+- Bei kuenftiger Analytics-Anforderung (z.B. SQL-Query auf per-Vicki-
+  Setpoint-Verlauf ueber Wochen): EventLog-PK-Erweiterung mit
+  `sub_entity_id` oder dedizierte `event_log_device`-Hypertable.
+  Bewusst aufgeschoben bis konkreter Use-Case (S6:
+  Komplexitaet traegt Beweislast).
+
+---
+
+# AE-56 — Window-State-Modul fuer geteilte Read-Helper (Sprint 12)
+
+**Datum:** 2026-05-19
+**Status:** Akzeptiert
+**Bezug:** AE-52 (Override-Reject), CLAUDE.md §5.46 (Lesson aus T4-
+Implementation), `rules/window_state.py`
+
+## Kontext
+
+Sprint 12 T4 extrahierte `detect_open_window_zones` aus
+`rules/engine.py:layer_window_open`, damit `services/override_service`
+beim POST `/override` die gleiche Window-Open-Detection nutzen kann
+(eine Source-of-Truth, kein Code-Duplikat). Direkter Import von
+`rules/engine.py` in `services/override_service.py` waere zirkulaer:
+`engine.py` importiert `services.override_service` (Layer 3).
+
+## Entscheidung
+
+Geteilte Read-Helper zwischen Engine und Services leben in einem
+neutralen `rules/<thema>_state.py`-Modul. `rules/window_state.py`
+enthaelt `detect_open_window_zones(session, room_id, now) ->
+list[dict]`. Importiert wird von:
+
+- `rules/engine.py` (Layer 4 Window-Detection).
+- `services/override_service.py` (Pre-Insert-Window-Check).
+
+Das Modul selbst hat **keine** Abhaengigkeit zu `engine.py` oder
+`services/`, nur zu `models/` und `rules/constants.py`. Kein
+Late-Import-Trick, kein zirkulaerer Import.
+
+## Konsequenzen
+
+- Neues Modul-Layout-Pattern fuer geteilte Read-Helper in `rules/`.
+- Pattern angewendbar fuer kuenftige Helper:
+  - „Aggregat-Lesen" pro Zone → `rules/aggregation.py` (existiert
+    seit Sprint 11 T3, gleiches Pattern).
+  - „Inferred-Window-Detector" → `rules/inferred_window.py` (existiert
+    seit Sprint 9.11y).
+- `services/`-Module duerfen aus `rules/<state>.py` importieren.
+- `services/` ↔ `rules/engine.py`-Direktimporte bleiben einseitig
+  (engine ruft services, nicht umgekehrt).

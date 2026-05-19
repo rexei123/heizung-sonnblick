@@ -762,7 +762,20 @@ Erlaubte `source`-Werte:
 - `frontend_midnight` — gültig bis 00:00
 - `frontend_checkout` — gültig bis Check-out der aktiven Belegung
 
-`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 400 abgelehnt).
+`setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 422 abgelehnt).
+
+**Sprint 12 (AE-52):** Bei mindestens einer HeatingZone des Raums mit aktivem `open_window=True`-Reading (frisch, healthy Device) wird der POST mit HTTP 409 abgelehnt. Body:
+
+```json
+{
+  "detail": {
+    "error": "override_rejected_window_open",
+    "zones": [{"zone_id": 42, "reading_at": "2026-05-19T09:18:12.123456+00:00"}]
+  }
+}
+```
+
+Kein DB-Insert in `manual_override`, kein `business_audit`-Eintrag, kein Engine-Trigger. Fenster schliessen, dann erneut versuchen. Symmetrie-Caveat: Helper filtert auf `Device.health_state='healthy'` — bei All-Unhealthy-Cluster geht der Override durch, obwohl physisch ein Fenster offen sein koennte (Sprint-12a-Frontend-Hinweis dazu kommt).
 
 #### Manual-Override revoken
 

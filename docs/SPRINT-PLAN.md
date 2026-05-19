@@ -749,28 +749,135 @@ lesen Ist-Temp als Mittelwert über `healthy` Vickis, Fenster-OR.
 
 # SPRINT 12 — Mehrfach-Vicki Schreiben + Fenster belegungs-abhängig (Phase 1)
 
-**Priorität:** 🔴 (Phase 1)
+**Priorität:** ✅ abgeschlossen 2026-05-19 (Tag `v0.1.17-multivicki-fenster` nach PR-Merge)
 **Geschätzte Dauer:** 1-2 Wochen
-**Autonomiestufe:** 2
+**Autonomiestufe:** 2 (T0 + T6 Doku) und 1 (T2-T5 Engine + Hardware-Pfad)
 **Voraussetzung:** Sprint 11 abgeschlossen
 **Tag nach Abschluss:** `v0.1.17-multivicki-fenster`
+**Abgeschlossen:** 2026-05-19, Branch `feat/sprint-12-multivicki-fenster`, 4 Commits T2..T5 + T6-Doku, PR tbd nach `gh pr create`.
+
+## Ziel (final umgesetzt)
+
+AE-51 P3 (symmetrische Multi-Vicki-Setpoint-Submission, healthy-Filter,
+per-Vicki-Hysterese, `asyncio.gather`+individuelles try/except) und
+AE-52 (Layer 4 occupancy-aware + Override-Reject 409). Engine-Decision-
+Iteration bleibt room-zentrisch (D1: keine pro-Zone-differenzierende
+Engine-Logik existiert — `is_towel_warmer` ist DB-Marker ohne Konsumenten).
+
+## Tasks (umgesetzt)
+
+- **T0** Doku-Cleanup + Test-Helper (T0-PR #159 merged): STATUS §1+§9, SPRINT-PLAN Sprint-11-PR, AE-54-Querverweis-Fix, conftest.py `enable_heizung_log_propagation` + `purge_test_data_by_prefix`.
+- **T2** Schreib-Pfad Multi-Vicki symmetrisch (`168e2b2`): `_dispatch_downlinks_per_zone`, `_get_zone_devices` (healthy-Filter, D3-Fix), `_last_command_for_device` (per-Vicki-Hysterese, D5), JSONB-Sub-Trace im HARD_CLAMP-Row (D7/AE-55). Room-Level `hysteresis_decision` aus Trace entfernt (§5.20-Drift). +7 DB-Tests.
+- **T3** Layer 4 occupancy-aware (`2ee8a96`): `layer_window_open` belegungs-abhaengig (VACANT→Frostschutz, OCCUPIED→`default_t_vacant`-Setback), Override-Maskierungs-Marker, Signatur unveraendert (kleine Variante D4). +3 DB-Tests + Test 6 enhanced. D8: Reason bleibt `WINDOW_OPEN`, Differenzierung via detail+extras (Enum-Length-30-Constraint).
+- **T4** Override-Reject 409 (`cd96952`): Helper `detect_open_window_zones` extrahiert in `rules/window_state.py` (D12/AE-56), `OverrideRejectedWindowOpenError` in override_service, API-409-Mapping. +8 DB-Tests (3 Helper + 3 Service + 2 API).
+- **T5** E2E-Verbund (`5da9f1b`): `tests/test_sprint12_e2e.py` mit 7 Szenarien A-G (Engine-Tick A-E, HTTP F-G).
+- **T6** Doku-Update (dieser Commit): STATUS §2am, CLAUDE §5.42-§5.48, AE-52-Praezisierung + AE-54-Klarstellung + AE-55 + AE-56, SPRINT-PLAN Sprint-12-Abschluss + Sprint-12a-Block + Backlog.
+
+## Definition of Done
+
+- ruff/mypy strict/pytest grün (Backend): 189 passed, 197 skipped (DB-Tests skip-modus lokal, CI-Pipeline fährt sie).
+- Frontend unbetroffen (kein Frontend-Touch in Sprint 12 — Hinweis-UI verschoben in Sprint 12a).
+- PR auf `develop` (tbd), Tag `v0.1.17-multivicki-fenster` nach Strategie-Chat-Freigabe.
+- STATUS §2am-Eintrag (in diesem Commit gesetzt).
+
+## Drift-Befunde (in CLAUDE.md §5.42-§5.48 verankert)
+
+- **D1** Brief-Annahme „Sprint-9-Handtuchtrockner-Logik" — existiert nicht (§5.43).
+- **D2** Feldname `free_target_c` existiert nicht — `default_t_vacant` (AE-52 Praezisierung).
+- **D3** `_get_room_devices` filterte nicht auf health_state — neue `_get_zone_devices` mit `healthy`-Filter.
+- **D7** EventLog-PK zwingt JSONB-Sub-Trace (§5.44 / AE-55).
+- **D8** `CommandReason`-Length-30 zwingt detail-Differenzierung (§5.45).
+- **D11** Pass-Through-Pfad Layer 4: 2 Queries (Helper + Diagnostic) — Optimierungs-Backlog.
+- **D12** Helper in `rules/window_state.py` statt `engine.py` (zirk. Imports, §5.46 / AE-56).
+- **D14** Override-Reject filtert auf healthy — UX-Konsequenz bei All-Unhealthy-Cluster, Sprint-12a-Frontend-Hinweis.
+- **D15** `purge_test_data_by_prefix` raeumt Devices nicht — Backlog T0-Helper-Erweiterung.
+- **D16** `TEST_DATABASE_URL` vs `DATABASE_URL`-Konvention (§5.48 / Backlog).
+
+## Nicht-Ziele eingehalten
+
+- Engine-Iteration bleibt room-zentrisch (AE-54-Klarstellung).
+- Override-DB-Migration `zone_id`: verschoben nach Sprint 12a.
+- Frontend Override-Panel pro Zone + Fenster-Vorpruefung: verschoben nach Sprint 12a.
+- Handtuchtrockner-Spezial-Logik: weiterhin nicht im Scope.
+
+## Folge-Sprint-Backlog (T7-Vormerke aus Sprint 12)
+
+- **T0-Helper `purge_test_data_by_prefix` um Device-Cleanup erweitern** (D15-Folge). Aktuell raeumt der Helper nur Rooms+RoomTypes via CASCADE, Devices bleiben orphan wegen `Device.heating_zone_id`-FK mit `ondelete=SET NULL`. Lokaler `_purge_orphan_devices`-Helper in `test_sprint12_e2e.py` zeigt das Pattern. Konsolidierung in conftest.py-Helper im naechsten Hygiene-Sprint.
+- **Test-Fixture-Konsolidierung `_migrate_and_seed_admin` / `_ensure_test_admin`** (D16-Folge). Sprint-12-E2E hat eigene module-scoped Migration+Admin-Fixture parallel zu conftest, weil conftest `DATABASE_URL` liest und E2E `TEST_DATABASE_URL` pinnt. Beide idempotent, aber duplizierte Logik. Zusammen mit dem env-Var-Cleanup (naechster Punkt).
+- **`TEST_DATABASE_URL` vs `DATABASE_URL`-Konvention konsolidieren** (D16 / §5.48-Folge). Bestand mischt beide env Vars (`test_engine_isolation.py`: TEST_DATABASE_URL; `test_api_overrides.py`: DATABASE_URL). Sprint-12-E2E hat eine Brueckenkonvention etabliert; vollstaendige Konsolidierung im naechsten Hygiene-Sprint.
+- **Layer-4-Helper Pass-Through 2-Query-Reduktion** (D11). `layer_window_open` macht im Pass-Through-Pfad jetzt 2 Queries (Helper + Diagnostic). Optimierung via Return-Tuple `(open_zones, diagnostic_counts)` — nur sinnvoll wenn Engine-Load-Profil je relevant wird (z.B. > 200 Raeume, > 60-s-Beat).
+- **`_last_command_for_room` final entfernen** sobald `setpoint_in`-Lookup in `_evaluate_room_async` per-Vicki migriert wurde. Heute noch fuer Legacy-Audit aktiv (Docstring „ausschliesslich fuer Legacy-Lookups, NICHT in Decision-Pfade einbinden"). Cleanup-Sprint nach Sprint 12a oder spaeter.
+- **EventLog-PK-Migration auf `(time, room_id, evaluation_id, layer, sub_entity_id)`** — nur wenn konkreter Analytics-Use-Case auftritt (D7 / AE-55). Aktuell JSONB-Aggregat in `details["downlink_per_device"]` ausreichend. Bei SQL-Analytics-Bedarf (z.B. per-Vicki-Setpoint-Verlauf ueber Wochen) eigener Migration-Sprint.
+
+---
+
+# SPRINT 12a — Override-Zone-Scope + Frontend-Hinweis (Phase 1, Folge-Sprint)
+
+**Priorität:** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
+**Geschätzte Dauer:** 4-6 h
+**Autonomiestufe:** 1 (DB-Migration + Frontend-Touch)
+**Voraussetzung:** Sprint 12 abgeschlossen + gemerged + Tag `v0.1.17-multivicki-fenster` gesetzt
+**Tag nach Abschluss:** `v0.1.17a-override-zone-scope`
+
+> **Numerierungs-Drift Sprint 12 T6 (D17):** Brief-Wortlaut sagte
+> „Sprint-13-Block NEU anlegen" — kollidiert mit bereits existentem
+> Sprint 13 (Pairing-Wizard). Pragmatisch als Sprint 12a benannt
+> (Sub-Sprint-Pattern wie Sprint 11-Prep), keine Cascade-Renumbering
+> der nachfolgenden Sprints noetig. Tag-Slot `v0.1.17a-…` analog
+> reserviert.
 
 ## Ziel
 
-AE-51 (Schreiben symmetrisch) + AE-52 (Fenster belegungs-
-abhängig) implementieren. Setpoint-Downlinks symmetrisch an alle
-Vickis einer Zone. Engine Layer 4 reagiert auf `occupancy_state`:
-Zone frei + Fenster offen → Frostschutz 10°C, Zone belegt + Fenster
-offen → Frei-Sollwert aus Raumtyp. Override während Fenster offen
-wird ignoriert (Gast und Mitarbeiter).
+Override-Domain auf Zone-Scope umstellen + Frontend-UX fuer Fenster-
+offen-Reject. Sprint 12 hat Schreib-Pfad zonen-iteriert + Engine
+Layer 4 Window-aware gemacht; Override bleibt heute Room-scoped, das
+Frontend zeigt aber bereits Zonen-Granularitaet — Mismatch.
 
 ## Tasks (Skizze)
 
-- Engine Layer 4: Signatur-Erweiterung um `occupancy_state`, neue Default-Quelle aus `room_type.free_target_c`
-- Downlink-Adapter: symmetrisches Setpoint-Schreiben für alle Vickis einer Zone
-- Override-Pfad: Ignorieren während Fenster offen (Gast via `manual_setpoint`-Field, Mitarbeiter via UI)
-- Frontend: Hinweis „Fenster offen — Override wirkt nicht" auf Override-UI
-- Tests: belegungs-abhängige Reaktion, Override-Ignorieren, symmetrische Downlinks
+- DB-Migration `manual_override.zone_id` (`heating_zone_id`)
+  nullable, Default NULL. Bestehende Rows behalten NULL → Room-Scope.
+  Spaeter (Sprint 12b) NOT NULL + Default-Backfill auf
+  „Hauptzone des Raums".
+- `services/override_service` Signatur-Erweiterung um optionalen
+  `heating_zone_id`-Parameter in `create()` / `get_active()` /
+  `get_history()` / `revoke_device_overrides()`. Room-Scope bleibt
+  Default fuer Backward-Compat.
+- API-Endpoints `/api/v1/rooms/{room_id}/overrides` um Query-Param
+  `zone_id` erweitern (POST + GET). Bestehende ohne-Zone-Aufrufer
+  bleiben Room-scoped.
+- Engine Layer 3 (`layer_manual_override`) zone-aware: pro Zone
+  nach Zone-Override suchen, Room-Fallback wenn keiner.
+- **Frontend** Override-Panel pro Zone (B-LT-2-followup-1-aequivalent
+  fuer Override-UI). Vor POST: GET-Aufruf an neuen Endpoint
+  `/api/v1/rooms/{room_id}/window-state` (oder Query auf Layer 4
+  Aggregat) — wenn Zone offen, UI deaktiviert Override-Button + zeigt
+  Hinweis-Text „Fenster offen — Override nicht moeglich, bitte
+  Fenster schliessen". Sprint-12-R4-Erledigung.
+- **D14-Folge:** Frontend zeigt zusaetzlich Warnung bei
+  All-Unhealthy-Cluster („Devices offline — Status veraltet,
+  Override moeglich aber Wirkung unklar bis Hardware-Recovery").
+- Tests: Migration-Roundtrip, Service-API Zone-Scope, Engine Layer 3
+  zone-Lookup, Frontend Playwright (Override-Disable bei Fenster
+  offen).
+
+## Begründung
+
+Sprint 12 hat Schreib-Pfad und Read-Helper zonen-iteriert. Override-
+Tabelle ist die letzte Inkonsistenz — Frontend kann pro Zone
+deaktivieren, Backend kennt aber nur Room-Override. R4 aus
+Sprint 12 (Frontend sendet POST ohne Fenster-Vorpruefung →
+oefter 409) wird mit dieser Vorpruefung erledigt.
+
+## Risiken
+
+- **R4 Sprint-12** (Frontend-Vorpruefung): wird mit Sprint 12a
+  erledigt.
+- DB-Migration: bestehende Override-Rows bleiben Room-scoped via
+  NULL. Backward-Compat-Test in pytest noetig (alte API-Rufe ohne
+  `zone_id` muessen weiter funktionieren).
+- Engine Layer 3 zone-Lookup-Priorisierung: Zone-Override > Room-
+  Override > kein Override. Reihenfolge dokumentieren in AE-Ergaenzung.
 
 ---
 
@@ -979,7 +1086,8 @@ Pilot-Go-Live Oktober Woche 1.
 | `v0.1.14-auth` | Auth-Track komplett (9.17 + 9.17a + 9.17b) |
 | `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep: Doku-Konsolidierung Zuordnungs-Architektur |
 | `v0.1.16-health-aggregat` | Sprint 11: Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (AE-51/53/54) |
-| `v0.1.17-multivicki-fenster` | Sprint 12: Mehrfach-Vicki Schreiben + Fenster belegungs-abhängig (AE-51/52) |
+| `v0.1.17-multivicki-fenster` | Sprint 12: Mehrfach-Vicki Schreiben + Fenster belegungs-abhängig + Override-Reject 409 (AE-51 P3 / AE-52 / AE-55 / AE-56) |
+| `v0.1.17a-override-zone-scope` | Sprint 12a (Folge): Override-Zone-Scope + Frontend-Hinweis (Fenster-offen-Vorpruefung, R4-Erledigung) |
 | `v0.1.18-pairing-wizard` | Sprint 13: Pairing-Wizard + Mass-Pairing-CSV + Eingangstest |
 | `v0.1.19-cross-sicht-ui` | Sprint 14: Cross-Sicht-UI + Health-Badges + Mail-Platzhalter |
 | `v0.1.20-arc42-konsolidierung` | Sprint 14b: arc42-Doku-Konsolidierung (Phase-1-Abschluss) |
