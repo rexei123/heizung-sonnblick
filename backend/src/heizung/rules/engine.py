@@ -772,16 +772,57 @@ async def _last_command_for_room(
 ) -> tuple[int, datetime] | None:
     """Letzter erfolgreich gesendeter ControlCommand fuer ein Device des Raums.
 
-    Hysterese arbeitet auf der Pro-Raum-Ebene (Engine-Output ist 1 Setpoint
-    pro Raum). Wenn ein Raum mehrere Devices hat, ist der juengste Command
-    eines beliebigen Device der Vergleichswert — bei Multi-Device-Raeumen
-    bleibt das in Sprint 9 ein bekannter Approximationsfehler (Backlog).
+    DEPRECATED ab Sprint 12 T2 (AE-51 P3 + D5): Hysterese ist ab Sprint 12
+    per-Vicki via ``_last_command_for_device``. Funktion bleibt
+    **ausschliesslich fuer Legacy-Lookups** erhalten (z.B. Engine-Trace-
+    Konsistenz mit historischen control_command-Rows), **NICHT in
+    Decision-Pfade einbinden**.
+
+    Verbleibender legitimer Aufrufer: ``setpoint_in``-Lookup in
+    ``_evaluate_room_async`` (reines Audit, kein Decision-Gate). Bei
+    Cleanup-Sprint: ``setpoint_in`` zuerst Per-Vicki migrieren, dann
+    diese Funktion entfernen.
+
+    Hysterese arbeitete vor Sprint 12 auf der Pro-Raum-Ebene (Engine-Output
+    ist 1 Setpoint pro Raum). Wenn ein Raum mehrere Devices hat, ist der
+    juengste Command eines beliebigen Device der Vergleichswert — bei
+    Multi-Device-Raeumen war das ein bekannter Approximationsfehler. Sprint
+    12 loest das auf, indem jeder Vicki seinen eigenen Hysterese-Check
+    gegen seinen eigenen letzten Setpoint bekommt.
     """
     stmt = (
         select(ControlCommand.target_setpoint, ControlCommand.issued_at)
         .join(Device, Device.id == ControlCommand.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(ControlCommand.sent_to_gateway_at.is_not(None))
+        .order_by(ControlCommand.issued_at.desc())
+        .limit(1)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        return None
+    setpoint, issued_at = row
+    return _quantize(setpoint), issued_at
+
+
+async def _last_command_for_device(
+    session: AsyncSession, device_id: int
+) -> tuple[int, datetime] | None:
+    """Letzter erfolgreich gesendeter ControlCommand fuer ein spezifisches
+    Device (Sprint 12 T2, AE-51 P3 + D5).
+
+    Pro-Vicki-Hysterese: jeder Vicki bekommt seinen eigenen Hysterese-
+    Check basierend auf seinem letzten gesendeten Setpoint, NICHT auf
+    dem Raum-Approximations-Setpoint aus ``_last_command_for_room``
+    (deprecated).
+
+    Returns: ``(setpoint_c_int, issued_at)`` oder ``None`` wenn kein
+    erfolgreich gesendeter ControlCommand fuer dieses Device existiert.
+    """
+    stmt = (
+        select(ControlCommand.target_setpoint, ControlCommand.issued_at)
+        .where(ControlCommand.device_id == device_id)
         .where(ControlCommand.sent_to_gateway_at.is_not(None))
         .order_by(ControlCommand.issued_at.desc())
         .limit(1)
