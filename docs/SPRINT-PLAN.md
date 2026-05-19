@@ -709,12 +709,12 @@ ergänzen, Cross-Referenz-Check, Lint, Abschluss-Bericht.
 
 # SPRINT 11 — Health-State + Plausi + Zone-Isolation + Aggregat-Lesen (Phase 1)
 
-**Priorität:** ✅ abgeschlossen 2026-05-18 (Tag pending: `v0.1.16-health-aggregat` nach Merge)
+**Priorität:** ✅ abgeschlossen 2026-05-18 (Tag `v0.1.16-health-aggregat`)
 **Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 2
 **Voraussetzung:** Sprint 11-Prep abgeschlossen; Sprint 10/10a/b/c durch
 **Tag nach Abschluss:** `v0.1.16-health-aggregat`
-**Abgeschlossen:** 2026-05-18, 9 Commits auf Branch `feature/sprint-11-health-aggregat` (9 ahead develop), PR #<TBD nach gh pr create>
+**Abgeschlossen:** 2026-05-18, 9 Commits auf Branch `feature/sprint-11-health-aggregat`, PR #158 gemerged (Merge-Commit `6a8f2ae`)
 **Test-Counts:** 261+1 (vor Sprint 11) → 360+1 (nach T6), +99 neue Tests
 **Implementiert:** AE-51 §4.1 (Aggregat-Lesen), AE-53 (Health-State + Plausi + 3-Stufen-Alarm), AE-54 (Engine-Isolation, Room-zentrisch — Zone-granular kommt Sprint 12)
 

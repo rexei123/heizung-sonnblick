@@ -1453,10 +1453,13 @@ Sprint 11 hat das AE-54-Versprechen folgendermassen umgesetzt:
 - Zone-Health-Mutation auf `degraded` fuer ALLE Zonen des Raums bei
   Crash (`_mark_room_health_degraded`-Helper)
 
-HeatingZone-granulare Iteration kommt mit Sprint 12 (AE-51 §4.2,
-Schreib-Pfad). Dann ist auch ein zonenscharfes try/except moeglich,
-das nur eine `HeatingZone` als `degraded` markiert statt aller Zonen
-des Raums.
+HeatingZone-granulare Iteration kommt mit Sprint 12
+(`docs/STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §4.2 als Master-Quelle,
+inhaltlich gespiegelt in AE-51 Punkt 3 — der urspruengliche Querverweis
+„AE-51 §4.2" in dieser Klarstellung war ein Schreibfehler, AE-51 hat
+keine §-Untergliederung). Dann ist auch ein zonenscharfes try/except
+moeglich, das nur eine `HeatingZone` als `degraded` markiert statt aller
+Zonen des Raums.
 
 Begriffs-Mapping (Code ↔ Strategie):
 
