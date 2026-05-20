@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-20. Sprints 0-12 abgeschlossen, Sprint 12a (Override-Zone-Scope + OCCUPIED-Gate + AE-58, Backend-only) auf Branch `feat/sprint12a-override-zone-scope` fertig (7 Commits T1-T7), wartet auf PR-Freigabe + Live-Verify auf heizung-test. Tag `v0.1.17a-override-zone-scope-backend` nach Merge.
+**Stand:** 2026-05-20. Sprints 0-12 + 12a abgeschlossen, Tag `v0.1.17a-override-zone-scope-backend` auf develop (PR #162 squash-merged, Squash-Commit `0a6e5ae`, Live-Verify auf heizung-test erfolgreich). Sprint 12b (Frontend Zone-Override-Panels) als naechster Sprint in SPRINT-PLAN.md vorbereitet.
 
 ---
 
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-20
-**Letzter Tag (gemerged):** `v0.1.17-multivicki-fenster` (Sprint 12, Squash-Commit `c9f58d1`, gemerged 2026-05-19).
-**Aktueller Sprint:** Sprint 12a (Override-Zone-Scope + OCCUPIED-Gate + AE-58, Backend-only). Branch `feat/sprint12a-override-zone-scope` mit 7 Commits T1-T7 fertig (T0 Phase-0 ohne Commit, T1 Migration, T2 Service, T3 API, T4 device_adapter, T5 Engine, T6 PMS-Hook-Tests, T7 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17a-override-zone-scope-backend` nach Strategie-Chat-Freigabe + Live-Verify auf heizung-test.
+**Letzter Tag:** `v0.1.17a-override-zone-scope-backend` (Sprint 12a, Squash-Commit `0a6e5ae`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
+**Aktueller Sprint:** Sprint 12a abgeschlossen 2026-05-20, PR #162 squash-merged, Tag gesetzt, Live-Verify auf heizung-test sauber (Override-Lifecycle End-to-End, Migration 0016 angewendet, Engine-Tick gesund). Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check + 422/409-differenzierte Fehler-Anzeige + room_blocked-Slot-Stub) als naechster Sprint in SPRINT-PLAN.md vorbereitet, Start nach Strategie-Chat-Freigabe.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1727,13 +1727,15 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 
 ---
 
-## 2an. Sprint 12a Override-Zone-Scope + AE-58 Konsolidierung (Backend-only, 2026-05-20)
+## 2an. Sprint 12a Override-Zone-Scope + AE-58 Konsolidierung (Backend-only, 2026-05-20, abgeschlossen)
 
 **Ziel:** Override-Modell konsolidieren auf strategie-konformen Zustand (AE-58). Zone-scoped Overrides (`manual_override.heating_zone_id`), OCCUPIED-Gate (Override nur fuer belegte Zimmer), AE-29 + AE-45 abgeloest, Mitarbeiter > Gast Prioritaet, Window-Open trumpft alle Quellen, Auto-Revoke bei Check-out fuer alle Quellen (`revoke_all_active_overrides` ersetzt `revoke_device_overrides`). Engine Layer 3 zone-aware via `RuleResult.zone_overrides` (Option G), Layer 4/5 + Dispatch mit Pass-Through.
 
-**Tag-Vorschlag:** `v0.1.17a-override-zone-scope-backend` nach Merge + Live-Verify auf heizung-test.
+**Tag:** `v0.1.17a-override-zone-scope-backend` (annotated, gesetzt 2026-05-20 auf Squash-Commit `0a6e5ae`).
 
-**Branch:** `feat/sprint12a-override-zone-scope`, 7 Commits T1-T7 (T0 Phase-0-Quellcheck ohne Commit).
+**PR:** [#162](https://github.com/rexei123/heizung-sonnblick/pull/162) squash-merged 2026-05-20T12:26:04Z (Squash-Commit `0a6e5ae`).
+
+**Branch:** `feat/sprint12a-override-zone-scope` (7 Commits T1-T7 ueber develop, nach Merge geloescht via `--delete-branch`; T0 Phase-0-Quellcheck ohne Commit).
 
 **Commits:**
 
@@ -1779,6 +1781,16 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 - AE-29 `manual_setpoint_event`-Cleanup (DROP TABLE + Modell + Schema + Relationships) verschoben in B-12a-1.
 
 **Querverweise:** AE-58 (Master-ADR fuer Override-Modell), AE-29 (abgeloest), AE-45 (abgeloest), AE-52 (Praezisierung Device-Pfad silent skip), AE-54-Klarstellung (Layer 3 zone-aware), CLAUDE.md §5.51-§5.53 (3 neue Lessons aus Sprint 12a).
+
+### Live-Verify-Befund heizung-test (2026-05-20)
+
+- Commit `0a6e5ae` auf Server (Auto-Pull-Timer hat gezogen).
+- Migration `0016_manual_override_zone_id` angewendet, `alembic current` → `0016_manual_override_zone_id (head)`.
+- `manual_override`-Schema verifiziert: `heating_zone_id integer NULL`, FK `fk_manual_override_heating_zone ON DELETE SET NULL`, Partial Index `ix_manual_override_active_zone (room_id, heating_zone_id, created_at DESC) WHERE revoked_at IS NULL`; Bestands-Constraints (`ck_manual_override_setpoint_range`, `ck_manual_override_source`) unveraendert.
+- API gesund: Container-Stack Up. Override-Lifecycle End-to-End sauber durchgefuehrt — Raum 201 Frontend-Override anlegen (201 Created mit `heating_zone_id: null` Backward-Compat-Pfad), Revoke via DELETE.
+- Engine-Tick laeuft sauber (MQTT-Uplinks persistiert, `evaluate_room` geschedult).
+- Sommermodus auf heizung-test aktiv (Layer 0 Fast-Path → Layers 1-5 geskippt) — T3/T4 Zone-Override-Wirkung in Real-Hardware-Pfad strukturell nicht beobachtbar bis Heizperiode 2026/27. CI-Coverage 413 Tests ist die harte Verifikations-Anker (analog Sprint 12 STATUS §2am R3, Window-Detection).
+- Keine Drifts beobachtet, keine 500/Stack-Trace im API-Container-Log.
 
 ---
 
@@ -2062,7 +2074,7 @@ Secrets liegen in:
 | `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep (Doku-Konsolidierung Zuordnungs-Architektur, STRATEGIE-THERMOSTAT-ZUORDNUNG + AE-51..AE-54, PR #157) | 2026-05-16 |
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
-| `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest) | 2026-05-20 (nach Merge + Live-Verify) |
+| `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
