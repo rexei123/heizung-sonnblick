@@ -188,9 +188,16 @@ export interface Room {
   floor: number | null;
   orientation: Orientation | null;
   status: RoomStatus;
+  guest_override_blocked: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// Sprint 12c (AE-58): Body fuer PATCH /rooms/{id}/override-block-state.
+// Eigener Endpoint, NICHT Teil von RoomUpdate.
+export interface RoomOverrideBlockUpdate {
+  blocked: boolean;
 }
 
 export interface RoomCreate {
@@ -463,7 +470,10 @@ export type CommandReason =
   // Sprint 12a T4 (AE-58): Reasons fuer MANUAL_OVERRIDE_BLOCKED-Layer-
   // Rows. Beide nur im Device-Adapter-Off-Pipeline-Pfad geschrieben.
   | "device_blocked_vacant"
-  | "device_blocked_window";
+  | "device_blocked_window"
+  // Sprint 12c (AE-58): Uebersteuerungs-Sperre aktiv -> Vicki-Drehring
+  // silent geskippt.
+  | "device_blocked_room_blocked";
 
 // ---------------------------------------------------------------------------
 // Manual Override (Sprint 9.9 - Engine Layer 3)

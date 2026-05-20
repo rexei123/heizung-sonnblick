@@ -23,4 +23,8 @@ export const roomsApi = {
   // Sprint 9.5: Engine-Trace fuer Decision-Panel.
   engineTrace: (id: number, limit = 50): Promise<EventLogEntry[]> =>
     apiClient.get<EventLogEntry[]>(`${BASE}/${id}/engine-trace?limit=${limit}`),
+
+  // Sprint 12c (AE-58): Uebersteuerungs-Sperre togglen.
+  patchOverrideBlockState: (id: number, blocked: boolean): Promise<Room> =>
+    apiClient.patch<Room>(`${BASE}/${id}/override-block-state`, { blocked }),
 };

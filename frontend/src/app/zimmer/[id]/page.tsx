@@ -14,9 +14,11 @@ import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { ManualOverridePanelList } from "@/components/patterns/manual-override-panel-list";
 import { RoomForm } from "@/components/patterns/room-form";
+import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useDetachDeviceZone, useDevices } from "@/lib/api/hooks";
+import { useRoomOverrides } from "@/lib/api/hooks-overrides";
 import {
   useDeleteRoom,
   useHeatingZones,
@@ -34,6 +36,12 @@ export default function ZimmerDetailPage() {
   const room = useRoom(id);
   const updateMut = useUpdateRoom(id ?? 0);
   const deleteMut = useDeleteRoom();
+  // Sprint 12c: aktive Override-Anzahl fuer Confirm-Dialog im Toggle.
+  const overridesQuery = useRoomOverrides(id ?? 0, { include_expired: false });
+  const activeOverridesCount = (overridesQuery.data ?? []).filter(
+    (o) =>
+      o.revoked_at === null && new Date(o.expires_at).getTime() > Date.now(),
+  ).length;
   const [tab, setTab] = useState<Tab>("stammdaten");
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -92,7 +100,7 @@ export default function ZimmerDetailPage() {
         </Link>
       </div>
 
-      <header className="mb-6 flex items-center justify-between">
+      <header className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-medium text-text-primary">
             Zimmer {room.data.number}
@@ -101,14 +109,20 @@ export default function ZimmerDetailPage() {
             <p className="text-sm text-text-secondary mt-1">{room.data.display_name}</p>
           ) : null}
         </div>
-        <Button
-          variant="destructive"
-          icon="delete"
-          onClick={() => setConfirmDelete(true)}
-          disabled={deleteMut.isPending}
-        >
-          Zimmer löschen
-        </Button>
+        <div className="flex items-start gap-3">
+          <RoomOverrideBlockToggle
+            room={room.data}
+            activeOverridesCount={activeOverridesCount}
+          />
+          <Button
+            variant="destructive"
+            icon="delete"
+            onClick={() => setConfirmDelete(true)}
+            disabled={deleteMut.isPending}
+          >
+            Zimmer löschen
+          </Button>
+        </div>
       </header>
 
       <div className="border-b border-border mb-4 flex gap-4 text-sm">

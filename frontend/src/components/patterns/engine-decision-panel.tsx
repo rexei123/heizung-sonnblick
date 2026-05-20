@@ -73,6 +73,7 @@ const REASON_LABEL: Record<CommandReason, string> = {
   manual_event: "Manueller Event",
   device_blocked_vacant: "Geraet blockiert (Zimmer nicht belegt)",
   device_blocked_window: "Geraet blockiert (Fenster offen)",
+  device_blocked_room_blocked: "Geraet blockiert (Zimmer Uebersteuerung gesperrt)",
 };
 
 interface Props {

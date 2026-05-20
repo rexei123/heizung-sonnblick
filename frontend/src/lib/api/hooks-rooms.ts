@@ -96,6 +96,23 @@ export function useDeleteRoom(): UseMutationResult<void, Error, number> {
   });
 }
 
+// Sprint 12c (AE-58): Uebersteuerungs-Sperre togglen.
+// Invalidiert Room (neuer guest_override_blocked-Stand) und die Override-Liste
+// des Raums (Toggle-On revoked aktive Overrides serverseitig).
+export function useSetRoomOverrideBlockState(
+  id: number,
+): UseMutationResult<Room, Error, boolean> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (blocked: boolean) => roomsApi.patchOverrideBlockState(id, blocked),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ROOM_KEYS.one(id) });
+      qc.invalidateQueries({ queryKey: ROOM_KEYS.all });
+      qc.invalidateQueries({ queryKey: ["overrides", id] });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Heizzonen
 // ---------------------------------------------------------------------------
