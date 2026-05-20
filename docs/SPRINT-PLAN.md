@@ -1007,43 +1007,25 @@ Frontend-UX an das in Sprint 12a etablierte Backend-Override-Modell
 
 ---
 
-# SPRINT 12c — Zimmer-Sperre `room.guest_override_blocked` (Phase 1, Folge-Sprint zu 12b)
+# SPRINT 12c — Uebersteuerungs-Sperre `room.guest_override_blocked` (ABGESCHLOSSEN 2026-05-20)
 
-**Priorität:** 🟢 (Phase-1-Folge, nach 12b oder spaeter)
-**Geschätzte Dauer:** 3-5 h
-**Autonomiestufe:** 1 (DB-Migration + Pre-Insert-Gate in beiden Override-Pfaden)
-**Voraussetzung:** Sprint 12b abgeschlossen + gemerged
-**Tag nach Abschluss:** `v0.1.17c-room-blocked`
+**Status:** ✅ Abgeschlossen 2026-05-20 (T1-T9, Branch `feat/sprint12c-room-override-blocked`)
+**Tag nach Merge:** `v0.1.17c-room-override-blocked`
+**Autonomiestufe:** 1 (DB-Migration produktiv + Engine/Adapter + neuer API-Mutator + Auto-Revoke mit Audit)
 
-## Ziel
+## Ergebnis
 
-Zimmer-Ebene-Override-Sperre als Override-Gate-Erweiterung (AE-58
-Punkt 2): Hotelier kann ein Zimmer komplett von Override-Anlage
-aussperren (z.B. fuer Compliance-Tests, Wartungs-Sperre, Gast-
-Beschwerden ueber zu warme Vickis).
+Uebersteuerungs-Sperre als Mitarbeiter-Toggle (`PATCH /rooms/{id}/override-block-state`). Block-Gate liegt im `override_service.create()` als Single-Source-of-Truth; Device-Adapter spiegelt das Gate als Pre-A vor OCCUPIED + Window-Check und schreibt off-pipeline `EventLogLayer.MANUAL_OVERRIDE_BLOCKED` mit neuem `CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED`. Toggle-On triggert `revoke_all_active_overrides(reason="room_override_blocked")` (source-agnostic), BusinessAudit-Action `ROOM_OVERRIDE_BLOCK_TOGGLED` mit `new_value.revoked_overrides_count`. Frontend: Toggle im Zimmer-Detail-Header (Lock-Symbol), Sperre-Banner im Override-Tab, Create-Form versteckt waehrend blocked. Engine bleibt unangetastet (kein neuer Layer).
 
-## Tasks (Skizze)
+**Diff-Stats:** Backend +1 Migration, +1 Test-Datei (`test_api_rooms.py`), 8 Source-Files. Frontend +1 Component (`RoomOverrideBlockToggle`), +1 E2E-Spec (4 Cases §5.54-konform), 7 Source-Files. Backend-Tests 426 passed; Frontend-E2E 51/51 gruen.
 
-- Migration `0017_room_guest_override_blocked.py`: `ALTER TABLE
-  room ADD COLUMN guest_override_blocked BOOLEAN NOT NULL DEFAULT
-  FALSE`
-- `override_service.create()` Pre-Insert-Gate: wenn
-  `room.guest_override_blocked=True` → `RoomBlockedError`. Reihenfolge:
-  OCCUPIED → ROOM_BLOCKED → Window-Open.
-- API `/api/v1/overrides.py` POST: 409
-  `{"error": "room_blocked", "room_id": X}` Mapping (Anker-Kommentar
-  in Sprint-12a T3 schon platziert)
-- `device_adapter.handle_uplink_for_override`: silent skip + Audit
-  (Reason `DEVICE_BLOCKED_ROOM`), AE-58 Punkt 9
-- Neue Enum-Werte: `CommandReason.DEVICE_BLOCKED_ROOM` (VARCHAR(30))
-- Frontend: Toggle in Zimmer-Detail-Header (Mitarbeiter-Right),
-  Sperr-Banner sichtbar fuer Hotelier
-- Tests: Pre-Insert-Gate (beide Pfade), API 409, Frontend Toggle E2E
+**Querverweise:** STATUS §2aq, AE-58 (Sprint-12c-Ergaenzung), §5.49 (Test-Fixture-Anpassung Raw-SQL), §5.51 (Domain-Invariante Block-Gate vor OCCUPIED-Gate), §5.52 (Off-Pipeline-Audit fuer Pre-A-Gate).
 
-## Out of Scope
+## Out of Scope (Backlog)
 
-- Vicki-Hardware-Child-Lock via Downlink 0x07 (B-12c-1 Backlog,
-  nach erstem Winter)
+- B-12c-AuditGap: `auto_revoke_on_checkout` schreibt weiterhin kein Audit.
+- B-12c-1: Vicki-Hardware-Child-Lock via Downlink 0x07 (separater Sprint).
+- Zimmer-Liste-Indikator (Schloss-Symbol in Tabelle).
 
 ---
 

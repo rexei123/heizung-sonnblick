@@ -1349,6 +1349,49 @@ Skip-Step enthaelt nur Echo-Output.
 Querverweis: §5.10 (Workflow-Reporting-Race), §5.25 (stale concurrency-
 cancel), §5.54 (Playwright route() Glob vs. Regex)
 
+### 5.56 Migration-Roundtrip-Tests muessen bei NOT-NULL ohne DB-Default revisionsabhaengig inserten (Sprint 12c Lesson)
+
+Wenn eine Migration eine `NOT NULL`-Spalte hinzufuegt und der
+Server-Default direkt danach via `alter_column(server_default=None)`
+wieder entfernt wird (Default lebt im ORM-Modell), brechen alle
+Raw-SQL-INSERTs in Bestands-Tests, die die neue Spalte nicht
+explizit setzen. §5.49 deckt diese Klasse generell ab, aber
+**Migration-Roundtrip-Tests sind ein Spezialfall**: sie inserten
+absichtlich an unterschiedlichen Revision-Staenden (z.B. bei
+`command.downgrade(0014)` ist `room.guest_override_blocked` noch
+nicht vorhanden). Pauschales „Spalte ueberall ergaenzen" bricht
+dann genau diese Tests in die Gegenrichtung — Spalte existiert
+am downgrade-Punkt schlicht nicht.
+
+**Regel fuer neue migrations-erweiternde Spalten:** In den
+Roundtrip-Test-Files (`test_migrations_roundtrip.py`) jeden
+Raw-SQL-`INSERT` einzeln pruefen:
+
+- INSERT bei `command.upgrade(alembic_cfg, "head")` -> Spalte
+  ergaenzen (`guest_override_blocked, false`).
+- INSERT bei `command.downgrade(alembic_cfg, "<rev-vor-deiner>")`
+  -> Spalte NICHT ergaenzen, kurzer Kommentar warum.
+
+Sprint-12c-Beispiel: Migration `0017_room_guest_override_blocked`,
+4 von 6 Raw-SQL-INSERTs in `test_migrations_roundtrip.py` +
+`test_manual_override_model.py` mussten erweitert werden, 2
+mussten unveraendert bleiben (Tests `test_migration_0015_default_
+value_after_upgrade` insertiert bei rev `0014`, `test_migration_
+0016_existing_rows_keep_null` insertiert bei rev `0015`).
+
+**Diagnose-Pattern:** Wenn Roundtrip-Test mit `NotNullViolation`
+auf die NEUE Spalte failt **am HEAD-INSERT** -> Spalte ergaenzen.
+Wenn er mit `column does not exist` failt **am downgrade-INSERT**
+-> Spalte entfernen (Fix war zu pauschal).
+
+**Modul-Docstring-Pflicht:** Beide betroffenen Test-Files
+bekommen einen §5.49-Hinweis im Header, damit spaetere
+Spalten-Ergaenzungen den Mechanismus auf einen Blick verstehen.
+
+Querverweis: §5.18 (VARCHAR-Constraint-Pflicht-Check), §5.49
+(Schema-Constraint im Helper-Docstring), §5.50 (Lokal-DB-Verify-
+Pflicht).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
