@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -70,6 +71,13 @@ class Room(Base):
         nullable=False,
         default=RoomStatus.VACANT,
     )
+
+    # Sprint 12c (AE-58): Uebersteuerungs-Sperre pro Zimmer. ``true`` -> jede
+    # Override-Anlage (Mitarbeiter-API und Vicki-Drehring) wird abgewiesen.
+    # NICHT zu verwechseln mit ``status == BLOCKED`` (Engine-out, Operations-
+    # Zustand) — hier laeuft die Engine normal, nur die Override-Eingabe ist
+    # gesperrt.
+    guest_override_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     notes: Mapped[str | None] = mapped_column(String(1000))
 

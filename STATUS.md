@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b abgeschlossen, Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check) auf Branch `feature/sprint-12b-override-zone-scope-frontend` fertig (6 Commits T1-T6), wartet auf PR-Freigabe. Tag `v0.1.17b-override-zone-scope-frontend` nach Merge.
+**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b + 12c abgeschlossen. Sprint 12c (Uebersteuerungs-Sperre pro Zimmer, `room.guest_override_blocked`) auf Branch `feat/sprint12c-room-override-blocked` fertig (T1-T9). Tag `v0.1.17c-room-override-blocked` nach Merge.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-05-20
 **Letzter Tag (gemerged):** `v0.1.17a-override-zone-scope-backend` (Sprint 12a, Squash-Commit `0a6e5ae`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
-**Aktueller Sprint:** Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check + 422/409-differenzierte Fehler-Anzeige + Engine-Panel zone_overrides_trace) abgeschlossen 2026-05-20. Branch `feature/sprint-12b-override-zone-scope-frontend` mit 6 Commits T1-T6 fertig (T1 Type/API-Sync, T2 Panel-Refactor + Container, T3 Error-Toast-Helper, T4 Engine-Decision-Panel, T5 Playwright E2E, T6 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17b-override-zone-scope-frontend` nach Strategie-Chat-Freigabe + Merge.
+**Aktueller Sprint:** Sprint 12c (Uebersteuerungs-Sperre pro Zimmer, AE-58) abgeschlossen 2026-05-20. Branch `feat/sprint12c-room-override-blocked` mit T1-T9 fertig (T1 Migration+Model+Schema, T2 Service-Block-Check, T3 PATCH-Endpoint+Audit, T4 Device-Adapter-Gate+CommandReason, T5 Backend-Tests inkl. 13 Neutests, T6 Frontend-Toggle, T7 PanelList-Banner, T8 4 E2E-Cases, T9 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17c-room-override-blocked` nach Strategie-Chat-Freigabe + Merge.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1864,6 +1864,60 @@ Tag `v0.1.17b-override-zone-scope-frontend` annotated auf `3587b47` gesetzt und 
 
 ---
 
+## 2aq. Sprint 12c Room Override Block (Voll-Sprint, 2026-05-20, abgeschlossen)
+
+**Ziel:** Uebersteuerungs-Sperre pro Zimmer (`room.guest_override_blocked`) als Mitarbeiter-Toggle. Single-Source-of-Truth im `override_service.create`, Device-Adapter spiegelt das Gate vor dem OCCUPIED-Check. Toggle-On revoked alle aktiven Overrides des Raums (source-agnostic) mit `revoked_reason="room_override_blocked"`, BusinessAudit-Action `ROOM_OVERRIDE_BLOCK_TOGGLED` mit Revoked-Count. Engine bleibt unangetastet (kein neuer Layer).
+
+**Tag-Vorschlag:** `v0.1.17c-room-override-blocked` nach Merge.
+
+**Branch:** `feat/sprint12c-room-override-blocked`, T1-T9 abgeschlossen.
+
+**Brief-Vor-Entscheidungen (verbindlich):**
+
+- Block-Gate liegt im `override_service.create()` als Single-Source-of-Truth. Device-Adapter prueft zusaetzlich vorab + schreibt EventLog beim Skip.
+- Gate-Reihenfolge im Adapter: BLOCKED → OCCUPIED → Window → Zone → Create.
+- Auto-Revoke bei Toggle-On: `override_service.revoke_all_active_overrides(reason="room_override_blocked")`, source-agnostic (DEVICE + FRONTEND_*).
+- Audit pro Toggle: 1 BusinessAudit-Eintrag mit `new_value.revoked_overrides_count`. Override-IDs NICHT im Audit — rekonstruierbar via `revoked_reason`-Filter.
+- Engine bleibt unangetastet (kein neuer Layer, kein Layer-3-Filter).
+- `auto_revoke_on_checkout`-Audit-Luecke nicht in 12c saniert (Backlog).
+
+**Tasks (umgesetzt):**
+
+- **T1** Migration + Model + Schema (~1 h): `0017_room_guest_override_blocked.py` (add_column NOT NULL server_default=false, dann alter_column server_default=None — Default lebt im ORM-Modell), `models/room.py` Boolean-Mapped-Column, `schemas/room.py` `RoomRead.guest_override_blocked` + neue Klasse `RoomOverrideBlockUpdate(blocked: bool, extra="forbid")`. Alembic-Roundtrip 0016↔0017 gegen heizung-test-db lokal verifiziert (§5.50).
+- **T2** Service-Layer Block-Check (~30 min): `RoomOverrideBlockedError(room_id)` neue Exception, Block-Gate in `override_service.create()` VOR OCCUPIED-Check eingehaengt. Docstring + Raises aktualisiert.
+- **T3** API PATCH-Endpoint + Audit + Marker-Cleanup (~1 h): `PATCH /rooms/{id}/override-block-state` mit `require_mitarbeiter`-Auth, Idempotenz-Pfad (old==new -> kein Audit), Auto-Revoke bei Toggle-On, BusinessAudit-Schreibung in derselben Transaktion. `api/v1/overrides.py` neuer 409-Handler fuer `RoomOverrideBlockedError` VOR `RoomNotOccupiedError`-Handler. Sprint-12c-Markerkommentar (overrides.py:201) entfernt.
+- **T4** Device-Adapter Block-Gate + CommandReason (~30 min): `CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED` neu (27 chars, paßt in VARCHAR(30) §5.45), Pre-A-Gate in `handle_uplink_for_override` schreibt off-pipeline EventLog (§5.52-Pattern). Docstring + Gate-Numerierung (pre-a/a/b/c/d) aktualisiert.
+- **T5** Backend-Tests (~2 h, Pflicht-Stop nach Lauf): 3 Service-Tests (`test_override_service.py` inkl. §5.51-Domain-Invariante-Docstring), 5 API-Tests in neuer Datei `test_api_rooms.py` (Toggle-On revokes + Audit, Toggle-Off no-op, Idempotenz, `require_mitarbeiter`-Dependency-Wiring via `app.dependency_overrides`, 404), 2 API-Tests in `test_api_overrides.py` (409 `room_override_blocked` + Block-Praezedenz vor `room_not_occupied`), 3 Adapter-Tests in `test_device_adapter.py` (DEVICE_BLOCKED_ROOM_BLOCKED, Praezedenz vor VACANT, Praezedenz vor Window). §5.49-Fixture-Anpassungen: 4 von 6 Raw-SQL-Room-INSERTs (2 in test_manual_override_model.py + 2 in test_migrations_roundtrip.py am HEAD) um `guest_override_blocked, false` erweitert; 2 INSERTs unangetastet (downgrade-Pfade vor 0017). Voller Lauf: 426 passed, 1 xfailed, 0 failed, 0 errors.
+- **T6** Frontend Type + Hook + Toggle-Komponente (~1 h): `Room.guest_override_blocked: boolean` + `RoomOverrideBlockUpdate`-Type, `roomsApi.patchOverrideBlockState`, `useSetRoomOverrideBlockState`-Hook mit Cache-Invalidation (Room + Overrides), neue Komponente `RoomOverrideBlockToggle` mit Lock/Lock-Open-Symbol, Confirm-Dialog nur wenn `activeOverridesCount > 0`, inline Toast-Feedback. Integration in `app/zimmer/[id]/page.tsx` Header.
+- **T7** PanelList-Banner + Engine-Decision-Label (~30 min): `manual-override-panel-list.tsx` liest `useRoom` (Cache-Hit), rendert Sperr-Banner + propagiert `overrideBlocked` an Zone-/Room-Cards. Zone-Card mit `overrideBlocked` blendet CreateForm aus, Active-Display read-only. Engine-Decision-Panel `REASON_LABEL.device_blocked_room_blocked` ergaenzt. TypeScript exhaustive `CommandReason`-Union erweitert.
+- **T8** Playwright-E2E (~1 h): 4 Cases in `tests/e2e/sprint12c-room-override-blocked.spec.ts` (§5.54-konform RegExp + `(\?.*)?$`): Confirm-Dialog bei aktiven Overrides, Toggle-On hide Create-Form, blocked-Banner sichtbar, Toggle-Off restore Create-Form. Voller E2E-Lauf 51/51 gruen.
+- **T9** Doku (dieser Commit): STATUS §2aq + §9, SPRINT-PLAN, AE-58-Ergaenzung Sprint-12c-Slot.
+
+**Diff-Stats:** Backend +1 Migration, +1 Test-Datei (`test_api_rooms.py`), 8 Source-Dateien geaendert. Frontend +1 Component, +1 E2E-Spec, 7 Source-Dateien geaendert.
+
+**Toolchain:** ruff format + ruff check + mypy strict + pytest -x (426 passed) auf Backend; tsc + eslint + next build + Playwright (51 passed) auf Frontend. Migration-Roundtrip 0016↔0017 lokal verifiziert (§5.50).
+
+**Brief-Risiken — Status:**
+
+- **R-§5.49** Raw-SQL-Test-Fixtures: nachgeholt in 2 Test-Files, 4 INSERTs aktualisiert, 2 INSERTs (downgrade-Pfade) bewusst unveraendert mit Hinweis-Kommentar. Modul-Docstrings ergaenzt.
+- **R-§5.47** Helper-Extraktion verhaltensneutral: Block-Gate ist neuer Gate VOR bestehenden Gates, kein Refactor bestehender Logik.
+- **R-Auth-Test** `require_mitarbeiter`-403 nicht real testbar unter `AUTH_ENABLED=false` (System-Admin-Fallback). Test ueber `app.dependency_overrides[require_mitarbeiter]` validiert Dependency-Wiring.
+
+**Out of Scope (Backlog):**
+
+- B-12c-AuditGap: `auto_revoke_on_checkout` schreibt weiterhin kein Audit (Sprint-12c-Scope-Verzicht laut Brief).
+- B-12c-1: Vicki-Hardware-Child-Lock via Downlink `0x07` (separater Sprint).
+- Zimmer-Liste-Indikator (Schloss-Symbol in Tabelle).
+- AE-57-Luecken-Klaerung (Doku-Hygiene-Backlog).
+
+### Live-Verify auf heizung-test
+
+Folgt nach PR-Merge + Auto-Pull-Deploy.
+
+**Querverweise:** AE-58 (Master-ADR + Sprint-12c-Ergaenzung), §5.51 (Domain-Invariante in Tests verankert), §5.52 (Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog), §5.54 (RegExp-Routes in E2E), §5.55 (CI-Verify via `gh run list` statt `gh pr checks`).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -2146,6 +2200,7 @@ Secrets liegen in:
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
 | `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
 | `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung, PR #164, Squash-Commit `3587b47`) | 2026-05-20 |
+| `v0.1.17c-room-override-blocked` | Sprint 12c (Uebersteuerungs-Sperre pro Zimmer: `room.guest_override_blocked`, Single-Source-of-Truth in `override_service.create`, Auto-Revoke bei Toggle-On mit `revoked_reason="room_override_blocked"`, BusinessAudit `ROOM_OVERRIDE_BLOCK_TOGGLED`, Device-Adapter Pre-A-Gate, Frontend-Toggle + Panel-Banner) | 2026-05-20 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 

@@ -80,6 +80,12 @@ interface ZoneCardProps {
   lastEvalTime: string | null;
   /** Aktiver Zone-Override (heating_zone_id === zone.id), sonst null. */
   activeOverride: ManualOverride | null;
+  /**
+   * Sprint 12c (AE-58): ``room.guest_override_blocked === true`` -> Create-
+   * Form wird ausgeblendet, aktive Anzeigen read-only ohne Revoke-Button
+   * (Doppel-Aktion mit Toggle-Off vermeiden).
+   */
+  overrideBlocked?: boolean;
 }
 
 export function ManualOverrideZoneCard({
@@ -88,6 +94,7 @@ export function ManualOverrideZoneCard({
   isWindowOpen,
   lastEvalTime,
   activeOverride,
+  overrideBlocked = false,
 }: ZoneCardProps) {
   return (
     <div className="bg-surface border border-border rounded-md p-5">
@@ -97,7 +104,12 @@ export function ManualOverrideZoneCard({
           roomId={roomId}
           override={activeOverride}
           revokeLabel="Übersteuerung aufheben"
+          readOnly={overrideBlocked}
         />
+      ) : overrideBlocked ? (
+        <p className="text-sm text-text-secondary italic">
+          Übersteuerung gesperrt — bitte Mitarbeiter aufheben.
+        </p>
       ) : (
         <CreateOverrideForm
           roomId={roomId}
@@ -142,9 +154,12 @@ function ZoneHeader({ zone }: { zone: HeatingZone }) {
 export function ManualOverrideRoomCard({
   roomId,
   override,
+  overrideBlocked = false,
 }: {
   roomId: number;
   override: ManualOverride;
+  /** Sprint 12c (AE-58): blocked -> Revoke-Button ausblenden. */
+  overrideBlocked?: boolean;
 }) {
   return (
     <div className="bg-surface border border-border rounded-md p-5">
@@ -167,6 +182,7 @@ export function ManualOverrideRoomCard({
         roomId={roomId}
         override={override}
         revokeLabel="Übersteuerung aufheben"
+        readOnly={overrideBlocked}
       />
     </div>
   );
@@ -180,9 +196,16 @@ interface ActiveDisplayProps {
   roomId: number;
   override: ManualOverride;
   revokeLabel: string;
+  /** Sprint 12c (AE-58): blocked -> Revoke-Button ausblenden. */
+  readOnly?: boolean;
 }
 
-function ActiveOverrideDisplay({ roomId, override, revokeLabel }: ActiveDisplayProps) {
+function ActiveOverrideDisplay({
+  roomId,
+  override,
+  revokeLabel,
+  readOnly = false,
+}: ActiveDisplayProps) {
   const revokeMut = useRevokeOverride(roomId);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,14 +245,16 @@ function ActiveOverrideDisplay({ roomId, override, revokeLabel }: ActiveDisplayP
             <p className="text-sm text-text-secondary mt-1">Grund: {override.reason}</p>
           ) : null}
         </div>
-        <Button
-          variant="destructive"
-          icon="cancel"
-          onClick={() => setConfirmRevoke(true)}
-          disabled={revokeMut.isPending}
-        >
-          {revokeLabel}
-        </Button>
+        {readOnly ? null : (
+          <Button
+            variant="destructive"
+            icon="cancel"
+            onClick={() => setConfirmRevoke(true)}
+            disabled={revokeMut.isPending}
+          >
+            {revokeLabel}
+          </Button>
+        )}
       </div>
 
       {error ? <p className="text-sm text-error mt-3">{error}</p> : null}

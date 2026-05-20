@@ -576,6 +576,59 @@ async def test_post_vacant_returns_409_room_not_occupied(
     assert body["detail"]["room_id"] == vacant_room_id
 
 
+# ---------------------------------------------------------------------------
+# Sprint 12c (AE-58) — Block-Gate vor OCCUPIED-Gate
+# ---------------------------------------------------------------------------
+
+
+async def test_create_returns_409_room_override_blocked(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    room_id: int,
+) -> None:
+    """Sprint 12c: POST in geblocktes Zimmer (OCCUPIED + blocked=True) ->
+    409 mit ``error_code=room_override_blocked``."""
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        room = await session.get(Room, room_id)
+        assert room is not None
+        room.guest_override_blocked = True
+        await session.commit()
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22", "source": "frontend_4h"},
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["detail"]["error_code"] == "room_override_blocked"
+    assert body["detail"]["room_id"] == room_id
+
+
+async def test_create_block_takes_precedence_over_room_not_occupied(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    vacant_room_id: int,
+) -> None:
+    """Sprint 12c (§5.51 Domain-Invariante): Block + VACANT ->
+    ``room_override_blocked`` gewinnt, NICHT ``room_not_occupied``."""
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        room = await session.get(Room, vacant_room_id)
+        assert room is not None
+        room.guest_override_blocked = True
+        await session.commit()
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{vacant_room_id}/overrides",
+        json={"setpoint": "22", "source": "frontend_4h"},
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["detail"]["error_code"] == "room_override_blocked"
+    assert body["detail"]["room_id"] == vacant_room_id
+
+
 async def test_post_with_invalid_zone_id_returns_404(
     http_client: httpx.AsyncClient,
     setup_engine: AsyncEngine,

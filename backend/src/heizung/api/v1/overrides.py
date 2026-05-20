@@ -40,6 +40,7 @@ from heizung.services.occupancy_service import next_active_checkout
 from heizung.services.override_service import (
     OverrideRejectedWindowOpenError,
     RoomNotOccupiedError,
+    RoomOverrideBlockedError,
 )
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
@@ -196,9 +197,19 @@ async def create_room_override(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except RoomOverrideBlockedError as e:
+        # Sprint 12c (AE-58): Uebersteuerungs-Sperre aktiv -> Override abgewiesen.
+        # Block-Check hat Vorrang vor OCCUPIED-Check (gleiche Reihenfolge wie
+        # im Service-Layer ``override_service.create``).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "room_override_blocked",
+                "room_id": e.room_id,
+            },
+        ) from e
     except RoomNotOccupiedError as e:
         # Sprint 12a T3 (AE-58): Raum nicht OCCUPIED -> Override abgewiesen.
-        # AE-58 Sprint 12c: hier kommt room_blocked-Check (room.guest_override_blocked)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

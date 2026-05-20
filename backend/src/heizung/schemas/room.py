@@ -48,6 +48,19 @@ class RoomRead(BaseModel):
     floor: int | None
     orientation: Orientation | None
     status: RoomStatus
+    guest_override_blocked: bool
     notes: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class RoomOverrideBlockUpdate(BaseModel):
+    """Eingabe fuer PATCH /api/v1/rooms/{id}/override-block-state (Sprint 12c).
+
+    Eigener Endpoint statt Erweiterung von ``RoomUpdate``: Toggle hat
+    eigene Audit-Action und Auto-Revoke-Semantik (siehe AE-58 Sprint 12c).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    blocked: bool

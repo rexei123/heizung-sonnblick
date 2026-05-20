@@ -29,7 +29,7 @@ import {
   ManualOverrideZoneCard,
 } from "@/components/patterns/manual-override-panel";
 import { useRoomOverrides } from "@/lib/api/hooks-overrides";
-import { useEngineTrace, useHeatingZones } from "@/lib/api/hooks-rooms";
+import { useEngineTrace, useHeatingZones, useRoom } from "@/lib/api/hooks-rooms";
 import type { EventLogEntry, ManualOverride } from "@/lib/api/types";
 
 interface Props {
@@ -40,6 +40,10 @@ export function ManualOverridePanelList({ roomId }: Props) {
   const zonesQuery = useHeatingZones(roomId);
   const traceQuery = useEngineTrace(roomId);
   const overridesQuery = useRoomOverrides(roomId, { include_expired: true });
+  // Sprint 12c (AE-58): Sperre-Flag. React-Query-Cache-Hit aus Parent-
+  // Page (gleicher roomId-Key) — kein zusaetzlicher Network-Request.
+  const roomQuery = useRoom(roomId);
+  const overrideBlocked = roomQuery.data?.guest_override_blocked === true;
 
   const zones = useMemo(() => zonesQuery.data ?? [], [zonesQuery.data]);
   const overrides = useMemo(() => overridesQuery.data ?? [], [overridesQuery.data]);
@@ -70,8 +74,36 @@ export function ManualOverridePanelList({ roomId }: Props) {
         </p>
       </header>
 
+      {overrideBlocked ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-3 rounded-md border border-border bg-surface p-4"
+        >
+          <span
+            className="material-symbols-outlined text-text-secondary"
+            style={{ fontSize: 22 }}
+            aria-hidden
+          >
+            lock
+          </span>
+          <div>
+            <p className="text-sm font-medium text-text-primary">
+              Übersteuerung gesperrt
+            </p>
+            <p className="text-xs text-text-secondary mt-1">
+              Neue Übersteuerungen sind aktuell nicht möglich. Bitte Mitarbeiter aufheben.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {activeRoomScopeOverride ? (
-        <ManualOverrideRoomCard roomId={roomId} override={activeRoomScopeOverride} />
+        <ManualOverrideRoomCard
+          roomId={roomId}
+          override={activeRoomScopeOverride}
+          overrideBlocked={overrideBlocked}
+        />
       ) : null}
 
       {zonesQuery.isLoading ? (
@@ -89,6 +121,7 @@ export function ManualOverridePanelList({ roomId }: Props) {
             isWindowOpen={openZoneIds.has(zone.id)}
             lastEvalTime={lastEvalTime}
             activeOverride={findActiveOverride(overrides, zone.id)}
+            overrideBlocked={overrideBlocked}
           />
         ))
       )}

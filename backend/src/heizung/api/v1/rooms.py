@@ -10,12 +10,12 @@ CRUD:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin, require_user
+from heizung.auth.dependencies import require_admin, require_mitarbeiter, require_user
 from heizung.db import get_session
 from heizung.models.enums import RoomStatus
 from heizung.models.event_log import EventLog
@@ -24,7 +24,9 @@ from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.user import User
 from heizung.schemas.event_log import EventLogRead
-from heizung.schemas.room import RoomCreate, RoomRead, RoomUpdate
+from heizung.schemas.room import RoomCreate, RoomOverrideBlockUpdate, RoomRead, RoomUpdate
+from heizung.services import override_service
+from heizung.services.business_audit_service import record_business_action
 
 INT4_MAX = 2_147_483_647
 
@@ -152,6 +154,74 @@ async def update_room(
             status_code=status.HTTP_409_CONFLICT,
             detail="Eindeutigkeitsverletzung (Nummer?)",
         ) from e
+    await session.refresh(room)
+    return room
+
+
+@router.patch(
+    "/{room_id}/override-block-state",
+    response_model=RoomRead,
+    summary="Uebersteuerungs-Sperre togglen (Sprint 12c, AE-58)",
+)
+async def set_override_block_state(
+    request: Request,
+    payload: RoomOverrideBlockUpdate,
+    room_id: int = RoomIdPath,
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> Room:
+    """Setzt ``room.guest_override_blocked`` auf den Ziel-Wert.
+
+    Sprint 12c (AE-58): Toggle-On (False -> True) revoked **alle** aktiven
+    Overrides des Raums (source-agnostic) via
+    ``override_service.revoke_all_active_overrides`` mit
+    ``reason="room_override_blocked"``. Toggle-Off (True -> False) laesst
+    die Override-Tabelle unangetastet — bestehende Overrides bleiben
+    revoked, neue koennen wieder angelegt werden.
+
+    Idempotenz (§S2): wenn ``old == new``, kein Audit, kein Revoke, 200
+    mit aktuellem Room-Stand.
+
+    Audit: BusinessAudit-Action ``ROOM_OVERRIDE_BLOCK_TOGGLED`` mit
+    ``new_value.revoked_overrides_count``. Override-IDs werden NICHT im
+    Audit gefuehrt — rekonstruierbar via
+    ``revoked_reason='room_override_blocked'``-Filter auf
+    ``manual_override``.
+
+    Begriffstrennung: ``guest_override_blocked`` ist **nicht** identisch
+    mit ``RoomStatus.BLOCKED`` (das ist „Zimmer aus Engine genommen").
+    Hier laeuft die Engine normal, nur die Override-Eingabe ist gesperrt.
+    """
+    room = await _get_or_404(session, room_id)
+
+    old_blocked = room.guest_override_blocked
+    if old_blocked == payload.blocked:
+        return room
+
+    revoked_count = 0
+    if payload.blocked:
+        revoked_count = await override_service.revoke_all_active_overrides(
+            session,
+            room_id=room_id,
+            reason="room_override_blocked",
+        )
+
+    room.guest_override_blocked = payload.blocked
+
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="ROOM_OVERRIDE_BLOCK_TOGGLED",
+        target_type="room",
+        target_id=room_id,
+        old_value={"blocked": old_blocked},
+        new_value={
+            "blocked": payload.blocked,
+            "revoked_overrides_count": revoked_count,
+        },
+        request_ip=request.client.host if request.client else None,
+    )
+    await session.commit()
     await session.refresh(room)
     return room
 

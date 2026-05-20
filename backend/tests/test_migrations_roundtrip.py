@@ -11,6 +11,10 @@ Setup-Anforderungen:
 
 Wenn TEST_DATABASE_URL nicht gesetzt -> Test wird skipped. CI muss die
 Variable setzen, sonst silent-pass = Test-Coverage-Luege.
+
+§5.49 (Sprint 12c): Room-Fixtures setzen ``guest_override_blocked=false``
+explizit im Raw-SQL-INSERT, weil das Feld NOT NULL ohne DB-Server-Default
+ist (Default lebt nur im ORM-Modell, Raw-SQL umgeht das).
 """
 
 from __future__ import annotations
@@ -307,6 +311,9 @@ def test_migration_0015_default_value_after_upgrade(alembic_cfg: Config) -> None
             rt_id = conn.execute(
                 text("INSERT INTO room_type (name) VALUES ('rt_0015_default') RETURNING id")
             ).scalar_one()
+            # Hinweis: Test inserted bei Revision 0014 (vor 0017),
+            # daher KEIN guest_override_blocked in Spalten-Liste — Spalte
+            # existiert in dieser Migrations-Stufe noch nicht.
             room_id = conn.execute(
                 text(
                     "INSERT INTO room (number, room_type_id, status) "
@@ -389,8 +396,8 @@ def test_migration_0015_check_constraint_rejects_invalid(alembic_cfg: Config) ->
             ).scalar_one()
             room_id = conn.execute(
                 text(
-                    "INSERT INTO room (number, room_type_id, status) "
-                    "VALUES ('r-0015c', :rt, 'vacant') RETURNING id"
+                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
+                    "VALUES ('r-0015c', :rt, 'vacant', false) RETURNING id"
                 ),
                 {"rt": rt_id},
             ).scalar_one()
@@ -479,6 +486,9 @@ def test_migration_0016_existing_rows_keep_null(alembic_cfg: Config) -> None:
             rt_id = conn.execute(
                 text("INSERT INTO room_type (name) VALUES ('rt_0016_null') RETURNING id")
             ).scalar_one()
+            # Hinweis: Test inserted bei Revision 0015 (vor 0017),
+            # daher KEIN guest_override_blocked in Spalten-Liste — Spalte
+            # existiert in dieser Migrations-Stufe noch nicht.
             room_id = conn.execute(
                 text(
                     "INSERT INTO room (number, room_type_id, status) "
@@ -553,8 +563,8 @@ def test_migration_0016_fk_set_null_on_zone_delete(alembic_cfg: Config) -> None:
             ).scalar_one()
             room_id = conn.execute(
                 text(
-                    "INSERT INTO room (number, room_type_id, status) "
-                    "VALUES ('r-0016f', :rt, 'occupied') RETURNING id"
+                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
+                    "VALUES ('r-0016f', :rt, 'occupied', false) RETURNING id"
                 ),
                 {"rt": rt_id},
             ).scalar_one()

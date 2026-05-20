@@ -3,6 +3,12 @@
 Pure-Function-Tests fuer ``compute_expires_at`` laufen ohne DB. Die
 restlichen Tests nutzen ein async ``db_session``-Fixture und skippen,
 wenn ``TEST_DATABASE_URL`` nicht gesetzt ist.
+
+§5.51 Domain-Invariante (Sprint 12c, AE-58): Block-Check liegt VOR
+OCCUPIED-Check. Ein Zimmer mit ``guest_override_blocked=True`` wirft
+``RoomOverrideBlockedError`` unabhaengig vom Belegungs-Status — auch wenn
+es VACANT, CLEANING oder BLOCKED ist. Die Sperre hat Vorrang vor dem
+Sprint-12a-OCCUPIED-Gate.
 """
 
 from __future__ import annotations
@@ -668,3 +674,82 @@ async def test_get_active_room_scope_only_when_lookup_without_zone_id(
         db_session, room_id, heating_zone_id=zone_id
     )
     assert active_with_zone is not None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12c (AE-58) — Block-Gate vor OCCUPIED-Gate
+# ---------------------------------------------------------------------------
+
+
+async def test_create_raises_room_override_blocked_when_room_is_blocked(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Sprint 12c: ``guest_override_blocked=True`` -> RoomOverrideBlockedError,
+    kein DB-Insert."""
+    room = await db_session.get(Room, room_id)
+    assert room is not None
+    room.guest_override_blocked = True
+    await db_session.flush()
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    with pytest.raises(override_service.RoomOverrideBlockedError) as exc_info:
+        await override_service.create(
+            db_session,
+            room_id=room_id,
+            setpoint=Decimal("22.0"),
+            source=OverrideSource.FRONTEND_4H,
+            expires_at=expires,
+        )
+    assert exc_info.value.room_id == room_id
+
+    from sqlalchemy import select
+
+    rows = list(
+        (await db_session.execute(select(ManualOverride).where(ManualOverride.room_id == room_id)))
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def test_create_block_check_runs_before_occupied_check(
+    db_session: AsyncSession, vacant_room_id: int
+) -> None:
+    """Sprint 12c (§5.51 Domain-Invariante): Block-Gate hat Vorrang vor
+    OCCUPIED-Gate. Auch wenn der Raum VACANT ist, wird bei
+    ``guest_override_blocked=True`` zuerst ``RoomOverrideBlockedError`` geworfen
+    — NICHT ``RoomNotOccupiedError``."""
+    room = await db_session.get(Room, vacant_room_id)
+    assert room is not None
+    room.guest_override_blocked = True
+    await db_session.flush()
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    with pytest.raises(override_service.RoomOverrideBlockedError) as exc_info:
+        await override_service.create(
+            db_session,
+            room_id=vacant_room_id,
+            setpoint=Decimal("22.0"),
+            source=OverrideSource.FRONTEND_4H,
+            expires_at=expires,
+        )
+    assert exc_info.value.room_id == vacant_room_id
+
+
+async def test_create_allows_when_blocked_false(db_session: AsyncSession, room_id: int) -> None:
+    """Sprint 12c: ``guest_override_blocked=False`` (Default) -> Override
+    wird normal angelegt."""
+    room = await db_session.get(Room, room_id)
+    assert room is not None
+    assert room.guest_override_blocked is False
+
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    override = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    assert override.id is not None
+    assert override.setpoint == Decimal("22.0")

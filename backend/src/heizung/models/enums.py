@@ -134,6 +134,10 @@ class CommandReason(enum.StrEnum):
     # Downlink).
     DEVICE_BLOCKED_VACANT = "device_blocked_vacant"
     DEVICE_BLOCKED_WINDOW = "device_blocked_window"
+    # Sprint 12c (AE-58): Uebersteuerungs-Sperre pro Zimmer aktiv -> Vicki-
+    # Drehring wird silent geskippt. Off-pipeline Audit via
+    # ``EventLogLayer.MANUAL_OVERRIDE_BLOCKED``.
+    DEVICE_BLOCKED_ROOM_BLOCKED = "device_blocked_room_blocked"
 
 
 class ScenarioScope(enum.StrEnum):

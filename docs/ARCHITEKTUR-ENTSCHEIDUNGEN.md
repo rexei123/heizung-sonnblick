@@ -1734,3 +1734,62 @@ Strategie-Chat 2026-05-20 hat das Override-Modell konsolidiert.
   als Trigger bleibt, Dauer + Revoke einheitlich nach AE-58.
 - AE-54 partiell revidiert: Layer 3 ist seit 12a zone-aware, Layer
   4/5 bleiben room-level mit Pass-Through.
+
+## Sprint-12c-Ergaenzung (2026-05-20) — Uebersteuerungs-Sperre pro Zimmer
+
+Sprint 12c ergaenzt AE-58 um einen Mitarbeiter-gesteuerten Block-
+Schalter pro Zimmer, der unabhaengig vom OCCUPIED-Gate funktioniert.
+
+10. **`room.guest_override_blocked: bool`** als NOT NULL DEFAULT FALSE
+    Feld (Migration `0017_room_guest_override_blocked.py`, Pattern:
+    `add_column server_default=false` -> Backfill -> `alter_column
+    server_default=None`, Default lebt im ORM-Modell). Begriffstrennung
+    streng: **„Uebersteuerung gesperrt"** != **„Zimmer gesperrt"**.
+    Letzteres ist `RoomStatus.BLOCKED` (Engine-out, Operations-Zustand),
+    ersteres laesst die Engine normal laufen und blockt nur die
+    Override-Eingabe.
+
+11. **Block-Gate als zusaetzlicher Pre-Insert-Gate VOR dem
+    OCCUPIED-Gate** in `override_service.create()`:
+    - Frontend-Pfad: `RoomOverrideBlockedError` -> HTTP 409
+      `{"error_code": "room_override_blocked", "room_id": X}`
+    - Device-Pfad: silent skip + `event_log MANUAL_OVERRIDE_BLOCKED`
+      mit `reason=DEVICE_BLOCKED_ROOM_BLOCKED` (off-pipeline, §5.52).
+      Pre-A-Gate im `device_adapter.handle_uplink_for_override` spiegelt
+      das Service-Gate vor `derive_room_status`-Aufruf.
+    Reihenfolge im Service: **Block → OCCUPIED → Window** (Service);
+    im Adapter: **pre-a Block → a OCCUPIED → b Window → c Zone → d
+    Create**.
+
+12. **Auto-Revoke bei Toggle-On (False → True):** PATCH
+    `/rooms/{id}/override-block-state` (`require_mitarbeiter`) ruft
+    `override_service.revoke_all_active_overrides(reason=
+    "room_override_blocked")` source-agnostic. Toggle-Off (True →
+    False) laesst die Override-Tabelle unangetastet — bestehende
+    Revokes bleiben, neue Overrides koennen wieder angelegt werden.
+    Idempotenz (§S2): `old == new` -> kein Audit, kein Revoke.
+
+13. **Audit pro Toggle:** BusinessAudit-Action
+    `ROOM_OVERRIDE_BLOCK_TOGGLED` mit `target_type="room"`,
+    `old_value={"blocked": old}`, `new_value={"blocked": new,
+    "revoked_overrides_count": N}`. Override-IDs werden NICHT im Audit
+    gefuehrt — Rekonstruktion via
+    `revoked_reason="room_override_blocked"`-Filter auf
+    `manual_override`-Tabelle. Doppelung mit Single-Revoke-Audits
+    (`MANUAL_OVERRIDE_CLEAR`) vermieden.
+
+14. **Bewusste Audit-Luecke:** `auto_revoke_on_checkout` schreibt
+    weiterhin kein Audit (Sprint 12a-Verhalten, vor Sprint 12c
+    geerbt). Saniert in eigenem Sprint (B-12c-AuditGap), weil das
+    Pattern auch andere silent-Bulk-Revoke-Stellen betrifft.
+
+15. **Engine bleibt unberuehrt.** Block-Gate liegt vor der
+    Override-Anlage; Engine Layer 3 (`layer_manual_override`) liest
+    weiterhin nur aktive Overrides. Auto-Revoke bei Toggle-On macht
+    die Trennung sauber: nach dem PATCH gibt es keine aktiven
+    Overrides, also greift Engine Layer 3 auf nichts.
+
+**Querverweise:** STATUS §2aq (Sprint-12c-Doku), §5.49 (Test-
+Fixture-Anpassung Raw-SQL-INSERTs gegen NOT-NULL ohne DB-Default),
+§5.51 (Domain-Invariante Block-Gate vor OCCUPIED-Gate), §5.52
+(Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog).
