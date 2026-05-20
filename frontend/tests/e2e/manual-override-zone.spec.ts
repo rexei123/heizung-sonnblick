@@ -277,7 +277,7 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
 
     await expect(page.getByRole("heading", { name: "Schlafzimmer" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Bad" })).toBeVisible();
@@ -310,7 +310,7 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
 
     await expect(page.getByText("Fenster offen — Übersteuerung nicht möglich")).toBeVisible();
     // bedroom-Card zuerst (zone id 201) -> first() ist Schlafzimmer.
@@ -343,7 +343,7 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
 
     // Zones sortiert nach id (bedroom 201 vor bathroom 202) -> first()
     // ist Schlafzimmer-Card's Anwenden-Button.
@@ -379,7 +379,7 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
 
     // Zones sortiert nach id (bedroom 201 vor bathroom 202) -> first()
     // ist Schlafzimmer-Card's Anwenden-Button.

@@ -49,7 +49,7 @@ export function RoomOverrideBlockToggle({ room, activeOverridesCount }: Props) {
       await mut.mutateAsync(next);
       setFeedback({
         kind: "success",
-        text: next ? "Uebersteuerung gesperrt." : "Uebersteuerung freigegeben.",
+        text: next ? "Übersteuerung gesperrt." : "Übersteuerung freigegeben.",
       });
     } catch (e) {
       setFeedback({
@@ -81,11 +81,11 @@ export function RoomOverrideBlockToggle({ room, activeOverridesCount }: Props) {
         aria-pressed={isBlocked}
         aria-label={
           isBlocked
-            ? "Uebersteuerung freigeben"
-            : "Uebersteuerung sperren"
+            ? "Übersteuerung freigeben"
+            : "Übersteuerung sperren"
         }
       >
-        {isBlocked ? "Uebersteuerung gesperrt" : "Uebersteuerung sperren"}
+        {isBlocked ? "Übersteuerung gesperrt" : "Übersteuerung sperren"}
       </Button>
       {feedback ? (
         <p
@@ -101,9 +101,9 @@ export function RoomOverrideBlockToggle({ room, activeOverridesCount }: Props) {
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Uebersteuerung sperren?"
+        title="Übersteuerung sperren?"
         message={`${activeOverridesCount} aktive ${
-          activeOverridesCount === 1 ? "Uebersteuerung wird" : "Uebersteuerungen werden"
+          activeOverridesCount === 1 ? "Übersteuerung wird" : "Übersteuerungen werden"
         } aufgehoben. Fortfahren?`}
         confirmLabel="Sperren"
         intent="destructive"
