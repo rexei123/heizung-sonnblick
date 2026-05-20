@@ -37,6 +37,7 @@ from heizung.models.enums import CommandReason, EventLogLayer, OverrideSource, R
 from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
 from heizung.services.occupancy_service import derive_room_status, next_active_checkout
@@ -176,13 +177,19 @@ async def handle_uplink_for_override(
     """Vollstaendiger Pfad: Detection + Pre-Insert-Gates + Override-Erzeugung.
 
     Aufrufer: ``mqtt_subscriber`` nach erfolgreicher Reading-Persistenz.
-    Sprint 12a T4 (AE-58) — Gate-Reihenfolge nach Brief:
+    Gate-Reihenfolge (AE-58):
 
-    a) **OCCUPIED-Gate** (via ``derive_room_status``): VACANT/RESERVED/
-       CLEANING/BLOCKED -> silent skip + ``MANUAL_OVERRIDE_BLOCKED``-
-       event_log-Eintrag mit ``reason=DEVICE_BLOCKED_VACANT``. KEIN
-       ``RoomNotOccupiedError``-Raise — der mqtt_subscriber-Aufrufer
-       darf nicht crashen.
+    pre-a) **Block-Gate** (Sprint 12c): ``room.guest_override_blocked``
+       gesetzt -> silent skip + ``MANUAL_OVERRIDE_BLOCKED``-event_log-
+       Eintrag mit ``reason=DEVICE_BLOCKED_ROOM_BLOCKED``. Spiegelt das
+       Single-Source-of-Truth-Gate in ``override_service.create`` und
+       schreibt zusaetzlich Audit (S3), weil der Skip nicht durch den
+       Service laeuft.
+    a) **OCCUPIED-Gate** (Sprint 12a T4, via ``derive_room_status``):
+       VACANT/RESERVED/CLEANING/BLOCKED -> silent skip +
+       ``MANUAL_OVERRIDE_BLOCKED``-event_log-Eintrag mit
+       ``reason=DEVICE_BLOCKED_VACANT``. KEIN ``RoomNotOccupiedError``-
+       Raise — der mqtt_subscriber-Aufrufer darf nicht crashen.
     b) **Window-Offen-Gate** (via ``detect_open_window_zones``):
        mindestens eine Zone des Raums meldet ``open_window=True`` ->
        silent skip + event_log mit ``reason=DEVICE_BLOCKED_WINDOW``.
@@ -198,7 +205,8 @@ async def handle_uplink_for_override(
     Returns:
         ``ManualOverride`` bei erfolgreicher Anlage.
         ``None`` bei: kein Engine-Intent, Ack-Window, innerhalb Toleranz,
-        kein Room-Mapping, OCCUPIED-Gate-Skip, Window-Gate-Skip.
+        kein Room-Mapping, Block-Gate-Skip, OCCUPIED-Gate-Skip,
+        Window-Gate-Skip.
     """
     user_setpoint = await detect_user_override(
         session,
@@ -215,6 +223,28 @@ async def handle_uplink_for_override(
         logger.warning(
             "device-override skip: device_id=%s ohne Heizzonen-/Raum-Mapping",
             device_id,
+        )
+        return None
+
+    # Gate (pre-a): Sperre-Check (Sprint 12c, AE-58). Spiegelt den Block-Gate
+    # in ``override_service.create``. Wenn der Raum aus dem Mapping nicht
+    # existiert (Race / DB-Drift), kein EventLog — defensive Edge.
+    room = await session.get(Room, room_id)
+    if room is None:
+        return None
+    if room.guest_override_blocked:
+        logger.info(
+            "device-override skip: room_id=%s guest_override_blocked=True — device_id=%s",
+            room_id,
+            device_id,
+        )
+        await _write_blocked_event_log(
+            session,
+            room_id=room_id,
+            device_id=device_id,
+            received_at=received_at,
+            reason=CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED,
+            uplink_setpoint=user_setpoint,
         )
         return None
 
