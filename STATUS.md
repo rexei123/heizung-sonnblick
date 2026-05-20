@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b + 12c abgeschlossen. Sprint 12c (Uebersteuerungs-Sperre pro Zimmer, `room.guest_override_blocked`) auf Branch `feat/sprint12c-room-override-blocked` fertig (T1-T9). Tag `v0.1.17c-room-override-blocked` nach Merge.
+**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b + 12c abgeschlossen, alle Tags gesetzt, Live-Verify auf heizung-test erfolgreich (zuletzt v0.1.17c am 2026-05-20). Folge-Sprint 12c.a (Zimmer-Liste-Indikator) Phase-0 abgeschlossen.
 
 ---
 
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-20
-**Letzter Tag (gemerged):** `v0.1.17a-override-zone-scope-backend` (Sprint 12a, Squash-Commit `0a6e5ae`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
-**Aktueller Sprint:** Sprint 12c (Uebersteuerungs-Sperre pro Zimmer, AE-58) abgeschlossen 2026-05-20. Branch `feat/sprint12c-room-override-blocked` mit T1-T9 fertig (T1 Migration+Model+Schema, T2 Service-Block-Check, T3 PATCH-Endpoint+Audit, T4 Device-Adapter-Gate+CommandReason, T5 Backend-Tests inkl. 13 Neutests, T6 Frontend-Toggle, T7 PanelList-Banner, T8 4 E2E-Cases, T9 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17c-room-override-blocked` nach Strategie-Chat-Freigabe + Merge.
+**Letzter Tag (gemerged):** `v0.1.17c-room-override-blocked` (Sprint 12c, Squash-Commit `e9b18af`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
+**Aktueller Sprint:** Sprint 12c (Uebersteuerungs-Sperre pro Zimmer, AE-58) abgeschlossen 2026-05-20, Tag gesetzt, Live-Verify erfolgreich. Doku-Nachzug + UI-Wording-Mini-Hotfix (Branch `docs/sprint12c-live-verify-and-wording-fix`) erweitert STATUS §2aq um Live-Verify-Block und stellt UI-Strings „Uebersteuerung sperren/gesperrt/freigeben" auf Umlaut um. Folge-Sprint 12c.a (Zimmer-Liste-Indikator, Frontend-only) Phase-0 abgeschlossen, Tag `v0.1.17d-room-block-list-indicator` nach Merge.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1910,11 +1910,25 @@ Tag `v0.1.17b-override-zone-scope-frontend` annotated auf `3587b47` gesetzt und 
 - Zimmer-Liste-Indikator (Schloss-Symbol in Tabelle).
 - AE-57-Luecken-Klaerung (Doku-Hygiene-Backlog).
 
-### Live-Verify auf heizung-test
+### Live-Verify auf heizung-test (2026-05-20 18:10 CEST)
 
-Folgt nach PR-Merge + Auto-Pull-Deploy.
+- Squash-Commit `e9b18af` via `deploy-pull.service` deployt (HEAD-Sync 18:08:03 + Restart 18:10:07).
+- Alle relevanten Container healthy nach Restart (api/web/celery_worker healthy, celery_beat unhealthy per §5.32 akzeptiert, db/redis/caddy/mosquitto/chirpstack-* healthy).
+- Migration 0017 auf head bestaetigt: `docker exec deploy-api-1 alembic current` → `0017_room_guest_override_blocked (head)`.
+- `/health` → 200 mit JSON ok.
 
-**Querverweise:** AE-58 (Master-ADR + Sprint-12c-Ergaenzung), §5.51 (Domain-Invariante in Tests verankert), §5.52 (Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog), §5.54 (RegExp-Routes in E2E), §5.55 (CI-Verify via `gh run list` statt `gh pr checks`).
+Cowork-Sicht-Verify (Hotelier-gefuehrt):
+
+- **Block 1** (Toggle-Sichtbarkeit): bestaetigt — Header-Button „Uebersteuerung sperren", Symbol `lock_open`.
+- **Block 2** (Toggle OFF→ON ohne aktive Overrides): bestaetigt — kein Confirm-Dialog, Symbol `lock`, Banner „Uebersteuerung gesperrt" in beiden Zonen-Cards, Create-Forms ausgeblendet. `PATCH /rooms/16/override-block-state` → 200. Roundtrip Toggle ON→OFF ebenfalls 200.
+- **Block 3** (Wording-Trennung): bestaetigt — Raum 101 manuell auf `RoomStatus.BLOCKED` gesetzt, Status-Pill „Gesperrt" rot in Liste, Stammdaten-Dropdown „Gesperrt". Override-Toggle weiterhin separat sichtbar mit Wording „Uebersteuerung sperren", keine Vermischung mit RoomStatus-Begriff. §5.20-Drift-Risiko entschaerft.
+- **Block 4** (Engine-Decision-Panel REASON_LABEL `device_blocked_room_blocked`): in Sommer-Sicht nicht beobachtbar (Brief-konform), Real-Hardware-Verify in Heizperiode 2026/27 nachgezogen.
+
+**Befund Wording-Inkonsistenz:** Header-Button-Strings waren ASCII („Uebersteuerung"), Tab/Panel mit Umlaut („Übersteuerung"). UI-Strings unterliegen NICHT der CLAUDE-ae/ue/oe-Regel (gilt nur fuer Code + Commits). Hotfix in selbem Doku-Nachzug-PR umgesetzt (Toggle-Button + Banner-Text + Confirm-Dialog + Engine-Decision-Panel-REASON_LABEL + Playwright-Assertions). Folge-Anpassung in `manual-override-zone.spec.ts`: 4 Tab-Locator auf `{ name: "Übersteuerung", exact: true }`, weil der Toggle-Button nach Wording-Fix Substring-Kollision mit dem Tab erzeugte (§5.47-Spirit, verhaltensneutrale Konsumenten-Anpassung).
+
+**Folge-Sprint:** 12c.a (Zimmer-Liste-Indikator) ist Frontend-only-Mini-Sprint, Phase-0 abgeschlossen, Implementierungs-Brief liegt vor. Tag `v0.1.17d-room-block-list-indicator` nach Merge.
+
+**Querverweise:** AE-58 (Master-ADR + Sprint-12c-Ergaenzung), §5.20 (Doku-Drift), §5.47 (verhaltensneutrale Konsumenten-Anpassung in Tests), §5.51 (Domain-Invariante in Tests verankert), §5.52 (Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog), §5.54 (RegExp-Routes in E2E), §5.55 (CI-Verify via `gh run list` statt `gh pr checks`).
 
 ---
 
@@ -2200,7 +2214,7 @@ Secrets liegen in:
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
 | `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
 | `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung, PR #164, Squash-Commit `3587b47`) | 2026-05-20 |
-| `v0.1.17c-room-override-blocked` | Sprint 12c (Uebersteuerungs-Sperre pro Zimmer: `room.guest_override_blocked`, Single-Source-of-Truth in `override_service.create`, Auto-Revoke bei Toggle-On mit `revoked_reason="room_override_blocked"`, BusinessAudit `ROOM_OVERRIDE_BLOCK_TOGGLED`, Device-Adapter Pre-A-Gate, Frontend-Toggle + Panel-Banner) | 2026-05-20 |
+| `v0.1.17c-room-override-blocked` | Sprint 12c (Uebersteuerungs-Sperre pro Zimmer: `room.guest_override_blocked`, Single-Source-of-Truth in `override_service.create`, Auto-Revoke bei Toggle-On mit `revoked_reason="room_override_blocked"`, BusinessAudit `ROOM_OVERRIDE_BLOCK_TOGGLED`, Device-Adapter Pre-A-Gate, Frontend-Toggle + Panel-Banner, PR #166, Squash-Commit `e9b18af`) | 2026-05-20 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 

@@ -200,12 +200,12 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
     await page.goto("/zimmer/101");
 
     // Header zeigt Sperr-Button im Off-State.
-    const toggleBtn = page.getByRole("button", { name: "Uebersteuerung sperren" });
+    const toggleBtn = page.getByRole("button", { name: "Übersteuerung sperren" });
     await expect(toggleBtn).toBeVisible();
     await toggleBtn.click();
 
     // Confirm-Dialog mit Count.
-    await expect(page.getByText(/1 aktive Uebersteuerung wird/)).toBeVisible();
+    await expect(page.getByText(/1 aktive Übersteuerung wird/)).toBeVisible();
 
     // Cancel -> kein PATCH.
     await page.getByRole("button", { name: "Abbrechen" }).click();
@@ -220,12 +220,12 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
 
     await page.goto("/zimmer/101");
     // Override-Tab oeffnen — Create-Form muss vor Toggle-On sichtbar sein.
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
     await expect(page.getByRole("button", { name: "Anwenden" })).toBeVisible();
 
     // Toggle-On (keine aktiven Overrides -> kein Dialog, direkter PATCH).
     await page
-      .getByRole("button", { name: "Uebersteuerung sperren" })
+      .getByRole("button", { name: "Übersteuerung sperren" })
       .click();
 
     // PATCH ging mit blocked=true raus.
@@ -243,7 +243,7 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
 
     // Banner + Hinweis-Text in Zone-Card; KEIN Anwenden-Button.
     await expect(page.getByText("Übersteuerung gesperrt").first()).toBeVisible();
@@ -254,7 +254,7 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
 
     // Toggle-Button im On-State.
     await expect(
-      page.getByRole("button", { name: "Uebersteuerung freigeben" }),
+      page.getByRole("button", { name: "Übersteuerung freigeben" }),
     ).toBeVisible();
   });
 
@@ -265,12 +265,12 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
     });
 
     await page.goto("/zimmer/101");
-    await page.getByRole("button", { name: "Übersteuerung" }).click();
+    await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
     await expect(page.getByRole("button", { name: "Anwenden" })).toHaveCount(0);
 
     // Toggle-Off — direkt ohne Confirm.
     await page
-      .getByRole("button", { name: "Uebersteuerung freigeben" })
+      .getByRole("button", { name: "Übersteuerung freigeben" })
       .click();
 
     await expect.poll(() => ctrl.patchedBlocked()).toBe(false);
