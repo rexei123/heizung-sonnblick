@@ -1145,6 +1145,114 @@ ENVIRONMENT=test ALLOW_DEFAULT_SECRETS=1 \
 docker stop heizung-test-db  # nach Session
 ```
 
+### 5.51 Domain-Invariante einfuehren: Tests an Domain-Wahrheit anpassen, nicht Service schwaechen (Sprint 12a T2)
+
+Wenn ein Sprint eine neue Domain-Invariante einfuehrt (Sprint 12a:
+„Override existiert nur in OCCUPIED-Zimmern", AE-58), kollidiert das
+mit Bestandstests, die diese Invariante nicht respektieren — in 12a
+waren das ~13 Tests in `test_api_overrides.py`, `test_engine_layer3.py`
+und `test_sprint12_e2e.py`, die Room ohne Occupancy anlegten und
+trotzdem `override_service.create()` riefen.
+
+Naheliegend, aber falsch: Service-Layer-Gate optional machen
+(`enforce_occupied=False`), damit Bestandstests gruen bleiben. Das
+schwaecht die Domain-Invariante an den Aufrufer aus und verschiebt
+die Stabilitaets-Pruefung in die Tests — genau das Doku-Drift-Muster
+aus §5.20 (aspirative Kommentare).
+
+Richtig: Fixture-Anpassung gegen Domain-Wahrheit. Test-Setup, das
+zu „OCCUPIED-Override anlegen" gehoert, muss eine aktive Occupancy
+seeden — das ist der realistische Setup-Default. Variante A in
+Sprint 12a T2: minimaler Fixture-Patch (~5 LoC pro Fixture in 3
+Files), keine Assertion-Aenderung, keine Service-Schwaechung.
+
+**Regel:** Bei neuer Domain-Invariante mit Backward-Compat-Klausel im
+Brief, sind Test-Fixture-Updates die richtige Antwort, NICHT
+Service-Optionalitaet. Erste Frage zum Strategie-Chat statt
+Eigeninitiative: „Variante A (Fixtures anpassen) oder Service
+loosen?".
+
+Sonderfall: ein-zwei Tests, die explizit das VACANT-Verhalten
+asserten (Sprint 12a: `test_layer3_no_op_passes_through` + Window-
+Tests mit `default_t_vacant=18`), brauchen eigene `vacant_room_id`-
+Fixture-Variante.
+
+Querverweis: §5.20 (Doku-Drift), §5.30 (Brief-Luecken), §5.47
+(Backward-Compat-Pflicht).
+
+### 5.52 Off-Pipeline-Audit-Pattern mit synthetischer evaluation_id (Sprint 12a T4)
+
+Wenn ein Code-Pfad eine Sicherheits-Entscheidung trifft, die KEINE
+Steuer-Wirkung erzeugt (kein Setpoint, kein ControlCommand, kein
+Downlink), aber dennoch auditiert werden muss (S3-Auditierbarkeit
+aus §0), passt der bestehende `event_log`-Pfad nicht direkt:
+`event_log.evaluation_id` ist Primary-Key-Bestandteil und gehoert
+zu einer Engine-Tick-Eval.
+
+Pattern aus Sprint 12a T4 (`device_adapter._write_blocked_event_log`):
+- Neuer Layer-Enum-Wert `EventLogLayer.MANUAL_OVERRIDE_BLOCKED`
+  semantisch off-pipeline, gehoert keiner Engine-Eval-Schleife
+- Synthetische `evaluation_id = uuid.uuid4()` pro Skip — gehoert
+  keinem Engine-Tick, ist eigenstaendig
+- `setpoint_in` und `setpoint_out` bleiben `None` (keine Setpoint-
+  Entscheidung getroffen)
+- `details` JSONB traegt Kontext-Snapshot (`source: "device_adapter"`,
+  `uplink_setpoint: "X.Y"`, …)
+- Kein `ControlCommand`-Insert, kein Downlink-Versuch (S4
+  Hardware-Schutz)
+
+Anwendungsfaelle:
+- Vicki-Drehring in VACANT-Raum (AE-58 OCCUPIED-Gate)
+- Vicki-Drehring bei offenem Fenster (AE-52 Window-Gate)
+
+**Regel:** Audit-Konsumenten (Engine-Decision-Panel, Trace-UI) muessen
+mit Off-Pipeline-Rows umgehen koennen — sie haben kein
+`evaluation_id`-Geschwister mit anderen Layern, sind also einzelne
+Inseln im Log. Frontend-Filter sollten sie als separate Kategorie
+zeigen (z.B. „Verworfene Drehring-Aktionen") statt sie in den
+regulaeren Tick-Trace zu verschmelzen.
+
+Querverweis: §5.23 (Engine-Trace-Konsistenz: alle Engine-Layer
+schreiben LayerStep — gilt fuer Engine-Pipeline; diese Lesson ist
+das Off-Pipeline-Komplement), AE-55 (JSONB-Sub-Trace-Pattern).
+
+### 5.53 Dual-Source-of-Truth-Risiko bei Status-Feldern (Sprint 12a T5)
+
+Wenn ein Service-Layer eine abgeleitete Status-Wahrheit berechnet
+(`occupancy_service.derive_room_status` → `RoomStatus` aus aktiven
+Occupancies), darf ein anderer Code-Pfad NICHT parallel das
+persistierte Feld direkt lesen — sonst entstehen zwei Quellen-of-
+Truth, die in Tests sichtbar werden.
+
+Sprint-12a-Drift: T2 `override_service.create()` ruft
+`derive_room_status` (Quelle: Occupancies). Sprint-12a-Test-Fixtures
+seeden Occupancy → `derive_room_status` returnt OCCUPIED → Override-
+Anlage gelingt. Aber Engine Layer 1 (`rules/engine.py:layer_base_target`)
+liest `ctx.room.status` direkt — bleibt VACANT (Room-Model-Default),
+weil `sync_room_status` nicht lief. T5-Tests, die OCCUPIED-Layer-1-
+Defaults brauchen, mussten Helper `_force_room_status_occupied`
+nutzen (testinternes Setup, kein Production-Pfad).
+
+In Production gleichen sich die beiden Quellen via periodischen
+`sync_room_status`-Aufruf an — aber: jeder Drift zwischen Cron-
+Tick-Latenz und Override-Eingabe ist potentiell falsches Verhalten
+(Engine sieht VACANT, Service sieht OCCUPIED).
+
+**Regel:** Status-Felder, die im Service-Layer berechnet werden,
+sollten **eine** Quelle-of-Truth haben. Wenn der Engine-Pfad
+ebenfalls Status braucht, muss er denselben Helper rufen, NICHT
+das persistierte Feld direkt lesen. Backlog B-12a-4: Engine soll
+`derive_room_status` nutzen.
+
+**Pflicht im Sprint-Brief:** Wenn neuer Service-Layer-Code ein
+Status-Feld als Domain-Wahrheit etabliert (z.B. „Override gilt
+nur in OCCUPIED"), Phase-0-Quellcheck muss verifizieren, dass
+ALLE Konsumenten der Wahrheit denselben Helper nutzen. Andernfalls
+Backlog-Eintrag als Drift-Risiko.
+
+Querverweis: §5.20 (Doku-Drift in Steuerlogik), AE-58 Punkt 2
+(OCCUPIED-Gate als zentrale Domain-Invariante).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

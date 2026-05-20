@@ -811,13 +811,63 @@ Engine-Logik existiert — `is_towel_warmer` ist DB-Marker ohne Konsumenten).
 
 ---
 
-# SPRINT 12a — Override-Zone-Scope + Frontend-Hinweis (Phase 1, Folge-Sprint)
+# SPRINT 12a — Override-Zone-Scope + AE-58 Konsolidierung (Backend-only, Phase 1-Folge)
 
-**Priorität:** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
-**Geschätzte Dauer:** 4-6 h
-**Autonomiestufe:** 1 (DB-Migration + Frontend-Touch)
+**Priorität:** ✅ abgeschlossen 2026-05-20 (Branch `feat/sprint12a-override-zone-scope`, 7 Commits T1-T7, PR-Erstellung als naechster Schritt, Tag `v0.1.17a-override-zone-scope-backend` nach Strategie-Chat-Freigabe + Live-Verify auf heizung-test)
+**Geschätzte Dauer (Brief):** 10-14 h
+**Realdauer:** ~12-13 h ueber 7 Tasks
+**Autonomiestufe:** 1 (DB-Migration + kritischer Service-Pfad + Hardware-Befehlspfad)
 **Voraussetzung:** Sprint 12 abgeschlossen + gemerged + Tag `v0.1.17-multivicki-fenster` gesetzt
-**Tag nach Abschluss:** `v0.1.17a-override-zone-scope`
+**Tag nach Abschluss:** `v0.1.17a-override-zone-scope-backend`
+
+## Ergebnis (Sprint 12a)
+
+AE-58 Override-Modell konsolidiert:
+- Zone-Scope-Override (`manual_override.heating_zone_id`)
+- OCCUPIED-Gate: Override nur in belegten Zimmern (RoomNotOccupiedError, 409 Frontend / silent skip + Audit Device)
+- Mitarbeiter > Gast Prioritaet (FRONTEND_* > DEVICE)
+- Window-Open trumpft alle Quellen (Layer 4 verwirft zone_overrides)
+- Auto-Revoke bei Check-out fuer ALLE Quellen (`revoke_all_active_overrides` ersetzt `revoke_device_overrides`)
+- Engine Layer 3 zone-aware via `RuleResult.zone_overrides` (Option G)
+- AE-29 + AE-45 als abgeloest markiert (Code-Cleanup AE-29 in B-12a-1)
+- AE-54-Klarstellung partiell revidiert (Layer 3 zone-aware, Layer 4/5 Room-Level mit Pass-Through)
+
+Detail-Tasks T0-T7 + Commit-Range siehe STATUS.md §2an.
+
+## Folge-Sprint-Backlog aus 12a (in STATUS.md §6.2 als B-12a-1..7)
+
+- B-12a-1: AE-29 manual_setpoint_event-Cleanup (Mini-Sprint, ~2 h)
+- B-12a-2: `_create_device`-Helper-Default `health_state="healthy"` (~10 Min)
+- B-12a-3: Layer 4 zone-differenzierende Window-Wirkung (nach Heizperiode)
+- B-12a-4: Engine soll `derive_room_status` nutzen statt `room.status` (~3-4 h)
+- B-12a-5: `_get_zones_for_room`-Helper Konsolidierung (~30 Min)
+- B-12a-6: Dispatch-Test mit `zone_overrides` ergaenzen (~30 Min)
+- B-12a-7: `get_active_zones_bulk`-Optimierung (YAGNI, Notiz)
+
+---
+
+# SPRINT 12a (alt) — ORIGINAL-BRIEF-SKIZZE 2026-05-19 (HISTORISCH)
+
+**Status:** ueberholt durch Sprint-12a-Strategie-Chat-Brief 2026-05-20
+(Backend-only mit AE-58-Konsolidierung). Der urspruengliche
+Sprint-12a-Brief 2026-05-19 sah Backend + Frontend in einem Sprint
+vor. Die Frontend-Arbeit ist in Sprint 12b (siehe unten) verschoben.
+
+**Originalziel (historisch):** Override-Domain auf Zone-Scope umstellen
++ Frontend-UX fuer Fenster-offen-Reject. Sprint 12 hat Schreib-Pfad
+zonen-iteriert + Engine Layer 4 Window-aware gemacht; Override blieb
+heute Room-scoped, das Frontend zeigte aber bereits Zonen-Granularitaet
+— Mismatch.
+
+**Folgende Original-Skizze ist NICHT mehr Plan-Basis** (siehe oben
+„Ergebnis (Sprint 12a)" fuer den tatsaechlichen Inhalt nach
+Brief-Update 2026-05-20):
+
+**Priorität (historisch):** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
+**Geschätzte Dauer (historisch):** 4-6 h
+**Autonomiestufe (historisch):** 1 (DB-Migration + Frontend-Touch)
+**Voraussetzung (historisch):** Sprint 12 abgeschlossen + gemerged + Tag `v0.1.17-multivicki-fenster` gesetzt
+**Tag nach Abschluss (historisch):** `v0.1.17a-override-zone-scope`
 
 > **Numerierungs-Drift Sprint 12 T6 (D17):** Brief-Wortlaut sagte
 > „Sprint-13-Block NEU anlegen" — kollidiert mit bereits existentem
@@ -878,6 +928,98 @@ oefter 409) wird mit dieser Vorpruefung erledigt.
   `zone_id` muessen weiter funktionieren).
 - Engine Layer 3 zone-Lookup-Priorisierung: Zone-Override > Room-
   Override > kein Override. Reihenfolge dokumentieren in AE-Ergaenzung.
+
+---
+
+# SPRINT 12b — Frontend Zone-Override-Panels + Window-Pre-Check (Phase 1, Folge-Sprint zu 12a)
+
+**Priorität:** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
+**Geschätzte Dauer:** 4-6 h
+**Autonomiestufe:** 2 (Frontend-Refactor, kein Hardware-Pfad)
+**Voraussetzung:** Sprint 12a abgeschlossen + gemerged + Tag `v0.1.17a-override-zone-scope-backend` gesetzt
+**Tag nach Abschluss:** `v0.1.17b-override-zone-scope-frontend`
+
+## Ziel
+
+Frontend-UX an das in Sprint 12a etablierte Backend-Override-Modell
+(AE-58) anpassen:
+
+- **Zone-Override-Panels pro Zone** statt einer Card pro Raum.
+  Zimmer mit 2 Zonen (Schlafzimmer + Bad) zeigen 2 Panels. Jedes
+  Panel ist eigenstaendig (eigener Override-Setpoint, eigene
+  Quelle-Auswahl, eigener „Aufheben"-Button).
+- **Window-Pre-Check vor POST**: GET `/api/v1/rooms/{room_id}/window-state`
+  (oder Reuse `engine-trace`-Endpoint) bevor Override-POST. Wenn
+  Zone offen: Button disabled, Hinweis-Text „Fenster offen —
+  Override nicht moeglich, bitte Fenster schliessen". Erspart 409-
+  Response-Loops im Normalbetrieb.
+- **Schema-Konsum `heating_zone_id`**: Response-Body zeigt
+  `heating_zone_id` (int | null); UI rendert Zone-Scope vs.
+  Room-Scope (Default) als Label-Variante.
+- **422 / 409-differenzierte Fehler-Anzeige**: heute generischer
+  „Fehler"-Toast. 409 `room_not_occupied` → „Override nur fuer
+  belegte Zimmer moeglich". 409 `override_rejected_window_open`
+  → siehe Window-Pre-Check. 404 `invalid_zone` → defensive Fallback.
+- **room_blocked-Slot-Stub fuer Sprint 12c**: UI-Komponente fuer
+  Sperr-Toggle vorbereiten (deaktiviert, mit „kommt in Sprint 12c"-
+  Hinweis), Backend-Pfad bleibt 12c-Scope.
+
+## Tasks (Skizze)
+
+- Refactor `frontend/src/components/patterns/manual-override-panel.tsx`
+  von `(roomId)` auf `(roomId, zoneId)`-Mode
+- Neue Container-Komponente `manual-override-panel-list.tsx` rendert
+  N Panels pro Zone des Raums + 1 Room-Scope-Fallback-Panel falls
+  Bestandsdaten vorhanden
+- Hook `useWindowStateForRoom(roomId)` + Pre-Check-Gating
+- API-Schema-Konsum `heating_zone_id` in Response + Create-Body
+- Playwright E2E: Zone-Override anlegen, Aufheben, Window-Pre-Check
+  Disable-State, 422/409-Fehler-Toasts
+
+## Out of Scope
+
+- Backend-Aenderungen (alles in Sprint 12a fertig)
+- `room.guest_override_blocked`-Toggle (Sprint 12c)
+
+---
+
+# SPRINT 12c — Zimmer-Sperre `room.guest_override_blocked` (Phase 1, Folge-Sprint zu 12b)
+
+**Priorität:** 🟢 (Phase-1-Folge, nach 12b oder spaeter)
+**Geschätzte Dauer:** 3-5 h
+**Autonomiestufe:** 1 (DB-Migration + Pre-Insert-Gate in beiden Override-Pfaden)
+**Voraussetzung:** Sprint 12b abgeschlossen + gemerged
+**Tag nach Abschluss:** `v0.1.17c-room-blocked`
+
+## Ziel
+
+Zimmer-Ebene-Override-Sperre als Override-Gate-Erweiterung (AE-58
+Punkt 2): Hotelier kann ein Zimmer komplett von Override-Anlage
+aussperren (z.B. fuer Compliance-Tests, Wartungs-Sperre, Gast-
+Beschwerden ueber zu warme Vickis).
+
+## Tasks (Skizze)
+
+- Migration `0017_room_guest_override_blocked.py`: `ALTER TABLE
+  room ADD COLUMN guest_override_blocked BOOLEAN NOT NULL DEFAULT
+  FALSE`
+- `override_service.create()` Pre-Insert-Gate: wenn
+  `room.guest_override_blocked=True` → `RoomBlockedError`. Reihenfolge:
+  OCCUPIED → ROOM_BLOCKED → Window-Open.
+- API `/api/v1/overrides.py` POST: 409
+  `{"error": "room_blocked", "room_id": X}` Mapping (Anker-Kommentar
+  in Sprint-12a T3 schon platziert)
+- `device_adapter.handle_uplink_for_override`: silent skip + Audit
+  (Reason `DEVICE_BLOCKED_ROOM`), AE-58 Punkt 9
+- Neue Enum-Werte: `CommandReason.DEVICE_BLOCKED_ROOM` (VARCHAR(30))
+- Frontend: Toggle in Zimmer-Detail-Header (Mitarbeiter-Right),
+  Sperr-Banner sichtbar fuer Hotelier
+- Tests: Pre-Insert-Gate (beide Pfade), API 409, Frontend Toggle E2E
+
+## Out of Scope
+
+- Vicki-Hardware-Child-Lock via Downlink 0x07 (B-12c-1 Backlog,
+  nach erstem Winter)
 
 ---
 

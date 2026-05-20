@@ -1,13 +1,18 @@
-"""Manual-Override-Domain-Logik (Sprint 9.9, Engine Layer 3).
+"""Manual-Override-Domain-Logik (Sprint 9.9 + Sprint 12a-Konsolidierung, AE-58).
 
 Reine Domain-Schicht: kennt KEIN Casablanca, KEIN Vicki, KEIN HTTP. Nimmt
 ``AsyncSession`` + Werte, gibt Modelle zurueck. Konsumenten:
 
 - ``api/v1/overrides``                 -> create / get_active / get_history / revoke (T4)
 - ``services/device_adapter``          -> create(source=DEVICE) (T5)
-- Casablanca-Sync-Job                  -> revoke_device_overrides (T6)
+- Casablanca-Sync-Job                  -> revoke_all_active_overrides (Sprint 12a T2/T6)
 - ``tasks/cleanup_overrides``          -> cleanup_expired (T7)
 - Engine Layer 3                       -> get_active (T3)
+
+Sprint 12a hat die Domain konsolidiert (AE-58): Override gilt nur in
+OCCUPIED-Zimmern (``RoomNotOccupiedError`` Pre-Insert-Gate), Zone-Scope
+optional via ``heating_zone_id``, Check-out revoked ALLE Quellen
+(``revoke_all_active_overrides`` ersetzt ``revoke_device_overrides``).
 """
 
 from __future__ import annotations
@@ -18,13 +23,14 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.models.enums import OverrideSource
+from heizung.models.enums import OverrideSource, RoomStatus
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
 from heizung.rules.window_state import detect_open_window_zones
+from heizung.services.occupancy_service import derive_room_status
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,29 @@ class OverrideRejectedWindowOpenError(Exception):
         super().__init__(
             f"Override-Anlage abgewiesen: Fenster offen in Zone(n) {zone_ids}. "
             "Bitte Fenster schliessen und erneut versuchen."
+        )
+
+
+class RoomNotOccupiedError(Exception):
+    """Sprint 12a T2 (AE-58): Override-Anlage wird abgewiesen, wenn der Raum
+    nicht ``OCCUPIED`` ist.
+
+    AE-58: Override existiert nur in OCCUPIED-Zimmern; VACANT/RESERVED/
+    CLEANING/BLOCKED laufen auf globalen Einstellungen + Frostschutz, keine
+    Override-Ausnahmen. Vicki-Drehring in VACANT ist Daten-Anomalie und
+    wird vom Device-Pfad (T4) silent geskippt; Frontend-Pfad (T3) mappt
+    auf HTTP 409 ``room_not_occupied``.
+
+    :param room_id: betroffener Raum.
+    :param status: aktueller abgeleiteter Status (aus ``derive_room_status``).
+    """
+
+    def __init__(self, room_id: int, status: RoomStatus) -> None:
+        self.room_id = room_id
+        self.status = status
+        super().__init__(
+            f"Override-Anlage abgewiesen: Raum {room_id} ist nicht OCCUPIED "
+            f"(Status: {status.value}). Override gilt nur fuer belegte Raeume."
         )
 
 
@@ -112,10 +141,18 @@ def compute_expires_at(
         local_midnight = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
         raw = local_midnight.astimezone(UTC)
     elif source in (OverrideSource.FRONTEND_CHECKOUT, OverrideSource.DEVICE):
-        if next_checkout_at is not None:
-            raw = next_checkout_at
-        else:
-            raw = now + timedelta(days=HARD_MAX_DURATION_DAYS)
+        # Sprint 12a T2 (AE-58): Fallback-Pfad ``now+7d`` entfaellt. Mit
+        # vorgeschaltetem OCCUPIED-Gate (siehe ``create``) gibt es immer
+        # eine aktive Belegung, also liefert ``next_active_checkout`` einen
+        # Wert. ``None`` ist ein Contract-Bruch beim Aufrufer; defensiv
+        # raisen damit der Fehler an die Oberflaeche kommt, statt still
+        # auf 7 Tage zu cappen.
+        if next_checkout_at is None:
+            raise ValueError(
+                f"next_checkout_at darf nicht None sein fuer source={source.value} "
+                "— OCCUPIED-Gate haette das verhindern muessen"
+            )
+        raw = next_checkout_at
     else:
         raise ValueError(f"Unbekannte OverrideSource: {source}")
 
@@ -132,10 +169,26 @@ async def create(
     expires_at: datetime,
     reason: str | None = None,
     created_by: str | None = None,
+    heating_zone_id: int | None = None,
 ) -> ManualOverride:
     """Legt einen neuen Override an.
 
+    Sprint 12a T2 (AE-58): zwei Pre-Insert-Gates in dieser Reihenfolge:
+
+    1. **OCCUPIED-Gate** — Override gilt nur fuer belegte Raeume. Status
+       wird via ``derive_room_status`` aus aktiven Occupancies berechnet
+       (canonical, nicht stale ``room.status``-Feld).
+    2. **Window-Offen-Gate** (Sprint 12 T4 / AE-52) — Override wird
+       abgewiesen, wenn mindestens eine HeatingZone des Raums
+       ``open_window=True`` meldet.
+
+    :param heating_zone_id: optionale Zone-Granularitaet (Sprint 12a T1/T2).
+        ``None`` = Room-Scope-Override (Backward-Compat fuer Aufrufer
+        ohne Zone-Wissen). Engine Layer 3 (T5) priorisiert Zone-Match vor
+        Room-Match beim Lookup.
     :raises ValueError: setpoint out-of-range [MIN_SETPOINT, MAX_SETPOINT].
+    :raises RoomNotOccupiedError: Sprint 12a T2 (AE-58) — Raum ist nicht
+        OCCUPIED. Override wird NICHT persistiert.
     :raises OverrideRejectedWindowOpenError: Sprint 12 T4 (AE-52) — eine
         oder mehrere HeatingZones des Raums melden gerade ``open_window=
         True`` mit frischem Reading. Override wird NICHT persistiert.
@@ -147,6 +200,15 @@ async def create(
         )
 
     now = _now()
+
+    # Sprint 12a T2 (AE-58): OCCUPIED-Gate VOR Window-Gate. AE-58 verankert
+    # Override-Domain als „nur fuer belegte Raeume"; VACANT/RESERVED/CLEANING/
+    # BLOCKED laufen auf globalen Einstellungen + Frostschutz, keine Override-
+    # Ausnahmen. ``derive_room_status`` ist die canonical Quelle (aus aktiven
+    # Occupancies abgeleitet), ``room.status``-Feld koennte stale sein.
+    room_status = await derive_room_status(session, room_id, now)
+    if room_status != RoomStatus.OCCUPIED:
+        raise RoomNotOccupiedError(room_id, room_status)
 
     # Sprint 12 T4 (AE-52): Pre-Insert Window-Check. Wenn mindestens eine
     # Zone des Raums Fenster offen meldet, wird der Override abgewiesen
@@ -174,6 +236,7 @@ async def create(
 
     override = ManualOverride(
         room_id=room_id,
+        heating_zone_id=heating_zone_id,
         setpoint=quantized,
         source=source,
         expires_at=capped_expires_at,
@@ -185,17 +248,55 @@ async def create(
     return override
 
 
-async def get_active(session: AsyncSession, room_id: int) -> ManualOverride | None:
-    """Juengster nicht-revokierter, nicht-expired Override fuer den Raum."""
+async def get_active(
+    session: AsyncSession,
+    room_id: int,
+    heating_zone_id: int | None = None,
+) -> ManualOverride | None:
+    """Aktiver Override fuer den Raum (Sprint 12a T2, AE-58).
+
+    Lookup-Priorisierung (Sprint 12a):
+
+    1. **Scope:** Wenn ``heating_zone_id`` gesetzt, gewinnt Zone-Match
+       (``heating_zone_id == X``) vor Room-Match (``heating_zone_id IS NULL``).
+       Ohne ``heating_zone_id`` werden ausschliesslich Room-Scope-Overrides
+       betrachtet — Zone-Overrides bleiben unsichtbar (Backward-Compat fuer
+       Aufrufer ohne Zone-Wissen, z.B. Legacy-Engine-Layer-3-Pfad vor T5).
+    2. **Quelle:** FRONTEND_* schlaegt DEVICE (Mitarbeiter > Gast).
+    3. **Tiebreaker:** ``created_at DESC`` (neuerer Eintrag gewinnt).
+    """
     now = _now()
-    stmt = (
+    is_device = case(
+        (ManualOverride.source == OverrideSource.DEVICE, 1),
+        else_=0,
+    )
+    base = (
         select(ManualOverride)
         .where(ManualOverride.room_id == room_id)
         .where(ManualOverride.revoked_at.is_(None))
         .where(ManualOverride.expires_at > now)
-        .order_by(ManualOverride.created_at.desc())
-        .limit(1)
     )
+    if heating_zone_id is None:
+        stmt = (
+            base.where(ManualOverride.heating_zone_id.is_(None))
+            .order_by(is_device, ManualOverride.created_at.desc())
+            .limit(1)
+        )
+    else:
+        is_room_scope = case(
+            (ManualOverride.heating_zone_id.is_(None), 1),
+            else_=0,
+        )
+        stmt = (
+            base.where(
+                or_(
+                    ManualOverride.heating_zone_id == heating_zone_id,
+                    ManualOverride.heating_zone_id.is_(None),
+                )
+            )
+            .order_by(is_room_scope, is_device, ManualOverride.created_at.desc())
+            .limit(1)
+        )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -206,18 +307,39 @@ async def get_history(
     *,
     limit: int = 50,
     include_expired: bool = True,
+    heating_zone_id: int | None = None,
 ) -> list[ManualOverride]:
-    """Override-Historie fuer den Raum, ``created_at DESC``.
+    """Override-Historie fuer den Raum.
+
+    Ohne ``heating_zone_id`` (Default, Backward-Compat): alle Overrides des
+    Raums, ``created_at DESC``.
+
+    Mit ``heating_zone_id``: Zone-Match (``heating_zone_id == X``) plus
+    Room-Scope-Overrides (``heating_zone_id IS NULL``) als Fallback im
+    Response. Sortierung: Zone-Match zuerst (Block oben), dann Room-Match,
+    dann ``created_at DESC`` innerhalb jedes Blocks (Sprint 12a T3).
 
     ``limit`` wird auf ``HISTORY_LIMIT_CAP`` (= 200) gekappt.
     """
     effective_limit = min(limit, HISTORY_LIMIT_CAP)
-    stmt = (
-        select(ManualOverride)
-        .where(ManualOverride.room_id == room_id)
-        .order_by(ManualOverride.created_at.desc())
-        .limit(effective_limit)
-    )
+    base = select(ManualOverride).where(ManualOverride.room_id == room_id)
+    if heating_zone_id is None:
+        stmt = base.order_by(ManualOverride.created_at.desc()).limit(effective_limit)
+    else:
+        is_room_scope = case(
+            (ManualOverride.heating_zone_id.is_(None), 1),
+            else_=0,
+        )
+        stmt = (
+            base.where(
+                or_(
+                    ManualOverride.heating_zone_id == heating_zone_id,
+                    ManualOverride.heating_zone_id.is_(None),
+                )
+            )
+            .order_by(is_room_scope, ManualOverride.created_at.desc())
+            .limit(effective_limit)
+        )
     if not include_expired:
         now = _now()
         stmt = stmt.where(ManualOverride.expires_at > now)
@@ -243,18 +365,30 @@ async def revoke(
     return override
 
 
-async def revoke_device_overrides(
+async def revoke_all_active_overrides(
     session: AsyncSession,
     room_id: int,
     *,
     reason: str = "auto: guest checked out",
 ) -> int:
-    """Revoked alle aktiven device-Overrides fuer den Raum. Returns count."""
+    """Revoked ALLE aktiven Overrides des Raums (Sprint 12a T2, AE-58).
+
+    Sprint 12a hat ``revoke_device_overrides`` ersatzlos durch diese
+    Funktion ersetzt. Bei Check-out (PMS-Hook, OCCUPIED -> VACANT ohne
+    Folge-Checkin in 4h) wird der komplette Override-Stack des Raums
+    revokiert — DEVICE und FRONTEND_*. Grund: ein neuer Gast soll auf
+    globalen Einstellungen starten, ohne dass alte Mitarbeiter-Overrides
+    aus der vorigen Belegung weiterlaufen.
+
+    Filter: ``revoked_at IS NULL AND expires_at > now``, kein
+    ``source``-Filter mehr.
+
+    Returns Anzahl der revokierten Overrides.
+    """
     now = _now()
     stmt = (
         select(ManualOverride)
         .where(ManualOverride.room_id == room_id)
-        .where(ManualOverride.source == OverrideSource.DEVICE)
         .where(ManualOverride.revoked_at.is_(None))
         .where(ManualOverride.expires_at > now)
     )

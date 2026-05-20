@@ -23,6 +23,7 @@ Reply in diesem Fenster ist erwartet -> kein Override.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -32,11 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
-from heizung.models.enums import OverrideSource
+from heizung.models.enums import CommandReason, EventLogLayer, OverrideSource, RoomStatus
+from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
+from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
-from heizung.services.occupancy_service import next_active_checkout
+from heizung.services.occupancy_service import derive_room_status, next_active_checkout
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -110,6 +113,59 @@ async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:
     return room_id
 
 
+async def _device_zone_id(session: AsyncSession, device_id: int) -> int | None:
+    """``Device.heating_zone_id`` direkt. ``None`` wenn nicht zugeordnet.
+
+    Sprint 12a T4 (AE-58): separater Helper analog ``_device_room_id``.
+    Single Query auf ``device.heating_zone_id`` (Phase-0 §3: direkte
+    1:N-FK, kein heating_zone_device-Mapping-Modul). Im aktuellen
+    Schema liefert ``_device_zone_id`` und ``_device_room_id`` immer
+    konsistente Werte — die separate Funktion erlaubt aber, die
+    Room-Scope-Fallback-Logik im Aufrufer sauber gegen die Zone-Lookup-
+    Logik abzugrenzen (Forward-Compat fuer mgl. Schema-Erweiterung).
+    """
+    stmt = select(Device.heating_zone_id).where(Device.id == device_id).limit(1)
+    zone_id: int | None = await session.scalar(stmt)
+    return zone_id
+
+
+async def _write_blocked_event_log(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    device_id: int,
+    received_at: datetime,
+    reason: CommandReason,
+    uplink_setpoint: Decimal,
+) -> None:
+    """Off-pipeline event_log-Audit fuer device_adapter Pre-Insert-Skip.
+
+    Sprint 12a T4 (AE-58): Vicki-Drehring in VACANT-Raum oder bei Fenster
+    offen wird im device_adapter ohne manual_override-Insert verworfen.
+    Damit der Befund auditierbar bleibt (S3), schreibt der Skip-Pfad einen
+    eigenstaendigen ``MANUAL_OVERRIDE_BLOCKED``-Eintrag mit synthetischer
+    ``evaluation_id`` (gehoert keiner Engine-Tick-Eval an). ``setpoint_in``
+    / ``setpoint_out`` bleiben ``None`` — es entstand keine Steuer-
+    Entscheidung. ``details`` traegt den verworfenen User-Setpoint.
+    """
+    entry = EventLog(
+        time=received_at,
+        room_id=room_id,
+        evaluation_id=uuid.uuid4(),
+        layer=EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+        device_id=device_id,
+        setpoint_in=None,
+        setpoint_out=None,
+        reason=reason,
+        details={
+            "source": "device_adapter",
+            "uplink_setpoint": str(uplink_setpoint),
+        },
+    )
+    session.add(entry)
+    await session.flush()
+
+
 async def handle_uplink_for_override(
     session: AsyncSession,
     device_id: int,
@@ -117,12 +173,32 @@ async def handle_uplink_for_override(
     fport: int,
     received_at: datetime,
 ) -> ManualOverride | None:
-    """Vollstaendiger Pfad: Detection + Override-Erzeugung.
+    """Vollstaendiger Pfad: Detection + Pre-Insert-Gates + Override-Erzeugung.
 
     Aufrufer: ``mqtt_subscriber`` nach erfolgreicher Reading-Persistenz.
-    Returns den erzeugten ``ManualOverride`` oder ``None``, wenn keine
-    Override-Bedingung erfuellt war (kein Engine-Intent, Ack-Window,
-    innerhalb Toleranz, kein Room-Mapping).
+    Sprint 12a T4 (AE-58) — Gate-Reihenfolge nach Brief:
+
+    a) **OCCUPIED-Gate** (via ``derive_room_status``): VACANT/RESERVED/
+       CLEANING/BLOCKED -> silent skip + ``MANUAL_OVERRIDE_BLOCKED``-
+       event_log-Eintrag mit ``reason=DEVICE_BLOCKED_VACANT``. KEIN
+       ``RoomNotOccupiedError``-Raise — der mqtt_subscriber-Aufrufer
+       darf nicht crashen.
+    b) **Window-Offen-Gate** (via ``detect_open_window_zones``):
+       mindestens eine Zone des Raums meldet ``open_window=True`` ->
+       silent skip + event_log mit ``reason=DEVICE_BLOCKED_WINDOW``.
+       Reuse des Sprint-12-T4-Helpers, gleiche Filter-Semantik (healthy
+       Devices, frische Readings).
+    c) **Zone-Lookup**: ``_device_zone_id``. ``None`` -> Warning
+       ``device_without_zone_mapping`` + Room-Scope-Fallback
+       (``heating_zone_id=None``). Im aktuellen Schema unerreichbar
+       (Vicki ohne Zone hat auch keinen Raum-Link), bleibt aber als
+       defensiver Branch gegen Schema-Erweiterung.
+    d) ``override_service.create(..., heating_zone_id=...)``.
+
+    Returns:
+        ``ManualOverride`` bei erfolgreicher Anlage.
+        ``None`` bei: kein Engine-Intent, Ack-Window, innerhalb Toleranz,
+        kein Room-Mapping, OCCUPIED-Gate-Skip, Window-Gate-Skip.
     """
     user_setpoint = await detect_user_override(
         session,
@@ -142,6 +218,55 @@ async def handle_uplink_for_override(
         )
         return None
 
+    # Gate (a): OCCUPIED-Check (AE-58).
+    room_status = await derive_room_status(session, room_id, received_at)
+    if room_status != RoomStatus.OCCUPIED:
+        logger.info(
+            "device-override skip: room_id=%s nicht OCCUPIED (status=%s) — device_id=%s",
+            room_id,
+            room_status.value,
+            device_id,
+        )
+        await _write_blocked_event_log(
+            session,
+            room_id=room_id,
+            device_id=device_id,
+            received_at=received_at,
+            reason=CommandReason.DEVICE_BLOCKED_VACANT,
+            uplink_setpoint=user_setpoint,
+        )
+        return None
+
+    # Gate (b): Window-Offen-Check (AE-52, Sprint 12 T4 Helper reuse).
+    open_zones = await detect_open_window_zones(session, room_id, received_at)
+    if open_zones:
+        logger.info(
+            "device-override skip: room_id=%s window_open in zone(s)=%s — device_id=%s",
+            room_id,
+            [z.get("zone_id") for z in open_zones],
+            device_id,
+        )
+        await _write_blocked_event_log(
+            session,
+            room_id=room_id,
+            device_id=device_id,
+            received_at=received_at,
+            reason=CommandReason.DEVICE_BLOCKED_WINDOW,
+            uplink_setpoint=user_setpoint,
+        )
+        return None
+
+    # Gate (c): Zone-Lookup mit Room-Scope-Fallback (AE-58).
+    heating_zone_id = await _device_zone_id(session, device_id)
+    if heating_zone_id is None:
+        logger.warning(
+            "device_without_zone_mapping: device_id=%s room_id=%s — Override mit "
+            "heating_zone_id=NULL angelegt (Room-Scope-Fallback)",
+            device_id,
+            room_id,
+        )
+
+    # Gate (d): Override anlegen.
     next_checkout = await next_active_checkout(session, room_id, now=received_at)
     hotel_config = await session.get(GlobalConfig, 1)
 
@@ -159,4 +284,5 @@ async def handle_uplink_for_override(
         source=OverrideSource.DEVICE,
         expires_at=expires_at,
         reason="auto: detected user setpoint change",
+        heating_zone_id=heating_zone_id,
     )

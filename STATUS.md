@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-19. Sprints 0-12 abgeschlossen, Tag `v0.1.17-multivicki-fenster` auf develop (PR #160 squash-merged, Commit `c9f58d1`). Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) vorbereitet.
+**Stand:** 2026-05-20. Sprints 0-12 abgeschlossen, Sprint 12a (Override-Zone-Scope + OCCUPIED-Gate + AE-58, Backend-only) auf Branch `feat/sprint12a-override-zone-scope` fertig (7 Commits T1-T7), wartet auf PR-Freigabe + Live-Verify auf heizung-test. Tag `v0.1.17a-override-zone-scope-backend` nach Merge.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-19
-**Letzter Tag:** `v0.1.17-multivicki-fenster` (Sprint 12, Squash-Commit `c9f58d1`, gemerged 2026-05-19).
-**Aktueller Sprint:** Sprint 12 abgeschlossen 2026-05-19, PR #160 squash-merged, Tag gesetzt. Sprint 12a (Override-Zone-Scope + Frontend-Hinweis) als Folge-Sprint in SPRINT-PLAN.md vorbereitet, Start nach Strategie-Chat-Freigabe.
+**Stichtag:** 2026-05-20
+**Letzter Tag (gemerged):** `v0.1.17-multivicki-fenster` (Sprint 12, Squash-Commit `c9f58d1`, gemerged 2026-05-19).
+**Aktueller Sprint:** Sprint 12a (Override-Zone-Scope + OCCUPIED-Gate + AE-58, Backend-only). Branch `feat/sprint12a-override-zone-scope` mit 7 Commits T1-T7 fertig (T0 Phase-0 ohne Commit, T1 Migration, T2 Service, T3 API, T4 device_adapter, T5 Engine, T6 PMS-Hook-Tests, T7 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17a-override-zone-scope-backend` nach Strategie-Chat-Freigabe + Live-Verify auf heizung-test.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1727,6 +1727,61 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 
 ---
 
+## 2an. Sprint 12a Override-Zone-Scope + AE-58 Konsolidierung (Backend-only, 2026-05-20)
+
+**Ziel:** Override-Modell konsolidieren auf strategie-konformen Zustand (AE-58). Zone-scoped Overrides (`manual_override.heating_zone_id`), OCCUPIED-Gate (Override nur fuer belegte Zimmer), AE-29 + AE-45 abgeloest, Mitarbeiter > Gast Prioritaet, Window-Open trumpft alle Quellen, Auto-Revoke bei Check-out fuer alle Quellen (`revoke_all_active_overrides` ersetzt `revoke_device_overrides`). Engine Layer 3 zone-aware via `RuleResult.zone_overrides` (Option G), Layer 4/5 + Dispatch mit Pass-Through.
+
+**Tag-Vorschlag:** `v0.1.17a-override-zone-scope-backend` nach Merge + Live-Verify auf heizung-test.
+
+**Branch:** `feat/sprint12a-override-zone-scope`, 7 Commits T1-T7 (T0 Phase-0-Quellcheck ohne Commit).
+
+**Commits:**
+
+| Commit | Subject | Stat |
+|--------|---------|------|
+| `eabd7be` (T1) | feat(sprint12a): T1 migration 0016 manual_override.heating_zone_id | 2 files, +247 |
+| `a352e8b` (T2) | feat(sprint12a): T2 override_service Zone-Scope + OCCUPIED-Gate + Priority-Sort | 7 files, +524/-54 |
+| `f52c07f` (T3) | feat(sprint12a): T3 API Zone-Scope + 409 room_not_occupied + 404 invalid_zone | 4 files, +329/-11 |
+| `aec8866` (T4) | feat(sprint12a): T4 device_adapter Zone-Scope + OCCUPIED/Window-Gates + Audit | 3 files, +368/-6 |
+| `c8cf477` (T5) | feat(sprint12a): T5 Engine Layer 3 zone-aware (Option G) | 3 files, +470/-13 |
+| `91e78d8` (T6) | test(sprint12a): T6 PMS-Hook Verifikation revoke_all_active_overrides | 1 file, +91 |
+| T7 (dieser Commit) | docs(sprint12a): T7 AE-58 + AE-29/45/52/54-Marker + STRATEGIE + RUNBOOK + STATUS + SPRINT-PLAN + CLAUDE | mehrere Doku-Files |
+
+**Total (T1-T6):** **+2029 insertions / -84 deletions**, +25 neue Tests netto (+27 neue, -2 entfernte obsolete `compute_expires_at`-Fallback-Tests). Test-Suite 388 → 413 (+25). Brief-Erwartung 10-14 h, Realdauer ~12-13 h ueber 7 Tasks.
+
+**Kern-Liefergegenstaende:**
+
+- Migration `0016_manual_override_zone_id.py` mit `heating_zone_id INTEGER NULL`, FK `ON DELETE SET NULL`, Partial Index `ix_manual_override_active_zone`.
+- `models/manual_override.py`: `heating_zone_id: Mapped[int | None]`.
+- `services/override_service.py`: `RoomNotOccupiedError` neu, `create()` mit OCCUPIED-Gate + Window-Gate + `heating_zone_id`-Param, `get_active()` Zone>Room + FRONTEND>DEVICE Priority-Sort, `compute_expires_at()` Fallback `now+7d` entfernt, `revoke_device_overrides` → `revoke_all_active_overrides` (kein source-Filter).
+- `api/v1/overrides.py`: POST mit `heating_zone_id` Body-Param + FK-404-Check + 409 `room_not_occupied`, GET mit `zone_id` Query-Param + Zone>Room-Sort, AE-58 Sprint-12c-Anker-Kommentar fuer `room_blocked`-Slot.
+- `services/device_adapter.py`: `_device_zone_id` Helper + `_write_blocked_event_log` Helper + Gate-Stack (OCCUPIED → Window → Zone-Lookup → create), silent skip + Audit fuer Vicki-Drehring in VACANT/Window.
+- `services/override_pms_hook.py`: Aufruf auf `revoke_all_active_overrides` (T2-Vorgriff per Brief).
+- `models/enums.py`: `EventLogLayer.MANUAL_OVERRIDE_BLOCKED`, `CommandReason.DEVICE_BLOCKED_VACANT` + `DEVICE_BLOCKED_WINDOW`.
+- `rules/engine.py`: `RuleResult.zone_overrides: dict[int, int]`, `layer_manual_override` mit `heating_zone_id`-Param + `heating_zone_id`-Feld in extras, Zone-Eval-Schleife nach Layer 2 in `evaluate_room`, Layer 4 verwirft `zone_overrides` bei `WINDOW_OPEN`, Layer 5 clampt Zone-Werte, AE-55-Trace via `extras["zone_overrides_trace"]` in HARD_CLAMP-Row.
+- `tasks/engine_tasks.py`: `_dispatch_downlinks_per_zone` mit `zone_overrides`-Param, pro Zone `target = zone_overrides.get(zone.id, default)`.
+- `schemas/manual_override.py`: `ManualOverrideCreate` mit optionalem `heating_zone_id`, `ManualOverrideResponse` mit `heating_zone_id: int | None`.
+
+**Brief-Drifts (vorab durch Strategie-Chat freigegeben):**
+
+- **T1:** AE-29-Cleanup nicht im Bundle-DROP, separates B-12a-1 (Phase-0-Befund: aktive ORM-Relationships, DROP wuerde Room-Lazy-Load brechen).
+- **T2:** Backward-Compat-Konflikt zwischen OCCUPIED-Gate und Bestandstests → Variante A (Fixture-Anpassung in test_api_overrides.py + test_engine_layer3.py + test_sprint12_e2e.py, ~30 Min Mechanik, keine Test-Assertion-Aenderung). 13 Bestandstests rot vor Fixture-Update, 0 nach Update.
+- **T5:** Option G statt Option F. RuleResult-Erweiterung um `zone_overrides`-Dict, Engine-Decision-Iteration teilweise zone-aware (Layer 3), Layer 4/5/Dispatch Pass-Through. AE-54-Klarstellung in T7 revidiert.
+- **T5 Fixture-Drift:** Engine Layer 1 liest `ctx.room.status`, T2-Fixtures setzen nur Occupancy → derive_room_status. Helper `_force_room_status_occupied` in 2 T5-Tests. B-12a-4 Backlog: Engine soll `derive_room_status` nutzen.
+- **T7:** Doku-Run pflegt AE-58 + Markierungen + STRATEGIE + RUNBOOK + STATUS + SPRINT-PLAN + CLAUDE-Lessons.
+
+**Tests-Bilanz:** 388 (Sprint-12-Stand vor 12a) → 413 (+25 netto = +27 neue T1-T6-Tests minus 2 entfernte obsolete `compute_expires_at`-Fallback-Tests). 1 xfailed unveraendert (Sprint-11-Bestand).
+
+**Nicht-Ziele eingehalten:**
+
+- Kein Frontend-Touch (Sprint 12b: Zone-Override-Panels, Window-Pre-Check, `room_blocked`-Slot-Stub).
+- Kein `room.guest_override_blocked`-Feld (Sprint 12c).
+- AE-29 `manual_setpoint_event`-Cleanup (DROP TABLE + Modell + Schema + Relationships) verschoben in B-12a-1.
+
+**Querverweise:** AE-58 (Master-ADR fuer Override-Modell), AE-29 (abgeloest), AE-45 (abgeloest), AE-52 (Praezisierung Device-Pfad silent skip), AE-54-Klarstellung (Layer 3 zone-aware), CLAUDE.md §5.51-§5.53 (3 neue Lessons aus Sprint 12a).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -1929,6 +1984,13 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-11prep-3 🟢 (nach Heizperiode) | **Alarm-Schwellen-Härtung gegen 100-Vicki-Skalierung.** AE-53-3-Stufen-Alarm (Mail-Stub via `logger.warning`) ist heute auf 4 Vickis ausgelegt; bei 100 Vickis ist Alarm-Müdigkeit realistisch. Nach erster Heizperiode 2026/27 empirisch nachjustieren. |
 | B-11prep-4 🟠 (Mitte August) | **Pilot-Zimmer-Auswahl finalisieren.** 5 Zimmer maximaler Vielfalt: Standard + Suite + Mehrfach-Vicki + Funk-Rand + häufiger Gästewechsel. Vorbereitung Phase 6 Pilot-Go-Live Oktober Woche 1. Gemeinsam Strategie-Chat + Hotelier. |
 | B-11prep-5 🟠 (nach Pre-Pairing September) | **LoRaWAN-Funklast-Monitoring UG65** in ersten Wochen nach Mass-Pairing. Bei ~100 Vickis ist Funk-Auslastung des einzigen Gateways relevant. Backlog für eigenes Monitoring-Item; vor Heizperiode-Start empirisch verifizieren. |
+| B-12a-1 🟡 | **AE-29 manual_setpoint_event-Cleanup.** DROP TABLE + Modell `models/manual_setpoint_event.py` + Schema `schemas/manual_setpoint_event.py` + Relationships in `room.py` + `room_type.py` + Re-Export `models/__init__.py` atomar entfernen. Eigener Mini-Sprint nach 12a-Merge, ~2 h, Autonomiestufe 2. Voraussetzung: 12a gemerged. Anlass: AE-58 hat AE-29 abgeloest, T1-Phase-0 zeigte 0 API-/Engine-Konsumenten aber aktive ORM-Relationships → konnte nicht in T1-Migration mitgedroppt werden. |
+| B-12a-2 🟢 | **`_create_device`-Helper-Default `health_state="healthy"`.** Test-Konvenienz: bei Sprint-12a T4 musste in `test_drehring_window_open_silent_skip` `device.health_state` manuell auf `healthy` gesetzt werden, weil DB-Default `silent` ist und `detect_open_window_zones` healthy-Filter hat. ~10 Min, Autonomiestufe 3. |
+| B-12a-3 🟢 | **Layer 4 zone-differenzierende Window-Wirkung.** Heute setzt Window-Open alle Zonen des Raums auf Frostschutz/`free_target` und verwirft `zone_overrides` komplett (AE-58 Punkt 5). Empirische Bewertung nach Heizperiode 2026/27: soll Zone-Open nur die spezifische Zone in Sicherheits-Setpoint setzen statt ganzen Raum? Architektur-Frage, kein konkreter Sprint vor Heizperiode-Auswertung. |
+| B-12a-4 🟡 | **Engine soll `derive_room_status` nutzen statt `room.status`-Field.** Aktuell zwei Quellen-of-Truth fuer „Ist Raum belegt?": `override_service.create` (T2) nutzt `derive_room_status` aus aktiven Occupancies, `rules/engine.py` Layer 1 liest `ctx.room.status` direkt. Sprint-12a T5 hat Drift in Tests sichtbar gemacht (Helper `_force_room_status_occupied` noetig). Single Source of Truth via `derive_room_status` auch im Engine-Pfad. ~3-4 h, Autonomiestufe 2. Eigener Sprint nach 12a-Merge. |
+| B-12a-5 🟢 | **`_get_zones_for_room`-Helper konsolidieren nach `rules/zone_helpers.py`.** Aktuell Duplikat in `rules/engine.py` (`_get_zones_for_room_local`) + `tasks/engine_tasks.py` (`_get_zones_for_room`). Abhaengigkeits-Richtung (tasks → rules, nicht umgekehrt) verhindert direkten Import. Helper-Modul `rules/zone_helpers.py` als gemeinsame Quelle. ~30 Min, Autonomiestufe 3. |
+| B-12a-6 🟢 | **Dispatch-Test mit `zone_overrides` ergaenzen.** `test_engine_multivicki_write.py` um Zone-Override-Pfad-Assertion erweitern: bei `RuleResult.zone_overrides={zone1: 24}` muss `_dispatch_downlinks_per_zone` Vicki in Zone1 mit Setpoint 24 ansteuern, Vicki in Zone2 mit Room-Default. Aktuell nur indirekt via 4 End-to-End-Tests in `test_engine_layer3.py` abgesichert. ~30 Min, Autonomiestufe 3. |
+| B-12a-7 🟢 | **`get_active_zones_bulk`-Optimierung.** N+1-Lookup-Vermeidung im Engine-Zone-Eval-Loop in `evaluate_room`: heute pro Zone ein `get_active`-Roundtrip. Bei typischem 1-2 Zonen/Raum vernachlaessigbar; bei ~100 Vickis × 60s-Beat ist Engine-Last weiterhin Sekunden-Bereich. YAGNI bis Performance-Profil das verlangt. Notiz fuer spaeter. |
 | B-11prep-6 🟢 (nach Heizperiode) | **Drift-Erkennung statistisch** als KI-Vorbereitung. Aufbau eines Modells für Abweichungen einzelner Vickis von Zone-Geschwistern über Tage/Wochen. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7.3 + §13 (bewusst nicht in MVP). |
 | B-11prep-7 🟢 (nach Heizperiode) | **Backend-Plausi für Fenster (BR-16).** Heute reine Vicki-Flag-Logik (`vicki.openWindow`-Uplink, AE-47). Backend-Eigenlogik (Temperatursturz-Heuristik o.ä.) als Ergänzung evaluieren, sobald Heizperiode-Daten zeigen, ob Vicki-Flag allein reicht. STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5.1. |
 | B-11prep-8 🟢 (in Sprint 14b) | **arc42-Konsolidierung der Architektur-Doku.** Migration als Sprint 14b geplant (zwischen Sprint 14 UI-Erweiterungen und Sprint 15 heizung-main-Migration). Bestehende Inhalte (STRATEGIE.md, ARCHITEKTUR-REFRESH-2026-05-07, STRATEGIE-REFRESH-2026-05-15, ARCHITEKTUR-ENTSCHEIDUNGEN.md, CLAUDE.md §5 Lessons) werden auf arc42-12-Kapitel-Skelett gemappt, nicht neu geschrieben. Source-of-Truth-Hierarchie in CLAUDE.md §0.2 wird dann strukturell und kann entfallen. MkDocs/Renderer-Entscheidung bewusst aufgeschoben (reines Markdown reicht für Solo-Betrieb, Renderer erst bei externer Übergabe geprüft). Diskussions-Grundlage: Strategie-Chat 2026-05-15. |
@@ -2000,6 +2062,7 @@ Secrets liegen in:
 | `v0.1.15-zuordnungs-architektur-doku` | Sprint 11-Prep (Doku-Konsolidierung Zuordnungs-Architektur, STRATEGIE-THERMOSTAT-ZUORDNUNG + AE-51..AE-54, PR #157) | 2026-05-16 |
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
+| `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest) | 2026-05-20 (nach Merge + Live-Verify) |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 

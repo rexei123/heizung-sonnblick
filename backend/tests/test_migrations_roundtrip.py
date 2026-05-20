@@ -426,3 +426,183 @@ def test_migration_0015_check_constraint_rejects_invalid(alembic_cfg: Config) ->
             if rt_id is not None:
                 conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
             conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0016_atomar_auf_ab_auf(alembic_cfg: Config) -> None:
+    """Migration 0016 muss upgrade -> downgrade -> upgrade ohne Fehler durchlaufen.
+
+    Sprint 12a T1: manual_override.heating_zone_id additiv + FK + Partial
+    Index. Catcht: vergessenes drop_index/drop_constraint im downgrade,
+    falsche Reihenfolge (Index vor FK vor Column), Idempotenz bei Re-Run.
+    """
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "0016_manual_override_zone_id")
+    command.downgrade(alembic_cfg, "0015_health_state")
+    command.upgrade(alembic_cfg, "0016_manual_override_zone_id")
+    command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0016_existing_rows_keep_null(alembic_cfg: Config) -> None:
+    """Bestandsdaten in manual_override behalten heating_zone_id=NULL.
+
+    Lazy-Migration laut Sprint-12a-Brief: Bestands-Overrides bleiben
+    Room-Scope (heating_zone_id IS NULL) bis zur naechsten Erneuerung.
+    Engine Layer 3 (T5) fuehrt Zone>Room-Fallback durch, kein Backfill
+    in der Migration.
+
+    Szenario:
+    1. DB auf 0015 (vor 0016, ohne heating_zone_id-Spalte)
+    2. manual_override-Row anlegen
+    3. Upgrade auf 0016 -> Spalte wird mit nullable=True angelegt
+    4. Verify: bestehende Row hat heating_zone_id IS NULL
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "0015_health_state")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    rt_id: int | None = None
+    room_id: int | None = None
+    override_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            rt_id = conn.execute(
+                text("INSERT INTO room_type (name) VALUES ('rt_0016_null') RETURNING id")
+            ).scalar_one()
+            room_id = conn.execute(
+                text(
+                    "INSERT INTO room (number, room_type_id, status) "
+                    "VALUES ('r-0016n', :rt, 'occupied') RETURNING id"
+                ),
+                {"rt": rt_id},
+            ).scalar_one()
+            expires_at = datetime.now(tz=UTC) + timedelta(hours=4)
+            override_id = conn.execute(
+                text(
+                    "INSERT INTO manual_override "
+                    "(room_id, setpoint, source, expires_at) "
+                    "VALUES (:r, 21.0, 'frontend_4h', :exp) RETURNING id"
+                ),
+                {"r": room_id, "exp": expires_at},
+            ).scalar_one()
+            conn.commit()
+
+        command.upgrade(alembic_cfg, "0016_manual_override_zone_id")
+
+        with engine.connect() as conn:
+            hz_id = conn.execute(
+                text("SELECT heating_zone_id FROM manual_override WHERE id = :id"),
+                {"id": override_id},
+            ).scalar_one()
+
+        assert hz_id is None, (
+            f"Bestehende manual_override-Row sollte heating_zone_id=NULL haben, hat {hz_id!r}"
+        )
+    finally:
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as conn:
+            if override_id is not None:
+                conn.execute(
+                    text("DELETE FROM manual_override WHERE id = :id"),
+                    {"id": override_id},
+                )
+            if room_id is not None:
+                conn.execute(text("DELETE FROM room WHERE id = :id"), {"id": room_id})
+            if rt_id is not None:
+                conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0016_fk_set_null_on_zone_delete(alembic_cfg: Config) -> None:
+    """FK ON DELETE SET NULL: Zone-Loeschung resetted heating_zone_id im Override.
+
+    Sicherheitsnetz statt Cascade — Override-Audit bleibt erhalten, faellt
+    auf Room-Scope zurueck. Catcht: falsches ondelete (CASCADE/RESTRICT
+    statt SET NULL).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    rt_id: int | None = None
+    room_id: int | None = None
+    zone_id: int | None = None
+    override_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            rt_id = conn.execute(
+                text("INSERT INTO room_type (name) VALUES ('rt_0016_fk') RETURNING id")
+            ).scalar_one()
+            room_id = conn.execute(
+                text(
+                    "INSERT INTO room (number, room_type_id, status) "
+                    "VALUES ('r-0016f', :rt, 'occupied') RETURNING id"
+                ),
+                {"rt": rt_id},
+            ).scalar_one()
+            zone_id = conn.execute(
+                text(
+                    "INSERT INTO heating_zone "
+                    "(room_id, kind, name, is_towel_warmer) "
+                    "VALUES (:r, 'bedroom', 'zone-0016f', false) RETURNING id"
+                ),
+                {"r": room_id},
+            ).scalar_one()
+            expires_at = datetime.now(tz=UTC) + timedelta(hours=4)
+            override_id = conn.execute(
+                text(
+                    "INSERT INTO manual_override "
+                    "(room_id, heating_zone_id, setpoint, source, expires_at) "
+                    "VALUES (:r, :z, 21.0, 'frontend_4h', :exp) RETURNING id"
+                ),
+                {"r": room_id, "z": zone_id, "exp": expires_at},
+            ).scalar_one()
+            conn.commit()
+
+        # Zone loeschen — Override muss erhalten bleiben, heating_zone_id wird NULL
+        with engine.connect() as conn:
+            conn.execute(text("DELETE FROM heating_zone WHERE id = :id"), {"id": zone_id})
+            conn.commit()
+            zone_id = None  # Cleanup-Marker: bereits geloescht
+
+            row = conn.execute(
+                text("SELECT heating_zone_id FROM manual_override WHERE id = :id"),
+                {"id": override_id},
+            ).fetchone()
+
+        assert row is not None, "manual_override-Row darf nicht mit-geloescht worden sein"
+        assert row[0] is None, (
+            f"FK ON DELETE SET NULL: heating_zone_id sollte NULL sein, ist {row[0]!r}"
+        )
+    finally:
+        with engine.connect() as conn:
+            if override_id is not None:
+                conn.execute(
+                    text("DELETE FROM manual_override WHERE id = :id"),
+                    {"id": override_id},
+                )
+            if zone_id is not None:
+                conn.execute(text("DELETE FROM heating_zone WHERE id = :id"), {"id": zone_id})
+            if room_id is not None:
+                conn.execute(text("DELETE FROM room WHERE id = :id"), {"id": room_id})
+            if rt_id is not None:
+                conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
+            conn.commit()

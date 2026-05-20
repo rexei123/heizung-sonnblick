@@ -18,12 +18,14 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_mitarbeiter, require_user
 from heizung.db import get_session
 from heizung.models.enums import OverrideSource
 from heizung.models.global_config import GlobalConfig
+from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.user import User
@@ -35,7 +37,10 @@ from heizung.schemas.manual_override import (
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import next_active_checkout
-from heizung.services.override_service import OverrideRejectedWindowOpenError
+from heizung.services.override_service import (
+    OverrideRejectedWindowOpenError,
+    RoomNotOccupiedError,
+)
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
@@ -65,6 +70,32 @@ async def _ensure_room_exists(session: AsyncSession, room_id: int) -> None:
         )
 
 
+async def _ensure_zone_in_room(
+    session: AsyncSession, *, room_id: int, heating_zone_id: int
+) -> None:
+    """Sprint 12a T3 (AE-58): validiert dass die Zone zum Raum gehoert.
+
+    Wirft HTTP 404 ``invalid_zone`` falls Zone nicht existiert oder zu
+    einem anderen Raum gehoert. Beide Faelle werden gleich behandelt —
+    der Client darf keine Zonen-IDs anderer Raeume erraten koennen
+    (kein leakendes 403 vs 404).
+    """
+    stmt = select(HeatingZone.id).where(
+        HeatingZone.id == heating_zone_id,
+        HeatingZone.room_id == room_id,
+    )
+    found = await session.scalar(stmt)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "invalid_zone",
+                "zone_id": heating_zone_id,
+                "room_id": room_id,
+            },
+        )
+
+
 @router.get(
     "/rooms/{room_id}/overrides",
     response_model=list[ManualOverrideResponse],
@@ -74,15 +105,27 @@ async def list_room_overrides(
     room_id: int = RoomIdPath,
     limit: int = Query(default=50, ge=1, le=200),  # noqa: B008
     include_expired: bool = Query(default=True),  # noqa: B008
+    zone_id: int | None = Query(default=None, gt=0),  # noqa: B008
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[ManualOverride]:
+    """Override-Historie eines Raums.
+
+    Sprint 12a T3 (AE-58): Optionaler Query-Param ``zone_id`` filtert auf
+    Zone-Match (``heating_zone_id == zone_id``) und ergaenzt Room-Scope-
+    Overrides (``heating_zone_id IS NULL``) als Fallback. Sortierung:
+    Zone-Match zuerst, dann Room-Match, dann ``created_at DESC``. Ohne
+    ``zone_id``: alle Overrides des Raums (Backward-Compat).
+    """
     await _ensure_room_exists(session, room_id)
+    if zone_id is not None:
+        await _ensure_zone_in_room(session, room_id=room_id, heating_zone_id=zone_id)
     return await override_service.get_history(
         session,
         room_id,
         limit=limit,
         include_expired=include_expired,
+        heating_zone_id=zone_id,
     )
 
 
@@ -100,6 +143,13 @@ async def create_room_override(
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ManualOverride:
     await _ensure_room_exists(session, room_id)
+
+    # Sprint 12a T3 (AE-58): wenn Body heating_zone_id setzt, muss die Zone
+    # zum Pfad-Raum gehoeren — sonst 404 invalid_zone.
+    if payload.heating_zone_id is not None:
+        await _ensure_zone_in_room(
+            session, room_id=room_id, heating_zone_id=payload.heating_zone_id
+        )
 
     # Sprint 9.9a Hotfix A2: Engine quantisiert auf ganze Grad (rules.engine._quantize),
     # daher API-seitig nur ganze Werte akzeptieren - sonst sieht der User
@@ -139,18 +189,28 @@ async def create_room_override(
             expires_at=expires_at,
             reason=payload.reason,
             created_by=user.email,
+            heating_zone_id=payload.heating_zone_id,
         )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except RoomNotOccupiedError as e:
+        # Sprint 12a T3 (AE-58): Raum nicht OCCUPIED -> Override abgewiesen.
+        # AE-58 Sprint 12c: hier kommt room_blocked-Check (room.guest_override_blocked)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "room_not_occupied",
+                "room_id": e.room_id,
+            },
+        ) from e
     except OverrideRejectedWindowOpenError as e:
         # Sprint 12 T4 (AE-52): Fenster offen -> Override-Anlage abgewiesen.
         # zones-Liste: nur zone_id + reading_at exponieren (keine
-        # device-internal Felder, kein Health-State). Frontend zeigt einen
-        # "Fenster offen — Override nicht moeglich"-Hinweis (kommt in
-        # Sprint 13).
+        # device-internal Felder, kein Health-State). Frontend-Vorpruefung
+        # + UX-Hinweis kommen in Sprint 12b.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

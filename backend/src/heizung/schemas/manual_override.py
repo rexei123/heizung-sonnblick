@@ -37,6 +37,14 @@ class ManualOverrideCreate(BaseModel):
         "(device_adapter) und im Create-Schema bewusst nicht erlaubt.",
     )
     reason: str | None = Field(default=None, max_length=500)
+    heating_zone_id: int | None = Field(
+        default=None,
+        gt=0,
+        description="Sprint 12a (AE-58): optionaler Zone-Scope. None bedeutet "
+        "Room-Scope (Backward-Compat). Bei gesetztem Wert muss die Zone "
+        "demselben Raum wie der Pfad-Parameter angehoeren — sonst 404 "
+        "invalid_zone.",
+    )
 
     @field_validator("setpoint", mode="after")
     @classmethod
@@ -61,6 +69,7 @@ class ManualOverrideResponse(BaseModel):
 
     id: int
     room_id: int
+    heating_zone_id: int | None
     setpoint: Decimal
     source: OverrideSource
     expires_at: datetime

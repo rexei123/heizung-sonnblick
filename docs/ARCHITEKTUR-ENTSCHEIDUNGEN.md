@@ -346,6 +346,8 @@ Die Engine liest beim Evaluieren beide Tabellen und mapped Szenarien auf Regel-L
 
 ## AE-29 · `manual_setpoint_event` als zeitlich begrenzter Override
 
+**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). `manual_setpoint_event`-Anwendungsfaelle (Wartung/Renovierung) laufen ueber fiktive Belegung (RUNBOOK §10d.7). Code-Cleanup folgt in B-12a-1 (DROP TABLE + Modell + Schema + Relationships + Re-Export atomar). Inhaltliche Substanz unten bleibt historisch.
+
 **Kontext.** Hotelier braucht "Temperatur jetzt setzen" als One-Off-Aktion (Wartung Fenster, Spezialgast, Aufheizen vor Ankunft). Soll ueber alle Regeln gewinnen ausser Frostschutz, aber zeitlich begrenzt.
 
 **Entscheidung.** Tabelle `manual_setpoint_event` mit `scope`, `room_type_id` ODER `room_id`, `target_setpoint_celsius`, `starts_at`, `ends_at`, `is_active`, `reason TEXT`. Engine prueft im Layer 3 (Manual Override): Gibt es ein aktives Event mit jetzt zwischen starts_at und ends_at? Ja -> Setpoint ersetzen.
@@ -739,7 +741,8 @@ Freigabe.
 - Sprint 9.17 (NextAuth) sollte Audit-Trail für Auto-Override-Erkennung berücksichtigen — wer/wann hat am Vicki gedreht?
 - Bestehender Code-Pfad muss noch lokalisiert werden — Quellcheck als Pflicht-Vorgehen für Sprint 9.13 Pairing-UI (Trace-UI braucht source-Differenzierung).
 
-**Status:** akzeptiert
+**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). Die 7-Tage-Expiry und die Auto-Revoke-Frontend-Logik sind obsolet. Auto-Detect-Erkennung als Trigger bleibt aktiv (`device_adapter.handle_uplink_for_override`), Dauer + Revoke jetzt einheitlich nach AE-58 (Override gilt bis `next_active_checkout`, Hard-Cap 7 Tage; Revoke bei Check-out trifft DEVICE + FRONTEND_* via `revoke_all_active_overrides`). Inhaltliche Substanz unten bleibt historisch.
+
 **Verstärkt:** Sprint 9.9 manual_override (Sub-Reasons fehlen heute)
 
 ---
@@ -1366,6 +1369,25 @@ durch (System-Sicht „kein Fenster offen") — Frontend-Hinweis dazu
 kommt in Sprint 12a. Test G in `tests/test_sprint12_e2e.py` verankert
 den Befund.
 
+## Praezisierung Sprint 12a Device-Pfad (2026-05-20)
+
+Sprint 12a T4 hat den Device-Pfad (`device_adapter.handle_uplink_for_override`,
+Vicki-Drehring-Auto-Detect) symmetrisch zum Frontend-Pfad mit Pre-
+Insert-Gates ausgestattet. Wortlaut-Praezisierung gegenueber dem
+Sprint-12-Block:
+
+- **Override-Reject im Device-Pfad ist silent skip + event_log-Eintrag**
+  `MANUAL_OVERRIDE_BLOCKED` mit `reason=DEVICE_BLOCKED_WINDOW`,
+  **nicht HTTP 409**. HTTP 409 gilt nur fuer den Frontend-Pfad
+  (`api/v1/overrides.py` POST).
+- Begruendung: der mqtt_subscriber-Aufrufer darf nicht crashen — er
+  verarbeitet Vicki-Uplinks asynchron, hat keinen HTTP-Caller. Audit-
+  Trail erfolgt off-pipeline via synthetische `evaluation_id` (uuid4),
+  gehoert keiner Engine-Tick-Eval an.
+- Gate-Reihenfolge im Device-Pfad: OCCUPIED → Window → Zone-Lookup →
+  create. OCCUPIED-Gate ebenfalls silent (Reason
+  `DEVICE_BLOCKED_VACANT`), AE-58.
+
 ---
 
 # AE-53 — Health-State-Modell für Device + Zone, Plausi-Grenzen, 3-Stufen-Alarm (Sprint 11)
@@ -1500,12 +1522,14 @@ HeatingZone-granulare Iteration im **Schreib-Pfad** (Multi-Vicki-
 Dispatch, `tasks/engine_tasks.py:_dispatch_downlinks_per_zone`) ist in
 Sprint 12 umgesetzt (siehe STATUS.md §2am). **Engine-Decision-
 Iteration** bleibt room-zentrisch — `_evaluate_room_async` iteriert
-weiterhin pro Raum, Decision-Layers (Base/Temporal/Manual/Window/
-Detached/Clamp) operieren auf Room-Kontext. Verschoben bis erster
-konkreter Anwendungsfall mit pro-Zone-differenzierender Decision-
-Logik (heute existiert keine — `is_towel_warmer`-Feld auf
-`HeatingZone` ist DB-Marker ohne Engine-Konsumenten, T1-Befund aus
-Sprint 12).
+weiterhin pro Raum, Decision-Layers (Base/Temporal/Window/Detached/
+Clamp) operieren auf Room-Kontext, **MIT AUSNAHME Layer 3
+(Manual-Override) seit Sprint 12a** — zone-aware via
+`RuleResult.zone_overrides` (siehe AE-58 Punkt 4). Layer 4 (Window)
+und Layer 5 (Hard-Clamp) bleiben room-level mit
+`zone_overrides`-Pass-Through bzw. Pro-Wert-Clamp. Weitere
+Zone-Differenzierung verschoben bis konkreter Anwendungsfall
+(vgl. B-12a-3).
 
 Zonenscharfes try/except ist damit Teil-erfuellt: Top-Level-Wrap im
 `_evaluate_room_async` bleibt Room-granular, aber `_dispatch_downlinks_
@@ -1617,3 +1641,96 @@ Late-Import-Trick, kein zirkulaerer Import.
 - `services/`-Module duerfen aus `rules/<state>.py` importieren.
 - `services/` ↔ `rules/engine.py`-Direktimporte bleiben einseitig
   (engine ruft services, nicht umgekehrt).
+
+---
+
+# AE-58 — Override-Modell konsolidiert (Sprint 12a)
+
+**Datum:** 2026-05-20
+**Status:** Akzeptiert
+**Bezug:** AE-29 (abgeloest), AE-45 (abgeloest), AE-51, AE-52,
+AE-54 (partiell revidiert), STRATEGIE-THERMOSTAT-ZUORDNUNG.md §6
+
+## Kontext
+
+Vor Sprint 12a existierten drei Override-Quellen mit drei
+verschiedenen Expiry-Semantiken und zwei Scope-Ebenen:
+
+- AE-29 `manual_setpoint_event` (Admin-Override bis Revoke)
+- AE-45 Auto-Detect-Override (7 Tage)
+- Frontend-Override (4 h / Mitternacht / Check-out)
+
+Override-Scope war room-level. Sprint 12 hat den Schreibpfad
+multi-vicki-symmetrisch pro Zone gemacht, aber Layer 3 las Override
+room-scoped — Folge: Gast-Drehring im Bad zog Schlafzimmer-Vicki mit
+auf Bad-Setpoint. Strategie-widrig.
+
+Strategie-Chat 2026-05-20 hat das Override-Modell konsolidiert.
+
+## Entscheidung
+
+1. **Zwei Quellen:** GAST (Vicki-Drehring, `source=DEVICE`) und
+   MITARBEITER (Frontend, `source=FRONTEND_4H` / `FRONTEND_MIDNIGHT` /
+   `FRONTEND_CHECKOUT`). AE-29 `manual_setpoint_event` ENTFAELLT.
+   Wartung/Renovierung laeuft ueber fiktive Belegung (siehe
+   RUNBOOK §10d.7).
+
+2. **Override existiert nur in OCCUPIED-Zimmern.** VACANT-Zimmer
+   laufen auf globalen Einstellungen / Frostschutz. Pre-Insert-Gate
+   in `override_service.create()`:
+   - Frontend-Pfad: `RoomNotOccupiedError` -> HTTP 409
+     `{"error": "room_not_occupied", "room_id": X}`
+   - Device-Pfad: silent skip + `event_log MANUAL_OVERRIDE_BLOCKED`
+     mit `reason=DEVICE_BLOCKED_VACANT`
+
+3. **Zone-Scope (`heating_zone_id`):** Override traegt
+   `heating_zone_id` (nullable). Lookup-Priorisierung in
+   `get_active()`: Zone-Match > Room-Match (NULL), innerhalb gleicher
+   Scope-Ebene FRONTEND_* > DEVICE, dann `created_at DESC`.
+
+4. **Engine Layer 3 zone-aware:** `evaluate_room` iteriert nach
+   Layer 2 die Zonen, ruft `layer_manual_override` pro Zone mit
+   `heating_zone_id`. Zone-Override fliesst in
+   `RuleResult.zone_overrides[zone_id]`. Room-Override
+   (`heating_zone_id=NULL`) bleibt in `setpoint_c`. Layer 4/5/Dispatch
+   bleiben room-level mit `zone_overrides`-Pass-Through.
+
+5. **Window-Open trumpft alles:** Layer 4 mit `WINDOW_OPEN` setzt
+   `zone_overrides={}` und `setpoint_c` auf Frostschutz/`free_target`
+   (AE-52). Override wird bei offenem Fenster gar nicht erst angelegt
+   — Frontend HTTP 409 `override_rejected_window_open`, Device silent
+   skip + `event_log DEVICE_BLOCKED_WINDOW`.
+
+6. **Dauer:** GAST gilt bis `next_active_checkout`. MITARBEITER nach
+   Wahl (4 h / Mitternacht / Check-out). Hard-Cap
+   `HARD_MAX_DURATION_DAYS=7` fuer alle Quellen (Sicherheitsnetz).
+
+7. **Prioritaet bei Stack (mehrere aktive Overrides):** FRONTEND_* >
+   DEVICE bei gleicher Scope-Ebene. Mitarbeiter-Override gewinnt,
+   ohne Gast-Override zu revoken — nach Ablauf des
+   Mitarbeiter-Overrides kehrt System auf Gast-Wunsch zurueck.
+
+8. **Revoke bei Check-out:** OCCUPIED → VACANT ohne Folge-Checkin in
+   `CHECKOUT_GRACE_WINDOW=4h` triggert `revoke_all_active_overrides`
+   — revoked DEVICE + FRONTEND_* vollstaendig (frueher nur DEVICE).
+
+9. **Off-Pipeline-Audit:** `MANUAL_OVERRIDE_BLOCKED`-Layer mit
+   synthetischer `evaluation_id` (uuid4) im `event_log` fuer beide
+   Device-Skip-Pfade. Kein `ControlCommand`, kein Downlink (S4
+   Hardware-Schutz).
+
+## Konsequenzen
+
+- `manual_override.heating_zone_id` NULL fuer Bestandsrows
+  (Lazy-Migration). Neue Overrides tragen `heating_zone_id` bei
+  Zone-Scope, NULL bei Room-Scope-Fallback (Vicki ohne Zone-Mapping).
+- `revoke_device_overrides` ersatzlos ersetzt durch
+  `revoke_all_active_overrides` (Filter ohne source).
+- `compute_expires_at`-Fallback „next_checkout_at None -> now+7d"
+  entfaellt (toter Pfad nach OCCUPIED-Gate).
+- AE-29 als „ABGELOEST durch AE-58" markiert. Tabelle + Modell +
+  Relationships verbleiben im Code, Cleanup als Folge-Sprint B-12a-1.
+- AE-45 als „ABGELOEST durch AE-58" markiert. Auto-Detect-Erkennung
+  als Trigger bleibt, Dauer + Revoke einheitlich nach AE-58.
+- AE-54 partiell revidiert: Layer 3 ist seit 12a zone-aware, Layer
+  4/5 bleiben room-level mit Pass-Through.

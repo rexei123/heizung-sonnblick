@@ -194,12 +194,17 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
             # per-Vicki-Hysterese, parallele Submission via asyncio.gather,
             # individuelles try/except. Kein Rollback bei Teil-Erfolg
             # (Annahme A2 aus Sprint-12-Brief).
+            # Sprint 12a T5 (AE-58 Option G): ``zone_overrides`` aus
+            # ``result`` durchreichen — pro Zone bekommt der Dispatch
+            # entweder den Zone-spezifischen Setpoint oder den Room-Default
+            # (``setpoint_c``) als Fallback.
             per_device_results, per_zone_status = await _dispatch_downlinks_per_zone(
                 session=session,
                 room_id=room_id,
                 target_setpoint_c=result.setpoint_c,
                 base_reason=result.base_reason,
                 eval_id=eval_id,
+                zone_overrides=result.zone_overrides,
             )
             sent_devices = per_device_results
 
@@ -358,6 +363,7 @@ async def _dispatch_downlinks_per_zone(
     target_setpoint_c: int,
     base_reason: CommandReason,
     eval_id: uuid.UUID,
+    zone_overrides: dict[int, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
 
@@ -383,12 +389,20 @@ async def _dispatch_downlinks_per_zone(
 
     ``target_setpoint_c`` ist bereits int aus ``engine.py``'s _quantize —
     ganzzahlig vor Hysterese-Check (RUNBOOK §10d.7 / Vicki-Hardware-Constraint).
+
+    Sprint 12a T5 (AE-58 Option G): ``zone_overrides`` ist ein optionaler
+    Dict ``zone_id -> int_setpoint``. Pro Zone wird ``zone_overrides[zone_id]``
+    bevorzugt, sonst Fallback auf ``target_setpoint_c`` (Room-Default).
     """
+    zone_overrides = zone_overrides or {}
     zones = await _get_zones_for_room(session, room_id)
     per_device_results: list[dict[str, Any]] = []
     per_zone_status: list[dict[str, Any]] = []
 
     for zone in zones:
+        # Sprint 12a T5: pro Zone den Zone-spezifischen Setpoint, sonst
+        # Room-Default.
+        zone_target_setpoint_c = zone_overrides.get(zone.id, target_setpoint_c)
         devices = await _get_zone_devices(session, zone.id)
         if not devices:
             per_zone_status.append(
@@ -412,7 +426,7 @@ async def _dispatch_downlinks_per_zone(
             dev_decision = hysteresis_decision(
                 prev_setpoint_c=prev_sp,
                 prev_issued_at=prev_at,
-                new_setpoint_c=target_setpoint_c,
+                new_setpoint_c=zone_target_setpoint_c,
             )
             if not dev_decision.should_send:
                 skipped_count += 1
@@ -429,7 +443,7 @@ async def _dispatch_downlinks_per_zone(
                 continue
             cc = ControlCommand(
                 device_id=dev.id,
-                target_setpoint=Decimal(target_setpoint_c),
+                target_setpoint=Decimal(zone_target_setpoint_c),
                 reason=base_reason,
                 rule_context=json.dumps(
                     {
@@ -458,7 +472,7 @@ async def _dispatch_downlinks_per_zone(
         # Parallele Downlink-Submission via asyncio.gather. ``return_exceptions=
         # True`` macht aus jeder Exception einen Wert in ``outcomes`` — KEINE
         # asyncio.gather()-Cascade-Cancellation, kein Rollback (A2).
-        coros = [send_setpoint(dev.dev_eui, target_setpoint_c) for dev, _, _ in send_payloads]
+        coros = [send_setpoint(dev.dev_eui, zone_target_setpoint_c) for dev, _, _ in send_payloads]
         outcomes = await asyncio.gather(*coros, return_exceptions=True)
 
         count_sent = 0
@@ -472,7 +486,7 @@ async def _dispatch_downlinks_per_zone(
                     dev.dev_eui,
                     dev.id,
                     zone.id,
-                    target_setpoint_c,
+                    zone_target_setpoint_c,
                     exc_info=outcome,
                 )
                 per_device_results.append(
