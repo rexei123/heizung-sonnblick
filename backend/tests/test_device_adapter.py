@@ -517,3 +517,155 @@ async def test_drehring_device_without_zone_fallback(
     # Warning ist via Logger emitted (caplog kann §5.37-bedingt leer sein —
     # Asserts behavior-based statt log-based; Override-Erfolg + NULL-Zone
     # beweist den Fallback-Pfad).
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12c (AE-58) — Pre-A-Block-Gate vor OCCUPIED + Window
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_uplink_room_blocked_writes_event_log_and_returns_none(
+    session: AsyncSession,
+) -> None:
+    """Sprint 12c: guest_override_blocked=True -> kein Override, event_log
+    MANUAL_OVERRIDE_BLOCKED mit reason=DEVICE_BLOCKED_ROOM_BLOCKED."""
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    room_id, _zone_id, device_id, now = await _seed_occupied_stack(session)
+    room = await session.get(Room, room_id)
+    assert room is not None
+    room.guest_override_blocked = True
+    await session.flush()
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room_id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED
+    assert rows[0].device_id == device_id
+    assert rows[0].details is not None
+    assert rows[0].details["uplink_setpoint"] == "24.0"
+
+
+async def test_handle_uplink_block_takes_precedence_over_vacant(
+    session: AsyncSession,
+) -> None:
+    """Sprint 12c (§5.51): blocked=True + VACANT -> Pre-A-Gate gewinnt,
+    event_log-Eintrag traegt DEVICE_BLOCKED_ROOM_BLOCKED, NICHT
+    DEVICE_BLOCKED_VACANT."""
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    short = _unique_short()
+    rt = RoomType(name=f"t12cv-{short}")
+    session.add(rt)
+    await session.flush()
+    # KEINE Occupancy -> VACANT.
+    room = Room(number=f"t12cv-{short}", room_type_id=rt.id, guest_override_blocked=True)
+    session.add(room)
+    await session.flush()
+    hz = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="zone-1")
+    session.add(hz)
+    await session.flush()
+    device = await _create_device(session, heating_zone_id=hz.id)
+    now = datetime.now(tz=UTC)
+    await _create_control_command(
+        session,
+        device_id=device.id,
+        setpoint=Decimal("21.0"),
+        sent_at=now - timedelta(seconds=120),
+    )
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device.id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room.id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED
+
+
+async def test_handle_uplink_block_takes_precedence_over_window(
+    session: AsyncSession,
+) -> None:
+    """Sprint 12c (§5.51): blocked=True + Fenster offen -> Pre-A-Gate
+    gewinnt, event_log traegt DEVICE_BLOCKED_ROOM_BLOCKED, NICHT
+    DEVICE_BLOCKED_WINDOW."""
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    room_id, _zone_id, device_id, now = await _seed_occupied_stack(
+        session, open_window_reading=True
+    )
+    device = await session.get(Device, device_id)
+    assert device is not None
+    device.health_state = "healthy"
+    room = await session.get(Room, room_id)
+    assert room is not None
+    room.guest_override_blocked = True
+    await session.flush()
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room_id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED
