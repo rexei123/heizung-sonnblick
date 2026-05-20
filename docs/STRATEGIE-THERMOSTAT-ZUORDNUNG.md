@@ -120,19 +120,33 @@ der Zone `openWindow=false` meldet, gilt die Zone als „Fenster zu".
   ignoriert. UI muss diesen Zustand explizit anzeigen, damit der
   Mitarbeiter weiß, dass seine Eingabe wirkungslos bleibt
 
-## 6. Override-Modell (einheitlich)
+## 6. Override-Modell (einheitlich, konsolidiert Sprint 12a / AE-58)
 
-- **Override wirkt immer auf Zone-Ebene**, niemals pro Vicki
+- **Override wirkt immer auf Zone-Ebene**, niemals pro Vicki. Seit
+  Sprint 12a (AE-58) traegt jeder Override optional eine
+  `heating_zone_id` — Lookup-Priorisierung Zone-Match > Room-Match.
+- Override existiert nur in OCCUPIED-Zimmern (AE-58 Punkt 2). VACANT
+  laeuft auf globalen Einstellungen / Frostschutz, keine Ausnahmen.
 - Quelle bestimmt Dauer und Grenzen, nicht die Wirkung:
-  - **Gast-Override** (Auto-Detect via Vicki): 4 h Gültigkeit
-    (AE-45)
+  - **Gast-Override** (Auto-Detect via Vicki): bis
+    `next_active_checkout` (AE-58), Hard-Cap
+    `HARD_MAX_DURATION_DAYS=7` als Sicherheitsnetz
   - **Mitarbeiter-Frontend-Override**: konfigurierbar — 4h /
     Mitternacht / bis Check-out (siehe RUNBOOK §10d.7)
-  - **System-Override** (`manual_setpoint_event`, AE-29): bis
-    manuelles Revoke
 - Wenn ein Gast nur eine Vicki einer Mehrfach-Vicki-Zone dreht,
   übernimmt die Zone den gemeldeten Wert. Alle Vickis der Zone
   fahren symmetrisch auf diesen Setpoint.
+
+**Mitarbeiter-Override hat Prioritaet ueber Gast-Override** bei
+gleicher Scope-Ebene (AE-58 Punkt 7): FRONTEND_* > DEVICE,
+`created_at DESC` als Tiebreaker. Mitarbeiter ueberschreibt ohne
+Gast-Override zu revoken — nach Ablauf des Mitarbeiter-Overrides
+kehrt das System auf den Gast-Wunsch zurueck.
+
+**Wartung/Renovierung in VACANT-Zimmern via fiktive Belegung**
+(RUNBOOK §10d.7): keine eigene Override-Quelle mehr (AE-29
+abgeloest). Hotelier legt eine fiktive Belegung an und setzt
+darunter einen normalen Mitarbeiter-Override „bis Check-out".
 
 ## 7. Health-Monitoring
 
@@ -222,7 +236,9 @@ Alle bestehenden Fixpunkte bleiben unangetastet:
 - **3-Ebenen-Settings-Hierarchie** Global/Raumtyp/Zone (Raum)
 - **AE-43 Geräte-Lifecycle** (Pairing-Wizard, Inline-Edit,
   Sortierung)
-- **AE-45 Auto-Detect-Override** (4 h Expiry für Gast-Override)
+- **Auto-Detect-Erkennung** als Trigger (AE-45-Mechanik bleibt; Dauer
+  + Revoke seit Sprint 12a einheitlich nach AE-58 — bis
+  `next_active_checkout`, Hard-Cap 7 Tage)
 - **Sommermodus-Layer-0-Fast-Path** (AE-34)
 
 Dieses Dokument **erweitert** die Engine um Mehrfach-Vicki-

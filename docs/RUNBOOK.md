@@ -804,6 +804,46 @@ curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
 
 Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelöscht werden.
 
+#### Wartung/Renovierung via fiktive Belegung (Sprint 12a, AE-58)
+
+Sprint 12a hat das Override-Modell konsolidiert (AE-58): Override existiert nur in OCCUPIED-Zimmern. Wartungs-Szenarien (Renovierungs-Setpoint 12 °C über mehrere Tage, Wartungs-Aufheizung vor Handwerker-Termin, technische Trocknung nach Wasserschaden) laufen NICHT mehr ueber `manual_setpoint_event` (AE-29 abgeloest), sondern ueber eine **fiktive Belegung**:
+
+**Schritt-Anweisung:**
+
+1. Fiktive Belegung anlegen via Belegungs-API (oder Frontend „Belegungen → Neu"):
+
+   ```bash
+   curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+     -d '{"room_id": 42, "check_in": "2026-10-15T07:00:00Z", "check_out": "2026-10-18T16:00:00Z", "source": "manual"}' \
+     https://heizung-test.hoteltec.at/api/v1/occupancies
+   ```
+
+   `source="manual"` markiert die Belegung als manuell angelegt (nicht PMS-synchronisiert). `check_in`/`check_out`-Zeitfenster deckt die Wartungs-Phase ab.
+
+2. Mitarbeiter-Override „bis Check-out" setzen (Renovierungs-Setpoint 12 °C, Aufheiz-Setpoint 21 °C usw.):
+
+   ```bash
+   curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
+     -d '{"setpoint": "12", "source": "frontend_checkout", "reason": "Renovierung"}' \
+     https://heizung-test.hoteltec.at/api/v1/rooms/42/overrides
+   ```
+
+   Override bekommt `expires_at = check_out` der fiktiven Belegung (Hard-Cap 7 Tage greift defensiv). `reason` ist Audit-Klartext.
+
+3. Wartung läuft, Engine hält den Setpoint.
+
+4. Am Ende der Wartung Belegung beenden (PATCH cancel oder check_out vorzeitig stornieren):
+
+   ```bash
+   curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
+     -d '{"cancel": true}' \
+     https://heizung-test.hoteltec.at/api/v1/occupancies/<id>
+   ```
+
+   `sync_room_status` wechselt automatisch `OCCUPIED → VACANT`. Wenn kein Folge-Checkin innerhalb 4 h ansteht, triggert `auto_revoke_on_checkout` (`revoke_all_active_overrides`) — der Wartungs-Override wird sauber revokiert, Audit-Spur bleibt. Raum laeuft anschliessend auf globalen Einstellungen.
+
+**Begruendung:** Eine Override-Quelle weniger (AE-29 entfaellt), eine konsistente Lifecycle-Logik (Override + Belegung sind gekoppelt), saubere Audit-Spur in `occupancy` + `manual_override` + `business_audit` statt eines parallelen `manual_setpoint_event`-Pfads. Referenz: `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` AE-58.
+
 ### 10d.8 Health-Status-Compute-Task (Sprint 11 T5, AE-53)
 
 Periodische Health-State-Berechnung laeuft via Celery-Beat alle
