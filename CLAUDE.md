@@ -1298,6 +1298,57 @@ Querverweis: §5.51 (Domain-Invariante Tests), §5.10 (build-images.yml
 triggert nicht zuverlaessig — analog: Tool-Verhalten weicht von der
 Doku-Erwartung ab und braucht Workaround-Pattern).
 
+### 5.55 Skip-Spiegel-Workflow-Pattern verfaelscht gh pr checks (Sprint 12b Lesson)
+
+Symptom: gh pr checks <pr-nr> meldet „lint-and-build success 2s, e2e
+success 3s" obwohl ein Frontend-PR mit echten UI-Aenderungen geprueft
+werden muesste. Echte Test-Dauer waere 2-4 Minuten.
+
+Ursache: Repo hat zwei Workflow-Files mit gleichem name: „Frontend CI"
+und gleichen Job-Namen lint-and-build + e2e:
+- .github/workflows/frontend-ci.yml (Real-Workflow, paths:
+  [frontend/**, workflow-file])
+- .github/workflows/frontend-ci-skip.yml (Spiegel, paths-ignore:
+  [frontend/**, workflow-file])
+
+Begruendung Spiegel-Pattern: Branch-Protection erwartet lint-and-build
++ e2e als Required Checks; ohne Spiegel wuerden PRs ohne Frontend-
+Aenderungen ewig pending bleiben, weil der Real-Workflow durch Path-
+Filter nicht startet. Spiegel meldet sofort success und entsperrt
+den Merge.
+
+Bei PRs mit gemischten Files (Frontend + Doku + Backend) laufen beide
+Workflows parallel. Da der Skip-Workflow in 2-3s fertig ist und der
+Real-Workflow 2-4 Minuten braucht, zeigt ein zu frueh abgesetztes
+gh pr checks nur den Skip-Stand. Klassische Reporting-Race-Variante,
+verwandt mit §5.10 und §5.25.
+
+Regel: Vor jeder CI-Merge-Entscheidung an einem Frontend-PR:
+
+```
+gh run list --branch <feature-branch> --limit 5 --json \
+  databaseId,workflowName,event,conclusion,createdAt,updatedAt
+```
+
+Pruefen:
+1. Es existiert ein Run von frontend-ci.yml (nicht nur -skip.yml)
+2. Dieser Run hat conclusion=success
+3. Dauer ist plausibel (>30s fuer Frontend-PR mit Code-Aenderung)
+
+Falls Real-Run noch laeuft: warten, nicht auf gh pr checks verlassen.
+
+Diagnose-Befehl bei Verdacht:
+
+```
+gh run view <run-id> --log | grep -E "passed|failed|Running"
+```
+
+Echter Playwright-Step enthaelt „Running N tests" + „N passed (...m)";
+Skip-Step enthaelt nur Echo-Output.
+
+Querverweis: §5.10 (Workflow-Reporting-Race), §5.25 (stale concurrency-
+cancel), §5.54 (Playwright route() Glob vs. Regex)
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
