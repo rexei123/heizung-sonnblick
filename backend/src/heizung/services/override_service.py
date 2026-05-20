@@ -307,18 +307,39 @@ async def get_history(
     *,
     limit: int = 50,
     include_expired: bool = True,
+    heating_zone_id: int | None = None,
 ) -> list[ManualOverride]:
-    """Override-Historie fuer den Raum, ``created_at DESC``.
+    """Override-Historie fuer den Raum.
+
+    Ohne ``heating_zone_id`` (Default, Backward-Compat): alle Overrides des
+    Raums, ``created_at DESC``.
+
+    Mit ``heating_zone_id``: Zone-Match (``heating_zone_id == X``) plus
+    Room-Scope-Overrides (``heating_zone_id IS NULL``) als Fallback im
+    Response. Sortierung: Zone-Match zuerst (Block oben), dann Room-Match,
+    dann ``created_at DESC`` innerhalb jedes Blocks (Sprint 12a T3).
 
     ``limit`` wird auf ``HISTORY_LIMIT_CAP`` (= 200) gekappt.
     """
     effective_limit = min(limit, HISTORY_LIMIT_CAP)
-    stmt = (
-        select(ManualOverride)
-        .where(ManualOverride.room_id == room_id)
-        .order_by(ManualOverride.created_at.desc())
-        .limit(effective_limit)
-    )
+    base = select(ManualOverride).where(ManualOverride.room_id == room_id)
+    if heating_zone_id is None:
+        stmt = base.order_by(ManualOverride.created_at.desc()).limit(effective_limit)
+    else:
+        is_room_scope = case(
+            (ManualOverride.heating_zone_id.is_(None), 1),
+            else_=0,
+        )
+        stmt = (
+            base.where(
+                or_(
+                    ManualOverride.heating_zone_id == heating_zone_id,
+                    ManualOverride.heating_zone_id.is_(None),
+                )
+            )
+            .order_by(is_room_scope, ManualOverride.created_at.desc())
+            .limit(effective_limit)
+        )
     if not include_expired:
         now = _now()
         stmt = stmt.where(ManualOverride.expires_at > now)
