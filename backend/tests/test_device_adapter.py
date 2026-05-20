@@ -291,3 +291,229 @@ async def test_handle_uplink_creates_device_override(session: AsyncSession) -> N
     # also unter dem 7-Tage-Hard-Cap).
     assert abs((override.expires_at - next_checkout).total_seconds()) < 1
     assert override.reason == "auto: detected user setpoint change"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12a T4 (AE-58) — Pre-Insert-Gates im Auto-Detect-Pfad
+# ---------------------------------------------------------------------------
+
+
+async def _seed_occupied_stack(
+    session: AsyncSession,
+    *,
+    open_window_reading: bool = False,
+) -> tuple[int, int, int, datetime]:
+    """Setup-Helper: Room + RoomType + Occupancy + HeatingZone + Device +
+    ControlCommand-Historie. Optional auch ein SensorReading mit
+    ``open_window``. Returns (room_id, zone_id, device_id, now).
+    """
+    from heizung.models.sensor_reading import SensorReading
+
+    short = _unique_short()
+    rt = RoomType(name=f"t12a-{short}")
+    session.add(rt)
+    await session.flush()
+    room = Room(number=f"t12a-{short}", room_type_id=rt.id)
+    session.add(room)
+    await session.flush()
+    now = datetime.now(tz=UTC)
+    session.add(
+        Occupancy(
+            room_id=room.id,
+            check_in=now - timedelta(hours=1),
+            check_out=now + timedelta(days=2),
+            is_active=True,
+        )
+    )
+    await session.flush()
+    hz = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="zone-1")
+    session.add(hz)
+    await session.flush()
+    device = await _create_device(session, heating_zone_id=hz.id)
+    # Engine-Intent: ControlCommand 21.0 vor 120 s -> Ack-Window aus,
+    # nachfolgender Uplink mit deutlich anderem Setpoint = Drehring.
+    await _create_control_command(
+        session,
+        device_id=device.id,
+        setpoint=Decimal("21.0"),
+        sent_at=now - timedelta(seconds=120),
+    )
+    if open_window_reading:
+        session.add(
+            SensorReading(
+                time=now - timedelta(minutes=2),
+                device_id=device.id,
+                fcnt=1,
+                temperature=Decimal("21.0"),
+                open_window=True,
+            )
+        )
+        await session.flush()
+    return room.id, hz.id, device.id, now
+
+
+async def test_drehring_in_occupied_with_zone_creates_override_with_zone_id(
+    session: AsyncSession,
+) -> None:
+    """T4 (a-d): OCCUPIED + Fenster zu + Zone-Mapping -> Override mit
+    heating_zone_id gesetzt."""
+    _room_id, zone_id, device_id, now = await _seed_occupied_stack(session)
+
+    override = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert override is not None
+    assert override.heating_zone_id == zone_id
+    assert override.source == OverrideSource.DEVICE
+    assert override.setpoint == Decimal("24.0")
+
+
+async def test_drehring_in_vacant_silent_skip(session: AsyncSession) -> None:
+    """T4 (a): VACANT-Raum -> kein Override, event_log MANUAL_OVERRIDE_BLOCKED
+    mit reason=DEVICE_BLOCKED_VACANT.
+    """
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    short = _unique_short()
+    rt = RoomType(name=f"t12av-{short}")
+    session.add(rt)
+    await session.flush()
+    room = Room(number=f"t12av-{short}", room_type_id=rt.id)
+    session.add(room)
+    await session.flush()
+    # KEINE Occupancy -> derive_room_status returnt VACANT.
+    hz = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="zone-1")
+    session.add(hz)
+    await session.flush()
+    device = await _create_device(session, heating_zone_id=hz.id)
+    now = datetime.now(tz=UTC)
+    await _create_control_command(
+        session,
+        device_id=device.id,
+        setpoint=Decimal("21.0"),
+        sent_at=now - timedelta(seconds=120),
+    )
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device.id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    # event_log-Eintrag verifizieren
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room.id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_VACANT
+    assert rows[0].device_id == device.id
+    assert rows[0].details is not None
+    assert rows[0].details["uplink_setpoint"] == "24.0"
+
+
+async def test_drehring_window_open_silent_skip(session: AsyncSession) -> None:
+    """T4 (b): OCCUPIED + Fenster offen -> kein Override, event_log mit
+    reason=DEVICE_BLOCKED_WINDOW.
+
+    Wichtig: Device.health_state defaultet auf 'silent', detect_open_window_zones
+    filtert aber auf 'healthy'. Fixture hebt den State explizit auf 'healthy',
+    sonst sieht der Helper das Fenster nicht.
+    """
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    room_id, _zone_id, device_id, now = await _seed_occupied_stack(
+        session, open_window_reading=True
+    )
+    # Device auf healthy heben, sonst filtert detect_open_window_zones aus.
+    device = await session.get(Device, device_id)
+    assert device is not None
+    device.health_state = "healthy"
+    await session.flush()
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room_id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_WINDOW
+    assert rows[0].device_id == device_id
+
+
+async def test_drehring_device_without_zone_fallback(
+    session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T4 (c): Vicki ohne heating_zone_id-Mapping -> Override mit
+    heating_zone_id=NULL + Warning.
+
+    Im aktuellen Schema sind ``_device_room_id`` und ``_device_zone_id``
+    semantisch identisch (beide via ``Device.heating_zone_id`` -> ohne
+    Zone auch kein Raum). Zum Test des Fallback-Branches monkeypatchen
+    wir ``_device_zone_id`` so, dass es ``None`` zurueckliefert,
+    waehrend der reale Raum-Lookup ueber ``_device_room_id`` weiter
+    funktioniert. Branch ist Forward-Compat fuer kuenftige Schema-
+    Erweiterung (z.B. direkter ``device.room_id``).
+    """
+    import logging as _logging
+
+    _room_id, _zone_id, device_id, now = await _seed_occupied_stack(session)
+
+    async def _zone_id_none(_session: AsyncSession, _device_id: int) -> int | None:
+        return None
+
+    monkeypatch.setattr(device_adapter, "_device_zone_id", _zone_id_none)
+
+    caplog.set_level(_logging.WARNING, logger="heizung.services.device_adapter")
+    override = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("24.0"),
+        fport=1,
+        received_at=now,
+    )
+
+    assert override is not None
+    assert override.heating_zone_id is None
+    # Warning ist via Logger emitted (caplog kann §5.37-bedingt leer sein —
+    # Asserts behavior-based statt log-based; Override-Erfolg + NULL-Zone
+    # beweist den Fallback-Pfad).

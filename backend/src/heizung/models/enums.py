@@ -128,6 +128,12 @@ class CommandReason(enum.StrEnum):
     SCENARIO_SUMMER_MODE = "scenario_summer_mode"
     MANUAL = "manual"
     MANUAL_EVENT = "manual_event"
+    # Sprint 12a T4 (AE-58): Auto-Detect-Override-Pfad blockt silent in
+    # VACANT-Raeumen bzw. bei Fenster offen. event_log-Audit-Eintrag mit
+    # diesen Reasons. KEIN control_command-Eintrag (Vicki bekommt keinen
+    # Downlink).
+    DEVICE_BLOCKED_VACANT = "device_blocked_vacant"
+    DEVICE_BLOCKED_WINDOW = "device_blocked_window"
 
 
 class ScenarioScope(enum.StrEnum):
@@ -190,3 +196,7 @@ class EventLogLayer(enum.StrEnum):
     DEVICE_DETACHED = "device_detached"
     HARD_CLAMP = "hard_clamp"
     INFERRED_WINDOW_OBSERVATION = "inferred_window_observation"
+    # Sprint 12a T4 (AE-58): off-pipeline Audit-Schicht fuer device_adapter
+    # Pre-Insert-Skip (VACANT-Raum oder Fenster offen). Erzeugt synthetische
+    # evaluation_id, gehoert KEINER Engine-Tick-Evaluation an.
+    MANUAL_OVERRIDE_BLOCKED = "manual_override_blocked"
