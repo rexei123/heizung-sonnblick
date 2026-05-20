@@ -13,11 +13,12 @@
 
 import { useMemo } from "react";
 
-import { useEngineTrace } from "@/lib/api/hooks-rooms";
+import { useEngineTrace, useHeatingZones } from "@/lib/api/hooks-rooms";
 import type {
   CommandReason,
   EventLogEntry,
   EventLogLayer,
+  HeatingZone,
   OverrideSource,
 } from "@/lib/api/types";
 import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
@@ -32,6 +33,11 @@ const LAYER_ORDER: EventLogLayer[] = [
   "base_target",
   "temporal_override",
   "manual_override",
+  // Sprint 12a T4: MANUAL_OVERRIDE_BLOCKED ist off-pipeline (synthetische
+  // evaluation_id pro Drehring-Skip — siehe AE-58 Punkt 9). Trace-Group
+  // ist single-row; Position in LAYER_ORDER greift hier nicht praktisch,
+  // semantisch sortiert nach Layer-3-Verwandschaft.
+  "manual_override_blocked",
   "guest_override",
   "window_safety",
   "device_detached",
@@ -43,6 +49,7 @@ const LAYER_LABEL: Record<EventLogLayer, string> = {
   base_target: "Basis (Belegung)",
   temporal_override: "Zeitsteuerung",
   manual_override: "Manueller Override",
+  manual_override_blocked: "Übersteuerung blockiert",
   guest_override: "Gast-Drehring",
   window_safety: "Fenster-Sicherheit",
   device_detached: "Geraet-Sicherheit",
@@ -64,6 +71,8 @@ const REASON_LABEL: Record<CommandReason, string> = {
   summer_mode: "Sommermodus",
   manual: "Manuell",
   manual_event: "Manueller Event",
+  device_blocked_vacant: "Geraet blockiert (Zimmer nicht belegt)",
+  device_blocked_window: "Geraet blockiert (Fenster offen)",
 };
 
 interface Props {
@@ -72,6 +81,10 @@ interface Props {
 
 export function EngineDecisionPanel({ roomId }: Props) {
   const traceQuery = useEngineTrace(roomId);
+  // Sprint 12b T4: Zone-Namen-Lookup fuer ``zone_overrides_trace``-Block
+  // (HARD_CLAMP-Sub-Details, AE-58 Punkt 4 + AE-55-Pattern aus Sprint 12).
+  const zonesQuery = useHeatingZones(roomId);
+  const zones = useMemo(() => zonesQuery.data ?? [], [zonesQuery.data]);
 
   // Alle Eintraege der NEUESTEN Evaluation gruppieren (engineTrace ist
   // ORDER BY time DESC -> der erste Eintrag haengt zur juengsten Eval).
@@ -107,7 +120,7 @@ export function EngineDecisionPanel({ roomId }: Props) {
   return (
     <div className="space-y-5">
       <SummaryCard latest={latest} />
-      <LayerTrace entries={latest.entries} />
+      <LayerTrace entries={latest.entries} zones={zones} />
       <HysteresisFooter latest={latest} />
       <HistoryList groups={grouped.slice(1, 6)} />
     </div>
@@ -182,7 +195,13 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
 }
 
 
-function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
+function LayerTrace({ entries, zones }: { entries: EventLogEntry[]; zones: HeatingZone[] }) {
+  // Sprint 12b T4: HARD_CLAMP-Row kann ``details.zone_overrides_trace``
+  // aus Sprint 12a T5 (AE-55-Pattern) tragen. Wenn vorhanden + non-empty,
+  // unter der Tabelle einen Pro-Zone-Block rendern.
+  const clampEntry = entries.find((e) => e.layer === "hard_clamp");
+  const zoneOverrides = extractZoneOverrides(clampEntry);
+
   return (
     <div className="bg-surface border border-border rounded-md overflow-hidden">
       <header className="px-4 py-3 border-b border-border bg-surface-alt">
@@ -232,6 +251,74 @@ function LayerTrace({ entries }: { entries: EventLogEntry[] }) {
           ))}
         </tbody>
       </table>
+      {zoneOverrides.length > 0 ? (
+        <ZoneOverridesBlock entries={zoneOverrides} zones={zones} />
+      ) : null}
+    </div>
+  );
+}
+
+interface ZoneOverrideTraceItem {
+  zone_id: number;
+  setpoint_c: number;
+}
+
+/**
+ * Sprint 12b T4: Liest ``details.zone_overrides_trace`` aus der
+ * HARD_CLAMP-Row und extrahiert die Zone-Match-Treffer (Records mit
+ * ``zone_id`` UND ``setpoint_c``). Andere Eintraege im Array
+ * (window-clear-events, clamp-events) sind Diagnose-Notizen und werden
+ * hier bewusst nicht angezeigt — fuer den Hotelier zaehlt nur welche
+ * Zone welchen Setpoint bekommt. Bei mehreren Eintraegen fuer dieselbe
+ * Zone gewinnt der letzte (Insertion-Order im Backend, AE-55).
+ */
+function extractZoneOverrides(entry: EventLogEntry | undefined): ZoneOverrideTraceItem[] {
+  if (!entry || !entry.details) return [];
+  const raw = entry.details["zone_overrides_trace"];
+  if (!Array.isArray(raw)) return [];
+  const byZone = new Map<number, ZoneOverrideTraceItem>();
+  for (const item of raw) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "zone_id" in item &&
+      "setpoint_c" in item
+    ) {
+      const z = (item as { zone_id: unknown }).zone_id;
+      const sp = (item as { setpoint_c: unknown }).setpoint_c;
+      if (typeof z === "number" && typeof sp === "number") {
+        byZone.set(z, { zone_id: z, setpoint_c: sp });
+      }
+    }
+  }
+  return [...byZone.values()];
+}
+
+function ZoneOverridesBlock({
+  entries,
+  zones,
+}: {
+  entries: ZoneOverrideTraceItem[];
+  zones: HeatingZone[];
+}) {
+  const zoneById = new Map(zones.map((z) => [z.id, z]));
+  return (
+    <div className="border-t border-border px-4 py-3 bg-surface-alt/40">
+      <h4 className="text-sm font-medium text-text-primary mb-2">Pro-Zone-Setpoints</h4>
+      <ul className="space-y-1 text-sm text-text-secondary">
+        {entries.map((e) => {
+          const zone = zoneById.get(e.zone_id);
+          const label = zone ? `${zone.name} (Zone ${e.zone_id})` : `Zone ${e.zone_id}`;
+          return (
+            <li key={e.zone_id} className="flex items-center justify-between">
+              <span>{label}</span>
+              <span className="font-medium text-text-primary tabular-nums">
+                {e.setpoint_c} °C
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

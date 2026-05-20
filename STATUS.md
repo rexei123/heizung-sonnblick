@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-20. Sprints 0-12 + 12a abgeschlossen, Tag `v0.1.17a-override-zone-scope-backend` auf develop (PR #162 squash-merged, Squash-Commit `0a6e5ae`, Live-Verify auf heizung-test erfolgreich). Sprint 12b (Frontend Zone-Override-Panels) als naechster Sprint in SPRINT-PLAN.md vorbereitet.
+**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b abgeschlossen, Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check) auf Branch `feature/sprint-12b-override-zone-scope-frontend` fertig (6 Commits T1-T6), wartet auf PR-Freigabe. Tag `v0.1.17b-override-zone-scope-frontend` nach Merge.
 
 ---
 
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-20
-**Letzter Tag:** `v0.1.17a-override-zone-scope-backend` (Sprint 12a, Squash-Commit `0a6e5ae`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
-**Aktueller Sprint:** Sprint 12a abgeschlossen 2026-05-20, PR #162 squash-merged, Tag gesetzt, Live-Verify auf heizung-test sauber (Override-Lifecycle End-to-End, Migration 0016 angewendet, Engine-Tick gesund). Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check + 422/409-differenzierte Fehler-Anzeige + room_blocked-Slot-Stub) als naechster Sprint in SPRINT-PLAN.md vorbereitet, Start nach Strategie-Chat-Freigabe.
+**Letzter Tag (gemerged):** `v0.1.17a-override-zone-scope-backend` (Sprint 12a, Squash-Commit `0a6e5ae`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
+**Aktueller Sprint:** Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check + 422/409-differenzierte Fehler-Anzeige + Engine-Panel zone_overrides_trace) abgeschlossen 2026-05-20. Branch `feature/sprint-12b-override-zone-scope-frontend` mit 6 Commits T1-T6 fertig (T1 Type/API-Sync, T2 Panel-Refactor + Container, T3 Error-Toast-Helper, T4 Engine-Decision-Panel, T5 Playwright E2E, T6 Doku). PR-Erstellung als naechster Schritt. Tag `v0.1.17b-override-zone-scope-frontend` nach Strategie-Chat-Freigabe + Merge.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1794,6 +1794,53 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 
 ---
 
+## 2ap. Sprint 12b Frontend Zone-Override-Panels + Window-Pre-Check (Frontend-only, 2026-05-20, abgeschlossen)
+
+**Ziel:** Frontend-UX an das Sprint-12a-Backend-Override-Modell (AE-58) anpassen — Pro-Zone-Override-Cards (statt einer Room-weiten Card), Window-Pre-Check vor POST (Engine-Trace als Datenquelle, kein neuer Backend-Endpoint), typisierter Error-Helper fuer 409/404/422-Differenzierung, Engine-Decision-Panel um `zone_overrides_trace`-Block + neue Layer/Reason-Werte (Sprint 12a T4) erweitert.
+
+**Tag-Vorschlag:** `v0.1.17b-override-zone-scope-frontend` nach Merge.
+
+**Branch:** `feature/sprint-12b-override-zone-scope-frontend`, 6 Commits T1-T6.
+
+**Architektur-Entscheidungen aus Strategie-Chat-Brief (verbindlich):**
+
+- **E1** Window-Pre-Check liest Engine-Trace (Pattern aus `engine-window-indicator.tsx`), KEIN neuer Backend-Endpoint. Bis-90s-Latenz akzeptiert; UI zeigt „Stand: vor Xs"-Hinweis.
+- **E2** Pro-Zone-Card-Layout immer aktiv, auch bei N=1 Zone (ein UI-Pfad, Zone-Label sichtbar).
+- **E3** room_blocked-UI-Stub NICHT sichtbar in 12b. Nur Code-Anker im Backend (api/v1/overrides.py-Sprint-12c-Marker aus T3).
+- **E4** Backward-Compat-Room-Scope-Overrides (`heating_zone_id IS NULL`) als zusaetzliche Read-only-Card „Raum (alle Zonen)" am Listen-Anfang, nur wenn so ein Override aktiv ist.
+- **E5** Engine-Decision-Panel-Erweiterung minimal-invasiv: nur LayerTrace-Block, kein SummaryCard-Block.
+- **E6** Wording-Trennung strikt: „Zimmer gesperrt" = `RoomStatus.BLOCKED` (Bestand); „Übersteuerung gesperrt" = `guest_override_blocked` (Sprint 12c, NICHT in 12b verwendet).
+
+**Tasks (umgesetzt):**
+
+- **T1** Type + API-Layer-Sync (~1 h): `ManualOverride` + `ManualOverrideCreate` + `ManualOverrideListQuery` um `heating_zone_id` / `zone_id` erweitert; Hook-Keys mit Zone-Achse; neuer `useZoneOverride(roomId, zoneId)`-Convenience-Hook.
+- **T2** Panel-Refactor (~3-4 h): Container `manual-override-panel-list.tsx` neu, `manual-override-panel.tsx` refactoriert zu Sub-Komponenten (`ManualOverrideZoneCard`, `ManualOverrideRoomCard`, `HistoryCard` mit Bereich-Spalte), Window-Pre-Check via `useEngineTrace` + `extractWindowState`-Helper, `app/zimmer/[id]/page.tsx` auf neue Container-Komponente umgestellt. Material-Symbols statt Emoji durchgehend.
+- **T3** Error-Toast-Differenzierung (~30 min): typisierter `mapOverrideError`-Helper in `lib/api/override-errors.ts` mappt 409 `room_not_occupied`, 409 `override_rejected_window_open`, 404 `invalid_zone`, 422 (Setpoint-Half-Step / FRONTEND_CHECKOUT-ohne-Belegung / ValueError) auf deutsche User-Texte ohne ID-Leak.
+- **T4** Engine-Decision-Panel-Erweiterung (~1 h): `EventLogLayer`-Union um `manual_override_blocked`; `CommandReason`-Union um `device_blocked_vacant` + `device_blocked_window`; LAYER_ORDER + LAYER_LABEL + REASON_LABEL um neue Werte; `LayerTrace` rendert `ZoneOverridesBlock` unter der Tabelle wenn HARD_CLAMP-`details.zone_overrides_trace` Zone-Match-Records enthaelt (Zonen-Namen via `useHeatingZones`-Lookup).
+- **T5** Playwright E2E (~1-2 h): `tests/e2e/manual-override-zone.spec.ts` mit 5 Cases (Happy, Window-Blocked, Room-not-occupied, Invalid-Zone, Engine-Panel-Pro-Zone), alle gruen lokal.
+- **T6** Doku (dieser Commit): STATUS §1 + §2ap + §9, SPRINT-PLAN.md Sprint-12b abgeschlossen-Block, CLAUDE.md §5.54 (Playwright route() glob vs. regex bei URLs mit Query-String — Sprint-12b-Footgun).
+
+**Diff-Stats (T1-T5 vor T6-Commit):** ~6 Files src/, 1 File tests/, +~900 LoC netto (Container neu, Panel refactoriert, Helper neu, types.ts erweitert, Engine-Decision-Panel erweitert, E2E-Spec neu). 5 neue Playwright-Cases.
+
+**Toolchain:** TypeScript strict gruen, ESLint gruen, Playwright 5/5 gruen lokal. Backend-Tests unveraendert (kein Backend-Code-Touch): 413 passed, 1 xfailed.
+
+**Brief-Risiken — Status:**
+
+- **R1** Engine-Trace-90s-Latenz: UI rendert „Stand: vor Xs"-Hinweis transparent unter dem Disabled-Button (E1-Akzeptanz, dokumentiert in CLAUDE.md §5.54 nicht — stattdessen als bewusste UX-Entscheidung im Brief).
+- **R2** Backward-Compat-Room-Card moeglicherweise nie sichtbar in Praxis: Code bleibt als Sicherheits-Netz drin. Akzeptiert.
+- **R3** Zone-Label-Anzeige bei N=1 Zone: einheitlicher Pfad, kein Sonderfall. Akzeptiert.
+- **R4** Type-Update-Konsumenten-Check via grep vor T2: nur `lib/api/types.ts`, `lib/api/overrides.ts`, `lib/api/hooks-overrides.ts`, `components/patterns/manual-override-panel.tsx` — keine versteckten Konsumenten. T2 ohne Stopp durchgefuehrt.
+
+**Nicht-Ziele eingehalten:**
+
+- Kein Backend-Code-Touch (`backend/src/` unveraendert in Sprint 12b).
+- Kein `room.guest_override_blocked`-Stub im Frontend (E3, Sprint 12c).
+- Kein neuer Backend-Endpoint fuer Window-State (E1, Engine-Trace ausreichend).
+
+**Querverweise:** AE-58 (Master-ADR Sprint 12a), AE-52-Praezisierung (Window-Open trumpft alles), AE-54-Klarstellung (Engine Layer 3 zone-aware), Sprint-12a STATUS §2an, Sprint-12-T5 zone_overrides_trace-Pattern (AE-55), CLAUDE.md §5.54 (Playwright route()-Footgun).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -2075,6 +2122,7 @@ Secrets liegen in:
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
 | `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
+| `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung) | 2026-05-20 (nach Merge) |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
