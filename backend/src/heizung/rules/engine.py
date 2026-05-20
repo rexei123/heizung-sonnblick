@@ -82,12 +82,27 @@ class LayerStep:
 
 @dataclass(frozen=True, slots=True)
 class RuleResult:
-    """Ergebnis einer Engine-Eval. Wird vom Celery-Task konsumiert."""
+    """Ergebnis einer Engine-Eval. Wird vom Celery-Task konsumiert.
+
+    Sprint 12a T5 (AE-58 Option G): ``zone_overrides`` enthaelt pro Zone den
+    Setpoint, falls ein zone-scoped Manual-Override (Layer 3) fuer diese
+    Zone aktiv ist. ``{}`` = alle Zonen folgen ``setpoint_c``. Zonen ohne
+    Eintrag erben den Room-Default ``setpoint_c`` (z.B. Layer 1/2/3 Room-
+    Scope-Override). Layer 4 (Window) verwirft ``zone_overrides`` komplett
+    bei Fenster-Trigger (Sicherheit schlaegt jede Komfort-Wahl, AE-52);
+    Layer 5 (Hard-Clamp) clampt setpoint_c UND jeden Wert in zone_overrides
+    auf ``[room_type.min, room_type.max]``.
+
+    Typ ``int`` (nicht ``Decimal``) konsistent mit ``setpoint_c``: Engine
+    quantisiert via ``_quantize`` durchgehend auf ganze Grad
+    (RUNBOOK §10d.7 Vicki-Hardware-Constraint).
+    """
 
     room_id: int
     setpoint_c: int
     layers: tuple[LayerStep, ...]
     base_reason: CommandReason
+    zone_overrides: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,8 +356,9 @@ async def layer_manual_override(
     *,
     prev_setpoint_c: int,
     prev_reason: CommandReason,
+    heating_zone_id: int | None = None,
 ) -> LayerStep:
-    """Layer 3: Manual Override (Sprint 9.9 T3).
+    """Layer 3: Manual Override (Sprint 9.9 T3, Sprint 12a T5 zone-aware).
 
     Liefert IMMER einen ``LayerStep`` (auch im no-op-Fall) fuer Trace-
     Transparenz im Engine-Decision-Panel. Wenn kein aktiver Override
@@ -351,15 +367,35 @@ async def layer_manual_override(
 
     Aktive Override -> Setpoint = override.setpoint, Reason = MANUAL,
     extras enthaelt source/expires_at/override_id fuer Frontend.
+
+    Sprint 12a T5 (AE-58 Option G): ``heating_zone_id`` parametrisiert den
+    Lookup:
+
+    - ``None`` (Default, Backward-Compat): Lookup ohne Zone-Filter ->
+      Room-Scope-Overrides (``heating_zone_id IS NULL``) gewinnen. Pfad
+      bleibt 1:1 wie Sprint 9.9 fuer den Room-Default in ``setpoint_c``.
+    - ``int`` (Zone-Eval-Schleife in ``evaluate_room``): Lookup mit
+      Zone-Filter -> Zone-Match-Override gewinnt vor Room-Match (siehe
+      ``override_service.get_active`` Priority-Sort).
+
+    Aufrufer in ``evaluate_room`` callt diese Funktion N+1 mal pro
+    Engine-Tick: einmal mit ``heating_zone_id=None`` (Room-Default in
+    ``setpoint_c``), und einmal pro Zone des Raums (Eintrag in
+    ``RuleResult.zone_overrides`` wenn Zone-Override gefunden).
     """
-    override = await override_service.get_active(session, room_id)
+    override = await override_service.get_active(session, room_id, heating_zone_id=heating_zone_id)
     if override is None:
         return LayerStep(
             layer=EventLogLayer.MANUAL_OVERRIDE,
             setpoint_c=prev_setpoint_c,
             reason=prev_reason,
             detail="no active override",
-            extras={"source": None, "expires_at": None, "override_id": None},
+            extras={
+                "source": None,
+                "expires_at": None,
+                "override_id": None,
+                "heating_zone_id": None,
+            },
         )
     return LayerStep(
         layer=EventLogLayer.MANUAL_OVERRIDE,
@@ -370,6 +406,11 @@ async def layer_manual_override(
             "source": override.source.value,
             "expires_at": override.expires_at.isoformat(),
             "override_id": override.id,
+            # Sprint 12a T5: heating_zone_id des gefundenen Override-Records
+            # (NULL fuer Room-Scope, int fuer Zone-Scope). evaluate_room
+            # nutzt das, um Zone-Match vs. Room-Match-Treffer im Zone-Eval-
+            # Loop zu unterscheiden.
+            "heating_zone_id": override.heating_zone_id,
         },
     )
 
@@ -859,6 +900,19 @@ async def _last_command_for_room(
     return _quantize(setpoint), issued_at
 
 
+async def _get_zones_for_room_local(session: AsyncSession, room_id: int) -> list[HeatingZone]:
+    """Alle HeatingZones eines Raums (Sprint 12a T5).
+
+    Lokale Kopie aus ``tasks/engine_tasks._get_zones_for_room`` — die
+    rules-Schicht darf keine Tasks-Importe haben (Sprint 11/12 hat
+    saubere Abhaengigkeitsrichtung etabliert: tasks importiert rules,
+    nicht umgekehrt). Reihenfolge ``id ASC`` fuer deterministische
+    Zone-Override-Iteration in Tests + Trace.
+    """
+    stmt = select(HeatingZone).where(HeatingZone.room_id == room_id).order_by(HeatingZone.id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def _last_command_for_device(
     session: AsyncSession, device_id: int
 ) -> tuple[int, datetime] | None:
@@ -923,16 +977,58 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     now = datetime.now(tz=UTC)
     temporal = layer_temporal(base, ctx, now=now)
 
-    # Sprint 9.9 T3: Layer 3 Manual-Override. Laeuft IMMER (auch no-op),
-    # damit das Engine-Decision-Panel stets zeigt, ob ein Override anliegt.
-    # Sprint 9.10d: temporal ist nun always-on und reicht im no-effect-Fall
-    # base.setpoint/base.reason als Passthrough durch — kein None-Fallback noetig.
+    # Sprint 9.9 T3: Layer 3 Manual-Override (Room-Scope). Laeuft IMMER
+    # (auch no-op), damit das Engine-Decision-Panel stets zeigt, ob ein
+    # Room-Override anliegt. Sprint 9.10d: temporal ist nun always-on und
+    # reicht im no-effect-Fall base.setpoint/base.reason als Passthrough
+    # durch — kein None-Fallback noetig. Sprint 12a T5: Aufruf bleibt mit
+    # ``heating_zone_id=None`` (Room-Scope-Lookup); Zone-Scope-Overrides
+    # werden separat unten gesammelt.
     manual = await layer_manual_override(
         session,
         room_id,
         prev_setpoint_c=_require_setpoint(temporal),
         prev_reason=temporal.reason,
+        heating_zone_id=None,
     )
+
+    # Sprint 12a T5 (AE-58 Option G): Zone-Eval-Schleife fuer Zone-scoped
+    # Manual-Overrides. Pro Zone des Raums ein Lookup; Zone-Match-Override
+    # landet in ``zone_overrides[zone.id]``. Zonen ohne eigenen Override
+    # erben spaeter ``setpoint_c`` (= Room-Default aus Layer 3 Room-Scope-
+    # Output). Layer 4 (Window) kann diesen Dict spaeter komplett verwerfen.
+    # ``manual.extras["source"]`` ist ``None`` wenn der Room-Scope-Lookup
+    # selbst kein Override fand — die Zone-Lookups sind davon unabhaengig.
+    zone_overrides: dict[int, int] = {}
+    zone_overrides_trace: list[dict[str, Any]] = []
+    zones_for_overrides = await _get_zones_for_room_local(session, room_id)
+    for zone in zones_for_overrides:
+        zone_step = await layer_manual_override(
+            session,
+            room_id,
+            prev_setpoint_c=_require_setpoint(temporal),
+            prev_reason=temporal.reason,
+            heating_zone_id=zone.id,
+        )
+        zone_extras = zone_step.extras or {}
+        # Sprint 12a T5: nur Zone-Match-Treffer aufnehmen. ``get_active`` mit
+        # ``heating_zone_id=zone.id`` kann auch einen Room-Scope-Override
+        # zurueckliefern (Fallback). Den behandelt der separate Room-
+        # Scope-Aufruf (``manual``) bereits via ``setpoint_c`` — Doppel-
+        # Eintrag in ``zone_overrides`` wuerde dieselbe Setpoint-Wirkung
+        # redundant duplizieren. Filter: ``extras["heating_zone_id"] ==
+        # zone.id`` heisst Zone-Match (genaue Zone), sonst Room-Match.
+        if zone_extras.get("heating_zone_id") == zone.id:
+            zone_setpoint = _require_setpoint(zone_step)
+            zone_overrides[zone.id] = zone_setpoint
+            zone_overrides_trace.append(
+                {
+                    "zone_id": zone.id,
+                    "setpoint_c": zone_setpoint,
+                    "override_id": zone_extras.get("override_id"),
+                    "source": zone_extras.get("source"),
+                }
+            )
 
     # Sprint 9.10 T2: Layer 4 Window-Detection. Ueberschreibt JEDEN
     # vorherigen Setpoint (auch Manual-Override) auf Frostschutz, wenn ein
@@ -945,6 +1041,15 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         room_status=ctx.room.status,
         now=now,
     )
+
+    # Sprint 12a T5 (AE-58 Option G): Window-Open verwirft ``zone_overrides``
+    # komplett — Sicherheit schlaegt jede Komfort-Wahl. Layer 4-Trigger
+    # wirkt room-level auf alle Zonen via ``setpoint_c``. Zone-
+    # Differenzierung bei Fenster offen kommt erst mit konkretem Bedarf
+    # (B-12a-3 Backlog).
+    if window.reason == CommandReason.WINDOW_OPEN:
+        zone_overrides = {}
+        zone_overrides_trace.append({"event": "window_open_cleared_zone_overrides"})
 
     # Sprint 9.11x T5: Layer 4 zweiter Trigger — Detached-Frostschutz mit
     # AND-Semantik ueber alle Zone-Devices. Reichert das Trace-Bild an
@@ -961,6 +1066,39 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
 
     clamp = layer_clamp(_require_setpoint(detached), ctx, prev_reason=detached.reason)
 
+    # Sprint 12a T5: zone_overrides auf gleiche Range clampen wie setpoint_c.
+    if zone_overrides:
+        rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
+        rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
+        floor = max(rt_min, MIN_SETPOINT_C)
+        ceiling = min(rt_max, MAX_SETPOINT_C)
+        clamped_zone_overrides: dict[int, int] = {}
+        for zone_id, sp in zone_overrides.items():
+            clamped_sp = max(floor, min(ceiling, sp))
+            clamped_zone_overrides[zone_id] = clamped_sp
+            if clamped_sp != sp:
+                zone_overrides_trace.append(
+                    {
+                        "zone_id": zone_id,
+                        "clamped_from": sp,
+                        "clamped_to": clamped_sp,
+                        "range": [floor, ceiling],
+                    }
+                )
+        zone_overrides = clamped_zone_overrides
+
+    # Sprint 12a T5: AE-55-Pattern — Clamp-Layer-Row traegt Zone-Override-
+    # Diagnostik in ``extras``. Frontend-Trace-Panel kann beides anzeigen.
+    if zone_overrides_trace:
+        clamp_extras = {"zone_overrides_trace": zone_overrides_trace}
+        clamp = LayerStep(
+            layer=clamp.layer,
+            setpoint_c=clamp.setpoint_c,
+            reason=clamp.reason,
+            detail=clamp.detail,
+            extras=clamp_extras,
+        )
+
     layers_tuple: tuple[LayerStep, ...] = (
         summer,
         base,
@@ -976,6 +1114,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         setpoint_c=_require_setpoint(clamp),
         layers=layers_tuple,
         base_reason=detached.reason,
+        zone_overrides=zone_overrides,
     )
 
 
