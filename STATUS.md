@@ -1837,7 +1837,30 @@ STRATEGIE-REFRESH-2026-05-15.md (Phasen-Modell + Migrations-Plan).
 - Kein `room.guest_override_blocked`-Stub im Frontend (E3, Sprint 12c).
 - Kein neuer Backend-Endpoint fuer Window-State (E1, Engine-Trace ausreichend).
 
-**Querverweise:** AE-58 (Master-ADR Sprint 12a), AE-52-Praezisierung (Window-Open trumpft alles), AE-54-Klarstellung (Engine Layer 3 zone-aware), Sprint-12a STATUS §2an, Sprint-12-T5 zone_overrides_trace-Pattern (AE-55), CLAUDE.md §5.54 (Playwright route()-Footgun).
+### Live-Verify auf heizung-test (2026-05-20 18:15 CEST)
+
+Squash-Commit `3587b47` auf Server, Auto-Pull-Deploy via `deploy-pull.sh` erfolgreich (api healthy, web healthy nach 60s, celery_beat unhealthy pre-existing aus 12a-Stand, kein 12b-Bezug).
+
+Sicht-Verify Cowork (Raum 201 / DB-ID 16, 2 Zonen; Raum 202 / DB-ID 17, 1 Zone):
+
+- **A** Raum 201 Override-Tab: 2 Cards „Schlafbereich" (Symbol `bed`) + „Bad" (Symbol `shower`), Historie-Card mit 1 aufgehobenem Eintrag, keine aktive „Raum (alle Zonen)"-Card (kein Altbestand).
+- **B** Raum 202 Override-Tab: 1 Card „Schlafbereich", Zone-Label auch bei N=1 Zone sichtbar (E2 verifiziert).
+- **C** Window-Pre-Check: alle 3 Cards Anwenden-Button aktiv, kein Window-Open-Hinweis (Sommermodus aktiv).
+- **D** Raum 201 Engine-Tab: Layer „Sommermodus" (`summer_mode_active=true`) → „Sicherheits-Limit" (`within [10,30]`), 10 °C. Kein „Übersteuerung blockiert"-Layer, kein `ZoneOverridesBlock` (erwartet bei Sommer-Fast-Path, kein Fehler).
+- **E** Console: keine App-Errors/Warnings, nur ignorierter Chrome-Extension-Noise.
+- **F** Network: 3 GETs (`heating-zones`, `engine-trace?limit=50`, `overrides?include_expired=true`), alle 200; URLs nutzen DB-ID 16, nicht Zimmer-Nummer 201.
+
+Sommermodus-bedingt nicht real beobachtbar (durch 47 CI-Tests abgesichert):
+
+- Window-Pre-Check Disabled-State bei realem offenem Fenster
+- Engine-Decision-Panel `ZoneOverridesBlock` bei aktivem Zone-Override
+- 409 `override_rejected_window_open` Toast-Differenzierung
+
+Real-Hardware-Verifikation kommt automatisch in Heizperiode 2026/27 (analog Sprint 12 STATUS §2am R3).
+
+Tag `v0.1.17b-override-zone-scope-frontend` annotated auf `3587b47` gesetzt und gepusht.
+
+**Querverweise:** AE-58 (Master-ADR Sprint 12a), AE-52-Praezisierung (Window-Open trumpft alles), AE-54-Klarstellung (Engine Layer 3 zone-aware), Sprint-12a STATUS §2an, Sprint-12-T5 zone_overrides_trace-Pattern (AE-55), CLAUDE.md §5.54 (Playwright route()-Footgun), CLAUDE.md §5.55 (Skip-Spiegel-Workflow-Pattern verfaelscht gh pr checks).
 
 ---
 
@@ -2122,7 +2145,7 @@ Secrets liegen in:
 | `v0.1.16-health-aggregat` | Sprint 11 (Health-State + Plausi + Zone-Isolation + Aggregat-Lesen, AE-51 §4.1 + AE-53 + AE-54, PR #158) | 2026-05-18 |
 | `v0.1.17-multivicki-fenster` | Sprint 12 (Multi-Vicki-Dispatch symmetrisch + Layer 4 occupancy-aware + Override-Reject 409, AE-51 P3 + AE-52 + AE-55 + AE-56, PR #160) | 2026-05-19 |
 | `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
-| `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung) | 2026-05-20 (nach Merge) |
+| `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung, PR #164, Squash-Commit `3587b47`) | 2026-05-20 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
