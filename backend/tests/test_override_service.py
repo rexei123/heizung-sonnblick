@@ -17,9 +17,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from heizung.models.enums import OverrideSource
+from heizung.models.enums import OverrideSource, RoomStatus
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
+from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.services import override_service
@@ -66,12 +67,6 @@ def test_compute_expires_at_frontend_checkout_with_next() -> None:
     assert result == next_co
 
 
-def test_compute_expires_at_frontend_checkout_without_next_falls_back_to_7_days() -> None:
-    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
-    result = override_service.compute_expires_at(OverrideSource.FRONTEND_CHECKOUT, now)
-    assert result == now + timedelta(days=7)
-
-
 def test_compute_expires_at_device_with_next() -> None:
     now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
     next_co = datetime(2026, 5, 8, 11, 0, tzinfo=UTC)
@@ -81,18 +76,37 @@ def test_compute_expires_at_device_with_next() -> None:
     assert result == next_co
 
 
-def test_compute_expires_at_device_without_next_caps_at_7_days() -> None:
-    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
-    result = override_service.compute_expires_at(OverrideSource.DEVICE, now)
-    assert result == now + timedelta(days=7)
-
-
 def test_compute_expires_at_caps_when_next_checkout_too_far() -> None:
     """Hard-Cap greift, auch wenn next_checkout in 10 Tagen liegt."""
     now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
     next_co = now + timedelta(days=10)
     result = override_service.compute_expires_at(
         OverrideSource.FRONTEND_CHECKOUT, now, next_checkout_at=next_co
+    )
+    assert result == now + timedelta(days=7)
+
+
+# Sprint 12a T2: Fallback-Pfad ``next_checkout_at=None`` ist tot (OCCUPIED-Gate).
+# Defensive Pflicht: compute_expires_at raises bei FRONTEND_CHECKOUT/DEVICE +
+# None — kein stiller 7d-Cap.
+def test_compute_expires_at_frontend_checkout_without_next_raises() -> None:
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="next_checkout_at darf nicht None sein"):
+        override_service.compute_expires_at(OverrideSource.FRONTEND_CHECKOUT, now)
+
+
+def test_compute_expires_at_device_without_next_raises() -> None:
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="next_checkout_at darf nicht None sein"):
+        override_service.compute_expires_at(OverrideSource.DEVICE, now)
+
+
+def test_compute_expires_at_hard_max_caps_device() -> None:
+    """Sprint 12a T2: HARD_MAX (7 Tage) gilt auch fuer DEVICE bei langem checkout."""
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    far_checkout = now + timedelta(days=14)
+    result = override_service.compute_expires_at(
+        OverrideSource.DEVICE, now, next_checkout_at=far_checkout
     )
     assert result == now + timedelta(days=7)
 
@@ -118,12 +132,49 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def room_id(db_session: AsyncSession) -> AsyncIterator[int]:
-    """RoomType + Room als Test-Setup. Wird via session.rollback aufgeraeumt."""
+    """RoomType + Room + aktive Belegung -> OCCUPIED.
+
+    Sprint 12a T2 (AE-58): ``override_service.create`` verlangt
+    OCCUPIED-Status. Test-Default ist eine aktive Belegung (check_in vor
+    now, check_out > now+1d), damit alle Bestandstests ohne Logik-Aenderung
+    durch das OCCUPIED-Gate kommen. ``derive_room_status`` liest aus
+    aktiven Occupancies — kein expliziter ``room.status``-Set noetig.
+
+    Aufraeumen via ``session.rollback`` (db_session-Fixture).
+    """
     suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
     rt = RoomType(name=f"t9-9-svc-{suffix}")
     db_session.add(rt)
     await db_session.flush()
     room = Room(number=f"t9-9-{suffix}", room_type_id=rt.id)
+    db_session.add(room)
+    await db_session.flush()
+    now = datetime.now(tz=UTC)
+    occ = Occupancy(
+        room_id=room.id,
+        check_in=now - timedelta(hours=2),
+        check_out=now + timedelta(days=2),
+        is_active=True,
+    )
+    db_session.add(occ)
+    await db_session.flush()
+    yield room.id
+
+
+@pytest_asyncio.fixture
+async def vacant_room_id(db_session: AsyncSession) -> AsyncIterator[int]:
+    """RoomType + Room ohne Belegung -> VACANT (Default-Status).
+
+    Sprint 12a T2: dediziert fuer OCCUPIED-Gate-Negative-Test
+    (``RoomNotOccupiedError``).
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    rt = RoomType(name=f"t12-vac-{suffix}")
+    db_session.add(rt)
+    await db_session.flush()
+    # Prefix ``t12-v-`` ist 6 chars; mit 12-char strftime-Suffix = 18 chars
+    # (innerhalb VARCHAR(20), §5.49).
+    room = Room(number=f"t12-v-{suffix}", room_type_id=rt.id)
     db_session.add(room)
     await db_session.flush()
     yield room.id
@@ -249,7 +300,14 @@ async def test_revoke_double_raises(db_session: AsyncSession, room_id: int) -> N
         await override_service.revoke(db_session, o.id, reason="zweites mal")
 
 
-async def test_revoke_device_overrides_only_device(db_session: AsyncSession, room_id: int) -> None:
+async def test_revoke_all_active_overrides_revokes_device_and_frontend(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Sprint 12a T2 (AE-58): revoke_all_active_overrides revoked ALLE Quellen.
+
+    Ersetzt ``revoke_device_overrides`` ersatzlos — neuer Vertrag: Check-out
+    revoked DEVICE und FRONTEND_* in einem Aufruf.
+    """
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     device = await override_service.create(
         db_session,
@@ -265,12 +323,14 @@ async def test_revoke_device_overrides_only_device(db_session: AsyncSession, roo
         source=OverrideSource.FRONTEND_4H,
         expires_at=expires,
     )
-    count = await override_service.revoke_device_overrides(db_session, room_id)
-    assert count == 1
+    count = await override_service.revoke_all_active_overrides(db_session, room_id)
+    assert count == 2
     await db_session.refresh(device)
     await db_session.refresh(frontend)
     assert device.revoked_at is not None
-    assert frontend.revoked_at is None
+    assert frontend.revoked_at is not None
+    assert device.revoked_reason == "auto: guest checked out"
+    assert frontend.revoked_reason == "auto: guest checked out"
 
 
 async def test_cleanup_expired_marks_only_expired(db_session: AsyncSession, room_id: int) -> None:
@@ -439,3 +499,172 @@ async def test_create_rejects_when_one_of_two_zones_open(
         .all()
     )
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12a T2 (AE-58) — OCCUPIED-Gate + Zone-Scope + Priority-Sort
+# ---------------------------------------------------------------------------
+
+
+async def test_create_raises_on_vacant_room(db_session: AsyncSession, vacant_room_id: int) -> None:
+    """T2 (AE-58): VACANT-Raum -> RoomNotOccupiedError, kein DB-Insert."""
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    with pytest.raises(override_service.RoomNotOccupiedError) as exc_info:
+        await override_service.create(
+            db_session,
+            room_id=vacant_room_id,
+            setpoint=Decimal("22.0"),
+            source=OverrideSource.FRONTEND_4H,
+            expires_at=expires,
+        )
+    assert exc_info.value.room_id == vacant_room_id
+    assert exc_info.value.status == RoomStatus.VACANT
+
+    from sqlalchemy import select
+
+    rows = list(
+        (
+            await db_session.execute(
+                select(ManualOverride).where(ManualOverride.room_id == vacant_room_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+async def test_create_succeeds_on_occupied_room(db_session: AsyncSession, room_id: int) -> None:
+    """T2 (AE-58): OCCUPIED-Raum (room_id-Fixture mit aktiver Belegung) -> Insert ok."""
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    override = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    assert override.id is not None
+    assert override.heating_zone_id is None  # Backward-Compat: Default Room-Scope
+
+
+async def test_get_active_priority_frontend_beats_device_same_timestamp(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """T2: Bei gleichem created_at gewinnt FRONTEND_* vor DEVICE."""
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+    )
+    frontend = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    active = await override_service.get_active(db_session, room_id)
+    assert active is not None
+    assert active.id == frontend.id
+    assert active.source == OverrideSource.FRONTEND_4H
+
+
+async def test_get_active_newest_wins_within_same_priority_class(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """T2: Innerhalb gleicher Priority-Klasse (z.B. zwei DEVICE) gewinnt der neueste."""
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    older = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+    )
+    # Manueller created_at-Vorlauf, weil zwei flushes in derselben TX in
+    # Postgres denselben transaction_timestamp tragen.
+    older.created_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    await db_session.flush()
+
+    newer = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("24.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+    )
+    active = await override_service.get_active(db_session, room_id)
+    assert active is not None
+    assert active.id == newer.id
+
+
+async def test_get_active_zone_match_beats_room_match(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """T2: Lookup mit zone_id -> Zone-Override schlaegt Room-Override.
+
+    Auch wenn der Room-Override eine staerkere Priority-Klasse hat
+    (FRONTEND vs. DEVICE), gewinnt die Zone-Match-Klausel hierarchisch
+    zuerst.
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    zone_id, _device_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bedroom", dev_eui=f"deadbeef{suffix}"
+    )
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    zone_override = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+        heating_zone_id=zone_id,
+    )
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+
+    active = await override_service.get_active(db_session, room_id, heating_zone_id=zone_id)
+    assert active is not None
+    assert active.id == zone_override.id
+
+
+async def test_get_active_room_scope_only_when_lookup_without_zone_id(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """T2: Lookup ohne zone_id -> Zone-Overrides sind unsichtbar (Backward-Compat).
+
+    Engine-Layer-3-Aufrufer aus Sprint 9.9 ruft ``get_active(session, room_id)``
+    ohne ``heating_zone_id`` und darf nur Room-Scope-Overrides sehen — sonst
+    wuerden zone-spezifische Anlagen unbeabsichtigt auf den gesamten Raum
+    wirken.
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")[-8:]
+    zone_id, _device_id = await _add_zone_with_device(
+        db_session, room_id=room_id, zone_name="bath", dev_eui=f"cafef00d{suffix}"
+    )
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+        heating_zone_id=zone_id,
+    )
+    active_without_zone = await override_service.get_active(db_session, room_id)
+    assert active_without_zone is None, (
+        "Lookup ohne zone_id darf Zone-Override nicht sehen (Backward-Compat)"
+    )
+    active_with_zone = await override_service.get_active(
+        db_session, room_id, heating_zone_id=zone_id
+    )
+    assert active_with_zone is not None

@@ -92,7 +92,48 @@ async def http_client(setup_engine: AsyncEngine) -> AsyncIterator[httpx.AsyncCli
 
 
 @pytest_asyncio.fixture
+async def vacant_room_id(setup_engine: AsyncEngine) -> AsyncIterator[int]:
+    """Test-Setup ohne Belegung -> VACANT.
+
+    Sprint 12a T2: ``test_post_frontend_checkout_without_occupancy_returns_422``
+    testet explizit das 422 bei fehlender Occupancy (API-Layer-Check vor
+    ``service.create``). Default-Fixture ``room_id`` seedet eine Belegung;
+    fuer diesen Fall dediziert ohne.
+    """
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    async with sessionmaker() as session:
+        # Prefix ``t12-v-`` = 6 chars, suffix 12 chars -> 18 chars (VARCHAR(20)).
+        rt = RoomType(name=f"t12-v-{suffix}")
+        session.add(rt)
+        await session.flush()
+        room = Room(number=f"t12-v-{suffix}", room_type_id=rt.id)
+        session.add(room)
+        await session.commit()
+        rid, rt_id = room.id, rt.id
+
+    try:
+        yield rid
+    finally:
+        async with sessionmaker() as session:
+            await session.execute(
+                text("DELETE FROM manual_override WHERE room_id = :r"),
+                {"r": rid},
+            )
+            await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": rid})
+            await session.execute(text("DELETE FROM room_type WHERE id = :r"), {"r": rt_id})
+            await session.commit()
+
+
+@pytest_asyncio.fixture
 async def room_id(setup_engine: AsyncEngine) -> AsyncIterator[int]:
+    """Test-Setup mit aktiver Belegung -> OCCUPIED-Status.
+
+    Sprint 12a T2 (AE-58): ``override_service.create`` verlangt OCCUPIED
+    (Domain-Invariante „Overrides existieren nur in belegten Zimmern").
+    Bestehende API-Tests testen Override-CRUD-Pfade — eine aktive Belegung
+    ist der realistische Setup-Default. Test-Bodies/Assertions unveraendert.
+    """
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
     # ``room.number`` ist VARCHAR(20). Kompaktes prefix + 12-stelliges suffix
     # passt sicher rein (4 + 12 = 16 chars).
@@ -103,6 +144,17 @@ async def room_id(setup_engine: AsyncEngine) -> AsyncIterator[int]:
         await session.flush()
         room = Room(number=f"t99-{suffix}", room_type_id=rt.id)
         session.add(room)
+        await session.flush()
+        from heizung.models.occupancy import Occupancy
+
+        now = datetime.now(tz=UTC)
+        occ = Occupancy(
+            room_id=room.id,
+            check_in=now - timedelta(hours=2),
+            check_out=now + timedelta(days=2),
+            is_active=True,
+        )
+        session.add(occ)
         await session.commit()
         rid, rt_id = room.id, rt.id
 
@@ -142,10 +194,12 @@ async def test_post_frontend_4h_returns_201(http_client: httpx.AsyncClient, room
 
 
 async def test_post_frontend_checkout_without_occupancy_returns_422(
-    http_client: httpx.AsyncClient, room_id: int
+    http_client: httpx.AsyncClient, vacant_room_id: int
 ) -> None:
+    # Sprint 12a T2: explizit VACANT-Fixture, weil Test 422 bei fehlender
+    # Occupancy testet (API-Layer-Check fuer FRONTEND_CHECKOUT).
     resp = await http_client.post(
-        f"/api/v1/rooms/{room_id}/overrides",
+        f"/api/v1/rooms/{vacant_room_id}/overrides",
         json={"setpoint": "22.0", "source": "frontend_checkout"},
     )
     assert resp.status_code == 422, resp.text

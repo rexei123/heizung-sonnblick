@@ -44,12 +44,54 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def room_id(db_session: AsyncSession) -> AsyncIterator[int]:
-    """RoomType + Room. Default-Status vacant -> Layer 1 = t_vacant = 18 degC."""
+    """RoomType + Room + aktive Belegung -> OCCUPIED, Layer 1 = t_occupied.
+
+    Sprint 12a T2 (AE-58): ``override_service.create`` verlangt OCCUPIED.
+    Tests, die Override anlegen, brauchen aktive Belegung. Default-
+    Roomtype hat ``default_t_occupied=21``, daher Layer 1 = 21 (vorher
+    18 bei VACANT). Tests die explizit gegen ``t_vacant=18`` asserten
+    (`test_layer3_no_op_passes_through`, `test_layer3_revoked_override_ignored`)
+    nutzen weiter die ``vacant_room_id``-Fixture.
+    """
+    from heizung.models.occupancy import Occupancy
+
     suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
     rt = RoomType(name=f"t9-9-l3-{suffix}")
     db_session.add(rt)
     await db_session.flush()
     room = Room(number=f"t9-9-l3-{suffix}", room_type_id=rt.id)
+    db_session.add(room)
+    await db_session.flush()
+    now = datetime.now(tz=UTC)
+    occ = Occupancy(
+        room_id=room.id,
+        check_in=now - timedelta(hours=2),
+        check_out=now + timedelta(days=2),
+        is_active=True,
+    )
+    db_session.add(occ)
+    await db_session.flush()
+    yield room.id
+
+
+@pytest_asyncio.fixture
+async def vacant_room_id(db_session: AsyncSession) -> AsyncIterator[int]:
+    """RoomType + Room ohne Belegung -> VACANT, Layer 1 = t_vacant = 18 degC.
+
+    Sprint 12a T2: dediziert fuer Layer-3-No-Op-Tests, die explizit gegen
+    ``t_vacant``-Fallback asserten. Tests, die ``override_service.create``
+    rufen, koennen diese Fixture NICHT direkt nutzen (OCCUPIED-Gate raised).
+    Falls eine Insertion noetig ist, via Direct-ORM (``ManualOverride(...)``
+    + ``session.add`` + ``session.flush``) statt Service-Aufruf.
+
+    Prefix ``t12-vac-`` ist 8 chars; mit 12-char strftime-Suffix bleibt
+    Room.number bei 20 chars genau am VARCHAR(20)-Limit (§5.49).
+    """
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    rt = RoomType(name=f"t12-vac-{suffix}")
+    db_session.add(rt)
+    await db_session.flush()
+    room = Room(number=f"t12-vac-{suffix}", room_type_id=rt.id)
     db_session.add(room)
     await db_session.flush()
     yield room.id
@@ -73,8 +115,9 @@ def _layer5(result_layers: tuple[LayerStep, ...]) -> LayerStep:
 # ---------------------------------------------------------------------------
 
 
-async def test_layer3_no_op_passes_through(db_session: AsyncSession, room_id: int) -> None:
-    result = await evaluate_room(db_session, room_id)
+async def test_layer3_no_op_passes_through(db_session: AsyncSession, vacant_room_id: int) -> None:
+    # Sprint 12a T2: VACANT-Fixture, Layer 1 = t_vacant = 18 degC.
+    result = await evaluate_room(db_session, vacant_room_id)
     assert result is not None
     # Default vacant -> 18 degC, Layer 5 in [5,30] = 18.
     assert result.setpoint_c == 18
@@ -168,18 +211,26 @@ async def test_layer5_clamps_above_room_type_max(db_session: AsyncSession, room_
 # ---------------------------------------------------------------------------
 
 
-async def test_layer3_revoked_override_ignored(db_session: AsyncSession, room_id: int) -> None:
+async def test_layer3_revoked_override_ignored(
+    db_session: AsyncSession, vacant_room_id: int
+) -> None:
+    # Sprint 12a T2: Test pruft Layer-3-No-Op + t_vacant=18-Fallback bei
+    # revoktem Override. Braucht VACANT-Fixture (assertion 18). Direct-ORM-
+    # Insert statt service.create(), weil OCCUPIED-Gate sonst raised.
+    from heizung.models.manual_override import ManualOverride
+
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
-    o = await override_service.create(
-        db_session,
-        room_id=room_id,
+    o = ManualOverride(
+        room_id=vacant_room_id,
         setpoint=Decimal("23.0"),
         source=OverrideSource.DEVICE,
         expires_at=expires,
     )
+    db_session.add(o)
+    await db_session.flush()
     await override_service.revoke(db_session, o.id, reason="test")
 
-    result = await evaluate_room(db_session, room_id)
+    result = await evaluate_room(db_session, vacant_room_id)
     assert result is not None
     layer3 = _layer3(result.layers)
     assert layer3.extras is not None

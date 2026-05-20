@@ -629,9 +629,14 @@ async def _seed_room_zone_device_reading(
     open_window: bool,
     device_health_state: str = "healthy",
 ) -> tuple[int, int]:
-    """Setup-Helper fuer F/G: Room + 1 Zone + 1 Device + 1 frisches Reading.
-    Eigene Session via setup_engine, commit am Ende.
+    """Setup-Helper fuer F/G: Room + aktive Belegung + 1 Zone + 1 Device + Reading.
+
+    Sprint 12a T2 (AE-58): F/G testen POST-Override-Pfade. Override-Service
+    verlangt OCCUPIED — daher aktive Occupancy ab now-2h bis now+2d. Eigene
+    Session via setup_engine, commit am Ende.
     """
+    from heizung.models.occupancy import Occupancy
+
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
     async with sessionmaker() as session:
         rt = RoomType(name=f"{PREFIX}-rt-{suffix}")
@@ -639,6 +644,15 @@ async def _seed_room_zone_device_reading(
         await session.flush()
         room = Room(number=f"{PREFIX}-{suffix}", room_type_id=rt.id)
         session.add(room)
+        await session.flush()
+        now = datetime.now(tz=UTC)
+        occ = Occupancy(
+            room_id=room.id,
+            check_in=now - timedelta(hours=2),
+            check_out=now + timedelta(days=2),
+            is_active=True,
+        )
+        session.add(occ)
         await session.flush()
         zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="bedroom")
         session.add(zone)

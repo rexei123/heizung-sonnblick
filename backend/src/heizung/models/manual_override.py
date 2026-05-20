@@ -47,6 +47,13 @@ class ManualOverride(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     room_id: Mapped[int] = mapped_column(ForeignKey("room.id", ondelete="CASCADE"), nullable=False)
+    # Sprint 12a T1/T2 (AE-58): optionale Zone-Granularitaet. NULL = Room-Scope-
+    # Override (Backward-Compat-Pfad fuer Bestandsdaten und Aufrufer ohne
+    # heating_zone_id). FK ON DELETE SET NULL erhaelt Audit-Row bei Zone-Loeschung.
+    heating_zone_id: Mapped[int | None] = mapped_column(
+        ForeignKey("heating_zone.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     setpoint: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)
     source: Mapped[OverrideSource] = mapped_column(
