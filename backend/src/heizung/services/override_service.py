@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.enums import OverrideSource, RoomStatus
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
+from heizung.models.room import Room
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services.occupancy_service import derive_room_status
 
@@ -90,6 +91,33 @@ class RoomNotOccupiedError(Exception):
         super().__init__(
             f"Override-Anlage abgewiesen: Raum {room_id} ist nicht OCCUPIED "
             f"(Status: {status.value}). Override gilt nur fuer belegte Raeume."
+        )
+
+
+class RoomOverrideBlockedError(Exception):
+    """Sprint 12c (AE-58): Override-Anlage wird abgewiesen, wenn das Zimmer
+    die Uebersteuerungs-Sperre (``room.guest_override_blocked = True``) gesetzt
+    hat.
+
+    Sperre ist Mitarbeiter-gesteuert (PATCH /rooms/{id}/override-block-state)
+    und hat Vorrang vor dem OCCUPIED-Gate: ein geblocktes Zimmer wirft diesen
+    Fehler unabhaengig vom Belegungsstatus. Single-Source-of-Truth liegt im
+    Service-Layer; Device-Adapter prueft denselben Flag vorab und schreibt
+    EventLog beim Skip (T4), API-Layer mappt auf HTTP 409
+    ``room_override_blocked`` (T3).
+
+    Begriffstrennung: NICHT identisch mit ``RoomStatus.BLOCKED`` (Zimmer
+    operativ aus der Engine genommen). Hier laeuft die Engine normal, nur
+    die Override-Eingabe ist gesperrt.
+
+    :param room_id: betroffener Raum.
+    """
+
+    def __init__(self, room_id: int) -> None:
+        self.room_id = room_id
+        super().__init__(
+            f"Override-Anlage abgewiesen: Raum {room_id} hat die "
+            f"Uebersteuerungs-Sperre aktiviert (guest_override_blocked=True)."
         )
 
 
@@ -173,12 +201,16 @@ async def create(
 ) -> ManualOverride:
     """Legt einen neuen Override an.
 
-    Sprint 12a T2 (AE-58): zwei Pre-Insert-Gates in dieser Reihenfolge:
+    Pre-Insert-Gates in fester Reihenfolge:
 
-    1. **OCCUPIED-Gate** — Override gilt nur fuer belegte Raeume. Status
-       wird via ``derive_room_status`` aus aktiven Occupancies berechnet
-       (canonical, nicht stale ``room.status``-Feld).
-    2. **Window-Offen-Gate** (Sprint 12 T4 / AE-52) — Override wird
+    1. **Block-Gate** (Sprint 12c, AE-58) — Raum hat
+       ``guest_override_blocked=True`` -> ``RoomOverrideBlockedError``,
+       unabhaengig vom Belegungsstatus. Single-Source-of-Truth fuer die
+       Sperre.
+    2. **OCCUPIED-Gate** (Sprint 12a T2, AE-58) — Override gilt nur fuer
+       belegte Raeume. Status wird via ``derive_room_status`` aus aktiven
+       Occupancies berechnet (canonical, nicht stale ``room.status``-Feld).
+    3. **Window-Offen-Gate** (Sprint 12 T4, AE-52) — Override wird
        abgewiesen, wenn mindestens eine HeatingZone des Raums
        ``open_window=True`` meldet.
 
@@ -186,7 +218,10 @@ async def create(
         ``None`` = Room-Scope-Override (Backward-Compat fuer Aufrufer
         ohne Zone-Wissen). Engine Layer 3 (T5) priorisiert Zone-Match vor
         Room-Match beim Lookup.
-    :raises ValueError: setpoint out-of-range [MIN_SETPOINT, MAX_SETPOINT].
+    :raises ValueError: setpoint out-of-range [MIN_SETPOINT, MAX_SETPOINT],
+        oder Raum existiert nicht.
+    :raises RoomOverrideBlockedError: Sprint 12c (AE-58) — Raum hat
+        ``guest_override_blocked=True``. Override wird NICHT persistiert.
     :raises RoomNotOccupiedError: Sprint 12a T2 (AE-58) — Raum ist nicht
         OCCUPIED. Override wird NICHT persistiert.
     :raises OverrideRejectedWindowOpenError: Sprint 12 T4 (AE-52) — eine
@@ -200,6 +235,16 @@ async def create(
         )
 
     now = _now()
+
+    # Sprint 12c (AE-58): Block-Gate VOR OCCUPIED-Gate. Sperre hat Vorrang —
+    # ein geblocktes Zimmer weist Overrides ab, unabhaengig von Belegung.
+    # Single-Source-of-Truth: alle Aufrufer (API, Device-Adapter) laufen
+    # durch dieses Gate.
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise ValueError(f"Raum {room_id} existiert nicht")
+    if room.guest_override_blocked:
+        raise RoomOverrideBlockedError(room_id=room_id)
 
     # Sprint 12a T2 (AE-58): OCCUPIED-Gate VOR Window-Gate. AE-58 verankert
     # Override-Domain als „nur fuer belegte Raeume"; VACANT/RESERVED/CLEANING/
