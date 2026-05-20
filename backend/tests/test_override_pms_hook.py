@@ -220,3 +220,94 @@ async def test_occupied_to_vacant_no_overrides_returns_zero(session: AsyncSessio
         now=now,
     )
     assert revoked == 0
+
+
+# ---------------------------------------------------------------------------
+# Sprint 12a T6 (AE-58) — revoke_all_active_overrides Verifikation
+# ---------------------------------------------------------------------------
+
+
+async def test_checkout_revoked_alle_override_quellen(session: AsyncSession) -> None:
+    """T6: DEVICE + FRONTEND_* gemischt aktiv -> beide revoked beim Check-out.
+
+    Sprint 12a T2 hat ``revoke_device_overrides`` durch
+    ``revoke_all_active_overrides`` ersetzt. Vorher blieben FRONTEND-
+    Overrides ueber den Check-out hinaus aktiv, jetzt wird der komplette
+    Stack revokiert (AE-58: neue Belegung startet sauber auf globalen
+    Einstellungen).
+    """
+    now = datetime.now(tz=UTC)
+    room_id, _ = await _seed_room_with_device(session)
+    expires = now + timedelta(days=2)
+
+    device_override = ManualOverride(
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+    )
+    frontend_override = ManualOverride(
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    session.add_all([device_override, frontend_override])
+    await session.flush()
+
+    revoked = await auto_revoke_on_checkout(
+        session,
+        room_id,
+        previous_status=RoomStatus.OCCUPIED,
+        new_status=RoomStatus.VACANT,
+        now=now,
+    )
+    assert revoked == 2
+    await session.refresh(device_override)
+    await session.refresh(frontend_override)
+    assert device_override.revoked_at is not None
+    assert device_override.revoked_reason == "auto: guest checked out"
+    assert frontend_override.revoked_at is not None
+    assert frontend_override.revoked_reason == "auto: guest checked out"
+
+
+async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSession) -> None:
+    """T6: Folge-Checkin innerhalb 4h Grace -> keine Revokation, auch fuer
+    FRONTEND-Quelle.
+
+    Bestaetigt: ``CHECKOUT_GRACE_WINDOW=4h`` aus Sprint 9.9 T6 weiter
+    aktiv, gilt jetzt fuer alle Override-Quellen (FRONTEND_* + DEVICE).
+    Komplement zu ``test_occupied_to_vacant_with_followup_in_2h_does_not_revoke``
+    (DEVICE-Quelle), pruefen wir hier FRONTEND_4H am 4h-Boundary.
+    """
+    now = datetime.now(tz=UTC)
+    room_id, _ = await _seed_room_with_device(session)
+    expires = now + timedelta(days=2)
+
+    frontend_override = ManualOverride(
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    session.add(frontend_override)
+    # Folge-Checkin in exakt 4h -> inklusive Grace, kein Revoke.
+    session.add(
+        Occupancy(
+            room_id=room_id,
+            check_in=now + timedelta(hours=4),
+            check_out=now + timedelta(days=3),
+        )
+    )
+    await session.flush()
+
+    revoked = await auto_revoke_on_checkout(
+        session,
+        room_id,
+        previous_status=RoomStatus.OCCUPIED,
+        new_status=RoomStatus.VACANT,
+        now=now,
+    )
+    assert revoked == 0
+    await session.refresh(frontend_override)
+    assert frontend_override.revoked_at is None
