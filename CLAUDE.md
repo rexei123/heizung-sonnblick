@@ -1253,6 +1253,51 @@ Backlog-Eintrag als Drift-Risiko.
 Querverweis: §5.20 (Doku-Drift in Steuerlogik), AE-58 Punkt 2
 (OCCUPIED-Gate als zentrale Domain-Invariante).
 
+### 5.54 Playwright page.route() glob-Pattern matchen NICHT zuverlaessig URLs mit Query-String (Sprint 12b T5)
+
+Sprint 12b T5 hat einen Playwright-Test mit folgendem Mock-Pattern
+geschrieben:
+
+```typescript
+await page.route("**/api/v1/rooms/101/overrides", async (route) => {
+  if (route.request().method() === "POST") { ... }
+  if (route.request().method() === "GET")  { ... }
+});
+```
+
+Der Test passte den POST-Request korrekt ab. Aber das nachgelagerte
+TanStack-Query-Refetch (`invalidateQueries` → erneuter GET) traf nicht
+den Handler — der Refetch-URL war
+`/api/v1/rooms/101/overrides?include_expired=true`, und das Glob-Pattern
+``**/api/v1/rooms/101/overrides`` matchte ihn nicht. Die Konsequenz:
+Playwright fiel auf das zuvor in ``mockBasicAuthAndRoom`` registrierte
+Default-Pattern zurueck, das `[]` lieferte — der Test sah keinen
+aktiven Override nach dem POST.
+
+**Regel:** Wenn ein Test-Mock URLs mit Query-Strings abdecken muss,
+**immer Regex statt Glob** verwenden:
+
+```typescript
+await page.route(/.*\/api\/v1\/rooms\/101\/overrides(\?.*)?$/, ...);
+```
+
+Das `(\?.*)?$` macht den Query-String optional und erfasst beide
+Faelle (mit und ohne Query). Funktioniert deterministisch fuer GET-
+Listen mit dynamischen Query-Params (`limit`, `include_expired`,
+`zone_id`, ...).
+
+**Diagnose-Pattern bei aehnlichen Bugs:** Wenn ein Mock fuer eine
+URL „nur manchmal" greift und der Test mit „Element nicht sichtbar
+nach Mutation" timeout-failed, immer pruefen: hat die Folge-URL
+Query-Strings? Playwright-Glob `**` matched **nicht** ueber `?` hinweg
+in allen Konstellationen — die Doku ist nicht klar zu diesem
+Edge-Case, das Verhalten in der Praxis ist „glob nicht zuverlaessig
+bei Query-Strings".
+
+Querverweis: §5.51 (Domain-Invariante Tests), §5.10 (build-images.yml
+triggert nicht zuverlaessig — analog: Tool-Verhalten weicht von der
+Doku-Erwartung ab und braucht Workaround-Pattern).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

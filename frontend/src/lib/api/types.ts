@@ -436,6 +436,10 @@ export type EventLogLayer =
   | "base_target"
   | "temporal_override"
   | "manual_override"
+  // Sprint 12a T4 (AE-58): Off-Pipeline-Audit fuer device_adapter
+  // Pre-Insert-Skip (VACANT-Raum oder Fenster offen). Eigene
+  // synthetische ``evaluation_id``, gehoert keiner Engine-Tick-Eval.
+  | "manual_override_blocked"
   | "guest_override"
   | "window_safety"
   | "device_detached"
@@ -455,7 +459,11 @@ export type CommandReason =
   | "frost_protection"
   | "summer_mode"
   | "manual"
-  | "manual_event";
+  | "manual_event"
+  // Sprint 12a T4 (AE-58): Reasons fuer MANUAL_OVERRIDE_BLOCKED-Layer-
+  // Rows. Beide nur im Device-Adapter-Off-Pipeline-Pfad geschrieben.
+  | "device_blocked_vacant"
+  | "device_blocked_window";
 
 // ---------------------------------------------------------------------------
 // Manual Override (Sprint 9.9 - Engine Layer 3)
@@ -482,10 +490,15 @@ export type FrontendOverrideSource =
  * ``backend/src/heizung/schemas/manual_override.py``. ``setpoint`` kommt
  * als String aus Pydantic-Decimal-Serialisierung — bewusst nicht in
  * Number umwandeln (Float-Rundungsfreiheit).
+ *
+ * Sprint 12a T3 (AE-58): ``heating_zone_id`` traegt optionalen Zone-
+ * Scope. ``null`` = Room-Scope-Override (Backward-Compat fuer
+ * Bestandsrows aus Lazy-Migration 0016).
  */
 export interface ManualOverride {
   id: number;
   room_id: number;
+  heating_zone_id: number | null;
   setpoint: string;
   source: OverrideSource;
   expires_at: string;
@@ -500,11 +513,24 @@ export interface ManualOverrideCreate {
   setpoint: string;
   source: FrontendOverrideSource;
   reason?: string | null;
+  /**
+   * Sprint 12a T3 (AE-58): optionaler Zone-Scope. ``undefined`` /
+   * weggelassen = Room-Scope-Override (Backward-Compat). Gesetzt =
+   * Zone-Match (Backend FK-404-Check verifiziert, dass Zone zum Pfad-
+   * Room gehoert).
+   */
+  heating_zone_id?: number;
 }
 
 export interface ManualOverrideListQuery {
   limit?: number;
   include_expired?: boolean;
+  /**
+   * Sprint 12a T3 (AE-58): optionaler Zone-Filter. Wenn gesetzt liefert
+   * Backend Zone-Match + Room-Scope-Fallback (Zone > Room sortiert).
+   * Ohne Param: alle Overrides des Raums (Backward-Compat).
+   */
+  zone_id?: number;
 }
 
 export interface EventLogEntry {

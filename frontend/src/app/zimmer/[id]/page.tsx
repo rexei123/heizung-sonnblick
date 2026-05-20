@@ -12,7 +12,7 @@ import { useState } from "react";
 import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
-import { ManualOverridePanel } from "@/components/patterns/manual-override-panel";
+import { ManualOverridePanelList } from "@/components/patterns/manual-override-panel-list";
 import { RoomForm } from "@/components/patterns/room-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -137,7 +137,7 @@ export default function ZimmerDetailPage() {
       </div>
 
       {tab === "override" ? (
-        <ManualOverridePanel roomId={id} />
+        <ManualOverridePanelList roomId={id} />
       ) : (
         <div className="bg-surface border border-border rounded-md p-5">
           {tab === "stammdaten" ? (

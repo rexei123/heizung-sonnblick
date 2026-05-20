@@ -933,11 +933,35 @@ oefter 409) wird mit dieser Vorpruefung erledigt.
 
 # SPRINT 12b — Frontend Zone-Override-Panels + Window-Pre-Check (Phase 1, Folge-Sprint zu 12a)
 
-**Priorität:** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
-**Geschätzte Dauer:** 4-6 h
+**Priorität:** ✅ abgeschlossen 2026-05-20 (Branch `feature/sprint-12b-override-zone-scope-frontend`, 6 Commits T1-T6, PR-Erstellung als naechster Schritt, Tag `v0.1.17b-override-zone-scope-frontend` nach Strategie-Chat-Freigabe + Merge)
+**Geschätzte Dauer (Brief):** 6-9 h netto
 **Autonomiestufe:** 2 (Frontend-Refactor, kein Hardware-Pfad)
 **Voraussetzung:** Sprint 12a abgeschlossen + gemerged + Tag `v0.1.17a-override-zone-scope-backend` gesetzt
 **Tag nach Abschluss:** `v0.1.17b-override-zone-scope-frontend`
+
+## Ergebnis (Sprint 12b)
+
+Frontend-UX an das in Sprint 12a etablierte Backend-Override-Modell (AE-58) angepasst:
+- ManualOverridePanelList Container, pro Zone eine eigene `ManualOverrideZoneCard` mit eigenem Submit-Pfad (`heating_zone_id` im POST-Body)
+- Optionale `ManualOverrideRoomCard` (read-only) am Listen-Anfang fuer Backward-Compat-Bestandsdaten mit `heating_zone_id === null` (Lazy-Migration aus 12a T1)
+- Window-Pre-Check via `useEngineTrace`-Hook: Submit-Button + Form-Inputs disabled wenn `details.open_zones` der WINDOW_SAFETY-Layer-Row die Zone listet; „Stand: vor Xs"-Hinweis transparent (E1-Latenz-Akzeptanz)
+- `mapOverrideError`-Helper (`lib/api/override-errors.ts`) mappt 409 `room_not_occupied`, 409 `override_rejected_window_open`, 404 `invalid_zone`, 422 auf deutsche User-Texte (kein ID-Leak)
+- Engine-Decision-Panel: `zone_overrides_trace` aus HARD_CLAMP-Row als Pro-Zone-Setpoint-Block unter dem Layer-Trace sichtbar; neue Layer- und Reason-Werte aus Sprint 12a T4 (`manual_override_blocked`, `device_blocked_vacant`, `device_blocked_window`) in `EventLogLayer`/`CommandReason`-Unions + `LAYER_LABEL`/`REASON_LABEL`
+- 5 Playwright-E2E-Cases lokal grün (Happy/Window-Blocked/Room-not-occupied/Invalid-Zone/Engine-Panel-Pro-Zone)
+- Backend-Tests bleiben grün (413 passed, 1 xfailed), kein Backend-Code-Touch
+
+Detail-Tasks T1-T6 + Commit-Range siehe STATUS.md §2ap.
+
+**Out of Scope (per Brief E3):** room_blocked-UI-Stub. Nur Code-Anker im 12a-T3-Backend (api/v1/overrides.py `# AE-58 Sprint 12c: ...`) ist sichtbar; Frontend bleibt 12b-clean.
+
+---
+
+# SPRINT 12b (alt) — ORIGINAL-BRIEF-SKIZZE (HISTORISCH)
+
+Folgende Beschreibung ist die urspruengliche Brief-Skizze aus Sprint-12a-T7-Doku-Update (2026-05-20 frueh) und wurde durch den Brief vom Strategie-Chat 2026-05-20 nach 12a-Merge praezisiert. „Ergebnis (Sprint 12b)" oben ist Plan-Basis.
+
+**Priorität (historisch):** 🟠 (Phase-1-Folge, vor Sprint 13 Pairing-Wizard)
+**Geschätzte Dauer (historisch):** 4-6 h
 
 ## Ziel
 

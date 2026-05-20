@@ -1,10 +1,15 @@
 /**
- * API-Funktionen fuer Manual-Overrides (Sprint 9.9 T8).
+ * API-Funktionen fuer Manual-Overrides (Sprint 9.9 T8 + Sprint 12a/12b).
  *
  * Backend-Endpoints:
- *   GET    /api/v1/rooms/{room_id}/overrides
- *   POST   /api/v1/rooms/{room_id}/overrides
+ *   GET    /api/v1/rooms/{room_id}/overrides[?zone_id=X]
+ *   POST   /api/v1/rooms/{room_id}/overrides  (Body kann heating_zone_id tragen)
  *   DELETE /api/v1/overrides/{override_id}
+ *
+ * Sprint 12a T3 (AE-58): ``zone_id``-Query und ``heating_zone_id``-Body
+ * fliessen via ``ManualOverrideListQuery``/``ManualOverrideCreate`` direkt
+ * durch ``queryString``/``apiClient.post`` — keine separate Helper-
+ * Funktion noetig, Type-System sichert Schema.
  */
 
 import { apiClient, queryString } from "./client";
