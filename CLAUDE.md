@@ -1392,6 +1392,35 @@ Querverweis: §5.18 (VARCHAR-Constraint-Pflicht-Check), §5.49
 (Schema-Constraint im Helper-Docstring), §5.50 (Lokal-DB-Verify-
 Pflicht).
 
+### 5.57 Tabellen-Header ohne sichtbaren Text sind semantisch blind (Sprint 12c.a UX-Befund)
+
+Sprint 12c.a fuehrte eine schmale Indikator-Spalte ein (Schloss-Symbol
+fuer `guest_override_blocked`). Brief-Entscheidung war: Header leer,
+Semantik traegt `aria-label` + `title`-Tooltip am Symbol. Erste Live-
+Sicht des Hoteliers zeigte: Spalte ist ohne Header semantisch blind.
+Tooltip greift nur beim Hover, Screen-Reader-Label am Symbol greift
+nur beim Vorlesen einer Body-Zelle. Bei einer Spalten-Tabelle erwarten
+Nutzer den Header als primaere Sinngeber-Quelle — er ist das einzige
+UI-Element, das ohne Interaktion lesbar ist.
+
+**Regel:** Tabellen-Spalten brauchen sichtbaren Header-Text, auch wenn
+die Spalte nur ein Symbol enthaelt. Ausnahmen sind nur fuer Action-
+Spalten am Tabellen-Ende erlaubt (Detail-Link, Loeschen-Knopf), wo
+Konvention den Header verzichtet — auch dort gerne mit `sr-only`-Label
+fuer Screen-Reader.
+
+**Anti-Pattern:** `<th aria-hidden></th>` + `title`-Attribut am Body-
+Symbol. Header bleibt fuer Sehende leer, fuer Screen-Reader explizit
+versteckt, Tooltip nur Hover-aktiv. Drei Wege blockiert, kein Weg
+funktioniert.
+
+**Konkret-Fix Sprint 12c.a:** Header-Text "Uebersteuerung" (Umlaut,
+Endkunden-UI), `aria-hidden` entfernt. PR #169, Commit 3a9218d.
+
+**Querverweise:** §5.20 (aspirative Kommentare = Doku-Drift, analog:
+versteckte Semantik = UX-Drift), Sprint-12c.a-Brief-Pattern fuer
+Vor-Entscheidungen die im Live-Verify kippen koennen.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
