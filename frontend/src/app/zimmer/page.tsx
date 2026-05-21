@@ -187,9 +187,12 @@ function RoomTable({ list, loading, error }: TableProps) {
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Etage</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Orient.</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Status</th>
-            {/* Sprint 12c.a: Block-Indikator-Spalte. Header leer, Symbol traegt
-                Bedeutung via aria-label + title in der Body-Zelle. */}
-            <th aria-hidden className="px-3 py-2"></th>
+            {/* Sprint 12c.a: Block-Indikator-Spalte. Live-Verify-Befund 12c.a:
+                Header braucht sichtbaren Text — Tooltip allein ist semantisch
+                blind, weil er nur beim Hover greift. */}
+            <th className="text-left px-3 py-2 font-medium text-text-secondary">
+              Übersteuerung
+            </th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary"></th>
           </tr>
         </thead>
