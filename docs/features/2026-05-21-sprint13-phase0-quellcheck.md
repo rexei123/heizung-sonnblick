@@ -65,7 +65,7 @@ Bereit für Auftrag.
 ```python
 def upgrade() -> None:
     op.add_column("device", sa.Column("retired_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("device", sa.Column("retired_reason", sa.String(50), nullable=True))
+    op.add_column("device", sa.Column("retired_reason", sa.String(64), nullable=True))
     op.add_column(
         "device",
         sa.Column(
@@ -75,21 +75,29 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
+    # Voll-Unique-Constraint aus Migration 0001 entfernen und durch
+    # Partial-Unique-Index ersetzen, damit retired Rows mit derselben
+    # DevEUI nebeneinander existieren koennen (DevEUI-Wiederverwendung
+    # nach Werksreset). Eindeutigkeit nur unter aktiven Rows.
+    op.drop_constraint("uq_device_dev_eui", "device", type_="unique")
     op.create_index(
-        "ix_device_active_zone",
+        "ix_device_dev_eui_active",
         "device",
-        ["heating_zone_id"],
+        ["dev_eui"],
+        unique=True,
         postgresql_where=sa.text("retired_at IS NULL"),
     )
+    # is_active-Spalte wird durch retired_at abgeloest (siehe Anhang
+    # is_active-Befund + AE-57 Entscheidung 2 Uebergangs-Klausel).
+    op.drop_column("device", "is_active")
 ```
 
 - **`retired_at: datetime | None`** — NULL = aktiv, gesetzt = retired (unwiderruflich, Audit-Anker).
-- **`retired_reason: VARCHAR(50) | None`** — z. B. `'hardware_swap'`, `'battery_dead'`, `'pre_pairing_failed'`. Optional, aber Free-Text bleibt aus dem `event_log` heraus.
+- **`retired_reason: VARCHAR(64) | None`** — z. B. `'hardware_swap'`, `'battery_dead'`, `'pre_pairing_failed'`. Optional, aber Free-Text bleibt aus dem `event_log` heraus. Länge auf 64 angeglichen an `BusinessAudit.action` (CLAUDE.md §5.45-Disziplin).
 - **`replaced_by_device_id: FK device.id NULL`** — Cross-Reference Alt → Neu (Brief K. DEVICE_REPLACED).
-- **Partial-Index `ix_device_active_zone`** — beschleunigt alle Engine-Queries „aktive Devices einer Zone".
+- **Partial-Unique-Index `ix_device_dev_eui_active`** — erlaubt mehrere retired Rows mit gleicher `dev_eui` (Hardware-Drift-Forensik + Re-Pair nach Werksreset), garantiert Eindeutigkeit nur unter aktiven Rows. Ersetzt die Voll-Unique-Constraint `uq_device_dev_eui` aus Migration 0001 (`backend/alembic/versions/0001_initial_domain_model.py:162`).
+- **`DROP COLUMN is_active`** — Bundle mit `ADD retired_at` (AE-57 Entscheidung 2 Übergangs-Klausel). Zwei Read-Stellen umstellen: `engine_tasks.py:352` + `api/v1/devices.py:137`.
 - **Kein Backfill nötig** (Spalten nullable, kein `server_default`), §5.56-Roundtrip-Anpassung **nicht** erforderlich.
-
-`is_active` bleibt vorerst erhalten (Backward-Compat, ggf. später entfernen im Cleanup-Sprint). Semantik-Trennung: `is_active=False` = temporär aus, `retired_at IS NOT NULL` = permanent ausgemustert.
 
 ---
 
@@ -400,8 +408,8 @@ Sprint-13-Schema-Erweiterung — Device-Lifecycle:
 - **Revision-ID:** `0018_device_retired_at`
 - **Down-Revision:** `0017_room_guest_override_blocked`
 - **Felder:** `retired_at TIMESTAMP TZ NULL`, `retired_reason VARCHAR(50) NULL`, `replaced_by_device_id INT FK device.id NULL` (ON DELETE SET NULL — selbst-referenzielle Lazy-Migration ohne Cascade-Risiko).
-- **Index:** Partial `ix_device_active_zone ON device(heating_zone_id) WHERE retired_at IS NULL` (analog `ix_manual_override_active_zone` aus 0016).
-- **§5.56-Roundtrip-Check:** Spalten sind nullable → Raw-SQL-Test-Inserts in `tests/test_migrations_roundtrip.py` + `tests/test_device_*.py` brauchen **keine** Anpassung. Modul-Docstring-§5.49-Hinweis nicht erforderlich.
+- **Index:** Partial-Unique `ix_device_dev_eui_active ON device(dev_eui) WHERE retired_at IS NULL`. Vor `create_index()`: `op.drop_constraint("uq_device_dev_eui", "device", type_="unique")` aus Migration 0001 entfernen. Performance-Partial-Index auf `heating_zone_id` ist verworfen (S6 — Mikro-Optimierung ohne realen Nutzen bei ~100 Devices, FK-Index reicht).
+- **§5.56-Roundtrip-Check:** Spalten sind nullable → Raw-SQL-Test-Inserts in `tests/test_migrations_roundtrip.py` + `tests/test_device_*.py` brauchen **keine** Anpassung. Modul-Docstring-§5.49-Hinweis nicht erforderlich. Hinweis: `DROP COLUMN is_active` + Constraint-Swap auf `dev_eui` **doch** roundtrip-relevant — Downgrade muss `uq_device_dev_eui` wiederherstellen und `is_active`-Spalte mit `server_default=true` zurückbringen.
 - **§5.50-Lokal-DB-Verify (Pflicht):** vor Push gegen lokales `timescaledb:latest-pg16` migrieren + zurück (`alembic upgrade head` + `alembic downgrade 0017_room_guest_override_blocked` + `alembic upgrade head`), kein Schema-Drift, alle bestehenden DB-Tests grün.
 
 ```python
@@ -414,9 +422,11 @@ Backward-Compat: alle bestehenden Rows bleiben ``retired_at=NULL``
 (aktiv). Kein Backfill, kein Server-Default — Spalten sind nullable und
 NULL bedeutet semantisch "Device ist aktiv".
 
-Partial-Index ``ix_device_active_zone`` beschleunigt Engine-Queries auf
-aktive Devices einer Zone (`engine_tasks._get_devices_for_zone`,
-`rules/window_state.detect_open_window_zones`).
+Partial-Unique-Index ``ix_device_dev_eui_active`` ersetzt die Voll-
+Unique-Constraint ``uq_device_dev_eui`` aus Migration 0001 und erlaubt
+mehrere retired Rows mit gleicher DevEUI (Hardware-Drift-Forensik +
+Re-Pair nach Werksreset), garantiert Eindeutigkeit nur unter aktiven
+Rows.
 
 Revision ID: 0018_device_retired_at
 Revises: 0017_room_guest_override_blocked
@@ -701,3 +711,18 @@ Nur Lese-Pfade. Kein aktiver Schreibpfad (kein Endpoint, kein Service setzt `dev
 - AE-57 ändert ausschliesslich Semantik für `device`. Andere `is_active`-Vorkommen sind eigene Tabellen mit eigenen Domänen (User-Aktivierung, Saison-Aktivität, Belegungs-Aktivität, Szenario-Aktivierung) und bleiben unangetastet.
 - Sprint 13b Migration 0018 ist gebündelt: `ADD COLUMN retired_at, retired_reason, replaced_by_device_id` (nullable) **plus** `DROP COLUMN device.is_active` **plus** Umstellung der zwei oben gelisteten Read-Stellen auf `retired_at IS NULL`.
 - Bis 13b-Merge bleibt `device.is_active` der aktive S4-Filter (Brief-Übergangs-Klausel im AE-57-Block).
+
+### Strategie-Chat-Auflösung Partial-Index-Variante (2026-05-21)
+
+Zwei Varianten standen im ersten AE-57-Entwurf gegeneinander:
+
+| Variante | Spalte | Zweck | Status |
+|---|---|---|---|
+| 1 | `dev_eui` `UNIQUE WHERE retired_at IS NULL` | Eindeutigkeit nur unter aktiven Rows; erlaubt DevEUI-Wiederverwendung nach Werksreset; Forensik-Anker für retired Rows | **verbindlich** |
+| 2 | `heating_zone_id` `WHERE retired_at IS NULL` | Performance-Index für „aktive Devices einer Zone"-Queries | **verworfen** |
+
+Begründung Variante 2 verworfen: Mikro-Optimierung ohne realen Nutzen bei ~100 Devices (S6 — Komplexität trägt Beweislast). Engine-Queries laufen über bestehenden FK-Index `device.heating_zone_id`. Aktive-Filter-Selektivität bei wenigen retireten Rows nicht relevant.
+
+Konsequenz: Migration 0018 muss zusätzlich die Voll-Unique-Constraint `uq_device_dev_eui` (Migration 0001) per `op.drop_constraint()` entfernen, bevor der Partial-Unique-Index angelegt wird. Downgrade-Pfad stellt die Voll-Constraint wieder her.
+
+AE-57-Block in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` enthält den verbindlichen Wortlaut + Implementierungs-Skizze (Commit `4ace2a9` auf `chore/sprint13-hygiene`).
