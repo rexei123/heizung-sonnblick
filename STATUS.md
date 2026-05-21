@@ -7,8 +7,8 @@
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-20
-**Letzter Tag (gemerged):** `v0.1.17c-room-override-blocked` (Sprint 12c, Squash-Commit `e9b18af`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich am selben Tag).
-**Aktueller Sprint:** Sprint 12c.a (Zimmer-Liste-Block-Indikator, Frontend-only) abgeschlossen 2026-05-20. Branch `feat/sprint12ca-room-block-list-indicator` mit T1-T3 fertig (T1 Tabellen-Spalte, T2 Playwright 2 Cases, T3 Doku). Tag `v0.1.17d-room-block-list-indicator` nach Merge. Sprint 12c (PR #166, Tag `v0.1.17c`) abgeschlossen + live-verifiziert; Doku-Nachzug + UI-Wording-Hotfix als PR #167 gemerged.
+**Letzter Tag (gemerged):** `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21).
+**Aktueller Sprint:** Sprint 12c.a (Zimmer-Liste-Block-Indikator, Frontend-only) abgeschlossen 2026-05-20, Tag `v0.1.17c-room-override-blocked`-Familie erweitert um `v0.1.17d-room-block-list-indicator` (PR #168, Squash-Commit `81ed3dc`), Live-Verify auf heizung-test erfolgreich 2026-05-21. Live-Sicht-Befund Header-Drift: Doku-Nachzug + UI-Header-Hotfix auf Branch `docs/sprint12ca-live-verify-and-header-fix` (Spalten-Header „Übersteuerung" ergaenzt, STATUS §2ar Live-Verify-Block nachgetragen).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1957,9 +1957,14 @@ Cowork-Sicht-Verify (Hotelier-gefuehrt):
 - Filter „Nur gesperrte"
 - Lock-Symbol im Zimmer-Detail-Header (Doppelung mit Toggle-Button)
 
-### Live-Verify auf heizung-test
+### Live-Verify auf heizung-test (2026-05-21 07:24 CEST)
 
-Folgt nach PR-Merge + Auto-Pull-Deploy (Web-Container-only Restart, gemeinsam mit ggf. wartendem 12c-Restart-Pfad).
+- Squash-Commit `81ed3dc` via `deploy-pull.service` deployt (Sync 07:23:45 + Restart 07:26:17).
+- Alle relevanten Container healthy nach Restart (api/web/celery_worker healthy, celery_beat unhealthy per §5.32 akzeptiert).
+- `/health` → 200 mit JSON ok.
+- Sicht-Verify Hotelier (Raum 101 manuell auf `guest_override_blocked=true` gesetzt): Schloss-Symbol in der neuen Spalte sichtbar in Zimmer-Uebersicht. Tooltip erscheint beim Hover („Übersteuerung gesperrt"). Wording-Trennung zu `RoomStatus.BLOCKED` bleibt scharf.
+
+**Befund Header-Drift:** Erste Live-Sicht zeigte fehlenden Spalten-Header (Brief-Entscheidung „Header leer, Tooltip traegt Semantik"). Realer Nutzer-Befund: ohne Header ist die Spalte semantisch blind, weil Tooltip nur beim Hover greift. Hotfix in selbem Doku-Nachzug-PR (T1): Header-Text „Übersteuerung" ergaenzt, `aria-hidden` entfernt. UI-Strings mit Umlaut (Endkunden-sichtbar, NICHT CLAUDE-ae/ue/oe-Regel).
 
 **Querverweise:** Sprint 12c (PR #166, AE-58, Tag `v0.1.17c`), §5.20 (Doku-Drift/Wording-Trennung), §5.54 (RegExp-Routes), §5.55 (CI-Verify Real-Run).
 
@@ -2248,7 +2253,7 @@ Secrets liegen in:
 | `v0.1.17a-override-zone-scope-backend` | Sprint 12a (Override-Zone-Scope + AE-58 Konsolidierung Backend-only: OCCUPIED-Gate, Zone-Scope-Override, Engine Layer 3 zone-aware via `RuleResult.zone_overrides`, AE-29 + AE-45 abgeloest, PR #162) | 2026-05-20 |
 | `v0.1.17b-override-zone-scope-frontend` | Sprint 12b (Frontend Zone-Override-Panels + Window-Pre-Check via Engine-Trace + typisierter Error-Helper + Engine-Decision-Panel-Erweiterung, PR #164, Squash-Commit `3587b47`) | 2026-05-20 |
 | `v0.1.17c-room-override-blocked` | Sprint 12c (Uebersteuerungs-Sperre pro Zimmer: `room.guest_override_blocked`, Single-Source-of-Truth in `override_service.create`, Auto-Revoke bei Toggle-On mit `revoked_reason="room_override_blocked"`, BusinessAudit `ROOM_OVERRIDE_BLOCK_TOGGLED`, Device-Adapter Pre-A-Gate, Frontend-Toggle + Panel-Banner, PR #166, Squash-Commit `e9b18af`) | 2026-05-20 |
-| `v0.1.17d-room-block-list-indicator` | Sprint 12c.a (Schloss-Symbol-Spalte in Zimmer-Uebersicht bei `guest_override_blocked=true`, Frontend-only, Datum + Squash-SHA werden im Doku-Nachzug-PR nachgetragen) | TBD |
+| `v0.1.17d-room-block-list-indicator` | Sprint 12c.a (Schloss-Symbol-Spalte in Zimmer-Uebersicht bei `guest_override_blocked=true`, Frontend-only, PR #168, Squash-Commit `81ed3dc`) | 2026-05-20 |
 
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
