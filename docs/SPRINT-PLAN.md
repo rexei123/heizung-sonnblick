@@ -1025,7 +1025,31 @@ Uebersteuerungs-Sperre als Mitarbeiter-Toggle (`PATCH /rooms/{id}/override-block
 
 - B-12c-AuditGap: `auto_revoke_on_checkout` schreibt weiterhin kein Audit.
 - B-12c-1: Vicki-Hardware-Child-Lock via Downlink 0x07 (separater Sprint).
-- Zimmer-Liste-Indikator (Schloss-Symbol in Tabelle).
+- Zimmer-Liste-Indikator: ausgelagert in Sprint 12c.a (siehe unten).
+
+---
+
+# SPRINT 12c.a — Zimmer-Liste-Block-Indikator (ABGESCHLOSSEN 2026-05-20)
+
+**Status:** ✅ Abgeschlossen 2026-05-20 (T1-T3, Branch `feat/sprint12ca-room-block-list-indicator`)
+**Tag nach Merge:** `v0.1.17d-room-block-list-indicator`
+**Autonomiestufe:** 3 (Frontend-only-Trivial-Sprint, kein Backend-Touch, kein Logik-Pfad)
+**Voraussetzung:** Sprint 12c gemerged + Tag `v0.1.17c` gesetzt + Live-Verify erfolgreich
+
+## Ergebnis
+
+Schloss-Symbol-Spalte in `frontend/src/app/zimmer/page.tsx` (RoomTable) zwischen Status-Pill und Detail-Link. Symbol `lock` mit `aria-label="Übersteuerung gesperrt"` + gleichlautendem `title` wenn `r.guest_override_blocked === true`. Wording-Trennung zu `RoomStatus.BLOCKED` bleibt scharf (eigene Spalte, kein Merge in `STATUS_COLOR`-Map). Backend liefert das Feld bereits seit Sprint 12c (PR #166), keine API-Aenderung.
+
+**Diff-Stats:** Frontend +1 E2E-Spec (`sprint12ca-room-block-list-indicator.spec.ts` mit 2 Cases), 1 Source-File geaendert (`app/zimmer/page.tsx`), 1 Doku-Block (STATUS §2ar + §1 + §9, SPRINT-PLAN). Playwright 53 passed (51 Bestand + 2 neu).
+
+**Querverweise:** Sprint 12c (PR #166, AE-58, Tag `v0.1.17c`), STATUS §2ar, §5.20 (Wording-Trennung), §5.54 (RegExp-Routes).
+
+## Out of Scope (Backlog)
+
+- Tooltip-Komponente in `components/ui/` extrahieren (kein Bedarf ausserhalb dieser einen Zelle)
+- Status-Pill-Komponente extrahieren (Sprint-8-Inline-Pattern, kein 12c.a-Anlass)
+- Filter „Nur gesperrte zeigen"
+- Lock-Symbol im Zimmer-Detail-Header (Doppelung mit 12c-Toggle-Button)
 
 ---
 

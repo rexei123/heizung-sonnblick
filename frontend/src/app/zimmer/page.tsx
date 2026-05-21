@@ -187,6 +187,9 @@ function RoomTable({ list, loading, error }: TableProps) {
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Etage</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Orient.</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Status</th>
+            {/* Sprint 12c.a: Block-Indikator-Spalte. Header leer, Symbol traegt
+                Bedeutung via aria-label + title in der Body-Zelle. */}
+            <th aria-hidden className="px-3 py-2"></th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary"></th>
           </tr>
         </thead>
@@ -208,6 +211,18 @@ function RoomTable({ list, loading, error }: TableProps) {
               <td className="px-3 py-2 text-text-secondary">{r.orientation ?? "—"}</td>
               <td className="px-3 py-2">
                 <span className={STATUS_COLOR[r.status]}>{STATUS_LABEL[r.status]}</span>
+              </td>
+              <td className="px-3 py-2">
+                {r.guest_override_blocked ? (
+                  <span
+                    className="material-symbols-outlined text-text-secondary"
+                    aria-label="Übersteuerung gesperrt"
+                    title="Übersteuerung gesperrt"
+                    style={{ fontSize: 18 }}
+                  >
+                    lock
+                  </span>
+                ) : null}
               </td>
               <td className="px-3 py-2 text-right">
                 <Link
