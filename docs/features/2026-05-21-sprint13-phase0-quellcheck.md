@@ -669,3 +669,35 @@ Phase 4b (September Pre-Pairing) ist 13a + 13b zusammen mit Pairing-Wizard-UI (S
 ## Stop-Point (Brief-konform)
 
 Phase-0-Bericht abgelegt unter `docs/features/2026-05-21-sprint13-phase0-quellcheck.md`. Branch `chore/sprint13-phase0` mit WIP-Commit, **kein PR**. Strategie-Chat reviewt diesen Bericht und gibt Hygiene-Mini-Sprint-Brief + Sprint-13a-Brief frei.
+
+---
+
+## Anhang — `is_active`-Befund (Hygiene-Mini-Sprint 2026-05-21, Strategie-Chat-Pflicht-Check)
+
+Der Hygiene-Mini-Sprint-Brief verlangte vor AE-57-Commit einen erneuten Grep zur Verifikation, dass die `is_active`-Spalte ausschliesslich auf `device` für AE-57 relevant ist und die übrigen Treffer **out of scope** bleiben.
+
+### Grep-Ergebnis `is_active` in `backend/src/heizung/models/`
+
+| Tabelle | Datei : Zeile | AE-57-Scope |
+|---|---|---|
+| `device` | `models/device.py:83` | **IN-SCOPE** (Sprint 13b Migration 0018 dropt, ersetzt durch `retired_at`) |
+| `user` | `models/user.py:42` | out-of-scope (Auth, Sprint 9.17) |
+| `season` | `models/season.py:44` | out-of-scope (Saison-Aktivierung, Sprint 8) |
+| `manual_setpoint_event` | `models/manual_setpoint_event.py:73` | out-of-scope für AE-57 — **gesondert** als ganze Tabelle in Hygiene-Sprint T3 (B-12a-1, Migration 0019) gedropped |
+| `occupancy` | `models/occupancy.py:59` | out-of-scope (Belegung, Sprint 8) |
+| `scenario_assignment` | `models/scenario_assignment.py:72` | out-of-scope (Szenarien, Sprint 9.16) |
+
+### Grep-Ergebnis `Device.is_active` als Code-Filter (`backend/src/heizung/`)
+
+| Stelle | Zweck |
+|---|---|
+| `tasks/engine_tasks.py:352` (`_get_devices_for_zone`) | S4-Filter im Downlink-Dispatch |
+| `api/v1/devices.py:137` | optionaler UI-Filter-Query-Param |
+
+Nur Lese-Pfade. Kein aktiver Schreibpfad (kein Endpoint, kein Service setzt `device.is_active=False`). Default ist seit Migration 0001 `true`, alle Bestands-Rows haben `true`.
+
+### Bestätigung
+
+- AE-57 ändert ausschliesslich Semantik für `device`. Andere `is_active`-Vorkommen sind eigene Tabellen mit eigenen Domänen (User-Aktivierung, Saison-Aktivität, Belegungs-Aktivität, Szenario-Aktivierung) und bleiben unangetastet.
+- Sprint 13b Migration 0018 ist gebündelt: `ADD COLUMN retired_at, retired_reason, replaced_by_device_id` (nullable) **plus** `DROP COLUMN device.is_active` **plus** Umstellung der zwei oben gelisteten Read-Stellen auf `retired_at IS NULL`.
+- Bis 13b-Merge bleibt `device.is_active` der aktive S4-Filter (Brief-Übergangs-Klausel im AE-57-Block).
