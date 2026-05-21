@@ -1677,8 +1677,33 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
    - `retired_reason VARCHAR(64) NULL`
    - `replaced_by_device_id INTEGER NULL` (self-referenzielle FK auf
      `device.id` mit `ON DELETE SET NULL`)
-   Plus Partial-Index `WHERE retired_at IS NULL` für Engine-Queries auf
-   aktive Devices.
+
+   Plus Partial-Unique-Index auf `dev_eui` `WHERE retired_at IS NULL`.
+   Grund: nach Retire bleibt die DevEUI im retired Device-Row erhalten
+   (Hardware-Drift-Forensik bleibt möglich, Audit-Trail intakt). Ein
+   Re-Pair derselben Hardware nach Werksreset würde an einer
+   Voll-Unique-Constraint auf `device.dev_eui` kollidieren. Der
+   Partial-Unique-Index erlaubt mehrere retired Rows mit derselben
+   DevEUI, garantiert aber Eindeutigkeit unter den aktiven Rows.
+
+   Implementierungs-Skizze für Sprint 13b Migration 0018:
+
+   ```python
+   op.create_index(
+       "ix_device_dev_eui_active",
+       "device",
+       ["dev_eui"],
+       unique=True,
+       postgresql_where=sa.text("retired_at IS NULL"),
+   )
+   ```
+
+   Voraussetzung: bestehende Voll-Unique-Constraint
+   `uq_device_dev_eui` auf `device.dev_eui` (Migration 0001,
+   `backend/alembic/versions/0001_initial_domain_model.py:162`) wird
+   in derselben Migration durch den Partial-Unique ersetzt — vor
+   `create_index()` per `op.drop_constraint("uq_device_dev_eui",
+   "device", type_="unique")`.
 
 2. **Ziel-Zustand:** „Aktiv" ist definiert als `retired_at IS NULL`.
    Single Source of Truth.
@@ -1761,6 +1786,14 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
   pro importierter Zeile, plus `PAIRING_BATCH_IMPORTED` für den
   Batch-Lauf als ganzen (siehe Phase-0 §K).
 
+- **DevEUI-Wiederverwendung nach Werksreset ist erlaubt:** Der
+  Partial-Unique-Index aus Entscheidung (1) erlaubt mehrere retired
+  Rows mit derselben `dev_eui` — der ursprüngliche Row bleibt für
+  Hardware-Forensik erhalten, ein neuer aktiver Row mit identischer
+  DevEUI ist möglich (z.B. nach Vicki-Werksreset + Re-Pairing).
+  Eindeutigkeit ist nur unter aktiven Rows (`retired_at IS NULL`)
+  garantiert.
+
 ## Verworfen
 
 - **DevEUI-in-place-Ersetzung** (alten Vicki-Row updaten statt neuen
@@ -1777,11 +1810,11 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
   Schnittlinie. `is_active` + `retired_at` gehören thematisch in
   dasselbe Bundle (13b).
 
-- **Re-Use von retired DevEUIs:** retired Devices bleiben mit ihrer
-  alten `dev_eui` in der Tabelle. Neue Vickis bekommen eigene
-  `dev_eui` (Hardware-eindeutig). Unique-Constraint auf `dev_eui`
-  bleibt unangetastet — kein Re-Pairing-Pattern, das alte DevEUIs
-  recycled.
+- **Partial-Performance-Index auf `heating_zone_id WHERE retired_at IS
+  NULL`:** Mikro-Optimierung ohne realen Nutzen bei ~100 Devices (S6 —
+  Komplexität trägt Beweislast). Engine-Queries laufen über
+  Foreign-Key-Index, der bereits existiert. Aktive-Filter-Selektivität
+  ist bei wenigen retireten Rows nicht relevant.
 
 ## Querverweise
 
