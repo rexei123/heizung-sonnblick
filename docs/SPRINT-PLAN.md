@@ -1053,28 +1053,115 @@ Schloss-Symbol-Spalte in `frontend/src/app/zimmer/page.tsx` (RoomTable) zwischen
 
 ---
 
-# SPRINT 13 — Pairing-Wizard + Mass-Pairing-CSV + Vicki-Eingangstest (Phase 1)
+# SPRINT 13 — Pre-Pairing-Skript + Device-Tausch-Endpoint (Phase 1, Sprint-13-light-Cut 2026-05-21)
 
-**Priorität:** 🟠 (Vorbedingung Phase 4b Pre-Pairing)
-**Geschätzte Dauer:** 2-3 Wochen
+**Priorität:** 🟠 (Vorbedingung Phase 4b Pre-Pairing September)
+**Geschätzte Dauer:** 13a ~4-6 h + 13b ~5-8 h (zusammen ~1-2 Wochen)
 **Autonomiestufe:** 2
-**Voraussetzung:** Sprint 12 abgeschlossen
-**Tag nach Abschluss:** `v0.1.18-pairing-wizard`
+**Voraussetzung:** Sprint 12c.a abgeschlossen + Hygiene-Mini-Sprint
+abgeschlossen (Commits `9e17455`..`9a949f8` auf `chore/sprint13-hygiene`,
+PR-Merge steht noch aus). AE-57 verfuegbar.
+**Tag nach Abschluss:** `v0.1.18-pairing-wizard` (Sprint 13a + 13b vereint)
 
-## Ziel
+## Sprint-13-Cut (verbindlich ab 2026-05-21)
 
-Pairing-Wizard dreistufig (Zimmer → Zone → Label) mit
-vorgeschalteter ChirpStack-Pairing-Stufe und Vicki-Eingangstest
-am Wizard-Ende. Mass-Pairing-CSV-Import oder Batch-Wizard für
-~100 Vickis (Vorbereitung Phase 4b im September).
+Strategie-Chat-Entscheidung aus Phase-0-Bericht
+`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`: **keine**
+dreistufige Wizard-UI im September-Workflow. Hotelier paired ~100 Vickis
+einmalig am Office-Laptop ueber ein Python-CLI-Skript. ChirpStack-
+Provisioning bleibt manuell via ChirpStack-UI-Bulk-Import (vorab durch
+den Hotelier). heizung-DB-Eintraege kommen via CSV-Import-Subcommand
+des Pre-Pairing-Skripts.
 
-## Tasks (Skizze)
+Alte Skizze (dreistufiger Pairing-Wizard, ChirpStack-gRPC-Bootstrap)
+verworfen 2026-05-21. Begruendung: einmaliger Mass-Pairing-Vorgang
+rechtfertigt keine Wizard-UI; CLI-Skript ist robuster + reproduzierbar
++ versionierbar (script lebt im Repo, Vendor-CSV im Office-Laptop-
+Filesystem).
 
-- Wizard-Stufe ChirpStack-Pairing: Device-Profile + Codec via gRPC-Bootstrap
-- Wizard-Stufe Zimmer → Zone → Label (bestehende Logik erweitert)
-- Wizard-Stufe Vicki-Eingangstest: Setpoint hoch → Ventil hörbar auf, runter → hörbar zu
-- Mass-Pairing-CSV-Import (B-11prep-2) für 100-Vicki-Batch
-- Tests: CSV-Format-Validierung, Eingangstest-Verifikation, Wizard-Flow E2E
+## Sprint 13a — Pre-Pairing-Skript (Phase 4b-Vorbereitung)
+
+**Geschätzte Dauer:** ~4-6 h
+**Tag nach 13a:** `v0.1.18a-pre-pairing-script`
+
+### Ziel
+
+Python-CLI-Skript `backend/scripts/pair_devices.py` mit Subcommands
+`import-csv`, `test-device`, `retire-device`. Aufruf via
+`docker exec deploy-api-1 python scripts/pair_devices.py …` auf
+heizung-test/heizung-main. Pattern analog
+`scripts/activate_open_window_detection.py` (Phase-0 §G).
+
+### Tasks (Skizze)
+
+- T1: CSV-Format dokumentieren + RUNBOOK §10h.2 fuellen (heute TBD-Stub).
+- T2: `backend/scripts/pair_devices.py` Skelett mit argparse-Subcommands.
+- T3: Pydantic-Row-Modell `PairingCsvRow` + Parser-Helper
+  in `backend/src/heizung/services/pairing_csv.py` (Phase-0 §F).
+- T4: Service-Helper `pair_device_from_row` (idempotent, BusinessAudit
+  `DEVICE_PAIRED`) + `retire_device` (BusinessAudit `DEVICE_RETIRED`).
+- T5: Eingangstest-Logik:
+  `set_open_window_detection(enabled=True, 10, Decimal("1.5"))` →
+  `send_setpoint(25)` → sleep 60 s → `send_setpoint(10)` → sleep 60 s.
+  Audit `DEVICE_PAIRED.new_value.eingangstest_ok=True`.
+- T6: Tests: `tests/test_pairing_csv.py` (Hex-Pattern, Duplikate,
+  ungueltige Zone), `tests/test_pair_devices_script.py` (Smoke gegen
+  Test-DB).
+- T7: Doku — STATUS §2at, SPRINT-PLAN-Update, RUNBOOK §10h.2,
+  ggf. CLAUDE.md-Lesson.
+
+### Out of Scope 13a
+
+- Migration 0018 (kommt in 13b)
+- Frontend-Dialog (kommt in 13b)
+- Engine-Read-Stellen-Umbau (kommt in 13b)
+
+## Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018
+
+**Geschätzte Dauer:** ~3-5 h Backend + 2-3 h Frontend
+**Tag nach 13b:** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag)
+
+### Ziel
+
+Implementation der AE-57-Architektur: Device-Lifecycle-Felder
+(`retired_at`, `retired_reason`, `replaced_by_device_id`),
+`is_active`-Drop, zentraler Helper `get_active_devices_for_zone()`,
+Umstellung der 5 Pflicht-Filter-Stellen aus Phase-0 §L, neuer Endpoint
+`POST /api/v1/devices/{id}/retire`, Frontend-Dialog „Vicki ersetzen".
+
+### Tasks (Skizze)
+
+- T1: Migration 0018 (`ADD COLUMN retired_at`, `retired_reason`,
+  `replaced_by_device_id`, Partial-Unique-Index `dev_eui WHERE
+  retired_at IS NULL`, `DROP COLUMN is_active`,
+  `drop_constraint("uq_device_dev_eui")`). Roundtrip-Test in
+  `tests/test_migrations_roundtrip.py`.
+- T2: Helper `get_active_devices_for_zone(session, zone_id)` in
+  `services/device_repository.py` neu. Filtert auf
+  `retired_at IS NULL`.
+- T3: Umstellung der 5 Read-Stellen aus Phase-0 §L
+  (`tasks/engine_tasks._get_devices_for_zone`,
+  `rules/engine.layer_device_detached`,
+  `rules/window_state.detect_open_window_zones`,
+  `services/device_adapter._device_room_id` + `_device_zone_id`).
+  Pflicht-Test pro Stelle: retired Row nicht im Result.
+- T4: Endpoint `POST /api/v1/devices/{id}/retire`
+  (`require_admin`, atomare Transaktion, BusinessAudit `DEVICE_RETIRED`
+  und/oder `DEVICE_REPLACED`).
+- T5: `api/v1/devices.py` List-View: Query-Param `include_retired=False`
+  (Default), `is_active`-Param entfernt.
+- T6: Frontend-Dialog im Geräte-Detail: „Vicki ersetzen" → DevEUI-
+  Eingabe + Begründung → `POST /retire`-Aufruf.
+- T7: Playwright-E2E: Tausch-Flow (Retire → neuer Vicki anlegen →
+  Zone-Re-Assign → Engine-Tick verifiziert).
+- T8: Doku — STATUS §2au, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
+  („is_active-Uebergang abgeschlossen"), Tag.
+
+### Out of Scope 13b
+
+- gRPC-ChirpStack-Bootstrap (verworfen 2026-05-21)
+- Pairing-Wizard-UI (verworfen 2026-05-21)
+- Pilot-Zimmer-Auswahl (Backlog B-11prep-4)
 
 ---
 
