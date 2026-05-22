@@ -20,6 +20,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from freezegun import freeze_time
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.models.device import Device
@@ -323,10 +324,17 @@ async def test_layer4_null_open_window_is_treated_as_closed(
 # ---------------------------------------------------------------------------
 
 
+@freeze_time("2026-05-22T12:00:00Z")
 async def test_layer4_closed_occupied_passthrough(
     db_session: AsyncSession, setup_room: dict[str, int]
 ) -> None:
     """T3 (b): Fenster zu + OCCUPIED -> Pass-Through, kein Eingriff.
+
+    Zeit auf 12:00 UTC fixiert (B-FlakyTime-1): default night_setback-Fenster
+    aus seed.py:113-114 ist [00:00, 06:00] UTC; ohne Mock failt der Layer-4-
+    Pass-Through-Assert (setpoint_c == 21) zwischen 00:00-06:00 UTC, weil
+    Layer 2 vorher auf night_setback=19 senkt und Layer 4 das durchreicht.
+
 
     Layer 4 reicht prev_setpoint (= OCCUPIED-Base 21 degC default) und
     prev_reason unveraendert durch. setpoint_source ist NICHT gesetzt

@@ -27,7 +27,6 @@ def test_all_models_importable() -> None:
         "Scenario",
         "ScenarioAssignment",
         "GlobalConfig",
-        "ManualSetpointEvent",
         "EventLog",
     }
     exported = set(models.__all__)
@@ -54,7 +53,6 @@ def test_metadata_contains_all_tables() -> None:
         "scenario",
         "scenario_assignment",
         "global_config",
-        "manual_setpoint_event",
         "event_log",
     }
     actual_tables = set(Base.metadata.tables.keys())
@@ -73,7 +71,6 @@ def test_room_has_expected_relationships() -> None:
         "occupancies",
         "rule_configs",
         "scenario_assignments",
-        "manual_setpoint_events",
     }:
         assert expected in rel_names, f"Room fehlt Beziehung: {expected}"
 
@@ -139,19 +136,6 @@ def test_scenario_assignment_scope_consistency_check() -> None:
         c.name for c in ScenarioAssignment.__table__.constraints if isinstance(c, CheckConstraint)
     }
     assert "ck_scenario_assignment_scope_consistency" in check_names
-
-
-def test_manual_setpoint_event_temp_range() -> None:
-    """ManualSetpointEvent erlaubt nur 5.0 - 30.0 °C in der DB (Defense-in-Depth)."""
-    from sqlalchemy import CheckConstraint
-
-    from heizung.models import ManualSetpointEvent
-
-    check_names = {
-        c.name for c in ManualSetpointEvent.__table__.constraints if isinstance(c, CheckConstraint)
-    }
-    assert "ck_manual_setpoint_event_temp_range" in check_names
-    assert "ck_manual_setpoint_event_time_ordered" in check_names
 
 
 def test_season_dates_ordered_check() -> None:

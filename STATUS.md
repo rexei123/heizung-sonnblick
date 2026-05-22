@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-20. Sprints 0-12 + 12a + 12b + 12c abgeschlossen, alle Tags gesetzt, Live-Verify auf heizung-test erfolgreich (zuletzt v0.1.17c am 2026-05-20). Folge-Sprint 12c.a (Zimmer-Liste-Indikator) Phase-0 abgeschlossen.
+**Stand:** 2026-05-22. Sprints 0-12 + 12a + 12b + 12c + 12c.a abgeschlossen, alle Tags gesetzt, Live-Verify auf heizung-test erfolgreich (zuletzt v0.1.17d am 2026-05-21). Hygiene-Mini-Sprint vor Sprint 13 am 2026-05-22 abgeschlossen (kein Tag, siehe §2as).
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-20
-**Letzter Tag (gemerged):** `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21).
-**Aktueller Sprint:** Sprint 12c.a (Zimmer-Liste-Block-Indikator, Frontend-only) abgeschlossen 2026-05-20, Tag `v0.1.17c-room-override-blocked`-Familie erweitert um `v0.1.17d-room-block-list-indicator` (PR #168, Squash-Commit `81ed3dc`), Live-Verify auf heizung-test erfolgreich 2026-05-21. Live-Sicht-Befund Header-Drift: Doku-Nachzug + UI-Header-Hotfix auf Branch `docs/sprint12ca-live-verify-and-header-fix` (Spalten-Header „Übersteuerung" ergaenzt, STATUS §2ar Live-Verify-Block nachgetragen).
+**Stichtag:** 2026-05-22
+**Letzter Tag (gemerged):** `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21). Kein neuer Tag im Hygiene-Mini-Sprint.
+**Aktueller Sprint:** Hygiene-Mini-Sprint vor Sprint 13 abgeschlossen 2026-05-22, kein Tag, 7 Commits auf `chore/sprint13-hygiene` (PR-Erstellung steht noch aus). Naechster Sprint: Sprint 13a Pre-Pairing-Skript (Brief folgt nach PR-Merge der Hygiene-Commits). Vorgaenger: Sprint 12c.a (Zimmer-Liste-Block-Indikator, Frontend-only) abgeschlossen 2026-05-20, Tag `v0.1.17c-room-override-blocked`-Familie erweitert um `v0.1.17d-room-block-list-indicator` (PR #168, Squash-Commit `81ed3dc`), Live-Verify auf heizung-test erfolgreich 2026-05-21.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -1905,10 +1905,10 @@ Tag `v0.1.17b-override-zone-scope-frontend` annotated auf `3587b47` gesetzt und 
 
 **Out of Scope (Backlog):**
 
-- B-12c-AuditGap: `auto_revoke_on_checkout` schreibt weiterhin kein Audit (Sprint-12c-Scope-Verzicht laut Brief).
+- B-12c-AuditGap: `auto_revoke_on_checkout` schreibt weiterhin kein Audit (Sprint-12c-Scope-Verzicht laut Brief). ✅ erledigt 2026-05-22 im Hygiene-Sprint T2 (Commit `3934d33`).
 - B-12c-1: Vicki-Hardware-Child-Lock via Downlink `0x07` (separater Sprint).
 - Zimmer-Liste-Indikator (Schloss-Symbol in Tabelle).
-- AE-57-Luecken-Klaerung (Doku-Hygiene-Backlog).
+- AE-57-Luecken-Klaerung (Doku-Hygiene-Backlog). ✅ vergeben 2026-05-21 im Hygiene-Sprint T1 (Commits `9e17455` + `4ace2a9`).
 
 ### Live-Verify auf heizung-test (2026-05-20 18:10 CEST)
 
@@ -1967,6 +1967,36 @@ Cowork-Sicht-Verify (Hotelier-gefuehrt):
 **Befund Header-Drift:** Erste Live-Sicht zeigte fehlenden Spalten-Header (Brief-Entscheidung „Header leer, Tooltip traegt Semantik"). Realer Nutzer-Befund: ohne Header ist die Spalte semantisch blind, weil Tooltip nur beim Hover greift. Hotfix in selbem Doku-Nachzug-PR (T1): Header-Text „Übersteuerung" ergaenzt, `aria-hidden` entfernt. UI-Strings mit Umlaut (Endkunden-sichtbar, NICHT CLAUDE-ae/ue/oe-Regel).
 
 **Querverweise:** Sprint 12c (PR #166, AE-58, Tag `v0.1.17c`), §5.20 (Doku-Drift/Wording-Trennung), §5.54 (RegExp-Routes), §5.55 (CI-Verify Real-Run).
+
+---
+
+## 2as. Hygiene-Mini-Sprint vor Sprint 13 (2026-05-21/22, abgeschlossen)
+
+**Ziel:** Drei Backlog-Altlasten + Test-Infrastruktur-Flake schliessen, bevor Sprint 13a-Brief geschrieben wird. Stufe 3 + ein Stufe-2-Block (freezegun-Patch). Kein Tag.
+
+**Branch:** `chore/sprint13-hygiene`, 7 Commits auf develop @ `bb267ec`.
+
+**Tasks erledigt:**
+
+- **T1 (~45 min, 2 Commits `9e17455` + `4ace2a9`):** AE-57 vergeben — „Device-Lifecycle: Retire + Pair-New, Zone als stabiler Historie-Anker". Schliesst die ADR-Nummer-Luecke zwischen AE-56 und AE-58. Entscheidung (1) mit Partial-Unique-Index `WHERE retired_at IS NULL` (DevEUI-Wiederverwendung nach Werksreset erlaubt, Performance-Index-Variante verworfen mit S6-Begruendung). Entscheidung (2) mit `is_active`-Uebergangs-Klausel bis Sprint-13b-Merge. AE-43 + AE-58 Querverweise nachgezogen.
+- **T2 (~45 min, Commit `3934d33`):** B-12c-AuditGap geschlossen. `auto_revoke_on_checkout` in `services/override_pms_hook.py` schreibt jetzt `OVERRIDES_AUTO_REVOKED_ON_CHECKOUT`-BusinessAudit in derselben Transaktion wie der Revoke. Idempotenz-Pfad unveraendert. Neue Konstante `REVOKE_REASON_CHECKOUT="auto_revoke_on_checkout"` als Single-Source-of-Truth fuer `revoked_reason` und `new_value.reason`. 3 neue Tests, 3 bestehende Assertions aktualisiert.
+- **T3 (~1 h, 2 Commits `2663a7e` + `e970edb`):** B-12a-1 manual_setpoint_event-Cleanup. AE-29 abgeloest durch AE-58 (Sprint 12a), tote Tabelle + Modell + Schema + Relationships + `ManualOverrideScope`-Enum entfernt. Migration 0019 mit 1:1-Roundtrip-Reproduktion aus 0003a, lokal gegen heizung-test-db verifiziert (upgrade → downgrade → upgrade). AE-29-Status-Header mit Commit-Hash-Backfill in eigenem Doku-Commit.
+- **T3.5 (~30 min, Commit `d2d5311`):** B-FlakyTime-1 — freezegun-Decorator auf 2 Layer-1-Pipeline-Tests (`test_engine_zone_override_wirkt_nur_auf_zone`, `test_layer4_closed_occupied_passthrough`). Beide asserten Layer-1-Output ohne Layer-2-Setback-Maskierung und failten zwischen 00:00-06:00 UTC reproduzierbar. `freezegun>=1.5` als Dev-Dep. Kein prophylaktischer Patch auf andere 32 `evaluate_room`-Tests (YAGNI). Aufgedeckt waehrend T3-pytest-Lauf um 05:01 UTC.
+- **T4 (~15 min, Commit `9a949f8`):** CLAUDE.md §5.58 Lesson „Device-Queries brauchen Lifecycle-Filter" als Pflicht-Pattern fuer Sprint 13b. Uebergangs-Klausel + Zielzustand + Anti-Pattern + Pflicht-Stellen-Liste aus Phase-0 §L.
+
+**Backend-Tests:** 428 passed, 1 xfailed (Baseline 426 +3 −1 fuer geloeschten `manual_setpoint_event`-Test).
+
+**Diff-Summe:** 14 files geaendert, +~280 / −240, 1 neue Migration, 2 geloeschte Files, 1 neue Dev-Dependency.
+
+**Out of Scope (Sprint 13b):** Migration 0018 (Device-Lifecycle-Felder + `is_active`-Drop), Helper `get_active_devices_for_zone()`, Umstellung der 5 Pflicht-Filter-Stellen.
+
+**Neue Backlog-Punkte (in §6.2 unten erfasst):**
+
+- **B-HygieneFollowup-1:** `override_service` vs. `override_pms_hook` Modul-Grenzen-Audit nach Sprint 13b. 🟢
+- **B-HygieneFollowup-2:** Default-Reason-Param in `revoke_all_active_overrides` pruefen ob noch Aufrufer existieren nach Sprint 13b. 🟢
+- **B-FlakyTime-1:** abgeschlossen in diesem Sprint, hier nur als Verweis. ✅
+
+**Querverweise:** AE-29 (historisch), AE-57 (neu vergeben), AE-58, Phase-0-Bericht `docs/features/2026-05-21-sprint13-phase0-quellcheck.md`, CLAUDE.md §5.58.
 
 ---
 
@@ -2172,13 +2202,18 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-11prep-3 🟢 (nach Heizperiode) | **Alarm-Schwellen-Härtung gegen 100-Vicki-Skalierung.** AE-53-3-Stufen-Alarm (Mail-Stub via `logger.warning`) ist heute auf 4 Vickis ausgelegt; bei 100 Vickis ist Alarm-Müdigkeit realistisch. Nach erster Heizperiode 2026/27 empirisch nachjustieren. |
 | B-11prep-4 🟠 (Mitte August) | **Pilot-Zimmer-Auswahl finalisieren.** 5 Zimmer maximaler Vielfalt: Standard + Suite + Mehrfach-Vicki + Funk-Rand + häufiger Gästewechsel. Vorbereitung Phase 6 Pilot-Go-Live Oktober Woche 1. Gemeinsam Strategie-Chat + Hotelier. |
 | B-11prep-5 🟠 (nach Pre-Pairing September) | **LoRaWAN-Funklast-Monitoring UG65** in ersten Wochen nach Mass-Pairing. Bei ~100 Vickis ist Funk-Auslastung des einzigen Gateways relevant. Backlog für eigenes Monitoring-Item; vor Heizperiode-Start empirisch verifizieren. |
-| B-12a-1 🟡 | **AE-29 manual_setpoint_event-Cleanup.** DROP TABLE + Modell `models/manual_setpoint_event.py` + Schema `schemas/manual_setpoint_event.py` + Relationships in `room.py` + `room_type.py` + Re-Export `models/__init__.py` atomar entfernen. Eigener Mini-Sprint nach 12a-Merge, ~2 h, Autonomiestufe 2. Voraussetzung: 12a gemerged. Anlass: AE-58 hat AE-29 abgeloest, T1-Phase-0 zeigte 0 API-/Engine-Konsumenten aber aktive ORM-Relationships → konnte nicht in T1-Migration mitgedroppt werden. |
+| B-12a-1 | **AE-29 manual_setpoint_event-Cleanup.** DROP TABLE + Modell `models/manual_setpoint_event.py` + Schema `schemas/manual_setpoint_event.py` + Relationships in `room.py` + `room_type.py` + Re-Export `models/__init__.py` atomar entfernen. | ✅ erledigt 2026-05-22 (Hygiene-Sprint T3, Commit `2663a7e`). Migration 0019 mit 1:1-Roundtrip-Reproduktion aus 0003a, plus `ManualOverrideScope`-Enum mit-gedroppt (0 Konsumenten). AE-29-Status-Header in Commit `e970edb` mit Hash-Backfill. |
 | B-12a-2 🟢 | **`_create_device`-Helper-Default `health_state="healthy"`.** Test-Konvenienz: bei Sprint-12a T4 musste in `test_drehring_window_open_silent_skip` `device.health_state` manuell auf `healthy` gesetzt werden, weil DB-Default `silent` ist und `detect_open_window_zones` healthy-Filter hat. ~10 Min, Autonomiestufe 3. |
 | B-12a-3 🟢 | **Layer 4 zone-differenzierende Window-Wirkung.** Heute setzt Window-Open alle Zonen des Raums auf Frostschutz/`free_target` und verwirft `zone_overrides` komplett (AE-58 Punkt 5). Empirische Bewertung nach Heizperiode 2026/27: soll Zone-Open nur die spezifische Zone in Sicherheits-Setpoint setzen statt ganzen Raum? Architektur-Frage, kein konkreter Sprint vor Heizperiode-Auswertung. |
 | B-12a-4 🟡 | **Engine soll `derive_room_status` nutzen statt `room.status`-Field.** Aktuell zwei Quellen-of-Truth fuer „Ist Raum belegt?": `override_service.create` (T2) nutzt `derive_room_status` aus aktiven Occupancies, `rules/engine.py` Layer 1 liest `ctx.room.status` direkt. Sprint-12a T5 hat Drift in Tests sichtbar gemacht (Helper `_force_room_status_occupied` noetig). Single Source of Truth via `derive_room_status` auch im Engine-Pfad. ~3-4 h, Autonomiestufe 2. Eigener Sprint nach 12a-Merge. |
 | B-12a-5 🟢 | **`_get_zones_for_room`-Helper konsolidieren nach `rules/zone_helpers.py`.** Aktuell Duplikat in `rules/engine.py` (`_get_zones_for_room_local`) + `tasks/engine_tasks.py` (`_get_zones_for_room`). Abhaengigkeits-Richtung (tasks → rules, nicht umgekehrt) verhindert direkten Import. Helper-Modul `rules/zone_helpers.py` als gemeinsame Quelle. ~30 Min, Autonomiestufe 3. |
 | B-12a-6 🟢 | **Dispatch-Test mit `zone_overrides` ergaenzen.** `test_engine_multivicki_write.py` um Zone-Override-Pfad-Assertion erweitern: bei `RuleResult.zone_overrides={zone1: 24}` muss `_dispatch_downlinks_per_zone` Vicki in Zone1 mit Setpoint 24 ansteuern, Vicki in Zone2 mit Room-Default. Aktuell nur indirekt via 4 End-to-End-Tests in `test_engine_layer3.py` abgesichert. ~30 Min, Autonomiestufe 3. |
 | B-12a-7 🟢 | **`get_active_zones_bulk`-Optimierung.** N+1-Lookup-Vermeidung im Engine-Zone-Eval-Loop in `evaluate_room`: heute pro Zone ein `get_active`-Roundtrip. Bei typischem 1-2 Zonen/Raum vernachlaessigbar; bei ~100 Vickis × 60s-Beat ist Engine-Last weiterhin Sekunden-Bereich. YAGNI bis Performance-Profil das verlangt. Notiz fuer spaeter. |
+| B-12c-AuditGap | **`auto_revoke_on_checkout`-Audit-Luecke.** Sprint 12c hatte die Audit-Schreibung bewusst aus dem Scope genommen. | ✅ erledigt 2026-05-22 (Hygiene-Sprint T2, Commit `3934d33`). `OVERRIDES_AUTO_REVOKED_ON_CHECKOUT`-BusinessAudit in derselben Transaktion wie der Revoke, Idempotenz-Pfad unveraendert, `REVOKE_REASON_CHECKOUT`-Konstante als Single-Source-of-Truth fuer Filter-Rekonstruktion. |
+| AE-57-Luecke | **AE-57-Slot in ADR-Log nie vergeben** (Doku-Hygiene-Backlog aus Sprint 12c). | ✅ vergeben 2026-05-21 (Hygiene-Sprint T1, Commits `9e17455` + `4ace2a9`). „Device-Lifecycle: Retire + Pair-New, Zone als stabiler Historie-Anker". Schliesst die Luecke zwischen AE-56 und AE-58. Inhaltliche Basis fuer Sprint 13b. |
+| B-FlakyTime-1 | **Time-of-day-Flaky in 2 Layer-1-Pipeline-Tests** zwischen 00:00-06:00 UTC (`test_engine_zone_override_wirkt_nur_auf_zone`, `test_layer4_closed_occupied_passthrough`). Aufgedeckt im Hygiene-Sprint T3-pytest-Lauf um 05:01 UTC. | ✅ erledigt 2026-05-22 (Hygiene-Sprint T3.5, Commit `d2d5311`). `@freeze_time("2026-05-22T12:00:00Z")` auf beiden Tests, `freezegun>=1.5` als Dev-Dep. Kein prophylaktischer Patch auf andere 32 `evaluate_room`-Tests (YAGNI). |
+| B-HygieneFollowup-1 🟢 | **`override_service` vs. `override_pms_hook` Modul-Grenzen-Audit nach Sprint 13b.** Phase-0-Befund: `auto_revoke_on_checkout` lebt in `override_pms_hook.py`, nicht in `override_service.py` (Brief T2 hat die Datei-Annahme nicht getroffen). Datei-Aufteilung pruefen ob klar oder Refactor sinnvoll. ~30 min, Stufe 3. |
+| B-HygieneFollowup-2 🟢 | **Default-Reason-Param `'auto: guest checked out'` in `revoke_all_active_overrides`.** Nach Sprint 13b pruefen, ob noch Aufrufer existieren die den Default brauchen, oder ob der Param entfernt werden kann. Heute zwei explizite Aufrufer (Hygiene-T2 + Sprint 12c PATCH), plus Default-Nutzung in `test_override_service.py:332`. ~15 min, Stufe 3. |
 | B-11prep-6 🟢 (nach Heizperiode) | **Drift-Erkennung statistisch** als KI-Vorbereitung. Aufbau eines Modells für Abweichungen einzelner Vickis von Zone-Geschwistern über Tage/Wochen. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7.3 + §13 (bewusst nicht in MVP). |
 | B-11prep-7 🟢 (nach Heizperiode) | **Backend-Plausi für Fenster (BR-16).** Heute reine Vicki-Flag-Logik (`vicki.openWindow`-Uplink, AE-47). Backend-Eigenlogik (Temperatursturz-Heuristik o.ä.) als Ergänzung evaluieren, sobald Heizperiode-Daten zeigen, ob Vicki-Flag allein reicht. STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5.1. |
 | B-11prep-8 🟢 (in Sprint 14b) | **arc42-Konsolidierung der Architektur-Doku.** Migration als Sprint 14b geplant (zwischen Sprint 14 UI-Erweiterungen und Sprint 15 heizung-main-Migration). Bestehende Inhalte (STRATEGIE.md, ARCHITEKTUR-REFRESH-2026-05-07, STRATEGIE-REFRESH-2026-05-15, ARCHITEKTUR-ENTSCHEIDUNGEN.md, CLAUDE.md §5 Lessons) werden auf arc42-12-Kapitel-Skelett gemappt, nicht neu geschrieben. Source-of-Truth-Hierarchie in CLAUDE.md §0.2 wird dann strukturell und kann entfallen. MkDocs/Renderer-Entscheidung bewusst aufgeschoben (reines Markdown reicht für Solo-Betrieb, Renderer erst bei externer Übergabe geprüft). Diskussions-Grundlage: Strategie-Chat 2026-05-15. |

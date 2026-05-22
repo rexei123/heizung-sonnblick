@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from alembic.config import Config
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from alembic import command
+from heizung.models.business_audit import BusinessAudit
 from heizung.models.device import Device
 from heizung.models.enums import (
     DeviceKind,
@@ -140,7 +142,7 @@ async def test_occupied_to_vacant_no_followup_revokes(session: AsyncSession) -> 
     assert revoked == 1
     await session.refresh(override)
     assert override.revoked_at is not None
-    assert override.revoked_reason == "auto: guest checked out"
+    assert override.revoked_reason == "auto_revoke_on_checkout"
 
 
 async def test_occupied_to_vacant_with_followup_in_2h_does_not_revoke(
@@ -266,9 +268,9 @@ async def test_checkout_revoked_alle_override_quellen(session: AsyncSession) -> 
     await session.refresh(device_override)
     await session.refresh(frontend_override)
     assert device_override.revoked_at is not None
-    assert device_override.revoked_reason == "auto: guest checked out"
+    assert device_override.revoked_reason == "auto_revoke_on_checkout"
     assert frontend_override.revoked_at is not None
-    assert frontend_override.revoked_reason == "auto: guest checked out"
+    assert frontend_override.revoked_reason == "auto_revoke_on_checkout"
 
 
 async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSession) -> None:
@@ -311,3 +313,124 @@ async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSess
     assert revoked == 0
     await session.refresh(frontend_override)
     assert frontend_override.revoked_at is None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 13 Hygiene (B-12c-AuditGap) — BusinessAudit-Schreibung
+# ---------------------------------------------------------------------------
+
+
+async def _count_audits(session: AsyncSession, room_id: int, action: str) -> list[BusinessAudit]:
+    """Liefert alle BusinessAudit-Rows fuer (action, target_type='room', target_id=room_id)."""
+    stmt = (
+        select(BusinessAudit)
+        .where(BusinessAudit.action == action)
+        .where(BusinessAudit.target_type == "room")
+        .where(BusinessAudit.target_id == room_id)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def test_audit_geschrieben_bei_effektiver_revokation(session: AsyncSession) -> None:
+    """B-12c-AuditGap: pro effektiver Revokation ein BusinessAudit-Eintrag
+    OVERRIDES_AUTO_REVOKED_ON_CHECKOUT mit korrektem revoked_overrides_count.
+    """
+    now = datetime.now(tz=UTC)
+    room_id, _ = await _seed_room_with_device(session)
+    expires = now + timedelta(days=2)
+    session.add_all(
+        [
+            ManualOverride(
+                room_id=room_id,
+                setpoint=Decimal("23.0"),
+                source=OverrideSource.DEVICE,
+                expires_at=expires,
+            ),
+            ManualOverride(
+                room_id=room_id,
+                setpoint=Decimal("21.0"),
+                source=OverrideSource.FRONTEND_4H,
+                expires_at=expires,
+            ),
+        ]
+    )
+    await session.flush()
+
+    revoked = await auto_revoke_on_checkout(
+        session,
+        room_id,
+        previous_status=RoomStatus.OCCUPIED,
+        new_status=RoomStatus.VACANT,
+        now=now,
+    )
+    assert revoked == 2
+
+    audits = await _count_audits(session, room_id, "OVERRIDES_AUTO_REVOKED_ON_CHECKOUT")
+    assert len(audits) == 1
+    audit = audits[0]
+    assert audit.user_id is None  # System-Trigger, Praezedenzfall
+    assert audit.old_value is None
+    assert audit.new_value == {
+        "room_id": room_id,
+        "revoked_overrides_count": 2,
+        "reason": "auto_revoke_on_checkout",
+    }
+
+
+async def test_idempotenz_kein_audit_ohne_active_overrides(session: AsyncSession) -> None:
+    """B-12c-AuditGap Idempotenz: kein aktiver Override -> kein Revoke,
+    kein Audit. Analog zum 12c-Pattern fuer ROOM_OVERRIDE_BLOCK_TOGGLED.
+    """
+    now = datetime.now(tz=UTC)
+    room_id, _ = await _seed_room_with_device(session)
+    # KEIN Override anlegen.
+
+    revoked = await auto_revoke_on_checkout(
+        session,
+        room_id,
+        previous_status=RoomStatus.OCCUPIED,
+        new_status=RoomStatus.VACANT,
+        now=now,
+    )
+    assert revoked == 0
+
+    audits = await _count_audits(session, room_id, "OVERRIDES_AUTO_REVOKED_ON_CHECKOUT")
+    assert audits == []
+
+
+async def test_revoked_reason_filter_rekonstruktion(session: AsyncSession) -> None:
+    """B-12c-AuditGap: Override-IDs stehen NICHT im Audit. Rekonstruktion
+    erfolgt via Filter ``manual_override.revoked_reason='auto_revoke_on_checkout'``.
+
+    Verifiziert dass der String identisch zwischen ``manual_override``-Row
+    und ``business_audit.new_value.reason`` ist (Pflicht-Voraussetzung
+    fuer die Audit-Rekonstruktion).
+    """
+    now = datetime.now(tz=UTC)
+    room_id, _ = await _seed_room_with_device(session)
+    expires = now + timedelta(days=2)
+    override = ManualOverride(
+        room_id=room_id,
+        setpoint=Decimal("22.5"),
+        source=OverrideSource.FRONTEND_MIDNIGHT,
+        expires_at=expires,
+    )
+    session.add(override)
+    await session.flush()
+
+    revoked = await auto_revoke_on_checkout(
+        session,
+        room_id,
+        previous_status=RoomStatus.OCCUPIED,
+        new_status=RoomStatus.VACANT,
+        now=now,
+    )
+    assert revoked == 1
+    await session.refresh(override)
+
+    audits = await _count_audits(session, room_id, "OVERRIDES_AUTO_REVOKED_ON_CHECKOUT")
+    assert len(audits) == 1
+    # Filter-Pfad: revoked_reason in manual_override == new_value.reason im Audit.
+    assert override.revoked_reason == "auto_revoke_on_checkout"
+    assert audits[0].new_value["reason"] == "auto_revoke_on_checkout"

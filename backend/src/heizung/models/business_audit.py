@@ -41,7 +41,9 @@ class BusinessAudit(Base):
     # Aktion als Token. Eingefuehrte Werte:
     #   OCCUPANCY_CREATE, OCCUPANCY_CANCEL,
     #   MANUAL_OVERRIDE_SET, MANUAL_OVERRIDE_CLEAR,
-    #   PASSWORD_CHANGE, PASSWORD_RESET_BY_ADMIN
+    #   PASSWORD_CHANGE, PASSWORD_RESET_BY_ADMIN,
+    #   ROOM_OVERRIDE_BLOCK_TOGGLED (Sprint 12c, AE-58),
+    #   OVERRIDES_AUTO_REVOKED_ON_CHECKOUT (Sprint 13 Hygiene, B-12c-AuditGap)
     action: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # Domaenen-Objekt: target_type='room' / 'user' / 'occupancy' ...

@@ -1421,6 +1421,60 @@ Endkunden-UI), `aria-hidden` entfernt. PR #169, Commit 3a9218d.
 versteckte Semantik = UX-Drift), Sprint-12c.a-Brief-Pattern fuer
 Vor-Entscheidungen die im Live-Verify kippen koennen.
 
+### 5.58 Device-Queries brauchen Lifecycle-Filter (AE-57, Sprint 13-Hygiene-prep)
+
+AE-57 fuehrt in Sprint 13b das Feld `device.retired_at` ein. Damit
+verschiebt sich die Definition von „aktiver Vicki" von `device.is_active`
+(historisch) auf `retired_at IS NULL` (ab 13b-Merge). Bis dahin gilt
+`is_active` als Uebergangs-Filter (siehe AE-57 Entscheidung 2).
+
+**Regel:** Jede Query, die `device`-Rows liest und an Engine,
+Downlink-Dispatch oder Health-Aggregation weitergibt, MUSS aktive
+Devices filtern. Aktuelle Quelle: `Device.is_active.is_(True)`. Nach
+Sprint-13b-Merge: `Device.retired_at.is_(None)` ueber zentralen Helper
+`get_active_devices_for_zone()`.
+
+**Begruendung (S4 Hardware-Schutz):** Ein nicht-gefilterter Read
+nach Retire+Pair-New trifft beide Rows (alter + neuer Vicki desselben
+Heizkoerpers). Engine wuerde dann zwei widerspruechliche Downlinks an
+zwei ChirpStack-DevEUIs senden — alter Vicki ist physisch entfernt,
+neuer Vicki bekommt korrekt Setpoint, aber `control_command`-Tabelle
+zeigt einen fehlgeschlagenen Downlink, der einen Alarm triggert.
+
+**Anti-Pattern:**
+```python
+# FALSCH (greift auf retired Devices zu)
+devices = await db.execute(
+    select(Device).where(Device.heating_zone_id == zone_id)
+)
+```
+
+**Richtig:**
+```python
+# UEBERGANG (bis Sprint 13b-Merge)
+devices = await db.execute(
+    select(Device).where(
+        Device.heating_zone_id == zone_id,
+        Device.is_active.is_(True),
+    )
+)
+
+# NACH Sprint 13b (zentraler Helper)
+devices = await get_active_devices_for_zone(db, zone_id)
+```
+
+**Pflicht-Stellen in Sprint 13b:** Migration 0018 + Umstellung der
+5 Read-Stellen aus Phase-0-Bericht §L
+(`tasks/engine_tasks._get_devices_for_zone`,
+`rules/engine.layer_device_detached`,
+`rules/window_state.detect_open_window_zones`,
+`api/v1/devices`-Listen-Endpoint, plus `_device_room_id`/
+`_device_zone_id`-Helper). Pflicht-Test pro Stelle: nach Retire-
+Simulation darf der retired Row im Query-Result NICHT vorkommen.
+
+**Querverweise:** AE-57 (Master-ADR Device-Lifecycle), AE-58
+(Override-Modell, zone-aware Layer 3), §5.45 (Audit-Action-Konventionen).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

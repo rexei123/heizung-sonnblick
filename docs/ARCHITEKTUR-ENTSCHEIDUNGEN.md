@@ -346,7 +346,7 @@ Die Engine liest beim Evaluieren beide Tabellen und mapped Szenarien auf Regel-L
 
 ## AE-29 · `manual_setpoint_event` als zeitlich begrenzter Override
 
-**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). `manual_setpoint_event`-Anwendungsfaelle (Wartung/Renovierung) laufen ueber fiktive Belegung (RUNBOOK §10d.7). Code-Cleanup folgt in B-12a-1 (DROP TABLE + Modell + Schema + Relationships + Re-Export atomar). Inhaltliche Substanz unten bleibt historisch.
+**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). Tabelle + Modell + Schema + Relationships + `ManualOverrideScope`-Enum geloescht in Sprint 13-Hygiene (Migration 0019, Commit `2663a7e`). `manual_setpoint_event`-Anwendungsfaelle (Wartung/Renovierung) laufen ueber fiktive Belegung (RUNBOOK §10d.7). Inhalt bleibt referenzierbar als historische Begruendung.
 
 **Kontext.** Hotelier braucht "Temperatur jetzt setzen" als One-Off-Aktion (Wartung Fenster, Spezialgast, Aufheizen vor Ankunft). Soll ueber alle Regeln gewinnen ausser Frostschutz, aber zeitlich begrenzt.
 
@@ -684,6 +684,9 @@ in der Sidebar geführt mit folgenden Bausteinen:
 
 **Status:** akzeptiert
 **Verstärkt:** STRATEGIE.md §8.3 Geräte-Sektion
+**Erweitert durch:** AE-57 (Sprint 13-prep, 2026-05-21) — Tausch-Workflow
+formalisiert als Retire + Pair-New mit `device.retired_at` als
+Lifecycle-Marker statt impliziter Detach-Logik.
 
 ---
 
@@ -1644,6 +1647,188 @@ Late-Import-Trick, kein zirkulaerer Import.
 
 ---
 
+# AE-57 — Device-Lifecycle: Retire + Pair-New, Zone als stabiler Historie-Anker (Sprint 13-prep)
+
+**Datum:** 2026-05-21
+**Status:** Akzeptiert
+**Bezug:** AE-43 (Geräte-Lifecycle, Pairing-Wizard), AE-51 (Zone-
+Aggregat-Modell), AE-58 (Override-Modell konsolidiert), Sprint 13
+Phase-0-Bericht (`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`)
+
+## Kontext
+
+Vicki-Tausch (Defekt, Batterie-Ende, Hardware-Drift) ist im
+Hotelbetrieb normaler Wartungs-Vorgang — über Heizperiode 2026/27
+werden vereinzelte Geräte ersetzt werden müssen. Analytik fragt nach
+**Zone-Historie** („Wie warm war Zone X im Februar 2027?"), nicht nach
+Device-Historie. Das Datenmodell muss Hardware-Tausch unterstützen,
+ohne dass der `sensor_reading`-Verlauf verschmiert wird.
+
+Heute fehlen drei Bausteine: (a) Schema-Marker, der retired Devices
+sauber von aktiven trennt, (b) Cross-Reference Alt → Neu beim Tausch,
+(c) verbindlicher Lifecycle-Filter in den Engine-Queries (Phase-0 §L
+listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
+
+## Entscheidung
+
+1. **Schema-Erweiterung** in Sprint 13b Migration 0018: `device` bekommt
+   drei nullable Felder:
+   - `retired_at TIMESTAMP WITH TIME ZONE NULL`
+   - `retired_reason VARCHAR(64) NULL`
+   - `replaced_by_device_id INTEGER NULL` (self-referenzielle FK auf
+     `device.id` mit `ON DELETE SET NULL`)
+
+   Plus Partial-Unique-Index auf `dev_eui` `WHERE retired_at IS NULL`.
+   Grund: nach Retire bleibt die DevEUI im retired Device-Row erhalten
+   (Hardware-Drift-Forensik bleibt möglich, Audit-Trail intakt). Ein
+   Re-Pair derselben Hardware nach Werksreset würde an einer
+   Voll-Unique-Constraint auf `device.dev_eui` kollidieren. Der
+   Partial-Unique-Index erlaubt mehrere retired Rows mit derselben
+   DevEUI, garantiert aber Eindeutigkeit unter den aktiven Rows.
+
+   Implementierungs-Skizze für Sprint 13b Migration 0018:
+
+   ```python
+   op.create_index(
+       "ix_device_dev_eui_active",
+       "device",
+       ["dev_eui"],
+       unique=True,
+       postgresql_where=sa.text("retired_at IS NULL"),
+   )
+   ```
+
+   Voraussetzung: bestehende Voll-Unique-Constraint
+   `uq_device_dev_eui` auf `device.dev_eui` (Migration 0001,
+   `backend/alembic/versions/0001_initial_domain_model.py:162`) wird
+   in derselben Migration durch den Partial-Unique ersetzt — vor
+   `create_index()` per `op.drop_constraint("uq_device_dev_eui",
+   "device", type_="unique")`.
+
+2. **Ziel-Zustand:** „Aktiv" ist definiert als `retired_at IS NULL`.
+   Single Source of Truth.
+
+   **Übergangs-Klausel:** Die heute existierende Spalte
+   `device.is_active` (Boolean NOT NULL DEFAULT true, eingeführt in
+   Migration 0001) hat **keinen aktiven Schreibpfad** — sie wird nur
+   gelesen (`engine_tasks._get_devices_for_zone` als S4-Filter im
+   Downlink-Dispatch + `api/v1/devices.py`-Listen-Endpoint als
+   UI-Filter-Param). Strukturell gibt es heute also nur eine Quelle.
+
+   Sprint 13b dropt `is_active` zusammen mit der Einführung von
+   `retired_at` in Migration 0018. Beide Read-Stellen werden im selben
+   Sprint auf `retired_at IS NULL` umgestellt. Bis zum 13b-Merge bleibt
+   `is_active` der genutzte Filter, danach `retired_at IS NULL`.
+
+3. **Reading-Anker bleibt am Device:** `sensor_reading.device_id` zeigt
+   unverändert auf den jeweils liefernden Device-Row. Alte Readings
+   bleiben am retired Device-Row, neue Readings am neuen Row. Kein
+   Rewrite, kein Re-Pointing, keine Daten-Migration beim Tausch.
+
+4. **Analytik joint über `device.heating_zone_id`, nicht über
+   `device.id`.** Zone ist Domain-Anker, Device ist Hardware-Lebenszeit.
+   Trend-Analytics auf Zonen-Ebene (Soll/Ist über Zeit, Heating-Profile)
+   bleiben über Vicki-Wechsel hinweg intakt.
+
+5. **Engine + Services MÜSSEN beim Device-Lesen `retired_at IS NULL`
+   filtern.** Zentraler Repository-Helper
+   `get_active_devices_for_zone()` (Implementierung in Sprint 13b) ist
+   das Pflicht-Pattern. Verstreute `device`-Queries mit unsicherem
+   Filter sind S4-Verstoss-Kandidaten (Risiko doppelter Downlinks
+   während Tausch-Race).
+
+6. **BusinessAudit-Actions** (alle ≤ 64 chars, Konvention OBJEKT_VERB
+   nach §5.45):
+   - `DEVICE_PAIRED` — initiales Pairing, kein Vorgänger.
+     `new_value` enthält `dev_eui`, `label`, `zone_id`, Quelle
+     (`csv_import` / `manual`).
+   - `DEVICE_REPLACED` — Tausch. **Eine** Audit-Row pro Tausch (nicht
+     zwei): schreibt in einer Transaktion sowohl `retired_at` +
+     `retired_reason` + `replaced_by_device_id` auf dem alten Device
+     als auch den neuen Device-Row + Zone-Assignment. `target_type=
+     "device"`, `target_id=<alter device_id>`, `new_value` enthält
+     `replaced_by_device_id`, `retired_at`, `reason`,
+     `prev_heating_zone_id`.
+   - `DEVICE_RETIRED` — Stilllegung ohne Ersatz (selten, z.B. Zone
+     wird ausser Betrieb genommen). Schreibt `retired_at` +
+     `retired_reason` auf dem alten Device ohne neuen Vicki.
+
+## Konsequenzen
+
+- **Sprint 13b Migration 0018 ist gebündelt:**
+  - `ADD COLUMN retired_at`, `retired_reason`,
+    `replaced_by_device_id` (alle nullable, kein Backfill).
+  - `DROP COLUMN is_active`.
+  - Umstellen der zwei `is_active`-Read-Stellen
+    (`engine_tasks.py:352` und `api/v1/devices.py:137`) auf
+    `retired_at IS NULL`.
+  - Pflicht-Test: alle bestehenden Device-Rows überleben Migration
+    (`retired_at` bleibt NULL = aktiv, bisheriges Verhalten).
+
+- **Engine-Queries-Audit Sprint 13b:** 5 Pflicht-Filter-Stellen aus
+  Phase-0-Bericht §L müssen mit `retired_at IS NULL` versehen werden:
+  `tasks/engine_tasks.py:_get_devices_for_zone` (S4-kritisch),
+  `rules/engine.py:layer_device_detached` (2 JOINs),
+  `rules/window_state.py:detect_open_window_zones`,
+  `services/device_adapter.py:_device_room_id` + `_device_zone_id`.
+
+- **Helper-Pflicht:** `get_active_devices_for_zone(session, zone_id)`
+  als zentrales Lese-Pattern. Implementierung Sprint 13b. Neue
+  Device-Queries müssen diesen Helper nutzen oder explizit
+  `retired_at IS NULL` filtern (CLAUDE.md §5.58).
+
+- **Detach-Endpoint bleibt erhalten:** `DELETE
+  /api/v1/devices/{id}/heating-zone` (Sprint 9.13) ist semantisch
+  „temporäre Abnahme" (Wartung, Umzug). Retire-Endpoint (Sprint 13b)
+  ist semantisch „permanenter Tausch". Beide Pfade getrennt.
+
+- **CSV-Mass-Pairing-Skript (Sprint 13a)** schreibt `DEVICE_PAIRED`
+  pro importierter Zeile, plus `PAIRING_BATCH_IMPORTED` für den
+  Batch-Lauf als ganzen (siehe Phase-0 §K).
+
+- **DevEUI-Wiederverwendung nach Werksreset ist erlaubt:** Der
+  Partial-Unique-Index aus Entscheidung (1) erlaubt mehrere retired
+  Rows mit derselben `dev_eui` — der ursprüngliche Row bleibt für
+  Hardware-Forensik erhalten, ein neuer aktiver Row mit identischer
+  DevEUI ist möglich (z.B. nach Vicki-Werksreset + Re-Pairing).
+  Eindeutigkeit ist nur unter aktiven Rows (`retired_at IS NULL`)
+  garantiert.
+
+## Verworfen
+
+- **DevEUI-in-place-Ersetzung** (alten Vicki-Row updaten statt neuen
+  anlegen): zerstört Historie, Audit-Trail wird unscharf,
+  Hardware-Drift-Forensik unmöglich. Sensor-Reading-Verlauf würde
+  mehrere physische Geräte vermischen.
+
+- **`is_active`-Boolean parallel zu `retired_at` permanent behalten:**
+  S2-Verstoss (zwei Truth-Sources für denselben Zustand). Sobald
+  irgendein Schreibpfad eine Spalte ändert ohne die andere, drift.
+
+- **`is_active` im Hygiene-Sprint droppen** (statt in 13b): zieht
+  Migration + Engine-Read-Stellen-Umbau in Stufe-3-Sprint, falsche
+  Schnittlinie. `is_active` + `retired_at` gehören thematisch in
+  dasselbe Bundle (13b).
+
+- **Partial-Performance-Index auf `heating_zone_id WHERE retired_at IS
+  NULL`:** Mikro-Optimierung ohne realen Nutzen bei ~100 Devices (S6 —
+  Komplexität trägt Beweislast). Engine-Queries laufen über
+  Foreign-Key-Index, der bereits existiert. Aktive-Filter-Selektivität
+  ist bei wenigen retireten Rows nicht relevant.
+
+## Querverweise
+
+- Phase-0-Bericht `docs/features/2026-05-21-sprint13-phase0-quellcheck.md`
+  (§A Schema-Empfehlung, §K BusinessAudit-Action-Pattern, §L Engine-
+  Query-Audit, Anhang `is_active`-Befund).
+- AE-43 (Geräte-Lifecycle UI, Pairing-Wizard-Sprint-Skizze).
+- AE-58 (Override-Modell — Zone-Scope-Pattern als Vorbild für
+  Lifecycle-Filterung).
+- CLAUDE.md §5.45 (Audit-Action-Length-Limits), §5.58 (Lifecycle-
+  Filter-Pflicht, Sprint 13-prep Hygiene-Sprint).
+
+---
+
 # AE-58 — Override-Modell konsolidiert (Sprint 12a)
 
 **Datum:** 2026-05-20
@@ -1792,4 +1977,6 @@ Schalter pro Zimmer, der unabhaengig vom OCCUPIED-Gate funktioniert.
 **Querverweise:** STATUS §2aq (Sprint-12c-Doku), §5.49 (Test-
 Fixture-Anpassung Raw-SQL-INSERTs gegen NOT-NULL ohne DB-Default),
 §5.51 (Domain-Invariante Block-Gate vor OCCUPIED-Gate), §5.52
-(Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog).
+(Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog), AE-57
+(Device-Lifecycle Retire+Pair-New — Override-Pfad ist zone-scoped,
+Device-Pfad wird in Sprint 13b lifecycle-aware).
