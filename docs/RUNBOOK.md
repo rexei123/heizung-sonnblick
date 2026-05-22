@@ -1314,11 +1314,150 @@ Pro Vicki vor der Montage auf dem Tisch im Hotel-Office:
 Bestandene Geräte werden als „eingangsgetestet" markiert und
 wandern in den Montage-Pool für Sprint 17 / Phase 6.
 
-### 10h.2 Mass-Pairing-CSV-Format (TBD, Sprint 13)
+### 10h.2 Pre-Pairing-Skript-Anwendung (Sprint 13a)
 
-CSV-Format für Batch-Import von ~100 Vickis. Spezifikation
-folgt aus Sprint 13 (Pairing-Wizard + B-11prep-2). Bis dahin:
-einzeln pairen via Wizard.
+Skript: `python -m heizung.scripts.pair_devices`.
+
+Aufrufkontext: Hotelier oder Mitarbeiter sitzt am Office-Laptop, hat
+SSH-Zugang auf den Server. Skript laeuft im Backend-Container via
+`docker exec`. CSV liegt auf dem Server unter `/tmp/`.
+
+**Voraussetzungen vor Pairing-Lauf:**
+
+1. ChirpStack-Bulk-Import von Tenants + Application + DeviceProfile +
+   alle DevEUIs ist bereits einmal vor September im ChirpStack-Web-UI
+   gemacht (Hotelier-Hand, nicht Skript-Aufgabe).
+2. CSV ist vorbereitet aus der Master-Vorlage
+   `docs/inventar/Zimmer_Geraete_Liste.xlsx`. Spalten:
+
+   stockwerk; zimmer_nummer; zimmer_typ; zone_label; dev_eui; app_key
+
+   - Encoding utf-8 oder utf-8-mit-BOM (Excel-Default Windows).
+   - Trennzeichen Semikolon oder Komma (auto-erkannt).
+   - dev_eui: 16-Hex-Zeichen vom Vicki-Aufkleber.
+   - app_key: 32-Hex-Zeichen vom Vicki-Aufkleber. WICHTIG: app_key
+     wird NICHT in heizung-DB persistiert — er gehoert zur
+     ChirpStack-Registrierung. Spalte ist Cross-Reference-Notiz fuer
+     den Hotelier.
+   - Reserve-Geraete: Spalten `stockwerk`, `zimmer_nummer`,
+     `zimmer_typ`, `zone_label` leer lassen. Skript erkennt das als
+     Pool-Device, legt `heating_zone_id = NULL` an.
+
+3. Zimmer + Heating-Zones sind in heizung-DB vorhanden. Falls nicht
+   (heizung-main beim Live-Lauf im September), vorher Zimmer-Seed-
+   Sprint ausfuehren.
+
+**Workflow Schritt fuer Schritt:**
+
+A. CSV auf den Server kopieren (PowerShell auf Laptop):
+
+   ```powershell
+   scp pairings.csv server:/tmp/
+   ```
+
+B. Pre-Flight-Validierung (kein Side-Effekt):
+
+   ```bash
+   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+       validate /tmp/pairings.csv"
+   ```
+
+   Erwartung: `[OK] N CSV-Rows validiert. Bereit fuer import.`
+   Bei Fehlern: jede Zeile bekommt eine eigene Fehlerzeile, Skript
+   exit-codet 1. Hotelier korrigiert CSV, lokal speichern, scp neu,
+   nochmal validate.
+
+C. Smoke-Test gegen heizung-test (NUR vor Live-Lauf September,
+   Sprint 13a-Verifikation):
+
+   ```bash
+   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+       import /tmp/pairings.csv --dry-run"
+   ```
+
+   ACHTUNG: `--dry-run` rollt die DB-Aenderungen zurueck, sendet
+   aber trotzdem MQTT-Downlinks an die in der CSV gelisteten Vickis.
+   Auf heizung-test mit 4 Test-Vickis akzeptabel — heizung-main
+   wuerde echte Hardware konfigurieren.
+
+D. Live-Lauf:
+
+   ```bash
+   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+       import /tmp/pairings.csv --user-email hotelier@hotel-sonnblick.at"
+   ```
+
+   Pro Row: `[OK] Zeile N: DevEUI ... -> paired (device_id=X)` oder
+   `[SKIP] Zeile N: DEV_EUI_EXISTS` oder `[FAIL] Zeile N: <Fehler>`.
+   Am Ende: Summary mit Counts.
+
+E. Pro Vicki am Tisch: 6-Schritt-Eingangstest (RUNBOOK §10h.1 plus
+   idempotenter Open-Window-Resend als Schritt 0):
+
+   ```bash
+   ssh server "docker exec -it deploy-api-1 python -m heizung.scripts.pair_devices \
+       test <device_id-oder-dev_eui>"
+   ```
+
+   Argument-Flexibilitaet: entweder `device.id` aus dem Import-Output
+   oder `dev_eui` vom Vicki-Aufkleber. Skript erkennt das automatisch.
+   `-it` ist wichtig fuer die Setpoint-Schritte (User-Prompt
+   "Ventil geoeffnet? [j/n]").
+
+   Erwartung pro Vicki: alle 6 Schritte `[OK]`,
+   `overall_status=passed`. Bei `[FAIL]`: Konsolen-Output nennt den
+   Defekt-Schritt, Mitarbeiter dokumentiert Hardware-Problem manuell,
+   Vicki wird physisch zurueck in den Karton.
+
+F. Nach Eingangstest pro Vicki: physische Markierung am Vicki-Gehaeuse
+   (Aufkleber mit Soll-Zimmer + Soll-Zone). Beispiel:
+   "207-Bad / device_id=47".
+
+**Reserve-Pool-Workflow:**
+
+Reserve-Vickis durchlaufen identisch B-D-E (Pre-Flight, Import als
+Pool, Eingangstest). In Schritt E ist KEIN Soll-Zimmer-Aufkleber noetig
+— Vicki kommt ins Lager mit Markierung "Reserve / device_id=X". Bei
+spaeterem Bedarf wird Reserve via Sprint-13b-Tausch-Dialog einem Zimmer
+zugewiesen.
+
+Pool-Status abfragen jederzeit:
+
+```bash
+ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices list-pool"
+```
+
+Ausgabe: Tabelle aller Pool-Devices mit `device_id`, `dev_eui`,
+`model`, `created_at`, `label`.
+
+**Stoerungsfaelle:**
+
+- `DEV_EUI_EXISTS`: DevEUI ist schon in heizung-DB. Doppelt importiert,
+  oder Vicki von vorigem Hotel-Lauf uebrig. Pruefen via list-pool oder
+  DB-Query.
+- Eingangstest `heartbeat`-failed: Vicki sendet keinen Uplink. Pruefen
+  ob Batterie eingelegt, ob ChirpStack-Application aktiv ist, ob die
+  Funkstrecke im Office-Raum funktioniert.
+- Eingangstest `temp_plausi`-failed: Temperatur ausserhalb 15-30 °C.
+  Vicki im Tiefkuehl oder am Heizkoerper — warten bis Raumtemperatur.
+- Eingangstest `backplate`-failed: Vicki erkennt nicht, dass er auf
+  einer Backplate sitzt. Hardware-Defekt oder Backplate falsch
+  zugeschoben.
+- Eingangstest `setpoint_25`/`setpoint_10` mit Status `user_aborted`:
+  Mitarbeiter hat Ventil-Bewegung nicht gehoert. Hardware-Defekt —
+  Vicki tauschen.
+- Eingangstest `resend_open_window`-failed (non-blocking): MQTT zu
+  ChirpStack hatte Hiccups beim OW-Resend. Test laeuft trotzdem
+  weiter — Vicki bleibt OW-aktiv aus dem urspruenglichen
+  Import-Downlink. Bei wiederholtem Resend-Fail: ChirpStack-Container-
+  Health pruefen.
+
+**Verwandt:**
+
+- §10h.1 (Eingangstest-Spec)
+- AE-57 (Device-Lifecycle, Pool-Status abgeleitet)
+- AE-48 (Downlink-Adapter, MQTT-Pfad)
+- AE-32 (Vicki-1.0-°C-Setpoint-Quantisierung)
 
 ### 10h.3 Zimmer-Zuordnungs-Workflow ohne Montage (TBD, Sprint 17)
 
