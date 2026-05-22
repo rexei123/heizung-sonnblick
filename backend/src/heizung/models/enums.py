@@ -153,18 +153,6 @@ class ScenarioScope(enum.StrEnum):
     ROOM = "room"
 
 
-class ManualOverrideScope(enum.StrEnum):
-    """Gueltigkeitsbereich einer manuellen Setpoint-Aktion.
-
-    Bewusst keine GLOBAL-Stufe: ein "Temperatur jetzt fuer alle"-Befehl
-    ist gefaehrlich (kein Frostschutz auf Hotel-Ebene). Wenn jemand alles
-    setzen will, macht er es per Raumtyp-Bulk-Aktion.
-    """
-
-    ROOM_TYPE = "room_type"
-    ROOM = "room"
-
-
 class OverrideSource(enum.StrEnum):
     """Quelle einer Manual-Override-Aktion (Sprint 9.9 Engine Layer 3).
 

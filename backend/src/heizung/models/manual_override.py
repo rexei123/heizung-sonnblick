@@ -6,12 +6,10 @@ Vier Quellen (siehe :class:`heizung.models.enums.OverrideSource`):
 nicht-revokierten Eintrag mit ``expires_at > now``; Layer 5 (Hard-Clamp)
 greift danach.
 
-Abgrenzung zu :class:`heizung.models.manual_setpoint_event.ManualSetpointEvent`:
-``ManualSetpointEvent`` (Sprint 8) ist die Hotelleitungs-Aktion "fuer X Tage
-auf Raumtyp/Raum manuell setzen". ``ManualOverride`` (Sprint 9.9) ist die
-operative Override-Erkennung pro Raum mit auto-revoke beim PMS-Status-Wechsel
-"belegt -> frei". Beide leben parallel und triggern jeweils eigene Engine-
-Layer; eine Konsolidierung ist Sprint-10+-Backlog.
+Sprint 12a (AE-58) hat das Override-Modell konsolidiert; Sprint 13-Hygiene
+hat die parallel-existierende ``manual_setpoint_event``-Tabelle (AE-29)
+geloescht. Override-basierte Wartungs-Szenarien laufen jetzt ueber
+fiktive Belegung (RUNBOOK §10d.7).
 """
 
 from __future__ import annotations

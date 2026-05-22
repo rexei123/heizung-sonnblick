@@ -16,7 +16,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from heizung.db import Base
 
 if TYPE_CHECKING:
-    from heizung.models.manual_setpoint_event import ManualSetpointEvent
     from heizung.models.room import Room
     from heizung.models.rule_config import RuleConfig
     from heizung.models.scenario_assignment import ScenarioAssignment
@@ -71,8 +70,5 @@ class RoomType(Base):
         back_populates="room_type", cascade="all, delete-orphan"
     )
     scenario_assignments: Mapped[list[ScenarioAssignment]] = relationship(
-        back_populates="room_type", cascade="all, delete-orphan"
-    )
-    manual_setpoint_events: Mapped[list[ManualSetpointEvent]] = relationship(
         back_populates="room_type", cascade="all, delete-orphan"
     )

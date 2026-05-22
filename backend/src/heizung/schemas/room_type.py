@@ -45,8 +45,7 @@ class RoomTypeCreate(BaseModel):
     )
     @classmethod
     def _v_temp_range(cls, v: Decimal | None) -> Decimal | None:
-        # Erlaubter Bereich plausibel fuer Hotel-Heizung. DB-Constraint
-        # auf manual_setpoint_event ist 5-30 °C; analog hier.
+        # Hotel-Heizungs-Plausi-Bereich 5-30 °C.
         if v is None:
             return v
         if v < Decimal("5.0") or v > Decimal("30.0"):
