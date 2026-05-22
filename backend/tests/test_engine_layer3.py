@@ -16,6 +16,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from freezegun import freeze_time
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.models.enums import EventLogLayer, OverrideSource
@@ -403,11 +404,18 @@ async def _force_room_status_occupied(db_session: AsyncSession, room_id: int) ->
     await db_session.flush()
 
 
+@freeze_time("2026-05-22T12:00:00Z")
 async def test_engine_zone_override_wirkt_nur_auf_zone(
     db_session: AsyncSession, room_id: int
 ) -> None:
     """T5: Zone1-Override 24. evaluate_room -> result.zone_overrides[zone1]=24,
-    Zone2 NICHT im Dict, result.setpoint_c = Layer-1/2-Default."""
+    Zone2 NICHT im Dict, result.setpoint_c = Layer-1/2-Default.
+
+    Zeit auf 12:00 UTC fixiert (B-FlakyTime-1): default night_setback-Fenster
+    aus seed.py:113-114 ist [00:00, 06:00] UTC; ohne Mock failt der Layer-1-
+    Assert (setpoint_c == 21) zwischen 00:00-06:00 UTC, weil Layer 2 auf
+    night_setback=19 senkt.
+    """
     await _force_room_status_occupied(db_session, room_id)
     zone1_id = await _add_zone(db_session, room_id=room_id, name="z1-engzone")
     zone2_id = await _add_zone(db_session, room_id=room_id, name="z2-engzone")
