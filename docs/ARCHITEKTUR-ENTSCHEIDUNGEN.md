@@ -346,7 +346,7 @@ Die Engine liest beim Evaluieren beide Tabellen und mapped Szenarien auf Regel-L
 
 ## AE-29 · `manual_setpoint_event` als zeitlich begrenzter Override
 
-**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). Tabelle + Modell + Schema + Relationships + `ManualOverrideScope`-Enum geloescht in Sprint 13-Hygiene (Migration 0019, Commit `<wird nach Commit eingetragen>`). `manual_setpoint_event`-Anwendungsfaelle (Wartung/Renovierung) laufen ueber fiktive Belegung (RUNBOOK §10d.7). Inhalt bleibt referenzierbar als historische Begruendung.
+**Status:** ABGELOEST durch AE-58 (Sprint 12a, 2026-05-20). Tabelle + Modell + Schema + Relationships + `ManualOverrideScope`-Enum geloescht in Sprint 13-Hygiene (Migration 0019, Commit `2663a7e`). `manual_setpoint_event`-Anwendungsfaelle (Wartung/Renovierung) laufen ueber fiktive Belegung (RUNBOOK §10d.7). Inhalt bleibt referenzierbar als historische Begruendung.
 
 **Kontext.** Hotelier braucht "Temperatur jetzt setzen" als One-Off-Aktion (Wartung Fenster, Spezialgast, Aufheizen vor Ankunft). Soll ueber alle Regeln gewinnen ausser Frostschutz, aber zeitlich begrenzt.
 
