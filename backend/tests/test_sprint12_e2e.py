@@ -255,8 +255,10 @@ async def _make_device(
     *,
     zone_id: int,
     health_state: str = "healthy",
-    is_active: bool = True,
 ) -> tuple[int, str]:
+    # Sprint 13b.1 (AE-57): is_active-Parameter entfernt — Devices sind
+    # immer aktiv beim Anlegen (retired_at=NULL). Tests, die retired-
+    # Verhalten brauchen, setzen device.retired_at explizit nach flush.
     dev_eui = f"deadbeef{uuid.uuid4().hex[:8]}"
     device = Device(
         dev_eui=dev_eui,
@@ -264,7 +266,6 @@ async def _make_device(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone_id,
-        is_active=is_active,
         health_state=health_state,
     )
     session.add(device)
@@ -663,7 +664,6 @@ async def _seed_room_zone_device_reading(
             vendor=DeviceVendor.MCLIMATE,
             model="vicki",
             heating_zone_id=zone.id,
-            is_active=True,
             health_state=device_health_state,
         )
         session.add(device)

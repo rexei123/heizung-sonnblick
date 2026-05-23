@@ -1564,6 +1564,104 @@ Daten sind nicht-persistent — Re-Start liefert frische DB.
 
 ---
 
+## 10j. Vicki-Tausch via API (Sprint 13b.1, AE-57)
+
+Operative Anleitung fuer den Hardware-Tausch eines defekten Vickis
+gegen einen Reserve-Pool-Vicki. Drei API-Endpoints unter
+`/api/v1/devices/...`, alle `require_admin` fuer Mutationen und
+`require_user` fuer den Pool-Read.
+
+**Voraussetzungen:**
+
+- Defekter Vicki ist im System bekannt (eingebucht, in Zone, evtl.
+  bereits silent/inactive). Wir nennen ihn ``OLD_ID``.
+- Reserve-Vicki ist im Pool (``heating_zone_id IS NULL``,
+  ``retired_at IS NULL``). Pre-Pairing im Hotel-Office wurde
+  durchlaufen (Sprint 13a §10h.2). Wir nennen ihn ``POOL_ID``.
+- Admin-Cookie im Browser oder als ``-b ...``-Header in curl.
+
+### 10j.1 Pool-Liste anzeigen
+
+```bash
+curl -s -b "${COOKIE}" https://heizung-test.hoteltec.at/api/v1/devices/pool
+```
+
+Liefert die aktiven Reserve-Vickis sortiert ``created_at DESC``
+(neueste zuerst). Wenn die Liste leer ist: Hotelier muss zuerst
+einen Pool-Vicki anlegen (§10h.2 Pre-Pairing).
+
+### 10j.2 Tausch alt -> Pool-Vicki
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -b "${COOKIE}" \
+  -d '{"new_pool_device_id": ${POOL_ID}}' \
+  https://heizung-test.hoteltec.at/api/v1/devices/${OLD_ID}/replace/from-pool
+```
+
+Atomarer Pool-Reassign-Tausch:
+
+- ``OLD`` bekommt ``retired_at=NOW``, ``retired_reason='replaced_by_pool'``,
+  ``replaced_by_device_id=POOL_ID``, ``heating_zone_id=NULL``.
+- ``POOL`` uebernimmt die Zone des alten Vickis.
+- ``DEVICE_REPLACED``-BusinessAudit-Row in derselben Transaktion
+  (target_id=OLD_ID).
+- Engine-Tick auf der Zone-Room triggert automatisch nach Commit
+  (Pattern HF-9.13a-2) — Layer 4 + Engine-Decision-Panel zeigen den
+  neuen Stand innerhalb 5-10 Sek.
+
+**Status-Codes:**
+
+- 200 — Tausch ok, Response-Body ist der retired ``OLD``-Device-Row.
+- 404 — ``OLD_ID`` oder ``POOL_ID`` existiert nicht.
+- 409 — ``OLD`` bereits retired, ``OLD`` ohne Zone (Pool-zu-Pool
+  Tausch nicht erlaubt), ``POOL`` nicht im Pool, Selbst-Tausch.
+- 401 — fehlende/falsche Auth.
+
+**Race-Schutz:** Bei zwei parallelen Tausch-Versuchen auf
+denselben ``POOL_ID`` (zwei Hotelier-Sessions gleichzeitig) gewinnt
+einer mit 200, der zweite bekommt 409 mit ``UPDATE-Rowcount=0``-
+Detail. Postgres-Default-Isolation READ COMMITTED reicht — der
+``UPDATE``-WHERE-Block ist die Wachposten-Stelle.
+
+### 10j.3 Stilllegung ohne Ersatz
+
+```bash
+curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -b "${COOKIE}" \
+  -d '{"reason": "battery_dead"}' \
+  https://heizung-test.hoteltec.at/api/v1/devices/${OLD_ID}/retire
+```
+
+Setzt ``retired_at`` + ``retired_reason``. ``heating_zone_id``
+BLEIBT (Historie-Anker fuer sensor_reading-FK, AE-57 Konsequenz).
+``DEVICE_RETIRED``-BusinessAudit + Engine-Tick analog.
+
+### 10j.4 Audit-Trail verifizieren
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "
+SELECT id, action, target_id, created_at,
+       (new_value->>'new_device_id')::int AS new_dev,
+       new_value->>'reason' AS reason
+FROM business_audit
+WHERE action IN ('DEVICE_REPLACED','DEVICE_RETIRED')
+ORDER BY created_at DESC
+LIMIT 10;
+"
+```
+
+### 10j.5 Frontend-Dialog
+
+Sprint 13b.2 baut auf den drei o.g. Endpoints einen Dialog auf
+``/zimmer/[id]`` (Phase-0-Update Audit 3 Empfehlung: Per-Device-Row
+"Tauschen"-Button neben "Trennen"). Bis dahin sind die Endpoints
+curl-only / Cowork-only.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

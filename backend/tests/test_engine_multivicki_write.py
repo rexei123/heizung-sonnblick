@@ -173,7 +173,6 @@ async def _make_zone_with_devices(
             model="vicki",
             label=f"{zone_name}-vicki-{idx}",
             heating_zone_id=zone.id,
-            is_active=True,
             health_state=health,
         )
         session.add(dev)

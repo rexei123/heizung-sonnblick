@@ -14,7 +14,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     String,
@@ -37,8 +36,12 @@ class Device(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    # LoRaWAN-Identifikation (8 Byte hex = 16 Zeichen).
-    dev_eui: Mapped[str] = mapped_column(String(16), unique=True, nullable=False)
+    # LoRaWAN-Identifikation (8 Byte hex = 16 Zeichen). Eindeutigkeit unter
+    # aktiven Rows (retired_at IS NULL) via Partial-Unique-Index
+    # ``ix_device_dev_eui_active_unique`` (Migration 0018, AE-57). Voll-
+    # Unique-Constraint aus Migration 0001 wurde abgeloest, damit DevEUI-
+    # Wiederverwendung nach Werksreset moeglich ist.
+    dev_eui: Mapped[str] = mapped_column(String(16), nullable=False)
     app_eui: Mapped[str | None] = mapped_column(String(16))
 
     kind: Mapped[DeviceKind] = mapped_column(
@@ -63,8 +66,7 @@ class Device(Base):
     )
     model: Mapped[str] = mapped_column(String(50), nullable=False)
 
-    # Zuordnung zur Zone. NULL, solange das Gerät physisch vorhanden aber
-    # noch keiner Zone zugeteilt ist (Provisioning).
+    # Zuordnung zur Zone. NULL = Pool (Reserve-Vicki) oder Provisioning.
     heating_zone_id: Mapped[int | None] = mapped_column(
         ForeignKey("heating_zone.id", ondelete="SET NULL")
     )
@@ -80,7 +82,16 @@ class Device(Base):
     # sonst entstuenden zwei Wahrheiten.
     health_state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="silent")
 
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Sprint 13b.1 (AE-57): Device-Lifecycle. ``retired_at IS NULL`` ist
+    # Single Source of Truth fuer "aktiv". Wird ausschliesslich von
+    # ``services.device_service.retire_device`` und ``replace_device``
+    # gesetzt — kein direkter Schreibpfad ueber Schema/API.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_reason: Mapped[str | None] = mapped_column(String(255))
+    replaced_by_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("device.id", ondelete="SET NULL")
+    )
+
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
@@ -94,3 +105,13 @@ class Device(Base):
     )
 
     heating_zone: Mapped[HeatingZone | None] = relationship(back_populates="devices")
+
+    # Selbst-referenzielle Cross-Reference Alt -> Neu beim Tausch
+    # (AE-57 Entscheidung 6). ``remote_side=[id]`` zeigt SQLAlchemy, dass
+    # ``id`` die "many"-Seite ist und ``replaced_by_device_id`` die FK.
+    # noqa A003: id shadowing is SQLAlchemy canonical pattern in class body.
+    replaced_by: Mapped[Device | None] = relationship(
+        "Device",
+        foreign_keys=[replaced_by_device_id],
+        remote_side=[id],  # noqa: A003
+    )

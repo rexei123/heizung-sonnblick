@@ -1134,67 +1134,84 @@ develop @ `8f3554b`).
 - `retire-device`-Subcommand (verworfen, kommt als
   POST-Endpoint in 13b)
 
-## Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018 (aktiver Folge-Sprint nach 13a)
+## Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018
 
-**Status:** in Vorbereitung. Strategie-Chat erstellt Brief auf Basis
-dieser Skizze + neuer Backlog-Punkte aus Sprint 13a (B-Sprint13a-5/-6/-8).
-**Geschätzte Dauer:** ~3-5 h Backend + 2-3 h Frontend
-**Tag nach 13b:** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag)
+**Cut 2026-05-23 (Strategie-Chat):** Aufgespalten in 13b.1 (Backend,
+abgeschlossen 2026-05-23 — siehe STATUS §2au) und 13b.2 (Frontend,
+geplant).
+
+### Sprint 13b.1 ✅ Backend abgeschlossen 2026-05-23
+
+**Status:** Code-Phase fertig, Live-Verify auf heizung-test pending
+(T7 nach Merge). PR-Erstellung in T8b.
+**Tatsaechliche Dauer:** ~6 h Code + ~1 h Doku.
+**Branch:** `feature/sprint-13b1-device-lifecycle` (7 Commits).
+**Tag (geplant):** `v0.1.18b1-device-replacement-backend`.
+
+Geliefert:
+
+- Migration 0018 (`retired_at`, `retired_reason`,
+  `replaced_by_device_id`, Partial-Unique-Index,
+  `is_active`-Drop). Minimal — **KEIN** `pairing_status`-Feld
+  (Strategie-Entscheidung 2026-05-23, B-Sprint13a-5 verworfen).
+- `services/device_service.py`: `get_active_devices_for_zone`,
+  `get_pool_devices`, `replace_device` (race-safe via UPDATE-
+  WHERE-rowcount-Check), `retire_device`. Drei Exceptions
+  (`DeviceNotFound`/`DeviceStateError`/`PoolDeviceUnavailable`).
+- 6 §L-Stellen umgestellt (T4.1-T4.6, 6 dedizierte Tests).
+- 3 API-Endpoints (`GET /devices/pool`,
+  `POST /{id}/replace/from-pool`, `POST /{id}/retire`) +
+  Listen-Default-Filter `retired_at IS NULL` mit
+  `?include_retired=true`-Opt-In.
+- `BusinessAudit DEVICE_REPLACED` (eine Row pro Tausch, AE-57
+  Entscheidung 6) + `DEVICE_RETIRED` (Stilllegung ohne Ersatz).
+- 40 neue Tests (3 Migration + 6 Helper + 6 §L + 13 Service +
+  12 API). Voll-Suite 518 passed, 1 xfailed.
+
+Out of Scope 13b.1 → 13b.2:
+
+- Frontend-Dialog "Vicki ersetzen" auf `/zimmer/[id]`
+- shadcn `badge`-Komponente falls Reserve-Tag visuell
+- Playwright-E2E Tausch-Flow
+- B-Sprint13a-8 CLI-Summary-Wording / B-Sprint13a-9 Dry-Run-Msg
+
+### Sprint 13b.2 — Frontend Tausch-Dialog (geplant)
+
+**Status:** Brief folgt nach 13b.1-Merge + Live-Verify-Befund.
+**Geschaetzte Dauer:** ~2-3 h Frontend.
+**Tag nach 13b.2:** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag).
 
 ### Ziel
 
-Implementation der AE-57-Architektur: Device-Lifecycle-Felder
-(`retired_at`, `retired_reason`, `replaced_by_device_id`),
-`is_active`-Drop, zentraler Helper `get_active_devices_for_zone()`,
-Umstellung der 5 Pflicht-Filter-Stellen aus Phase-0 §L, neuer Endpoint
-`POST /api/v1/devices/{id}/retire`, Frontend-Dialog „Vicki ersetzen"
-inkl. Pool-Selector-UI fuer schnellen Reserve-Vicki-Tausch.
+13b.2 ergaenzt das Frontend (shadcn Dialog mit Pool-Dropdown auf
+`/zimmer/[id]/page.tsx`), das auf den drei 13b.1-Endpoints
+(`GET /devices/pool`, `POST /{id}/replace/from-pool`,
+`POST /{id}/retire`) sitzt.
 
-### Tasks (verbindlicher Cut)
+### Tasks-Skizze 13b.2 (Brief folgt)
 
-- T1: Migration 0018 (`ADD COLUMN retired_at`, `retired_reason`,
-  `replaced_by_device_id`, Partial-Unique-Index `dev_eui WHERE
-  retired_at IS NULL`, `DROP COLUMN is_active`,
-  `drop_constraint("uq_device_dev_eui")`).
-  **Zusatz aus B-Sprint13a-5:** `pairing_status`-Feld
-  (Default `active`) als Trigger fuer Downlink-Failure-Recovery
-  (Variante-B). Roundtrip-Test in
-  `tests/test_migrations_roundtrip.py`.
-- T2: Helper `get_active_devices_for_zone(session, zone_id)` in
-  `services/device_repository.py` neu. Filtert auf
-  `retired_at IS NULL` UND `pairing_status='active'`.
-- T3: Umstellung der 5 Read-Stellen aus Phase-0 §L
-  (`tasks/engine_tasks._get_devices_for_zone`,
-  `rules/engine.layer_device_detached`,
-  `rules/window_state.detect_open_window_zones`,
-  `services/device_adapter._device_room_id` + `_device_zone_id`).
-  Pflicht-Test pro Stelle: retired Row nicht im Result.
-- T4: Endpoint `POST /api/v1/devices/{id}/retire`
-  (`require_admin`, atomare Transaktion, BusinessAudit `DEVICE_RETIRED`
-  und/oder `DEVICE_REPLACED`).
-- T5: `api/v1/devices.py` List-View: Query-Param `include_retired=False`
-  (Default), `is_active`-Param entfernt. Plus `list-all`-Pendant am
-  CLI (B-Sprint13a-6) als sortierbare Frontend-Tabelle mit Zimmer-
-  Zuordnung.
-- T6: Frontend-Dialog im Geräte-Detail: „Vicki ersetzen" → DevEUI-
-  Eingabe + Begründung → `POST /retire`-Aufruf.
-- T6.1: Pool-Selector-UI — Hotelier waehlt aus existierenden Pool-
-  Devices (`heating_zone_id IS NULL`) einen Tausch-Kandidaten,
-  statt manueller DevEUI-Eingabe. Pflicht-UI fuer den schnellen
-  Tausch-Flow (Sprint 17 vorbereiten).
-- T7: Playwright-E2E: Tausch-Flow (Retire → neuer Vicki aus Pool →
-  Zone-Re-Assign → Engine-Tick verifiziert).
-- T8: CLI-Summary-Wording-Praezisierung (B-Sprint13a-8) und Dry-Run-
-  Schluss-Message-Fix (B-Sprint13a-9) mit-erledigen, wenn der
-  Tausch-Endpoint die gleiche Result-Wrapping-Logik nutzt.
-- T9: Doku — STATUS §2au, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
-  („is_active-Uebergang abgeschlossen"), Tag.
+- T1 Frontend-Dialog "Vicki ersetzen" auf `/zimmer/[id]/page.tsx` —
+  Per-Device-Row Action-Button (Phase-0-Update Audit 3 Empfehlung).
+- T2 Pool-Dropdown via `useQuery` auf `GET /api/v1/devices/pool`.
+- T3 `useReplaceFromPool` + `useRetireDevice` Mutations
+  (`@tanstack/react-query`).
+- T4 ConfirmDialog-Pattern wiederverwenden (siehe
+  `ConfirmDialog` in `confirm-dialog.tsx`).
+- T5 ggf. shadcn `badge`-Komponente fuer Reserve-Tag (Phase-0-
+  Update Audit 4 — heute fehlt sie).
+- T6 Playwright-E2E: Tausch-Flow.
+- T7 CLI-Summary-Wording (B-Sprint13a-8) + Dry-Run-Msg-Fix
+  (B-Sprint13a-9) mitnehmen.
+- T8 Doku: STATUS §2x, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
+  ("is_active-Uebergang abgeschlossen — komplett gedropped"), Tag.
 
-### Out of Scope 13b
+### Out of Scope 13b (gesamt)
 
 - gRPC-ChirpStack-Bootstrap (verworfen 2026-05-21)
 - Pairing-Wizard-UI (verworfen 2026-05-21)
 - Pilot-Zimmer-Auswahl (Backlog B-11prep-4)
+- DEV_EUI-Wiederverwendung nach Retire im CSV (B-13b-1, eigener
+  Sprint)
 
 ---
 

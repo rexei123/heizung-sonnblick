@@ -362,7 +362,6 @@ async def _seed_zone_with_window_state(
             vendor=DeviceVendor.MCLIMATE,
             model="vicki",
             heating_zone_id=zone.id,
-            is_active=True,
             health_state="healthy",
         )
         session.add(device)

@@ -23,7 +23,13 @@ def _normalize_eui(value: str | None) -> str | None:
 
 
 class DeviceCreate(BaseModel):
-    """Eingabe fuer POST /api/v1/devices."""
+    """Eingabe fuer POST /api/v1/devices.
+
+    Sprint 13b.1 (AE-57): kein ``is_active``-Feld mehr — Devices werden
+    immer aktiv angelegt (``retired_at=NULL``). Lifecycle-Aenderungen
+    laufen ueber ``services.device_service.retire_device`` /
+    ``replace_device``, nicht ueber Create/Update.
+    """
 
     dev_eui: str = Field(
         ..., description="LoRaWAN DevEUI (8 Byte hex, 16 Zeichen, case-insensitive)"
@@ -37,9 +43,8 @@ class DeviceCreate(BaseModel):
     label: str | None = Field(default=None, max_length=200)
     heating_zone_id: int | None = Field(
         default=None,
-        description="FK auf heating_zone.id; NULL solange ungeordnet (Provisioning).",
+        description="FK auf heating_zone.id; NULL solange ungeordnet (Pool oder Provisioning).",
     )
-    is_active: bool = True
 
     @field_validator("dev_eui")
     @classmethod
@@ -56,7 +61,11 @@ class DeviceCreate(BaseModel):
 
 
 class DeviceUpdate(BaseModel):
-    """Eingabe fuer PATCH /api/v1/devices/{id}. Alle Felder optional."""
+    """Eingabe fuer PATCH /api/v1/devices/{id}. Alle Felder optional.
+
+    Sprint 13b.1 (AE-57): kein ``is_active``-Feld mehr. Lifecycle laeuft
+    ueber dedizierte Service-Funktionen / Endpoints, nicht via Update.
+    """
 
     app_eui: str | None = None
     kind: DeviceKind | None = None
@@ -64,7 +73,6 @@ class DeviceUpdate(BaseModel):
     model: str | None = Field(default=None, min_length=1, max_length=50)
     label: str | None = Field(default=None, max_length=200)
     heating_zone_id: int | None = None
-    is_active: bool | None = None
 
     @field_validator("app_eui")
     @classmethod
@@ -73,7 +81,12 @@ class DeviceUpdate(BaseModel):
 
 
 class DeviceRead(BaseModel):
-    """Ausgabe fuer GET /api/v1/devices und /devices/{id}."""
+    """Ausgabe fuer GET /api/v1/devices und /devices/{id}.
+
+    Sprint 13b.1 (AE-57): ``retired_at`` / ``retired_reason`` /
+    ``replaced_by_device_id`` ergaenzt. ``is_active`` entfernt — Caller
+    filtern via ``retired_at IS NULL`` (Single Source of Truth).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,7 +98,9 @@ class DeviceRead(BaseModel):
     model: str
     label: str | None
     heating_zone_id: int | None
-    is_active: bool
+    retired_at: datetime | None
+    retired_reason: str | None
+    replaced_by_device_id: int | None
     last_seen_at: datetime | None
     firmware_version: str | None = None
     health_state: Literal["healthy", "degraded", "silent", "suspicious"]
@@ -97,6 +112,35 @@ class DeviceAssignZoneRequest(BaseModel):
     """Request body fuer PUT /api/v1/devices/{device_id}/heating-zone."""
 
     heating_zone_id: int = Field(..., gt=0, description="Ziel-Heizzone")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeviceReplaceFromPoolRequest(BaseModel):
+    """Request body fuer POST /api/v1/devices/{device_id}/replace/from-pool.
+
+    Sprint 13b.1 (AE-57 Entscheidung 6): atomarer Pool-Reassign-Tausch.
+    """
+
+    new_pool_device_id: int = Field(
+        ..., gt=0, description="Ziel-Pool-Device, das die alte Zone uebernimmt."
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeviceRetireRequest(BaseModel):
+    """Request body fuer POST /api/v1/devices/{device_id}/retire.
+
+    Sprint 13b.1 (AE-57 Entscheidung 6): Stilllegung ohne Ersatz.
+    """
+
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Freitext-Begruendung (z.B. 'battery_dead', 'hardware_swap').",
+    )
 
     model_config = ConfigDict(extra="forbid")
 

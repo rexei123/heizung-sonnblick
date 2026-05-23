@@ -517,7 +517,6 @@ async def test_engine_window_open_verwirft_zone_overrides(
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
         heating_zone_id=zone1_id,
-        is_active=True,
         health_state="healthy",
     )
     db_session.add(device)

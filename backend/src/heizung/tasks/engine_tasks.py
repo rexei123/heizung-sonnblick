@@ -43,6 +43,7 @@ from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
 from heizung.services import engine_lock
+from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.downlink_adapter import send_setpoint
 
 # Sprint 9.10 T3.5: Re-Trigger-Verzoegerung wenn der Lock fuer einen Raum
@@ -338,22 +339,17 @@ async def _get_zones_for_room(session: AsyncSession, room_id: int) -> list[Heati
 async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]:
     """Aktive + healthy Devices einer Zone (Sprint 12 T2, AE-51 P3 + D3).
 
-    Filter: ``is_active=True`` UND ``health_state='healthy'``. Devices in
-    Status ``silent``, ``degraded`` oder ``suspicious`` (AE-53) werden
-    NICHT angesteuert — kein Downlink-Versuch, keine ControlCommand-Row.
-    Reihenfolge ueber ``id ASC`` fuer deterministisches Verhalten in
-    Tests + Trace (asyncio.gather ist intern parallel, aber die Reihenfolge
-    der per-device-results bleibt durch zip(send_payloads, outcomes)
-    deterministisch).
+    Sprint 13b.1 (AE-57): Lifecycle-Filter via ``get_active_devices_for_zone``
+    (``retired_at IS NULL``). ``health_state='healthy'``-Filter bleibt
+    in dieser Funktion, weil Engine-spezifisch — Devices in Status
+    ``silent``, ``degraded`` oder ``suspicious`` (AE-53) werden NICHT
+    angesteuert (kein Downlink-Versuch, keine ControlCommand-Row).
+
+    Reihenfolge ``id ASC`` (Helper-Default) fuer deterministisches
+    Verhalten in Tests + Trace.
     """
-    stmt = (
-        select(Device)
-        .where(Device.heating_zone_id == zone_id)
-        .where(Device.is_active.is_(True))
-        .where(Device.health_state == "healthy")
-        .order_by(Device.id)
-    )
-    return list((await session.execute(stmt)).scalars().all())
+    active_devices = await get_active_devices_for_zone(session, zone_id)
+    return [d for d in active_devices if d.health_state == "healthy"]
 
 
 async def _dispatch_downlinks_per_zone(

@@ -613,11 +613,15 @@ async def layer_device_detached(
     threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
     occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
 
-    # 1. Alle Devices der Heizzonen des Raums laden.
+    # 1. Alle aktiven Devices der Heizzonen des Raums laden.
+    # Sprint 13b.1 (AE-57): Lifecycle-Filter retired_at IS NULL ergaenzt
+    # (inline, weil JOIN-basiert ueber HeatingZone; Helper-Signatur
+    # waere room-scope-N+1).
     devices_stmt = (
         select(Device.id, Device.dev_eui)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(Device.retired_at.is_(None))
     )
     devices: list[tuple[int, str]] = list((await session.execute(devices_stmt)).tuples().all())
 
@@ -650,6 +654,7 @@ async def layer_device_detached(
         .join(Device, Device.id == SensorReading.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(Device.retired_at.is_(None))
         .where(SensorReading.time >= threshold)
         .where(SensorReading.attached_backplate.is_not(None))
         .subquery()

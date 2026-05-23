@@ -73,6 +73,7 @@ from heizung.scripts.pairing.inbound_test import (  # noqa: E402
     run_inbound_test,
 )
 from heizung.scripts.pairing.pairing_service import pair_batch  # noqa: E402
+from heizung.services.device_service import get_pool_devices  # noqa: E402
 
 logger = logging.getLogger("pair_devices")
 
@@ -240,29 +241,24 @@ async def _cmd_test(args: argparse.Namespace) -> int:
 
 
 async def _cmd_list_pool(args: argparse.Namespace) -> int:
-    """``list-pool``: Reserve-Devices (heating_zone_id IS NULL AND is_active=True).
+    """``list-pool``: Reserve-Devices (heating_zone_id IS NULL AND retired_at IS NULL).
 
-    Hinweis: ``is_active=True`` ist AE-57-Uebergangs-Klausel (Sprint 13b
-    ersetzt durch ``retired_at IS NULL``).
+    Sprint 13b.1 (AE-57): umgestellt auf ``get_pool_devices``-Helper aus
+    ``services/device_service.py``. Lifecycle-Filter ist jetzt
+    ``retired_at IS NULL`` (Single Source of Truth).
     """
     del args  # noqa: ARG001 — kein arg, Konsistenz mit anderen Handlern
     async with SessionLocal() as session:
-        stmt = (
-            select(Device.id, Device.dev_eui, Device.model, Device.created_at, Device.label)
-            .where(Device.heating_zone_id.is_(None))
-            .where(Device.is_active.is_(True))
-            .order_by(Device.id)
-        )
-        rows = (await session.execute(stmt)).all()
+        pool_devices = await get_pool_devices(session)
 
-    if not rows:
+    if not pool_devices:
         print("Pool ist leer (keine Reserve-Devices).")
         return 0
-    print(f"Reserve-Pool ({len(rows)} Devices, heating_zone_id IS NULL):")
+    print(f"Reserve-Pool ({len(pool_devices)} Devices, heating_zone_id IS NULL):")
     print(f"  {'ID':<6} {'dev_eui':<18} {'model':<10} {'created_at':<20} label")
-    for dev_id, dev_eui, model, created_at, label in rows:
-        ts = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else "-"
-        print(f"  {dev_id:<6} {dev_eui:<18} {model:<10} {ts:<20} {label or '-'}")
+    for dev in pool_devices:
+        ts = dev.created_at.strftime("%Y-%m-%d %H:%M:%S") if dev.created_at else "-"
+        print(f"  {dev.id:<6} {dev.dev_eui:<18} {dev.model:<10} {ts:<20} {dev.label or '-'}")
     return 0
 
 
@@ -322,7 +318,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # list-pool
     sub.add_parser(
         "list-pool",
-        help="Reserve-Pool-Devices (heating_zone_id IS NULL AND is_active=True).",
+        help="Reserve-Pool-Devices (heating_zone_id IS NULL AND retired_at IS NULL).",
     )
 
     return parser

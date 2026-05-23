@@ -1650,10 +1650,15 @@ Late-Import-Trick, kein zirkulaerer Import.
 # AE-57 — Device-Lifecycle: Retire + Pair-New, Zone als stabiler Historie-Anker (Sprint 13-prep)
 
 **Datum:** 2026-05-21
-**Status:** Akzeptiert
+**Status:** Implementiert (Sprint 13b.1, 2026-05-23). Migration 0018
+deployed, Service-Layer `services/device_service.py` (Helper +
+replace_device + retire_device) live, 6 Engine-Read-Stellen
+umgestellt, 3 API-Endpoints unter `/api/v1/devices/...`. Siehe
+STATUS §2au + RUNBOOK §10j. Frontend-Dialog folgt in Sprint 13b.2.
 **Bezug:** AE-43 (Geräte-Lifecycle, Pairing-Wizard), AE-51 (Zone-
 Aggregat-Modell), AE-58 (Override-Modell konsolidiert), Sprint 13
-Phase-0-Bericht (`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`)
+Phase-0-Bericht (`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`),
+Phase-0-Update (`docs/features/2026-05-23-sprint13b-phase0-update.md`)
 
 ## Kontext
 
