@@ -114,9 +114,7 @@ def downgrade() -> None:
     # 2. Backfill: retired Rows bekommen is_active = FALSE. Muss VOR dem
     #    Drop von retired_at laufen, sonst ist der Filter nicht mehr
     #    auflosbar.
-    op.execute(
-        "UPDATE device SET is_active = FALSE WHERE retired_at IS NOT NULL"
-    )
+    op.execute("UPDATE device SET is_active = FALSE WHERE retired_at IS NOT NULL")
 
     # 3. Partial-Unique-Index droppen, Voll-Unique-Constraint
     #    wiederherstellen (1:1 wie in 0001 angelegt).

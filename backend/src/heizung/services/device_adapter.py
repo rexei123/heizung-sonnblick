@@ -103,11 +103,18 @@ async def detect_user_override(
 
 async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:
     """``Device -> HeatingZone -> room_id``. ``None`` wenn das Geraet
-    keiner Zone zugeordnet ist."""
+    keiner Zone zugeordnet ist ODER retired ist.
+
+    Sprint 13b.1 (AE-57): inline ``retired_at IS NULL``-Filter. Helper
+    ``get_active_devices_for_zone`` waere unpassend (hier ID-Lookup, kein
+    Zone-Scan). Retirte Devices, die noch funken, duerfen KEINE Override-
+    Anlage triggern (Anti-Strategie nach Retire).
+    """
     stmt = (
         select(HeatingZone.room_id)
         .join(Device, Device.heating_zone_id == HeatingZone.id)
         .where(Device.id == device_id)
+        .where(Device.retired_at.is_(None))
         .limit(1)
     )
     room_id: int | None = await session.scalar(stmt)
@@ -115,17 +122,20 @@ async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:
 
 
 async def _device_zone_id(session: AsyncSession, device_id: int) -> int | None:
-    """``Device.heating_zone_id`` direkt. ``None`` wenn nicht zugeordnet.
+    """``Device.heating_zone_id`` direkt. ``None`` wenn nicht zugeordnet
+    ODER retired.
 
     Sprint 12a T4 (AE-58): separater Helper analog ``_device_room_id``.
-    Single Query auf ``device.heating_zone_id`` (Phase-0 §3: direkte
-    1:N-FK, kein heating_zone_device-Mapping-Modul). Im aktuellen
-    Schema liefert ``_device_zone_id`` und ``_device_room_id`` immer
-    konsistente Werte — die separate Funktion erlaubt aber, die
-    Room-Scope-Fallback-Logik im Aufrufer sauber gegen die Zone-Lookup-
-    Logik abzugrenzen (Forward-Compat fuer mgl. Schema-Erweiterung).
+    Sprint 13b.1 (AE-57): inline ``retired_at IS NULL``-Filter (analog
+    ``_device_room_id``). Retired Devices liefern ``None`` zurueck —
+    Aufrufer behandeln das wie "Device nicht zugeordnet".
     """
-    stmt = select(Device.heating_zone_id).where(Device.id == device_id).limit(1)
+    stmt = (
+        select(Device.heating_zone_id)
+        .where(Device.id == device_id)
+        .where(Device.retired_at.is_(None))
+        .limit(1)
+    )
     zone_id: int | None = await session.scalar(stmt)
     return zone_id
 

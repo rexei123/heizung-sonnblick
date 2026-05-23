@@ -30,11 +30,13 @@ def _valid_create_payload() -> dict[str, Any]:
 
 
 def test_device_create_minimal() -> None:
+    # Sprint 13b.1 (AE-57): DeviceCreate hat kein is_active-Feld mehr —
+    # Devices werden immer aktiv angelegt (retired_at=NULL). Lifecycle
+    # laeuft ueber dedizierte Service-Funktionen.
     d = DeviceCreate(**_valid_create_payload())
     assert d.dev_eui == "0011223344556677"
     assert d.kind == DeviceKind.THERMOSTAT
     assert d.vendor == DeviceVendor.MCLIMATE
-    assert d.is_active is True
     assert d.heating_zone_id is None
     assert d.app_eui is None
 

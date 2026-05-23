@@ -123,8 +123,12 @@ async def create_device(
     summary="Geraete-Liste (paginiert)",
 )
 async def list_devices(
-    is_active: bool | None = Query(  # noqa: B008
-        default=None, description="Nur aktive (True) oder nur deaktivierte (False) Geraete."
+    include_retired: bool = Query(  # noqa: B008
+        default=False,
+        description=(
+            "Wenn False (Default): nur aktive Geraete (retired_at IS NULL). "
+            "True liefert retired Devices mit (Audit-Sicht)."
+        ),
     ),
     vendor: str | None = Query(default=None),  # noqa: B008
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
@@ -132,9 +136,12 @@ async def list_devices(
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> list[Device]:
+    # Sprint 13b.1 (AE-57): is_active-Query-Param ersetzt durch
+    # include_retired (Default False). Inline-Filter retired_at IS NULL,
+    # weil Helper-Signatur (zone-scoped) hier nicht passt.
     stmt = select(Device)
-    if is_active is not None:
-        stmt = stmt.where(Device.is_active == is_active)
+    if not include_retired:
+        stmt = stmt.where(Device.retired_at.is_(None))
     if vendor is not None:
         stmt = stmt.where(Device.vendor == vendor)
     stmt = stmt.order_by(Device.id).offset(offset).limit(limit)

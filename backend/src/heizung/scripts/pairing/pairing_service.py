@@ -131,7 +131,10 @@ async def pair_device(
         Trigger (Praezedenzfall siehe Sprint-13-Hygiene
         ``OVERRIDES_AUTO_REVOKED_ON_CHECKOUT``).
     """
-    # Gate 1: DevEUI-Existenz.
+    # Gate 1: DevEUI-Existenz (bewusst OHNE retired_at-Filter, Sprint
+    # 13b.1, AE-57). Pre-Flight-Disziplin: CSV-Bulk-Pairing rejected auch
+    # retired Devices mit identischer DevEUI. Re-Pair nach Werksreset
+    # geht ueber Tausch-Endpoint (DEVICE_REPLACED), nicht CSV.
     existing_stmt = select(Device.id).where(Device.dev_eui == row.dev_eui)
     existing_id = (await session.execute(existing_stmt)).scalar_one_or_none()
     if existing_id is not None:

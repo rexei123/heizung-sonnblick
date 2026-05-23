@@ -181,9 +181,16 @@ async def check_dev_eui_duplicates(
     kollidierenden Zeilen-Nummern.
 
     Gegen DB: SELECT id, dev_eui FROM device WHERE dev_eui IN (...).
-    Filter NICHT auf ``is_active`` oder ``retired_at`` — eine DevEUI ist
-    global einzigartig (Voll-Unique-Constraint aus Migration 0001, bis
-    Sprint 13b auf Partial-Unique umgestellt wird).
+    Bewusst KEIN ``retired_at IS NULL``-Filter (Sprint 13b.1, AE-57).
+    Migration 0018 hat die Voll-Unique-Constraint auf ``dev_eui``
+    durch einen Partial-Unique-Index ersetzt
+    (``ix_device_dev_eui_active_unique WHERE retired_at IS NULL``),
+    der DevEUI-Wiederverwendung nach Werksreset technisch erlaubt.
+    Dieser Pre-Flight-Check ist absichtlich strenger als die DB-
+    Constraint: er rejected auch retired Devices mit derselben
+    DevEUI. Begruendung: CSV-Bulk-Import ist nicht der Pfad fuer
+    Re-Pair nach Werksreset — das laeuft ueber den Sprint-13b
+    Tausch-Endpoint mit explizitem ``DEVICE_REPLACED``-Audit.
 
     :return: Liste von Konflikt-Messages. Leere Liste = OK.
     """

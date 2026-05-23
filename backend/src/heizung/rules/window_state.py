@@ -41,8 +41,8 @@ async def detect_open_window_zones(
 
     Eine Zone gilt als offen, wenn mindestens ein zugeordnetes Device
 
-    - ``is_active=True`` (impliziter Filter ueber ``Device``-Records, die
-      Readings schreiben),
+    - ``retired_at IS NULL`` (Sprint 13b.1, AE-57 — Lifecycle-Filter
+      explizit; retired Devices duerfen den Layer 4 nicht beeinflussen),
     - ``health_state='healthy'`` (AE-53, Sprint 11 T3 — silent/degraded/
       suspicious Vickis fliessen NICHT in die Aggregation),
     - ein frisches Reading hat (Alter <= ``WINDOW_STALE_THRESHOLD_MIN``,
@@ -75,6 +75,7 @@ async def detect_open_window_zones(
         .join(Device, Device.id == SensorReading.device_id)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
+        .where(Device.retired_at.is_(None))
         .where(Device.health_state == "healthy")
         .order_by(SensorReading.device_id, SensorReading.time.desc())
         .distinct(SensorReading.device_id)
