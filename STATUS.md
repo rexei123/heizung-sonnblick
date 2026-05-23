@@ -2112,6 +2112,141 @@ Audit NICHT zurueck.
 
 ---
 
+## 2au. Sprint 13b.1 Backend Device-Lifecycle + Pool-Reassign-Tausch (2026-05-23, abgeschlossen Code)
+
+**Ziel:** Implementation der AE-57-Architektur im Backend: Migration
+0018 (`retired_at`/`retired_reason`/`replaced_by_device_id` +
+Partial-Unique-Index + `is_active`-Drop), Service-Layer fuer
+atomaren Pool-Reassign-Tausch + Stilllegung, API-Endpoints fuer
+Frontend (Sprint 13b.2). Race-Schutz via UPDATE-WHERE-Clause in der
+Pool-Reservierung (READ-COMMITTED-tauglich).
+
+**Branch:** `feature/sprint-13b1-device-lifecycle`, 7 Commits auf
+develop @ `1275511` (PR-Erstellung steht in T8b aus).
+
+**Tag (geplant nach Merge):** `v0.1.18b1-device-replacement-backend`
+
+**Tasks erledigt:**
+
+- **T1 (Commit `6d244b8`):** Migration `0018_device_lifecycle.py` —
+  3 nullable Spalten + selbst-referenzielle FK + Partial-Unique-Index
+  `ix_device_dev_eui_active_unique WHERE retired_at IS NULL` +
+  `is_active`-Drop. 3 Roundtrip-Tests (atomar_auf_ab_auf,
+  downgrade_backfills_is_active, partial_unique_allows_retired_
+  duplicates). §5.56-Test-Fix `test_migration_0015_check_constraint_
+  rejects_invalid` (is_active aus INSERT entfernt).
+- **T2 (Commit `16711bc`):** `models/device.py` + `schemas/device.py`
+  auf Lifecycle-Felder umgestellt. 5 Test-Fixtures (`is_active=True`
+  aus `Device(...)` entfernt: layer3, api_overrides, multivicki,
+  override_service, sprint12_e2e). `noqa A003` auf
+  `remote_side=[id]` (SQLAlchemy-Standard).
+- **T3 (Commit `d699447`):** Neue Datei
+  `services/device_service.py` mit `get_active_devices_for_zone` +
+  `get_pool_devices`. 6 Tests in
+  `tests/services/test_device_service.py`.
+- **T4 (Commit `ed9712b`):** §L-Umstellung 6 Stellen — T4.1
+  `_get_zone_devices` via Helper + Health-Filter; T4.2/T4.3/T4.4
+  inline `retired_at IS NULL` (JOIN-basiert, Helper-Signatur passt
+  nicht); T4.5 `_device_room_id`/`_device_zone_id` inline; T4.6
+  `_cmd_list_pool` via `get_pool_devices`. 6 §L-Tests in
+  `test_sprint13b1_lifecycle_filters.py`. T2-Followup-Fixes
+  (test_device_schema, test_sprint12_e2e._make_device).
+  `csv_parser.py:205` + `pairing_service.py:135` bleiben bewusst
+  ungefiltert (Phase-0-Update §L), Docstrings auf 13b.1-Stand.
+- **T5 (Commit `3497f74`):** `replace_device` + `retire_device` in
+  `device_service.py`. Race-Schutz: UPDATE-WHERE-Clause
+  (`heating_zone_id IS NULL AND retired_at IS NULL`) auf Pool-
+  Reservierung, `rowcount`-Check liefert `PoolDeviceUnavailable`
+  bei race-Konflikt. Drei Exceptions
+  (`DeviceNotFound`/`DeviceStateError`/`PoolDeviceUnavailable`).
+  `BusinessAudit DEVICE_REPLACED` + `DEVICE_RETIRED` atomar.
+  13 Tests inkl. Race-Test (2 Sessions via `asyncio.gather`).
+- **T6 (Commit `da4b921`):** Drei API-Endpoints in `api/v1/devices.py`
+  — `GET /devices/pool`, `POST /{id}/replace/from-pool`,
+  `POST /{id}/retire`. `require_admin` fuer Mutationen,
+  `require_user` fuer Pool-Read. Engine-Tick-Trigger nach commit
+  (Pattern HF-9.13a-2). Route-Order-Fix: `/pool` vor `/{device_id}`
+  (FastAPI-Path-Matching). 12 API-Tests in
+  `test_api_devices_lifecycle.py`. **Brief-Annahme
+  `/rooms/{id}/devices` + `/heating-zones/{id}/devices` existiert
+  nicht** — Frontend nutzt `useDevices()` global (Phase-0-Update
+  Audit 3).
+- **T7 (User-Ausgefuehrt):** Live-Verify auf heizung-test nach Merge.
+  Befund-Platzhalter siehe unten.
+- **T8a (dieser Doku-Commit):** STATUS §2au + SPRINT-PLAN-Update +
+  AE-57-Implementiert-Marker + RUNBOOK §10j + CLAUDE.md §5.60 Lesson
+  (Race-Schutz im UPDATE-WHERE-Clause).
+
+**Backend-Tests:** **518 passed**, 1 xfailed (Baseline 476 vor
+13b.1: +3 T1, +6 T3, +6 T4, +13 T5, +12 T6, +2 Zwischenstand-Sprung
+= 518). ruff format/check + mypy strict gruen.
+
+**Diff-Summe (T1-T6):** 13 Code-Files, +1837 Insertions / −98
+Deletions. 5 neue Test-Files (3 Migration-Roundtrip-Tests im
+existierenden File, 6 Helper-Tests, 6 §L-Tests, 13 Service-Tests,
+12 API-Tests).
+
+**T7 Live-Verify-Befund (Platzhalter, wird nach heizung-test-Run
+ergaenzt):**
+
+- Schritt 0-2 (SSH + Auto-Pull + alembic current): `<TODO>`
+- Schritt 3 (Schema-Verify `\d device`): `<TODO>`
+- Schritt 4 (Pre-State + pg_dump): `<TODO>`
+- Schritt 6 (`get_pool_devices`-Service-Call): `<TODO>`
+- Schritt 7 (`retire_device` + Audit-Verify): `<TODO>`
+- Schritt 8 (`replace_device` + Audit-Verify): `<TODO>`
+- Schritt 9 (Datenkonsistenz alle 4 Vickis): `<TODO>`
+- Schritt 10 (Race-Test mit konkurrierendem Replace): `<TODO>`
+- Schritt 11 (Engine-Tick post-replace, kein retired in Reads):
+  `<TODO>`
+- Schritt 12 (curl-Smoke /devices/pool 401 + 200): `<TODO>`
+- Schritt 13 (Cleanup: device-State zurueckgerollt, Audit-Rows
+  bleiben): `<TODO>`
+- Schritt 14 (Final-Verify Engine-Tick nach Cleanup): `<TODO>`
+
+Vollstaendiges Verify-Script in der PR-Beschreibung (Sprint
+13b.1-T7-Block) + Backup-Pfad
+`/opt/heizung-sonnblick/backups/sprint13b1-device-<TS>.sql`.
+
+**Out of Scope (Sprint 13b.2):**
+
+- Frontend-Dialog "Vicki ersetzen" auf `/zimmer/[id]` (shadcn Dialog
+  + Pool-Dropdown-Select via `GET /devices/pool`)
+- shadcn `badge`-Komponente fuer Reserve-Tag falls visuell gewuenscht
+- E2E-Playwright-Test Tausch-Flow
+
+**Out of Scope (spaeter):**
+
+- B-Sprint13a-5 (`pairing_status`-Feld fuer Downlink-Failure-
+  Recovery-Variante-B) — Strategie-Entscheidung 2026-05-23: nicht in
+  0018, eigener Sprint nach erster Heizperiode-Auswertung.
+- Open-Window-Detection-Re-Send an new device beim Tausch (B-13b-2)
+  — Pool-Device hat OW-Config aus Pre-Pairing-Eingangstest.
+- DEV_EUI-Wiederverwendung nach Retire im CSV-Bulk-Pairing
+  (B-13b-1) — Pre-Flight ist absichtlich strenger als DB-Constraint;
+  Re-Pair via Tausch-Endpoint, nicht CSV.
+
+**Neue Backlog-Punkte:**
+
+- **B-Sprint13b1-1** 🟢: BusinessAudit-Tests mit `user_id != None`
+  brauchen User-Fixture-Setup. Heute weichen Service-Tests via
+  `user_id=None` aus (System-Trigger-Pattern). API-Tests (TestClient)
+  testen den User-Pfad live (via `require_admin`-Dependency). Voll-
+  Coverage-Run mit echtem User-FK kommt in 13b.2-Tests mit, wenn
+  Frontend-User-Cookie via dependency_override testbar wird.
+- **B-Sprint13b1-2** 🟢: Engine-Tick-Trigger-Latenz beim
+  Tausch-Endpoint dokumentieren (Pattern HF-9.13a-2). Heute folgt
+  `evaluate_room.delay()` direkt nach commit; Worker-Pickup ~5-6 Sek
+  (B-9.13a-hf2-2). Falls Frontend-UX im 13b.2-Tausch-Dialog ein
+  "Loading"-Indikator brauchen wuerde: hier verlinken.
+
+**Querverweise:** AE-57 (Master-ADR), Phase-0-Bericht
+`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`,
+Phase-0-Update `docs/features/2026-05-23-sprint13b-phase0-update.md`,
+RUNBOOK §10j, CLAUDE.md §5.58 + §5.60, STATUS §2at.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

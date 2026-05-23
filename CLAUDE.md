@@ -1533,6 +1533,73 @@ Tageszeit-basierte Suffixe haben Parallel-Test-Race-Potenzial.
 (Folge-Hot-Fix), §5.58 (Device-Lifecycle-Filter, andere Lesson aus
 demselben Sprint-Block).
 
+### 5.60 Race-Schutz via UPDATE-WHERE-Clause statt Python-Pre-Check (Sprint 13b.1 T5)
+
+Service-Funktionen, die einen DB-Row exklusiv reservieren (z.B.
+``replace_device``: ein Pool-Vicki darf nur einmal gleichzeitig in
+eine Zone wandern), brauchen Race-Schutz auf DB-Ebene, nicht in
+Python.
+
+**Anti-Pattern (race-anfaellig):**
+
+```python
+# 1. Python liest State
+new = await session.get(Device, new_pool_device_id)
+if new.heating_zone_id is not None:
+    raise PoolDeviceUnavailable(...)   # <-- stale-read moeglich
+
+# 2. Python schreibt State
+new.heating_zone_id = target_zone_id
+```
+
+Postgres-Default-Isolation READ COMMITTED zeigt jedem Reader den
+zuletzt committeten Zustand. Zwei parallele Sessions koennen die
+Pool-Cell beide als ``NULL`` lesen, beide passieren den Pre-Check,
+beide schreiben — der Letzte gewinnt, der Erste sieht keinen Fehler.
+
+**Richtig (race-safe):**
+
+```python
+# Pre-Check fuer klare Fehlermeldung bleibt (UX), aber der echte
+# Wachposten ist die UPDATE-WHERE-Clause:
+reserve_stmt = (
+    update(Device)
+    .where(Device.id == new_pool_device_id)
+    .where(Device.heating_zone_id.is_(None))    # <-- atomare Pruefung
+    .where(Device.retired_at.is_(None))          # <-- in derselben WHERE
+    .values(heating_zone_id=target_zone_id)
+    .returning(Device.id)
+)
+result = await session.execute(reserve_stmt)
+if len(result.fetchall()) != 1:
+    raise PoolDeviceUnavailable(
+        "rowcount=0 -> parallel vergeben (race-Schutz)"
+    )
+```
+
+Postgres serialisiert den ``UPDATE`` am Row-Lock. Der zweite UPDATE
+findet keine matching Row mehr (WHERE-Clause schliesst die nun
+nicht-mehr-NULL-Pool-Cell aus) und liefert ``rowcount=0``.
+
+**Regel:** Pre-Check (Python-Read) liefert die klare Fehlermeldung,
+``UPDATE``-WHERE-Rowcount-Check ist die race-safe Wachposten-Stelle.
+Beide Schichten sind komplementaer — Pre-Check ist NICHT verzichtbar
+(sonst kommt im typischen Pfad nur ``rowcount=0`` an, ohne Hinweis
+**warum**).
+
+**Test-Pattern fuer Race:** Zwei eigene ``AsyncSession``-Instanzen
+aus ``async_sessionmaker(engine)``, beide rufen das Service via
+``asyncio.gather(...)``. Sequentielles Setup committen (sonst sehen
+die Race-Sessions die Test-Rows nicht via DB), Race-Assertion: genau
+einer der zwei Aufrufe ist ``"ok"``, der andere
+``PoolDeviceUnavailable``. Cleanup via FK-sicher sortiertes
+``DELETE`` (Pflicht — Test commited, Rollback nicht greifbar).
+
+**Querverweise:** AE-40 (Engine-Lock im Datenpfad analog),
+§5.39 (DB-Tests gegen globalen Compute-Task — own_ids-Filter-Pattern),
+AE-57 Entscheidung 6 (Tausch-Audit), STATUS §2au, Service-Pattern in
+``services/device_service.py:replace_device``.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
