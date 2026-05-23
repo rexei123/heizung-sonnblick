@@ -36,10 +36,20 @@ from heizung.schemas.device import (
     DeviceAssignZoneResponse,
     DeviceCreate,
     DeviceRead,
+    DeviceReplaceFromPoolRequest,
+    DeviceRetireRequest,
     DeviceUpdate,
     HardwareStatusResponse,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
+from heizung.services.device_service import (
+    DeviceNotFound,
+    DeviceStateError,
+    PoolDeviceUnavailable,
+    get_pool_devices,
+    replace_device,
+    retire_device,
+)
 from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
@@ -147,6 +157,25 @@ async def list_devices(
     stmt = stmt.order_by(Device.id).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+@router.get(
+    "/pool",
+    response_model=list[DeviceRead],
+    summary="Reserve-Pool-Devices (heating_zone_id IS NULL, retired_at IS NULL)",
+)
+async def list_pool_devices(
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[Device]:
+    """Liefert alle aktiven Reserve-Vickis sortiert ``created_at DESC``
+    (neueste zuerst). Frontend nutzt das fuer den Pool-Dropdown beim
+    Tausch (13b.2).
+
+    Sprint 13b.1 (AE-57): MUSS vor ``GET /{device_id}`` registriert sein,
+    sonst matched FastAPI ``/{device_id}`` mit ``device_id="pool"`` -> 422.
+    """
+    return await get_pool_devices(session)
 
 
 @router.get(
@@ -397,3 +426,127 @@ async def get_hardware_status(
         frames_in_window=frames_in_window,
         window_minutes=WINDOW_STALE_THRESHOLD_MIN,
     )
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: Pool-Reassign-Tausch + Retire + Pool-Liste (Sprint 13b.1, AE-57)
+# ---------------------------------------------------------------------------
+#
+# Hinweis: ``GET /pool`` ist weiter oben (vor ``/{device_id}``) registriert
+# — sonst matched FastAPI ``/{device_id}`` mit ``device_id="pool"`` und
+# liefert 422 statt 200.
+
+
+@router.post(
+    "/{device_id}/replace/from-pool",
+    response_model=DeviceRead,
+    status_code=status.HTTP_200_OK,
+    summary="Vicki via Pool-Device ersetzen (atomarer Tausch)",
+)
+async def replace_device_from_pool(
+    payload: DeviceReplaceFromPoolRequest,
+    device_id: int = DeviceIdPath,
+    user: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> Device:
+    """Atomarer Pool-Reassign-Tausch (AE-57 Entscheidung 6).
+
+    Alt-Vicki bekommt ``retired_at``, ``retired_reason='replaced_by_pool'``,
+    ``replaced_by_device_id=new``. Neu-Vicki uebernimmt die Zone. Eine
+    ``DEVICE_REPLACED``-BusinessAudit-Row in derselben Transaktion.
+
+    Engine-Tick auf der betroffenen Zone-Room triggert nach Commit
+    automatisch (Sprint 9.13a hf2-Pattern), Layer-4 sieht den neuen
+    Stand sofort.
+    """
+    # Engine-Tick-Trigger: alte Zone capturen vor dem Tausch (replace
+    # setzt heating_zone_id = NULL).
+    old_for_trigger = await session.get(Device, device_id)
+    old_zone_id = old_for_trigger.heating_zone_id if old_for_trigger else None
+
+    try:
+        result = await replace_device(
+            session,
+            old_device_id=device_id,
+            new_pool_device_id=payload.new_pool_device_id,
+            user_id=user.id,
+        )
+    except DeviceNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PoolDeviceUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except DeviceStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:  # Selbst-Tausch
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await session.commit()
+    await session.refresh(result)
+
+    # Engine-Tick triggern, damit Layer 4 + Engine-Decision-Panel den
+    # neuen Stand ohne 60-s-Beat-Latenz sehen (Pattern aus Sprint HF-9.13a-2).
+    if old_zone_id is not None:
+        zone = await session.get(HeatingZone, old_zone_id)
+        if zone is not None:
+            evaluate_room.delay(zone.room_id)
+            logger.info(
+                "engine_tick_triggered",
+                extra={
+                    "device_id": result.id,
+                    "room_id": zone.room_id,
+                    "trigger": "device_replaced_from_pool",
+                },
+            )
+
+    return result
+
+
+@router.post(
+    "/{device_id}/retire",
+    response_model=DeviceRead,
+    status_code=status.HTTP_200_OK,
+    summary="Vicki stillsetzen (Retire ohne Ersatz)",
+)
+async def retire_device_endpoint(
+    payload: DeviceRetireRequest,
+    device_id: int = DeviceIdPath,
+    user: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> Device:
+    """Stilllegung ohne Ersatz (AE-57 Entscheidung 6).
+
+    Setzt ``retired_at`` + ``retired_reason``. ``heating_zone_id`` bleibt
+    (Historie-Anker fuer sensor_reading-FK). DEVICE_RETIRED-Audit atomar.
+    """
+    old_for_trigger = await session.get(Device, device_id)
+    old_zone_id = old_for_trigger.heating_zone_id if old_for_trigger else None
+
+    try:
+        result = await retire_device(
+            session,
+            device_id=device_id,
+            reason=payload.reason,
+            user_id=user.id,
+        )
+    except DeviceNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DeviceStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await session.commit()
+    await session.refresh(result)
+
+    if old_zone_id is not None:
+        zone = await session.get(HeatingZone, old_zone_id)
+        if zone is not None:
+            evaluate_room.delay(zone.room_id)
+            logger.info(
+                "engine_tick_triggered",
+                extra={
+                    "device_id": result.id,
+                    "room_id": zone.room_id,
+                    "trigger": "device_retired",
+                },
+            )
+
+    return result

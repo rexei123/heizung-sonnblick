@@ -116,6 +116,35 @@ class DeviceAssignZoneRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DeviceReplaceFromPoolRequest(BaseModel):
+    """Request body fuer POST /api/v1/devices/{device_id}/replace/from-pool.
+
+    Sprint 13b.1 (AE-57 Entscheidung 6): atomarer Pool-Reassign-Tausch.
+    """
+
+    new_pool_device_id: int = Field(
+        ..., gt=0, description="Ziel-Pool-Device, das die alte Zone uebernimmt."
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DeviceRetireRequest(BaseModel):
+    """Request body fuer POST /api/v1/devices/{device_id}/retire.
+
+    Sprint 13b.1 (AE-57 Entscheidung 6): Stilllegung ohne Ersatz.
+    """
+
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Freitext-Begruendung (z.B. 'battery_dead', 'hardware_swap').",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DeviceAssignZoneResponse(BaseModel):
     """Response fuer PUT und DELETE - heating_zone_id ist None nach Detach.
 
