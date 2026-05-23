@@ -404,13 +404,17 @@ def test_migration_0015_check_constraint_rejects_invalid(alembic_cfg: Config) ->
             conn.commit()
 
         # device: invalid health_state -> CHECK-Verletzung
+        # §5.56: is_active aus Spaltenliste entfernt (Sprint 13b.1 Migration
+        # 0018 dropt die Spalte; Test laeuft an head, ist_active existiert
+        # dort nicht mehr). Test prueft CHECK auf health_state, is_active
+        # war ungenutzt.
         with engine.connect() as conn, pytest.raises(IntegrityError):
             conn.execute(
                 text(
                     "INSERT INTO device "
-                    "(dev_eui, kind, vendor, model, is_active, health_state) "
+                    "(dev_eui, kind, vendor, model, health_state) "
                     "VALUES ('00000000000015c1', 'thermostat', 'mclimate', "
-                    "'vicki', true, 'unknown')"
+                    "'vicki', 'unknown')"
                 )
             )
             conn.commit()
@@ -615,4 +619,186 @@ def test_migration_0016_fk_set_null_on_zone_delete(alembic_cfg: Config) -> None:
                 conn.execute(text("DELETE FROM room WHERE id = :id"), {"id": room_id})
             if rt_id is not None:
                 conn.execute(text("DELETE FROM room_type WHERE id = :id"), {"id": rt_id})
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0018_atomar_auf_ab_auf(alembic_cfg: Config) -> None:
+    """Migration 0018 muss upgrade -> downgrade -> upgrade ohne Fehler durchlaufen.
+
+    Sprint 13b.1 T1 (AE-57): device-Lifecycle. Catcht:
+    - vergessenes drop_constraint im downgrade (fk_device_replaced_by
+      vor drop_column),
+    - falsche Reihenfolge bei Constraint-Swap (Partial-Unique-Index vor
+      Voll-Unique-Constraint im downgrade),
+    - Backfill-Logic-Fehler im downgrade
+      (``UPDATE ... WHERE retired_at IS NOT NULL`` muss VOR
+      ``drop_column retired_at`` laufen).
+    """
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "0018_device_lifecycle")
+    command.downgrade(alembic_cfg, "0019_drop_manual_setpoint_event")
+    command.upgrade(alembic_cfg, "0018_device_lifecycle")
+    command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0018_downgrade_backfills_is_active(alembic_cfg: Config) -> None:
+    """Downgrade-Backfill setzt is_active=FALSE fuer retired Devices.
+
+    Szenario:
+    1. DB auf head (0018 angewendet, kein is_active mehr).
+    2. Zwei Test-Devices anlegen: eines aktiv (retired_at=NULL), eines
+       retired (retired_at gesetzt).
+    3. Downgrade auf 0019 (is_active wird wiederhergestellt).
+    4. Verify: aktives Device hat is_active=TRUE, retired Device hat
+       is_active=FALSE.
+
+    Schuetzt §5.49-Roundtrip-Pflicht: Backfill-Logic im Downgrade muss
+    inhaltlich korrekt sein, nicht nur Schema-Roundtrip.
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    active_dev_id: int | None = None
+    retired_dev_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            active_dev_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state) "
+                    "VALUES ('00000000aa180001', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent') RETURNING id"
+                )
+            ).scalar_one()
+            retired_dev_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state, "
+                    "retired_at, retired_reason) "
+                    "VALUES ('00000000aa180002', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent', NOW(), 'test_backfill') RETURNING id"
+                )
+            ).scalar_one()
+            conn.commit()
+
+        command.downgrade(alembic_cfg, "0019_drop_manual_setpoint_event")
+
+        with engine.connect() as conn:
+            active_is_active = conn.execute(
+                text("SELECT is_active FROM device WHERE id = :id"),
+                {"id": active_dev_id},
+            ).scalar_one()
+            retired_is_active = conn.execute(
+                text("SELECT is_active FROM device WHERE id = :id"),
+                {"id": retired_dev_id},
+            ).scalar_one()
+
+        assert active_is_active is True, (
+            f"aktives Device sollte is_active=TRUE haben, ist {active_is_active!r}"
+        )
+        assert retired_is_active is False, (
+            f"retired Device sollte is_active=FALSE haben "
+            f"(Downgrade-Backfill), ist {retired_is_active!r}"
+        )
+    finally:
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as conn:
+            if active_dev_id is not None:
+                conn.execute(
+                    text("DELETE FROM device WHERE id = :id"),
+                    {"id": active_dev_id},
+                )
+            if retired_dev_id is not None:
+                conn.execute(
+                    text("DELETE FROM device WHERE id = :id"),
+                    {"id": retired_dev_id},
+                )
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0018_partial_unique_allows_retired_duplicates(
+    alembic_cfg: Config,
+) -> None:
+    """Partial-Unique-Index erlaubt mehrere retired Rows mit gleicher DevEUI.
+
+    Szenario:
+    1. DB auf head (0018 angewendet).
+    2. Aktives Device mit DevEUI X anlegen.
+    3. Device retiren (retired_at setzen).
+    4. Zweites aktives Device mit derselben DevEUI X anlegen.
+    5. Verify: zweites Insert klappt (Partial-Unique-Index greift nur
+       fuer retired_at IS NULL).
+
+    Schuetzt AE-57 Entscheidung 1: DevEUI-Wiederverwendung nach Retire
+    moeglich; Eindeutigkeit nur unter aktiven Rows.
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    dup_dev_eui = "00000000aa180003"
+    first_id: int | None = None
+    second_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            first_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state) "
+                    "VALUES (:eui, 'thermostat', 'mclimate', 'vicki', "
+                    "'silent') RETURNING id"
+                ),
+                {"eui": dup_dev_eui},
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "UPDATE device SET retired_at = NOW(), "
+                    "retired_reason = 'test_partial_unique' WHERE id = :id"
+                ),
+                {"id": first_id},
+            )
+            second_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state) "
+                    "VALUES (:eui, 'thermostat', 'mclimate', 'vicki', "
+                    "'silent') RETURNING id"
+                ),
+                {"eui": dup_dev_eui},
+            ).scalar_one()
+            conn.commit()
+
+        assert first_id is not None
+        assert second_id is not None
+        assert first_id != second_id, (
+            "Zwei Device-Rows mit gleichem DevEUI muessen unterschiedliche "
+            "IDs haben (eine retired, eine aktiv)."
+        )
+    finally:
+        with engine.connect() as conn:
+            if second_id is not None:
+                conn.execute(
+                    text("DELETE FROM device WHERE id = :id"),
+                    {"id": second_id},
+                )
+            if first_id is not None:
+                conn.execute(
+                    text("DELETE FROM device WHERE id = :id"),
+                    {"id": first_id},
+                )
             conn.commit()
