@@ -1475,6 +1475,64 @@ Simulation darf der retired Row im Query-Result NICHT vorkommen.
 **Querverweise:** AE-57 (Master-ADR Device-Lifecycle), AE-58
 (Override-Modell, zone-aware Layer 3), §5.45 (Audit-Action-Konventionen).
 
+### 5.59 freezegun greift nur auf Test-Body, nicht auf Fixture-Body (B-FlakyTime-2, Sprint 13-Hygiene-Followup)
+
+`@freeze_time("...")` als Decorator auf einer Test-Funktion friert
+die Zeit nur waehrend der Test-Body-Ausfuehrung ein. Pytest-Fixtures,
+die der Test als Parameter erhaelt, werden VORHER evaluiert — mit
+Real-Time, NICHT mit Frozen-Time.
+
+**Symptom:** Test passt am Merge-Tag, schlaegt am naechsten Tag fehl.
+Diagnose-Beweis: Fixture berechnet `Occupancy.check_in =
+datetime.now(tz=UTC) - 2h`. Test-Body sieht via `@freeze_time` einen
+Zeitpunkt, der vor `check_in` liegt — `derive_room_status` gibt
+`RoomStatus.reserved` zurueck statt `occupied`, `AE-58`-Gate raised
+`RoomNotOccupiedError`.
+
+**Regel:** Wenn ein Test mit `@freeze_time` arbeitet UND Fixtures
+nutzt, die zeit-abhaengige Werte in die DB schreiben
+(`Occupancy.check_in/check_out`, `SensorReading.created_at`,
+`ManualOverride.expires_at`, etc.), muessen diese Fixtures absolute
+Datumswerte verwenden, NICHT `datetime.now(tz=UTC)`.
+
+**Pattern:**
+
+```python
+# Modul-Top:
+FROZEN_NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+
+@pytest_asyncio.fixture
+async def room_id(db_session):
+    occ = Occupancy(
+        check_in=FROZEN_NOW - timedelta(hours=2),
+        check_out=FROZEN_NOW + timedelta(days=2),
+    )
+    ...
+
+# Test-Body mit gleicher FROZEN_NOW:
+@freeze_time("2026-05-22T12:00:00Z")
+async def test_xy(room_id):
+    ...
+```
+
+**Anti-Pattern:**
+
+```python
+# FALSCH (Fixture nutzt Real-Now)
+@pytest_asyncio.fixture
+async def room_id(db_session):
+    now = datetime.now(tz=UTC)   # <-- Real-Time, schluepft an freeze_time vorbei
+    occ = Occupancy(check_in=now - timedelta(hours=2), ...)
+```
+
+**Naming-Hygiene zusaetzlich:** Suffix-Generierung in Fixtures auf
+`uuid.uuid4().hex[:N]` umstellen, NICHT `datetime.now().strftime(...)`.
+Tageszeit-basierte Suffixe haben Parallel-Test-Race-Potenzial.
+
+**Querverweise:** B-FlakyTime-1 (Hygiene-Sprint `d2d5311`), B-FlakyTime-2
+(Folge-Hot-Fix), §5.58 (Device-Lifecycle-Filter, andere Lesson aus
+demselben Sprint-Block).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

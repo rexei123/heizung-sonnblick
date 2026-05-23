@@ -10,6 +10,7 @@ DB-Tests skippen ohne ``TEST_DATABASE_URL``.
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -27,6 +28,12 @@ from heizung.services import override_service
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
+
+# Frozen-Time fuer Tests mit @freeze_time-Decorator. Fixtures, die
+# Occupancy.check_in/check_out setzen, muessen diese Konstante verwenden
+# statt datetime.now(tz=UTC) - sonst Tag-Drift zwischen Fixture-Realtime
+# und Test-Frozen-Time (B-FlakyTime-2).
+FROZEN_NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest_asyncio.fixture
@@ -56,18 +63,17 @@ async def room_id(db_session: AsyncSession) -> AsyncIterator[int]:
     """
     from heizung.models.occupancy import Occupancy
 
-    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    suffix = uuid.uuid4().hex[:12]
     rt = RoomType(name=f"t9-9-l3-{suffix}")
     db_session.add(rt)
     await db_session.flush()
     room = Room(number=f"t9-9-l3-{suffix}", room_type_id=rt.id)
     db_session.add(room)
     await db_session.flush()
-    now = datetime.now(tz=UTC)
     occ = Occupancy(
         room_id=room.id,
-        check_in=now - timedelta(hours=2),
-        check_out=now + timedelta(days=2),
+        check_in=FROZEN_NOW - timedelta(hours=2),
+        check_out=FROZEN_NOW + timedelta(days=2),
         is_active=True,
     )
     db_session.add(occ)
@@ -85,10 +91,10 @@ async def vacant_room_id(db_session: AsyncSession) -> AsyncIterator[int]:
     Falls eine Insertion noetig ist, via Direct-ORM (``ManualOverride(...)``
     + ``session.add`` + ``session.flush``) statt Service-Aufruf.
 
-    Prefix ``t12-vac-`` ist 8 chars; mit 12-char strftime-Suffix bleibt
+    Prefix ``t12-vac-`` ist 8 chars; mit 12-char uuid-Suffix bleibt
     Room.number bei 20 chars genau am VARCHAR(20)-Limit (§5.49).
     """
-    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    suffix = uuid.uuid4().hex[:12]
     rt = RoomType(name=f"t12-vac-{suffix}")
     db_session.add(rt)
     await db_session.flush()
