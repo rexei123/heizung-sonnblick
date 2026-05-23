@@ -1600,6 +1600,102 @@ einer der zwei Aufrufe ist ``"ok"``, der andere
 AE-57 Entscheidung 6 (Tausch-Audit), STATUS §2au, Service-Pattern in
 ``services/device_service.py:replace_device``.
 
+### 5.61 Live-Verify async-Services brauchen `await session.commit()` explizit (Sprint 13b.1 T7)
+
+Services im Repo committen **bewusst nicht** — die Transaktions-
+Verantwortung liegt beim FastAPI-Endpoint-Handler. Pattern aus
+``replace_device``/``retire_device``:
+
+```python
+# Service mutiert + flush, KEIN commit:
+async def replace_device(session, ...):
+    old.retired_at = now
+    await session.flush()
+    await record_business_action(...)
+    await session.refresh(old)
+    return old   # Caller committed
+```
+
+Beim Live-Verify per ``docker exec deploy-api-1 python -c "..."``
+gibt es **keinen** FastAPI-Handler, der committed. Wer den Service
+nackt aufruft, sieht in der DB **nichts** nach dem ``with``-Block-
+Exit — die Transaktion wird beim Garbage-Collect der Session
+zurueckgerollt.
+
+**Richtig (Live-Verify-Wrapper):**
+
+```python
+import asyncio
+from heizung.db import SessionLocal
+from heizung.services.device_service import replace_device
+
+async def _main():
+    async with SessionLocal() as s:
+        d = await replace_device(s, old_device_id=3, new_pool_device_id=5)
+        await s.commit()             # <-- expliziter Commit
+        print(f"retired_at={d.retired_at}")
+
+asyncio.run(_main())
+```
+
+**Regel:** Bei jedem direkten Service-Aufruf ausserhalb des FastAPI-
+Stacks (Live-Verify, CLI-Skripts, manuelle Datenmigrationen) MUSS
+``await session.commit()`` explizit vor dem ``async with``-Exit
+stehen. Sonst Rollback ohne Fehlermeldung — typischer
+"funktioniert lokal in den Pytest-Tests, schreibt aber auf
+heizung-test nichts"-Bug.
+
+Sprint-13a-Scripts (``pair_devices``) committen bewusst via
+``await session.commit()`` am Ende ihrer ``_cmd_import``-Funktionen.
+Sprint-13b.1-Services nicht — der Endpoint committed. Live-Verify-
+Doku (RUNBOOK §10j, T7-Block) muss das Wrapper-Pattern explizit
+zeigen, sonst replizieren Tester den Bug.
+
+**Querverweise:** §5.59 (Race-Schutz UPDATE-WHERE), STATUS §2au
+T7-Schritt-6/7/8, ``services/device_service.py``-Docstrings
+("Caller committed die Transaktion").
+
+### 5.62 DB-Schema gegen Brief-Annahme verifizieren bevor Tests + Doku festgelegt werden (Sprint 13b.1 T7)
+
+Live-Verify-Befund 2026-05-23: erste Service-Tests in T5 nutzten
+zunaechst ``audit["details"]`` zum Audit-Row-Verify, obwohl die
+``business_audit``-Tabelle aus Sprint 9.17 (AE-50) die Spalten
+``old_value JSONB`` + ``new_value JSONB`` hat, **nicht** ``details``.
+Die Sprint-13b.1-Brief-Skizze (T5 + RUNBOOK §10j curl-Beispiel)
+hatte ``details JSONB`` als Annahme — falsch. Auffallen kann das
+nur im Live-Verify, wenn Tests auf Service-Code (nicht Schema)
+zielen und der Test-Assert auf ``audit.new_value["new_device_id"]``
+zugreift.
+
+**Regel:** Vor dem Schreiben von Tests/RUNBOOK-Doku ueber bestehende
+DB-Tabellen-Spalten:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "\d <table_name>"
+```
+
+oder lokal:
+
+```bash
+docker exec heizung-test-db psql -U heizung -d heizung_test -c "\d <table_name>"
+```
+
+Spalten-Namen + Typen verifizieren. Wenn die Sprint-Brief-Skizze
+einen anderen Namen verwendet als das echte Schema, ist die Skizze
+falsch — nicht das Schema. Phase-0-Quellcheck-Pflicht aus §5.43
+(Brief-Annahmen via grep belegen) gilt analog fuer DB-Tabellen.
+
+**Folge-Pflicht:** Bei Live-Verify-Befund "Doku-Sprache passt nicht
+zu Schema" ist die Doku zu korrigieren (RUNBOOK + ADR + STATUS),
+**nicht** das Schema. Sprint-13b.1 T7-Followup-Doku-Commit
+korrigiert das in einem chore-Branch + PR.
+
+**Querverweise:** §5.43 (Brief-Annahmen via grep belegen — analog
+fuer DB-Schemas), §5.20 (aspirative Kommentare als Doku-Drift),
+``services/business_audit_service.py`` (echte Schema-Source),
+``backend/alembic/versions/0014_auth_and_business_audit.py``
+(Migration mit Schema-Definition).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

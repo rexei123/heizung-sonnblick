@@ -2112,7 +2112,7 @@ Audit NICHT zurueck.
 
 ---
 
-## 2au. Sprint 13b.1 Backend Device-Lifecycle + Pool-Reassign-Tausch (2026-05-23, abgeschlossen Code)
+## 2au. Sprint 13b.1 Backend Device-Lifecycle + Pool-Reassign-Tausch (2026-05-23, abgeschlossen inkl. Live-Verify)
 
 **Ziel:** Implementation der AE-57-Architektur im Backend: Migration
 0018 (`retired_at`/`retired_reason`/`replaced_by_device_id` +
@@ -2186,27 +2186,72 @@ Deletions. 5 neue Test-Files (3 Migration-Roundtrip-Tests im
 existierenden File, 6 Helper-Tests, 6 §L-Tests, 13 Service-Tests,
 12 API-Tests).
 
-**T7 Live-Verify-Befund (Platzhalter, wird nach heizung-test-Run
-ergaenzt):**
+**T7 Live-Verify auf heizung-test (2026-05-23, abgeschlossen):**
 
-- Schritt 0-2 (SSH + Auto-Pull + alembic current): `<TODO>`
-- Schritt 3 (Schema-Verify `\d device`): `<TODO>`
-- Schritt 4 (Pre-State + pg_dump): `<TODO>`
-- Schritt 6 (`get_pool_devices`-Service-Call): `<TODO>`
-- Schritt 7 (`retire_device` + Audit-Verify): `<TODO>`
-- Schritt 8 (`replace_device` + Audit-Verify): `<TODO>`
-- Schritt 9 (Datenkonsistenz alle 4 Vickis): `<TODO>`
-- Schritt 10 (Race-Test mit konkurrierendem Replace): `<TODO>`
-- Schritt 11 (Engine-Tick post-replace, kein retired in Reads):
-  `<TODO>`
-- Schritt 12 (curl-Smoke /devices/pool 401 + 200): `<TODO>`
-- Schritt 13 (Cleanup: device-State zurueckgerollt, Audit-Rows
-  bleiben): `<TODO>`
-- Schritt 14 (Final-Verify Engine-Tick nach Cleanup): `<TODO>`
+- **Schritt 0-2 (Deploy + Migration):** Auto-Pull-Timer hat Squash-
+  Commit `55a91fa` gezogen, `alembic current` bestaetigt
+  `0018_device_lifecycle (head)`. Kein manueller Pull-Trigger noetig.
+- **Schritt 3 (Schema-Verify):** `\d device` zeigt drei neue Spalten
+  (`retired_at TIMESTAMPTZ`, `retired_reason VARCHAR(255)`,
+  `replaced_by_device_id INTEGER`), KEIN `is_active`. Partial-
+  Unique-Index `ix_device_dev_eui_active_unique` mit `WHERE
+  (retired_at IS NULL)` aktiv. FK `fk_device_replaced_by` self-ref
+  mit ON DELETE SET NULL.
+- **Schritt 4 (Pre-State + Backup):** 4 Vickis am Hotel — `id=2`
+  (Vicki-001, `heating_zone_id=91`), `id=3` (Vicki-002, hz=3),
+  `id=4` (Vicki-003, hz=5), `id=5` (Vicki-004, hz=7). Alle
+  `retired_at IS NULL`. Backups unter
+  `/opt/heizung-sonnblick/backups/sprint13b1-{device,audit}-
+  20260523-095006.sql` (7-Tage-Rollback-Reserve).
+- **Schritt 6 (`get_pool_devices`):** Service-Call mit
+  `asyncio.run()` + `async with SessionLocal()` Wrapper. Pool-
+  Simulation auf `id=5` lieferte korrekt `pool_count=1 ids=[5]`.
+- **Schritt 7 (`retire_device`):** `retire_device(id=2,
+  reason="sprint-13b1-live-verify")` -> `retired_at` gesetzt,
+  `DEVICE_RETIRED`-BusinessAudit-Row mit `new_value` JSONB
+  (`reason`, `retired_at_iso`, `heating_zone_id=91`).
+- **Schritt 8 (`replace_device`):** `replace_device(old=3,
+  new_pool=5)` -> `id=3` wird `retired_at` + `replaced_by_id=5` +
+  `heating_zone_id=NULL`, `id=5` uebernimmt `heating_zone_id=3` aus
+  alter Zone. `DEVICE_REPLACED`-Audit mit `new_value` JSONB
+  (`new_device_id=5`, `heating_zone_id=3`, `replaced_at_iso`).
+- **Schritt 9 (Datenkonsistenz):** alle 4 Vickis im erwarteten
+  State, Cross-Reference Alt -> Neu via `replaced_by_device_id`
+  korrekt.
+- **Schritt 10 (Race-Test):** zweiter `replace_device(old=2,
+  new_pool=5)` mit bereits retired `id=2` -> `DeviceStateError`:
+  `"old_device_id=2 ist bereits retired ... Re-Replace nicht
+  erlaubt"`. Gate-Stack greift sauber.
+- **Schritt 11 (Engine-Tick post-replace):** `evaluate_room` fuer
+  die aktive Zone 3 mit Vicki-003-Uplink wurde geschedult (Pattern
+  HF-9.13a-2). Fuer retired `id=3` ein graceful skip + Warning
+  "device_id=3 ohne heating_zone -> kein Re-Eval" — Layer 4 / Engine
+  sehen retired Devices nicht mehr. Keine ControlCommand-Rows fuer
+  retired.
+- **Schritt 12 (API-Smoke):** `GET /api/v1/devices/pool` ohne
+  Auth -> 401 (Auth-Wall steht, AUTH_ENABLED=true greift).
+- **Schritt 13 (Cleanup):** alle 4 Vickis auf Pre-Test-State
+  zurueckgerollt (drei separate UPDATEs nach Heredoc-Drift in
+  PowerShell-SSH-Paste, siehe §5.62 Lesson). BusinessAudit-Rows
+  persistent als Audit-Trail (kein Cleanup-Delete — Sprint 13b.1
+  T7-Run dokumentiert).
+- **Schritt 14 (Final-Verify):** Engine-Tick laeuft normal, alle 4
+  Vickis wieder in Reads sichtbar.
 
-Vollstaendiges Verify-Script in der PR-Beschreibung (Sprint
-13b.1-T7-Block) + Backup-Pfad
-`/opt/heizung-sonnblick/backups/sprint13b1-device-<TS>.sql`.
+Live-Verify-Lessons (s.u. CLAUDE.md §5.61 + §5.62):
+
+- Live-Verify-Service-Wrapper braucht `await session.commit()`
+  explizit (Services committen bewusst nicht — FastAPI-Endpoint-
+  Pattern).
+- BusinessAudit-Schema heisst `new_value` JSONB + `old_value` JSONB
+  (nicht `details`). DB-Schema gegen Brief-Annahme verifizieren
+  bevor Tests + Doku festgelegt werden.
+- `pg_dump --data-only` auf `device`-Tabelle warnt wegen
+  zirkulaerer FK `fk_device_replaced_by`. Restore via
+  `pg_restore --disable-triggers` oder Full-Dump (RUNBOOK §10j
+  ergaenzt).
+- PowerShell-Paste schluckt Heredoc + sleep-Pausen. SSH-Befehle als
+  separate Einzelzeilen einklopfen, kein `<<SQL...SQL`-Heredoc.
 
 **Out of Scope (Sprint 13b.2):**
 
@@ -2243,7 +2288,7 @@ Vollstaendiges Verify-Script in der PR-Beschreibung (Sprint
 **Querverweise:** AE-57 (Master-ADR), Phase-0-Bericht
 `docs/features/2026-05-21-sprint13-phase0-quellcheck.md`,
 Phase-0-Update `docs/features/2026-05-23-sprint13b-phase0-update.md`,
-RUNBOOK §10j, CLAUDE.md §5.58 + §5.60, STATUS §2at.
+RUNBOOK §10j, CLAUDE.md §5.58 + §5.60 + §5.61 + §5.62, STATUS §2at.
 
 ---
 
