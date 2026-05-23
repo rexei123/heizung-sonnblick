@@ -663,7 +663,6 @@ async def _seed_room_zone_device_reading(
             vendor=DeviceVendor.MCLIMATE,
             model="vicki",
             heating_zone_id=zone.id,
-            is_active=True,
             health_state=device_health_state,
         )
         session.add(device)
