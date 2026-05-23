@@ -1056,12 +1056,12 @@ Schloss-Symbol-Spalte in `frontend/src/app/zimmer/page.tsx` (RoomTable) zwischen
 # SPRINT 13 — Pre-Pairing-Skript + Device-Tausch-Endpoint (Phase 1, Sprint-13-light-Cut 2026-05-21)
 
 **Priorität:** 🟠 (Vorbedingung Phase 4b Pre-Pairing September)
-**Geschätzte Dauer:** 13a ~4-6 h + 13b ~5-8 h (zusammen ~1-2 Wochen)
+**Geschätzte Dauer:** 13a ~4-6 h ✅ + 13b ~5-8 h (Sprint 13a abgeschlossen 2026-05-23)
 **Autonomiestufe:** 2
 **Voraussetzung:** Sprint 12c.a abgeschlossen + Hygiene-Mini-Sprint
-abgeschlossen (Commits `9e17455`..`9a949f8` auf `chore/sprint13-hygiene`,
-PR-Merge steht noch aus). AE-57 verfuegbar.
-**Tag nach Abschluss:** `v0.1.18-pairing-wizard` (Sprint 13a + 13b vereint)
+abgeschlossen (gemerged via PR #171). AE-57 verfuegbar.
+**Tag fuer 13a:** `v0.1.18a-pre-pairing-skript` (T9.12, nach PR-Merge)
+**Tag fuer 13b (geplant):** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag)
 
 ## Sprint-13-Cut (verbindlich ab 2026-05-21)
 
@@ -1079,45 +1079,65 @@ rechtfertigt keine Wizard-UI; CLI-Skript ist robuster + reproduzierbar
 + versionierbar (script lebt im Repo, Vendor-CSV im Office-Laptop-
 Filesystem).
 
-## Sprint 13a — Pre-Pairing-Skript (Phase 4b-Vorbereitung)
+## Sprint 13a — Pre-Pairing-Skript (Phase 4b-Vorbereitung) ✅ ABGESCHLOSSEN 2026-05-23
 
-**Geschätzte Dauer:** ~4-6 h
-**Tag nach 13a:** `v0.1.18a-pre-pairing-script`
+**Tatsaechliche Dauer:** ~4-6 h reine Code-Arbeit (T2-T7), zzgl. T8
+Live-Verify + T9 Doku am 2026-05-23.
+**Tag (T9.12):** `v0.1.18a-pre-pairing-skript`
+**Branch:** `feat/sprint13a-pre-pairing-skript` (8 Commits auf
+develop @ `8f3554b`).
 
-### Ziel
+### Ergebnis (Abweichungen von Skizze)
 
-Python-CLI-Skript `backend/scripts/pair_devices.py` mit Subcommands
-`import-csv`, `test-device`, `retire-device`. Aufruf via
-`docker exec deploy-api-1 python scripts/pair_devices.py …` auf
-heizung-test/heizung-main. Pattern analog
-`scripts/activate_open_window_detection.py` (Phase-0 §G).
+- **Skript-Pfad:** `backend/src/heizung/scripts/pair_devices.py`
+  (im neuen Sub-Package `heizung.scripts/`), nicht
+  `backend/scripts/`. Aufruf via `python -m
+  heizung.scripts.pair_devices …`. Bestehendes
+  `backend/scripts/activate_open_window_detection.py` bleibt am
+  alten Ort — Migration in Backlog B-Sprint13a-1.
+- **Subcommands:** `validate`, `import` (mit `--dry-run`), `test`,
+  `list-pool`. `retire-device` verworfen — gehoert thematisch zu
+  Sprint 13b (Tausch-Endpoint), wo es als Service-Helper unter dem
+  REST-Endpoint sitzt.
+- **`PairingCsvRow`** liegt unter
+  `heizung.scripts.pairing.csv_row`, nicht
+  `heizung.services.pairing_csv` — Service-Layer haette suggeriert,
+  das Modell sei auch fuer den Engine-Pfad relevant; das ist es
+  nicht.
+- **Reserve-Pool-Konzept** kam in 13a dazu (Phase-0-Befund Sprint
+  12c.a Live-Test 2026-05-21): drei Lifecycle-Zustaende
+  (`pool`/`paired`/`retired`) abgeleitet aus `heating_zone_id` +
+  `retired_at` (Sprint 13b). Pool-Rows in CSV mit leeren ersten
+  vier Spalten.
+- **Eingangstest:** auf 6 Schritte erweitert (RUNBOOK §10h.1, incl.
+  non-blocking Schritt 0 als OW-Re-Send), nicht 4 wie Skizze.
 
-### Tasks (Skizze)
+### Tasks Ist (Commits siehe STATUS §2at)
 
-- T1: CSV-Format dokumentieren + RUNBOOK §10h.2 fuellen (heute TBD-Stub).
-- T2: `backend/scripts/pair_devices.py` Skelett mit argparse-Subcommands.
-- T3: Pydantic-Row-Modell `PairingCsvRow` + Parser-Helper
-  in `backend/src/heizung/services/pairing_csv.py` (Phase-0 §F).
-- T4: Service-Helper `pair_device_from_row` (idempotent, BusinessAudit
-  `DEVICE_PAIRED`) + `retire_device` (BusinessAudit `DEVICE_RETIRED`).
-- T5: Eingangstest-Logik:
-  `set_open_window_detection(enabled=True, 10, Decimal("1.5"))` →
-  `send_setpoint(25)` → sleep 60 s → `send_setpoint(10)` → sleep 60 s.
-  Audit `DEVICE_PAIRED.new_value.eingangstest_ok=True`.
-- T6: Tests: `tests/test_pairing_csv.py` (Hex-Pattern, Duplikate,
-  ungueltige Zone), `tests/test_pair_devices_script.py` (Smoke gegen
-  Test-DB).
-- T7: Doku — STATUS §2at, SPRINT-PLAN-Update, RUNBOOK §10h.2,
-  ggf. CLAUDE.md-Lesson.
+- T1 — Master-Inventar-Format-Doku `docs/inventar/README.md` (XLSX
+  selbst NICHT im Repo, S4/S5).
+- T2 — `PairingCsvRow` Pydantic-Modell + Pool-Konsistenz-Validator.
+- T3 — CSV-Parser + `validate_against_db` + DevEUI-Duplikat-Check.
+- T4 — Pairing-Service mit Gate-Stack + Savepoint-Isolation +
+  `DEVICE_PAIRED`-Audit.
+- T5 — Eingangstest-Modul (RUNBOOK §10h.1, 6 Schritte).
+- T6 — CLI-Entrypoint mit 4 Subcommands + Auto-Detect.
+- T7 — RUNBOOK §10h.2 Pre-Pairing-Skript-Anwendung.
+- T8 — Live-Verify auf lokaler heizung-test-DB (Pool-Smoke).
+- T9 — STATUS + SPRINT-PLAN + Backlog + PR + Tag.
 
-### Out of Scope 13a
+### Out of Scope 13a (in 13b)
 
 - Migration 0018 (kommt in 13b)
 - Frontend-Dialog (kommt in 13b)
 - Engine-Read-Stellen-Umbau (kommt in 13b)
+- `retire-device`-Subcommand (verworfen, kommt als
+  POST-Endpoint in 13b)
 
-## Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018
+## Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018 (aktiver Folge-Sprint nach 13a)
 
+**Status:** in Vorbereitung. Strategie-Chat erstellt Brief auf Basis
+dieser Skizze + neuer Backlog-Punkte aus Sprint 13a (B-Sprint13a-5/-6/-8).
 **Geschätzte Dauer:** ~3-5 h Backend + 2-3 h Frontend
 **Tag nach 13b:** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag)
 
@@ -1127,18 +1147,22 @@ Implementation der AE-57-Architektur: Device-Lifecycle-Felder
 (`retired_at`, `retired_reason`, `replaced_by_device_id`),
 `is_active`-Drop, zentraler Helper `get_active_devices_for_zone()`,
 Umstellung der 5 Pflicht-Filter-Stellen aus Phase-0 §L, neuer Endpoint
-`POST /api/v1/devices/{id}/retire`, Frontend-Dialog „Vicki ersetzen".
+`POST /api/v1/devices/{id}/retire`, Frontend-Dialog „Vicki ersetzen"
+inkl. Pool-Selector-UI fuer schnellen Reserve-Vicki-Tausch.
 
-### Tasks (Skizze)
+### Tasks (verbindlicher Cut)
 
 - T1: Migration 0018 (`ADD COLUMN retired_at`, `retired_reason`,
   `replaced_by_device_id`, Partial-Unique-Index `dev_eui WHERE
   retired_at IS NULL`, `DROP COLUMN is_active`,
-  `drop_constraint("uq_device_dev_eui")`). Roundtrip-Test in
+  `drop_constraint("uq_device_dev_eui")`).
+  **Zusatz aus B-Sprint13a-5:** `pairing_status`-Feld
+  (Default `active`) als Trigger fuer Downlink-Failure-Recovery
+  (Variante-B). Roundtrip-Test in
   `tests/test_migrations_roundtrip.py`.
 - T2: Helper `get_active_devices_for_zone(session, zone_id)` in
   `services/device_repository.py` neu. Filtert auf
-  `retired_at IS NULL`.
+  `retired_at IS NULL` UND `pairing_status='active'`.
 - T3: Umstellung der 5 Read-Stellen aus Phase-0 §L
   (`tasks/engine_tasks._get_devices_for_zone`,
   `rules/engine.layer_device_detached`,
@@ -1149,12 +1173,21 @@ Umstellung der 5 Pflicht-Filter-Stellen aus Phase-0 §L, neuer Endpoint
   (`require_admin`, atomare Transaktion, BusinessAudit `DEVICE_RETIRED`
   und/oder `DEVICE_REPLACED`).
 - T5: `api/v1/devices.py` List-View: Query-Param `include_retired=False`
-  (Default), `is_active`-Param entfernt.
+  (Default), `is_active`-Param entfernt. Plus `list-all`-Pendant am
+  CLI (B-Sprint13a-6) als sortierbare Frontend-Tabelle mit Zimmer-
+  Zuordnung.
 - T6: Frontend-Dialog im Geräte-Detail: „Vicki ersetzen" → DevEUI-
   Eingabe + Begründung → `POST /retire`-Aufruf.
-- T7: Playwright-E2E: Tausch-Flow (Retire → neuer Vicki anlegen →
+- T6.1: Pool-Selector-UI — Hotelier waehlt aus existierenden Pool-
+  Devices (`heating_zone_id IS NULL`) einen Tausch-Kandidaten,
+  statt manueller DevEUI-Eingabe. Pflicht-UI fuer den schnellen
+  Tausch-Flow (Sprint 17 vorbereiten).
+- T7: Playwright-E2E: Tausch-Flow (Retire → neuer Vicki aus Pool →
   Zone-Re-Assign → Engine-Tick verifiziert).
-- T8: Doku — STATUS §2au, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
+- T8: CLI-Summary-Wording-Praezisierung (B-Sprint13a-8) und Dry-Run-
+  Schluss-Message-Fix (B-Sprint13a-9) mit-erledigen, wenn der
+  Tausch-Endpoint die gleiche Result-Wrapping-Logik nutzt.
+- T9: Doku — STATUS §2au, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
   („is_active-Uebergang abgeschlossen"), Tag.
 
 ### Out of Scope 13b

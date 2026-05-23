@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-22. Sprints 0-12 + 12a + 12b + 12c + 12c.a abgeschlossen, alle Tags gesetzt, Live-Verify auf heizung-test erfolgreich (zuletzt v0.1.17d am 2026-05-21). Hygiene-Mini-Sprint vor Sprint 13 am 2026-05-22 abgeschlossen (kein Tag, siehe §2as).
+**Stand:** 2026-05-23. Sprints 0-12 + 12a + 12b + 12c + 12c.a + Hygiene-Mini-Sprint + 13a abgeschlossen. Sprint 13a Tag `v0.1.18a-pre-pairing-skript` wird in T9.12 nach PR-Merge gesetzt; vorletzter Tag `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, gemerged 2026-05-20, Live-Verify auf heizung-test 2026-05-21).
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-22
-**Letzter Tag (gemerged):** `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21). Kein neuer Tag im Hygiene-Mini-Sprint.
-**Aktueller Sprint:** Hygiene-Mini-Sprint vor Sprint 13 abgeschlossen 2026-05-22, kein Tag, 7 Commits auf `chore/sprint13-hygiene` (PR-Erstellung steht noch aus). Naechster Sprint: Sprint 13a Pre-Pairing-Skript (Brief folgt nach PR-Merge der Hygiene-Commits). Vorgaenger: Sprint 12c.a (Zimmer-Liste-Block-Indikator, Frontend-only) abgeschlossen 2026-05-20, Tag `v0.1.17c-room-override-blocked`-Familie erweitert um `v0.1.17d-room-block-list-indicator` (PR #168, Squash-Commit `81ed3dc`), Live-Verify auf heizung-test erfolgreich 2026-05-21.
+**Stichtag:** 2026-05-23
+**Letzter Tag (geplant nach Merge):** `v0.1.18a-pre-pairing-skript` (Sprint 13a, 8 Commits auf `feat/sprint13a-pre-pairing-skript`, PR-Erstellung steht in T9.9 aus, Tag wird in T9.12 gesetzt). Vorletzter Tag (gemerged): `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21). Hygiene-Mini-Sprint zwischen 12c.a und 13a gemerged via PR #171, kein eigener Tag (siehe §2as).
+**Aktueller Sprint:** Sprint 13a Pre-Pairing-Skript abgeschlossen 2026-05-23 (siehe §2at). Naechster Sprint: Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018 + Engine-Read-Stellen-Umbau aus AE-57 (Brief folgt).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -2000,6 +2000,118 @@ Cowork-Sicht-Verify (Hotelier-gefuehrt):
 
 ---
 
+## 2at. Sprint 13a Pre-Pairing-Skript (2026-05-22/23, abgeschlossen)
+
+**Ziel:** Backend-CLI fuer das Einmal-Pairing aller 110 Vickis im
+September 2026 (105 verbaut + 5 Reserve-Pool). Kein Wizard, kein
+Frontend — fokussiertes Mitarbeiter-Werkzeug am Office-Laptop.
+
+**Branch:** `feat/sprint13a-pre-pairing-skript`, 8 Commits auf develop @ `8f3554b` (PR-Erstellung steht in T9.9 aus).
+
+**Tag (geplant nach Merge):** `v0.1.18a-pre-pairing-skript`
+
+**Tasks erledigt:**
+
+- **T1 (~15 min, Commit `d4f7681`):** Master-Inventar-Format-Doku als
+  `docs/inventar/README.md`. XLSX-Datei selbst NICHT im Repo (S4/S5 —
+  Office-Dateien sind `.gitignore`-blockiert wegen AppKey-Hijack-
+  Risiko). Hotelier pflegt XLSX am Office-Laptop, Repo dokumentiert
+  nur das Format. 45 Zimmer / 105 verbaute + 5 Reserve-Geraete.
+- **T2 (~30 min, Commit `e46cb8e`):** `PairingCsvRow` Pydantic-Modell
+  mit Pool-Konsistenz-Validator. `is_pool_device` als
+  `computed_field`.
+- **T3 (~1 h, Commit `2818eac`):** CSV-Parser mit `utf-8-sig` +
+  Sniffer-Auto-Detect, `validate_against_db`,
+  `check_dev_eui_duplicates`.
+- **T4 (~1.5 h, Commit `ade2c07`):** Pairing-Service mit Gate-Stack
+  (Existenz-Check -> Zone-Lookup -> Device-Row -> Audit -> Downlink),
+  Pro-Row-Savepoint-Isolation, `DEVICE_PAIRED`-Audit.
+- **T5 (~1 h, Commit `066c860`):** Eingangstest-Modul mit RUNBOOK-
+  §10h.1-konformen 6 Schritten (inkl. non-blocking Schritt 0 als
+  OW-Re-Send).
+- **T6 (~45 min, Commit `cb657e0`):** CLI-Entrypoint mit 4
+  Subcommands (`validate` / `import` / `test` / `list-pool`).
+  `test`-Subcommand mit Auto-Detect `device.id` ODER `dev_eui`.
+- **T7 (Commit `cc27388`):** RUNBOOK §10h.2 Pre-Pairing-Skript-
+  Anwendung (Workflow A-F + Reserve-Pool + Stoerungsfaelle).
+- **T9 (dieser Doku-Commit):** STATUS §2at + STATUS §1 + STATUS §6.2
+  Backlog + SPRINT-PLAN Sprint-13-Cut.
+
+**Backend-Tests:** 240 passed, 239 skipped (DB-Tests, kein
+`TEST_DATABASE_URL` lokal — CI deckt sie ab). 48 neue Test-Cases in
+5 neuen Test-Files (`test_pair_devices_cli.py`,
+`test_pairing_csv_parser.py`, `test_pairing_csv_row.py`,
+`test_pairing_inbound_test.py`, `test_pairing_service.py`).
+
+**Diff-Summe (T2-T7):** 14 files geaendert, +3336 / −4. 8 neue
+Backend-Files (`heizung.scripts/__init__.py`, `pair_devices.py`, plus
+6 Files unter `heizung.scripts.pairing/`), 5 neue Test-Files,
+RUNBOOK §10h.2 ergaenzt.
+
+**T8 Live-Verify (2026-05-23):** Dry-Run + echter Lauf gegen lokale
+heizung-test-DB (Container `heizung-test-db`, RUNBOOK §10i) mit
+unreachable MQTT-Host (`MQTT_HOST=localhost`, `MQTT_PORT=1`). Drei
+Pool-Devices durchlaufen Pairing-Pfad sauber: validate Exit 0,
+dry-run [FAIL]-DOWNLINK_FAILED mit Rollback (DB-Count 0 nach Lauf),
+echter Lauf [FAIL]-DOWNLINK_FAILED ohne Rollback (3 Device-Rows + 3
+`DEVICE_PAIRED`-Audit-Rows persistent in DB, `list-pool` zeigt die 3
+Devices). T4-Design bestaetigt: `status=error` rollt Device-Row +
+Audit NICHT zurueck.
+
+**Out of Scope (Sprint 13b):**
+
+- Tausch-Endpoint + Frontend-Dialog
+- Migration 0018 (`retired_at` + `is_active`-Drop)
+- Helper `get_active_devices_for_zone()`
+- Umstellung der 5 Pflicht-Filter-Stellen (Phase-0 §L)
+
+**Out of Scope (Sprint 17):**
+
+- Live-Lauf gegen heizung-main im September
+- Echte Eingangstest-Saekula mit 110 Vickis
+- ChirpStack-Bulk-Import durch Hotelier (manuell vor September)
+
+**Neue Backlog-Punkte (in §6.2 unten erfasst):**
+
+- **B-Sprint13a-1** 🟢: `activate_open_window_detection.py` von
+  `backend/scripts/` ins neue Sub-Package `heizung.scripts/`
+  migrieren (Konsistenz, nicht-dringend).
+- **B-Sprint13a-2** 🟢: Pydantic-Feld `zimmer_nummer` von
+  `int | None` auf `str | None` aendern (entspricht DB-`VARCHAR(20)`,
+  erlaubt Zimmer wie `"DG"`). Vor Sprint 17 klaeren.
+- **B-Sprint13a-3** 🟢: Test-Case fuer Float-String-Coercion in CSV
+  (`"52.0"` -> 52).
+- **B-Sprint13a-4** ✅ erledigt T7: RUNBOOK-Hinweis zu `app_key` als
+  Cross-Reference-Only dokumentiert.
+- **B-Sprint13a-5** 🟡: Migration 0018 in Sprint 13b fuehrt
+  `pairing_status`-Feld ein (Default `active`), um Variante-B fuer
+  Downlink-Failure-Recovery nachzureichen.
+- **B-Sprint13a-6** 🟢: `list-all`-Subcommand mit Zimmer-Zuordnung —
+  verschoben in Sprint 13b als sortierbare Frontend-Tabelle.
+- **B-Sprint13a-7** 🟢: RUNBOOK §10h.2 Stoerungsfall-Eintrag fuer
+  `resend_open_window-failed`: explizite Anleitung was der Hotelier
+  tun soll (manuell re-senden oder ignorieren weil naechster
+  Eingangstest erneut sendet).
+- **B-Sprint13a-8** 🟡: CLI-Summary-Wording praezisieren — `[FAIL]`
+  bei `DOWNLINK_FAILED` ist semantisch korrekt aber irrefuehrend
+  wenn Device in DB existiert. Praezise Formulierung: `Resultat: 0
+  paired, 0 skipped, 3 errors (3 Device-Rows in DB, OW-Downlink fuer
+  alle 3 fehlgeschlagen)`.
+- **B-Sprint13a-9** 🟢: Dry-Run-Schluss-Message umformulieren —
+  `ChirpStack-Downlinks wurden trotzdem gesendet` ist im
+  unreachable-Host-Pfad nicht korrekt. Praeziser:
+  `ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben)`.
+- **B-Sprint13a-10** 🟢: Falls in Sprint 16/17 sich herausstellt,
+  dass das Master-Inventar verbindlich versionierbar sein muss
+  (z.B. fuer Bootstrap-Reproduzierbarkeit): Format auf Pure-CSV
+  oder Markdown-Tabelle umstellen (keine Secrets-Vektoren), dann
+  ist `.gitignore`-Ausnahme vertretbar.
+
+**Querverweise:** AE-32, AE-48, AE-57, AE-58, RUNBOOK §10h.1 +
+§10h.2, STATUS §2as, `docs/inventar/README.md`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -2217,6 +2329,16 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-11prep-6 🟢 (nach Heizperiode) | **Drift-Erkennung statistisch** als KI-Vorbereitung. Aufbau eines Modells für Abweichungen einzelner Vickis von Zone-Geschwistern über Tage/Wochen. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §7.3 + §13 (bewusst nicht in MVP). |
 | B-11prep-7 🟢 (nach Heizperiode) | **Backend-Plausi für Fenster (BR-16).** Heute reine Vicki-Flag-Logik (`vicki.openWindow`-Uplink, AE-47). Backend-Eigenlogik (Temperatursturz-Heuristik o.ä.) als Ergänzung evaluieren, sobald Heizperiode-Daten zeigen, ob Vicki-Flag allein reicht. STRATEGIE-THERMOSTAT-ZUORDNUNG.md §5.1. |
 | B-11prep-8 🟢 (in Sprint 14b) | **arc42-Konsolidierung der Architektur-Doku.** Migration als Sprint 14b geplant (zwischen Sprint 14 UI-Erweiterungen und Sprint 15 heizung-main-Migration). Bestehende Inhalte (STRATEGIE.md, ARCHITEKTUR-REFRESH-2026-05-07, STRATEGIE-REFRESH-2026-05-15, ARCHITEKTUR-ENTSCHEIDUNGEN.md, CLAUDE.md §5 Lessons) werden auf arc42-12-Kapitel-Skelett gemappt, nicht neu geschrieben. Source-of-Truth-Hierarchie in CLAUDE.md §0.2 wird dann strukturell und kann entfallen. MkDocs/Renderer-Entscheidung bewusst aufgeschoben (reines Markdown reicht für Solo-Betrieb, Renderer erst bei externer Übergabe geprüft). Diskussions-Grundlage: Strategie-Chat 2026-05-15. |
+| B-Sprint13a-1 🟢 | **`activate_open_window_detection.py` ins neue Sub-Package `heizung.scripts/` migrieren.** Aktuell liegt das Skript in `backend/scripts/`, das neue Pairing-Skript in `backend/src/heizung/scripts/`. Konsistenz-Migration nicht-dringend; vor Sprint 17 erledigen, damit der Hotelier nur einen Aufruf-Pfad lernt. |
+| B-Sprint13a-2 🟢 | **Pydantic-Feld `zimmer_nummer` von `int \| None` auf `str \| None`.** Entspricht DB-`VARCHAR(20)`, erlaubt Zimmer wie `"DG"`, `"101A"`. Heute crasht der Parser bei nicht-numerischen Zimmern. Vor Sprint 17 klaeren. |
+| B-Sprint13a-3 🟢 | **Test-Case fuer Float-String-Coercion in Pairing-CSV.** Excel-Exporte schreiben `"52.0"` statt `"52"` — `PairingCsvRow.zimmer_nummer` muss das tolerieren (Coerce zu `52`) oder klar abweisen. Heute Verhalten ungetestet. |
+| B-Sprint13a-4 ✅ | **RUNBOOK-Hinweis zu `app_key` als Cross-Reference-Only dokumentiert.** Erledigt in T7 (Commit `cc27388`). |
+| B-Sprint13a-5 🟡 | **Migration 0018 (Sprint 13b) fuehrt `pairing_status`-Feld ein** (Default `active`), um Variante-B fuer Downlink-Failure-Recovery nachzureichen. Heute: Pairing-Service legt Device + Audit an, OW-Downlink failt, `status=error` propagiert — aber kein Persistenz-Marker am Device, dass die OW-Konfig noch nachzuholen ist. Mit `pairing_status='pending_ow_resend'` wird das explizit. |
+| B-Sprint13a-6 🟢 | **`list-all`-Subcommand mit Zimmer-Zuordnung.** Verschoben in Sprint 13b als sortierbare Frontend-Tabelle. CLI-Variante zur Eigen-Verifikation nice-to-have, nicht-dringend. |
+| B-Sprint13a-7 🟢 | **RUNBOOK §10h.2 Stoerungsfall-Eintrag fuer `resend_open_window-failed`.** Explizite Anleitung: was der Hotelier tun soll wenn die OW-Aktivierung am Tisch failt — manuell re-senden via `python -m heizung.scripts.pair_devices test <id>` oder ignorieren weil der naechste Eingangstest erneut sendet. Heute kein Doku-Eintrag fuer den Fall. |
+| B-Sprint13a-8 🟡 | **CLI-Summary-Wording praezisieren — `[FAIL]` bei `DOWNLINK_FAILED` ist semantisch korrekt aber irrefuehrend** wenn Device in DB existiert. Praezise Formulierung: `Resultat: 0 paired, 0 skipped, 3 errors (3 Device-Rows in DB, OW-Downlink fuer alle 3 fehlgeschlagen)`. T8-Live-Verify-Befund 2026-05-23. |
+| B-Sprint13a-9 🟢 | **Dry-Run-Schluss-Message umformulieren.** Aktuell: `ChirpStack-Downlinks wurden trotzdem gesendet` — im unreachable-Host-Pfad nicht korrekt. Praeziser: `ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben)`. T8-Live-Verify-Befund 2026-05-23. |
+| B-Sprint13a-10 🟢 | **Master-Inventar-Format-Migration (nur falls notwendig).** Falls in Sprint 16/17 sich herausstellt, dass das Master-Inventar verbindlich versionierbar sein muss (z.B. fuer Bootstrap-Reproduzierbarkeit): Format auf Pure-CSV oder Markdown-Tabelle umstellen (keine Secrets-Vektoren), dann ist `.gitignore`-Ausnahme vertretbar. Heute XLSX am Office-Laptop unter Hotelier-Kontrolle, Repo-README dokumentiert nur das Format. |
 
 ### 6.3 — Operative Aufgaben
 
