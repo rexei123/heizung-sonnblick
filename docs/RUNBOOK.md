@@ -1653,7 +1653,55 @@ LIMIT 10;
 "
 ```
 
-### 10j.5 Frontend-Dialog
+### 10j.5 Backup vor Tausch (Pre-Production)
+
+Vor groesseren Tausch-Aktionen (z.B. >1 Vicki gleichzeitig) ein
+data-only Backup von ``device`` + ``business_audit`` anlegen:
+
+```bash
+# SSH (heizung-test/main, root)
+TS=$(date -u +%Y%m%d-%H%M%S)
+mkdir -p /opt/heizung-sonnblick/backups
+docker exec deploy-db-1 pg_dump -U heizung -d heizung \
+    -t device --data-only \
+    > /opt/heizung-sonnblick/backups/sprint13b1-device-${TS}.sql
+docker exec deploy-db-1 pg_dump -U heizung -d heizung \
+    -t business_audit --data-only \
+    > /opt/heizung-sonnblick/backups/sprint13b1-audit-${TS}.sql
+```
+
+**Achtung pg_dump-Warnung:** ``device`` hat eine zirkulaere
+self-referenzielle FK (``fk_device_replaced_by`` zeigt auf
+``device.id``). ``pg_dump --data-only`` warnt darum mit
+``WARNING: there are circular foreign-key constraints on this
+table``. Das ist OK — das Backup ist trotzdem konsistent.
+
+**Restore-Verfahren** falls Rollback noetig:
+
+```bash
+# Option A (empfohlen): psql mit deferrable FKs aus -- Restore
+# in einer Transaktion mit ALTER CONSTRAINT DEFERRED.
+docker exec -i deploy-db-1 psql -U heizung -d heizung <<'SQL'
+BEGIN;
+SET CONSTRAINTS ALL DEFERRED;
+\COPY device FROM '/opt/heizung-sonnblick/backups/sprint13b1-device-<TS>.sql';
+COMMIT;
+SQL
+
+# Option B: pg_restore mit --disable-triggers (umgeht FK-Checks
+# fuer den Restore, FKs sind danach wieder aktiv).
+docker exec -i deploy-db-1 pg_restore --disable-triggers \
+    -U heizung -d heizung \
+    < /opt/heizung-sonnblick/backups/sprint13b1-device-<TS>.sql
+
+# Option C (sicherste): vollen Schema+Data-Dump zurueckspielen.
+# Voraussetzung: keine konkurrierenden Schreiber.
+```
+
+Wenn Backup nur als Forensik-Reserve liegen soll und nicht
+restored wird: pg_dump-Warnung folgenlos.
+
+### 10j.6 Frontend-Dialog
 
 Sprint 13b.2 baut auf den drei o.g. Endpoints einen Dialog auf
 ``/zimmer/[id]`` (Phase-0-Update Audit 3 Empfehlung: Per-Device-Row
