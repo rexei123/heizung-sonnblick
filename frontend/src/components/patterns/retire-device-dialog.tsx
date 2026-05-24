@@ -17,12 +17,16 @@
  * Thermostat): Warning-Box im Body, weil Heizung in der Zone bis zur
  * Neu-Zuweisung inaktiv bleibt.
  *
- * 409-Distinktion vs. T4: hier nur ``DeviceStateError`` moeglich
- * (Device bereits retired durch parallele Session). Backend
- * api/v1/devices.py:531-534 mapt nur DeviceNotFound -> 404,
- * DeviceStateError -> 409. Kein Pool-Race-Pfad.
+ * Subtype-Distinktion via ``error_code``-Feld im Backend-Response-Body
+ * (AE-59, B-Sprint13b2-4): zwei UX-relevante Codes fuer Retire —
+ * DEVICE_STATE_ERROR (bereits retired durch parallele Session) und
+ * DEVICE_NOT_FOUND (alter Row weg, Cleanup/Migration).
+ * SELF_REPLACEMENT_FORBIDDEN + POOL_DEVICE_UNAVAILABLE entstehen nicht
+ * bei Retire — Retire kennt keinen Pool-Reassign. Frueheres inline-
+ * ``/retired/i``-Regex-Match ist entfernt.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -33,8 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ERROR_CODES, getErrorCode } from "@/lib/api/error-codes";
 import { useRetireDevice } from "@/lib/api/hooks-devices-lifecycle";
-import type { ApiError } from "@/lib/api/types";
 import { showErrorToast, showSuccessToast } from "@/lib/toast";
 
 const REASON_OPTIONS = [
@@ -63,6 +67,7 @@ export function RetireDeviceDialog({
   open,
   onClose,
 }: RetireDeviceDialogProps) {
+  const qc = useQueryClient();
   const retireMut = useRetireDevice(deviceId, roomId);
   const [reason, setReason] = useState<RetireReason | "">("");
 
@@ -75,19 +80,30 @@ export function RetireDeviceDialog({
       setReason("");
       onClose();
     } catch (err) {
-      const apiErr = err as ApiError;
-      const detail =
-        typeof apiErr?.detail === "string" ? apiErr.detail : "";
-      const status = apiErr?.status;
-
-      if (status === 409 && /retired/i.test(detail)) {
-        showErrorToast("Thermostat ist bereits stillgelegt.");
-        onClose();
-        return;
+      // B-Sprint13b2-4 (AE-59): error_code-basierte Distinktion.
+      // getErrorCode liefert null bei unbekannten Server-Codes oder
+      // wenn das Feld nicht gesetzt ist.
+      const code = getErrorCode(err);
+      switch (code) {
+        case ERROR_CODES.DEVICE_STATE_ERROR:
+          // Device bereits retired durch parallele Session.
+          showErrorToast("Thermostat ist bereits stillgelegt.");
+          qc.invalidateQueries({ queryKey: ["devices"] });
+          onClose();
+          return;
+        case ERROR_CODES.DEVICE_NOT_FOUND:
+          // Device-Row existiert nicht mehr (Cleanup/Migration).
+          showErrorToast(
+            "Thermostat nicht gefunden. Bitte Liste neu laden.",
+          );
+          qc.invalidateQueries({ queryKey: ["devices"] });
+          onClose();
+          return;
+        default:
+          // 404 / 500 / Netzwerk-Fehler / unbekannter Server-Code
+          showErrorToast("Stilllegung fehlgeschlagen.");
+          onClose();
       }
-      // 404 / 500 / Netzwerk-Fehler
-      showErrorToast("Stilllegung fehlgeschlagen.");
-      onClose();
     }
   };
 

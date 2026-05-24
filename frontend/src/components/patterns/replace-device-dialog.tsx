@@ -1,22 +1,23 @@
 "use client";
 
 /**
- * ReplaceDeviceDialog — atomarer Pool-Reassign-Tausch (Sprint 13b.2 T4).
+ * ReplaceDeviceDialog — atomarer Pool-Reassign-Tausch (Sprint 13b.2 T4
+ * + B-Sprint13b2-4 error_code-Migration).
  *
  * Konsumiert ``useReplaceFromPool`` + ``useDevicePool`` + ``FormDialog``
  * + shadcn ``Select``. Backend-Endpoint ist AE-57 Entscheidung 6
  * (POST /api/v1/devices/{old}/replace/from-pool).
  *
- * 409-Subtype-Distinktion ohne ``exception_class``-Diskriminator
- * (verifiziert 2026-05-23 gegen backend/services/device_service.py +
- * api/v1/devices.py:474-481): das Backend liefert beide 409-Faelle nur
- * als ``{detail: <string>}``. String-Pattern-Match am detail-Feld
- * disambiguiert die zwei Faelle. Pool-Match zuerst, weil im
- * Hotelier-Alltag der haeufigere Race-Fall.
+ * Subtype-Distinktion via ``error_code``-Feld im Backend-Response-Body
+ * (AE-59, B-Sprint13b2-4). Vier Codes mit klarem Toast +
+ * Invalidate-Verhalten — siehe ``handleConfirm``-catch-Block. Frueheres
+ * String-Regex-Match (RE_POOL_UNAVAILABLE / RE_DEVICE_STATE) ist
+ * entfernt; der App-weite FastAPI-Handler liefert seit
+ * ``B-Sprint13b2-4`` das maschinen-lesbare ``error_code``-Feld.
  *
- * Pool-Cache wird onError bei Pool-Race im Dialog explizit
- * invalidiert — useReplaceFromPool macht nur onSuccess (T1.b),
- * Error-Specific-Refetch liegt UI-seitig.
+ * Pool-Cache wird onError bei ``POOL_DEVICE_UNAVAILABLE`` im Dialog
+ * explizit invalidiert — ``useReplaceFromPool`` macht nur onSuccess
+ * (T1.b), Error-Specific-Refetch liegt UI-seitig.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,15 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ERROR_CODES, getErrorCode } from "@/lib/api/error-codes";
 import {
   useDevicePool,
   useReplaceFromPool,
 } from "@/lib/api/hooks-devices-lifecycle";
-import type { ApiError } from "@/lib/api/types";
 import { showErrorToast, showSuccessToast } from "@/lib/toast";
-
-const RE_POOL_UNAVAILABLE = /Pool|parallel vergeben/i;
-const RE_DEVICE_STATE = /retired|nicht zugewiesen|Re-Replace/i;
 
 export interface ReplaceDeviceDialogProps {
   deviceId: number;
@@ -73,37 +71,58 @@ export function ReplaceDeviceDialog({
       setSelectedPoolId("");
       onClose();
     } catch (err) {
-      const apiErr = err as ApiError;
-      const detail =
-        typeof apiErr?.detail === "string" ? apiErr.detail : "";
-      const status = apiErr?.status;
-
-      if (status === 409 && RE_POOL_UNAVAILABLE.test(detail)) {
-        // Pool-Race: Reserve wurde parallel vergeben. Dialog bleibt
-        // offen, Pool sofort neu laden, Auswahl zuruecksetzen, User
-        // waehlt erneut.
-        showErrorToast(
-          "Reserve bereits vergeben. Bitte Auswahl erneut treffen.",
-        );
-        qc.invalidateQueries({ queryKey: ["devices", "pool"] });
-        setSelectedPoolId("");
-        return;
+      // B-Sprint13b2-4 (AE-59): error_code-basierte Distinktion.
+      // getErrorCode liefert null bei unbekannten Server-Codes oder
+      // wenn das Feld nicht gesetzt ist (404 / 500 / Netzwerk-Fehler
+      // / 4xx ohne unseren App-weiten Handler).
+      const code = getErrorCode(err);
+      switch (code) {
+        case ERROR_CODES.POOL_DEVICE_UNAVAILABLE:
+          // Pool-Race: Reserve wurde parallel vergeben. Dialog bleibt
+          // offen, Pool sofort neu laden, Auswahl zuruecksetzen, User
+          // waehlt erneut.
+          showErrorToast(
+            "Reserve bereits vergeben. Bitte Auswahl erneut treffen.",
+          );
+          qc.invalidateQueries({ queryKey: ["devices", "pool"] });
+          setSelectedPoolId("");
+          return;
+        case ERROR_CODES.DEVICE_STATE_ERROR:
+          // Alter Thermostat war beim Submit nicht mehr aktiv (z.B.
+          // bereits retired durch andere Session). Dialog schliessen,
+          // Voll-Refetch.
+          showErrorToast(
+            "Thermostat ist nicht mehr aktiv. Bitte Liste neu laden.",
+          );
+          qc.invalidateQueries({ queryKey: ["devices"] });
+          onClose();
+          return;
+        case ERROR_CODES.SELF_REPLACEMENT_FORBIDDEN:
+          // Defensiv — UI-seitig sollte das nicht erreichbar sein,
+          // weil das Dropdown nur Pool-Devices (heating_zone_id IS
+          // NULL) anbietet und das aktuelle Device aktiv-zugewiesen
+          // ist. Falls doch (Race + Refresh + falscher State): klarer
+          // Toast, Dialog schliessen.
+          showErrorToast(
+            "Tausch nicht möglich: Quell- und Zielgerät identisch.",
+          );
+          onClose();
+          return;
+        case ERROR_CODES.DEVICE_NOT_FOUND:
+          // alter oder neuer Device-Row existiert nicht mehr —
+          // typischerweise nach DB-Cleanup oder parallel Migration.
+          // Voll-Refetch, Dialog schliessen.
+          showErrorToast(
+            "Thermostat nicht gefunden. Bitte Liste neu laden.",
+          );
+          qc.invalidateQueries({ queryKey: ["devices"] });
+          onClose();
+          return;
+        default:
+          // 404 / 500 / Netzwerk-Fehler / unbekannter Server-Code
+          showErrorToast("Tausch fehlgeschlagen.");
+          onClose();
       }
-      if (status === 409 && RE_DEVICE_STATE.test(detail)) {
-        // Alter Thermostat war beim Submit nicht mehr aktiv (z.B.
-        // bereits retired durch andere Session). Dialog schliessen,
-        // Voll-Refetch.
-        showErrorToast(
-          "Thermostat ist nicht mehr aktiv. Bitte Liste neu laden.",
-        );
-        qc.invalidateQueries({ queryKey: ["devices"] });
-        onClose();
-        return;
-      }
-      // 404 / 500 / Netzwerk-Fehler / ueberraschende 409-Strings
-      // (z.B. Selbst-Tausch-ValueError aus api/v1/devices.py:480-481)
-      showErrorToast("Tausch fehlgeschlagen.");
-      onClose();
     }
   };
 
