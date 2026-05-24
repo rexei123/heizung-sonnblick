@@ -9,6 +9,8 @@ import type {
   DeviceAssignZoneResponse,
   DeviceCreate,
   DeviceListQuery,
+  DeviceReplaceFromPoolRequest,
+  DeviceRetireRequest,
   DeviceUpdate,
   HardwareStatusResponse,
   SensorReading,
@@ -46,4 +48,20 @@ export const devicesApi = {
 
   hardwareStatus: (id: number): Promise<HardwareStatusResponse> =>
     apiClient.get<HardwareStatusResponse>(`${BASE}/${id}/hardware-status`),
+
+  // Sprint 13b.1 (AE-57): Lifecycle-Endpoints — Pool-Lookup, atomarer
+  // Tausch (alte Vicki retired + Pool-Device uebernimmt Zone in einer
+  // Transaktion, race-safe via UPDATE-WHERE auf Pool-Cell), Retire
+  // ohne Ersatz. Beide Mutationen liefern den aktualisierten alten
+  // Device-Row zurueck (mit gesetztem retired_at).
+  getPool: (): Promise<Device[]> => apiClient.get<Device[]>(`${BASE}/pool`),
+
+  replaceFromPool: (
+    id: number,
+    payload: DeviceReplaceFromPoolRequest,
+  ): Promise<Device> =>
+    apiClient.post<Device>(`${BASE}/${id}/replace/from-pool`, payload),
+
+  retireDevice: (id: number, payload: DeviceRetireRequest): Promise<Device> =>
+    apiClient.post<Device>(`${BASE}/${id}/retire`, payload),
 };

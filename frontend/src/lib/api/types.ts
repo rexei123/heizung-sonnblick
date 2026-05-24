@@ -91,6 +91,24 @@ export interface DeviceAssignZoneResponse {
 }
 
 /**
+ * Sprint 13b.1 (AE-57): atomarer Pool-Reassign-Tausch. Body fuer
+ * POST /api/v1/devices/{device_id}/replace/from-pool.
+ */
+export interface DeviceReplaceFromPoolRequest {
+  new_pool_device_id: number;
+}
+
+/**
+ * Sprint 13b.1 (AE-57): Stilllegung ohne Ersatz. Body fuer
+ * POST /api/v1/devices/{device_id}/retire. ``reason`` ist Backend-
+ * Freitext (1-255 chars); Frontend-Dropdown sendet einen der vier
+ * Strings "Defekt" / "Batterie leer" / "Verlust" / "Wartung".
+ */
+export interface DeviceRetireRequest {
+  reason: string;
+}
+
+/**
  * Hardware-Status-Snapshot (Sprint 9.13c). Spiegelt
  * ``HardwareStatusResponse`` aus ``schemas/device.py``. Datenquelle ist
  * ``sensor_reading.attached_backplate`` der letzten ``window_minutes``
