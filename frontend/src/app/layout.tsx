@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Roboto } from "next/font/google";
+import { Toaster } from "sonner";
 
 import { AppShell } from "@/components/patterns/app-shell";
 import { Providers } from "@/components/providers";
@@ -39,6 +40,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
+        {/* Sprint 13b.2 T0.6: Toast-Slot oberhalb der App, ausserhalb
+            Providers (Toaster braucht keinen QueryClient-Context). */}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   );

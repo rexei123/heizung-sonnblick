@@ -13,6 +13,8 @@ import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { ManualOverridePanelList } from "@/components/patterns/manual-override-panel-list";
+import { ReplaceDeviceDialog } from "@/components/patterns/replace-device-dialog";
+import { RetireDeviceDialog } from "@/components/patterns/retire-device-dialog";
 import { RoomForm } from "@/components/patterns/room-form";
 import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
 import { Button } from "@/components/ui/button";
@@ -193,6 +195,14 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
     zoneName: string;
   } | null>(null);
   const [detachError, setDetachError] = useState<string | null>(null);
+  // Sprint 13b.2 T3: State-Anker fuer Replace + Retire-Dialog. Buttons
+  // setzen die device_id, der Dialog (T4/T5) liest sie und setzt nach
+  // close oder Erfolg wieder null. Pre-Stop-1: State-Reader unten als
+  // sr-only-Status-Placeholder, T4/T5 ersetzen ihn durch echte Dialoge.
+  const [openReplaceDialog, setOpenReplaceDialog] = useState<number | null>(
+    null,
+  );
+  const [openRetireDialog, setOpenRetireDialog] = useState<number | null>(null);
 
   const zoneIds = new Set((zones.data ?? []).map((z) => z.id));
   const devicesInRoom = (allDevices.data ?? []).filter(
@@ -261,6 +271,12 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
                   >
                     Detail →
                   </Link>
+                  <ReplaceDeviceButton
+                    onClick={() => setOpenReplaceDialog(d.id)}
+                  />
+                  <RetireDeviceButton
+                    onClick={() => setOpenRetireDialog(d.id)}
+                  />
                   <DetachButton
                     onClick={() =>
                       setDetachTarget({
@@ -284,7 +300,81 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
           onError={setDetachError}
         />
       ) : null}
+
+      {/* Sprint 13b.2 T4 + T5: Tausch + Stilllegen-Dialoge. State
+          haengt am DevicesInRoom-Hook; Dialoge konsumieren ihn ueber
+          openReplaceDialog / openRetireDialog. */}
+      {openReplaceDialog !== null ? (
+        <ReplaceDeviceDialog
+          deviceId={openReplaceDialog}
+          deviceLabel={
+            devicesInRoom.find((d) => d.id === openReplaceDialog)?.label ??
+            `Gerät #${openReplaceDialog}`
+          }
+          roomId={roomId}
+          open={true}
+          onClose={() => setOpenReplaceDialog(null)}
+        />
+      ) : null}
+      {openRetireDialog !== null
+        ? (() => {
+            const target = devicesInRoom.find((d) => d.id === openRetireDialog);
+            const targetZoneId = target?.heating_zone_id ?? null;
+            const isLast =
+              targetZoneId !== null
+                ? devicesInRoom.filter(
+                    (d) =>
+                      d.heating_zone_id === targetZoneId &&
+                      d.retired_at === null,
+                  ).length === 1
+                : false;
+            return (
+              <RetireDeviceDialog
+                deviceId={openRetireDialog}
+                deviceLabel={target?.label ?? `Gerät #${openRetireDialog}`}
+                roomId={roomId}
+                isLastActiveInZone={isLast}
+                open={true}
+                onClose={() => setOpenRetireDialog(null)}
+              />
+            );
+          })()
+        : null}
     </div>
+  );
+}
+
+function ReplaceDeviceButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-primary transition-colors"
+      aria-label="Thermostat tauschen"
+      title="Thermostat tauschen"
+    >
+      <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        swap_horiz
+      </span>
+      Tauschen
+    </button>
+  );
+}
+
+function RetireDeviceButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error transition-colors"
+      aria-label="Thermostat stilllegen"
+      title="Thermostat stilllegen"
+    >
+      <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        power_off
+      </span>
+      Stilllegen
+    </button>
   );
 }
 

@@ -227,7 +227,13 @@ async def test_cmd_import_real_with_user_email(
     mock_all_downlinks: dict[str, int],
 ) -> None:
     """import (ohne --dry-run): Device + Audit angelegt, user_id im Audit."""
-    await _seed_zone(patched_session_local, room_number="7103", zone_name="Schlafzimmer")
+    # Sprint 13b.2 T7-prep (CLAUDE.md §5.18): Suffix gegen Stale-Rows aus
+    # frueheren Test-Runs (uq_room_number-UniqueViolation). CSV-
+    # zimmer_nummer wird vom Pydantic-Validator als int geparsed
+    # (csv_parser §142), also muss der Suffix numerisch bleiben — keine
+    # Bindestrich-Variante moeglich.
+    room_num = str(7_100_000 + int(_short(), 16) % 100_000)
+    await _seed_zone(patched_session_local, room_number=room_num, zone_name="Schlafzimmer")
     test_email = f"cli-t6-{_short()}@example.com"
     user = User(
         email=test_email,
@@ -243,7 +249,7 @@ async def test_cmd_import_real_with_user_email(
     _write_csv(
         csv_path,
         "stockwerk,zimmer_nummer,zimmer_typ,zone_label,dev_eui,app_key\n"
-        f"1,7103,Standard,Schlafzimmer,{dev_eui},{_VALID_APP_KEY}\n",
+        f"1,{room_num},Standard,Schlafzimmer,{dev_eui},{_VALID_APP_KEY}\n",
     )
     exit_code = await pair_devices.main_async(["import", str(csv_path), "--user-email", test_email])
     assert exit_code == 0

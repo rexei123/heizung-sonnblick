@@ -22,7 +22,15 @@ export interface Device {
   model: string;
   label: string | null;
   heating_zone_id: number | null;
-  is_active: boolean;
+  /**
+   * Sprint 13b.1 (AE-57): Lifecycle-Marker. `null` = aktiv, Timestamp =
+   * stillgelegt. Listen-Endpoint blendet retired Rows per Default aus
+   * (Opt-in via `?include_retired=true`). Frueheres `is_active` wurde
+   * in Migration 0018 gedroppt.
+   */
+  retired_at: string | null;
+  retired_reason: string | null;
+  replaced_by_device_id: number | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -36,7 +44,6 @@ export interface DeviceCreate {
   model: string;
   label?: string | null;
   heating_zone_id?: number | null;
-  is_active?: boolean;
 }
 
 export interface DeviceUpdate {
@@ -46,7 +53,6 @@ export interface DeviceUpdate {
   model?: string;
   label?: string | null;
   heating_zone_id?: number | null;
-  is_active?: boolean;
 }
 
 export interface SensorReading {
@@ -67,7 +73,6 @@ export interface SensorReadingsQuery {
 }
 
 export interface DeviceListQuery {
-  is_active?: boolean;
   vendor?: DeviceVendor;
   limit?: number;
   offset?: number;
@@ -83,6 +88,24 @@ export interface DeviceAssignZoneResponse {
   heating_zone_id: number | null;
   label: string | null;
   updated_at: string;
+}
+
+/**
+ * Sprint 13b.1 (AE-57): atomarer Pool-Reassign-Tausch. Body fuer
+ * POST /api/v1/devices/{device_id}/replace/from-pool.
+ */
+export interface DeviceReplaceFromPoolRequest {
+  new_pool_device_id: number;
+}
+
+/**
+ * Sprint 13b.1 (AE-57): Stilllegung ohne Ersatz. Body fuer
+ * POST /api/v1/devices/{device_id}/retire. ``reason`` ist Backend-
+ * Freitext (1-255 chars); Frontend-Dropdown sendet einen der vier
+ * Strings "Defekt" / "Batterie leer" / "Verlust" / "Wartung".
+ */
+export interface DeviceRetireRequest {
+  reason: string;
 }
 
 /**

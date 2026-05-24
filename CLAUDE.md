@@ -1696,6 +1696,53 @@ fuer DB-Schemas), §5.20 (aspirative Kommentare als Doku-Drift),
 ``backend/alembic/versions/0014_auth_and_business_audit.py``
 (Migration mit Schema-Definition).
 
+### 5.63 Backend-Schema-Change-Sprints brauchen expliziten Frontend-Type-Spiegel-T-Block (Sprint 13b.2 T1.c-prep)
+
+Bei Sprint-Briefs, die ein Backend-Schema aendern (Spalte droppen,
+Spalte umbenennen, neue Pflicht-Felder), reicht der reine Backend-
+Sprint NICHT — der Frontend-TypeScript-Type-Spiegel zum Schema
+muss explizit als eigener T-Block im NACHFOLGENDEN Frontend-
+Sprint stehen, sonst sind die Konsumenten broken bis zur Hygiene-
+Aufraeumung.
+
+Anlass: Sprint 13b.1 (AE-57) hat ``device.is_active`` gedropped
+und ``retired_at`` etc. ergaenzt. Sprint-13b.2-Brief T8 erwaehnte
+zwar die CLAUDE.md-§5.58-Lesson ("is_active-Uebergang abgeschlossen
+— komplett gedropped"), aber **kein** T-Block deckte den
+Frontend-Type-Touch ab. Konsequenz: zwischen 13b.1-Merge und
+13b.2-T1.c-prep zeigte die heizung-test-UI ALLE Devices als
+"Eingerichtet: nein" (undefined-Property → falsy → cancel-Icon).
+Live-UX-Bug ueber drei Tage, gefangen erst beim Phase-0-Check vor
+T1.c-Implementation.
+
+**Regel:** Bei jedem Sprint-Brief, der Backend-Schema-Felder
+betroffener Frontend-Konsumenten aendert oder droppt, muss der
+NACHFOLGENDE Frontend-Sprint einen expliziten T-Block enthalten:
+
+   T<N>.X — types.ts-Lifecycle-Spiegel zum Backend-Schema
+   <Migration> (XXXX): <Feld> drop/add + Konsumenten-Liste
+   aus ``grep -rn "<feld>" frontend/src/``
+
+Dieser T-Block ist Pflicht-Stop, nicht Auto-Continue. Konsumenten-
+Liste muss vor Implementation komplett sein (analog §5.30
+Auth-Endpoint-Inventar).
+
+**Pflicht im Backend-Schema-Change-Sprint-Brief selbst:** Im
+"Out of Scope" / "Folge-Sprint"-Abschnitt explizit nennen
+"Frontend-Type-Spiegel kommt in Sprint <N+1> T<X>", damit der
+Strategie-Chat den Brief des Folge-Sprints korrekt aufsetzt.
+
+**Pflicht im Frontend-Folge-Sprint-Brief:** Im T-Block selbst
+zumindest die `types.ts`-Datei + die globale grep-Anweisung
+nennen. Brief T8-Doku-Verweis (CLAUDE.md-Lesson-Eintrag) alleine
+reicht NICHT, weil Doku-Update ohne Code-Change die Konsumenten
+broken laesst.
+
+**Querverweise:** §5.30 (Auth-Sprints alle Endpoints absichern,
+nicht nur mutierende — analoge Brief-Luecken-Klasse), §5.43
+(Brief-Annahmen via grep belegen), §5.58 (Device-Queries brauchen
+Lifecycle-Filter — gleiche AE-57-Familie, Backend-Seite).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
