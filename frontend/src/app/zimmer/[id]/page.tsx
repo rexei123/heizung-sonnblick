@@ -193,6 +193,14 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
     zoneName: string;
   } | null>(null);
   const [detachError, setDetachError] = useState<string | null>(null);
+  // Sprint 13b.2 T3: State-Anker fuer Replace + Retire-Dialog. Buttons
+  // setzen die device_id, der Dialog (T4/T5) liest sie und setzt nach
+  // close oder Erfolg wieder null. Pre-Stop-1: State-Reader unten als
+  // sr-only-Status-Placeholder, T4/T5 ersetzen ihn durch echte Dialoge.
+  const [openReplaceDialog, setOpenReplaceDialog] = useState<number | null>(
+    null,
+  );
+  const [openRetireDialog, setOpenRetireDialog] = useState<number | null>(null);
 
   const zoneIds = new Set((zones.data ?? []).map((z) => z.id));
   const devicesInRoom = (allDevices.data ?? []).filter(
@@ -261,6 +269,12 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
                   >
                     Detail →
                   </Link>
+                  <ReplaceDeviceButton
+                    onClick={() => setOpenReplaceDialog(d.id)}
+                  />
+                  <RetireDeviceButton
+                    onClick={() => setOpenRetireDialog(d.id)}
+                  />
                   <DetachButton
                     onClick={() =>
                       setDetachTarget({
@@ -284,7 +298,56 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
           onError={setDetachError}
         />
       ) : null}
+
+      {/* Sprint 13b.2 T3 Pre-Stop-1-Reader: T4 + T5 ersetzen diese
+          sr-only-Bloecke durch <ReplaceDeviceDialog /> bzw.
+          <RetireDeviceDialog /> mit deviceId={openReplaceDialog|
+          openRetireDialog} + onClose, das den State auf null setzt. */}
+      {openReplaceDialog !== null ? (
+        <span className="sr-only" role="status">
+          Tausch-Dialog wird vorbereitet für Gerät #{openReplaceDialog}
+        </span>
+      ) : null}
+      {openRetireDialog !== null ? (
+        <span className="sr-only" role="status">
+          Stilllegen-Dialog wird vorbereitet für Gerät #{openRetireDialog}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+function ReplaceDeviceButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-primary transition-colors"
+      aria-label="Thermostat tauschen"
+      title="Thermostat tauschen"
+    >
+      <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        swap_horiz
+      </span>
+      Tauschen
+    </button>
+  );
+}
+
+function RetireDeviceButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error transition-colors"
+      aria-label="Thermostat stilllegen"
+      title="Thermostat stilllegen"
+    >
+      <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        power_off
+      </span>
+      Stilllegen
+    </button>
   );
 }
 
