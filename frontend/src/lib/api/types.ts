@@ -123,10 +123,18 @@ export interface HardwareStatusResponse {
 
 /**
  * API-Fehler-Schema (FastAPI default: { detail: string | object[] }).
+ *
+ * Sprint 13b.2 B-Sprint13b2-4 (AE-59): optionales ``error_code``-Feld
+ * aus dem Backend-Body. Heute ausschliesslich von Lifecycle-Endpoints
+ * gesetzt (4 Codes, siehe ``lib/api/error-codes.ts``). FastAPI-
+ * Default-Pfade (ValidationError, generische ``HTTPException``-Aufrufe
+ * ohne unseren App-weiten Handler) liefern das Feld NICHT;
+ * ``undefined`` ist der Normalfall fuer andere Endpoint-Familien.
  */
 export interface ApiError {
   status: number;
   detail: string | unknown;
+  error_code?: string;
 }
 
 // ---------------------------------------------------------------------------
