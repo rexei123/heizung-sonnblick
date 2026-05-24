@@ -325,15 +325,25 @@ async def test_replace_device_writes_audit(db_session: AsyncSession) -> None:
 
 @pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
 async def test_replace_device_self_swap_raises(db_session: AsyncSession) -> None:
-    """old_id == new_id -> ValueError vor DB-Touch."""
+    """old_id == new_id -> SelfReplacementError vor DB-Touch.
+
+    B-Sprint13b2-4 (AE-59): vor T1 warf der Service einen
+    inline-``ValueError``; ab T1 ist es eine eigene
+    ``SelfReplacementError(LifecycleError)``-Subklasse mit
+    ``error_code = "SELF_REPLACEMENT_FORBIDDEN"``. Da LifecycleError
+    direkt von Exception erbt (NICHT mehr ValueError-Subklasse),
+    musste der Test von ``pytest.raises(ValueError, ...)`` auf
+    ``pytest.raises(SelfReplacementError, ...)`` umgestellt werden.
+    """
     from heizung.services.device_service import replace_device
+    from heizung.services.exceptions import SelfReplacementError
 
     zone_id = await _make_zone(db_session)
     dev = _make_device(zone_id=zone_id)
     db_session.add(dev)
     await db_session.flush()
 
-    with pytest.raises(ValueError, match="Selbst-Tausch"):
+    with pytest.raises(SelfReplacementError, match="Selbst-Tausch"):
         await replace_device(
             db_session,
             old_device_id=dev.id,

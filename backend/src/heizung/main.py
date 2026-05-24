@@ -17,6 +17,7 @@ from heizung import __version__
 from heizung.api.v1 import router as v1_router
 from heizung.auth.rate_limit import limiter
 from heizung.config import get_settings
+from heizung.services.exceptions import DeviceNotFound, LifecycleError
 from heizung.services.mqtt_subscriber import start_subscriber, stop_subscriber
 
 settings = get_settings()
@@ -67,6 +68,27 @@ async def _dbapi_error_handler(_: Request, exc: DBAPIError) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": "Ungueltiger Anfrage-Parameter (Datenbank-Validierung)"},
+    )
+
+
+@app.exception_handler(LifecycleError)
+async def _lifecycle_error_handler(_request: Request, exc: LifecycleError) -> JSONResponse:
+    """B-Sprint13b2-4 (AE-59): App-weiter Handler fuer Lifecycle-Exceptions.
+
+    Rendert ``{"detail": <message>, "error_code": <CODE>}``. ``DeviceNotFound``
+    -> 404, alle anderen Subklassen (``DeviceStateError`` /
+    ``PoolDeviceUnavailable`` / ``SelfReplacementError``) -> 409.
+
+    Scope: ausschliesslich Lifecycle-Pfade (replace, retire). Andere
+    Endpoint-Familien (overrides, auth, ...) bleiben unberuehrt — ihre
+    HTTPException-Aufrufe sind nicht von ``LifecycleError`` abgeleitet.
+    """
+    status_code = (
+        status.HTTP_404_NOT_FOUND if isinstance(exc, DeviceNotFound) else status.HTTP_409_CONFLICT
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": exc.message, "error_code": exc.error_code},
     )
 
 

@@ -7,8 +7,8 @@
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-05-24
-**Letzter Tag (geplant nach Merge):** `v0.1.18b2-device-replacement-frontend` (Sprint 13b.2, 13 Commits auf `feature/sprint-13b2-device-replacement-frontend`, PR-Erstellung in T9 pending, Tag wird in Stop 6 gesetzt). Vorletzter Tag (gemerged): `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, Live-Verify auf heizung-test erfolgreich 2026-05-23, siehe §2au). Zwischen 12c.a und 13a: Hygiene-Mini-Sprint via PR #171, kein eigener Tag (§2as).
-**Aktueller Sprint:** Sprint 13b.2 Frontend Pool-Reassign-Tausch + Stilllegen abgeschlossen 2026-05-24 (siehe §2av). Naechster Sprint: Sprint 14 — Cross-Sicht-UI + Health-Badges + Mail-Platzhalter (Phase 1, BR-2 + B-9.11x-5).
+**Letzter Tag (geplant nach Merge):** `v0.1.18b3-error-code-discriminator` (B-Sprint13b2-4, 5 Commits auf `feature/b-sprint13b2-4-error-code-discriminator`, PR-Erstellung in T7 pending, Tag wird in Stop 7 gesetzt). Vorletzter Tag (gemerged): `v0.1.18b2-device-replacement-frontend` (Sprint 13b.2, Squash-Commit `c82af70`, gemerged 2026-05-24, Cowork-Live-Verify nachgepflegt via PR #179, siehe §2av). Davor: `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, §2au).
+**Aktueller Sprint:** B-Sprint13b2-4 error_code-Diskriminator abgeschlossen 2026-05-24 (siehe §2aw). Naechster Sprint: Sprint 14 — Cross-Sicht-UI + Health-Badges + Mail-Platzhalter (Phase 1, BR-2 + B-9.11x-5).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -2510,11 +2510,13 @@ fuer robustes Frontend-Match. Vor Heizperiode 2026/27.
   Error-Stellen (ManualOverridePanel, Login-Form, etc.). Heute
   zwei Feedback-Patterns parallel — Strategie-Setzung 2026-05-23
   akzeptiert. Phase-7-Polish-Sprint.
-- **B-Sprint13b2-4** 🟡 (vor Heizperiode): 409-Subtype-Diskriminator
-  im Backend ergaenzen (`{detail: ..., exception_class:
-  "PoolDeviceUnavailable"}`). Heute String-Pattern-Match in
-  ReplaceDeviceDialog — fragil gegen Backend-Wording-Refactor.
-  Backend-Touch + ReplaceDeviceDialog-Update zusammen, ~1 h.
+- **B-Sprint13b2-4** ✅ erledigt 2026-05-24: 409-Subtype-Diskriminator
+  via `error_code`-Feld implementiert. Backend ``LifecycleError``-
+  Hierarchie + app-weiter FastAPI-Handler, Frontend ``error-codes.ts``
+  + Type-Guard, beide Dialoge migriert weg von String-Regex.
+  Voll-Coverage-Matrix in AE-59. Tatsaechlicher Aufwand 2-3 h wie
+  Brief, +1 T4-Discovery (client.ts-Fetch-Wrapper-Extraction). Siehe
+  §2aw + AE-59 + CLAUDE.md §5.64.
 - **B-Sprint13b2-5** 🟢: RetireDeviceDialog (vermutlich auch
   ReplaceDeviceDialog) schliesst selbsttaetig bei TanStack-Query-
   Background-Refetch (stale-time-Trigger oder
@@ -2536,7 +2538,140 @@ fuer robustes Frontend-Match. Vor Heizperiode 2026/27.
 
 **Querverweise:** AE-57 (Master-ADR, jetzt komplett),
 RUNBOOK §10j.6 (Hotelier-Workflow), CLAUDE.md §5.30 + §5.43 +
-§5.58 + §5.63, SPRINT-PLAN Sprint 13b.2, STATUS §2au + §2at.
+§5.58 + §5.63 + §5.64, SPRINT-PLAN Sprint 13b.2, STATUS §2au +
+§2at + §2aw.
+
+---
+
+## 2aw. B-Sprint13b2-4 error_code-Diskriminator (2026-05-24, abgeschlossen, PR pending)
+
+**Ziel:** 409-Subtype-Diskriminator via `error_code`-Feld im Response-
+Body. Frontend-Migration weg von String-Regex auf ``detail``. Belegt
+durch Phase-0-Audit (PR #180, gemerged ``c67c4ce``). Strategie-
+Setzung 2026-05-24: Top-Level-Sibling-Schema + 4 Codes + ``Lifecycle-
+Error``-Basisklasse + app-weiter FastAPI-Handler.
+
+**Branch:** `feature/b-sprint13b2-4-error-code-discriminator`,
+**5 Commits** auf develop @ `c67c4ce`. PR pending (Stop 5).
+
+**Tag (geplant nach Merge):** `v0.1.18b3-error-code-discriminator`
+
+**Tasks erledigt (T1-T7):**
+
+- **T1+T2+T3 (`5c3a34d`):** Backend-Refactor in einem atomaren
+  Commit, weil Exception-Hierarchie + App-Handler + Tests
+  voneinander abhaengen.
+  - Neue Datei `backend/src/heizung/services/exceptions.py` mit
+    `LifecycleError`-Basisklasse (ClassVar[str] error_code) + 4
+    Subklassen (`DeviceNotFound`, `DeviceStateError`,
+    `PoolDeviceUnavailable`, `SelfReplacementError`).
+    N818-noqa analog Pre-13b.1-Konvention.
+  - `device_service.py`: alte 3 Klassen entfernt, Import aus
+    exceptions.py (noqa F401, Backwards-Compat-Re-Export), inline
+    `ValueError("Selbst-Tausch...")` -> `SelfReplacementError(...)`.
+  - `main.py`: `@app.exception_handler(LifecycleError)` rendert
+    `{detail, error_code}` mit 404 fuer DeviceNotFound, sonst 409.
+  - `api/v1/devices.py`: 4+2 try/except-Branches in
+    replace/retire-Endpoints entfernt; LifecycleError-Imports raus.
+  - `tests/test_api_devices_lifecycle.py`: 4 Bestandstests um
+    error_code-Assertion erweitert + 2 neue Tests
+    (`test_replace_from_pool_409_self_replacement_forbidden`,
+    `test_replace_from_pool_409_pool_unavailable_direct`).
+- **T4 (`aaa3388`):** Frontend `lib/api/error-codes.ts` (neu) mit
+  ERROR_CODES + ErrorCode-Type + ApiErrorBody-Interface +
+  getErrorCode-Type-Guard. Plus `types.ts` ApiError um
+  optional `error_code?: string` erweitert. Plus `client.ts` Fetch-
+  Wrapper reicht `body.error_code` durch (Discovery — ohne diesen
+  Patch waere der Diskriminator nie im Dialog-Catch angekommen).
+- **T5 (`49ebbea`):** Beide Dialoge migriert weg von String-Regex:
+  - `replace-device-dialog.tsx`: 2 Modul-Konstanten entfernt,
+    switch ueber 4 ERROR_CODES, Toast-Wortlaut unveraendert,
+    2 neue UX-Pfade (SELF_REPLACEMENT_FORBIDDEN defensiv +
+    DEVICE_NOT_FOUND mit Refetch).
+  - `retire-device-dialog.tsx`: inline `/retired/i` entfernt,
+    `useQueryClient` hinzu (vorher kein Cache-Invalidate bei 409),
+    switch ueber 2 relevante Codes + default.
+- **T6 (`9ef6651`):** Playwright Case 3 (Pool-Race) Mock-Body um
+  `error_code: "POOL_DEVICE_UNAVAILABLE"` erweitert. Plus Cases 6+7
+  neu (DEVICE_STATE_ERROR Replace + DEVICE_NOT_FOUND Retire). Voll-
+  Suite 60 passed (vorher 58, +2 neue).
+- **T7 (dieser Commit):** AE-59 (ARCHITEKTUR-ENTSCHEIDUNGEN.md) +
+  CLAUDE.md §5.64 + STATUS §2av-Marker + dieser §2aw-Block +
+  Backlog-Updates B-Sprint13b2-4 ✅ + B-Sprint13b2-7 + B-Sprint13b2-8
+  neu.
+
+**Tests (Stop 4 Voll-Suite):**
+
+- Backend ruff format/check + mypy strict (98 source files, +1
+  exceptions.py) + pytest **240 passed / 281 skipped / 0 failed**
+  lokal (CI-Projection 518 + 2 = **520 passed**).
+- Lifecycle-Test-Suite mit DATABASE_URL gesetzt: **14 passed** (vorher
+  12, +2 neue).
+- Frontend tsc + lint + Playwright voll-suite **60 passed (45.7s, 0
+  retries)** — 58 alt + 2 neu (Cases 6+7).
+
+**Diff-Summe (T1-T7):** 5 Commits, **12 Files, +600+ Insertions / −110
+Deletions** (T1-T6: 11 Files +534/−109, T7-Doku: +5 Files Append).
+
+**Live-Verify:** ausstehend. Backend-Schema-Change ist transparent
+fuer alle Bestands-Konsumenten (`detail` bleibt String, `error_code`
+ist additive). Cowork-Re-Test fuer Frontend-Dialoge nach naechstem
+Pool-Refill (B-Sprint13b2-6 immer noch offen — siehe §2av).
+
+**Discoveries:**
+
+- **T4-Discovery:** `frontend/src/lib/api/client.ts` Fetch-Wrapper
+  verwarf `body.error_code` (extrahierte nur `body.detail`). Ohne
+  Anpassung waere der Diskriminator NIE im Dialog-Catch angekommen.
+  Pflicht-Vorsichts-Punkt fuer kuenftige Schema-Erweiterungen (siehe
+  CLAUDE.md §5.64).
+- **T5-Beifang:** RetireDeviceDialog hatte pre-T5 keinen Cache-
+  Invalidate-Pfad bei 409 (`/retired/i` matchte und Toast + Close,
+  aber keine devices-Refetch). Mit DEVICE_STATE_ERROR + DEVICE_NOT_FOUND
+  ist Invalidate jetzt konsistent.
+- **Bundle /zimmer/[id]:** first-load von 160 kB auf 171 kB (+11 kB).
+  Verursacher: error-codes.ts + Switch-Statements + 4 Toast-Texte je
+  Dialog. Akzeptabel, aber Backlog-Item B-Sprint13b2-8 fuer Phase-7-
+  Bundle-Audit.
+
+**Test-Coverage-Matrix:**
+
+| error_code | Backend pytest | Frontend Playwright |
+|---|---|---|
+| POOL_DEVICE_UNAVAILABLE | ✔ test_replace_from_pool_409_pool_unavailable_direct | ✔ Case 3 |
+| DEVICE_STATE_ERROR | ✔ test_replace_from_pool_409_new_not_in_pool + test_retire_409_already_retired | ✔ Case 6 (Replace) |
+| SELF_REPLACEMENT_FORBIDDEN | ✔ test_replace_from_pool_409_self_replacement_forbidden | ❌ UI nicht triggerbar (Dropdown blockiert) |
+| DEVICE_NOT_FOUND | ✔ test_replace_from_pool_404_unknown_old + test_retire_404_unknown | ✔ Case 7 (Retire) |
+
+**Out of Scope (in spaeteren Sprints):**
+
+- overrides.py-Konvention-Drift (Sprint 12c `error_code`-Key vs 12a
+  `error`-Key). AE-59 ist jetzt die kanonische Konvention; B-Sprint13b2-7
+  konvergiert die zwei Bestandscases sobald jemand sie ohnehin touched.
+- Andere Endpoint-Familien (auth, users, etc.) — kein `error_code`
+  heute, weil keine Subtype-Diskriminierung im Frontend noetig ist.
+
+**Neue Backlog-Punkte:**
+
+- **B-Sprint13b2-7** 🟡 (Hygiene, weiterhin offen): overrides.py
+  Konvention vereinheitlichen — Sprint 12c liefert
+  `detail.error_code`, Sprint 12a liefert `detail.error` (Phase-0-§4
+  Drift-Befund). Mit AE-59 als kanonischer Konvention kann der
+  Hygiene-Sprint die zwei Bestandscases auf Top-Level-Sibling
+  umstellen oder bei nested-detail bleiben — Strategie-Entscheidung.
+  Frontend-Konsumenten in `lib/api/overrides.ts` + ggf. Dialog-
+  Catches mit-ziehen. ~30-60 Min.
+- **B-Sprint13b2-8** 🟢 (Phase-7-Bundle-Audit): `/zimmer/[id]` first-
+  load von 160 kB auf 171 kB gewachsen durch error-codes.ts + Switch-
+  Logik + 4+2 Toast-Texte je Dialog. Pruefen ob Tree-Shaking
+  vollstaendig greift (ERROR_CODES wird als const-object exportiert,
+  sollte tree-shake-bar sein) oder ob der Switch in zwei Dialog-
+  Files dedupliziert werden kann. Backlog-Item, kein Pflicht-Touch.
+
+**Querverweise:** AE-59 (ADR + Schema), AE-57 (Master-Lifecycle —
+nun komplett mit error_code-Schicht), Phase-0-Audit PR #180,
+CLAUDE.md §5.64 (Lesson), STATUS §2av (Sprint 13b.2 als
+direkter Vorgaenger).
 
 ---
 

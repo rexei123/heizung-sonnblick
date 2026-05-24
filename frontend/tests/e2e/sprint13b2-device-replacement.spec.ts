@@ -334,6 +334,10 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
           body: JSON.stringify({
             detail:
               "new_pool_device_id=81 wurde parallel vergeben (race-Schutz: UPDATE-Rowcount=0).",
+            // B-Sprint13b2-4 (AE-59): Backend liefert seit Merge das
+            // error_code-Feld. Frontend matcht code-basiert via
+            // getErrorCode, NICHT mehr per String-Regex auf detail.
+            error_code: "POOL_DEVICE_UNAVAILABLE",
           }),
         });
       },
@@ -481,5 +485,147 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
         /Heizung in dieser Zone wird nach Stilllegung inaktiv/,
       ),
     ).toBeVisible();
+  });
+
+  test("Case 6 Replace 409 DEVICE_STATE_ERROR: Toast 'nicht mehr aktiv' + Dialog close + devices-Refetch", async ({
+    page,
+  }) => {
+    // B-Sprint13b2-4 (AE-59): alter Device ist beim Submit bereits
+    // retired (parallele Hotelier-Session war schneller). Backend
+    // liefert 409 mit error_code DEVICE_STATE_ERROR; Dialog soll
+    // schliessen + invalidate ["devices"] (zweiter GET-Call auf
+    // /api/v1/devices nach dem 409).
+    await mockBaseRoom(page);
+
+    let devicesCallCount = 0;
+
+    await page.route(/.*\/api\/v1\/devices(\?.*)?$/, async (route: Route) => {
+      devicesCallCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([DEVICE_IN_ROOM]),
+      });
+    });
+
+    await page.route(
+      /.*\/api\/v1\/devices\/pool(\?.*)?$/,
+      async (route: Route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([POOL_DEVICE_A]),
+        });
+      },
+    );
+
+    await page.route(
+      /.*\/api\/v1\/devices\/\d+\/replace\/from-pool$/,
+      async (route: Route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            detail:
+              "old_device_id=42 ist bereits retired (2026-05-24T10:00:00+00:00); Re-Replace nicht erlaubt.",
+            error_code: "DEVICE_STATE_ERROR",
+          }),
+        });
+      },
+    );
+
+    await page.goto("/zimmer/101");
+    await page.getByRole("button", { name: "Geräte", exact: true }).click();
+
+    await page
+      .getByRole("button", { name: "Thermostat tauschen", exact: true })
+      .click();
+
+    await page.getByLabel("Reserve-Thermostat").click();
+    await page
+      .getByRole("option", { name: "Reserve Vicki A", exact: true })
+      .click();
+
+    const callsBeforeSubmit = devicesCallCount;
+    await page
+      .getByRole("button", { name: "Tauschen", exact: true })
+      .click();
+
+    await expect(
+      page.getByText(
+        "Thermostat ist nicht mehr aktiv. Bitte Liste neu laden.",
+      ),
+    ).toBeVisible();
+
+    // Dialog schliesst (Header verschwindet).
+    await expect(
+      page.getByRole("heading", { name: "Thermostat tauschen" }),
+    ).toBeHidden();
+
+    // ["devices"]-Invalidate triggert Refetch (zweiter GET-Call).
+    await expect.poll(() => devicesCallCount).toBeGreaterThan(
+      callsBeforeSubmit,
+    );
+  });
+
+  test("Case 7 Retire 404 DEVICE_NOT_FOUND: Toast 'nicht gefunden' + Dialog close", async ({
+    page,
+  }) => {
+    // B-Sprint13b2-4 (AE-59): Device-Row weg (z.B. parallele Cleanup-
+    // Migration). Backend liefert 404 mit error_code DEVICE_NOT_FOUND;
+    // Dialog soll schliessen mit klarem Toast.
+    await mockBaseRoom(page);
+
+    await page.route(/.*\/api\/v1\/devices(\?.*)?$/, async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([DEVICE_IN_ROOM]),
+      });
+    });
+
+    await page.route(
+      /.*\/api\/v1\/devices\/\d+\/retire$/,
+      async (route: Route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({
+            detail: "device_id=42 nicht gefunden",
+            error_code: "DEVICE_NOT_FOUND",
+          }),
+        });
+      },
+    );
+
+    await page.goto("/zimmer/101");
+    await page.getByRole("button", { name: "Geräte", exact: true }).click();
+
+    await page
+      .getByRole("button", { name: "Thermostat stilllegen", exact: true })
+      .click();
+
+    await page.getByLabel("Grund").click();
+    await page.getByRole("option", { name: "Defekt", exact: true }).click();
+
+    await page
+      .getByRole("button", { name: "Stilllegen", exact: true })
+      .click();
+
+    await expect(
+      page.getByText("Thermostat nicht gefunden. Bitte Liste neu laden."),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole("heading", { name: "Thermostat stilllegen" }),
+    ).toBeHidden();
   });
 });

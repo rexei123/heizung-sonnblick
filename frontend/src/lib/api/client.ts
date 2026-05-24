@@ -37,13 +37,20 @@ async function request<T>(
 
     if (!res.ok) {
       let detail: unknown = res.statusText;
+      let errorCode: string | undefined;
       try {
         const body = await res.json();
         detail = body?.detail ?? body;
+        // Sprint 13b.2 B-Sprint13b2-4 (AE-59): error_code-Diskriminator
+        // aus Backend-Body extrahieren. Heute nur von Lifecycle-
+        // Endpoints geliefert; andere Pfade lassen das Feld weg.
+        if (typeof body?.error_code === "string") {
+          errorCode = body.error_code;
+        }
       } catch {
         // body war kein JSON — statusText reicht
       }
-      const err: ApiError = { status: res.status, detail };
+      const err: ApiError = { status: res.status, detail, error_code: errorCode };
       throw err;
     }
 

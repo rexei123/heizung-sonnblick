@@ -254,7 +254,10 @@ async def test_replace_from_pool_404_unknown_old(
         json={"new_pool_device_id": setup["pool_device_id"]},
     )
     assert resp.status_code == 404
-    assert "old_device_id" in resp.json()["detail"]
+    body = resp.json()
+    assert "old_device_id" in body["detail"]
+    # B-Sprint13b2-4 (AE-59): error_code-Diskriminator pflicht.
+    assert body["error_code"] == "DEVICE_NOT_FOUND"
 
 
 async def test_replace_from_pool_409_new_not_in_pool(
@@ -270,6 +273,62 @@ async def test_replace_from_pool_409_new_not_in_pool(
     # Gate 2 raised DeviceStateError, weil pool_device.heating_zone_id IS NULL
     # (kein aktiv-zugewiesener Tausch).
     assert resp.status_code == 409
+    # B-Sprint13b2-4 (AE-59): error_code-Diskriminator pflicht.
+    assert resp.json()["error_code"] == "DEVICE_STATE_ERROR"
+
+
+async def test_replace_from_pool_409_self_replacement_forbidden(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+) -> None:
+    """B-Sprint13b2-4 (AE-59): old_id == new_id -> SELF_REPLACEMENT_FORBIDDEN.
+
+    Vor dem T1-Refactor warf ``device_service.replace_device`` einen inline-
+    ``ValueError`` fuer diesen Pfad. Der Endpoint-Handler hat den generisch
+    via ``except ValueError`` in 409 uebersetzt, aber kein dedizierter Code
+    war im Body. Mit der neuen ``SelfReplacementError(LifecycleError)``-
+    Klasse + App-weitem Exception-Handler ist der Pfad jetzt explizit
+    diskriminierbar.
+    """
+    resp = await http_client.post(
+        f"/api/v1/devices/{setup['old_device_id']}/replace/from-pool",
+        json={"new_pool_device_id": setup["old_device_id"]},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["error_code"] == "SELF_REPLACEMENT_FORBIDDEN"
+    assert "Selbst-Tausch" in body["detail"]
+
+
+async def test_replace_from_pool_409_pool_unavailable_direct(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    setup: dict[str, int | str],
+) -> None:
+    """B-Sprint13b2-4 (AE-59): POOL_DEVICE_UNAVAILABLE-Diskriminator-Test.
+
+    Pool-Device direkt aus dem Pool nehmen (zone_id setzen), Replace-
+    Versuch trifft Gate 3 (Pre-Check ``new.heating_zone_id IS NOT NULL``)
+    und liefert ``PoolDeviceUnavailable``. Bestandstest
+    ``test_replace_from_pool_409_new_not_in_pool`` trifft eine andere
+    409-Variante (DeviceStateError fuer alt-Pool-Device); dieser Test
+    deckt den dedizierten Pool-Subtype.
+    """
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as s:
+        pool = await s.get(Device, setup["pool_device_id"])
+        assert pool is not None
+        pool.heating_zone_id = setup["zone_id"]
+        await s.commit()
+
+    resp = await http_client.post(
+        f"/api/v1/devices/{setup['old_device_id']}/replace/from-pool",
+        json={"new_pool_device_id": setup["pool_device_id"]},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["error_code"] == "POOL_DEVICE_UNAVAILABLE"
+    assert "nicht im Pool" in body["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +381,8 @@ async def test_retire_404_unknown(
         json={"reason": "unknown_device"},
     )
     assert resp.status_code == 404
+    # B-Sprint13b2-4 (AE-59): error_code-Diskriminator pflicht.
+    assert resp.json()["error_code"] == "DEVICE_NOT_FOUND"
 
 
 async def test_retire_409_already_retired(
@@ -341,7 +402,10 @@ async def test_retire_409_already_retired(
         json={"reason": "duplicate_retire"},
     )
     assert resp2.status_code == 409
-    assert "bereits retired" in resp2.json()["detail"]
+    body = resp2.json()
+    assert "bereits retired" in body["detail"]
+    # B-Sprint13b2-4 (AE-59): error_code-Diskriminator pflicht.
+    assert body["error_code"] == "DEVICE_STATE_ERROR"
 
 
 # ---------------------------------------------------------------------------
