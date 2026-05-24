@@ -13,6 +13,7 @@ import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { ManualOverridePanelList } from "@/components/patterns/manual-override-panel-list";
+import { ReplaceDeviceDialog } from "@/components/patterns/replace-device-dialog";
 import { RoomForm } from "@/components/patterns/room-form";
 import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
 import { Button } from "@/components/ui/button";
@@ -299,14 +300,19 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
         />
       ) : null}
 
-      {/* Sprint 13b.2 T3 Pre-Stop-1-Reader: T4 + T5 ersetzen diese
-          sr-only-Bloecke durch <ReplaceDeviceDialog /> bzw.
-          <RetireDeviceDialog /> mit deviceId={openReplaceDialog|
-          openRetireDialog} + onClose, das den State auf null setzt. */}
+      {/* Sprint 13b.2 T4: Pool-Reassign-Tausch-Dialog. T5 ergaenzt
+          analog den RetireDeviceDialog fuer openRetireDialog. */}
       {openReplaceDialog !== null ? (
-        <span className="sr-only" role="status">
-          Tausch-Dialog wird vorbereitet für Gerät #{openReplaceDialog}
-        </span>
+        <ReplaceDeviceDialog
+          deviceId={openReplaceDialog}
+          deviceLabel={
+            devicesInRoom.find((d) => d.id === openReplaceDialog)?.label ??
+            `Gerät #${openReplaceDialog}`
+          }
+          roomId={roomId}
+          open={true}
+          onClose={() => setOpenReplaceDialog(null)}
+        />
       ) : null}
       {openRetireDialog !== null ? (
         <span className="sr-only" role="status">
