@@ -1701,12 +1701,53 @@ docker exec -i deploy-db-1 pg_restore --disable-triggers \
 Wenn Backup nur als Forensik-Reserve liegen soll und nicht
 restored wird: pg_dump-Warnung folgenlos.
 
-### 10j.6 Frontend-Dialog
+### 10j.6 Frontend-Dialog (Sprint 13b.2, 2026-05-24)
 
-Sprint 13b.2 baut auf den drei o.g. Endpoints einen Dialog auf
-``/zimmer/[id]`` (Phase-0-Update Audit 3 Empfehlung: Per-Device-Row
-"Tauschen"-Button neben "Trennen"). Bis dahin sind die Endpoints
-curl-only / Cowork-only.
+Hotelier-Workflow auf `/zimmer/{id}` Geraete-Tab — kein CLI noetig
+fuer Tausch im laufenden Betrieb.
+
+**Vicki tauschen (defektes/leeres Geraet gegen Reserve aus dem
+Lager):**
+
+1. Hotelier oeffnet `/zimmer/{id}`, klickt Tab "Geraete".
+2. Neben dem defekten Vicki: Klick auf `swap_horiz Tauschen`.
+3. Dialog "Thermostat tauschen" oeffnet. Pool-Dropdown zeigt alle
+   Reserve-Vickis aus dem Lager (Label oder DevEUI). DevEUI als
+   Hover-Tooltip.
+4. Reserve waehlen, "Tauschen" klicken.
+5. Toast oben-rechts: "Thermostat getauscht — Engine uebernimmt in
+   ≤ 60 s." Geraete-Liste refetcht automatisch; alter Vicki
+   verschwindet (Backend-Default-Filter blendet `retired_at !=
+   NULL` aus), neuer Vicki erscheint mit derselben Zone.
+6. Engine-Tick laeuft in 5-6 Sek nach API-Call (Pattern HF-9.13a-2,
+   Worker-Pickup-Latenz, B-9.13a-hf2-2). Layer 4 sieht den neuen
+   Vicki sofort.
+
+**Vicki stilllegen (ohne Ersatz, z.B. Zone wird aus Betrieb
+genommen oder Vicki wird zur Reparatur eingeschickt):**
+
+1. Klick `power_off Stilllegen` neben dem Vicki.
+2. Dialog "Thermostat stilllegen". Bei letztem aktiven Vicki der
+   Zone: Warning-Box "Heizung in dieser Zone wird nach Stilllegung
+   inaktiv, bis ein neuer Thermostat zugewiesen wird."
+3. Grund waehlen: Defekt / Batterie leer / Verlust / Wartung.
+4. "Stilllegen" klicken (Destruktiv-Variante in rot).
+5. Toast: "Thermostat stillgelegt." Vicki verschwindet aus der
+   Liste; Stilllegung dauerhaft (kein Re-Activate-Pfad, neuer
+   Vicki via Pre-Pairing-Skript §10h einbringen + Tausch §10j.2
+   gegen den retired Row).
+
+**Pool-Race-Verhalten:** Wenn zwei Hotelier-Sessions parallel
+denselben Reserve-Vicki waehlen, gewinnt der schnellere; der
+zweite sieht Toast "Reserve bereits vergeben. Bitte Auswahl erneut
+treffen." und der Dropdown laedt sofort neu (jetzt ohne den
+vergebenen Eintrag). Backend-Race-Schutz via UPDATE-WHERE-Clause
+(CLAUDE.md §5.60).
+
+**CLI-Pfad (§10h.2) bleibt fuer Operator:** Pool-Refill nach
+Defekten (Mass-Import neuer Vickis via CSV), Forensik-Lookup
+(`list-pool`-Subcommand), Bulk-Eingangstest neuer Vickis.
+Frontend-Tausch + CLI-Bulk-Import komplementaer.
 
 ---
 

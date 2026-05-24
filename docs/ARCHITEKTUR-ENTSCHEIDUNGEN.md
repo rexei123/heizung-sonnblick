@@ -1650,15 +1650,20 @@ Late-Import-Trick, kein zirkulaerer Import.
 # AE-57 — Device-Lifecycle: Retire + Pair-New, Zone als stabiler Historie-Anker (Sprint 13-prep)
 
 **Datum:** 2026-05-21
-**Status:** Implementiert + Live-Verify abgeschlossen 2026-05-23
-(Sprint 13b.1, Squash-Commit `55a91fa`). Migration 0018 auf
+**Status:** Implementiert komplett (Backend Sprint 13b.1 2026-05-23
++ Frontend Sprint 13b.2 2026-05-24). Backend: Migration 0018 auf
 heizung-test deployed (Auto-Pull-Timer), Service-Layer
 `services/device_service.py` (Helper + replace_device +
-retire_device) live verifiziert, 6 Engine-Read-Stellen umgestellt
-mit Lifecycle-Filter-Tests, 3 API-Endpoints unter
-`/api/v1/devices/...`. Auth-Wall + Race-Schutz geprueft, Cleanup
-auf Pre-Test-State sauber. Siehe STATUS §2au + RUNBOOK §10j +
-CLAUDE.md §5.61 + §5.62. Frontend-Dialog folgt in Sprint 13b.2.
+retire_device) live verifiziert (Squash-Commit `55a91fa`), 6 Engine-
+Read-Stellen umgestellt mit Lifecycle-Filter-Tests, 3 API-Endpoints
+unter `/api/v1/devices/...`. Auth-Wall + Race-Schutz geprueft.
+Frontend (Branch `feature/sprint-13b2-device-replacement-frontend`,
+PR pending): Tausch- + Stilllegen-Dialoge auf `/zimmer/[id]` mit
+Pool-Dropdown + Reason-Dropdown + 409-Subtype-Handling, Reserve-
+Badge in `/devices`-Liste, FormDialog-Primitive + sonner-Toasts +
+Lifecycle-Type-Schluss in `types.ts`. 5 neue Playwright-Cases.
+Siehe STATUS §2au + §2av + RUNBOOK §10j + CLAUDE.md §5.61 + §5.62
++ §5.63. Cowork-Live-Verify-Auftrag nach Merge separat.
 **Bezug:** AE-43 (Geräte-Lifecycle, Pairing-Wizard), AE-51 (Zone-
 Aggregat-Modell), AE-58 (Override-Modell konsolidiert), Sprint 13
 Phase-0-Bericht (`docs/features/2026-05-21-sprint13-phase0-quellcheck.md`),

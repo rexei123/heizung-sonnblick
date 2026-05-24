@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-23. Sprints 0-12 + 12a + 12b + 12c + 12c.a + Hygiene-Mini-Sprint + 13a abgeschlossen. Sprint 13a Tag `v0.1.18a-pre-pairing-skript` wird in T9.12 nach PR-Merge gesetzt; vorletzter Tag `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, gemerged 2026-05-20, Live-Verify auf heizung-test 2026-05-21).
+**Stand:** 2026-05-24. Sprints 0-12 + 12a + 12b + 12c + 12c.a + Hygiene-Mini-Sprint + 13a + 13b.1 + 13b.2 abgeschlossen. Sprint 13b.2 Tag `v0.1.18b2-device-replacement-frontend` wird in Stop 6 nach PR-Merge gesetzt; vorletzter Tag `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, Live-Verify auf heizung-test 2026-05-23, siehe §2au).
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-23
-**Letzter Tag (geplant nach Merge):** `v0.1.18a-pre-pairing-skript` (Sprint 13a, 8 Commits auf `feat/sprint13a-pre-pairing-skript`, PR-Erstellung steht in T9.9 aus, Tag wird in T9.12 gesetzt). Vorletzter Tag (gemerged): `v0.1.17d-room-block-list-indicator` (Sprint 12c.a, Squash-Commit `81ed3dc`, gemerged 2026-05-20, Live-Verify auf heizung-test erfolgreich 2026-05-21). Hygiene-Mini-Sprint zwischen 12c.a und 13a gemerged via PR #171, kein eigener Tag (siehe §2as).
-**Aktueller Sprint:** Sprint 13a Pre-Pairing-Skript abgeschlossen 2026-05-23 (siehe §2at). Naechster Sprint: Sprint 13b — Tausch-Endpoint + Frontend-Dialog + Migration 0018 + Engine-Read-Stellen-Umbau aus AE-57 (Brief folgt).
+**Stichtag:** 2026-05-24
+**Letzter Tag (geplant nach Merge):** `v0.1.18b2-device-replacement-frontend` (Sprint 13b.2, 13 Commits auf `feature/sprint-13b2-device-replacement-frontend`, PR-Erstellung in T9 pending, Tag wird in Stop 6 gesetzt). Vorletzter Tag (gemerged): `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, Live-Verify auf heizung-test erfolgreich 2026-05-23, siehe §2au). Zwischen 12c.a und 13a: Hygiene-Mini-Sprint via PR #171, kein eigener Tag (§2as).
+**Aktueller Sprint:** Sprint 13b.2 Frontend Pool-Reassign-Tausch + Stilllegen abgeschlossen 2026-05-24 (siehe §2av). Naechster Sprint: Sprint 14 — Cross-Sicht-UI + Health-Badges + Mail-Platzhalter (Phase 1, BR-2 + B-9.11x-5).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -2086,21 +2086,23 @@ Audit NICHT zurueck.
 - **B-Sprint13a-5** 🟡: Migration 0018 in Sprint 13b fuehrt
   `pairing_status`-Feld ein (Default `active`), um Variante-B fuer
   Downlink-Failure-Recovery nachzureichen.
-- **B-Sprint13a-6** 🟢: `list-all`-Subcommand mit Zimmer-Zuordnung —
-  verschoben in Sprint 13b als sortierbare Frontend-Tabelle.
+- **B-Sprint13a-6** ✅ erledigt 2026-05-24 (Sprint 13b.2): Frontend-
+  Sicht der Pool/Aktiv-Devices ist via T6 Reserve-Badge in der
+  `/devices`-Liste plus T8 Playwright-Coverage gegeben. Kein
+  separater `list-all`-Subcommand mehr noetig.
 - **B-Sprint13a-7** 🟢: RUNBOOK §10h.2 Stoerungsfall-Eintrag fuer
   `resend_open_window-failed`: explizite Anleitung was der Hotelier
   tun soll (manuell re-senden oder ignorieren weil naechster
   Eingangstest erneut sendet).
-- **B-Sprint13a-8** 🟡: CLI-Summary-Wording praezisieren — `[FAIL]`
-  bei `DOWNLINK_FAILED` ist semantisch korrekt aber irrefuehrend
-  wenn Device in DB existiert. Praezise Formulierung: `Resultat: 0
-  paired, 0 skipped, 3 errors (3 Device-Rows in DB, OW-Downlink fuer
-  alle 3 fehlgeschlagen)`.
-- **B-Sprint13a-9** 🟢: Dry-Run-Schluss-Message umformulieren —
-  `ChirpStack-Downlinks wurden trotzdem gesendet` ist im
-  unreachable-Host-Pfad nicht korrekt. Praeziser:
-  `ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben)`.
+- **B-Sprint13a-8** ✅ erledigt 2026-05-24 (Sprint 13b.2 T7,
+  Commit `bad4a26`): Resultat-Output erweitert um DOWNLINK_FAILED-
+  Disambiguation in Klammer ("X errors (Y mit Device-Row in DB,
+  OW-Downlink fehlgeschlagen)"); Mixed-Case + Reine-Pairing-Fails-
+  Case differenziert.
+- **B-Sprint13a-9** ✅ erledigt 2026-05-24 (Sprint 13b.2 T7,
+  Commit `bad4a26`): Dry-Run-Schluss-Message auf
+  "ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben)"
+  umgestellt.
 - **B-Sprint13a-10** 🟢: Falls in Sprint 16/17 sich herausstellt,
   dass das Master-Inventar verbindlich versionierbar sein muss
   (z.B. fuer Bootstrap-Reproduzierbarkeit): Format auf Pure-CSV
@@ -2288,7 +2290,169 @@ Live-Verify-Lessons (s.u. CLAUDE.md §5.61 + §5.62):
 **Querverweise:** AE-57 (Master-ADR), Phase-0-Bericht
 `docs/features/2026-05-21-sprint13-phase0-quellcheck.md`,
 Phase-0-Update `docs/features/2026-05-23-sprint13b-phase0-update.md`,
-RUNBOOK §10j, CLAUDE.md §5.58 + §5.60 + §5.61 + §5.62, STATUS §2at.
+RUNBOOK §10j, CLAUDE.md §5.58 + §5.60 + §5.61 + §5.62 + §5.63,
+STATUS §2at + §2av.
+
+---
+
+## 2av. Sprint 13b.2 Frontend Pool-Reassign-Tausch + Stilllegen (2026-05-24, abgeschlossen, PR pending)
+
+**Ziel:** Frontend-Komplettierung von AE-57: Hotelier-UI fuer Vicki-
+Tausch (Pool-Reassign) + Stilllegung ohne Ersatz auf `/zimmer/[id]`
+Geraete-Tab. Reserve-Pool-Identifikation in `/devices`-Liste. Sitzt
+auf den drei 13b.1-Endpoints (`GET /devices/pool`,
+`POST /{id}/replace/from-pool`, `POST /{id}/retire`).
+
+**Branch:** `feature/sprint-13b2-device-replacement-frontend`,
+**13 Commits** auf develop @ `72a6e16`. PR pending (Stop 5).
+
+**Tag (geplant nach Merge):** `v0.1.18b2-device-replacement-frontend`
+
+**Tasks erledigt (Brief T1-T8 + 4 Brief-Plus-Adds + T9 Doku):**
+
+- **T1.d (`40354e0`):** `components/ui/form-dialog.tsx` — neue
+  Primitive analog ConfirmDialog, aber mit `children`-Body-Slot fuer
+  Form-Inhalte. Drift-4-Resolution (ConfirmDialog Confirm-only
+  reicht nicht fuer Pool/Reason-Dropdown).
+- **T1.c-prep (`e2cb807`):** Lifecycle-Type-Drift schliessen.
+  `types.ts`: `is_active` aus `Device`/`Create`/`Update`/`ListQuery`
+  entfernt, `retired_at`/`retired_reason`/`replaced_by_device_id`
+  als Required-Felder ergaenzt. 3 Konsumenten umgestellt
+  (`/devices`-Liste Sortier + Spalte "Eingerichtet"→"Aktiv",
+  `/devices/[id]`-Detail-Header). 3 e2e-Device-Mocks angepasst.
+  Live-UX-Bug-Fix (Devices zeigten "Eingerichtet: nein" weil
+  `is_active` weg). Brief-Luecken-Klasse — neue Lesson §5.63.
+- **T1.c (`c0923d7`):** `lib/api/devices.ts` — 3 typisierte Client-
+  Funktionen `getPool`, `replaceFromPool`, `retireDevice` plus 2
+  Request-Types in `types.ts`.
+- **T1.b (`7953ccb`):** `lib/api/hooks-devices-lifecycle.ts` (neu)
+  — `useDevicePool` (staleTime 10s, Race-relevant),
+  `useReplaceFromPool`/`useRetireDevice` (Mutations mit optionalem
+  `roomId`-Param fuer zone-spezifische Invalidation).
+- **T2 (`93fd973`):** `components/ui/badge.tsx` (neu) — shadcn-
+  Standard, 4 Varianten (`default`/`secondary`/`destructive`/
+  `outline`), Token-Konvention konsistent zu dialog.tsx +
+  select.tsx (`--primary`/`--secondary`/`--destructive`-HSL-CSS-
+  Variables in globals.css).
+- **T3 (`d400176`):** DevicesInRoom-Erweiterung in
+  `/zimmer/[id]/page.tsx` — 2 Action-Buttons pro Device-Row
+  (`swap_horiz Tauschen`, `power_off Stilllegen`) neben `Trennen`,
+  State-Anker `openReplaceDialog`/`openRetireDialog`.
+- **T0.6 (`6d59c63`):** sonner Toast-Library + `lib/toast.ts`-
+  Wrapper (`showSuccessToast`/`showErrorToast`/`showWarningToast`).
+  `<Toaster position="top-right" richColors closeButton />` in
+  `layout.tsx`. Drift-5-Resolution (Toast-Lib war nicht im Repo).
+- **T4 (`f510cc9`):** `components/patterns/replace-device-dialog.tsx`
+  — Pool-Dropdown via shadcn Select, Empty-State-Hinweis,
+  409-Subtype-String-Match (RE_POOL_UNAVAILABLE +
+  RE_DEVICE_STATE_ERROR), Toast-Wiring, Pool-Refetch via
+  `qc.invalidateQueries` bei Race.
+- **T5 (`058e464`):** `components/patterns/retire-device-dialog.tsx`
+  — Reason-Dropdown (4 feste Optionen Defekt/Batterie leer/Verlust/
+  Wartung), Last-Active-Warning-Box bei 1-Vicki-Zone (orange
+  `bg-warning-soft`), destructive Confirm-Button.
+- **T6 (`89605f2`):** Reserve-Badge in `/devices`-Liste
+  (`LabelCell`) bei `heating_zone_id === null &&
+  retired_at === null` — `variant="secondary"` + Hover-Tooltip.
+- **T7-prep (`355baa7`):** Fixture-Suffix-Patch in
+  `test_pair_devices_cli.py::test_cmd_import_real_with_user_email`
+  (numerischer uuid-hash-Suffix wegen Pydantic-int-Validator auf
+  CSV-zimmer_nummer). §5.18-Konformitaet, Pre-existing 13a-Test-
+  Hygiene-Bug.
+- **T7 (`bad4a26`):** CLI-Wording-Fixes in `scripts/pair_devices.py`
+  — B-Sprint13a-9 (Dry-Run-Message "trotzdem gesendet" →
+  "versucht (Ergebnisse siehe oben)") + B-Sprint13a-8 (Resultat-
+  Output mit DOWNLINK_FAILED-Disambiguation in Klammer). Cross-
+  Sprint-Backend-Touch.
+- **T8 (`27a28e6`):** `frontend/tests/e2e/sprint13b2-device-
+  replacement.spec.ts` — 5 Playwright-Cases (Replace Happy /
+  Pool-leer / Pool-Race-409 / Retire Happy / Retire Last-Active-
+  Warning). page.route-Mocks analog Sprint-12b-T5-Pattern, §5.54-
+  Regex-URLs.
+- **T9 (dieser Commit):** STATUS §2av + SPRINT-PLAN-Update + AE-57-
+  Status komplett + RUNBOOK §10j.6 Hotelier-Workflow + CLAUDE.md
+  §5.63 Lesson + Backlog-Abschluesse.
+
+**Tests (Stop 4 Voll-Suite):**
+
+- Frontend `tsc --noEmit`: gruen
+- Frontend `next lint`: gruen, 0 warnings
+- Frontend Playwright voll-suite: **58 passed (43.5s, 0 retries)**,
+  davon 5 neu in T8. Alle 9.x + 12.x Bestands-Tests weiter gruen
+  (T1.c-prep Device-Mock-Patches in 3 e2e-Files haben nichts
+  gebrochen).
+- Backend ruff format/check + mypy strict + pytest **240 passed /
+  279 skipped / 0 failed** post-T7-prep (Skip-Vorbehalt: ohne
+  `TEST_DATABASE_URL`; CI deckt die 279 DB-Tests).
+
+**Diff-Summe (T1-T9):** 20 Files, **+1283 Insertions / −17
+Deletions** in 14 Commits (13 Code/Test/Fix + 1 Doku).
+
+**Live-Verify:** ausstehend. Cowork-Auftrag formuliert nach Merge
+separat (Strategie-Chat-Verantwortung per Brief). Befund spaeter in
+diesem §2av-Block nachgepflegt.
+
+**Drift-Resolutionen (Brief-Plus-Adds):**
+
+| Drift | Resolution | Commit |
+|---|---|---|
+| 1+2 Hook-Pfad/Naming | `lib/api/hooks-devices-lifecycle.ts` analog `hooks-overrides.ts` | `7953ccb` |
+| 3 Komponenten-Pfad | `components/patterns/` (Repo-Konvention) | `f510cc9` + `058e464` |
+| 4 Dialog-Wrapper-Pattern | neue `FormDialog`-Primitive mit `children`-Slot | `40354e0` |
+| 5 Toast-Library fehlt | sonner-Installation + `lib/toast.ts`-Wrapper | `6d59c63` |
+
+Plus Schema-Drift-Discovery T1.c-prep (Lifecycle-Type-Spiegel) als
+neue Brief-Luecken-Klasse §5.63.
+
+**Backend-409-Distinktion ohne exception_class-Diskriminator:**
+
+Verifiziert in `backend/src/heizung/api/v1/devices.py:474-481` +
+`services/device_service.py:39-179`: Backend liefert beide 409
+(PoolDeviceUnavailable + DeviceStateError) nur als
+`{detail: <string>}`. Frontend nutzt String-Pattern-Match
+(`RE_POOL_UNAVAILABLE = /Pool|parallel vergeben/i` +
+`RE_DEVICE_STATE = /retired|nicht zugewiesen|Re-Replace/i`).
+Fragil gegen Backend-Wording-Refactor — Backlog-Item
+**B-Sprint13b2-4** fordert `exception_class`-Feld in 409-Response
+fuer robustes Frontend-Match. Vor Heizperiode 2026/27.
+
+**Out of Scope 13b.2 (in spaeteren Sprints):**
+
+- Frontend-Tabelle fuer retired Devices (Brief: B-Sprint13a-6 als
+  sortierbare Liste — durch Backend-Default-Filter blendet sich
+  retired heute aus der `/devices`-Liste aus; eigener Audit-Sprint
+  in 14+).
+- Filter "Nur Reserve anzeigen" in `/devices`-Liste (YAGNI).
+- Server-Side-`include_retired=true`-Sicht im Frontend (Audit-UI
+  Sprint 14+).
+- Migration der 8 Bestands-Inline-Error-Stellen auf Toast (Phase-7-
+  Polish, B-Sprint13b2-3).
+
+**Neue Backlog-Punkte:**
+
+- **B-Sprint13b2-1** 🟢: 8 weitere CLI-Tests in
+  `tests/test_pair_devices_cli.py` (Tests fuer Subcommands
+  validate, import-pre-flight, test) nutzen Hardcoded-Room-Numbers
+  (7101/7102/99999) ohne uuid-Suffix. Gleiche Klasse §5.18-Verstoss
+  wie T7-prep, heute zufaellig nicht kollidiert. ~15 Min Hygiene-
+  Sprint.
+- **B-Sprint13b2-2** 🟢: CLI-Tests brauchen autouse-Cleanup-Fixture
+  mit Prefix-Filter analog §5.39 — conftest-Patch verhindert dass
+  failed-Test-Leftovers nachfolgende Runs killen. Vor naechstem
+  CLI-Test-Sprint.
+- **B-Sprint13b2-3** 🟢: sonner-Migration der 8 Bestands-Inline-
+  Error-Stellen (ManualOverridePanel, Login-Form, etc.). Heute
+  zwei Feedback-Patterns parallel — Strategie-Setzung 2026-05-23
+  akzeptiert. Phase-7-Polish-Sprint.
+- **B-Sprint13b2-4** 🟡 (vor Heizperiode): 409-Subtype-Diskriminator
+  im Backend ergaenzen (`{detail: ..., exception_class:
+  "PoolDeviceUnavailable"}`). Heute String-Pattern-Match in
+  ReplaceDeviceDialog — fragil gegen Backend-Wording-Refactor.
+  Backend-Touch + ReplaceDeviceDialog-Update zusammen, ~1 h.
+
+**Querverweise:** AE-57 (Master-ADR, jetzt komplett),
+RUNBOOK §10j.6 (Hotelier-Workflow), CLAUDE.md §5.30 + §5.43 +
+§5.58 + §5.63, SPRINT-PLAN Sprint 13b.2, STATUS §2au + §2at.
 
 ---
 

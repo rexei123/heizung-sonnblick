@@ -1175,35 +1175,74 @@ Out of Scope 13b.1 → 13b.2:
 - Playwright-E2E Tausch-Flow
 - B-Sprint13a-8 CLI-Summary-Wording / B-Sprint13a-9 Dry-Run-Msg
 
-### Sprint 13b.2 — Frontend Tausch-Dialog (geplant)
+### Sprint 13b.2 ✅ Frontend abgeschlossen 2026-05-24
 
-**Status:** Brief folgt nach 13b.1-Merge + Live-Verify-Befund.
-**Geschaetzte Dauer:** ~2-3 h Frontend.
-**Tag nach 13b.2:** `v0.1.18-pairing-wizard` (Sprint-13-Gesamt-Tag).
+**Status:** Code + Tests + Doku fertig auf
+`feature/sprint-13b2-device-replacement-frontend` (13 Commits auf
+develop @ `72a6e16`). PR-Erstellung in T9 nach Strategie-Chat-
+Freigabe, Tag in Stop 6.
+**Tatsaechliche Dauer:** ~4 h Code + ~1 h Doku (statt 3-5 h Brief-
+Schaetzung — Brief-Plus-Adds aus Drift-Resolutionen).
+**Branch:** `feature/sprint-13b2-device-replacement-frontend`.
+**Tag (geplant nach Merge):** `v0.1.18b2-device-replacement-frontend`.
 
-### Ziel
+Geliefert (Brief-T1-T8 + 4 Brief-Plus-Adds):
 
-13b.2 ergaenzt das Frontend (shadcn Dialog mit Pool-Dropdown auf
-`/zimmer/[id]/page.tsx`), das auf den drei 13b.1-Endpoints
-(`GET /devices/pool`, `POST /{id}/replace/from-pool`,
-`POST /{id}/retire`) sitzt.
+- T1.c `frontend/src/lib/api/devices.ts`: 3 typisierte Client-
+  Funktionen `getPool`, `replaceFromPool`, `retireDevice` plus 2
+  Request-Types in `types.ts`.
+- T1.b `frontend/src/lib/api/hooks-devices-lifecycle.ts` (neu):
+  `useDevicePool` (staleTime 10s, Race-relevant), `useReplaceFromPool`
+  + `useRetireDevice` (Mutations mit optional `roomId`-Param fuer
+  zone-spezifische Invalidation).
+- T2 `frontend/src/components/ui/badge.tsx` (neu): shadcn-Standard,
+  4 Varianten, Token-Konvention konsistent zu dialog.tsx + select.tsx.
+- T3 DevicesInRoom-Erweiterung (`/zimmer/[id]/page.tsx`): 2 Action-
+  Buttons (`swap_horiz Tauschen`, `power_off Stilllegen`) pro Device-
+  Row + State-Anker `openReplaceDialog` / `openRetireDialog`.
+- T4 `components/patterns/replace-device-dialog.tsx`: Pool-Dropdown
+  via Select, Empty-State, 409-Subtype-String-Match (RE_POOL +
+  RE_DEVICE_STATE), Toast-Wiring.
+- T5 `components/patterns/retire-device-dialog.tsx`: Reason-Dropdown
+  (4 feste Optionen Defekt/Batterie leer/Verlust/Wartung),
+  Last-Active-Warning bei 1-Vicki-Zone, destructive Confirm-Button.
+- T6 Reserve-Badge in `/devices`-Liste (`LabelCell`) bei
+  `heating_zone_id === null && retired_at === null`.
+- T7 + T7-prep `scripts/pair_devices.py`: B-Sprint13a-8 +
+  B-Sprint13a-9 CLI-Wording-Fixes Cross-Sprint-Touch. Plus Fixture-
+  Suffix-Patch in `test_pair_devices_cli.py` analog §5.18 (Pre-
+  existing Test-Hygiene-Bug).
+- T8 `frontend/tests/e2e/sprint13b2-device-replacement.spec.ts`:
+  5 Playwright-Cases (Replace Happy/Pool-leer/Pool-Race-409/Retire
+  Happy/Last-Active-Warning).
+- T9 Doku: STATUS §2av + SPRINT-PLAN + AE-57-Status + RUNBOOK
+  §10j.6 + CLAUDE.md §5.63 + Backlog-Updates (dieser Commit).
 
-### Tasks-Skizze 13b.2 (Brief folgt)
+Brief-Plus-Adds (Drift-Resolutionen Strategie-Chat 2026-05-23):
 
-- T1 Frontend-Dialog "Vicki ersetzen" auf `/zimmer/[id]/page.tsx` —
-  Per-Device-Row Action-Button (Phase-0-Update Audit 3 Empfehlung).
-- T2 Pool-Dropdown via `useQuery` auf `GET /api/v1/devices/pool`.
-- T3 `useReplaceFromPool` + `useRetireDevice` Mutations
-  (`@tanstack/react-query`).
-- T4 ConfirmDialog-Pattern wiederverwenden (siehe
-  `ConfirmDialog` in `confirm-dialog.tsx`).
-- T5 ggf. shadcn `badge`-Komponente fuer Reserve-Tag (Phase-0-
-  Update Audit 4 — heute fehlt sie).
-- T6 Playwright-E2E: Tausch-Flow.
-- T7 CLI-Summary-Wording (B-Sprint13a-8) + Dry-Run-Msg-Fix
-  (B-Sprint13a-9) mitnehmen.
-- T8 Doku: STATUS §2x, SPRINT-PLAN, CLAUDE.md-Update zu §5.58
-  ("is_active-Uebergang abgeschlossen — komplett gedropped"), Tag.
+- T1.d `components/ui/form-dialog.tsx` (neu): FormDialog-Primitive
+  mit children-Body-Slot (Drift-4 — ConfirmDialog Confirm-only-
+  Pattern reicht nicht fuer Pool/Reason-Dropdown).
+- T1.c-prep `types.ts` + 3 Konsumenten + 3 e2e-Mocks: Lifecycle-
+  Type-Drift gegen Backend post-13b.1 (Live-UX-Bug-Fix:
+  Devices zeigten "Eingerichtet: nein" weil `is_active` weg —
+  Brief-Luecken-Klasse analog §5.30/§5.43, neue Lesson §5.63).
+- T0.6 sonner Toast-Library + `lib/toast.ts`-Wrapper (Drift-5 —
+  Toast-Lib war im Repo nicht vorhanden, Brief verlangte sie).
+- T7-prep Fixture-Suffix in `test_pair_devices_cli.py` (§5.18-
+  Konformitaet).
+
+**Tests:** Frontend type-check + lint + Playwright **58 passed
+(43.5s)**, davon 5 neu in T8. Backend ruff format/check + mypy
+strict + pytest **240 passed / 279 skipped / 0 failed** post-T7-
+prep (Skip-Vorbehalt: ohne `TEST_DATABASE_URL`; CI deckt die 279
+DB-Tests).
+
+**Diff-Summe (T1-T9):** 20 Files, +1283 Insertions / −17 Deletions
+in 14 Commits (13 Feature/Fix/Test + 1 Doku).
+
+**Live-Verify:** Cowork-Auftrag formuliert nach Merge separat
+(Strategie-Chat), Befund spaeter in STATUS §2av nachgepflegt.
 
 ### Out of Scope 13b (gesamt)
 
