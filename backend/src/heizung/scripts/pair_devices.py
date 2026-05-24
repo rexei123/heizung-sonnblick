@@ -190,9 +190,12 @@ async def _cmd_import(args: argparse.Namespace) -> int:
 
         if args.dry_run:
             await session.rollback()
+            # B-Sprint13a-9: "trotzdem gesendet" war im unreachable-Host-
+            # Pfad nicht korrekt — Downlinks koennen scheitern. Praeziser:
+            # "versucht (Ergebnisse siehe oben)".
             print(
                 "[DRY-RUN] DB-Aenderungen zurueckgerollt. "
-                "ChirpStack-Downlinks wurden trotzdem gesendet.",
+                "ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben).",
                 file=sys.stderr,
             )
         else:
@@ -209,9 +212,30 @@ async def _cmd_import(args: argparse.Namespace) -> int:
             f"(device_id={r.device_id}, is_pool={r.is_pool}) -> {detail}"
         )
 
+    # B-Sprint13a-8: "errors" allein war irrefuehrend, weil DOWNLINK_FAILED-
+    # Rows ein device.id haben (DB-Row angelegt, nur OW-Downlink scheiterte).
+    # Disambiguation in Klammer wenn errors > 0.
+    error_count = counts["error"]
+    errors_msg = f"{error_count} errors"
+    if error_count > 0:
+        db_present_errors = sum(
+            1 for r in results if r.status == "error" and r.device_id is not None
+        )
+        db_absent_errors = error_count - db_present_errors
+        if db_present_errors > 0 and db_absent_errors == 0:
+            errors_msg += (
+                f" ({db_present_errors} Device-Rows in DB, OW-Downlink fuer "
+                f"alle {db_present_errors} fehlgeschlagen)"
+            )
+        elif db_present_errors > 0 and db_absent_errors > 0:
+            errors_msg += (
+                f" ({db_present_errors} mit Device-Row in DB, OW-Downlink "
+                f"fehlgeschlagen; {db_absent_errors} ohne Device-Row)"
+            )
+        # db_present_errors == 0: alle errors sind echte Pairing-Fails -> kein Suffix.
+
     print(
-        f"\nResultat: {counts['paired']} paired, "
-        f"{counts['skipped_exists']} skipped, {counts['error']} errors."
+        f"\nResultat: {counts['paired']} paired, {counts['skipped_exists']} skipped, {errors_msg}."
     )
     return 0 if counts["error"] == 0 else 1
 
