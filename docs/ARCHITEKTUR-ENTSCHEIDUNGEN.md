@@ -1843,6 +1843,119 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
 
 ---
 
+# AE-59 — API-Fehler-Diskriminierung via error_code-Feld (B-Sprint13b2-4)
+
+**Datum:** 2026-05-24
+**Status:** Implementiert (B-Sprint13b2-4, 2026-05-24)
+**Geltungsbereich:** Lifecycle-Endpoints (Pool / Replace / Retire) aus
+Sprint 13b.1 + 13b.2. Andere Endpoint-Familien sind heute aus dem Scope
+ausgenommen (Strategie-Setzung 2026-05-24, B-Sprint13b2-7 plant
+Konvergenz).
+**Bezug:** AE-57 (Device-Lifecycle, Master), AE-58 (Override-Modell —
+zwei verschiedene `error_code`/`error`-Pattern-Stellen, siehe
+Phase-0-Audit §4), CLAUDE.md §5.64 (Lesson)
+
+## Kontext
+
+Sprint 13b.1 hat drei Lifecycle-Exceptions
+(``PoolDeviceUnavailable``, ``DeviceStateError``,
+``SelfReplacementError`` via inline ``ValueError``) eingefuehrt, alle
+unter HTTP 409. Im Frontend 13b.2 musste der ReplaceDeviceDialog
+zwischen den Subtypes unterscheiden (Pool-Race vs. State-Drift haben
+unterschiedliche UX: Race bleibt Dialog-offen + Pool-Refetch, State
+schliesst + Voll-Refetch).
+
+Mangels Diskriminator im Response-Body wurde im Sprint 13b.2 mit
+String-Regex (``RE_POOL_UNAVAILABLE`` + ``RE_DEVICE_STATE``) auf
+``detail`` gematcht — fragil gegen Backend-Wording-Refactor, Backlog
+B-Sprint13b2-4 (vor Heizperiode).
+
+## Entscheidung
+
+1. **Schema:** Backend-Exceptions, die im Frontend UX-relevant
+   unterschieden werden muessen, liefern einen maschinen-lesbaren
+   ``error_code`` als Top-Level-Sibling neben ``detail`` im Response-
+   Body:
+
+   ```json
+   {"detail": "<human-readable message>", "error_code": "POOL_DEVICE_UNAVAILABLE"}
+   ```
+
+2. **Vier Codes fuer Lifecycle-Operations** (B-Sprint13b2-4 T1):
+   - ``POOL_DEVICE_UNAVAILABLE`` (Pool-Race oder Pool-Pre-Check)
+   - ``DEVICE_STATE_ERROR`` (Device bereits retired / nicht zugewiesen)
+   - ``SELF_REPLACEMENT_FORBIDDEN`` (Replace mit ``old_id == new_id``)
+   - ``DEVICE_NOT_FOUND`` (Device-ID existiert nicht)
+
+3. **Backend-Implementation:** ``LifecycleError``-Basisklasse mit
+   ``error_code: ClassVar[str]``, FastAPI ``@app.exception_handler``
+   app-weit. ``DeviceNotFound`` -> 404, alle anderen Subklassen -> 409.
+
+4. **Frontend-Implementation:** ``lib/api/error-codes.ts`` mit
+   ``ERROR_CODES``-const + ``ErrorCode``-Type + ``getErrorCode``-
+   Type-Guard. Catch-Blocks der Dialoge nutzen ``switch``-Statement
+   ueber ``ERROR_CODES`` statt String-Regex. ``client.ts``-Fetch-
+   Wrapper extrahiert ``body.error_code`` und reicht es im
+   ``ApiError``-throw mit durch (T4-Discovery).
+
+## Verworfene Alternativen
+
+- **Nested-detail** ``{"detail": {"message": "...", "code": "..."}}``:
+  breaking gegen FastAPI-Default-Validation-Errors die ``detail`` als
+  String oder Array liefern; bricht 2 Bestandstests in
+  ``test_api_devices_lifecycle.py`` die ``"old_device_id" in
+  resp.json()["detail"]`` asserten.
+
+- **Custom-Header** ``X-Error-Code``: schlechtere Test-Ergonomie
+  (Header-Inspection vs. JSON-Body-Match), keine JSON-Konsistenz mit
+  ``detail``-Inhalt, Header-Capping/Mangling bei Reverse-Proxy moeglich.
+
+- **Per-Endpoint-try/except** ohne app-weiten Handler: Boilerplate-
+  Multiplikator. Sprint 14 + 15 haetten das Pattern fuer jedes neue
+  4xx-Subtype dupliziert. Mit app-weitem Handler ist neue
+  ``LifecycleError``-Subklasse in einer Datei + ein Code in
+  ``error-codes.ts`` der vollstaendige Touch.
+
+## Konsequenzen
+
+- **Sprint 13b.2-Frontend-Regex-Stellen entfernt** (Phase-0-Audit §3
+  hatte 5 Stellen in 2 Dialog-Komponenten gelistet). Catch-Blocks
+  sind code-basiert. Bestands-Toast-Wortlaut unveraendert.
+
+- **Backend-Tests** ergaenzt um ``error_code``-Assertion pro 4xx-Pfad
+  (T3 +6 Assertions in 4 Bestandstests + 2 neue Tests fuer
+  ``SELF_REPLACEMENT_FORBIDDEN`` + ``POOL_DEVICE_UNAVAILABLE``-direct).
+
+- **Frontend-Playwright** Case-3-Mock-Body erweitert + Cases 6+7
+  (``DEVICE_STATE_ERROR`` Replace + ``DEVICE_NOT_FOUND`` Retire). 60
+  passed (vorher 58).
+
+- **Cross-Sicht-UI-Vorbereitung Sprint 14:** das Pattern ist
+  generisch wiederverwendbar — neue ``LifecycleError``-Subklasse +
+  neuer Code in ``error-codes.ts``, kein neuer Handler noetig.
+  Phase-0-Audit §6 hatte das als Empfehlung formuliert,
+  B-Sprint13b2-4 hat die Schicht generisch ausgelegt.
+
+## Scope-Grenze
+
+Nur Lifecycle-Endpoints (Pool / Replace / Retire). Andere
+existierende ``error_code``-Stellen (overrides.py Sprint 12c
+Z.207) sind heute schon konvergent in der Struktur; Sprint-12a-
+``error``-Key-Stellen (Z.216) liefern weiterhin das alte Pattern.
+B-Sprint13b2-7 konsolidiert die Konventionen separat — natuerliche
+Aufloesung, sobald 12a-Bestand auf ``error_code`` umgestellt wird.
+
+## Querverweise
+
+- B-Sprint13b2-4 Phase-0-Audit:
+  ``docs/features/2026-05-24-b-sprint13b2-4-phase0.md``
+  (PR #180, gemerged ``c67c4ce``).
+- CLAUDE.md §5.64 (Lesson — Diskriminator-Pflicht-Pattern).
+- ``backend/src/heizung/services/exceptions.py`` (Hierarchie).
+- ``frontend/src/lib/api/error-codes.ts`` (Frontend-Type-Guard).
+
+---
+
 # AE-58 — Override-Modell konsolidiert (Sprint 12a)
 
 **Datum:** 2026-05-20

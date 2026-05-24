@@ -1743,6 +1743,45 @@ nicht nur mutierende — analoge Brief-Luecken-Klasse), §5.43
 (Brief-Annahmen via grep belegen), §5.58 (Device-Queries brauchen
 Lifecycle-Filter — gleiche AE-57-Familie, Backend-Seite).
 
+### 5.64 Backend-Exceptions im Frontend brauchen maschinen-lesbaren Diskriminator (B-Sprint13b2-4)
+
+Wenn ein Backend-Endpoint mehrere Fehler-Subtypen unter demselben
+HTTP-Status liefert (z.B. 409 fuer PoolDeviceUnavailable +
+DeviceStateError + SelfReplacementError), muss der Diskriminator als
+strukturiertes Feld im Response-Body kommen — ``error_code`` als
+Top-Level-Sibling neben ``detail``:
+
+```json
+{"detail": "<human-readable message>", "error_code": "POOL_DEVICE_UNAVAILABLE"}
+```
+
+String-Pattern-Match auf ``detail`` im Frontend ist fragil gegen
+Backend-Wording-Refactor und bricht silent.
+
+**Anlass:** Sprint 13b.2-Frontend hatte Regex-Konstanten
+``RE_POOL_UNAVAILABLE`` + ``RE_DEVICE_STATE`` in
+``ReplaceDeviceDialog``, weil Backend-Schema 13b.1 keinen
+Diskriminator lieferte. B-Sprint13b2-4 (2026-05-24) hat das mit
+``LifecycleError``-Hierarchie + app-weitem FastAPI-Handler +
+Frontend-Type-Guard ``getErrorCode`` geloest.
+
+**Regel fuer neue Sprints:** Bei jedem Endpoint, der mehrere
+Backend-Exceptions pro Status-Code wirft, von Anfang an mit
+``error_code``-Feld arbeiten. Refactor im Nachgang kostet 2-3 h
+zusaetzlichen Aufwand (T1-T7 in B-Sprint13b2-4).
+
+**Pflicht-Vorsichts-Punkt im Brief:** bei Schema-Erweiterung im
+Response-Body immer pruefen ob der Frontend-Fetch-Wrapper das neue
+Feld durchreicht. T4-Discovery in B-Sprint13b2-4: ``client.ts``
+hatte ``body.error_code`` verworfen (extrahierte nur ``body.detail``),
+ohne Anpassung waere der Diskriminator nie im Dialog-Catch
+angekommen. Vor jeder ``error_code``-Aenderung: ``grep`` auf
+``apiClient.*detail`` und ``ApiError``-Type-Definition.
+
+**Querverweise:** AE-59 (Schema + Konvention), §5.30 (Brief-Luecken-
+Klasse), §5.63 (Backend-Schema-Change-Sprints brauchen Frontend-
+Type-Spiegel — Familie).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
