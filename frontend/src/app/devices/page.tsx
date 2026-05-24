@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type KeyboardEvent } from "react";
 
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
@@ -283,6 +284,11 @@ function LabelCell({ device: d }: { device: Device }) {
     );
   }
 
+  // Sprint 13b.2 T6: Reserve-Pool-Marker. Backend-Default-Filter
+  // blendet retired_at !== null aus der Liste aus; der explizite
+  // retired_at-Check ist defensiv fuer ?include_retired=true-Sichten.
+  const isReserve = d.heating_zone_id === null && d.retired_at === null;
+
   return (
     <div className="flex items-center gap-2">
       <Link
@@ -305,6 +311,11 @@ function LabelCell({ device: d }: { device: Device }) {
           edit
         </span>
       </button>
+      {isReserve ? (
+        <Badge variant="secondary" title="Reserve-Thermostat im Lager (keiner Heizzone zugewiesen)">
+          Reserve
+        </Badge>
+      ) : null}
     </div>
   );
 }
