@@ -43,9 +43,6 @@ from heizung.schemas.device import (
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services.device_service import (
-    DeviceNotFound,
-    DeviceStateError,
-    PoolDeviceUnavailable,
     get_pool_devices,
     replace_device,
     retire_device,
@@ -464,21 +461,16 @@ async def replace_device_from_pool(
     old_for_trigger = await session.get(Device, device_id)
     old_zone_id = old_for_trigger.heating_zone_id if old_for_trigger else None
 
-    try:
-        result = await replace_device(
-            session,
-            old_device_id=device_id,
-            new_pool_device_id=payload.new_pool_device_id,
-            user_id=user.id,
-        )
-    except DeviceNotFound as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except PoolDeviceUnavailable as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except DeviceStateError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except ValueError as exc:  # Selbst-Tausch
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    # B-Sprint13b2-4 (AE-59): LifecycleError-Subklassen propagieren bis
+    # zum App-weiten Exception-Handler in heizung.main, der sie als
+    # {detail, error_code} mit 404 (DeviceNotFound) oder 409 (sonst)
+    # rendert. Kein endpoint-lokales try/except mehr noetig.
+    result = await replace_device(
+        session,
+        old_device_id=device_id,
+        new_pool_device_id=payload.new_pool_device_id,
+        user_id=user.id,
+    )
 
     await session.commit()
     await session.refresh(result)
@@ -521,17 +513,13 @@ async def retire_device_endpoint(
     old_for_trigger = await session.get(Device, device_id)
     old_zone_id = old_for_trigger.heating_zone_id if old_for_trigger else None
 
-    try:
-        result = await retire_device(
-            session,
-            device_id=device_id,
-            reason=payload.reason,
-            user_id=user.id,
-        )
-    except DeviceNotFound as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DeviceStateError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    # B-Sprint13b2-4 (AE-59): LifecycleError-Propagation (siehe replace-Endpoint).
+    result = await retire_device(
+        session,
+        device_id=device_id,
+        reason=payload.reason,
+        user_id=user.id,
+    )
 
     await session.commit()
     await session.refresh(result)

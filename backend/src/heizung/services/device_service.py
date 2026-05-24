@@ -35,21 +35,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.device import Device
 from heizung.services.business_audit_service import record_business_action
 
-
-class DeviceNotFound(LookupError):  # noqa: N818 — Brief-Signatur, AE-57-konvention
-    """Device-ID existiert nicht in der DB."""
-
-
-class DeviceStateError(ValueError):
-    """Device befindet sich in einem fuer die Operation unzulaessigen Zustand
-    (z.B. bereits retired, oder beim Tausch nicht aktiv-zugewiesen)."""
-
-
-class PoolDeviceUnavailable(ValueError):  # noqa: N818 — Brief-Signatur, AE-57-konvention
-    """Das angegebene neue Pool-Device ist nicht im Pool (heating_zone_id
-    nicht NULL, retired_at gesetzt, oder vom parallelen Tausch bereits
-    zugewiesen). Race-Schutz im UPDATE liefert dieselbe Exception bei
-    DB-Rowcount=0."""
+# B-Sprint13b2-4 (AE-59): Lifecycle-Exception-Hierarchie zentral in
+# services/exceptions.py. Re-Export hier fuer Backwards-Compat
+# (api/v1/devices.py importiert die Namen historisch aus diesem Modul;
+# die Re-Exports werden im Folge-Hygiene-Sprint sauber umgebogen).
+from heizung.services.exceptions import (  # noqa: F401 — re-export
+    DeviceNotFound,
+    DeviceStateError,
+    PoolDeviceUnavailable,
+    SelfReplacementError,
+)
 
 
 async def get_active_devices_for_zone(session: AsyncSession, zone_id: int) -> list[Device]:
@@ -123,7 +118,7 @@ async def replace_device(
     sollte rollback machen.
     """
     if old_device_id == new_pool_device_id:
-        raise ValueError("Selbst-Tausch nicht erlaubt (old_id == new_id).")
+        raise SelfReplacementError("Selbst-Tausch nicht erlaubt (old_id == new_id).")
 
     # Gate 1: Existenz alt
     old = await session.get(Device, old_device_id)
