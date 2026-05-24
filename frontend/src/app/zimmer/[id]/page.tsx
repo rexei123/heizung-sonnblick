@@ -14,6 +14,7 @@ import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
 import { ManualOverridePanelList } from "@/components/patterns/manual-override-panel-list";
 import { ReplaceDeviceDialog } from "@/components/patterns/replace-device-dialog";
+import { RetireDeviceDialog } from "@/components/patterns/retire-device-dialog";
 import { RoomForm } from "@/components/patterns/room-form";
 import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
 import { Button } from "@/components/ui/button";
@@ -300,8 +301,9 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
         />
       ) : null}
 
-      {/* Sprint 13b.2 T4: Pool-Reassign-Tausch-Dialog. T5 ergaenzt
-          analog den RetireDeviceDialog fuer openRetireDialog. */}
+      {/* Sprint 13b.2 T4 + T5: Tausch + Stilllegen-Dialoge. State
+          haengt am DevicesInRoom-Hook; Dialoge konsumieren ihn ueber
+          openReplaceDialog / openRetireDialog. */}
       {openReplaceDialog !== null ? (
         <ReplaceDeviceDialog
           deviceId={openReplaceDialog}
@@ -314,11 +316,30 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
           onClose={() => setOpenReplaceDialog(null)}
         />
       ) : null}
-      {openRetireDialog !== null ? (
-        <span className="sr-only" role="status">
-          Stilllegen-Dialog wird vorbereitet für Gerät #{openRetireDialog}
-        </span>
-      ) : null}
+      {openRetireDialog !== null
+        ? (() => {
+            const target = devicesInRoom.find((d) => d.id === openRetireDialog);
+            const targetZoneId = target?.heating_zone_id ?? null;
+            const isLast =
+              targetZoneId !== null
+                ? devicesInRoom.filter(
+                    (d) =>
+                      d.heating_zone_id === targetZoneId &&
+                      d.retired_at === null,
+                  ).length === 1
+                : false;
+            return (
+              <RetireDeviceDialog
+                deviceId={openRetireDialog}
+                deviceLabel={target?.label ?? `Gerät #${openRetireDialog}`}
+                roomId={roomId}
+                isLastActiveInZone={isLast}
+                open={true}
+                onClose={() => setOpenRetireDialog(null)}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }
