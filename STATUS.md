@@ -2388,9 +2388,75 @@ auf den drei 13b.1-Endpoints (`GET /devices/pool`,
 **Diff-Summe (T1-T9):** 20 Files, **+1283 Insertions / −17
 Deletions** in 14 Commits (13 Code/Test/Fix + 1 Doku).
 
-**Live-Verify:** ausstehend. Cowork-Auftrag formuliert nach Merge
-separat (Strategie-Chat-Verantwortung per Brief). Befund spaeter in
-diesem §2av-Block nachgepflegt.
+**Live-Verify (Cowork, 2026-05-24, abgeschlossen mit Vorbehalt):**
+
+Auftrag durchgelaufen direkt nach Tag-Push. Verifikation gegen
+heizung-test (Auto-Pull-Timer hat Squash-Commit `c82af70` deployed).
+
+| Workflow | Status | Notiz |
+|---|---|---|
+| 1 — Tausch-Dialog-Only (Pool leer → Submit disabled) | ✔ verifiziert | Modal-Pattern `role="dialog"` korrekt, Empty-State-Hinweis sichtbar, Submit-Button via `[aria-disabled="true"]` blockiert |
+| 2 — Empty-State-Text mit RUNBOOK-§10h-Verweis | ✔ verifiziert | Wortlaut deckungsgleich mit Code (`replace-device-dialog.tsx`) |
+| 3 — Replace 409-Race | ⏭ skipped | Single-Session-Cowork, kein realistischer Race-Trigger erzeugbar — Playwright-T8-Case-3 deckt das ab |
+| 4 — Retire Happy-Path (echter POST `/retire` 200, 4 Reason-Optionen) | ✔ verifiziert mit Drift | Vicki-002 (`device.id=3`) wurde live retired; 4 Reason-Optionen sichtbar; KEINE Warning-Box (Zone hatte mehrere aktive Vickis) |
+| 5 — Last-Active-Warning auf Zone mit nur einem Vicki | ✔ verifiziert | Orange Box (`bg-warning-soft` + `text-warning`) erscheint korrekt; Cowork hat `Abbrechen` geklickt — keine destruktive Aktion |
+
+**Pool-leer-Blocker (5 Punkte nicht verifizierbar):**
+
+heizung-test hatte zum Verify-Zeitpunkt **kein Reserve-Device im
+Pool** (alle 4 Vickis aktiv bzw. retired). Damit nicht prueft:
+
+- Befuellter Pool-Dropdown (>= 1 Reserve-Item)
+- Replace-Happy-Submit (POST `/replace/from-pool` 200)
+- Success-Toast nach Replace ("Thermostat getauscht …")
+- Reserve-Badge auf `/devices`-Liste (T6, Konsument von `badge.tsx`)
+- Visueller Smoke-Test der Pool-Liste in der Dropdown-Reihenfolge
+
+Pre-Pairing eines Test-Vickis vor naechstem Cowork-Re-Test
+notwendig — eigener Backlog-Eintrag **B-Sprint13b2-6**.
+
+**Test-State-Drift nach Workflow 4:**
+
+Workflow 4 hat `Vicki-002` (`device.id=3`) live retired, was die
+Vicki-Geraete-Liste der Zone reduziert haette. Cleanup analog T7-
+Live-Verify-Pattern (siehe STATUS §2au Schritt 13): direkter
+`UPDATE device SET retired_at = NULL, retired_reason = NULL,
+replaced_by_device_id = NULL WHERE id = 3` gegen `deploy-db-1`.
+BusinessAudit-Row (`action=DEVICE_RETIRED`, `target_id=3`,
+`user_id=<cowork-admin>`, `new_value` JSONB mit Test-Marker)
+bleibt persistent als Forensik-Spur (kein Cleanup-DELETE, S3-
+Auditierbarkeit aus CLAUDE.md §0).
+
+**Cowork-Tooling-Beobachtung:**
+
+`save_to_disk` nicht verfuegbar in der Cowork-Sandbox dieser
+Session — Screens wurden als Text-Beobachtung dokumentiert (Modal-
+Titel, Button-Labels, Toast-Inhalte als Strings im Bericht). Kein
+PNG-Output, keine Anhaenge. Wird in kuenftigen Cowork-Sessions
+durch andere Tooling-Variante geloest oder explizit als
+Cowork-Limitierung akzeptiert.
+
+**Funktional-Beobachtung — Dialog-Self-Close bei Hintergrund-Refetch:**
+
+Cowork hat beobachtet, dass das Stilllegen-Modal nach laengerer
+Wartephase selbsttaetig schliesst. Vermutete Ursache: TanStack-
+Query Background-Refetch triggert Parent-Re-Render von
+`DevicesInRoom`, der State-Anker `openRetireDialog` (lokal in
+`DevicesInRoom`) wird durch den Re-Render verloren bzw. die
+Komponenten-Identitaet bricht. Im Hotelier-Tempo (max. ein paar
+Sekunden zwischen Click und Submit) unkritisch, im
+Sit-Down-Test-Pattern aber irritierend. Eigener Backlog-Eintrag
+**B-Sprint13b2-5** mit Fix-Optionen.
+
+Vermutlich gleicher Effekt im ReplaceDeviceDialog (Pool-Refetch
+nach `staleTime: 10_000`). Heute nicht direkt beobachtet, aber
+strukturell identisch.
+
+**Live-Verify-Fazit:** 4 von 9 geplanten Pruefpunkten verifiziert,
+1 skipped (Race nur per Playwright-Mock testbar), 5 blockiert durch
+Pool-leer-State. Frontend-Implementierung korrekt fuer die
+verifizierten Pfade; Pool-Pfad-Reverify-Auftrag steht
+(B-Sprint13b2-6) nach Pool-Refill.
 
 **Drift-Resolutionen (Brief-Plus-Adds):**
 
@@ -2449,6 +2515,24 @@ fuer robustes Frontend-Match. Vor Heizperiode 2026/27.
   "PoolDeviceUnavailable"}`). Heute String-Pattern-Match in
   ReplaceDeviceDialog — fragil gegen Backend-Wording-Refactor.
   Backend-Touch + ReplaceDeviceDialog-Update zusammen, ~1 h.
+- **B-Sprint13b2-5** 🟢: RetireDeviceDialog (vermutlich auch
+  ReplaceDeviceDialog) schliesst selbsttaetig bei TanStack-Query-
+  Background-Refetch (stale-time-Trigger oder
+  `invalidateQueries`-Folge-Refetch). Heute Hotelier-Tempo unkritisch
+  (Click + Submit <2 Sek), im Sit-Down-Test-Pattern aber irritierend.
+  Fix-Optionen: (a) Dialog-Komponente ausserhalb der Daten-Liste
+  rendern (z.B. auf `/zimmer/[id]`-Page-Ebene statt in
+  `DevicesInRoom`), (b) Open-State im Modal-Layer lokal halten
+  (Compound-Pattern), (c) `key`-Prop auf Dialog mit stabiler ID
+  setzen. ~30-60 Min Hygiene-Sprint. Belegt durch Cowork-Live-Verify
+  2026-05-24.
+- **B-Sprint13b2-6** 🟡 (vor naechstem Cowork-Re-Test): Pool-Refill
+  auf heizung-test. Heute kein Reserve-Geraet im System -> 5
+  Cowork-Pruefpunkte (befuellter Pool-Dropdown, Replace-Happy-Submit,
+  Replace-Toast, Reserve-Badge T6, Pool-Reihenfolge) blockiert. Pre-
+  Pairing-Eingangstest gemaess RUNBOOK §10h fuer ein Test-Vicki
+  (z.B. ein bisher nicht-eingespieltes Geraet aus dem Lager),
+  anschliessend Folge-Cowork-Auftrag fuer die offenen 5 Punkte.
 
 **Querverweise:** AE-57 (Master-ADR, jetzt komplett),
 RUNBOOK §10j.6 (Hotelier-Workflow), CLAUDE.md §5.30 + §5.43 +
