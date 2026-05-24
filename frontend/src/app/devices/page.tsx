@@ -26,13 +26,17 @@ function toMessage(e: unknown): string {
 
 /**
  * Fehlerstatus-Score absteigend: hoeher = problematischer.
- * - inaktiv: 3
+ * - stillgelegt: 3
  * - last_seen > 24h: 2
  * - last_seen > 1h: 1
  * - sonst (frisch): 0
+ *
+ * Sprint 13b.1 (AE-57): retired_at IS NULL = aktiv. Listen-Endpoint
+ * blendet retired Devices per Default aus — Bucket 3 ist Schutz fuer
+ * `?include_retired=true`-Sichten.
  */
 function statusScore(d: Device): number {
-  if (!d.is_active) return 3;
+  if (d.retired_at !== null) return 3;
   if (d.last_seen_at === null) return 2;
   const ageMs = Date.now() - new Date(d.last_seen_at).getTime();
   const ageH = ageMs / (1000 * 60 * 60);
@@ -149,7 +153,7 @@ function DevicesTable({ devices }: { devices: Device[] }) {
             <th className="text-left px-4 py-3 font-medium">Bezeichnung</th>
             <th className="text-left px-4 py-3 font-medium">DevEUI</th>
             <th className="text-left px-4 py-3 font-medium">Hersteller / Modell</th>
-            <th className="text-left px-4 py-3 font-medium">Eingerichtet</th>
+            <th className="text-left px-4 py-3 font-medium">Aktiv</th>
             <th className="text-left px-4 py-3 font-medium">Status</th>
           </tr>
         </thead>
@@ -174,7 +178,7 @@ function DeviceRow({ device: d }: { device: Device }) {
         {d.vendor} / {d.model}
       </td>
       <td className="px-4 py-3">
-        {d.is_active ? (
+        {d.retired_at === null ? (
           <span className="inline-flex items-center gap-1 text-text-primary text-sm">
             <span
               className="material-symbols-outlined text-success"

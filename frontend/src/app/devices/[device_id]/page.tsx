@@ -102,7 +102,7 @@ export default function DeviceDetailPage() {
                   <HardwareStatusBadge deviceId={device.id} variant="detailed" />
                 </div>
                 <div className="text-xs text-text-tertiary">
-                  Eingerichtet: {device.is_active ? "ja" : "nein"}
+                  Aktiv: {device.retired_at === null ? "ja" : "nein"}
                 </div>
               </div>
             </div>
