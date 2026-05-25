@@ -15,6 +15,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from freezegun import freeze_time
 
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
 from heizung.rules.constants import FROST_PROTECTION_C
@@ -92,6 +93,7 @@ def _ctx(
     rule_configs: list[SimpleNamespace] | None = None,
     summer_mode_active: bool = False,
     next_occupancy: SimpleNamespace | None = None,
+    timezone: str = "Europe/Vienna",
 ) -> _RoomContext:
     return _RoomContext(
         room=_make_room(status),
@@ -99,6 +101,7 @@ def _ctx(
         rule_configs=rule_configs or [],
         summer_mode_active=summer_mode_active,
         next_occupancy=next_occupancy,
+        timezone=timezone,
     )
 
 
@@ -441,6 +444,90 @@ def test_temporal_preheat_wins_over_night() -> None:
     assert step is not None
     assert step.reason == CommandReason.PREHEAT_CHECKIN
     assert step.setpoint_c == 21
+
+
+# ---------------------------------------------------------------------------
+# B-10-4-Fix (AE-60) — TZ-aware Nachtabsenkung gegen Lokal-Zeit
+# ---------------------------------------------------------------------------
+
+
+@freeze_time("2026-07-15T20:00:00Z")
+def test_temporal_night_setback_tz_local_summer() -> None:
+    """Sommerzeit (CEST, UTC+2): 20:00 UTC = 22:00 Lokal. Mit
+    ``night_start=22:00`` triggert der Setback exakt am wall-clock-Start
+    der lokalen Nacht — UTC-now allein wuerde 20:00 sehen und NICHT
+    triggern. AE-60: UTC->Local-Konversion vor .time()-Vergleich."""
+    now = datetime.now(tz=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.reason == CommandReason.NIGHT_SETBACK
+    assert step.setpoint_c == 19
+    # Trace zeigt local 22:00, nicht UTC 20:00 — Hotelier-Sicht.
+    assert step.detail is not None
+    assert "now_local=22:00:00" in step.detail
+    assert "tz=Europe/Vienna" in step.detail
+
+
+@freeze_time("2026-01-15T21:00:00Z")
+def test_temporal_night_setback_tz_local_winter() -> None:
+    """Winterzeit (CET, UTC+1): 21:00 UTC = 22:00 Lokal. Mit
+    ``night_start=22:00`` triggert der Setback exakt am wall-clock-Start
+    der lokalen Nacht. Vor B-10-4-Fix waere bei 21:00 UTC kein Setback
+    aktiv geworden (21:00 liegt vor night_start=22:00)."""
+    now = datetime.now(tz=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.reason == CommandReason.NIGHT_SETBACK
+    assert step.setpoint_c == 19
+    assert step.detail is not None
+    assert "now_local=22:00:00" in step.detail
+
+
+@freeze_time("2026-10-28T01:30:00Z")
+def test_temporal_night_setback_dst_transition() -> None:
+    """3 Tage NACH DST-Wechsel 2026-10-25 (CEST -> CET). 01:30 UTC =
+    02:30 Lokal CET. Setback ist im Nachtfenster [22, 06] aktiv. Test
+    verifiziert dass ZoneInfo den DST-Wechsel sauber verarbeitet —
+    nach dem Wechsel wird CET (UTC+1) statt CEST (UTC+2) verwendet."""
+    now = datetime.now(tz=UTC)
+    rcs = [
+        _make_rule_config(
+            RuleConfigScope.GLOBAL,
+            t_night=19.0,
+            night_start=time(22, 0),
+            night_end=time(6, 0),
+        )
+    ]
+    ctx = _ctx(status=RoomStatus.OCCUPIED, rule_configs=rcs)
+    base = layer_base_target(ctx)
+    step = layer_temporal(base, ctx, now=now)
+    assert step is not None
+    assert step.reason == CommandReason.NIGHT_SETBACK
+    assert step.setpoint_c == 19
+    assert step.detail is not None
+    # Nach DST-Wechsel: CET (UTC+1), nicht CEST (UTC+2). Wenn ZoneInfo
+    # den Wechsel falsch verarbeitet hat, waere now_local=03:30 (UTC+2).
+    assert "now_local=02:30:00" in step.detail
 
 
 # ---------------------------------------------------------------------------

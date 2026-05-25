@@ -1782,6 +1782,59 @@ angekommen. Vor jeder ``error_code``-Aenderung: ``grep`` auf
 Klasse), §5.63 (Backend-Schema-Change-Sprints brauchen Frontend-
 Type-Spiegel — Familie).
 
+### 5.65 Hotelier-Konfigurations-Zeiten sind Lokal-Zeit, Engine konvertiert UTC->Lokal vor Vergleich (B-10-4-Fix)
+
+Hotelier-konfigurierbare Zeit-Felder in der UI (``night_start``,
+``night_end``, kuenftige Schedule-Profile, Wochentags-Plaene) sind
+**immer als Lokal-Zeit des Hotels gemeint**, nicht als UTC. Spalten-
+Typ ist ``Time`` ohne TZ (wall-clock-Intent), Persistenz ist OK so.
+
+**Falle:** Engine speichert + rechnet in UTC (``datetime.now(tz=UTC)``,
+TIMESTAMPTZ-Spalten). Wer einen Vergleich gegen die Lokal-Konfig
+schreibt und ``now.time()`` direkt verwendet, vergleicht UTC-Wallclock
+gegen Lokal-Wallclock → konstanter 1-2h-Offset je nach Sommer-/
+Winterzeit. Bug ist Bestandteil-uebergreifend (bricht nicht beim DST-
+Wechsel, sondern war schon vorher falsch und springt am DST-Wechsel
+nur sichtbar um 1h).
+
+**Pattern:**
+
+```python
+from zoneinfo import ZoneInfo
+
+# ctx.timezone = "Europe/Vienna" aus global_config.timezone, geladen
+# in _load_room_context mit defensivem Fallback DEFAULT_HOTEL_TIMEZONE.
+local_now = now.astimezone(ZoneInfo(ctx.timezone))
+local_t = local_now.time()
+if _is_in_night_window(local_t, night_start, night_end):
+    ...  # Setback aktiv
+```
+
+**Anti-Pattern:**
+
+```python
+now_t = now.time()   # UTC-Wallclock!
+if _is_in_night_window(now_t, night_start, night_end):
+    ...  # FALSCH — vergleicht UTC gegen Lokal-Konfig
+```
+
+**Regel fuer kuenftige Engine-Erweiterungen:** Jedes neue Hotelier-
+konfigurierbare Zeit-Feld (Schedule-Profil, Wochenend-Plan, etc.)
+muss durch denselben Konversionspfad. Pflicht-Stop im Sprint-Brief:
+Phase-0-Quellcheck verifiziert dass kein ``.time()`` auf UTC-now ohne
+``.astimezone(ZoneInfo(...))`` davor verwendet wird.
+
+**DST-Wechsel ist DAS Trigger-Event** fuer Sichtbarkeit dieser
+Bug-Klasse: Hotelier nimmt am Wechseltag eine ploetzliche 1h-
+Verschiebung der effektiven Setback-Zeit wahr — aber die Wurzel-
+Ursache ist nicht DST, sondern dass Engine in UTC vergleicht.
+``ZoneInfo`` handelt den DST-Wechsel transparent (Test
+``test_temporal_night_setback_dst_transition`` belegt das).
+
+**Querverweise:** AE-60 (TZ-Handling-Konvention), B-10-4 Phase-0-Audit
+(``docs/features/2026-05-25-b-10-4-dst-phase0-audit.md``), §5.59
+(Time-Logic-Klasse — verwandtes Fixture-Drift-Pattern bei freezegun).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
