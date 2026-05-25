@@ -19,6 +19,7 @@ from heizung.auth.rate_limit import limiter
 from heizung.config import get_settings
 from heizung.services.exceptions import DeviceNotFound, LifecycleError
 from heizung.services.mqtt_subscriber import start_subscriber, stop_subscriber
+from heizung.services.override_service import OverrideError
 
 settings = get_settings()
 
@@ -79,9 +80,8 @@ async def _lifecycle_error_handler(_request: Request, exc: LifecycleError) -> JS
     -> 404, alle anderen Subklassen (``DeviceStateError`` /
     ``PoolDeviceUnavailable`` / ``SelfReplacementError``) -> 409.
 
-    Scope: ausschliesslich Lifecycle-Pfade (replace, retire). Andere
-    Endpoint-Familien (overrides, auth, ...) bleiben unberuehrt — ihre
-    HTTPException-Aufrufe sind nicht von ``LifecycleError`` abgeleitet.
+    Scope: Lifecycle-Pfade (replace, retire). Override-Pfade nutzen den
+    parallelen ``OverrideError``-Handler (B-Sprint13b2-7).
     """
     status_code = (
         status.HTTP_404_NOT_FOUND if isinstance(exc, DeviceNotFound) else status.HTTP_409_CONFLICT
@@ -89,6 +89,32 @@ async def _lifecycle_error_handler(_request: Request, exc: LifecycleError) -> JS
     return JSONResponse(
         status_code=status_code,
         content={"detail": exc.message, "error_code": exc.error_code},
+    )
+
+
+@app.exception_handler(OverrideError)
+async def _override_error_handler(_request: Request, exc: OverrideError) -> JSONResponse:
+    """B-Sprint13b2-7 (AE-59): App-weiter Handler fuer Override-Exceptions.
+
+    Rendert ``{"detail": <message>, "error_code": <CODE>, ...extras}``
+    mit ``exc.http_status``. ``extras`` (room_id, zone_id, zones, ...)
+    kommen aus ``exc.response_extras()`` und werden als Top-Level-
+    Geschwister neben ``detail`` und ``error_code`` gerendert.
+
+    Subklassen (override_service.py):
+
+    - ``InvalidZoneError``                  -> 404 + INVALID_ZONE
+    - ``RoomNotOccupiedError``              -> 409 + ROOM_NOT_OCCUPIED
+    - ``RoomOverrideBlockedError``          -> 409 + ROOM_OVERRIDE_BLOCKED
+    - ``OverrideRejectedWindowOpenError``   -> 409 + OVERRIDE_REJECTED_WINDOW_OPEN
+    """
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "detail": exc.message,
+            "error_code": exc.error_code,
+            **exc.response_extras(),
+        },
     )
 
 

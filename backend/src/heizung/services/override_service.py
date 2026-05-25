@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Any
+from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, or_, select
@@ -42,7 +42,37 @@ HISTORY_LIMIT_CAP = 200
 DEFAULT_TIMEZONE = "Europe/Vienna"
 
 
-class OverrideRejectedWindowOpenError(Exception):
+class OverrideError(Exception):
+    """B-Sprint13b2-7 (AE-59): Basisklasse fuer Override-Domain-Fehler.
+
+    Pendant zu ``services.exceptions.LifecycleError``, semantisch
+    separat (Override-Domain, nicht Device-Lifecycle). App-weiter
+    FastAPI-Handler in ``heizung.main`` rendert
+    ``{"detail": <message>, "error_code": <CODE>, ...extras}`` mit
+    ``exc.http_status``. ``extras`` (room_id, zone_id, zones) werden
+    aus den Subklassen-Attributen gelesen — Subklassen ueberschreiben
+    ``response_extras()`` falls noetig.
+
+    Bewusst in diesem Modul (nicht in einem generischen
+    ``exceptions.py``), damit die Fehler-Klassen zur Domain ``override``
+    gehoeren und der API-Layer sie aus dem gleichen Import-Pfad
+    bekommt wie die Funktion, die sie wirft.
+    """
+
+    error_code: ClassVar[str] = "OVERRIDE_ERROR"  # Fallback, sollte nie greifen
+    http_status: ClassVar[int] = 409
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+    def response_extras(self) -> dict[str, Any]:
+        """Subklassen liefern domaenen-spezifische Top-Level-Felder fuer
+        den JSON-Body (room_id, zone_id, zones, ...). Default: leer."""
+        return {}
+
+
+class OverrideRejectedWindowOpenError(OverrideError):
     """Sprint 12 T4 (AE-52): Override-Anlage wird abgewiesen, wenn
     mindestens eine HeatingZone des Raums ein offenes Fenster meldet.
 
@@ -51,16 +81,14 @@ class OverrideRejectedWindowOpenError(Exception):
     Implementiert als hartes Reject im Service: kein DB-Insert, kein
     Audit-Eintrag. API-Layer mappt auf HTTP 409.
 
-    Bewusst in diesem Modul (nicht in einem generischen
-    ``exceptions.py``), damit die Fehler-Klasse zur Domain ``override``
-    gehoert und der API-Layer sie aus dem gleichen Import-Pfad
-    bekommt wie die Funktion, die sie wirft.
-
     :param zones: Liste der offenen Zonen aus
         ``rules.window_state.detect_open_window_zones`` — wird vom
         API-Layer als Teil des 409-Response-Bodys gerendert
         (zone_id ist pflicht, reading_at optional).
     """
+
+    error_code: ClassVar[str] = "OVERRIDE_REJECTED_WINDOW_OPEN"
+    http_status: ClassVar[int] = 409
 
     def __init__(self, zones: list[dict[str, Any]]) -> None:
         self.zones = zones
@@ -70,8 +98,15 @@ class OverrideRejectedWindowOpenError(Exception):
             "Bitte Fenster schliessen und erneut versuchen."
         )
 
+    def response_extras(self) -> dict[str, Any]:
+        return {
+            "zones": [
+                {"zone_id": z["zone_id"], "reading_at": z.get("reading_at")} for z in self.zones
+            ],
+        }
 
-class RoomNotOccupiedError(Exception):
+
+class RoomNotOccupiedError(OverrideError):
     """Sprint 12a T2 (AE-58): Override-Anlage wird abgewiesen, wenn der Raum
     nicht ``OCCUPIED`` ist.
 
@@ -79,11 +114,14 @@ class RoomNotOccupiedError(Exception):
     CLEANING/BLOCKED laufen auf globalen Einstellungen + Frostschutz, keine
     Override-Ausnahmen. Vicki-Drehring in VACANT ist Daten-Anomalie und
     wird vom Device-Pfad (T4) silent geskippt; Frontend-Pfad (T3) mappt
-    auf HTTP 409 ``room_not_occupied``.
+    auf HTTP 409 ``ROOM_NOT_OCCUPIED``.
 
     :param room_id: betroffener Raum.
     :param status: aktueller abgeleiteter Status (aus ``derive_room_status``).
     """
+
+    error_code: ClassVar[str] = "ROOM_NOT_OCCUPIED"
+    http_status: ClassVar[int] = 409
 
     def __init__(self, room_id: int, status: RoomStatus) -> None:
         self.room_id = room_id
@@ -93,8 +131,11 @@ class RoomNotOccupiedError(Exception):
             f"(Status: {status.value}). Override gilt nur fuer belegte Raeume."
         )
 
+    def response_extras(self) -> dict[str, Any]:
+        return {"room_id": self.room_id}
 
-class RoomOverrideBlockedError(Exception):
+
+class RoomOverrideBlockedError(OverrideError):
     """Sprint 12c (AE-58): Override-Anlage wird abgewiesen, wenn das Zimmer
     die Uebersteuerungs-Sperre (``room.guest_override_blocked = True``) gesetzt
     hat.
@@ -104,7 +145,7 @@ class RoomOverrideBlockedError(Exception):
     Fehler unabhaengig vom Belegungsstatus. Single-Source-of-Truth liegt im
     Service-Layer; Device-Adapter prueft denselben Flag vorab und schreibt
     EventLog beim Skip (T4), API-Layer mappt auf HTTP 409
-    ``room_override_blocked`` (T3).
+    ``ROOM_OVERRIDE_BLOCKED`` (T3).
 
     Begriffstrennung: NICHT identisch mit ``RoomStatus.BLOCKED`` (Zimmer
     operativ aus der Engine genommen). Hier laeuft die Engine normal, nur
@@ -113,12 +154,41 @@ class RoomOverrideBlockedError(Exception):
     :param room_id: betroffener Raum.
     """
 
+    error_code: ClassVar[str] = "ROOM_OVERRIDE_BLOCKED"
+    http_status: ClassVar[int] = 409
+
     def __init__(self, room_id: int) -> None:
         self.room_id = room_id
         super().__init__(
             f"Override-Anlage abgewiesen: Raum {room_id} hat die "
             f"Uebersteuerungs-Sperre aktiviert (guest_override_blocked=True)."
         )
+
+    def response_extras(self) -> dict[str, Any]:
+        return {"room_id": self.room_id}
+
+
+class InvalidZoneError(OverrideError):
+    """B-Sprint13b2-7: Zone existiert nicht oder gehoert zu einem anderen Raum.
+
+    Ersetzt die inline ``HTTPException`` aus ``_ensure_zone_in_room``
+    (Sprint 12a T3, AE-58). Beide Faelle (Zone fehlt / Zone gehoert zu
+    anderem Raum) werden gleich behandelt — der Client darf keine
+    Zonen-IDs anderer Raeume erraten koennen (kein leakendes 403 vs 404).
+
+    HTTP 404 (Nicht-Existenz / Cross-Room-Fremdzugriff).
+    """
+
+    error_code: ClassVar[str] = "INVALID_ZONE"
+    http_status: ClassVar[int] = 404
+
+    def __init__(self, room_id: int, zone_id: int) -> None:
+        self.room_id = room_id
+        self.zone_id = zone_id
+        super().__init__(f"Heizzone zone_id={zone_id} nicht gefunden im Raum room_id={room_id}.")
+
+    def response_extras(self) -> dict[str, Any]:
+        return {"room_id": self.room_id, "zone_id": self.zone_id}
 
 
 def _now() -> datetime:

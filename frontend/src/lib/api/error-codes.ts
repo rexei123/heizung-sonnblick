@@ -1,36 +1,50 @@
 /**
  * Frontend-Mapping fuer das Backend-``error_code``-Feld (B-Sprint13b2-4,
- * AE-59). Pendant zu ``backend/src/heizung/services/exceptions.py``.
+ * B-Sprint13b2-7, AE-59).
  *
- * Backend-Schema seit B-Sprint13b2-4-Merge:
+ * Pendant zu ``backend/src/heizung/services/exceptions.py`` (Lifecycle)
+ * + ``backend/src/heizung/services/override_service.py`` (Override-Domain).
  *
- *     {"detail": "<message-string>", "error_code": "<CODE>"}
+ * Backend-Schema:
  *
- * App-weiter FastAPI-Handler (``heizung.main._lifecycle_error_handler``)
- * mapt:
+ *     {"detail": "<message-string>", "error_code": "<CODE>", ...extras}
  *
- *   - DeviceNotFound          -> 404 + DEVICE_NOT_FOUND
- *   - DeviceStateError        -> 409 + DEVICE_STATE_ERROR
- *   - PoolDeviceUnavailable   -> 409 + POOL_DEVICE_UNAVAILABLE
- *   - SelfReplacementError    -> 409 + SELF_REPLACEMENT_FORBIDDEN
+ * App-weite FastAPI-Handler (``heizung.main``):
  *
- * Scope-Grenze (Strategie-Setzung 2026-05-24): ausschliesslich
- * Lifecycle-Endpoints (Pool, Replace, Retire). Andere Endpoint-
- * Familien (overrides, auth, ...) liefern heute andere oder keine
- * ``error_code``-Strukturen — ``getErrorCode`` liefert ``null`` fuer
- * alle nicht-Lifecycle-Bodies. ``B-Sprint13b2-7`` konsolidiert
- * spaeter die Konventionen.
+ * Lifecycle-Domain (``LifecycleError``-Hierarchie):
+ *   - DeviceNotFound                -> 404 + DEVICE_NOT_FOUND
+ *   - DeviceStateError              -> 409 + DEVICE_STATE_ERROR
+ *   - PoolDeviceUnavailable         -> 409 + POOL_DEVICE_UNAVAILABLE
+ *   - SelfReplacementError          -> 409 + SELF_REPLACEMENT_FORBIDDEN
+ *
+ * Override-Domain (``OverrideError``-Hierarchie, B-Sprint13b2-7):
+ *   - InvalidZoneError              -> 404 + INVALID_ZONE
+ *   - RoomNotOccupiedError          -> 409 + ROOM_NOT_OCCUPIED
+ *   - RoomOverrideBlockedError      -> 409 + ROOM_OVERRIDE_BLOCKED
+ *   - OverrideRejectedWindowOpenError -> 409 + OVERRIDE_REJECTED_WINDOW_OPEN
+ *
+ * Scope (Strategie-Setzung 2026-05-24, erweitert B-Sprint13b2-7):
+ * alle API-Endpoints mit Mehrfach-Subtypen pro HTTP-Status liefern
+ * top-level ``error_code``. ``getErrorCode`` ist die zentrale
+ * Type-Guard-Funktion fuer alle Konsumenten.
  *
  * Konsumenten heute:
- *   - components/patterns/replace-device-dialog.tsx
- *   - components/patterns/retire-device-dialog.tsx
+ *   - components/patterns/replace-device-dialog.tsx (Lifecycle)
+ *   - components/patterns/retire-device-dialog.tsx (Lifecycle)
+ *   - lib/api/override-errors.ts (Override-Domain)
  */
 
 export const ERROR_CODES = {
+  // Lifecycle-Domain (B-Sprint13b2-4)
   POOL_DEVICE_UNAVAILABLE: "POOL_DEVICE_UNAVAILABLE",
   DEVICE_STATE_ERROR: "DEVICE_STATE_ERROR",
   SELF_REPLACEMENT_FORBIDDEN: "SELF_REPLACEMENT_FORBIDDEN",
   DEVICE_NOT_FOUND: "DEVICE_NOT_FOUND",
+  // Override-Domain (B-Sprint13b2-7)
+  INVALID_ZONE: "INVALID_ZONE",
+  ROOM_NOT_OCCUPIED: "ROOM_NOT_OCCUPIED",
+  ROOM_OVERRIDE_BLOCKED: "ROOM_OVERRIDE_BLOCKED",
+  OVERRIDE_REJECTED_WINDOW_OPEN: "OVERRIDE_REJECTED_WINDOW_OPEN",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

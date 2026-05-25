@@ -384,8 +384,11 @@ async def test_post_returns_409_when_window_open(
     room_id: int,
 ) -> None:
     """T4 (d): POST /override + Fenster offen -> HTTP 409 mit
-    {"error": "override_rejected_window_open", "zones": [{"zone_id", "reading_at"}]}.
+    {detail: <str>, error_code: "OVERRIDE_REJECTED_WINDOW_OPEN", zones: [...]}.
     manual_override-Tabelle bleibt leer.
+
+    B-Sprint13b2-7 (AE-59): top-level ``error_code`` + ``zones`` via
+    OverrideError-Handler in ``heizung.main``.
     """
     suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
     zone_id, _device_id = await _seed_zone_with_window_state(
@@ -398,13 +401,12 @@ async def test_post_returns_409_when_window_open(
     )
     assert resp.status_code == 409, resp.text
     body = resp.json()
-    # FastAPI HTTPException(detail=...) wrapped as {"detail": ...}
-    assert "detail" in body
-    assert body["detail"]["error"] == "override_rejected_window_open"
-    assert isinstance(body["detail"]["zones"], list)
-    assert len(body["detail"]["zones"]) == 1
-    assert body["detail"]["zones"][0]["zone_id"] == zone_id
-    assert "reading_at" in body["detail"]["zones"][0]
+    assert body["error_code"] == "OVERRIDE_REJECTED_WINDOW_OPEN"
+    assert isinstance(body["detail"], str)
+    assert isinstance(body["zones"], list)
+    assert len(body["zones"]) == 1
+    assert body["zones"][0]["zone_id"] == zone_id
+    assert "reading_at" in body["zones"][0]
 
     # manual_override-Tabelle leer fuer diesen Raum:
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
@@ -561,9 +563,9 @@ async def test_post_vacant_returns_409_room_not_occupied(
     vacant_room_id: int,
 ) -> None:
     """T3: POST in VACANT-Raum (frontend_4h, kein Occupancy-Pre-Check) -> 409
-    mit ``{error: room_not_occupied, room_id: X}``. Wir nehmen frontend_4h
-    (nicht frontend_checkout), weil sonst der bereits existierende
-    422-Check fuer fehlendes Checkout zuerst greift.
+    mit ``{detail: <str>, error_code: "ROOM_NOT_OCCUPIED", room_id: X}``.
+
+    B-Sprint13b2-7 (AE-59): top-level ``error_code`` via OverrideError-Handler.
     """
     resp = await http_client.post(
         f"/api/v1/rooms/{vacant_room_id}/overrides",
@@ -571,8 +573,8 @@ async def test_post_vacant_returns_409_room_not_occupied(
     )
     assert resp.status_code == 409, resp.text
     body = resp.json()
-    assert body["detail"]["error"] == "room_not_occupied"
-    assert body["detail"]["room_id"] == vacant_room_id
+    assert body["error_code"] == "ROOM_NOT_OCCUPIED"
+    assert body["room_id"] == vacant_room_id
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +588,10 @@ async def test_create_returns_409_room_override_blocked(
     room_id: int,
 ) -> None:
     """Sprint 12c: POST in geblocktes Zimmer (OCCUPIED + blocked=True) ->
-    409 mit ``error_code=room_override_blocked``."""
+    409 mit ``error_code=ROOM_OVERRIDE_BLOCKED``.
+
+    B-Sprint13b2-7 (AE-59): top-level ``error_code`` via OverrideError-Handler.
+    """
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
     async with sessionmaker() as session:
         room = await session.get(Room, room_id)
@@ -600,8 +605,8 @@ async def test_create_returns_409_room_override_blocked(
     )
     assert resp.status_code == 409, resp.text
     body = resp.json()
-    assert body["detail"]["error_code"] == "room_override_blocked"
-    assert body["detail"]["room_id"] == room_id
+    assert body["error_code"] == "ROOM_OVERRIDE_BLOCKED"
+    assert body["room_id"] == room_id
 
 
 async def test_create_block_takes_precedence_over_room_not_occupied(
@@ -610,7 +615,10 @@ async def test_create_block_takes_precedence_over_room_not_occupied(
     vacant_room_id: int,
 ) -> None:
     """Sprint 12c (§5.51 Domain-Invariante): Block + VACANT ->
-    ``room_override_blocked`` gewinnt, NICHT ``room_not_occupied``."""
+    ``ROOM_OVERRIDE_BLOCKED`` gewinnt, NICHT ``ROOM_NOT_OCCUPIED``.
+
+    B-Sprint13b2-7 (AE-59): top-level ``error_code`` via OverrideError-Handler.
+    """
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
     async with sessionmaker() as session:
         room = await session.get(Room, vacant_room_id)
@@ -624,8 +632,8 @@ async def test_create_block_takes_precedence_over_room_not_occupied(
     )
     assert resp.status_code == 409, resp.text
     body = resp.json()
-    assert body["detail"]["error_code"] == "room_override_blocked"
-    assert body["detail"]["room_id"] == vacant_room_id
+    assert body["error_code"] == "ROOM_OVERRIDE_BLOCKED"
+    assert body["room_id"] == vacant_room_id
 
 
 async def test_post_with_invalid_zone_id_returns_404(
@@ -633,7 +641,10 @@ async def test_post_with_invalid_zone_id_returns_404(
     setup_engine: AsyncEngine,
     room_id: int,
 ) -> None:
-    """T3: zone_id zeigt auf Zone eines anderen Raums -> 404 invalid_zone."""
+    """T3: zone_id zeigt auf Zone eines anderen Raums -> 404 INVALID_ZONE.
+
+    B-Sprint13b2-7 (AE-59): top-level ``error_code`` via OverrideError-Handler.
+    """
     suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
     other_room_id, other_rt_id, other_zone_id = await _seed_room_with_zone(
         setup_engine, suffix=suffix, with_occupancy=True
@@ -649,9 +660,9 @@ async def test_post_with_invalid_zone_id_returns_404(
         )
         assert resp.status_code == 404, resp.text
         body = resp.json()
-        assert body["detail"]["error"] == "invalid_zone"
-        assert body["detail"]["zone_id"] == other_zone_id
-        assert body["detail"]["room_id"] == room_id
+        assert body["error_code"] == "INVALID_ZONE"
+        assert body["zone_id"] == other_zone_id
+        assert body["room_id"] == room_id
 
         sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
         async with sessionmaker() as session:

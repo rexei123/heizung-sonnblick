@@ -37,11 +37,7 @@ from heizung.schemas.manual_override import (
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import next_active_checkout
-from heizung.services.override_service import (
-    OverrideRejectedWindowOpenError,
-    RoomNotOccupiedError,
-    RoomOverrideBlockedError,
-)
+from heizung.services.override_service import InvalidZoneError
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
@@ -76,10 +72,13 @@ async def _ensure_zone_in_room(
 ) -> None:
     """Sprint 12a T3 (AE-58): validiert dass die Zone zum Raum gehoert.
 
-    Wirft HTTP 404 ``invalid_zone`` falls Zone nicht existiert oder zu
-    einem anderen Raum gehoert. Beide Faelle werden gleich behandelt —
-    der Client darf keine Zonen-IDs anderer Raeume erraten koennen
-    (kein leakendes 403 vs 404).
+    Wirft ``InvalidZoneError`` (HTTP 404 ``INVALID_ZONE``) falls Zone nicht
+    existiert oder zu einem anderen Raum gehoert. Beide Faelle werden
+    gleich behandelt — der Client darf keine Zonen-IDs anderer Raeume
+    erraten koennen (kein leakendes 403 vs 404).
+
+    B-Sprint13b2-7 (AE-59): app-weiter ``OverrideError``-Handler in
+    ``heizung.main`` rendert das Top-Level-``error_code``-Schema.
     """
     stmt = select(HeatingZone.id).where(
         HeatingZone.id == heating_zone_id,
@@ -87,14 +86,7 @@ async def _ensure_zone_in_room(
     )
     found = await session.scalar(stmt)
     if found is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "invalid_zone",
-                "zone_id": heating_zone_id,
-                "room_id": room_id,
-            },
-        )
+        raise InvalidZoneError(room_id=room_id, zone_id=heating_zone_id)
 
 
 @router.get(
@@ -181,6 +173,13 @@ async def create_room_override(
         hotel_config=hotel_config,
     )
 
+    # B-Sprint13b2-7 (AE-59): Override-Domain-Exceptions
+    # (RoomOverrideBlockedError, RoomNotOccupiedError,
+    # OverrideRejectedWindowOpenError) werden vom app-weiten
+    # ``OverrideError``-Handler in ``heizung.main`` gefangen und auf
+    # ``{detail, error_code, ...extras}`` mit korrektem HTTP-Status
+    # gerendert. ``ValueError`` aus der Schema-/Setpoint-Validierung
+    # bleibt 422.
     try:
         override = await override_service.create(
             session,
@@ -196,40 +195,6 @@ async def create_room_override(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
-        ) from e
-    except RoomOverrideBlockedError as e:
-        # Sprint 12c (AE-58): Uebersteuerungs-Sperre aktiv -> Override abgewiesen.
-        # Block-Check hat Vorrang vor OCCUPIED-Check (gleiche Reihenfolge wie
-        # im Service-Layer ``override_service.create``).
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error_code": "room_override_blocked",
-                "room_id": e.room_id,
-            },
-        ) from e
-    except RoomNotOccupiedError as e:
-        # Sprint 12a T3 (AE-58): Raum nicht OCCUPIED -> Override abgewiesen.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "room_not_occupied",
-                "room_id": e.room_id,
-            },
-        ) from e
-    except OverrideRejectedWindowOpenError as e:
-        # Sprint 12 T4 (AE-52): Fenster offen -> Override-Anlage abgewiesen.
-        # zones-Liste: nur zone_id + reading_at exponieren (keine
-        # device-internal Felder, kein Health-State). Frontend-Vorpruefung
-        # + UX-Hinweis kommen in Sprint 12b.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "override_rejected_window_open",
-                "zones": [
-                    {"zone_id": z["zone_id"], "reading_at": z.get("reading_at")} for z in e.zones
-                ],
-            },
         ) from e
 
     await record_business_action(
