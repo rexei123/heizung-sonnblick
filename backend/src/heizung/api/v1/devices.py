@@ -32,9 +32,11 @@ from heizung.models.sensor_reading import SensorReading
 from heizung.models.user import User
 from heizung.rules.constants import WINDOW_STALE_THRESHOLD_MIN
 from heizung.schemas.device import (
+    DeviceActiveOverrideRead,
     DeviceAssignZoneRequest,
     DeviceAssignZoneResponse,
     DeviceCreate,
+    DeviceLatestReadingRead,
     DeviceRead,
     DeviceReplaceFromPoolRequest,
     DeviceRetireRequest,
@@ -42,8 +44,12 @@ from heizung.schemas.device import (
     HardwareStatusResponse,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
+from heizung.services import override_service
 from heizung.services.device_service import (
+    get_device_with_relations,
+    get_latest_reading,
     get_pool_devices,
+    list_devices_with_relations,
     replace_device,
     retire_device,
 )
@@ -91,6 +97,69 @@ async def _ensure_zone_exists(session: AsyncSession, zone_id: int | None) -> Non
         )
 
 
+async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRead:
+    """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
+    + latest_reading (Sprint 14a, D2).
+
+    Erwartet ein Device mit eager-geladener ``heating_zone``-Kette (via
+    ``list_devices_with_relations`` / ``get_device_with_relations``), sonst
+    Lazy-Load-Fehler im async-Pfad. ``heating_zone`` (Nested),
+    ``hardware_number`` und die Basis-Felder kommen via ``model_validate``
+    (from_attributes); ``active_override`` + ``latest_reading`` werden
+    nachgesetzt, weil sie keine ORM-Attribute sind.
+
+    Hinweis (D3): pro Device je eine Override- + eine Reading-Query (N+1).
+    Bewusst akzeptiert bei < 200 Geraeten; Optimierung im Backlog falls noetig.
+    """
+    read = DeviceRead.model_validate(device)
+
+    override_read: DeviceActiveOverrideRead | None = None
+    if device.heating_zone is not None:
+        active = await override_service.get_active(
+            session,
+            device.heating_zone.room_id,
+            heating_zone_id=device.heating_zone_id,
+        )
+        if active is not None:
+            override_read = DeviceActiveOverrideRead(
+                source=active.source,
+                setpoint_celsius=active.setpoint,
+                started_at=active.created_at,
+                expires_at=active.expires_at,
+            )
+
+    reading = await get_latest_reading(session, device.id)
+    reading_read: DeviceLatestReadingRead | None = None
+    if reading is not None:
+        reading_read = DeviceLatestReadingRead(
+            valve_position=reading.valve_position,
+            open_window=reading.open_window,
+            attached_backplate=reading.attached_backplate,
+            recorded_at=reading.time,
+        )
+
+    return read.model_copy(
+        update={"active_override": override_read, "latest_reading": reading_read}
+    )
+
+
+async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRead:
+    """Laedt ein Geraet mit Relations frisch und baut das ``DeviceRead``.
+
+    Fuer Mutations-Endpoints, deren Response ``DeviceRead`` ist: nach
+    ``commit``/``refresh`` ist ``device.heating_zone`` nicht eager-geladen,
+    ein direktes ``model_validate`` wuerde im async-Pfad einen Lazy-Load
+    (MissingGreenlet) ausloesen. Daher Reload via ``get_device_with_relations``.
+    """
+    device = await get_device_with_relations(session, device_id)
+    if device is None:  # pragma: no cover — direkt nach erfolgreichem commit
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device {device_id} nicht gefunden",
+        )
+    return await _build_device_read(session, device)
+
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
@@ -106,7 +175,7 @@ async def create_device(
     payload: DeviceCreate,
     _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
+) -> DeviceRead:
     await _ensure_zone_exists(session, payload.heating_zone_id)
 
     device = Device(**payload.model_dump())
@@ -121,7 +190,9 @@ async def create_device(
             detail=f"DevEUI '{payload.dev_eui}' existiert bereits",
         ) from e
     await session.refresh(device)
-    return device
+    # Sprint 14a (D2): enriched DeviceRead inkl. Nested-Zuordnung (reload
+    # mit Eager-Load, weil refresh die Relation nicht laedt).
+    return await _reload_device_read(session, device.id)
 
 
 @router.get(
@@ -142,18 +213,19 @@ async def list_devices(
     offset: int = Query(default=0, ge=0),  # noqa: B008
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[Device]:
-    # Sprint 13b.1 (AE-57): is_active-Query-Param ersetzt durch
-    # include_retired (Default False). Inline-Filter retired_at IS NULL,
-    # weil Helper-Signatur (zone-scoped) hier nicht passt.
-    stmt = select(Device)
-    if not include_retired:
-        stmt = stmt.where(Device.retired_at.is_(None))
-    if vendor is not None:
-        stmt = stmt.where(Device.vendor == vendor)
-    stmt = stmt.order_by(Device.id).offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+) -> list[DeviceRead]:
+    # Sprint 14a (D2/D3): Eager-Load der Zuordnungs-Kette + Nested-Response
+    # (heating_zone.name/health_state, room.number, room_type.name) plus
+    # active_override + latest_reading. Lifecycle-Filter AE-57 unveraendert
+    # (retired_at IS NULL per Default, include_retired fuer Audit-Sicht).
+    devices = await list_devices_with_relations(
+        session,
+        include_retired=include_retired,
+        vendor=vendor,
+        limit=limit,
+        offset=offset,
+    )
+    return [await _build_device_read(session, d) for d in devices]
 
 
 @router.get(
@@ -164,15 +236,20 @@ async def list_devices(
 async def list_pool_devices(
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[Device]:
+) -> list[DeviceRead]:
     """Liefert alle aktiven Reserve-Vickis sortiert ``created_at DESC``
     (neueste zuerst). Frontend nutzt das fuer den Pool-Dropdown beim
     Tausch (13b.2).
 
     Sprint 13b.1 (AE-57): MUSS vor ``GET /{device_id}`` registriert sein,
     sonst matched FastAPI ``/{device_id}`` mit ``device_id="pool"`` -> 422.
+
+    Sprint 14a (D2): Response ist jetzt das enriched ``DeviceRead``. Pool-
+    Geraete haben ``heating_zone IS NULL`` -> ``heating_zone``/
+    ``active_override`` sind null; ``latest_reading`` kann gesetzt sein.
     """
-    return await get_pool_devices(session)
+    pool = await get_pool_devices(session)
+    return [await _build_device_read(session, d) for d in pool]
 
 
 @router.get(
@@ -184,8 +261,16 @@ async def get_device(
     device_id: int = DeviceIdPath,
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
-    return await _get_or_404(session, device_id)
+) -> DeviceRead:
+    # Sprint 14a (D2): Detail-Response mit Nested-Zuordnung + active_override
+    # + latest_reading (Quelle fuer Karten + Diagnose-Kacheln der Detail-Seite).
+    device = await get_device_with_relations(session, device_id)
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device {device_id} nicht gefunden",
+        )
+    return await _build_device_read(session, device)
 
 
 @router.patch(
@@ -198,7 +283,7 @@ async def update_device(
     device_id: int = DeviceIdPath,
     _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
+) -> DeviceRead:
     device = await _get_or_404(session, device_id)
     updates = payload.model_dump(exclude_unset=True)
 
@@ -208,9 +293,20 @@ async def update_device(
     for field, value in updates.items():
         setattr(device, field, value)
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as e:
+        await session.rollback()
+        # Sprint 14a (D1): Partial-Unique-Index auf hardware_number — bei
+        # Inline-Edit-Kollision (zwei Geraete, gleiche Nummer) sauberes 409
+        # statt 500.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Hardware-Nummer '{updates.get('hardware_number')}' ist bereits vergeben",
+        ) from e
     await session.refresh(device)
-    return device
+    # Sprint 14a (D2): enriched DeviceRead (reload mit Eager-Load).
+    return await _reload_device_read(session, device.id)
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +541,7 @@ async def replace_device_from_pool(
     device_id: int = DeviceIdPath,
     user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
+) -> DeviceRead:
     """Atomarer Pool-Reassign-Tausch (AE-57 Entscheidung 6).
 
     Alt-Vicki bekommt ``retired_at``, ``retired_reason='replaced_by_pool'``,
@@ -490,7 +586,8 @@ async def replace_device_from_pool(
                 },
             )
 
-    return result
+    # Sprint 14a (D2): enriched DeviceRead des (retired) Alt-Geraets.
+    return await _reload_device_read(session, result.id)
 
 
 @router.post(
@@ -504,7 +601,7 @@ async def retire_device_endpoint(
     device_id: int = DeviceIdPath,
     user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Device:
+) -> DeviceRead:
     """Stilllegung ohne Ersatz (AE-57 Entscheidung 6).
 
     Setzt ``retired_at`` + ``retired_reason``. ``heating_zone_id`` bleibt
@@ -537,4 +634,5 @@ async def retire_device_endpoint(
                 },
             )
 
-    return result
+    # Sprint 14a (D2): enriched DeviceRead des stillgelegten Geraets.
+    return await _reload_device_read(session, result.id)

@@ -31,8 +31,12 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from heizung.models.device import Device
+from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
+from heizung.models.sensor_reading import SensorReading
 from heizung.services.business_audit_service import record_business_action
 
 # B-Sprint13b2-4 (AE-59): Lifecycle-Exception-Hierarchie zentral in
@@ -66,6 +70,66 @@ async def get_active_devices_for_zone(session: AsyncSession, zone_id: int) -> li
     return list(result.scalars().all())
 
 
+# ---------------------------------------------------------------------------
+# Cross-Sicht-UI Read-Helper (Sprint 14a, D2/D3) — Eager-Load der
+# Zuordnungs-Kette device -> heating_zone -> room -> room_type.
+# ---------------------------------------------------------------------------
+
+# selectinload-Kette: laedt heating_zone + room + room_type in separaten
+# IN-Queries (kein JOIN-Row-Blowup), damit DeviceZoneRead.from_attributes
+# ohne Lazy-Load-MissingGreenlet im async-Pfad serialisieren kann.
+_ZONE_CHAIN = (
+    selectinload(Device.heating_zone).selectinload(HeatingZone.room).selectinload(Room.room_type)
+)
+
+
+async def list_devices_with_relations(
+    session: AsyncSession,
+    *,
+    include_retired: bool = False,
+    vendor: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[Device]:
+    """Geraete-Liste mit eager-geladener Zuordnungs-Kette (D2).
+
+    Lifecycle-Filter AE-57: ``retired_at IS NULL`` per Default
+    (``include_retired=True`` liefert die Audit-Sicht). Sortierung
+    ``id ASC`` wie der bisherige Listen-Endpoint.
+    """
+    stmt = select(Device).options(_ZONE_CHAIN)
+    if not include_retired:
+        stmt = stmt.where(Device.retired_at.is_(None))
+    if vendor is not None:
+        stmt = stmt.where(Device.vendor == vendor)
+    stmt = stmt.order_by(Device.id).offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_device_with_relations(session: AsyncSession, device_id: int) -> Device | None:
+    """Einzelnes Geraet mit eager-geladener Zuordnungs-Kette (D2)."""
+    stmt = select(Device).where(Device.id == device_id).options(_ZONE_CHAIN)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_latest_reading(session: AsyncSession, device_id: int) -> SensorReading | None:
+    """Juengster ``sensor_reading``-Frame eines Geraets (D2/D5).
+
+    Quelle fuer die Diagnose-Kacheln Ventilstellung / Fenster / Backplate.
+    ``None`` falls noch keine Messung vorliegt.
+    """
+    stmt = (
+        select(SensorReading)
+        .where(SensorReading.device_id == device_id)
+        .order_by(SensorReading.time.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def get_pool_devices(session: AsyncSession) -> list[Device]:
     """Liefert alle aktiven Pool-Devices (Reserve-Vickis).
 
@@ -81,6 +145,9 @@ async def get_pool_devices(session: AsyncSession) -> list[Device]:
         .where(Device.heating_zone_id.is_(None))
         .where(Device.retired_at.is_(None))
         .order_by(Device.created_at.desc())
+        # Sprint 14a: Eager-Load-Kette, damit DeviceRead-Serialisierung im
+        # async-Pfad keinen Lazy-Load ausloest (Pool-Devices: zone=None).
+        .options(_ZONE_CHAIN)
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
