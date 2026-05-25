@@ -47,6 +47,39 @@ export default function ZimmerDetailPage() {
   const [tab, setTab] = useState<Tab>("stammdaten");
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // B-Sprint13b2-5: Dialog-Open-State liegt am Page-Root, nicht in
+  // DevicesInRoom. Background-Refetch von useDevices() re-rendert die
+  // Liste, der Dialog-Subtree haengt ausserhalb und bleibt unberuehrt.
+  const [openReplaceDialog, setOpenReplaceDialog] = useState<number | null>(
+    null,
+  );
+  const [openRetireDialog, setOpenRetireDialog] = useState<number | null>(null);
+  // Dialog-Target-Lookup ueber dieselben Query-Keys wie DevicesInRoom
+  // (TanStack-Cache dedupliziert; kein zusaetzlicher Request).
+  const allDevicesForDialog = useDevices();
+  const zonesForDialog = useHeatingZones(id ?? 0);
+  const zoneIdsForRoom = new Set(
+    (zonesForDialog.data ?? []).map((z) => z.id),
+  );
+  const devicesInRoomForDialog = (allDevicesForDialog.data ?? []).filter(
+    (d) => d.heating_zone_id !== null && zoneIdsForRoom.has(d.heating_zone_id),
+  );
+  const retireTarget =
+    openRetireDialog !== null
+      ? devicesInRoomForDialog.find((d) => d.id === openRetireDialog)
+      : undefined;
+  const retireIsLast =
+    openRetireDialog !== null && retireTarget?.heating_zone_id != null
+      ? devicesInRoomForDialog.filter(
+          (d) =>
+            d.heating_zone_id === retireTarget.heating_zone_id &&
+            d.retired_at === null,
+        ).length === 1
+      : false;
+  const replaceTarget =
+    openReplaceDialog !== null
+      ? devicesInRoomForDialog.find((d) => d.id === openReplaceDialog)
+      : undefined;
 
   const handleUpdate = async (payload: RoomCreate | RoomUpdate) => {
     setError(null);
@@ -166,7 +199,11 @@ export default function ZimmerDetailPage() {
           ) : tab === "zonen" ? (
             <HeatingZoneList roomId={id} />
           ) : tab === "geraete" ? (
-            <DevicesInRoom roomId={id} />
+            <DevicesInRoom
+              roomId={id}
+              onReplaceClick={setOpenReplaceDialog}
+              onRetireClick={setOpenRetireDialog}
+            />
           ) : (
             <EngineDecisionPanel roomId={id} />
           )}
@@ -182,11 +219,42 @@ export default function ZimmerDetailPage() {
         onConfirm={performDelete}
         onCancel={() => setConfirmDelete(false)}
       />
+
+      {/* B-Sprint13b2-5: Tausch + Stilllegen-Dialoge am Page-Root, damit
+          TanStack-Query-Background-Refetch von useDevices() den
+          Dialog-Subtree nicht unmounted. */}
+      {openReplaceDialog !== null ? (
+        <ReplaceDeviceDialog
+          deviceId={openReplaceDialog}
+          deviceLabel={replaceTarget?.label ?? `Gerät #${openReplaceDialog}`}
+          roomId={id}
+          open={true}
+          onClose={() => setOpenReplaceDialog(null)}
+        />
+      ) : null}
+      {openRetireDialog !== null ? (
+        <RetireDeviceDialog
+          deviceId={openRetireDialog}
+          deviceLabel={retireTarget?.label ?? `Gerät #${openRetireDialog}`}
+          roomId={id}
+          isLastActiveInZone={retireIsLast}
+          open={true}
+          onClose={() => setOpenRetireDialog(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function DevicesInRoom({ roomId }: { roomId: number }) {
+function DevicesInRoom({
+  roomId,
+  onReplaceClick,
+  onRetireClick,
+}: {
+  roomId: number;
+  onReplaceClick: (deviceId: number) => void;
+  onRetireClick: (deviceId: number) => void;
+}) {
   const zones = useHeatingZones(roomId);
   const allDevices = useDevices();
   const [detachTarget, setDetachTarget] = useState<{
@@ -195,14 +263,6 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
     zoneName: string;
   } | null>(null);
   const [detachError, setDetachError] = useState<string | null>(null);
-  // Sprint 13b.2 T3: State-Anker fuer Replace + Retire-Dialog. Buttons
-  // setzen die device_id, der Dialog (T4/T5) liest sie und setzt nach
-  // close oder Erfolg wieder null. Pre-Stop-1: State-Reader unten als
-  // sr-only-Status-Placeholder, T4/T5 ersetzen ihn durch echte Dialoge.
-  const [openReplaceDialog, setOpenReplaceDialog] = useState<number | null>(
-    null,
-  );
-  const [openRetireDialog, setOpenRetireDialog] = useState<number | null>(null);
 
   const zoneIds = new Set((zones.data ?? []).map((z) => z.id));
   const devicesInRoom = (allDevices.data ?? []).filter(
@@ -272,10 +332,10 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
                     Detail →
                   </Link>
                   <ReplaceDeviceButton
-                    onClick={() => setOpenReplaceDialog(d.id)}
+                    onClick={() => onReplaceClick(d.id)}
                   />
                   <RetireDeviceButton
-                    onClick={() => setOpenRetireDialog(d.id)}
+                    onClick={() => onRetireClick(d.id)}
                   />
                   <DetachButton
                     onClick={() =>
@@ -300,46 +360,6 @@ function DevicesInRoom({ roomId }: { roomId: number }) {
           onError={setDetachError}
         />
       ) : null}
-
-      {/* Sprint 13b.2 T4 + T5: Tausch + Stilllegen-Dialoge. State
-          haengt am DevicesInRoom-Hook; Dialoge konsumieren ihn ueber
-          openReplaceDialog / openRetireDialog. */}
-      {openReplaceDialog !== null ? (
-        <ReplaceDeviceDialog
-          deviceId={openReplaceDialog}
-          deviceLabel={
-            devicesInRoom.find((d) => d.id === openReplaceDialog)?.label ??
-            `Gerät #${openReplaceDialog}`
-          }
-          roomId={roomId}
-          open={true}
-          onClose={() => setOpenReplaceDialog(null)}
-        />
-      ) : null}
-      {openRetireDialog !== null
-        ? (() => {
-            const target = devicesInRoom.find((d) => d.id === openRetireDialog);
-            const targetZoneId = target?.heating_zone_id ?? null;
-            const isLast =
-              targetZoneId !== null
-                ? devicesInRoom.filter(
-                    (d) =>
-                      d.heating_zone_id === targetZoneId &&
-                      d.retired_at === null,
-                  ).length === 1
-                : false;
-            return (
-              <RetireDeviceDialog
-                deviceId={openRetireDialog}
-                deviceLabel={target?.label ?? `Gerät #${openRetireDialog}`}
-                roomId={roomId}
-                isLastActiveInZone={isLast}
-                open={true}
-                onClose={() => setOpenRetireDialog(null)}
-              />
-            );
-          })()
-        : null}
     </div>
   );
 }

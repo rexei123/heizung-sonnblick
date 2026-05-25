@@ -2517,17 +2517,22 @@ fuer robustes Frontend-Match. Vor Heizperiode 2026/27.
   Voll-Coverage-Matrix in AE-59. Tatsaechlicher Aufwand 2-3 h wie
   Brief, +1 T4-Discovery (client.ts-Fetch-Wrapper-Extraction). Siehe
   §2aw + AE-59 + CLAUDE.md §5.64.
-- **B-Sprint13b2-5** 🟢: RetireDeviceDialog (vermutlich auch
-  ReplaceDeviceDialog) schliesst selbsttaetig bei TanStack-Query-
-  Background-Refetch (stale-time-Trigger oder
-  `invalidateQueries`-Folge-Refetch). Heute Hotelier-Tempo unkritisch
-  (Click + Submit <2 Sek), im Sit-Down-Test-Pattern aber irritierend.
-  Fix-Optionen: (a) Dialog-Komponente ausserhalb der Daten-Liste
-  rendern (z.B. auf `/zimmer/[id]`-Page-Ebene statt in
-  `DevicesInRoom`), (b) Open-State im Modal-Layer lokal halten
-  (Compound-Pattern), (c) `key`-Prop auf Dialog mit stabiler ID
-  setzen. ~30-60 Min Hygiene-Sprint. Belegt durch Cowork-Live-Verify
-  2026-05-24.
+- **B-Sprint13b2-5** ✅ erledigt 2026-05-25: Dialog-Open-State
+  (`openReplaceDialog`/`openRetireDialog`) von `DevicesInRoom` auf
+  `ZimmerDetailPage`-Root gehoben, Dialog-Renders ans Page-Ende
+  verschoben. Variante (a) aus dem Backlog-Eintrag. Background-
+  Refetch von `useDevices()` re-rendert weiterhin die Geraete-Liste
+  in `DevicesInRoom`, der Dialog-Subtree haengt jetzt ausserhalb
+  und ist von dem Re-Render entkoppelt. Implementation in
+  `feature/b-sprint13b2-5-dialog-self-close`, Diff +72/-52 in
+  `frontend/src/app/zimmer/[id]/page.tsx`. Type-check + Lint +
+  Playwright-Voll-Suite (60 Cases) gruen. Manueller UI-Verify lokal
+  bestaetigt: Dialog bleibt 60 s offen bei manuellem
+  `queryClient.invalidateQueries({ queryKey: ["devices"] })` in den
+  DevTools. KEIN neuer Playwright-Test (Timing-abhaengig, schwer
+  reproduzierbar). KEIN eigener Tag — geht mit dem
+  `v0.1.18c-hygiene-minisprint`-Sammel-Tag nach allen drei Hygiene-
+  Items.
 - **B-Sprint13b2-6** 🟡 (vor naechstem Cowork-Re-Test): Pool-Refill
   auf heizung-test. Heute kein Reserve-Geraet im System -> 5
   Cowork-Pruefpunkte (befuellter Pool-Dropdown, Replace-Happy-Submit,
