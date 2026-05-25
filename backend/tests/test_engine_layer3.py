@@ -145,6 +145,7 @@ async def test_layer3_no_op_passes_through(db_session: AsyncSession, vacant_room
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer3_active_override_wins(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
     o = await override_service.create(
@@ -169,6 +170,7 @@ async def test_layer3_active_override_wins(db_session: AsyncSession, room_id: in
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer3_trace_extras_complete(db_session: AsyncSession, room_id: int) -> None:
     expires = datetime.now(tz=UTC) + timedelta(hours=2)
     o = await override_service.create(
@@ -193,6 +195,7 @@ async def test_layer3_trace_extras_complete(db_session: AsyncSession, room_id: i
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer5_clamps_above_room_type_max(db_session: AsyncSession, room_id: int) -> None:
     """``room_type.max_temp_celsius=22`` + Override 25 -> Layer 5 cappt auf 22."""
     room = await db_session.get(Room, room_id)
@@ -271,6 +274,7 @@ async def _add_zone(db_session: AsyncSession, *, room_id: int, name: str) -> int
 # ---- Unit-Tests auf layer_manual_override direkt ---------------------------
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer3_zone_id_filter_returnt_zone_override(
     db_session: AsyncSession, room_id: int
 ) -> None:
@@ -313,6 +317,7 @@ async def test_layer3_zone_id_filter_returnt_zone_override(
     assert step.extras["heating_zone_id"] == zone_id
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer3_zone_id_none_returnt_room_override(
     db_session: AsyncSession, room_id: int
 ) -> None:
@@ -353,6 +358,7 @@ async def test_layer3_zone_id_none_returnt_room_override(
     assert step.extras["heating_zone_id"] is None
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_layer3_zone_id_kein_match_kein_room_override_passthrough(
     db_session: AsyncSession, room_id: int
 ) -> None:
@@ -443,6 +449,7 @@ async def test_engine_zone_override_wirkt_nur_auf_zone(
     assert zone2_id not in result.zone_overrides
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_engine_room_override_wirkt_via_setpoint_c(
     db_session: AsyncSession, room_id: int
 ) -> None:
@@ -465,6 +472,7 @@ async def test_engine_room_override_wirkt_via_setpoint_c(
     assert result.zone_overrides == {}
 
 
+@freeze_time(FROZEN_NOW.isoformat())
 async def test_engine_zone_schlaegt_room_bei_beidem_aktiv(
     db_session: AsyncSession, room_id: int
 ) -> None:
