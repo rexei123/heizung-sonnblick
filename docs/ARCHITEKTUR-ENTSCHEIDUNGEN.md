@@ -1843,6 +1843,112 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
 
 ---
 
+# AE-60 — TZ-Handling Engine: UTC intern, Lokal-Zeit für Hotelier-Konfigurationen (B-10-4-Fix)
+
+**Datum:** 2026-05-25
+**Status:** Implementiert (B-10-4-Fix, 2026-05-25)
+**Geltungsbereich:** Engine Layer 2 Nachtabsenkung
+(`rules/engine.py:layer_temporal`). Künftige Hotelier-konfigurierte
+Zeit-Felder (Schedule-Profile, Wochentags-Pläne, etc.) folgen
+demselben Pattern.
+**Bezug:** B-10-4 Phase-0-Audit (PR #184, gemerged `7bfa892`),
+CLAUDE.md §5.59 (Time-Logic-Klasse), §5.65 (Lesson aus diesem Fix)
+
+## Kontext
+
+Sprint 9.8 hat Layer 2 Nachtabsenkung mit einer expliziten
+Vereinfachung implementiert: `now.time()` aus UTC-`now` wurde direkt
+gegen `night_start` / `night_end` (`rule_config.Time`-Spalten ohne
+TZ) verglichen. Der Hotelier gibt diese Werte in der UI als
+Lokal-Zeit ein (z.B. "22:00" für Setback-Beginn in Wien). Die Engine
+verglich aber gegen UTC-Wallclock → konstanter Offset 1–2h je nach
+Sommer-/Winterzeit.
+
+B-10-4 Phase-0-Audit (2026-05-25) hat den Bug bestätigt und
+strategisch eingeordnet: alle 19 sonstigen `datetime.now`-Aufrufe
+sind TZ-aware, alle 35 DateTime-Spalten sind TIMESTAMPTZ, Celery
+läuft in UTC mit DST-immunen Intervall-Schedules. Einzige Stelle mit
+Local-vs-UTC-Drift ist die Nachtabsenkungs-Schwelle.
+
+Hotelier-Bestätigung 2026-05-25: heutige Werte sind als Lokal-Zeit
+gemeint, keine empirische Kompensation des UTC-Offsets — Fix richtet
+das Verhalten am Hotelier-Intent aus.
+
+## Entscheidung
+
+1. **Engine arbeitet weiterhin in UTC.** `datetime.now(tz=UTC)`,
+   alle TIMESTAMPTZ-Spalten, alle `timedelta`-Arithmetik bleiben
+   unverändert. DST-Immunität durch Monotonie der UTC-Linie.
+
+2. **Hotelier-konfigurierte Lokal-Zeiten** (`rule_config.night_start`,
+   `night_end`, künftige Schedule-Felder) sind als wall-clock Lokal-
+   Zeit zu interpretieren. Spalten-Typ bleibt `Time` (kein TIMETZ —
+   siehe Verworfene Alternativen).
+
+3. **Vergleichs-Pfad:** Engine konvertiert UTC-`now` über
+   `now.astimezone(ZoneInfo(ctx.timezone))` zu Lokal-Zeit, danach
+   `local_now.time()`-Vergleich gegen Lokal-Konfig.
+
+4. **`_RoomContext.timezone`-Feld** trägt den TZ-Namen pro Eval.
+   Quelle ist `global_config.timezone` (vorhandene Spalte mit
+   Default `"Europe/Vienna"`), geladen einmal pro Engine-Tick in
+   `_load_room_context`. Defensiver Fallback auf
+   `DEFAULT_HOTEL_TIMEZONE = "Europe/Vienna"` falls Row fehlt oder
+   Spalte leer.
+
+5. **Engine-Decision-Panel-Trace** zeigt Lokal-Stunde
+   (`now_local=22:00:00 tz=Europe/Vienna window=[22:00:00,06:00:00]`)
+   — die Sicht, die der Hotelier in der UI eingestellt hat.
+
+## Verworfene Alternativen
+
+- **`night_start` / `night_end` als TIMETZ speichern:** DB-Komplexität
+  ohne Hotelier-Nutzen — die UI fragt Lokal-Zeit ab, eine TIMETZ-
+  Persistenz würde Migration + Schema-Bruch + zusätzliche
+  Validierung erfordern. Die `Time`-Spalte (Lokal-Wall-Clock-Intent)
+  ist semantisch korrekt; nur der Engine-Vergleichspfad war falsch.
+
+- **DST-Sprung-Sonderbehandlung im Engine-Scheduler:** Engine ist in
+  UTC DST-immun (Beat-Schedule `60.0` Sekunden Intervall, alle
+  Datums-Arithmetik via `timedelta`). Nur die Lokal-Anzeige darf
+  DST sehen — und tut das jetzt korrekt über `ZoneInfo`.
+
+- **Hartcodierter `ZoneInfo("Europe/Vienna")` ohne global_config-
+  Lookup:** spart 1 DB-Query, aber bricht den Mandanten-Flexibilitäts-
+  Pfad (Multi-Mandant, andere Hotels in anderen TZs). Lookup ist
+  vernachlässigbar (1 Row, gecached vom SQLAlchemy-Identity-Map auf
+  Engine-Tick-Ebene).
+
+## Konsequenzen
+
+- **Bug behoben:** Setback-Beginn entspricht ab sofort dem Hotelier-
+  Intent (22:00 lokal = 22:00 CET im Winter, 22:00 CEST im Sommer).
+- **DST-Wechsel 2026-10-25 robust:** ZoneInfo handelt CEST→CET-
+  Sprung transparent. Engine-Scheduler bleibt UTC-monoton — kein
+  doppelter Tick, kein Aussetzer (durch Phase-0-Audit bestätigt).
+- **Drei neue Tests** (Sommer, Winter, DST-Wechsel) in
+  `test_engine_skeleton.py` mit `@freeze_time`-Decorators.
+- **10 Bestandstests** in der Layer-2-Section grün ohne Anpassung
+  (Phase-0-Audit hatte das vorhergesagt — UTC-Werte lagen weit
+  genug von Stunden-Grenzen entfernt).
+- **Keine DB-Migration.** `global_config.timezone` existierte schon,
+  `Time`-Spalten bleiben.
+
+## Querverweise
+
+- B-10-4 Phase-0-Audit:
+  `docs/features/2026-05-25-b-10-4-dst-phase0-audit.md` (PR #184).
+- CLAUDE.md §5.59 (Time-Logic-Klasse — Pattern), §5.65 (Lesson aus
+  B-10-4-Fix).
+- `backend/src/heizung/rules/engine.py:layer_temporal` (TZ-Konversion).
+- `backend/src/heizung/rules/engine.py:_load_room_context`
+  (GlobalConfig-Lookup mit Fallback).
+- `backend/src/heizung/rules/engine.py:_RoomContext.timezone` (Feld).
+- `backend/tests/test_engine_skeleton.py::test_temporal_night_setback_tz_local_summer`
+  + `..._winter` + `..._dst_transition` (neue Tests).
+
+---
+
 # AE-59 — API-Fehler-Diskriminierung via error_code-Feld (B-Sprint13b2-4 + B-Sprint13b2-7)
 
 **Datum:** 2026-05-24 (erweitert 2026-05-25)

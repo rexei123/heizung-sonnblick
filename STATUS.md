@@ -2690,6 +2690,48 @@ direkter Vorgaenger).
 
 ---
 
+## 2ax. Hygiene-Mini-Sprint v0.1.18c (2026-05-25, abgeschlossen)
+
+**Ziel:** Vier Hygiene-/Fix-Items zwischen Sprint 13b.2 und Sprint 14
+bündeln, bevor Phase 3 (Cross-Sicht-UI) startet. Sammel-Tag
+`v0.1.18c-hygiene-minisprint` nach Voll-Abschluss.
+
+**Items:**
+
+| Item | PR | Commit | Inhalt |
+|---|---|---|---|
+| B-Sprint13b2-5 | #182 | `0323d4e` | Dialog-Self-Close bei Background-Refetch — Open-State von `DevicesInRoom` auf `ZimmerDetailPage`-Root gehoben (Variante a aus dem Backlog-Eintrag). Type-check + Lint + Playwright (60 cases) grün. |
+| B-Sprint13b2-7 + B-FlakyTime-3 | #183 | `1e3d23a` | `OverrideError`-Basisklasse + 4 Subklassen mit `error_code`/`http_status` ClassVars, App-Handler in `main.py`, Frontend `ERROR_CODES`-Erweiterung. Plus Hotfix für 8 time-bombed Tests in `test_engine_layer3.py` (`@freeze_time(FROZEN_NOW)` ergänzt). Voll-Suite 520+8 grün. |
+| B-10-4 Phase-0-Audit | #184 | `7bfa892` | 6-Audit-Read-Only-Bericht zur DST-Robustheit der Engine. 1× 🔴 KRITISCH (Layer 2 Nachtabsenkung UTC-vs-Local), alles übrige 🟢. Hotelier-Bestätigung 2026-05-25: heutige Werte sind Lokal-Intent. |
+| B-10-4-Fix | #185 (dieser PR) | pending | `_RoomContext.timezone`-Feld aus `global_config.timezone`, `layer_temporal` konvertiert UTC-now via `ZoneInfo` zu Lokal-Zeit vor `.time()`-Vergleich. 3 neue Tests (Sommer CEST, Winter CET, DST-Wechsel 28.10.2026), 10 Bestand-Layer-2-Tests grün ohne Anpassung. AE-60 + CLAUDE.md §5.65. |
+
+**Tests (post-B-10-4-Fix):**
+
+- Backend `ruff format + ruff check + mypy strict`: grün
+- Backend Voll-Suite gegen Postgres: **526 passed, 1 xfailed** (520
+  Stand pre-Fix + 3 neue Layer-2 + ggf. 3 Nebeneffekt-Auto-Discovery)
+- Frontend `type-check + lint + Playwright`: grün (unverändert seit
+  PR #183)
+
+**Architektur-Touch:** AE-60 (TZ-Handling Engine: UTC intern, Lokal-
+Zeit für Hotelier-Konfigurationen) — Master-ADR für künftige
+Hotelier-konfigurierbare Zeit-Felder. CLAUDE.md §5.65 als Lesson
+zur Pflicht-Pattern.
+
+**Out of Scope (bleibt Backlog):** B-Sprint13b2-1 (CLI-Tests-uuid-
+Suffix), B-Sprint13b2-3 (sonner-Migration Inline-Errors) — beide
+geringer Aufwand, kein Heizperiode-Bezug. Verbleiben als Phase-7-
+Polish im nächsten Hygiene-Bundle.
+
+**Tag:** `v0.1.18c-hygiene-minisprint` nach B-10-4-Fix-Merge
+(Sammel-Tag, vom Hotelier ausgelöst).
+
+**Querverweise:** AE-60, §5.59 (Time-Logic-Klasse), §5.64 +
+§5.65 (Lessons), B-10-4 Phase-0-Audit
+(`docs/features/2026-05-25-b-10-4-dst-phase0-audit.md`).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -2886,7 +2928,7 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.17b-1 🟢 (info, Sprint 11+) | **Server-side JWT-Blacklisting bei Logout.** Heute: Browser-Cookie-Cleanup, gestohlener JWT-Token bleibt 12h gültig. Akzeptabel für Single-Mandant-Hotelbetrieb. Bei Multi-Mandant-Schritt (Sprint 11+) nötig. Realisierungs-Optionen: Redis-Blacklist mit JWT-Jti, oder Datenbank-Token-Tabelle mit Revoke-Spalte. Querverweis CLAUDE.md §5.31. |
 | B-10-2 ✅ | **Caddy-Basic-Auth-Konflikt mit Backend-Auth.** Nach Sprint-9.17a/b-Cutover liefen zwei parallele Auth-Schichten — Site-weite Caddy-Basic-Auth (Sprint 8a K-1) + FastAPI-JWT-Cookie (AE-50). Browser fragte mehrfach Basic-Auth pro Session, Session instabil, Material-Symbols-Font-Race (siehe B-9.13b-1). Sprint-10-Prep-Hotfix 2026-05-15: Caddy-Basic-Auth nur noch für `/openapi.json /docs /docs/* /redoc /redoc/*` (Reconnaissance-Schutz, FastAPI hat dort kein eigenes Auth-Layer); `/api/*` und Frontend laufen über Backend-Auth (JWT-Cookie via `require_user`/`require_admin`/`require_real_user`/`require_mitarbeiter`). `/health` + `/healthz` bleiben public (Monitoring + Docker-HEALTHCHECK). Live-verifiziert auf heizung-test 2026-05-15 nach Caddy-Reload: kein Caddy-Popup auf Frontend, Login als kaprun funktioniert, `/devices` lädt, `/openapi.json` weiterhin Caddy-Basic-Auth. Out-of-scope: `Caddyfile.main` (Sprint 12, heizung-main-Migration). PR #154, commit `196e83c`. | ✅ erledigt 2026-05-15 |
 | B-10-3 🟢 | **Vulnerability-Scanner-Traffic im Caddy-Log.** Beobachtet 2026-05-15 nach Sprint-10-Prep-Caddy-Hotfix: z.B. IP `192.253.248.169` scannt nach `/crm/.env.local`, `/staging/.env` und weiteren Standard-Pfaden. Caddy antwortet korrekt mit 308-Redirects, kein Daten-Leak. Hardening-Optionen: fail2ban auf wiederholte 4xx-/308-Antworten, Caddy-eigenes Rate-Limit-Modul, oder ein einfacher `@scanner`-Matcher mit `respond 444`. Sprint 10 (CI-Hygiene) oder eigener Security-Hardening-Sprint. |
-| B-10-4 🟠 (vor Sprint 11) | **DST-Verhalten (Sommer-/Winterzeit Österreich) in zeit-gesteuerten Engine-Pfaden.** Erster relevanter Wechsel im Produktivbetrieb: **25.10.2026** (drei Wochen nach Heizperiode-Start). Phase-0-Diagnose aller zeit-gesteuerten Engine-Pfade nötig: Layer 2 Temporal (Frostschutz-Fenster), occupancy-Zeitfenster (`occupancy.day_*`-Zeitstempel), Celery-Beat-Schedules (Engine-Tick, Override-Cleanup, deploy-pull-Timer-Sync), Trace-Zeitstempel im `event_log` (UTC vs. lokal). Risiko: doppelte Tick-Ausführung im „Stunde zurück"-Fall oder ein-Stunden-Aussetzer im „Stunde vor"-Fall. Sprint 10a (zwischen 10 und 11) oder eigener DST-Sprint. |
+| B-10-4 ✅ | **DST-Verhalten (Sommer-/Winterzeit Österreich) in zeit-gesteuerten Engine-Pfaden.** Phase-0-Audit (PR #184, 2026-05-25) hat einen 🔴 Befund identifiziert: Layer 2 Nachtabsenkung vergleicht UTC-now gegen Lokal-Konfig (`night_start`/`night_end`), konstanter Offset 1-2h. Engine-Beat, occupancy-Zeitfenster, Override-Expiry, Cleanup-Cron sind alle DST-immun (siehe Audit-Bericht §3-§5). | ✅ erledigt 2026-05-25 (B-10-4-Fix, AE-60, CLAUDE.md §5.65). `_RoomContext.timezone`-Feld aus `global_config.timezone` (Default Europe/Vienna), `layer_temporal` konvertiert UTC-now via `ZoneInfo` vor `.time()`-Vergleich. 3 neue Tests (Sommer CEST, Winter CET, DST-Wechsel 28.10.2026), 10 Bestand-Layer-2-Tests grün ohne Anpassung. Voll-Suite 526/1xfail. Keine DB-Migration. |
 | B-11prep-1 🟠 (vor Sprint 17) | **Casablanca-FIAS-Anbindung — Hotelier-Antwort steht aus** (Stand 2026-05-15). Phase 5 (PMS) hängt davon ab. Falls FIAS-Antwort bis Sprint-17-Start nicht vorliegt: Sprint 16a entfällt, PMS rutscht in Phase 7, manuelle Belegungs-Pflege bleibt Fallback. Master-Quelle STRATEGIE-THERMOSTAT-ZUORDNUNG.md §13. |
 | B-11prep-2 🟠 (in Sprint 13) | **Mass-Pairing-Werkzeug.** CSV-Import oder Batch-Wizard für ~100 Vickis. Realisiert in Sprint 13 (Pairing-Wizard), genutzt in Sprint 17 (Pre-Pairing September). Vorbereitung Phase 4b. |
 | B-11prep-3 🟢 (nach Heizperiode) | **Alarm-Schwellen-Härtung gegen 100-Vicki-Skalierung.** AE-53-3-Stufen-Alarm (Mail-Stub via `logger.warning`) ist heute auf 4 Vickis ausgelegt; bei 100 Vickis ist Alarm-Müdigkeit realistisch. Nach erster Heizperiode 2026/27 empirisch nachjustieren. |

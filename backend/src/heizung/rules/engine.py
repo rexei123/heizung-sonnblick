@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
@@ -30,6 +31,7 @@ from sqlalchemy.orm import joinedload
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
+from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
@@ -39,6 +41,8 @@ from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_M
 from heizung.rules.scenarios import is_summer_mode_active
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
+
+DEFAULT_HOTEL_TIMEZONE = "Europe/Vienna"
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,6 +128,11 @@ class _RoomContext:
     # Sprint 9.8: naechste aktive Belegung (fuer Vorheizen-Logik). NULL wenn
     # keine zukuenftige oder laufende Belegung existiert.
     next_occupancy: Occupancy | None = None
+    # B-10-4-Fix (AE-60): Hotel-Zeitzone fuer Vergleiche gegen Hotelier-
+    # konfigurierte Lokal-Zeiten (night_start, night_end, kuenftige
+    # Schedule-Profile). Default ``Europe/Vienna``, ueberschreibbar via
+    # ``global_config.timezone``.
+    timezone: str = DEFAULT_HOTEL_TIMEZONE
 
 
 # ---------------------------------------------------------------------------
@@ -292,13 +301,16 @@ def layer_temporal(
         - ``temporal_inactive``      Fallback (Status nicht RESERVED/OCCUPIED,
                                      oder noetige Konfiguration fehlt)
 
-    Time-Berechnung in lokaler Hotel-Zeitzone (default Europe/Vienna in
-    global_config). Sprint 9.8 vereinfacht: nutzt now (UTC) direkt — Hotelier
-    kann Sprint 13+ via global_config.timezone konfigurieren.
+    B-10-4-Fix (AE-60): ``night_start`` / ``night_end`` aus ``rule_config``
+    sind als Lokal-Zeit zu interpretieren (Hotelier-Eingabe in der UI).
+    Engine konvertiert ``now`` (UTC) ueber ``ZoneInfo(ctx.timezone)`` zu
+    Lokal-Zeit vor dem ``.time()``-Vergleich. ``ctx.timezone`` kommt aus
+    ``global_config.timezone`` (Default ``Europe/Vienna``).
     """
     detail_token: str | None = None
 
     # --- VORHEIZEN ---
+    # DateTime-Arithmetik (TZ-aware now - timedelta), DST-immun via Monotonie.
     if ctx.room.status == RoomStatus.RESERVED:
         occ = ctx.next_occupancy
         if occ is None:
@@ -323,11 +335,17 @@ def layer_temporal(
                 detail_token = "outside_preheat_window"
 
     # --- NACHTABSENKUNG ---
+    # B-10-4-Fix (AE-60): UTC-now zu Lokal-Zeit konvertieren, damit der
+    # Wall-Clock-Vergleich gegen Hotelier-konfigurierte Lokal-Zeiten
+    # (night_start, night_end) korrekt ist. Engine-Decision-Panel-Trace
+    # zeigt local-Stunde, das ist die fuer den Hotelier nachvollziehbare
+    # Sicht.
     if ctx.room.status == RoomStatus.OCCUPIED:
         night_start = _resolve_field("night_start", ctx)
         night_end = _resolve_field("night_end", ctx)
         if night_start is not None and night_end is not None:
-            now_t = now.time()
+            local_now = now.astimezone(ZoneInfo(ctx.timezone))
+            now_t = local_now.time()
             if _is_in_night_window(now_t, night_start, night_end):
                 t_night = _resolve_field("t_night", ctx) or ctx.room_type.default_t_night
                 return LayerStep(
@@ -335,7 +353,8 @@ def layer_temporal(
                     setpoint_c=_quantize(t_night),
                     reason=CommandReason.NIGHT_SETBACK,
                     detail=(
-                        f"night_setback: now={now_t.isoformat()} "
+                        f"night_setback: now_local={now_t.isoformat()} "
+                        f"tz={ctx.timezone} "
                         f"window=[{night_start.isoformat()},{night_end.isoformat()}]"
                     ),
                 )
@@ -857,12 +876,19 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     )
     next_occ = (await session.execute(next_occ_stmt)).scalar_one_or_none()
 
+    # B-10-4-Fix (AE-60): Hotel-Zeitzone aus GlobalConfig-Singleton lesen.
+    # Defensiver Fallback auf ``DEFAULT_HOTEL_TIMEZONE`` falls Row fehlt
+    # (frisches Setup vor Seed) oder ``timezone``-Spalte leer ist.
+    gc = await session.get(GlobalConfig, 1)
+    tz_name = gc.timezone if gc and gc.timezone else DEFAULT_HOTEL_TIMEZONE
+
     return _RoomContext(
         room=room,
         room_type=room.room_type,
         rule_configs=rule_configs,
         summer_mode_active=summer_active,
         next_occupancy=next_occ,
+        timezone=tz_name,
     )
 
 
