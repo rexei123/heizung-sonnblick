@@ -327,7 +327,9 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
           status: 409,
           contentType: "application/json",
           body: JSON.stringify({
-            detail: { error: "room_not_occupied", room_id: 101 },
+            detail: "Override-Anlage abgewiesen: Raum 101 ist nicht OCCUPIED.",
+            error_code: "ROOM_NOT_OCCUPIED",
+            room_id: 101,
           }),
         });
         return;
@@ -363,7 +365,10 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
           status: 404,
           contentType: "application/json",
           body: JSON.stringify({
-            detail: { error: "invalid_zone", zone_id: 999, room_id: 101 },
+            detail: "Heizzone zone_id=999 nicht gefunden im Raum room_id=101.",
+            error_code: "INVALID_ZONE",
+            zone_id: 999,
+            room_id: 101,
           }),
         });
         return;

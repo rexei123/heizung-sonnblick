@@ -2658,14 +2658,24 @@ Pool-Refill (B-Sprint13b2-6 immer noch offen — siehe §2av).
 
 **Neue Backlog-Punkte:**
 
-- **B-Sprint13b2-7** 🟡 (Hygiene, weiterhin offen): overrides.py
-  Konvention vereinheitlichen — Sprint 12c liefert
-  `detail.error_code`, Sprint 12a liefert `detail.error` (Phase-0-§4
-  Drift-Befund). Mit AE-59 als kanonischer Konvention kann der
-  Hygiene-Sprint die zwei Bestandscases auf Top-Level-Sibling
-  umstellen oder bei nested-detail bleiben — Strategie-Entscheidung.
-  Frontend-Konsumenten in `lib/api/overrides.ts` + ggf. Dialog-
-  Catches mit-ziehen. ~30-60 Min.
+- **B-Sprint13b2-7** ✅ erledigt 2026-05-25: overrides.py +
+  Sprint-12a-error-Key auf AE-59 konvergiert.
+  ``OverrideError``-Basisklasse + 4 Subklassen (InvalidZoneError,
+  RoomNotOccupiedError, RoomOverrideBlockedError,
+  OverrideRejectedWindowOpenError) mit ``error_code``/
+  ``http_status``-ClassVars + ``response_extras()``-Hook in
+  ``override_service.py``. App-weiter
+  ``@app.exception_handler(OverrideError)`` in ``main.py``. 3
+  except-Branches + 1 inline HTTPException in ``api/v1/overrides.py``
+  entrümpelt — alles laeuft jetzt durch den Handler. Frontend:
+  ``ERROR_CODES`` um die 4 Override-Codes erweitert,
+  ``override-errors.ts`` auf ``getErrorCode`` umgestellt
+  (extractErrorCode entfernt). 6 Backend-Asserts + 2 Playwright-Mocks
+  auf SCREAMING_SNAKE_CASE + Top-Level-Schema migriert. AE-59
+  Scope-Grenze erweitert auf „alle API-Endpoints mit Mehrfach-
+  Subtypen pro HTTP-Status". Branch
+  ``refactor/b-sprint13b2-7-error-code-convergence``. KEIN eigener
+  Tag — geht mit ``v0.1.18c-hygiene-minisprint``-Sammel-Tag.
 - **B-Sprint13b2-8** 🟢 (Phase-7-Bundle-Audit): `/zimmer/[id]` first-
   load von 160 kB auf 171 kB gewachsen durch error-codes.ts + Switch-
   Logik + 4+2 Toast-Texte je Dialog. Pruefen ob Tree-Shaking

@@ -1843,17 +1843,19 @@ listet 12 Fundstellen, davon 5 als Pflicht-Filter klassifiziert).
 
 ---
 
-# AE-59 — API-Fehler-Diskriminierung via error_code-Feld (B-Sprint13b2-4)
+# AE-59 — API-Fehler-Diskriminierung via error_code-Feld (B-Sprint13b2-4 + B-Sprint13b2-7)
 
-**Datum:** 2026-05-24
-**Status:** Implementiert (B-Sprint13b2-4, 2026-05-24)
-**Geltungsbereich:** Lifecycle-Endpoints (Pool / Replace / Retire) aus
-Sprint 13b.1 + 13b.2. Andere Endpoint-Familien sind heute aus dem Scope
-ausgenommen (Strategie-Setzung 2026-05-24, B-Sprint13b2-7 plant
-Konvergenz).
-**Bezug:** AE-57 (Device-Lifecycle, Master), AE-58 (Override-Modell —
-zwei verschiedene `error_code`/`error`-Pattern-Stellen, siehe
-Phase-0-Audit §4), CLAUDE.md §5.64 (Lesson)
+**Datum:** 2026-05-24 (erweitert 2026-05-25)
+**Status:** Implementiert (B-Sprint13b2-4 2026-05-24 Lifecycle,
+B-Sprint13b2-7 2026-05-25 Override-Domain)
+**Geltungsbereich:** Alle API-Endpoints mit Mehrfach-Subtypen pro
+HTTP-Status. Heutige Domains: Lifecycle (Pool / Replace / Retire) +
+Override (Anlage-Reject, Block, InvalidZone). Zukunftige Endpoint-
+Familien mit Subtype-Disambiguierung folgen demselben Pattern
+(eigene ``XxxError``-Basisklasse mit ``error_code``/``http_status``
+ClassVars, app-weiter Handler).
+**Bezug:** AE-57 (Device-Lifecycle, Master), AE-58 (Override-Modell),
+CLAUDE.md §5.64 (Lesson)
 
 ## Kontext
 
@@ -1938,12 +1940,33 @@ B-Sprint13b2-4 (vor Heizperiode).
 
 ## Scope-Grenze
 
-Nur Lifecycle-Endpoints (Pool / Replace / Retire). Andere
-existierende ``error_code``-Stellen (overrides.py Sprint 12c
-Z.207) sind heute schon konvergent in der Struktur; Sprint-12a-
-``error``-Key-Stellen (Z.216) liefern weiterhin das alte Pattern.
-B-Sprint13b2-7 konsolidiert die Konventionen separat — natuerliche
-Aufloesung, sobald 12a-Bestand auf ``error_code`` umgestellt wird.
+Alle API-Endpoints mit Mehrfach-Subtypen pro HTTP-Status, die im
+Frontend UX-relevant unterschieden werden muessen. Heutige Domains
+(Implementierungs-Stand 2026-05-25):
+
+- **Lifecycle** (B-Sprint13b2-4): ``LifecycleError``-Hierarchie in
+  ``services/exceptions.py``, 4 Codes (POOL_DEVICE_UNAVAILABLE,
+  DEVICE_STATE_ERROR, SELF_REPLACEMENT_FORBIDDEN, DEVICE_NOT_FOUND).
+- **Override** (B-Sprint13b2-7): ``OverrideError``-Hierarchie in
+  ``services/override_service.py``, 4 Codes (INVALID_ZONE,
+  ROOM_NOT_OCCUPIED, ROOM_OVERRIDE_BLOCKED,
+  OVERRIDE_REJECTED_WINDOW_OPEN). ``OverrideError.http_status`` als
+  ClassVar (404 fuer InvalidZone, 409 fuer die anderen drei) +
+  ``response_extras()``-Hook fuer domaenen-spezifische Top-Level-
+  Felder (room_id / zone_id / zones).
+
+Pattern fuer kuenftige Endpoint-Familien (z.B. Casablanca-Sync-Errors
+in Sprint 15+): eigene ``XxxError``-Basisklasse mit
+``error_code: ClassVar[str]`` + ``http_status: ClassVar[int]`` +
+optional ``response_extras()``-Override. App-weiter
+``@app.exception_handler(XxxError)`` in ``heizung.main`` rendert das
+AE-59-Schema. Frontend ergaenzt ``ERROR_CODES`` in
+``lib/api/error-codes.ts`` um neue Konstanten — eine Quelle der
+Wahrheit fuer Type-Guards.
+
+Out-of-Scope bleiben Endpoint-Familien mit nur einem Subtype pro
+HTTP-Status (auth-401, validation-422-String-detail) — dort reicht
+String-``detail`` ohne ``error_code``.
 
 ## Querverweise
 
@@ -1951,8 +1974,14 @@ Aufloesung, sobald 12a-Bestand auf ``error_code`` umgestellt wird.
   ``docs/features/2026-05-24-b-sprint13b2-4-phase0.md``
   (PR #180, gemerged ``c67c4ce``).
 - CLAUDE.md §5.64 (Lesson — Diskriminator-Pflicht-Pattern).
-- ``backend/src/heizung/services/exceptions.py`` (Hierarchie).
-- ``frontend/src/lib/api/error-codes.ts`` (Frontend-Type-Guard).
+- ``backend/src/heizung/services/exceptions.py`` (Lifecycle-Hierarchie).
+- ``backend/src/heizung/services/override_service.py`` (Override-
+  Hierarchie, B-Sprint13b2-7).
+- ``backend/src/heizung/main.py`` (zwei app-weite Handler).
+- ``frontend/src/lib/api/error-codes.ts`` (Frontend-Type-Guard,
+  alle Codes aus beiden Domains).
+- ``frontend/src/lib/api/override-errors.ts`` (Override-Text-Map auf
+  ``getErrorCode`` umgestellt, B-Sprint13b2-7).
 
 ---
 

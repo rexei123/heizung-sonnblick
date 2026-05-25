@@ -708,8 +708,9 @@ async def test_e2e_f_post_override_window_open_returns_409(
         )
         assert resp.status_code == 409, resp.text
         body = resp.json()
-        assert body["detail"]["error"] == "override_rejected_window_open"
-        zones = body["detail"]["zones"]
+        # B-Sprint13b2-7 (AE-59): top-level error_code + zones via OverrideError-Handler.
+        assert body["error_code"] == "OVERRIDE_REJECTED_WINDOW_OPEN"
+        zones = body["zones"]
         assert isinstance(zones, list)
         assert len(zones) == 1
         assert zones[0]["zone_id"] == zone_id
