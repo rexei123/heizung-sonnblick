@@ -77,7 +77,12 @@ export function ZoneHealthBadge({
 
   if (variant === "detailed") {
     return (
-      <div className={`flex flex-col gap-0.5 ${className ?? ""}`.trim()} role="status">
+      <div
+        className={`flex flex-col gap-0.5 ${className ?? ""}`.trim()}
+        role="status"
+        data-testid="zone-health-badge"
+        data-health={healthState}
+      >
         {pill}
         <span className="text-xs text-text-tertiary">{cfg.hint}</span>
       </div>
@@ -88,6 +93,8 @@ export function ZoneHealthBadge({
     <span
       role="status"
       title={cfg.hint}
+      data-testid="zone-health-badge"
+      data-health={healthState}
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium ${cfg.badgeClass} ${className ?? ""}`.trim()}
     >
       <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 14 }}>

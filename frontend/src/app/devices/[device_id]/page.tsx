@@ -120,10 +120,10 @@ export default function DeviceDetailPage() {
                   <div className="mb-1">Status</div>
                   <HardwareStatusBadge deviceId={device.id} variant="detailed" />
                 </div>
-                {device.heating_zone !== null ? (
+                {device.heating_zone ? (
                   <ZoneHealthBadge
                     healthState={device.heating_zone.health_state}
-                    variant="compact"
+                    variant="detailed"
                   />
                 ) : null}
               </div>
@@ -142,7 +142,10 @@ export default function DeviceDetailPage() {
             </InfoCard>
 
             <InfoCard title="Identifikation" icon="badge">
-              <div className="flex items-center justify-between gap-4 py-1.5 border-b border-border/60 last:border-0">
+              <div
+                className="flex items-center justify-between gap-4 py-1.5 border-b border-border/60 last:border-0"
+                data-testid="hardware-number-row"
+              >
                 <span className="text-sm text-text-tertiary">Hardware-Nummer</span>
                 <HardwareNumberEdit device={device} />
               </div>
@@ -189,6 +192,7 @@ export default function DeviceDetailPage() {
               label="Ventilstellung"
               value={formatValve(snapshot?.valve_position ?? null)}
               tone="default"
+              testId="kpi-ventilstellung"
             />
             <WindowBackplateCard reading={snapshot} />
             <OverrideCard override={device.active_override} />
@@ -276,6 +280,8 @@ interface InlineTextEditProps {
   emptyDisplay: string;
   ariaLabel: string;
   displayClassName: string;
+  /** Anzeige-Element im Display-Modus. "h1" fuer die Seiten-Headline. */
+  as?: "h1" | "span";
   /** null = Feld leeren. */
   onSave: (next: string | null) => Promise<void>;
 }
@@ -285,6 +291,7 @@ function InlineTextEdit({
   emptyDisplay,
   ariaLabel,
   displayClassName,
+  as = "span",
   onSave,
 }: InlineTextEditProps) {
   const [editing, setEditing] = useState(false);
@@ -359,11 +366,14 @@ function InlineTextEdit({
   }
 
   const isEmpty = value === null;
+  const valueClass = `${displayClassName} ${isEmpty ? "text-text-tertiary italic" : ""}`.trim();
   return (
     <div className="flex items-center gap-2">
-      <span className={`${displayClassName} ${isEmpty ? "text-text-tertiary italic" : ""}`.trim()}>
-        {value ?? emptyDisplay}
-      </span>
+      {as === "h1" ? (
+        <h1 className={valueClass}>{value ?? emptyDisplay}</h1>
+      ) : (
+        <span className={valueClass}>{value ?? emptyDisplay}</span>
+      )}
       <button
         type="button"
         onClick={() => {
@@ -390,6 +400,7 @@ function DeviceLabelEdit({ device }: { device: Device }) {
       value={device.label}
       emptyDisplay={`Device ${device.id}`}
       ariaLabel="Bezeichnung"
+      as="h1"
       displayClassName="text-2xl font-medium text-text-primary"
       onSave={(next) => updateMut.mutateAsync({ label: next }).then(() => undefined)}
     />
@@ -454,9 +465,10 @@ interface KpiCardProps {
   value: string;
   hint?: string;
   tone: "default" | "primary" | "info" | "danger";
+  testId?: string;
 }
 
-function KpiCard({ icon, label, value, hint, tone }: KpiCardProps) {
+function KpiCard({ icon, label, value, hint, tone, testId }: KpiCardProps) {
   const toneClass = {
     default: "text-text-primary",
     primary: "text-primary",
@@ -465,7 +477,7 @@ function KpiCard({ icon, label, value, hint, tone }: KpiCardProps) {
   }[tone];
 
   return (
-    <div className="bg-surface rounded-lg border border-border p-4">
+    <div className="bg-surface rounded-lg border border-border p-4" data-testid={testId}>
       <div className="flex items-center gap-2 text-text-tertiary text-xs">
         <span
           className="material-symbols-outlined"
@@ -502,7 +514,7 @@ function WindowBackplateCard({
         ? "abgenommen"
         : "—";
   return (
-    <div className="bg-surface rounded-lg border border-border p-4">
+    <div className="bg-surface rounded-lg border border-border p-4" data-testid="window-backplate-card">
       <div className="flex items-center gap-2 text-text-tertiary text-xs">
         <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
           sensor_window
@@ -533,14 +545,17 @@ const OVERRIDE_SOURCE_LABEL: Record<OverrideSource, string> = {
 /** D5: Override-Status read-only (AE-61) — keine Aktion auf Geräte-Seite. */
 function OverrideCard({ override }: { override: DeviceActiveOverride | null }) {
   return (
-    <div className="bg-surface rounded-lg border border-border p-4 md:col-span-2">
+    <div
+      className="bg-surface rounded-lg border border-border p-4 md:col-span-2"
+      data-testid="override-card"
+    >
       <div className="flex items-center gap-2 text-text-tertiary text-xs">
         <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
           touch_app
         </span>
         <span>Override</span>
       </div>
-      {override === null ? (
+      {!override ? (
         <div className="mt-2 text-sm text-text-secondary">Kein Override aktiv</div>
       ) : (
         <div className="mt-2 space-y-1 text-sm">

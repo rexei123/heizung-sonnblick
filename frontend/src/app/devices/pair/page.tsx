@@ -289,7 +289,7 @@ function DeviceStep({
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="z.B. Thermostat im Bad"
+              placeholder="z.B. Heizkörperthermostat"
               className="mt-1"
             />
           </label>

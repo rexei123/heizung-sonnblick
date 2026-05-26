@@ -178,7 +178,7 @@ function DeviceRow({ device: d }: { device: Device }) {
       <td className="px-4 py-3">
         <div className="flex items-start gap-3">
           <HardwareStatusBadge deviceId={d.id} variant="detailed" />
-          {d.heating_zone !== null ? (
+          {d.heating_zone ? (
             <ZoneHealthBadge healthState={d.heating_zone.health_state} variant="compact" />
           ) : null}
         </div>
@@ -192,11 +192,15 @@ function DeviceRow({ device: d }: { device: Device }) {
  * Pool-Geraete (keiner Zone zugewiesen) zeigen „— Reserve-Pool".
  */
 function ZuordnungCell({ device: d }: { device: Device }) {
-  if (d.heating_zone === null) {
-    return <span className="text-sm text-text-tertiary italic">— Reserve-Pool</span>;
+  if (!d.heating_zone) {
+    return (
+      <span data-testid="device-zuordnung" className="text-sm text-text-tertiary italic">
+        — Reserve-Pool
+      </span>
+    );
   }
   return (
-    <span className="text-sm text-text-secondary">
+    <span data-testid="device-zuordnung" className="text-sm text-text-secondary">
       <span className="text-text-primary font-medium">{d.heating_zone.room.number}</span>
       {" · "}
       {d.heating_zone.name}
