@@ -2242,3 +2242,58 @@ Fixture-Anpassung Raw-SQL-INSERTs gegen NOT-NULL ohne DB-Default),
 (Off-Pipeline-Audit-Pattern fuer Pre-A-Gate-EventLog), AE-57
 (Device-Lifecycle Retire+Pair-New — Override-Pfad ist zone-scoped,
 Device-Pfad wird in Sprint 13b lifecycle-aware).
+
+---
+
+# AE-61 — Geräte-Seiten sind read-only Diagnose
+
+**Datum:** 2026-05-26
+**Status:** Akzeptiert
+**Bezug:** Cross-Sicht-UI Sprint 14a, AE-51, AE-53,
+STRATEGIE-THERMOSTAT-ZUORDNUNG.md §9
+
+## Kontext
+
+Geräte-Seiten (`/devices`, `/devices/[id]`) und Zimmer-Seiten
+(`/zimmer`, `/zimmer/[id]`) haben unterschiedliche Workflow-Rollen:
+
+- Geräte-Seiten dienen der Hardware-Diagnose (welches Thermostat ist
+  online, in welcher Zone, mit welchem Status, welche Ventilstellung).
+- Zimmer-Seiten dienen der Heizungssteuerung (Sollwert, Override,
+  Profile, Übersteuerungs-Sperre).
+
+Ohne klare Trennung droht Steuer-Logik auf Geräte-Ebene statt
+Zone-Ebene zu landen (AE-51-Verstoß: Override wirkt immer auf die
+ganze Zone, nie pro Thermostat).
+
+## Entscheidung
+
+1. Geräte-Seiten zeigen ausschließlich Diagnose-Information.
+2. Inline-Edits auf Geräte-Seiten sind auf Stamm-Daten beschränkt
+   (Bezeichnung, Hardware-Nummer).
+3. Steuerungs-Aktionen (Sollwert setzen, Override anlegen/revoken,
+   Profile, Übersteuerungs-Sperre) leben ausschließlich auf
+   Zimmer-Seiten.
+4. Der Override-Status wird auf der Geräte-Detail-Seite read-only
+   angezeigt (Diagnose), aber nicht editiert.
+
+## Konsequenzen
+
+- Geräte-Detail-Seite enthält keine Aktions-Buttons außer
+  Replace/Retire/Detach (Device-Lifecycle aus Sprint 13b.2, AE-57)
+  und den Inline-Edits für Stamm-Daten.
+- Sprint 14a (Cross-Sicht-UI) hält sich an diese Trennung: die drei
+  neuen Diagnose-Kacheln (Ventilstellung, Fenster+Backplate,
+  Override-Status) sind read-only.
+- Spätere Sprints, die Steuerung erweitern, gehören auf
+  Zimmer-Seiten, nicht auf Geräte-Seiten.
+
+## Verworfen
+
+- Setpoint-Quick-Set auf der Geräte-Detail-Seite: zerreißt die
+  Workflow-Trennung und würde Engine-Logik auf Thermostat-Ebene statt
+  Zone-Ebene anwenden (AE-51-Verstoß).
+
+**Hinweis Nummern-Vergabe:** AE-60 wurde parallel von B-10-4
+(Engine-TZ-Handling) belegt; diese Cross-Sicht-Entscheidung läuft
+daher unter AE-61 (Strategie-Chat-Drift-Resolution 2026-05-26).
