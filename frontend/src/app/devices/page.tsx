@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type KeyboardEvent } from "react";
 
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
-import { Badge } from "@/components/ui/badge";
+import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
@@ -97,7 +97,7 @@ function DevicesPageInner() {
         <div>
           <h1 className="text-2xl font-medium text-text-primary">Geräte</h1>
           <p className="text-sm text-text-secondary mt-1">
-            Übersicht aller LoRaWAN-Geräte (Vicki, WT102, …) im System.
+            Übersicht aller LoRaWAN-Geräte (Thermostate, Sensoren) im System.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -152,9 +152,7 @@ function DevicesTable({ devices }: { devices: Device[] }) {
         <thead className="bg-surface-alt text-text-secondary">
           <tr>
             <th className="text-left px-4 py-3 font-medium">Bezeichnung</th>
-            <th className="text-left px-4 py-3 font-medium">DevEUI</th>
-            <th className="text-left px-4 py-3 font-medium">Hersteller / Modell</th>
-            <th className="text-left px-4 py-3 font-medium">Aktiv</th>
+            <th className="text-left px-4 py-3 font-medium">Zuordnung</th>
             <th className="text-left px-4 py-3 font-medium">Status</th>
           </tr>
         </thead>
@@ -174,39 +172,35 @@ function DeviceRow({ device: d }: { device: Device }) {
       <td className="px-4 py-3">
         <LabelCell device={d} />
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-text-tertiary">{d.dev_eui}</td>
-      <td className="px-4 py-3 text-text-secondary">
-        {d.vendor} / {d.model}
+      <td className="px-4 py-3">
+        <ZuordnungCell device={d} />
       </td>
       <td className="px-4 py-3">
-        {d.retired_at === null ? (
-          <span className="inline-flex items-center gap-1 text-text-primary text-sm">
-            <span
-              className="material-symbols-outlined text-success"
-              aria-hidden
-              style={{ fontSize: 16 }}
-            >
-              check_circle
-            </span>
-            ja
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-text-tertiary text-sm">
-            <span
-              className="material-symbols-outlined"
-              aria-hidden
-              style={{ fontSize: 16 }}
-            >
-              cancel
-            </span>
-            nein
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <HardwareStatusBadge deviceId={d.id} variant="detailed" />
+        <div className="flex items-start gap-3">
+          <HardwareStatusBadge deviceId={d.id} variant="detailed" />
+          {d.heating_zone !== null ? (
+            <ZoneHealthBadge healthState={d.heating_zone.health_state} variant="compact" />
+          ) : null}
+        </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Zuordnung-Spalte (Sprint 14a, D4): Zimmer · Zone aus dem Nested-Response.
+ * Pool-Geraete (keiner Zone zugewiesen) zeigen „— Reserve-Pool".
+ */
+function ZuordnungCell({ device: d }: { device: Device }) {
+  if (d.heating_zone === null) {
+    return <span className="text-sm text-text-tertiary italic">— Reserve-Pool</span>;
+  }
+  return (
+    <span className="text-sm text-text-secondary">
+      <span className="text-text-primary font-medium">{d.heating_zone.room.number}</span>
+      {" · "}
+      {d.heating_zone.name}
+    </span>
   );
 }
 
@@ -284,11 +278,9 @@ function LabelCell({ device: d }: { device: Device }) {
     );
   }
 
-  // Sprint 13b.2 T6: Reserve-Pool-Marker. Backend-Default-Filter
-  // blendet retired_at !== null aus der Liste aus; der explizite
-  // retired_at-Check ist defensiv fuer ?include_retired=true-Sichten.
-  const isReserve = d.heating_zone_id === null && d.retired_at === null;
-
+  // Sprint 14a (D4): Reserve-Marker wandert in die Zuordnung-Spalte
+  // („— Reserve-Pool"); der bisherige Inline-Badge entfaellt zugunsten
+  // der drei-spaltigen Liste.
   return (
     <div className="flex items-center gap-2">
       <Link
@@ -311,11 +303,6 @@ function LabelCell({ device: d }: { device: Device }) {
           edit
         </span>
       </button>
-      {isReserve ? (
-        <Badge variant="secondary" title="Reserve-Thermostat im Lager (keiner Heizzone zugewiesen)">
-          Reserve
-        </Badge>
-      ) : null}
     </div>
   );
 }

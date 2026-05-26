@@ -13,6 +13,56 @@ export type DeviceKind = "thermostat" | "sensor";
 
 export type DeviceVendor = "mclimate" | "milesight" | "manual";
 
+/** Device-Health (AE-53): aus Uplink-Latenz + Plausibilitaet abgeleitet. */
+export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious";
+
+/** Zone-Health (AE-53): aus den Devices der Zone aggregiert (no_device statt suspicious). */
+export type ZoneHealthState = "healthy" | "degraded" | "silent" | "no_device";
+
+// ---------------------------------------------------------------------------
+// Sprint 14a (D2/D9): Nested-Zuordnung + Diagnose-Felder im Device-Response.
+// Spiegelt schemas/device.py (DeviceZoneRead / DeviceRoomRead /
+// DeviceRoomTypeRead / DeviceActiveOverrideRead / DeviceLatestReadingRead).
+// ---------------------------------------------------------------------------
+
+export interface DeviceRoomType {
+  id: number;
+  name: string;
+}
+
+export interface DeviceRoom {
+  id: number;
+  number: string;
+  room_type: DeviceRoomType;
+}
+
+export interface DeviceZone {
+  id: number;
+  name: string;
+  health_state: ZoneHealthState;
+  room: DeviceRoom;
+}
+
+/**
+ * Aktiver Override fuer die Zone des Geraets (read-only Diagnose, AE-61).
+ * `setpoint_celsius` kommt als JSON-Number (Backend-field_serializer
+ * Decimal->float). `expires_at` ist non-null (Backend-Model NOT NULL).
+ */
+export interface DeviceActiveOverride {
+  source: OverrideSource;
+  setpoint_celsius: number;
+  started_at: string;
+  expires_at: string;
+}
+
+/** Juengster SensorReading-Frame fuer die Diagnose-Kacheln (D5). */
+export interface DeviceLatestReading {
+  valve_position: number | null;
+  open_window: boolean | null;
+  attached_backplate: boolean | null;
+  recorded_at: string;
+}
+
 export interface Device {
   id: number;
   dev_eui: string;
@@ -32,8 +82,17 @@ export interface Device {
   retired_reason: string | null;
   replaced_by_device_id: number | null;
   last_seen_at: string | null;
+  /** Sprint 9.11x.b: vom MQTT-Subscriber aus FW-Reply gepflegt. */
+  firmware_version: string | null;
+  /** Sprint 11 (AE-53): Device-Health-Aggregat. */
+  health_state: DeviceHealthState;
   created_at: string;
   updated_at: string;
+  // Sprint 14a (D1/D2): Cross-Sicht-Felder.
+  hardware_number: string | null;
+  heating_zone: DeviceZone | null;
+  active_override: DeviceActiveOverride | null;
+  latest_reading: DeviceLatestReading | null;
 }
 
 export interface DeviceCreate {
@@ -52,6 +111,8 @@ export interface DeviceUpdate {
   vendor?: DeviceVendor;
   model?: string;
   label?: string | null;
+  /** Sprint 14a (D1/D5): Hardware-Nummer per Inline-Edit (Detail-Seite). */
+  hardware_number?: string | null;
   heating_zone_id?: number | null;
 }
 
@@ -64,6 +125,10 @@ export interface SensorReading {
   battery_percent: number | null;
   rssi_dbm: number | null;
   snr_db: number | null;
+  // Sprint 14a (D9): Codec-Felder, vom Backend in SensorReadingRead
+  // gespiegelt (NULL wenn das Feld im Frame fehlte / alter Codec).
+  open_window: boolean | null;
+  attached_backplate: boolean | null;
 }
 
 export interface SensorReadingsQuery {

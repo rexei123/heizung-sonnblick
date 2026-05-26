@@ -289,7 +289,7 @@ function DeviceStep({
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="z.B. Vicki"
+              placeholder="z.B. Thermostat im Bad"
               className="mt-1"
             />
           </label>
@@ -493,7 +493,7 @@ function ConfirmStep({
           <Input
             value={label}
             onChange={(e) => onLabelChange(e.target.value)}
-            placeholder={device?.label ?? `Vicki ${device?.dev_eui.slice(-4) ?? ""}`}
+            placeholder={device?.label ?? `Thermostat ${device?.dev_eui.slice(-6) ?? ""}`}
             className="mt-1"
           />
         </label>
