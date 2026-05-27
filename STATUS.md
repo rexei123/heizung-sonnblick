@@ -2796,6 +2796,45 @@ Health-Modell — ZoneHealthBadge-Quelle), AE-57 (Device-Lifecycle), §5.20
 
 ---
 
+## 2az. Sprint 14a.1 Spalten-Split Geräte-Liste — Hotfix (2026-05-27, abgeschlossen, Live-Verify pending)
+
+**Anlass:** Cowork-Befund Status-Spalten-Drift auf `/devices` — die kombinierte
+„Status"-Spalte rendert HardwareStatusBadge (inhaltsabhängig breite Subline
+„Zuletzt: …") + ZoneHealthBadge in einem geteilten Inline-Flex-Slot; die
+variable Hardware-Badge-Breite verschob die Zone-Pille → optische Drift.
+
+**Lösung:** Variante A „Spalten-Split" (verbindlich Strategie-Chat 2026-05-27).
+„Status" → zwei Spalten **„Gerät"** (`device-hardware-cell`, HardwareStatusBadge
+detailed) + **„Zone"** (`device-zone-cell`, ZoneHealthBadge compact, bei
+Pool-Devices Em-Dash + `aria-label`). Wrapper `overflow-hidden` →
+`overflow-x-auto` (Mobile-Scroll). Eigene Tabellen-Slots statt Inline-Flow.
+
+**Scope:** reiner Frontend-Hotfix — kein Backend, keine Migration, keine neue
+Komponente, kein Detail-Seiten-Touch (`/devices/[id]` bleibt stacked, AE-61).
+Diff knapp: 1× `page.tsx` + 2 Playwright-Asserts (`devices.spec.ts` th-Array → 4,
+`hardware-status-badge.spec.ts` th-Filter „Gerät").
+
+**Commit/PR:** Squash-Commit `1f6c132`, PR #187 (CI grün: Frontend `lint-and-build`
+1m21s + `e2e` 2m22s). Phase-0-Audit-Vorlauf: Commit `254cb16`
+(`docs/features/2026-05-27-sprint-14a-1-phase0-status-spalten.md`).
+
+**Tests (unverändert):** Backend 532 passed / 1 xfailed; Frontend type-check +
+lint + Playwright **69 passed**.
+
+**Live-Verify:** ⏸ **pending.** Cowork-Begehung **lokal** gegen develop-Stand
+`1f6c132` durch Hotelier 2026-05-27: 4 Spalten ausgerichtet, Pool-Em-Dash in
+Zone-Spalte, Mobile-Scroll grün. **heizung-test hängt seit 2026-05-23
+(Block-A-Deploy-Stall)** → produktive Live-Verifikation steht aus, wird nach
+Block-A-Resolution nachgepflegt (§5.67).
+
+**Tag:** `v0.1.19a.1-cross-sicht-hotfix` auf `1f6c132` (2026-05-27).
+
+**Querverweise:** AE-61, §5.66 (Multi-Badge-Cells brauchen feste Slots), §5.67
+(Tag mit Deploy-Stall + „Live-Verify pending"-Pflicht), Phase-0-Audit
+`254cb16`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
