@@ -2297,3 +2297,52 @@ ganze Zone, nie pro Thermostat).
 **Hinweis Nummern-Vergabe:** AE-60 wurde parallel von B-10-4
 (Engine-TZ-Handling) belegt; diese Cross-Sicht-Entscheidung läuft
 daher unter AE-61 (Strategie-Chat-Drift-Resolution 2026-05-26).
+
+---
+
+# AE-62 — Zone-scoped Override als Setpoint-Surrogat in der UI
+
+**Datum:** 2026-05-27
+**Status:** Akzeptiert
+**Bezug:** Sprint 14b, AE-51 §4.1 (Zone-Aggregat), AE-52 (Window-Safety),
+AE-58 (Override-Hierarchie)
+
+## Kontext
+
+Bis Sprint 14b gibt es **keinen** Setpoint-Write-Endpoint für Zonen. Die
+Engine behält dauerhafte Sollwert-Hoheit (Heizprofile, Layer 2). Die
+Hotelier-Aktion „Wunschtemperatur jetzt setzen" ist UI-seitig nötig, fachlich
+aber identisch mit einem zone-scoped Override (AE-58). Im 14b-Heizzonen-Tab
+sollen Zone-Karten den Override anzeigen und das Setzen anstoßen.
+
+## Entscheidung
+
+1. Die UI behandelt „Wunschtemperatur setzen" als **zone-scoped Override**
+   über die bestehende `ManualOverride`-API — **kein** neuer Setpoint-Endpoint.
+2. Die Zone-Karte im Heizzonen-Tab zeigt den aktiven Override **read-only**
+   (Banner; Quelle via `useZoneOverride`).
+3. Die aktive Setpoint-Mutation (Anlegen/Aufheben) läuft im **Übersteuerung-Tab**
+   (`ManualOverrideZoneCard` — inkl. AE-52-Window-Safety + AE-58-Source-
+   Hierarchie).
+4. Die Zone-Karte verlinkt per CTA „Wunschtemperatur setzen →" auf den
+   Übersteuerung-Tab statt eigener Mutations-UI (Link-out).
+
+## Konsequenzen
+
+- Kein UI-Duplikat der Window-Safety-Logik (AE-52); Sprint-12b/12c-Selektoren
+  bleiben stabil.
+- Trade-off: Hotelier macht zwei Klicks (Tab-Wechsel + Setpoint) statt einem.
+- Backlog **B-14b-FU-4**: Übersteuerung-Tab als Historie/Verlauf refactoren,
+  falls Zone-Karten-direkte-Aktion mittelfristig gewünscht ist
+  (Chrome-loses-Inner-Refactor von `ManualOverrideZoneCard`).
+
+## Verworfen
+
+- **Eigener Setpoint-Endpoint:** würde die Engine-Sollwert-Hoheit aushöhlen und
+  die Override-Mechanik (AE-58) duplizieren.
+- **`ManualOverrideZoneCard` direkt in ZoneCard einbetten:** Card-Chrome-
+  Kollision (eigene Border/Heading) + Window-Safety-State-Plumbing-Duplikat.
+- **Chrome-loses-Inner-Refactor in 14b:** Stufe-1-Eskalation in einem Stufe-2-
+  Sprint; Bestands-Tests (12b/12c/13b.2) hätten angefasst werden müssen.
+
+**Querverweise:** AE-51 §4.1, AE-52, AE-58, Sprint 12b + 14b (PR #191), §5.69.

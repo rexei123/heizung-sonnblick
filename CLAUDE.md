@@ -1908,6 +1908,36 @@ fürchten. Server-Reality schlägt Session-Gedächtnis.
 mit echtem Deploy-Stall — bleibt gültig; wurde hier auf eine falsche Annahme
 aufgesetzt), §5.7/§5.11 (echte Deploy-Fehlerbilder).
 
+### 5.69 Bestand-Komponente einbetten: erst Phase-1-Sub-Audit, sonst Link-out (Sprint 14b)
+
+Wenn eine fachlich neue UI-Komponente eine bestehende, voll funktionsfähige
+Bestand-Komponente **einbetten** soll, vor der Implementation ein Phase-1-
+Sub-Audit der Bestand-Komponente machen:
+
+- **Card-Chrome** (eigene Border/Padding/Heading) — kollidiert mit dem neuen
+  Container?
+- **State-Plumbing-Bedarf** (Hooks, Refs, Context, Props wie `isWindowOpen`/
+  `lastEvalTime`) — muss der Parent Daten neu beschaffen/duplizieren?
+- **Tab-/Container-Annahmen** — geht die Komponente von einem bestimmten
+  Layout-Kontext aus?
+
+Bei Kollision: **STOP + Strategie-Chat-Drift-Resolution, KEIN Eigen-Refactor**
+der Bestand-Komponente (besonders wenn deren Tests in anderen Sprints liegen).
+**Link-out** (CTA, der auf die bestehende, voll funktionale Sicht verweist —
+z. B. Tab-Wechsel) ist oft die saubere Lösung, wenn der Bestand voll
+funktioniert und nur die **Sichtbarkeit** erweitert werden soll.
+
+Anlass: Sprint 14b. `ManualOverrideZoneCard` (Übersteuerung-Tab, Sprint 12b)
+sollte als Footer in die neue `ZoneCard` eingebettet werden. P1-Sub-Audit
+zeigte: eigene Card-Chrome + Zonen-Heading (Karte-in-Karte) **und** Bedarf an
+`isWindowOpen`/`lastEvalTime` (AE-52, via `useEngineTrace`) — Einbettung hätte
+einen Refactor der nicht-zu-refaktorierenden Komponente + Plumbing-Duplikat
+erzwungen. Lösung (AE-62): Link-out-CTA „Wunschtemperatur setzen →" auf den
+Übersteuerung-Tab; aktiver Override read-only via `useZoneOverride`.
+
+**Querverweis:** Sprint 14b (PR #191), AE-62, P1-Sub-Audit-Befund
+`ManualOverrideZoneCard`.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
