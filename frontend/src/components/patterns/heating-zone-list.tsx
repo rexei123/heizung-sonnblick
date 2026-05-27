@@ -1,20 +1,24 @@
 "use client";
 
 /**
- * Heizzonen-Liste fuer die Zimmer-Detail-Seite (Sprint 8.10, Sprint 8.15 Design-Fixes).
- * Inline anlegen + löschen.
+ * Heizzonen-Liste fuer die Zimmer-Detail-Seite (Sprint 8.10, Sprint 8.15
+ * Design-Fixes; Sprint 14b: Zone-Karten statt flacher Liste).
+ *
+ * Sprint 14b: Die flache `<li>`-Liste ist durch vertikal gestapelte
+ * `ZoneCard`s ersetzt (Header + ZoneHealthBadge + Thermostat-Bubbles +
+ * read-only Override-Banner/CTA + Zone löschen). Das „Neue Heizzone"-Anlege-
+ * Formular bleibt unverändert darunter. Löschen läuft jetzt aus der ZoneCard
+ * heraus (useDeleteHeatingZone dort) — die Query-Invalidation aktualisiert
+ * diese Liste automatisch.
  */
 
 import { useState } from "react";
 
+import { ZoneCard } from "@/components/patterns/zone-card";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
-  useCreateHeatingZone,
-  useDeleteHeatingZone,
-  useHeatingZones,
-} from "@/lib/api/hooks-rooms";
-import type { ApiError, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
+import { useDevices } from "@/lib/api/hooks";
+import { useCreateHeatingZone, useHeatingZones } from "@/lib/api/hooks-rooms";
+import type { ApiError, HeatingZoneKind } from "@/lib/api/types";
 
 const KINDS: HeatingZoneKind[] = ["bedroom", "bathroom", "living", "hallway", "other"];
 const KIND_LABEL: Record<HeatingZoneKind, string> = {
@@ -27,18 +31,19 @@ const KIND_LABEL: Record<HeatingZoneKind, string> = {
 
 interface Props {
   roomId: number;
+  /** Sprint 14b: programmatischer Wechsel auf den Übersteuerung-Tab (Link-out). */
+  onSwitchToOverrideTab?: () => void;
 }
 
-export function HeatingZoneList({ roomId }: Props) {
+export function HeatingZoneList({ roomId, onSwitchToOverrideTab }: Props) {
   const list = useHeatingZones(roomId);
+  const allDevices = useDevices();
   const createMut = useCreateHeatingZone(roomId);
-  const deleteMut = useDeleteHeatingZone(roomId);
 
   const [name, setName] = useState("");
   const [kind, setKind] = useState<HeatingZoneKind>("bedroom");
   const [isTowel, setIsTowel] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<HeatingZone | null>(null);
 
   const handleAdd = async () => {
     setError(null);
@@ -49,18 +54,6 @@ export function HeatingZoneList({ roomId }: Props) {
       setIsTowel(false);
     } catch (e) {
       setError(toMessage(e));
-    }
-  };
-
-  const performDelete = async () => {
-    if (!confirmDelete) return;
-    setError(null);
-    try {
-      await deleteMut.mutateAsync(confirmDelete.id);
-      setConfirmDelete(null);
-    } catch (e) {
-      setError(toMessage(e));
-      setConfirmDelete(null);
     }
   };
 
@@ -76,32 +69,17 @@ export function HeatingZoneList({ roomId }: Props) {
             Noch keine Heizzonen. Lege z.B. Schlafzimmer + Bad an.
           </p>
         ) : (
-          <ul className="bg-surface border border-border rounded-md overflow-hidden">
+          <div className="space-y-4">
             {list.data!.map((z) => (
-              <li
+              <ZoneCard
                 key={z.id}
-                className="flex items-center justify-between px-3 py-2 border-b border-border last:border-b-0"
-              >
-                <div>
-                  <div className="font-medium text-text-primary text-sm">
-                    {z.name}{" "}
-                    {z.is_towel_warmer ? (
-                      <span className="text-xs text-text-tertiary">(Handtuchtrockner)</span>
-                    ) : null}
-                  </div>
-                  <div className="text-xs text-text-tertiary">{KIND_LABEL[z.kind]}</div>
-                </div>
-                <Button
-                  variant="destructive"
-                  icon="delete"
-                  onClick={() => setConfirmDelete(z)}
-                  disabled={deleteMut.isPending}
-                >
-                  Löschen
-                </Button>
-              </li>
+                zone={z}
+                devices={allDevices.data ?? []}
+                roomId={roomId}
+                onSwitchToOverrideTab={onSwitchToOverrideTab}
+              />
             ))}
-          </ul>
+          </div>
         )}
       </div>
 
@@ -155,20 +133,6 @@ export function HeatingZoneList({ roomId }: Props) {
           </div>
         ) : null}
       </div>
-
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        title="Heizzone löschen?"
-        message={
-          confirmDelete
-            ? `Heizzone „${confirmDelete.name}“ wird endgültig entfernt. Geräte bleiben erhalten (Zone-Zuordnung wird auf NULL gesetzt).`
-            : ""
-        }
-        confirmLabel="Endgültig löschen"
-        loading={deleteMut.isPending}
-        onConfirm={performDelete}
-        onCancel={() => setConfirmDelete(null)}
-      />
     </div>
   );
 }

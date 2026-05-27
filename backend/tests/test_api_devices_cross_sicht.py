@@ -285,6 +285,9 @@ async def test_latest_reading_with_valve_position(
     assert latest["valve_position"] == 42
     assert latest["open_window"] is False
     assert latest["attached_backplate"] is True
+    # Sprint 14b: temperature (Decimal->float) + battery_percent additiv.
+    assert latest["temperature"] == 21.0
+    assert latest["battery_percent"] == 80
 
 
 # ---------------------------------------------------------------------------
