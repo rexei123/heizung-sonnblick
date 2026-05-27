@@ -100,8 +100,8 @@ async function mockHardwareStatus(page: Page) {
 // /devices-Liste (3 Spalten, D4)
 // ---------------------------------------------------------------------------
 
-test.describe("Sprint 14a — /devices-Liste (3 Spalten)", () => {
-  test("3 Spalten Bezeichnung/Zuordnung/Status, DevEUI/Hersteller/Aktiv entfernt", async ({
+test.describe("Sprint 14a — /devices-Liste (4 Spalten)", () => {
+  test("4 Spalten Bezeichnung/Zuordnung/Gerät/Zone, DevEUI/Hersteller/Aktiv entfernt", async ({
     page,
   }) => {
     await page.route("**/api/v1/devices*", (route) =>
@@ -116,8 +116,8 @@ test.describe("Sprint 14a — /devices-Liste (3 Spalten)", () => {
     await page.goto("/devices");
 
     await expect(page.getByRole("heading", { level: 1, name: "Geräte" })).toBeVisible();
-    // Genau die drei Spalten-Header.
-    await expect(page.locator("th")).toHaveText(["Bezeichnung", "Zuordnung", "Status"]);
+    // Genau die vier Spalten-Header (Sprint 14a.1: Status -> Gerät + Zone).
+    await expect(page.locator("th")).toHaveText(["Bezeichnung", "Zuordnung", "Gerät", "Zone"]);
     // DevEUI ist nicht mehr in der Liste.
     await expect(page.getByText("0011223344556677")).toHaveCount(0);
     // §5.20: Untertitel-Wording ohne „Vicki".
