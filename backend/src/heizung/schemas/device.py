@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
-from heizung.models.enums import DeviceKind, DeviceVendor
+from heizung.models.enums import DeviceKind, DeviceVendor, OverrideSource
 
 _HEX16 = re.compile(r"^[0-9a-fA-F]{16}$")
 
@@ -72,12 +73,87 @@ class DeviceUpdate(BaseModel):
     vendor: DeviceVendor | None = None
     model: str | None = Field(default=None, min_length=1, max_length=50)
     label: str | None = Field(default=None, max_length=200)
+    # Sprint 14a (D1/D5): Hardware-/Seriennummer per Inline-Edit aenderbar.
+    # Keine Format-Validierung (D3); Eindeutigkeit erzwingt der DB-Index.
+    hardware_number: str | None = Field(default=None, max_length=64)
     heating_zone_id: int | None = None
 
     @field_validator("app_eui")
     @classmethod
     def _v_app_eui(cls, v: str | None) -> str | None:
         return _normalize_eui(v)
+
+
+# ---------------------------------------------------------------------------
+# Nested Read-Schemas fuer die Cross-Sicht-UI (Sprint 14a, D2)
+# ---------------------------------------------------------------------------
+
+
+class DeviceRoomTypeRead(BaseModel):
+    """Raumtyp-Ausschnitt im Device-Nested-Response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
+class DeviceRoomRead(BaseModel):
+    """Zimmer-Ausschnitt im Device-Nested-Response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    number: str
+    room_type: DeviceRoomTypeRead
+
+
+class DeviceZoneRead(BaseModel):
+    """Heizzone-Ausschnitt inkl. Zone-Health (AE-51/AE-53) + Zimmer-Kette.
+
+    ``health_state`` ist die ZoneHealthBadge-Quelle (D6) — kein eigener
+    API-Call noetig. Werte-Whitelist gemaess ``heating_zone.health_state``
+    (AE-53 Punkt 2: ``no_device`` statt ``suspicious``).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    health_state: Literal["healthy", "degraded", "silent", "no_device"]
+    room: DeviceRoomRead
+
+
+class DeviceActiveOverrideRead(BaseModel):
+    """Aktiver Override fuer die Zone des Geraets (read-only, AE-61).
+
+    Quelle ist ``override_service.get_active`` (Zone>Room-Aufloesung,
+    ``revoked_at IS NULL AND expires_at > now``). Reine Diagnose-Anzeige —
+    die Steuerung lebt auf den Zimmer-Seiten (AE-61).
+    """
+
+    source: OverrideSource
+    setpoint_celsius: Decimal
+    started_at: datetime
+    expires_at: datetime
+
+    @field_serializer("setpoint_celsius")
+    def _decimal_to_float(self, v: Decimal) -> float:
+        return float(v)
+
+
+class DeviceLatestReadingRead(BaseModel):
+    """Juengster SensorReading-Frame fuer die Diagnose-Kacheln (D5).
+
+    ``valve_position`` 0..100 % (Frontend rendert > 100 / < 0 defensiv als
+    "nicht verfuegbar", D7). ``open_window`` / ``attached_backplate`` sind
+    NULL wenn das Codec-Feld im Frame fehlte (alter Codec / Recovery).
+    """
+
+    valve_position: int | None
+    open_window: bool | None
+    attached_backplate: bool | None
+    recorded_at: datetime
 
 
 class DeviceRead(BaseModel):
@@ -106,6 +182,15 @@ class DeviceRead(BaseModel):
     health_state: Literal["healthy", "degraded", "silent", "suspicious"]
     created_at: datetime
     updated_at: datetime
+
+    # Sprint 14a (D1/D2): additive Cross-Sicht-Felder. Defaults None, damit
+    # ``model_validate(device)`` (from_attributes) bei fehlenden ORM-
+    # Attributen (active_override, latest_reading) den Default nimmt; der
+    # Endpoint befuellt sie anschliessend via model_copy.
+    hardware_number: str | None = None
+    heating_zone: DeviceZoneRead | None = None
+    active_override: DeviceActiveOverrideRead | None = None
+    latest_reading: DeviceLatestReadingRead | None = None
 
 
 class DeviceAssignZoneRequest(BaseModel):

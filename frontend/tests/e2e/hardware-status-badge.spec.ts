@@ -23,6 +23,18 @@ const SAMPLE_DEVICE = {
   last_seen_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
   created_at: new Date(Date.now() - 86400 * 1000).toISOString(),
   updated_at: new Date().toISOString(),
+  // Sprint 14a: enriched DeviceRead-Felder (sonst crasht die Zuordnung-Spalte).
+  firmware_version: "4.2",
+  health_state: "healthy",
+  hardware_number: "MDC5419731K6UF",
+  heating_zone: {
+    id: 7,
+    name: "Schlafbereich",
+    health_state: "healthy",
+    room: { id: 1, number: "101", room_type: { id: 1, name: "Doppelzimmer" } },
+  },
+  active_override: null,
+  latest_reading: null,
 };
 
 const SAMPLE_HW_STATUS = {

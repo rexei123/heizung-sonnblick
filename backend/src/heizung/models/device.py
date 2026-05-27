@@ -73,6 +73,13 @@ class Device(Base):
 
     label: Mapped[str | None] = mapped_column(String(200))
 
+    # Sprint 14a (D1): hersteller-uebergreifende Hardware-/Seriennummer
+    # (z. B. ``MDC5419731K6UF``). Keine Format-Validierung. Eindeutigkeit
+    # nur fuer gesetzte Werte via Partial-Unique-Index
+    # ``ix_device_hardware_number_unique`` (Migration 0020,
+    # ``WHERE hardware_number IS NOT NULL``); beliebig viele NULL erlaubt.
+    hardware_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Sprint 9.11x: Schema-Vorbereitung fuer 9.11x.b (Codec-Drift-Schutz).
     # In 9.11x ungenutzt, in 9.11x.b vom MQTT-Subscriber gepflegt.
     firmware_version: Mapped[str | None] = mapped_column(String(8), nullable=True)

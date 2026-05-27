@@ -1259,8 +1259,26 @@ in 14 Commits (13 Feature/Fix/Test + 1 Doku).
 **Priorität:** 🟠 (Phase-1-Abschluss vor 14b)
 **Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 2
-**Voraussetzung:** Sprint 13 abgeschlossen
-**Tag nach Abschluss:** `v0.1.19-cross-sicht-ui`
+**Voraussetzung:** Sprint 13 abgeschlossen (+ Hygiene-Mini-Sprint `v0.1.18c`)
+**Tag nach Abschluss:** `v0.1.19-cross-sicht-ui` (Sammel; Sub-Sprints mit
+eigenen Tags `v0.1.19a/b/c`)
+
+## Sub-Sprint-Split (Strategie-Chat 2026-05-25, D1)
+
+Sprint 14 wird in drei Sub-Sprints umgesetzt, jeder mit eigenem Phase-0
++ Live-Verify:
+
+- **14a — Geräte-Liste + Detail + Hardware-Nummer:** ✅ abgeschlossen
+  2026-05-26 (STATUS §2ay; AE-61; Migration `0020`; enriched DeviceRead;
+  3-Spalten-Liste; Detail-Karten + 7 Kacheln; ZoneHealthBadge).
+  Tag `v0.1.19a-cross-sicht-devices` nach Merge.
+- **14b — Zimmer-Detail-Restruktur (Zone-Karten, additiv Variante B):**
+  🔲 offen.
+- **14c — Dashboard (KPI-Kacheln + Mail-Platzhalter Alarm-Stufe 2/3):**
+  🔲 offen.
+
+> Hinweis: „SPRINT 14b — arc42-Konsolidierung" weiter unten ist ein
+> separater Doku-Sprint, NICHT der Cross-Sicht-Sub-Sprint 14b.
 
 ## Ziel
 

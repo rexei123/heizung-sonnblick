@@ -2732,6 +2732,70 @@ Polish im nächsten Hygiene-Bundle.
 
 ---
 
+## 2ay. Sprint 14a Cross-Sicht-UI Geräte-Liste + Detail + Hardware-Nummer (2026-05-26, abgeschlossen, PR pending)
+
+**Ziel:** Erste Cross-Sicht-UI-Strecke (Phase 3): Geräte-Liste auf drei
+Spalten verschlankt, Geräte-Detail um Zuordnung/Identifikation + Diagnose-
+Kacheln erweitert, hersteller-übergreifende Hardware-Nummer eingeführt,
+ZoneHealthBadge neu (Co-Existenz mit HardwareStatusBadge). Geräte-Seiten
+sind read-only Diagnose (AE-61), Steuerung bleibt auf Zimmer-Seiten.
+
+**Hinweis Slot/Nummer:** Phase-0 hatte §2ax + AE-60 reserviert — beide
+wurden parallel vom Hygiene-Mini-Sprint (§2ax) bzw. B-10-4 (AE-60) belegt.
+Dieser Eintrag läuft daher als §2ay, der ADR als AE-61 (Drift-Resolution
+Strategie-Chat 2026-05-26).
+
+**Commits (Branch `feature/sprint-14a-cross-sicht-devices`):**
+
+| Task | Commit | Inhalt |
+|---|---|---|
+| T2 | `5e2f333` | Migration `0020_device_hardware_number`: `device.hardware_number VARCHAR(64) NULL` + Partial-Unique-Index (`WHERE hardware_number IS NOT NULL`, analog DevEUI/0018). Model-Feld + 3 Roundtrip-Tests. |
+| T3 | `20392ea` | Backend enriched `DeviceRead` (additiv): Nested `heating_zone{name, health_state, room{number, room_type{name}}}`, `hardware_number`, `active_override` (read-only, AE-61), `latest_reading`. Eager-Load (selectinload) auf List/Detail/Pool + Mutationen; `DeviceUpdate.hardware_number` + 409. 6 API-Tests. Lifecycle-Filter AE-57 unverändert. |
+| T4-T6 | `ad56a37` | Frontend Type-Spiegel (§5.63); 3-Spalten-Liste (Bezeichnung·Zuordnung·Status); Detail mit 2 Karten (Zuordnung/Identifikation) + 7 Kacheln (4 Bestand + Ventilstellung[defensiv]/Fenster+Backplate/Override); Inline-Edit Bezeichnung + Hardware-Nummer; ZoneHealthBadge (4 Zustände). §5.20-Wording (Vicki→Thermostat). |
+| T9 | `d20682c` | Playwright-Updates (devices/zone-health-badge/hardware-status-badge), data-testid, defensives Rendering. |
+| T8 | (dieser Commit) | AE-61-ADR + STATUS §2ay + SPRINT-PLAN. |
+
+**Tests:**
+
+- Backend `ruff` + `ruff format` + `mypy strict`: grün. Voll-Suite gegen
+  Postgres (:5433): **532 passed, 1 xfailed** (keine Regression; +9 ggü.
+  pre-14a durch 3 Migration- + 6 Cross-Sicht-Tests).
+- Frontend `type-check` + `lint`: grün. Playwright: **69 passed**
+  (inkl. neue devices/zone-health-badge; sprint13b.2-Replace/Retire +
+  hardware-status-badge + pairing unverändert grün).
+
+**Architektur-Touch:** AE-61 (Geräte-Seiten read-only Diagnose).
+
+**Datenquellen-Hinweis:** Detail-Kacheln Ventilstellung/Fenster/Backplate
+lesen aus `device.latest_reading` (enriched), die 4 Bestands-Kacheln aus
+`readings[0]` — Konsolidierung als Backlog B-14a-FU-6.
+
+**Neue Backlog-Punkte:**
+
+- **B-14a-FU-3** (info): `sensor_reading.spreading_factor` (LoRaWAN SF) aus
+  ChirpStack-rxInfo-Metadaten persistieren — eigener Mini-Sprint, kein
+  14a-Scope. Voraussetzung für SF-Diagnose/-Sortierung.
+- **B-14a-FU-5** (info): Listen-Endpoint `/devices` Performance-Audit nach
+  Sprint 17 Mass-Pairing — Eager-Load von `active_override` +
+  `latest_reading` evaluieren (heute bewusster N+1 bei < 200 Geräten, D3).
+- **B-14a-FU-6** (info): Datenquellen-Konsolidierung Detail-Kacheln —
+  Bestands-Kacheln (Temp/Sollwert/Batterie/Signal) auf
+  `device.latest_reading` statt `readings[0]` vereinheitlichen.
+- **B-14a-FU-7** (info): SPRINT-PLAN Naming-Kollision auflösen — den
+  arc42-Konsolidierungs-Sprint von „14b" umbenennen (Vorschlag:
+  `Sprint 15.arc42`), damit Sub-Sprint 14b (Zimmer-Restruktur) eindeutig
+  referenzierbar ist. Eigener Doku-PR nach `v0.1.19a`-Merge, nicht
+  14a-blockend.
+
+**Tag:** `v0.1.19a-cross-sicht-devices` nach PR-Merge auf develop (T10,
+vom Strategie-Chat/Hotelier ausgelöst).
+
+**Querverweise:** AE-61 (read-only Diagnose), AE-51/AE-53 (Zone-Aggregat +
+Health-Modell — ZoneHealthBadge-Quelle), AE-57 (Device-Lifecycle), §5.20
+(Wording), §5.63 (Frontend-Type-Spiegel), Migration `0020`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

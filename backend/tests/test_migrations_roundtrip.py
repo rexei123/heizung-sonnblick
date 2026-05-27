@@ -802,3 +802,136 @@ def test_migration_0018_partial_unique_allows_retired_duplicates(
                     {"id": first_id},
                 )
             conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0020_atomar_auf_ab_auf(alembic_cfg: Config) -> None:
+    """Migration 0020 muss upgrade -> downgrade -> upgrade ohne Fehler durchlaufen.
+
+    Sprint 14a (D1): device.hardware_number additiv + Partial-Unique-Index.
+    Catcht: vergessenes drop_index im downgrade, falsche Reihenfolge
+    (Index vor Column), Idempotenz bei Re-Run. Downgrade-Ziel ist
+    ``0018_device_lifecycle`` (echter Vorgaenger-Head, siehe
+    Migrations-Datei-Docstring).
+    """
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "0020_device_hardware_number")
+    command.downgrade(alembic_cfg, "0018_device_lifecycle")
+    command.upgrade(alembic_cfg, "0020_device_hardware_number")
+    command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0020_unique_rejects_duplicate_hardware_number(
+    alembic_cfg: Config,
+) -> None:
+    """Partial-Unique-Index blockt zwei aktive Rows mit gleicher hardware_number.
+
+    Szenario:
+    1. DB auf head (0020 angewendet).
+    2. Device mit hardware_number='MDC5419731K6UF' anlegen.
+    3. Zweites Device (anderer DevEUI!) mit derselben hardware_number ->
+       IntegrityError (UNIQUE-Verletzung auf ix_device_hardware_number_unique).
+
+    DevEUIs bewusst unterschiedlich, damit nicht der DevEUI-Partial-Unique
+    aus 0018 zuerst greift.
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    hw_number = "MDC5419731K6UF"
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state, hardware_number) "
+                    "VALUES ('00000000aa200001', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent', :hw)"
+                ),
+                {"hw": hw_number},
+            )
+            conn.commit()
+
+        with engine.connect() as conn, pytest.raises(IntegrityError):
+            conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state, hardware_number) "
+                    "VALUES ('00000000aa200002', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent', :hw)"
+                ),
+                {"hw": hw_number},
+            )
+            conn.commit()
+    finally:
+        with engine.connect() as conn:
+            conn.execute(
+                text("DELETE FROM device WHERE hardware_number = :hw"),
+                {"hw": hw_number},
+            )
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0020_allows_multiple_null_hardware_number(
+    alembic_cfg: Config,
+) -> None:
+    """Partial-Unique-Index erlaubt beliebig viele Rows mit hardware_number IS NULL.
+
+    Bestands-Vickis ohne erfasste Nummer duerfen koexistieren — Eindeutigkeit
+    gilt nur fuer gesetzte Werte (``WHERE hardware_number IS NOT NULL``).
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    first_id: int | None = None
+    second_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            first_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state) "
+                    "VALUES ('00000000aa200003', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent') RETURNING id"
+                )
+            ).scalar_one()
+            second_id = conn.execute(
+                text(
+                    "INSERT INTO device "
+                    "(dev_eui, kind, vendor, model, health_state) "
+                    "VALUES ('00000000aa200004', 'thermostat', 'mclimate', "
+                    "'vicki', 'silent') RETURNING id"
+                )
+            ).scalar_one()
+            conn.commit()
+
+        assert first_id is not None
+        assert second_id is not None
+        assert first_id != second_id, (
+            "Zwei Device-Rows mit hardware_number=NULL muessen koexistieren."
+        )
+    finally:
+        with engine.connect() as conn:
+            for dev_id in (second_id, first_id):
+                if dev_id is not None:
+                    conn.execute(
+                        text("DELETE FROM device WHERE id = :id"),
+                        {"id": dev_id},
+                    )
+            conn.commit()
