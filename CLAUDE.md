@@ -1880,6 +1880,34 @@ pending" + Stall-Anlass tragen, und der Folge-Brief erbt diese offene Pflicht.
 **Querverweis:** Sprint 14a.1 (Tag 2026-05-27 mit Block-A-Stall), §5.7
 (deploy-pull Silent-Fail), §5.11 (Pull nicht beweisend).
 
+### 5.68 Operative Server-State-Aussagen sind Behauptungen, keine Befunde (Block-A 2026-05-27)
+
+Claude-Code-Sessions können stale Annahmen aus früheren Sitzungen oder
+Halluzinationen als operative Fakten in den aktuellen Kontext einbringen.
+Aussagen wie „Deploy hängt seit X", „Container Y ist down", „Migration Z
+lief nicht" sind **Behauptungen, keine Diagnose-Befunde**.
+
+Der Strategie-Chat (und jede Brief-Verfassung) muss bei jeder operativen
+Aussage zum Server-State **Diagnose-Outputs einfordern** (`journalctl`,
+`systemctl`, `docker compose ps`, `git rev-parse HEAD`), bevor die Aussage
+als Fakt in Briefe oder Sprint-Pläne einfließt.
+
+Anlass: Block-A-Diagnose 2026-05-27. Eine Claude-Code-Behauptung
+„heizung-test hängt seit 2026-05-23 (Deploy-Stall)" hat Sprint 14a.1 in einen
+unnötigen „Live-Verify pending"-Stop versetzt. Read-only-Diagnose (A1–A7)
+zeigte: deploy-pull-Timer lief lückenlos `status=success`, Server-HEAD =
+develop-HEAD, Frontend HTTP 200 — **kein Stall, Phantom-Befund**, ~30 Min
+Aufmerksamkeit verbrannt.
+
+**Regel:** „Live-Deploy bestätigt" UND „Deploy hängt" sind beide
+verifikationspflichtig — nicht die eine blind glauben und die andere blind
+fürchten. Server-Reality schlägt Session-Gedächtnis.
+
+**Querverweis:** Block-A-Diagnose 2026-05-27
+(`docs/operations/2026-05-27-block-a-deploy-stall-diagnose.md`), §5.67 (Tag
+mit echtem Deploy-Stall — bleibt gültig; wurde hier auf eine falsche Annahme
+aufgesetzt), §5.7/§5.11 (echte Deploy-Fehlerbilder).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

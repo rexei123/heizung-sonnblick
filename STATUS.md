@@ -2821,11 +2821,14 @@ Diff knapp: 1× `page.tsx` + 2 Playwright-Asserts (`devices.spec.ts` th-Array �
 **Tests (unverändert):** Backend 532 passed / 1 xfailed; Frontend type-check +
 lint + Playwright **69 passed**.
 
-**Live-Verify:** ⏸ **pending.** Cowork-Begehung **lokal** gegen develop-Stand
-`1f6c132` durch Hotelier 2026-05-27: 4 Spalten ausgerichtet, Pool-Em-Dash in
-Zone-Spalte, Mobile-Scroll grün. **heizung-test hängt seit 2026-05-23
-(Block-A-Deploy-Stall)** → produktive Live-Verifikation steht aus, wird nach
-Block-A-Resolution nachgepflegt (§5.67).
+**Live-Verify:** ✅ bestätigt 2026-05-27 durch Block-A-Diagnose. Server-HEAD =
+`57e50c7` auf heizung-test, alle Container healthy seit ~10:40 CEST,
+deploy-pull-Timer durchgehend `status=success`. **Der „Block-A-Deploy-Stall"
+war ein Phantom** (stale Claude-Code-Annahme, durch journalctl widerlegt —
+siehe `docs/operations/2026-05-27-block-a-deploy-stall-diagnose.md`, §5.68).
+Rein optische Cowork-Begehung der 4-Spalten-Liste auf
+https://heizung-test.hoteltec.at/devices durch Hotelier ausstehend, aber
+Code-Stand identisch zur grünen lokalen Cowork-Verifikation 2026-05-27.
 
 **Tag:** `v0.1.19a.1-cross-sicht-hotfix` auf `1f6c132` (2026-05-27).
 
