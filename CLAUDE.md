@@ -1938,6 +1938,43 @@ erzwungen. Lösung (AE-62): Link-out-CTA „Wunschtemperatur setzen →" auf den
 **Querverweis:** Sprint 14b (PR #191), AE-62, P1-Sub-Audit-Befund
 `ManualOverrideZoneCard`.
 
+### 5.70 PowerShell-Here-Strings sind nicht backtick-sicher (Sprint 14c Phase-0)
+
+`@"..."@`-Here-Strings in PowerShell interpretieren Backticks als
+Escape-Zeichen. Ein PR-Body mit Markdown-Code-Fences (drei Backticks)
+oder Inline-Code zersplittert beim Übergeben an `gh pr create --body`
+in Einzelargumente und schlägt mit `unknown arguments … please quote
+all values that have spaces` fehl.
+
+**Lösung:** PR-Bodies (und allgemein native-Tool-Argumente), die
+Backticks, Umlaute oder Sonderzeichen enthalten, immer via
+`--body-file <utf8-datei>` übergeben. Temp-Datei nach Erfolg entfernen.
+
+**Anti-Pattern:**
+
+```powershell
+gh pr create --body @"
+... ```code``` ...
+"@   # bricht — Backticks werden als Escape interpretiert
+```
+
+**Pattern:**
+
+```powershell
+# Datei BOM-frei schreiben (Write-Tool oder UTF8Encoding $false, §5.3),
+# Set-Content -Encoding UTF8 schreibt UTF-8 MIT BOM — gh toleriert es,
+# aber BOM-frei ist sauberer.
+gh pr create --base develop --title "..." --body-file pr-body.md
+Remove-Item pr-body.md -Force
+```
+
+Anlass: Sprint 14c Phase-0 PR #193 — erster `gh pr create`-Versuch mit
+`@"..."@`-Body (Markdown-Code-Fences) zersplitterte in Einzelargumente;
+zweiter Versuch via `--body-file` lief sauber durch.
+
+**Querverweis:** §5.3 (PowerShell-Encoding/Escaping-Familie, BOM-Falle),
+§5.6 (Befehl-Trennung), Sprint 14c Phase-0 (PR #193).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
