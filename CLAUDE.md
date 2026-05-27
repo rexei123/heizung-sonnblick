@@ -1835,6 +1835,51 @@ Ursache ist nicht DST, sondern dass Engine in UTC vergleicht.
 (``docs/features/2026-05-25-b-10-4-dst-phase0-audit.md``), §5.59
 (Time-Logic-Klasse — verwandtes Fixture-Drift-Pattern bei freezegun).
 
+### 5.66 Multi-Badge-Cells brauchen feste Grid-/Tabellen-Slots (Sprint 14a.1)
+
+UI-Cells, die mehrere inhaltsabhängig-breite Komponenten nebeneinander
+rendern (z. B. Badge + Badge mit variabler Subline), brauchen feste
+Grid-/Tabellen-Slots — niemals einen geteilten Inline-Flex-Slot.
+
+Anlass: Sprint 14a hatte in der ``/devices``-Liste HardwareStatusBadge
+(``variant="detailed"`` mit zustands-abhängiger Subline „Zuletzt: …" bzw.
+„noch nie") **und** ZoneHealthBadge in einer gemeinsamen Status-Zelle
+(``flex gap-3``). Die variable Hardware-Badge-Breite verschob die
+Zone-Pille → optische Spalten-Drift, sichtbar erst im Cowork-Befund.
+
+Fix (14a.1, PR #187): Spalten-Split in zwei eigene ``<td>``
+(``device-hardware-cell`` / ``device-zone-cell``), Wrapper
+``overflow-x-auto`` für Mobile.
+
+**Regel:** Bei Cross-Sicht-UI mit Multi-Badge-Konsum **vor** dem T-Plan
+klären, ob die Badges semantisch in dieselbe oder in getrennte Spalten
+gehören. Inhaltsabhängige Breiten + geteilter Inline-Slot = Drift-Garant.
+
+**Querverweis:** Sprint 14a.1 (PR #187), AE-61 (Geräte-Seiten read-only).
+
+### 5.67 Tag mit Deploy-Stall ist erlaubt, aber „Live-Verify pending" ist Pflicht (Sprint 14a.1)
+
+Tag-Setzung bei aktivem Deploy-Stall ist zulässig, **wenn** der Code-Stand
+anderweitig solide verifiziert ist (lokale Tests + lokale Cowork-Begehung).
+Pflicht: der STATUS-Eintrag markiert **explizit** „Live-Verify pending" und
+benennt den Stall-Anlass.
+
+Hintergrund: Ein Tag ist ein Repo-Marker, **keine** Live-Garantie. Ohne
+expliziten „pending"-Vermerk übernimmt der nächste Sprint-Brief den Tag als
+„ist live" → Folge-Annahmen auf Sand (z. B. Cowork-Begehung gegen einen
+Server, der noch den alten Stand zeigt).
+
+Anlass: Sprint 14a.1 — Tag ``v0.1.19a.1-cross-sicht-hotfix`` 2026-05-27
+gesetzt, während heizung-test seit 2026-05-23 auf altem Deploy-Stand hängt
+(Block-A-Stall). Lokale Cowork-Begehung war grün; produktive Verifikation
+nachgezogen nach Block-A-Resolution.
+
+**Regel:** Tag ohne produktive Live-Verify → STATUS-Eintrag MUSS „Live-Verify
+pending" + Stall-Anlass tragen, und der Folge-Brief erbt diese offene Pflicht.
+
+**Querverweis:** Sprint 14a.1 (Tag 2026-05-27 mit Block-A-Stall), §5.7
+(deploy-pull Silent-Fail), §5.11 (Pull nicht beweisend).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

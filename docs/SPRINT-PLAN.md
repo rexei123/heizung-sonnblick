@@ -1271,9 +1271,15 @@ Sprint 14 wird in drei Sub-Sprints umgesetzt, jeder mit eigenem Phase-0
 - **14a — Geräte-Liste + Detail + Hardware-Nummer:** ✅ abgeschlossen
   2026-05-26 (STATUS §2ay; AE-61; Migration `0020`; enriched DeviceRead;
   3-Spalten-Liste; Detail-Karten + 7 Kacheln; ZoneHealthBadge).
-  Tag `v0.1.19a-cross-sicht-devices` nach Merge.
+  Tag `v0.1.19a-cross-sicht-devices`.
+- **14a.1 — Spalten-Split „Status" → „Gerät" + „Zone" (Hotfix):** ✅
+  abgeschlossen 2026-05-27 (STATUS §2az; PR #187; `1f6c132`; §5.66).
+  Tag `v0.1.19a.1-cross-sicht-hotfix`. **Live-Verify pending** (Cowork
+  lokal OK; heizung-test Deploy-Stall, §5.67).
 - **14b — Zimmer-Detail-Restruktur (Zone-Karten, additiv Variante B):**
-  🔲 offen.
+  🔲 offen. **Pflicht-Vorlauf:** Block-A-Deploy-Stall-Diagnose
+  heizung-test (seit 2026-05-23, eigener Implementation-Brief folgt) —
+  vor 14b auflösen, sonst keine produktive Live-Verifikation möglich.
 - **14c — Dashboard (KPI-Kacheln + Mail-Platzhalter Alarm-Stufe 2/3):**
   🔲 offen.
 
