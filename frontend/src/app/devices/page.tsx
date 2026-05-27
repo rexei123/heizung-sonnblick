@@ -147,13 +147,14 @@ function DevicesPageInner() {
 
 function DevicesTable({ devices }: { devices: Device[] }) {
   return (
-    <div className="bg-surface rounded-lg border border-border overflow-hidden">
+    <div className="bg-surface rounded-lg border border-border overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-surface-alt text-text-secondary">
           <tr>
             <th className="text-left px-4 py-3 font-medium">Bezeichnung</th>
             <th className="text-left px-4 py-3 font-medium">Zuordnung</th>
-            <th className="text-left px-4 py-3 font-medium">Status</th>
+            <th className="text-left px-4 py-3 font-medium">Gerät</th>
+            <th className="text-left px-4 py-3 font-medium">Zone</th>
           </tr>
         </thead>
         <tbody>
@@ -175,13 +176,17 @@ function DeviceRow({ device: d }: { device: Device }) {
       <td className="px-4 py-3">
         <ZuordnungCell device={d} />
       </td>
-      <td className="px-4 py-3">
-        <div className="flex items-start gap-3">
-          <HardwareStatusBadge deviceId={d.id} variant="detailed" />
-          {d.heating_zone ? (
-            <ZoneHealthBadge healthState={d.heating_zone.health_state} variant="compact" />
-          ) : null}
-        </div>
+      <td className="px-4 py-3" data-testid="device-hardware-cell">
+        <HardwareStatusBadge deviceId={d.id} variant="detailed" />
+      </td>
+      <td className="px-4 py-3" data-testid="device-zone-cell">
+        {d.heating_zone ? (
+          <ZoneHealthBadge healthState={d.heating_zone.health_state} variant="compact" />
+        ) : (
+          <span className="text-text-tertiary" aria-label="Keine Zone zugeordnet">
+            —
+          </span>
+        )}
       </td>
     </tr>
   );
