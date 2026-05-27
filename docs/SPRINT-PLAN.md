@@ -1276,12 +1276,15 @@ Sprint 14 wird in drei Sub-Sprints umgesetzt, jeder mit eigenem Phase-0
   abgeschlossen 2026-05-27 (STATUS §2az; PR #187; `1f6c132`; §5.66).
   Tag `v0.1.19a.1-cross-sicht-hotfix`. **Live-Verify pending** (Cowork
   lokal OK; heizung-test Deploy-Stall, §5.67).
-- **14b — Zimmer-Detail-Restruktur (Zone-Karten, additiv Variante B):**
-  🔲 offen. **Pflicht-Vorlauf:** Block-A-Deploy-Stall-Diagnose
-  heizung-test (seit 2026-05-23, eigener Implementation-Brief folgt) —
-  vor 14b auflösen, sonst keine produktive Live-Verifikation möglich.
+- **14b — Zimmer-Detail-Restruktur (Zone-Karten, additiv Variante B/B'):**
+  ✅ abgeschlossen 2026-05-27 (STATUS §2ba; PR #191; `a59b7aa`; AE-62;
+  §5.69). Tag `v0.1.19b-cross-sicht-zimmer-detail`. Live-Verify auf
+  heizung-test bestätigt (Block-A war Phantom, §5.68). Link-out-Variante
+  (Override-Steuerung bleibt im Übersteuerung-Tab).
 - **14c — Dashboard (KPI-Kacheln + Mail-Platzhalter Alarm-Stufe 2/3):**
-  🔲 offen.
+  🔲 offen — nächste Position. ~10–14 h, eigener Implementation-Brief folgt.
+
+**Phase-3-Cross-Sicht-UI-Stand:** 2/3 Sub-Sprints durch (14a + 14b), 14c offen.
 
 > Hinweis: „SPRINT 14b — arc42-Konsolidierung" weiter unten ist ein
 > separater Doku-Sprint, NICHT der Cross-Sicht-Sub-Sprint 14b.

@@ -2838,6 +2838,67 @@ Code-Stand identisch zur grünen lokalen Cowork-Verifikation 2026-05-27.
 
 ---
 
+## 2ba. Sprint 14b Zimmer-Detail Zone-Karten im Heizzonen-Tab (2026-05-27, abgeschlossen)
+
+**Ziel:** Heizzonen-Tab auf `/zimmer/[id]` von flacher Zonen-Liste auf
+**Zone-Karten** umgestellt: pro Zone ZoneHealthBadge + Thermostat-Bubbles
+(Ist-Temp + Batterie) + read-only Override-Banner mit **Link-out** auf den
+Übersteuerung-Tab. Backend `latest_reading` additiv erweitert.
+
+**Drift-Resolution (Strategie-Chat 2026-05-27):**
+- **A/A/B'** (statt A/A/B): Bubbles **ohne** Replace/Retire; Setpoint =
+  zone-scoped Override (AE-58/AE-62), kein Setpoint-Endpoint.
+- **Link-out** statt Einbettung `ManualOverrideZoneCard`: Kollisionen
+  Card-Chrome + AE-52-Window-Safety-Plumbing → CTA-Tab-Wechsel, kein
+  Übersteuerung-Tab-Refactor.
+- **T9.5:** Override-Banner via `useZoneOverride` (Bestand-Hook) statt
+  `device.active_override` — semantisch sauber (gerätelose-Zone-/Mehrfach-
+  Vicki-Edge abgedeckt).
+
+**Backend (additiv):** `DeviceLatestReadingRead` + `temperature` +
+`battery_percent` (field_serializer Decimal→float) + Builder + Roundtrip-
+Assert.
+
+**Frontend:** `zone-card.tsx` (neu), `thermostat-bubble.tsx` (neu),
+`heating-zone-list.tsx` (Restruktur, Create-Form bleibt, Delete via ZoneCard),
+`page.tsx` (Tab-Wechsel-Callback), `types.ts` (+`HeatingZone.health_state`
+§5.63, +`DeviceLatestReading` temperature/battery_percent).
+
+**Commit/PR:** Squash `a59b7aa`, PR #191 (CI real grün: Backend `lint-and-test`
+2m35s + Frontend `lint-and-build` 1m21s + `e2e` 2m32s).
+
+**Tests:** Backend **532 passed / 1 xfailed** (Bestand + Roundtrip-Assert);
+Frontend Playwright **77 passed** (69 Bestand + 8 neue 14b-Cases; 12b/12c/
+13b.2 + Geräte-/Übersteuerung-Smokes grün).
+
+**Live-Verify:** ✅ bestätigt 2026-05-27 via Cowork-Begehung heizung-test
+(develop@`a59b7aa`, web-Image 17:01:17 CEST, Containers recreated 17:05:48
+CEST). Geprüft A–M, drei Anmerkungen → Backlog, keine Defekte. (Deploy-Pfad
+gesund — Block-A war Phantom, §5.68.)
+
+**Tag:** `v0.1.19b-cross-sicht-zimmer-detail` auf `a59b7aa` (2026-05-27).
+
+**Neue Backlog-Punkte:**
+- **B-14b-FU-1** 🟢 Zone-Aggregat-Ist-Temp im ZoneCard-Header (Ø healthy
+  Vickis, AE-51 §4.1).
+- **B-14b-FU-2** 🟢 Engine-Setpoint-Anzeige im Header (Pre-T3-Sichtung: heute
+  nicht im Heizzonen-Tab).
+- **B-14b-FU-3** 🟢 Inline-Edit Zone-Eigenschaften (Name/Kind/Handtuchtrockner).
+- **B-14b-FU-4** 🟢 Übersteuerung-Tab evaluieren (Historie vs. Aktions-
+  Doppelung; ggf. Chrome-loses-Inner-Refactor von ManualOverrideZoneCard).
+- **B-14b-FU-5** 🟢 `HeatingZoneRead.active_override` backendseitig liefern →
+  `useZoneOverride`-Roundtrip in ZoneCard entfällt.
+- **B-14b-FU-6** 🟢 SourceBadge-Wording „Übersteuerung" → konkreterer Token
+  (Rezeption/Hotelier je Source), Heizzonen-Tab + Übersteuerung-Tab gemeinsam.
+- **B-14a.1-FU-2** 🟢 Mobile-Pixel-Test (390px) um `/zimmer/[id]` Heizzonen-Tab
+  erweitern (bislang nur `/devices`).
+
+**Querverweise:** AE-51, AE-53, AE-57, AE-58, **AE-62** (Zone-Override als
+Setpoint-Surrogat), AE-61, §5.20, §5.63, §5.65, §5.66, §5.67, §5.68,
+**§5.69** (Bestand-Komponenten-Einbettung), Phase-0-Audit `676ffcf`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
