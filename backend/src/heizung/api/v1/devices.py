@@ -135,6 +135,8 @@ async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRea
             valve_position=reading.valve_position,
             open_window=reading.open_window,
             attached_backplate=reading.attached_backplate,
+            temperature=reading.temperature,
+            battery_percent=reading.battery_percent,
             recorded_at=reading.time,
         )
 

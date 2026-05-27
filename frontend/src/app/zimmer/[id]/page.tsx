@@ -197,7 +197,7 @@ export default function ZimmerDetailPage() {
               error={error}
             />
           ) : tab === "zonen" ? (
-            <HeatingZoneList roomId={id} />
+            <HeatingZoneList roomId={id} onSwitchToOverrideTab={() => setTab("override")} />
           ) : tab === "geraete" ? (
             <DevicesInRoom
               roomId={id}

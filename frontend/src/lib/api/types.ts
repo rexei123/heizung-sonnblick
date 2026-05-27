@@ -60,6 +60,10 @@ export interface DeviceLatestReading {
   valve_position: number | null;
   open_window: boolean | null;
   attached_backplate: boolean | null;
+  // Sprint 14b: temperature (Backend field_serializer Decimal->float => number)
+  // + battery_percent fuer Thermostat-Bubbles (Ist-Temp + Batterie).
+  temperature: number | null;
+  battery_percent: number | null;
   recorded_at: string;
 }
 
@@ -340,6 +344,9 @@ export interface HeatingZone {
   kind: HeatingZoneKind;
   name: string;
   is_towel_warmer: boolean;
+  // Sprint 14b (§5.63): Backend HeatingZoneRead liefert health_state seit
+  // Sprint 11 (AE-53); Frontend-Type-Spiegel war bislang lückenhaft.
+  health_state: ZoneHealthState;
   created_at: string;
   updated_at: string;
 }

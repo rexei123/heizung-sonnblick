@@ -148,12 +148,23 @@ class DeviceLatestReadingRead(BaseModel):
     ``valve_position`` 0..100 % (Frontend rendert > 100 / < 0 defensiv als
     "nicht verfuegbar", D7). ``open_window`` / ``attached_backplate`` sind
     NULL wenn das Codec-Feld im Frame fehlte (alter Codec / Recovery).
+
+    Sprint 14b: ``temperature`` + ``battery_percent`` additiv ergaenzt
+    (Thermostat-Bubbles Ist-Temp + Batterie). ``temperature`` als
+    field_serializer->float (Konvention wie SensorReadingRead /
+    DeviceActiveOverrideRead).
     """
 
     valve_position: int | None
     open_window: bool | None
     attached_backplate: bool | None
+    temperature: Decimal | None = None
+    battery_percent: int | None = None
     recorded_at: datetime
+
+    @field_serializer("temperature")
+    def _temp_to_float(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 class DeviceRead(BaseModel):
