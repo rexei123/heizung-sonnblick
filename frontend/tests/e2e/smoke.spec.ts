@@ -1,11 +1,14 @@
 ﻿import { test, expect } from '@playwright/test';
 
 test.describe('Smoke-Tests', () => {
-  test('Startseite redirected auf /devices', async ({ page }) => {
-    // Seit N-4: page.tsx redirected auf /devices.
-    // Playwright folgt automatisch -> finale URL muss /devices sein.
+  test('Startseite zeigt das Dashboard (kein Redirect mehr)', async ({ page }) => {
+    // Sprint 14c: page.tsx ist nicht mehr redirect("/devices"), sondern das
+    // Dashboard mit Begruessung + KPI-Kacheln. URL bleibt "/".
     await page.goto('/');
-    await expect(page).toHaveURL(/\/devices$/);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: /Guten (Morgen|Tag|Abend)|Hallo/ }),
+    ).toBeVisible();
   });
 
   test('/devices liefert HTML mit Geraete-Liste', async ({ page }) => {
