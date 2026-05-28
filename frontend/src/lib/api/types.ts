@@ -657,3 +657,20 @@ export interface EventLogEntry {
   reason: CommandReason | null;
   details: Record<string, unknown> | null;
 }
+
+/**
+ * Sprint 14c: Aggregierte Dashboard-KPIs (GET /api/v1/dashboard/kpi).
+ * Spiegel zu ``schemas/dashboard.DashboardKpiRead`` (§5.63). Zod-Validierung
+ * in ``lib/api/dashboard.ts``. ``avg_temperature_celsius`` ist eine Zahl
+ * (Backend field_serializer->float), ``last_engine_tick`` UTC ISO-8601.
+ */
+export interface DashboardKpi {
+  rooms_occupied: number;
+  rooms_total: number;
+  avg_temperature_celsius: number | null;
+  devices_online: number;
+  devices_total: number;
+  active_overrides: number;
+  zones_window_open: number;
+  last_engine_tick: string | null;
+}

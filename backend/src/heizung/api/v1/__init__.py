@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from heizung.api.v1.auth import router as auth_router
+from heizung.api.v1.dashboard import router as dashboard_router
 from heizung.api.v1.devices import router as devices_router
 from heizung.api.v1.global_config import router as global_config_router
 from heizung.api.v1.heating_zones import router as heating_zones_router
@@ -26,5 +27,6 @@ router.include_router(global_config_router)
 router.include_router(rule_configs_router)
 router.include_router(scenarios_router)
 router.include_router(overrides_router)
+router.include_router(dashboard_router)
 
 __all__ = ["router"]

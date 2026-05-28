@@ -29,6 +29,7 @@ ggf. zusaetzlich pro dev_eui dedupliziert werden (z.B. Redis-Key
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,12 @@ def emit_health_alert(
     device_id: int,
     dev_eui: str,
     reason: str,
+    device_name: str | None = None,
+    room_name: str | None = None,
+    zone_name: str | None = None,
+    triggered_at: datetime | None = None,
+    last_uplink_at: datetime | None = None,
+    implausible_count_24h: int | None = None,
     context: dict[str, Any] | None = None,
 ) -> None:
     """Emittiert einen strukturierten WARNING-Log-Event.
@@ -50,9 +57,21 @@ def emit_health_alert(
         dev_eui: Device-EUI fuer Container-Log-grep.
         reason: ``"offline_24h"`` oder ``"implausible_readings_24h"`` —
             die Strings sind verbindlich (kommen aus AE-53 + T5).
-        context: Optionaler Zusatz-Kontext (z.B. counter-Wert,
-            last_uplink-Timestamp). Heute optional, in T7-Sprint-
-            Abschlussbericht ggf. erweitert.
+        device_name: Geraete-Bezeichnung (``device.label``) fuer den
+            spaeteren Mail-Betreff. ``None`` wenn unbenannt.
+        room_name: Zimmer-Nummer/-Name (``room.number``) via JOIN.
+        zone_name: Heizzonen-Name (``heating_zone.name``) via JOIN.
+        triggered_at: Zeitpunkt der Health-Eval (UTC), die den Alarm
+            ausgeloest hat.
+        last_uplink_at: Letztes Uplink-Reading des Devices (UTC).
+        implausible_count_24h: Implausible-Counter-Stand (Stufe-3-Trigger).
+        context: Optionaler Zusatz-Kontext (Backward-Compat-Slot).
+
+    Sprint 14c T3 (additiv): ``device_name``..``implausible_count_24h``
+    ergaenzt — alle keyword-only + optional, kein Breaking Change. Damit
+    erreicht der Logger das 10/10-Soll-Feld-Set fuer den spaeteren
+    SMTP-Versand (Phase-0-Audit Paket C). Re-Mail-Dedupe
+    (``health_alert_sent:{dev_eui}``) bleibt Backlog.
     """
     logger.warning(
         "health_alert",
@@ -61,6 +80,12 @@ def emit_health_alert(
             "device_id": device_id,
             "dev_eui": dev_eui,
             "reason": reason,
+            "device_name": device_name,
+            "room_name": room_name,
+            "zone_name": zone_name,
+            "triggered_at": triggered_at.isoformat() if triggered_at is not None else None,
+            "last_uplink_at": last_uplink_at.isoformat() if last_uplink_at is not None else None,
+            "implausible_count_24h": implausible_count_24h,
             "context": context or {},
         },
     )

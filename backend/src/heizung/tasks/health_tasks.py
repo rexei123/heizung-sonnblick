@@ -38,7 +38,7 @@ import redis
 from sqlalchemy import select
 
 from heizung.celery_app import app
-from heizung.models import Device, HeatingZone, SensorReading
+from heizung.models import Device, HeatingZone, Room, SensorReading
 from heizung.services import redis_client
 from heizung.services.health_alerts import emit_health_alert
 from heizung.tasks.engine_tasks import _task_session
@@ -171,6 +171,12 @@ async def _compute_health_state_async() -> dict[str, Any]:
     async with _task_session() as session:
         devices = list((await session.execute(select(Device))).scalars().all())
         zones = list((await session.execute(select(HeatingZone))).scalars().all())
+        rooms = list((await session.execute(select(Room))).scalars().all())
+
+        # Lookup-Maps fuer die Health-Alert-Payload-Anreicherung (T3): Namen
+        # via device -> heating_zone -> room. In-Memory, kein extra Roundtrip.
+        zone_by_id = {z.id: z for z in zones}
+        room_by_id = {r.id: r for r in rooms}
 
         # Pro Device: juengstes (time, temperature) — eine Query pro
         # Device gegen ix_sensor_reading_device_time, kein N+1-Schmerz
@@ -242,11 +248,22 @@ async def _compute_health_state_async() -> dict[str, Any]:
                     if counter >= IMPLAUSIBLE_THRESHOLD
                     else "offline_24h"
                 )
+                # T3: Namen via device -> zone -> room aufloesen (innerhalb
+                # der Session — Phase 6 emittiert nach Session-Close).
+                zone = zone_by_id.get(d.heating_zone_id) if d.heating_zone_id is not None else None
+                room = room_by_id.get(zone.room_id) if zone is not None else None
+                latest = latest_reading.get(d.id)
                 silent_transitions.append(
                     {
                         "device_id": d.id,
                         "dev_eui": d.dev_eui,
                         "reason": reason,
+                        "device_name": d.label,
+                        "zone_name": zone.name if zone is not None else None,
+                        "room_name": room.number if room is not None else None,
+                        "triggered_at": now,
+                        "last_uplink_at": latest[0] if latest is not None else None,
+                        "implausible_count_24h": counter_cache.get(d.dev_eui),
                     }
                 )
             if previous != new_state:
@@ -278,6 +295,12 @@ async def _compute_health_state_async() -> dict[str, Any]:
             device_id=transition["device_id"],
             dev_eui=transition["dev_eui"],
             reason=transition["reason"],
+            device_name=transition["device_name"],
+            room_name=transition["room_name"],
+            zone_name=transition["zone_name"],
+            triggered_at=transition["triggered_at"],
+            last_uplink_at=transition["last_uplink_at"],
+            implausible_count_24h=transition["implausible_count_24h"],
         )
 
     return {
