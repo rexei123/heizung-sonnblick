@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-24
-**Letzter Tag (geplant nach Merge):** `v0.1.18b3-error-code-discriminator` (B-Sprint13b2-4, 5 Commits auf `feature/b-sprint13b2-4-error-code-discriminator`, PR-Erstellung in T7 pending, Tag wird in Stop 7 gesetzt). Vorletzter Tag (gemerged): `v0.1.18b2-device-replacement-frontend` (Sprint 13b.2, Squash-Commit `c82af70`, gemerged 2026-05-24, Cowork-Live-Verify nachgepflegt via PR #179, siehe §2av). Davor: `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, §2au).
-**Aktueller Sprint:** B-Sprint13b2-4 error_code-Diskriminator abgeschlossen 2026-05-24 (siehe §2aw). Naechster Sprint: Sprint 14 — Cross-Sicht-UI + Health-Badges + Mail-Platzhalter (Phase 1, BR-2 + B-9.11x-5).
+**Stichtag:** 2026-05-28
+**Letzter Tag:** `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, develop-HEAD `278c2e7`, PR #195, gemerged 2026-05-28, §2bb). Davor: `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 14c Dashboard abgeschlossen 2026-05-28 (§2bb) — **Phase-3-Cross-Sicht-UI komplett (3/3 Sub-Sprints)**. Nächster Sprint: offen (Strategie-Chat).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -2877,6 +2877,28 @@ CEST). Geprüft A–M, drei Anmerkungen → Backlog, keine Defekte. (Deploy-Pfad
 gesund — Block-A war Phantom, §5.68.)
 
 **Tag:** `v0.1.19b-cross-sicht-zimmer-detail` auf `a59b7aa` (2026-05-27).
+
+## 2bb. Sprint 14c Dashboard (KPI-Kacheln + Logger-Payload) (2026-05-28, abgeschlossen)
+
+**Ziel:** Phase-3-Cross-Sicht-Abschluss (3/3 Sub-Sprints). `/`-Page von redirect("/devices") auf echtes Dashboard mit Begrüßung + 6 KPI-Kacheln + 60s-Refresh. Neuer Endpoint GET /api/v1/dashboard/kpi (additives Schema). Logger-Payload emit_health_alert 4→10 Soll-Felder (additiv, keyword-only, AE-53).
+
+**Tag:** v0.1.19c-cross-sicht-dashboard (develop-HEAD 278c2e7, PR #195).
+
+**Phase-0:** PR #193 (read-only Audit, docs/features/2026-05-27-sprint-14c-phase0-dashboard.md).
+
+**Tasks:** T0 Cowork-Snapshot · T1 services/dashboard_aggregates.py (6 async Helper) · T2 Endpoint + DashboardKpiRead · T3 Logger-Payload-Erweiterung · T4 components/patterns/kpi-card.tsx · T5 lib/api/dashboard.ts (Zod) + hooks-dashboard.ts (60s) · T6 app/page.tsx Redirect→Dashboard (use client) · T7 6 Playwright-Cases · T8 Toolchain grün · T9 PR+Merge · T10 Cowork-Begehung · T11 Tag · T12 Doku.
+
+**6 KPI-Kacheln:** Belegte Zimmer (Occupancy+Room.status) · Ø Raumtemperatur (Aggregat healthy-Zonen, Decimal) · Geräte online (health_state IN healthy/degraded, retired_at IS NULL) · Aktive Übersteuerungen (manual_override aktiv) · Fenster offen (sensor_reading.open_window OR-Aggregat) · Letzter Algorithmen-Lauf (event_log layer=HARD_CLAMP MAX(time)).
+
+**Brief-Korrekturen (Phase-0 §5.43):** KPI 5 via sensor_reading.open_window (NICHT heating_zone.is_window_open — Feld existiert nicht). KPI 6 via event_log layer=HARD_CLAMP (engine_tick/room_eval existieren nicht; HARD_CLAMP auch im Sommer-Fast-Path emittiert).
+
+**Test-Counts:** Backend 544 passed / 1 xfailed (532 Bestand + ~12 neu: 8 Aggregat + 4 API + Logger-10-Feld). Frontend 83 Playwright (77 Bestand + 6 neu in sprint-14c-dashboard.spec.ts).
+
+**Live-Verify heizung-test (§5.68):** Server-HEAD 278c2e7, build-images :develop success, Container web/api frisch healthy (07:10 CEST recreated via deploy-pull-Tick), /api/v1/dashboard/kpi 401 (Route live, auth-gated; alt war 404), Frontend / 200, alembic 0020 head. Cowork-Begehung 2026-05-28: 6 Kacheln sichtbar (2 von 45 belegt, Ø-Temp echter Wert, 4 von 4 online, 0 Overrides, 0 Fenster, Tick „vor wenigen Sekunden"), Begrüßung mit User-E-Mail, Mobile 390px sauber, 60s-Refresh im Network-Tab bestätigt.
+
+**Abweichungen:** (1) Kein Component-Test-Runner im Repo → KpiCard via Playwright + tsc abgedeckt (Backlog B-14c-FU-2). (2) User-Type ohne display_name → Greeting zeigt E-Mail/Fallback (Backlog B-14c-FU-3).
+
+**Diff-Stats:** 17 Dateien, +1328 / −15 (PR #195, Squash 278c2e7).
 
 **Neue Backlog-Punkte:**
 - **B-14b-FU-1** 🟢 Zone-Aggregat-Ist-Temp im ZoneCard-Header (Ø healthy

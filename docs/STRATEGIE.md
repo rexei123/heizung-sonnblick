@@ -525,16 +525,23 @@ Detaillierte Route-Liste in `docs/ARCHITEKTUR-REFRESH-2026-05-07.md` §6.
 
 ### 8.4 Dashboard – Persönliche Begrüßung und KPI-Cards
 
-Das Dashboard zeigt maximal 6 KPI-Cards (keine Charts, gemäß Design Strategie 5.2):
+Das Dashboard zeigt 6 KPI-Cards (keine Charts, gemäß Design Strategie 5.2):
 
-1. **Belegte Zimmer:** z. B. „38 von 45" mit Trend-Delta
-2. **Ø Raumtemperatur:** z. B. „20,4 °C" aller belegten Zimmer
-3. **Geräte online:** z. B. „127 von 130" mit Warnfarbe falls Offline
-4. **Energiestatus:** z. B. „Normal" oder „Sommermodus"
-5. **Nächster Check-in:** z. B. „14:00 Uhr · 3 Zimmer"
-6. **Außentemperatur:** z. B. „-3 °C · bewölkt"
+1. **Belegte Zimmer:** z. B. „38 von 45"
+2. **Ø Raumtemperatur:** z. B. „20,4 °C" über alle healthy Zonen
+3. **Geräte online:** z. B. „127 von 130", Warnfarbe falls online < total
+4. **Aktive Übersteuerungen:** Count aktiver manueller Overrides
+5. **Fenster offen:** Count Zonen mit offenem Fenster (Vicki-Open-Window-Detection)
+6. **Letzter Algorithmen-Lauf:** Zeitstempel der letzten Engine-Eval (HARD_CLAMP)
 
-Begrüßung: „Guten Morgen, Benny! Hier ist die Übersicht für Ihre Heizung."
+Begrüßung: „Guten Morgen, [Name]! Hier ist die Übersicht für Ihre Heizung."
+
+**Hinweis (Sprint 14c, 2026-05-28):** Die ursprüngliche Liste enthielt
+Energiestatus, Nächster Check-in und Außentemperatur. Diese sind ohne PMS-
+(Casablanca, Sprint 16a) bzw. Wetter-Service nicht umsetzbar und wurden durch
+die nicht-PMS-/Wetter-abhängige Variante oben ersetzt. Reaktivierung der drei
+Kacheln nach Sprint 16a + Wetter-Service-Sprint — siehe Backlog B-14c-FU-1.
+Implementiert in Sprint 14c (Tag v0.1.19c-cross-sicht-dashboard).
 
 ---
 

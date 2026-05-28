@@ -1282,9 +1282,11 @@ Sprint 14 wird in drei Sub-Sprints umgesetzt, jeder mit eigenem Phase-0
   heizung-test bestätigt (Block-A war Phantom, §5.68). Link-out-Variante
   (Override-Steuerung bleibt im Übersteuerung-Tab).
 - **14c — Dashboard (KPI-Kacheln + Mail-Platzhalter Alarm-Stufe 2/3):**
-  🔲 offen — nächste Position. ~10–14 h, eigener Implementation-Brief folgt.
+  ✅ abgeschlossen 2026-05-28 (STATUS §2bb; Tag v0.1.19c-cross-sicht-dashboard;
+  6 KPI-Kacheln; GET /api/v1/dashboard/kpi; Logger-Payload 4→10 Felder additiv).
+  Phase-3-Cross-Sicht-UI komplett (3/3 Sub-Sprints durch).
 
-**Phase-3-Cross-Sicht-UI-Stand:** 2/3 Sub-Sprints durch (14a + 14b), 14c offen.
+**Phase-3-Cross-Sicht-UI-Stand:** ✅ 3/3 Sub-Sprints durch (14a + 14b + 14c).
 
 > Hinweis: „SPRINT 14b — arc42-Konsolidierung" weiter unten ist ein
 > separater Doku-Sprint, NICHT der Cross-Sicht-Sub-Sprint 14b.
@@ -1570,6 +1572,12 @@ Hierarchie analog `rule_config`). Plus Saison-UI auf
 - B-9.13a-hf2-1 Server-Side-Build-SHA-Endpoint
 - B-9.11x-4 Status-Dashboard zentral (Pull-Timer + Container-Health
   + Engine-Eval)
+- B-14c-FU-1 🟢 3 PMS-/Wetter-Kacheln (Check-in, Außentemperatur, Energiestatus)
+  reaktivieren nach Sprint 16a (Casablanca-PMS) + Wetter-Service-Sprint
+- B-14c-FU-2 🟢 Component-Test-Runner (vitest) evaluieren, falls patterns/-Komponenten
+  wachsen (heute nur Playwright + tsc)
+- B-14c-FU-3 🟢 User.display_name-Feld backend-seitig (Migration + Schema +
+  Benutzer-UI), Dashboard-Greeting nutzt Klarname statt E-Mail
 
 ## Was nach Go-Live kommt (außerhalb dieses Plans)
 
