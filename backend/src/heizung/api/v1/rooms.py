@@ -98,7 +98,7 @@ async def list_rooms(
     offset: int = Query(default=0, ge=0),  # noqa: B008
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[Room]:
+) -> list[RoomRead]:
     stmt = select(Room)
     if room_type_id is not None:
         stmt = stmt.where(Room.room_type_id == room_type_id)
@@ -107,8 +107,17 @@ async def list_rooms(
     if floor is not None:
         stmt = stmt.where(Room.floor == floor)
     stmt = stmt.order_by(Room.number).offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    rooms = list((await session.execute(stmt)).scalars().all())
+
+    # Sprint 14d (R-A/R-D): EIN Batch-Aggregat fuer den Override-Indikator,
+    # KEIN per-room-Lookup (kein N+1 wie devices._build_device_read).
+    rooms_with_override = await override_service.get_rooms_with_active_override(session)
+    return [
+        RoomRead.model_validate(room).model_copy(
+            update={"has_active_override": room.id in rooms_with_override}
+        )
+        for room in rooms
+    ]
 
 
 @router.get(

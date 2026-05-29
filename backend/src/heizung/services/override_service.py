@@ -416,6 +416,34 @@ async def get_active(
     return result.scalar_one_or_none()
 
 
+async def get_rooms_with_active_override(session: AsyncSession) -> set[int]:
+    """Sprint 14d (R-A/R-D): ``room_id`` aller Zimmer mit >= 1 aktivem Override.
+
+    Bool-Aggregat fuer die Zimmer-Liste (RoomRead.has_active_override): EIN
+    Query ueber ``manual_override``, distinct ``room_id``, ohne per-room-Loop
+    (R-D — das per-Device-N+1-Muster aus ``devices._build_device_read`` wird
+    bewusst NICHT auf die Liste uebertragen).
+
+    Aktiv-Filter identisch zu ``get_active`` / ``count_active_overrides``:
+    ``revoked_at IS NULL AND expires_at > now``. Zone-Scope- (``heating_zone_id``
+    gesetzt) und Room-Scope-Overrides (``heating_zone_id IS NULL``) zaehlen
+    gleichermassen — gefragt ist nur „Zimmer hat ueberhaupt eine aktive
+    Uebersteuerung". OCCUPIED wird nicht erneut geprueft: Overrides entstehen
+    nur in OCCUPIED-Zimmern (AE-58 Create-Gate) und werden bei Check-out
+    revoked (``revoke_all_active_overrides``); eine Status-Re-Pruefung hier
+    waere ein per-room ``derive_room_status`` und wuerde R-D verletzen.
+    """
+    now = _now()
+    stmt = (
+        select(ManualOverride.room_id)
+        .where(ManualOverride.revoked_at.is_(None))
+        .where(ManualOverride.expires_at > now)
+        .distinct()
+    )
+    result = await session.execute(stmt)
+    return set(result.scalars().all())
+
+
 async def get_history(
     session: AsyncSession,
     room_id: int,
