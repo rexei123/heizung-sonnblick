@@ -2947,6 +2947,57 @@ leeres Zimmer (vacant / occupied ohne Override) → leere Zelle. (d) Listen-
 Sanity: kein Zimmer kombiniert Lock + „Aktiv". (e) Hard-Reload Ctrl+Shift+R
 vor jedem Check durchgeführt.
 
+---
+
+## 2bd. Sprint 14e Hygiene-Rest (FU-1 + FU-2 + FU-3) (2026-05-30, Code-Stand)
+
+**Ziel:** ZoneCard-Header zeigt Ist-Temp (FU-1) + effektiven Setpoint (FU-2 aus
+event_log HARD_CLAMP-Trace) inkl. Override-Vorrang (R1). Zimmer-Detail-
+Stammdaten haben Inline-Edit fuer Zone-Name + Room.room_type, gegated nach
+Rolle (R5), room_type mit Engine-Wirkungs-Warnung (ConfirmDialog) und
+business_audit-Eintrag (R4 bewusste Scope-Eingrenzung). Phase-0 #200 gemerged
+2026-05-30 (4596e23) hat den Plan vorbereitet.
+
+**Tag (vorgeschlagen):** `v0.1.19e-hygiene-rest` (NACH Merge + Cowork-Begehung
+§5.66 + Live-Verify §5.67).
+
+**Tasks:**
+- T1 `services/zone_aggregates.latest_mean_temp_per_zone` (Batch, R-D, §5.58)
+  + `HeatingZoneRead.mean_temperature_c`.
+- T2 `services/event_log.latest_hard_clamp_setpoint_per_room` (DISTINCT ON,
+  1h-Fenster, ix_event_log_room_time, AE-31/S3/AE-55 ohne neues Speicherfeld)
+  + `HeatingZoneRead.engine_setpoint_c`.
+- T3 types.ts §5.63-Spiegel, ZoneCard zwei Header-Zeilen mit
+  Override-Vorrang (R1) + null→„—" (R2).
+- T4 PATCH zone.name → `HEATING_ZONE_NAME_CHANGED`, PATCH room.room_type_id
+  → `ROOM_TYPE_CHANGED` mit `engine_effect=rule_config_scope_room_type`.
+- T5 `ZoneNameInlineEdit` (LabelCell-Pattern, kein Confirm) +
+  `RoomTypeInlineEditor` (Select + ConfirmDialog Engine-Warnung).
+  Affordance-Gating via `useAuth().user.role === "admin"` (R5).
+
+**Toolchain (lokal grün):** ruff check + format (156 Dateien), mypy strict
+src (102 Files), tsc, eslint, 558 Tests collected (`test_sprint14e_hygiene_
+rest.py` 10 Tests skippen ohne DATABASE_URL §5.50).
+
+**Backlog-Auflösung:**
+- **B-14b-FU-1** (Zone-Ist-Temp) → **erledigt**.
+- **B-14b-FU-2** (Engine-Setpoint im Header) → **erledigt** (Trace-Spiegel,
+  kein neues Feld).
+- **B-14b-FU-3** (Inline-Edit Zone-Eigenschaften) → **erledigt** fuer
+  zone.name + room.room_type_id; kind + is_towel_warmer bewusst aus Scope
+  (Phase-0 §C, ggf. spaeter).
+- **B-14c-FU-3** display_name → **gestrichen** (Strategie-Chat 2026-05-30,
+  Phase-0 §D).
+
+**Pflicht-Stops genutzt:** keine substantielle Abweichung im Brief, kein R3-
+Reissleine ausgeloest. Stop vor PR fuer CI-Watch + Stop vor Tag fuer Cowork.
+
+**Querverweise:** AE-31, AE-46 (Inline-Edit), AE-50 (Auth/Role), AE-51 §4.1/
+§4.2, AE-55 (HARD_CLAMP Final-Setpoint), §5.20 (Wording), §5.43 (grep-Beleg),
+§5.58 (retired_at-Filter), §5.63 (Type-Spiegel), §5.66 (Cowork), §5.67 (Live-
+Verify), §5.68 (Server-State-Diagnose), §5.70 (PR-Body-Datei). Phase-0:
+`docs/features/2026-05-30-sprint-14e-phase0-hygiene-rest.md`.
+
 **Phase-0:** PR #197 (read-only Audit, `docs/features/2026-05-28-sprint-14d-phase0-hygiene.md`), §J FU-4-Eval ergänzt 2026-05-30 (T10).
 
 **Tasks:** T1 `override_service.get_rooms_with_active_override` (EXISTS-Batch,
