@@ -285,7 +285,12 @@ function ZoneNameInlineEdit({ zone, roomId }: { zone: HeatingZone; roomId: numbe
  */
 function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
   const override = zone.active_override;
-  const effectiveSetpoint = override ? override.setpoint_celsius : zone.engine_setpoint_c;
+  // Bewusst ``== null`` (deckt undefined ab) — Bestand-Mocks vor Sprint 14e
+  // lieferten die Felder nicht; Render muss robust bleiben.
+  const meanTemp = zone.mean_temperature_c;
+  const effectiveSetpoint = override
+    ? override.setpoint_celsius
+    : zone.engine_setpoint_c;
   return (
     <dl className="mt-2 grid grid-cols-1 gap-1 text-sm">
       <div
@@ -299,9 +304,7 @@ function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
           Ist-Temp
         </dt>
         <dd className="tabular-nums text-text-primary">
-          {zone.mean_temperature_c === null
-            ? "—"
-            : `${zone.mean_temperature_c.toFixed(1)} °C`}
+          {meanTemp == null ? "—" : `${meanTemp.toFixed(1)} °C`}
         </dd>
       </div>
       <div
@@ -315,7 +318,7 @@ function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
           Soll
         </dt>
         <dd className="tabular-nums text-text-primary">
-          {effectiveSetpoint === null ? "—" : `${effectiveSetpoint.toFixed(1)} °C`}
+          {effectiveSetpoint == null ? "—" : `${effectiveSetpoint.toFixed(1)} °C`}
         </dd>
         {override ? (
           <dd

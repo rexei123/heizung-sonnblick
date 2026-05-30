@@ -177,14 +177,14 @@ async def _mk_device(
     sm: async_sessionmaker[AsyncSession],
     *,
     zone_id: int,
-    suffix: str,
     health_state: str,
     retired: bool = False,
 ) -> int:
+    """§5.18: dev_eui ist VARCHAR(16) — eigener 16-char-hex pro Device."""
     async with sm() as session:
         now = datetime.now(tz=UTC)
         device = Device(
-            dev_eui=f"deadbeef{suffix}",  # 16 char (§5.18)
+            dev_eui=uuid.uuid4().hex[:16],
             kind=DeviceKind.THERMOSTAT,
             vendor=DeviceVendor.MCLIMATE,
             model="vicki",
@@ -233,7 +233,7 @@ async def _mk_hard_clamp_eval(
                 layer=EventLogLayer.HARD_CLAMP,
                 setpoint_in=setpoint_c,
                 setpoint_out=setpoint_c,
-                reason=CommandReason.OCCUPIED,
+                reason=CommandReason.OCCUPIED_SETPOINT,
             )
         )
         await session.commit()
@@ -256,10 +256,19 @@ async def _cleanup(sm: async_sessionmaker[AsyncSession]) -> None:
                 "(SELECT id FROM \"user\" WHERE email LIKE 'e14e-%@test.example.com')"
             )
         )
+        # 14e-Devices haengen ueber heating_zone an unseren Test-Raumen — Filter
+        # ueber den FK statt dev_eui-Prefix, weil dev_eui ein uuid4-Hex ist.
         await session.execute(
             text(
                 "DELETE FROM sensor_reading WHERE device_id IN "
-                "(SELECT id FROM device WHERE dev_eui LIKE 'deadbeef%')"
+                "(SELECT id FROM device WHERE heating_zone_id IN "
+                "(SELECT id FROM heating_zone WHERE name LIKE 'z-t14e%'))"
+            )
+        )
+        await session.execute(
+            text(
+                "DELETE FROM device WHERE heating_zone_id IN "
+                "(SELECT id FROM heating_zone WHERE name LIKE 'z-t14e%')"
             )
         )
         await session.execute(
@@ -268,7 +277,6 @@ async def _cleanup(sm: async_sessionmaker[AsyncSession]) -> None:
                 "(SELECT id FROM room WHERE number LIKE 't14e-%')"
             )
         )
-        await session.execute(text("DELETE FROM device WHERE dev_eui LIKE 'deadbeef%'"))
         await session.execute(text("DELETE FROM heating_zone WHERE name LIKE 'z-t14e%'"))
         await session.execute(text("DELETE FROM room WHERE number LIKE 't14e-%'"))
         await session.execute(text("DELETE FROM room_type WHERE name LIKE 't14e-rt-%'"))
@@ -291,8 +299,8 @@ async def test_mean_temp_two_healthy_vickis_arithmetic_mean(
     try:
         room_id, _ = await _mk_room(sm, s, RoomStatus.OCCUPIED)
         zone_id = await _mk_zone(sm, room_id, f"t14e{s}a")
-        d1 = await _mk_device(sm, zone_id=zone_id, suffix=f"{s}aa", health_state="healthy")
-        d2 = await _mk_device(sm, zone_id=zone_id, suffix=f"{s}ab", health_state="healthy")
+        d1 = await _mk_device(sm, zone_id=zone_id, health_state="healthy")
+        d2 = await _mk_device(sm, zone_id=zone_id, health_state="healthy")
         await _mk_reading(sm, device_id=d1, temperature_c=Decimal("20.0"))
         await _mk_reading(sm, device_id=d2, temperature_c=Decimal("22.0"))
 
@@ -310,7 +318,7 @@ async def test_mean_temp_all_silent_returns_none(setup_engine: AsyncEngine) -> N
     try:
         room_id, _ = await _mk_room(sm, s, RoomStatus.OCCUPIED)
         zone_id = await _mk_zone(sm, room_id, f"t14e{s}b")
-        d1 = await _mk_device(sm, zone_id=zone_id, suffix=f"{s}ba", health_state="silent")
+        d1 = await _mk_device(sm, zone_id=zone_id, health_state="silent")
         await _mk_reading(sm, device_id=d1, temperature_c=Decimal("19.5"))
 
         async with sm() as session:
@@ -330,8 +338,8 @@ async def test_mean_temp_excludes_retired_vicki(setup_engine: AsyncEngine) -> No
     try:
         room_id, _ = await _mk_room(sm, s, RoomStatus.OCCUPIED)
         zone_id = await _mk_zone(sm, room_id, f"t14e{s}c")
-        active = await _mk_device(sm, zone_id=zone_id, suffix=f"{s}ca", health_state="healthy")
-        await _mk_device(sm, zone_id=zone_id, suffix=f"{s}cb", health_state="healthy", retired=True)
+        active = await _mk_device(sm, zone_id=zone_id, health_state="healthy")
+        await _mk_device(sm, zone_id=zone_id, health_state="healthy", retired=True)
         await _mk_reading(sm, device_id=active, temperature_c=Decimal("21.0"))
         # retired bekommt keinen Reading -- aber selbst mit Reading muss er
         # ignoriert werden, weil der Helper retired_at-Filter machen muss.
