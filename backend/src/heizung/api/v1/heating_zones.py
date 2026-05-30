@@ -14,7 +14,10 @@ CRUD:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from decimal import Decimal
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,27 +34,50 @@ from heizung.schemas.heating_zone import (
     ZoneActiveOverrideRead,
 )
 from heizung.services import override_service
+from heizung.services.business_audit_service import record_business_action
+from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
+from heizung.services.zone_aggregates import latest_mean_temp_per_zone
 
 
-async def _build_zone_read(session: AsyncSession, zone: HeatingZone) -> HeatingZoneRead:
-    """Sprint 14d FU-5: HeatingZoneRead + aktiver Zone-Override.
+async def _build_zone_read(
+    session: AsyncSession,
+    zone: HeatingZone,
+    *,
+    mean_temps: dict[int, Decimal | None] | None = None,
+    engine_setpoints: dict[int, Decimal | None] | None = None,
+) -> HeatingZoneRead:
+    """Sprint 14d FU-5 + 14e FU-1/FU-2: HeatingZoneRead + Anreicherungen.
 
-    Per-Zone-Enrichment via ``override_service.get_active`` (Zone-Match +
-    Room-Scope-Fallback). Zulaessig hier, weil Detail = ein Zimmer mit wenigen
-    Zonen — KEIN Listen-N+1 (R-D betrifft die Zimmer-Liste, nicht die
-    Zonen-Liste eines einzelnen Zimmers).
+    Override (Sprint 14d FU-5): per-Zone-Lookup via
+    ``override_service.get_active`` (Zone-Match + Room-Scope-Fallback).
+
+    Mean Temp (Sprint 14e FU-1) und Engine-Setpoint (FU-2) sind als optionale
+    Pre-Fetch-Dicts uebergebbar — der List-Endpoint befuellt sie via Batch-
+    Helpers (R-D, ein Query pro Aggregat). Der Single-Get-Endpoint laesst sie
+    leer und die per-Zone-Calls in dieser Funktion erledigen das (kein N+1,
+    Detail = ein Zimmer = wenige Zonen).
     """
     read = HeatingZoneRead.model_validate(zone)
+    update: dict[str, Any] = {}
+
     active = await override_service.get_active(session, zone.room_id, heating_zone_id=zone.id)
-    if active is None:
-        return read
-    override_read = ZoneActiveOverrideRead(
-        source=active.source,
-        setpoint_celsius=active.setpoint,
-        started_at=active.created_at,
-        expires_at=active.expires_at,
-    )
-    return read.model_copy(update={"active_override": override_read})
+    if active is not None:
+        update["active_override"] = ZoneActiveOverrideRead(
+            source=active.source,
+            setpoint_celsius=active.setpoint,
+            started_at=active.created_at,
+            expires_at=active.expires_at,
+        )
+
+    if mean_temps is None:
+        mean_temps = await latest_mean_temp_per_zone(session, [zone.id])
+    update["mean_temperature_c"] = mean_temps.get(zone.id)
+
+    if engine_setpoints is None:
+        engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
+    update["engine_setpoint_c"] = engine_setpoints.get(zone.room_id)
+
+    return read.model_copy(update=update)
 
 
 INT4_MAX = 2_147_483_647
@@ -104,7 +130,19 @@ async def list_heating_zones(
     await _ensure_room_exists(session, room_id)
     stmt = select(HeatingZone).where(HeatingZone.room_id == room_id).order_by(HeatingZone.id)
     zones = list((await session.execute(stmt)).scalars().all())
-    return [await _build_zone_read(session, zone) for zone in zones]
+    if not zones:
+        return []
+    # Sprint 14e FU-1/FU-2 (R-D): Aggregat-Batches einmal pro Liste, nicht
+    # pro Zone. ``engine_setpoint`` ist per Room und damit fuer alle Zonen
+    # desselben Zimmers identisch (AE-51 §4.2).
+    mean_temps = await latest_mean_temp_per_zone(session, [z.id for z in zones])
+    engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [room_id])
+    return [
+        await _build_zone_read(
+            session, zone, mean_temps=mean_temps, engine_setpoints=engine_setpoints
+        )
+        for zone in zones
+    ]
 
 
 @router.post(
@@ -155,12 +193,13 @@ async def get_heating_zone(
     summary="Heizzone partiell aktualisieren",
 )
 async def update_heating_zone(
+    request: Request,
     payload: HeatingZoneUpdate,
     room_id: int = RoomIdPath,
     zone_id: int = ZoneIdPath,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> HeatingZone:
+) -> HeatingZoneRead:
     zone = await _get_zone_or_404(session, room_id, zone_id)
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
@@ -168,8 +207,23 @@ async def update_heating_zone(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Mindestens ein Feld zur Aktualisierung erforderlich",
         )
+    # Sprint 14e T4 (R4): Audit nur fuer ``name`` — die anderen PATCH-Felder
+    # (kind, is_towel_warmer) sind bewusste 14e-Scope-Eingrenzung.
+    old_name = zone.name
+    name_changed = "name" in updates and updates["name"] != old_name
     for field, value in updates.items():
         setattr(zone, field, value)
+    if name_changed:
+        await record_business_action(
+            session,
+            user_id=user.id,
+            action="HEATING_ZONE_NAME_CHANGED",
+            target_type="heating_zone",
+            target_id=zone_id,
+            old_value={"name": old_name},
+            new_value={"name": updates["name"]},
+            request_ip=request.client.host if request.client else None,
+        )
     try:
         await session.commit()
     except IntegrityError as e:
@@ -179,7 +233,7 @@ async def update_heating_zone(
             detail="Eindeutigkeitsverletzung (Name?)",
         ) from e
     await session.refresh(zone)
-    return zone
+    return await _build_zone_read(session, zone)
 
 
 @router.delete(

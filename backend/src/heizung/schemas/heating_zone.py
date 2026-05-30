@@ -65,3 +65,22 @@ class HeatingZoneRead(BaseModel):
     # (list/get) befuellen ihn per-Zone via model_copy. Ersetzt den
     # ``useZoneOverride``-Roundtrip in ZoneCard.
     active_override: ZoneActiveOverrideRead | None = None
+
+    # Sprint 14e FU-1: Zone-Aggregat-Ist-Temperatur ueber healthy + aktive Vickis
+    # (AE-51 §4.1). Default None; die Zone-Endpoints befuellen ihn via Batch-
+    # Enrich (``services/zone_aggregates.latest_mean_temp_per_zone``) mit dem
+    # Pure-Helper ``rules.aggregation.aggregate_zone_readings``. None wenn keine
+    # healthy Vicki mit Temperatur in der Zone.
+    mean_temperature_c: Decimal | None = None
+
+    # Sprint 14e FU-2: zuletzt von der Engine als HARD_CLAMP-Setpoint geschriebener
+    # Wert fuer das Zimmer dieser Zone (AE-55 P1; alle Zonen eines Zimmers teilen
+    # den Wert, AE-51 §4.2). Quelle: ``event_log.setpoint_out`` der juengsten
+    # HARD_CLAMP-Row im 1h-Fenster. Default None; befuellt via
+    # ``services/event_log_service.latest_hard_clamp_setpoint_per_room``.
+    engine_setpoint_c: Decimal | None = None
+
+    @field_serializer("mean_temperature_c", "engine_setpoint_c")
+    def _decimal_temp_to_float(self, v: Decimal | None) -> float | None:
+        # §5.63: Decimal -> JSON-Zahl. Symmetrisch zur Override-Setpoint-Serialisierung.
+        return None if v is None else float(v)

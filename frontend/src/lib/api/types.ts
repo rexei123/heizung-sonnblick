@@ -355,6 +355,14 @@ export interface HeatingZone {
   // Sprint 14d FU-5 (§5.63): aktiver Zone-Override read-only. Gleiche Form wie
   // DeviceActiveOverride. Ersetzt den useZoneOverride-Roundtrip in ZoneCard.
   active_override: DeviceActiveOverride | null;
+  // Sprint 14e FU-1 (§5.63): Zone-Aggregat-Ist-Temperatur (arithm. Mittel ueber
+  // healthy + aktive Vickis, AE-51 §4.1). Backend serialisiert Decimal->number.
+  // null = keine healthy Vicki mit Temperatur in der Zone.
+  mean_temperature_c: number | null;
+  // Sprint 14e FU-2 (§5.63): zuletzt von der Engine als HARD_CLAMP gesetzter
+  // Setpoint des Zimmers (AE-55 P1). Alle Zonen eines Zimmers teilen den Wert
+  // (AE-51 §4.2). null = kein HARD_CLAMP-Eval im 1h-Fenster.
+  engine_setpoint_c: number | null;
 }
 
 export interface HeatingZoneCreate {
