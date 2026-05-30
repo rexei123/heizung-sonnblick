@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-28
-**Letzter Tag:** `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, develop-HEAD `278c2e7`, PR #195, gemerged 2026-05-28, §2bb). Davor: `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 14c Dashboard abgeschlossen 2026-05-28 (§2bb) — **Phase-3-Cross-Sicht-UI komplett (3/3 Sub-Sprints)**. Nächster Sprint: offen (Strategie-Chat).
+**Stichtag:** 2026-05-30
+**Letzter Tag:** `v0.1.19e-hygiene-rest` (Sprint 14e, develop-HEAD `112b827`, PR #201, gemerged 2026-05-30, §2bd). Davor: `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, PR #198, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 14e Hygiene-Rest abgeschlossen 2026-05-30 (§2bd). Nächster Sprint: offen (Strategie-Chat).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -2997,6 +2997,23 @@ Reissleine ausgeloest. Stop vor PR fuer CI-Watch + Stop vor Tag fuer Cowork.
 §5.58 (retired_at-Filter), §5.63 (Type-Spiegel), §5.66 (Cowork), §5.67 (Live-
 Verify), §5.68 (Server-State-Diagnose), §5.70 (PR-Body-Datei). Phase-0:
 `docs/features/2026-05-30-sprint-14e-phase0-hygiene-rest.md`.
+
+**Tag:** `v0.1.19e-hygiene-rest` (annotated, Tag-Object `e734751`, zeigt auf
+develop-HEAD `112b827` = PR #201 squash-Merge), gesetzt 2026-05-30 nach
+Live-Verify + Cowork-Begehung. Tag-Reihe v0.1.19: a/a.1/b/c/d/e.
+
+**Live-Verify (heizung-test):** SYNC auf `112b827` nach 92 s; api/web/
+celery_worker healthy (celery_beat health:starting = akzeptierter Drift
+§5.32); Alembic no-op (14e additiv, keine Migration). Cowork-Begehung
+2026-05-30 ~17:48 CEST: FU-1 Zone-Ist-Temp + FU-2 effektiver Setpoint
+(Override-Vorrang, keine konkurrierenden Zahlen) visuell OK; R2-„—"
+über 0-Geräte-Zone belegt (echtes silent-Vicki-Sample steht aus, CI-T1b
+deckt None ab); FU-3 Admin-Inline-Edit (name ohne / room_type mit
+Confirm + Engine-Warnung) OK; Mitarbeiter-Read-Only-Gating via
+require_admin CI/T4 abgedeckt (kein Test-Account in Session).
+Backlog 14f: Override-Header-Redundanz (Kompakt-Header + 14b-Banner
+zeigen denselben Wert doppelt) + Live-Restbeleg R2 bei real
+offline-gehendem Vicki.
 
 **Phase-0:** PR #197 (read-only Audit, `docs/features/2026-05-28-sprint-14d-phase0-hygiene.md`), §J FU-4-Eval ergänzt 2026-05-30 (T10).
 
