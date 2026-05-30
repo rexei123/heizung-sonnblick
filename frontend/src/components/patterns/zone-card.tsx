@@ -9,8 +9,8 @@
  *
  * AE-61 / Drift-Resolution 2026-05-27 (Link-out): KEINE Override-Mutation
  * hier — Setzen/Aufheben läuft im Übersteuerung-Tab (ManualOverrideZoneCard).
- * Der aktive Override wird read-only aus ``device.active_override`` der
- * Zone-Geräte gespiegelt (zone-scoped Override ist pro Zone identisch).
+ * Der aktive Override wird read-only aus ``zone.active_override``
+ * (HeatingZoneRead, Sprint 14d FU-5) gelesen.
  *
  * Wording §5.20: „Thermostat"; „Vicki" höchstens im Tooltip.
  */
@@ -21,7 +21,6 @@ import { ThermostatBubble } from "@/components/patterns/thermostat-bubble";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useZoneOverride } from "@/lib/api/hooks-overrides";
 import { useDeleteHeatingZone } from "@/lib/api/hooks-rooms";
 import { SOURCE_LABEL } from "@/lib/overrides-display";
 import type { ApiError, Device, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
@@ -49,13 +48,11 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
   const [error, setError] = useState<string | null>(null);
 
   const zoneDevices = devices.filter((d) => d.heating_zone_id === zone.id);
-  // T9.5: aktiver Zone-Override read-only über den Bestand-Convenience-Hook
-  // useZoneOverride (Zone-Match + Room-Scope-Fallback, revoked/expired
-  // gefiltert, jüngster gewinnt — identisch zu ManualOverridePanelList).
-  // Semantisch sauber (kein device.active_override-Edge bei Mehrfach-Vicki /
-  // geräteloser Zone). Backlog B-14b-FU-5: HeatingZoneRead.active_override
-  // backendseitig nachziehen, dann entfällt der Hook-Roundtrip.
-  const activeOverride = useZoneOverride(roomId, zone.id).data ?? null;
+  // Sprint 14d FU-5: aktiver Zone-Override direkt aus HeatingZoneRead
+  // (zone.active_override) — der useZoneOverride-Roundtrip entfällt. Zone-Match
+  // + Room-Scope-Fallback + revoked/expired-Filter passieren backendseitig
+  // (override_service.get_active).
+  const activeOverride = zone.active_override;
 
   const performDelete = async () => {
     setError(null);
@@ -103,7 +100,7 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
             <div data-testid={`zone-card-${zone.id}-override-banner`}>
               <div className="flex items-baseline gap-1">
                 <span className="text-2xl font-medium text-text-primary tabular-nums">
-                  {Math.round(parseFloat(activeOverride.setpoint))}
+                  {Math.round(activeOverride.setpoint_celsius)}
                 </span>
                 <span className="text-sm text-text-secondary">°C</span>
                 <span className="ml-2 text-xs text-text-tertiary">

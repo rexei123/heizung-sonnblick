@@ -3,11 +3,31 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-from heizung.models.enums import HeatingZoneKind
+from heizung.models.enums import HeatingZoneKind, OverrideSource
+
+
+class ZoneActiveOverrideRead(BaseModel):
+    """Sprint 14d FU-5: aktiver Override der Zone (read-only).
+
+    Spiegelt ``DeviceActiveOverrideRead`` (schemas/device.py) — gleiche Form,
+    damit der Frontend-Type wiederverwendbar ist. ``setpoint_celsius`` als
+    ``field_serializer``->``float`` (JSON-Zahl, §5.63-Konvention),
+    ``expires_at`` UTC (Frontend lokalisiert, §5.65).
+    """
+
+    source: OverrideSource
+    setpoint_celsius: Decimal
+    started_at: datetime
+    expires_at: datetime
+
+    @field_serializer("setpoint_celsius")
+    def _decimal_to_float(self, v: Decimal) -> float:
+        return float(v)
 
 
 class HeatingZoneCreate(BaseModel):
@@ -39,3 +59,9 @@ class HeatingZoneRead(BaseModel):
     health_state: Literal["healthy", "degraded", "silent", "no_device"]
     created_at: datetime
     updated_at: datetime
+
+    # Sprint 14d FU-5: aktiver Zone-Override (Zone-Match + Room-Scope-Fallback,
+    # ``override_service.get_active``). Default None; die Zone-Endpoints
+    # (list/get) befuellen ihn per-Zone via model_copy. Ersetzt den
+    # ``useZoneOverride``-Roundtrip in ZoneCard.
+    active_override: ZoneActiveOverrideRead | None = None

@@ -292,6 +292,9 @@ export interface Room {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  // Sprint 14d (R-A, §5.63): Bool-Indikator „>= 1 aktive Übersteuerung".
+  // Backend RoomRead befüllt es nur im Listen-Endpoint (sonst false).
+  has_active_override: boolean;
 }
 
 // Sprint 12c (AE-58): Body fuer PATCH /rooms/{id}/override-block-state.
@@ -349,6 +352,9 @@ export interface HeatingZone {
   health_state: ZoneHealthState;
   created_at: string;
   updated_at: string;
+  // Sprint 14d FU-5 (§5.63): aktiver Zone-Override read-only. Gleiche Form wie
+  // DeviceActiveOverride. Ersetzt den useZoneOverride-Roundtrip in ZoneCard.
+  active_override: DeviceActiveOverride | null;
 }
 
 export interface HeatingZoneCreate {

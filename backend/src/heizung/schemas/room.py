@@ -53,6 +53,14 @@ class RoomRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Sprint 14d (R-A): Bool-Indikator „Zimmer hat >= 1 aktive Uebersteuerung"
+    # fuer die Zimmer-Liste. Default False; NUR der Listen-Endpoint
+    # (``list_rooms``) befuellt ihn via Batch-Aggregat
+    # (``override_service.get_rooms_with_active_override``). Einzel-/Write-
+    # Responses (get/create/update) lassen ihn auf False — dort nicht
+    # konsumiert (RoomTable liest ausschliesslich die Liste).
+    has_active_override: bool = False
+
 
 class RoomOverrideBlockUpdate(BaseModel):
     """Eingabe fuer PATCH /api/v1/rooms/{id}/override-block-state (Sprint 12c).

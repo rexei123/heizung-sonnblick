@@ -28,7 +28,31 @@ from heizung.schemas.heating_zone import (
     HeatingZoneCreate,
     HeatingZoneRead,
     HeatingZoneUpdate,
+    ZoneActiveOverrideRead,
 )
+from heizung.services import override_service
+
+
+async def _build_zone_read(session: AsyncSession, zone: HeatingZone) -> HeatingZoneRead:
+    """Sprint 14d FU-5: HeatingZoneRead + aktiver Zone-Override.
+
+    Per-Zone-Enrichment via ``override_service.get_active`` (Zone-Match +
+    Room-Scope-Fallback). Zulaessig hier, weil Detail = ein Zimmer mit wenigen
+    Zonen — KEIN Listen-N+1 (R-D betrifft die Zimmer-Liste, nicht die
+    Zonen-Liste eines einzelnen Zimmers).
+    """
+    read = HeatingZoneRead.model_validate(zone)
+    active = await override_service.get_active(session, zone.room_id, heating_zone_id=zone.id)
+    if active is None:
+        return read
+    override_read = ZoneActiveOverrideRead(
+        source=active.source,
+        setpoint_celsius=active.setpoint,
+        started_at=active.created_at,
+        expires_at=active.expires_at,
+    )
+    return read.model_copy(update={"active_override": override_read})
+
 
 INT4_MAX = 2_147_483_647
 
@@ -76,11 +100,11 @@ async def list_heating_zones(
     room_id: int = RoomIdPath,
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[HeatingZone]:
+) -> list[HeatingZoneRead]:
     await _ensure_room_exists(session, room_id)
     stmt = select(HeatingZone).where(HeatingZone.room_id == room_id).order_by(HeatingZone.id)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    zones = list((await session.execute(stmt)).scalars().all())
+    return [await _build_zone_read(session, zone) for zone in zones]
 
 
 @router.post(
@@ -120,8 +144,9 @@ async def get_heating_zone(
     zone_id: int = ZoneIdPath,
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> HeatingZone:
-    return await _get_zone_or_404(session, room_id, zone_id)
+) -> HeatingZoneRead:
+    zone = await _get_zone_or_404(session, room_id, zone_id)
+    return await _build_zone_read(session, zone)
 
 
 @router.patch(

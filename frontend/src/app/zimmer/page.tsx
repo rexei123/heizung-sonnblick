@@ -215,6 +215,9 @@ function RoomTable({ list, loading, error }: TableProps) {
               <td className="px-3 py-2">
                 <span className={STATUS_COLOR[r.status]}>{STATUS_LABEL[r.status]}</span>
               </td>
+              {/* Sprint 14d (R-B): EINE Zelle, drei exklusive Zustände —
+                  gesperrt (Lock, 12c.a) > aktive Übersteuerung ("Aktiv") > leer.
+                  Nie kombiniert. */}
               <td className="px-3 py-2">
                 {r.guest_override_blocked ? (
                   <span
@@ -224,6 +227,17 @@ function RoomTable({ list, loading, error }: TableProps) {
                     style={{ fontSize: 18 }}
                   >
                     lock
+                  </span>
+                ) : r.has_active_override ? (
+                  <span
+                    className="inline-flex items-center gap-1 text-warning"
+                    aria-label="Übersteuerung aktiv"
+                    title="Übersteuerung aktiv"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                      tune
+                    </span>
+                    <span className="text-xs font-medium">Aktiv</span>
                   </span>
                 ) : null}
               </td>

@@ -174,5 +174,80 @@ Begründung an der F3-Reißleine:
 
 ---
 
+## §J — FU-4 Doku-Eval (Sprint 14d T10, 2026-05-30, read-only)
+
+Nachgereicht im 14d-Implementation-Sprint (T10, KEIN Code). Untersucht die im
+Phase-0-§F erwähnte „Übersteuerung-Tab evaluieren"-Frage konkret entlang der
+14d-Briefing-Achse **Historie/Verlauf vs. Aktions-Doppelung**.
+
+### Bestand
+
+- **Heizzonen-Tab** (`zone-card.tsx`, Sprint 14b, FU-5-aktualisiert in 14d
+  T7): pro Zone ein Read-only-Banner mit Setpoint, Quelle (`SOURCE_LABEL`),
+  Restzeit/expires_at + CTA „In Übersteuerung ändern →" / „Wunschtemperatur
+  setzen →" (Link-out, AE-61).
+- **Übersteuerung-Tab** (`manual-override-panel-list.tsx` +
+  `manual-override-panel.tsx`):
+  - Header + Block-Status-Hinweis bei `guest_override_blocked`
+  - optionale Room-Scope-Card (Backward-Compat Sprint 12b E4)
+  - pro Zone `ManualOverrideZoneCard`:
+    - aktiver Override → `ActiveOverrideDisplay` (Setpoint, Quelle, Restzeit,
+      Revoke-Button, „Grund" falls vorhanden)
+    - blockiert → Read-only-Hinweis
+    - sonst → `CreateOverrideForm` (Setpoint/Dauer/Grund/Window-Pre-Check)
+  - `HistoryCard` (Tabelle: Zeitpunkt · Bereich · Setpoint · Quelle · Status
+    · Grund, Paginierung 20er-Blöcke)
+
+### Befund
+
+- **Keine Aktions-Doppelung im strengen Sinn.** Mutation (Anlegen/Aufheben)
+  läuft ausschließlich im Übersteuerung-Tab. Heizzonen-Tab verlinkt per CTA
+  hinüber (`onSwitchToOverrideTab`). AE-61 §1.4 ist eingehalten.
+- **Anzeige-Doppelung (visuell) besteht.** Setpoint + Quelle + Restzeit
+  des aktiven Overrides werden auf beiden Tabs gerendert (Heizzonen-Tab im
+  ZoneCard-Banner, Übersteuerung-Tab im `ActiveOverrideDisplay`). Quelle ist
+  identisch (FU-5: `zone.active_override`); Inkonsistenz-Risiko = null.
+- **Historie ist exklusiv im Übersteuerung-Tab** (`HistoryCard`). Heizzonen-
+  Tab zeigt nur den aktuellen Zustand.
+- **Ergonomie-Trade-off** (AE-61 dokumentiert): Hotelier braucht zwei Klicks
+  (Tab-Wechsel + Setpoint setzen) statt einem.
+
+### Optionen
+
+1. **Status Quo behalten** (Default). Anzeige-Doppelung ist konsistent und
+   billig — Heizzonen-Tab als „Live-Ist + Override-Live-Soll", Übersteuerung-
+   Tab als „Mutation + Verlauf". Klare Verantwortungstrennung, AE-61-
+   konform. Keine Code-Arbeit.
+2. **Heizzonen-Tab-Banner streichen.** Aktive Override-Anzeige nur im
+   Übersteuerung-Tab. Pro: 1:1-Verantwortung. Contra: ZoneCard verliert
+   wichtige Live-Info für den Hotelier; CTA wird Pflicht-Klick, um den
+   aktuellen Soll-Setpoint zu sehen. Schlechter als Status Quo aus
+   Hotelier-Perspektive.
+3. **Mutation in ZoneCard ziehen, Übersteuerung-Tab auf Historie reduzieren**
+   (B-14b-FU-4 Backlog). Eliminert die zwei Klicks. Eigener Stufe-1-Sprint
+   (Chrome-loses-Inner-Refactor von `ManualOverrideZoneCard` + AE-61-Update +
+   Bestands-Tests 12b/12c/13b.2/14b/14d anpassen). Backend-Override-Pfad
+   bleibt unverändert.
+
+### Empfehlung
+
+**Status Quo in 14d** (Option 1). Anzeige-Doppelung ist kein Bug, sondern
+hotelier-freundlich; Aktions-Doppelung gibt es nicht.
+
+Option 3 lohnt sich nur, wenn der Cowork-Test in 14d zeigt, dass die zwei
+Klicks tatsächlich friction sind. Entscheid ausdrücklich **nach 14d-Cowork-
+Begehung** in den Strategie-Chat schieben, nicht in 14d implementieren
+(Brief §G: „UI-Folgen erst nach Strategie-Chat-Entscheid").
+
+### Querverweise
+
+- AE-61 (Geräte/Zonen-Read-only-Strategie, Trade-off „zwei Klicks")
+- AE-52 (Window-Safety, Mutationspfad)
+- AE-58 (Source-Hierarchie, Block-Toggle)
+- B-14b-FU-4 (Backlog für Option 3)
+- §5.66 (Multi-Badge-Slots) — relevant falls Option 3 die ZoneCard verbreitert
+
+---
+
 **Stop-Point:** Phase-0-Audit abgeschlossen. Kein Code-/Schema-/Migration-/Test-Touch.
 Warte auf Strategie-Chat-Freigabe für 14d-Implementation-Brief (inkl. R-A/R6-Entscheid).

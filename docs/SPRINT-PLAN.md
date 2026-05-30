@@ -1285,8 +1285,17 @@ Sprint 14 wird in drei Sub-Sprints umgesetzt, jeder mit eigenem Phase-0
   ✅ abgeschlossen 2026-05-28 (STATUS §2bb; Tag v0.1.19c-cross-sicht-dashboard;
   6 KPI-Kacheln; GET /api/v1/dashboard/kpi; Logger-Payload 4→10 Felder additiv).
   Phase-3-Cross-Sicht-UI komplett (3/3 Sub-Sprints durch).
+- **14d — Override-Sichtbarkeit (Block A + FU-4-Eval + FU-6-Wording):**
+  ✅ abgeschlossen 2026-05-30 (STATUS §2bc; Tag v0.1.19d-override-sichtbarkeit
+  pending — nach Merge + Cowork-Begehung). Zimmer-Liste zeigt „Aktiv"-
+  Indikator (R-A/R-B drei exklusive Zustände, Single-Zelle); RoomRead.
+  `has_active_override` via 1-Batch-Query (R-D, kein N+1); HeatingZoneRead.
+  `active_override` ersetzt useZoneOverride-Roundtrip (FU-5); SOURCE_LABEL
+  zeigt Quelle Gast/Mitarbeiter (FU-6 Option A); FU-4-Doku-Eval Status Quo
+  (kein UI-Refactor, B-14b-FU-4 bleibt Backlog).
 
-**Phase-3-Cross-Sicht-UI-Stand:** ✅ 3/3 Sub-Sprints durch (14a + 14b + 14c).
+**Phase-3-Cross-Sicht-UI-Stand:** ✅ 3/3 Sub-Sprints durch (14a + 14b + 14c),
+plus 14d Override-Sichtbarkeits-Hygiene.
 
 > Hinweis: „SPRINT 14b — arc42-Konsolidierung" weiter unten ist ein
 > separater Doku-Sprint, NICHT der Cross-Sicht-Sub-Sprint 14b.
