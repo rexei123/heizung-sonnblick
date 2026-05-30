@@ -38,6 +38,13 @@ const ROOM = {
   updated_at: NOW,
 };
 
+interface ZoneActiveOverrideFixture {
+  source: "device" | "frontend_4h" | "frontend_midnight" | "frontend_checkout";
+  setpoint_celsius: number;
+  started_at: string;
+  expires_at: string;
+}
+
 interface ZoneFixture {
   id: number;
   room_id: number;
@@ -47,6 +54,8 @@ interface ZoneFixture {
   health_state: "healthy" | "degraded" | "silent" | "no_device";
   created_at: string;
   updated_at: string;
+  // Sprint 14d FU-5: HeatingZoneRead.active_override (ersetzt useZoneOverride).
+  active_override?: ZoneActiveOverrideFixture | null;
 }
 
 const ZONE: ZoneFixture = {
@@ -99,19 +108,13 @@ function makeDevice(activeOverride: unknown = null) {
 
 const HW_STATUS = { status: "active" as const, last_seen: NOW, frames_in_window: 3, window_minutes: 30 };
 
-// T9.5: aktiver Zone-Override aus useZoneOverride (GET /rooms/101/overrides?zone_id=201).
-const MANUAL_OVERRIDE = {
-  id: 9,
-  room_id: 101,
-  heating_zone_id: 201,
-  setpoint: "21",
+// Sprint 14d FU-5: aktiver Zone-Override jetzt aus HeatingZoneRead.active_override.
+// Form spiegelt DeviceActiveOverride (setpoint_celsius: number, expires_at: ISO).
+const ZONE_ACTIVE_OVERRIDE: ZoneActiveOverrideFixture = {
   source: "frontend_4h",
+  setpoint_celsius: 21,
+  started_at: NOW,
   expires_at: FUTURE,
-  reason: null,
-  created_at: NOW,
-  created_by: null,
-  revoked_at: null,
-  revoked_reason: null,
 };
 
 /**
@@ -193,21 +196,23 @@ test.describe("Sprint 14b — Zone-Karten Heizzonen-Tab", () => {
     await expect(bubble).toContainText("80");
   });
 
-  test("4 Read-only Override-Banner bei aktivem Override", async ({ page }) => {
-    await mockZonen(page, { zonesRef: { current: [ZONE] }, devices: [makeDevice()] });
-    // useZoneOverride-Quelle: aktiver Zone-Override über die Overrides-Liste.
-    await page.route(/.*\/api\/v1\/rooms\/101\/overrides(\?.*)?$/, (route: Route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([MANUAL_OVERRIDE]),
-      }),
-    );
+  test("4 Read-only Override-Banner bei aktivem Override (FU-5)", async ({ page }) => {
+    // Sprint 14d FU-5: ZoneCard liest aktiven Override direkt aus
+    // HeatingZoneRead.active_override — KEIN separater /overrides-Roundtrip.
+    const overridesCalls = { n: 0 };
+    await page.route(/.*\/api\/v1\/rooms\/101\/overrides(\?.*)?$/, (route: Route) => {
+      overridesCalls.n += 1;
+      return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+    });
+    const zoneWithOverride: ZoneFixture = { ...ZONE, active_override: ZONE_ACTIVE_OVERRIDE };
+    await mockZonen(page, { zonesRef: { current: [zoneWithOverride] }, devices: [makeDevice()] });
     await gotoZonenTab(page);
     const banner = page.getByTestId("zone-card-201-override-banner");
     await expect(banner).toBeVisible();
     await expect(banner).toContainText("°C");
     await expect(banner).toContainText("läuft bis");
+    // FU-5-Beleg: kein useZoneOverride-Aufruf mehr.
+    expect(overridesCalls.n).toBe(0);
   });
 
   test("5 CTA Wunschtemperatur setzen wechselt auf Übersteuerung-Tab", async ({ page }) => {
