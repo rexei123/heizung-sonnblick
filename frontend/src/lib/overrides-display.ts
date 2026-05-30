@@ -10,11 +10,17 @@ import { useEffect, useState } from "react";
 
 import type { OverrideSource } from "@/lib/api/types";
 
+// Sprint 14d FU-6: Quelle (Gast/Mitarbeiter) als Klammer-Suffix sichtbar
+// machen — vorher zeigte das Label nur Dauer/Mechanik. Heizzonen-Tab
+// (ZoneCard-Banner) + Übersteuerung-Tab (SourceBadge / Confirm-Dialog /
+// Historie-Zelle) + Engine-Decision-Panel (Layer-3-Trace) teilen sich diesen
+// Map. Geräte-Seite hat einen eigenen ausführlicheren Map
+// (``app/devices/[device_id]/page.tsx::OVERRIDE_SOURCE_LABEL``).
 export const SOURCE_LABEL: Record<OverrideSource, string> = {
-  device: "Drehknopf",
-  frontend_4h: "Für 4 Stunden",
-  frontend_midnight: "Bis Mitternacht",
-  frontend_checkout: "Bis Check-Out",
+  device: "Drehknopf (Gast)",
+  frontend_4h: "4 Stunden (Mitarbeiter)",
+  frontend_midnight: "Bis Mitternacht (Mitarbeiter)",
+  frontend_checkout: "Bis Check-out (Mitarbeiter)",
 };
 
 export const SOURCE_ICON: Record<OverrideSource, string> = {

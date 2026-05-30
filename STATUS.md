@@ -2921,6 +2921,75 @@ Setpoint-Surrogat), AE-61, §5.20, §5.63, §5.65, §5.66, §5.67, §5.68,
 
 ---
 
+## 2bc. Sprint 14d Override-Sichtbarkeit (Block A + FU-4 + FU-6) (2026-05-30, abgeschlossen)
+
+**Ziel:** Aktiv-Override-Indikator in der Zimmer-Liste (R-A/R-B, drei exklusive
+Zustände); HeatingZoneRead liefert `active_override` (FU-5, useZoneOverride-
+Roundtrip in ZoneCard entfällt); FU-6 SourceBadge-Wording mit Quelle Gast/
+Mitarbeiter sichtbar; FU-4 Doku-Eval Übersteuerung-Tab (KEIN UI-Code).
+
+**Tag (vorgeschlagen):** `v0.1.19d-override-sichtbarkeit` (NACH Merge + Live-
+Verify + Cowork-Begehung §5.66/§5.67).
+
+**Phase-0:** PR #197 (read-only Audit, `docs/features/2026-05-28-sprint-14d-phase0-hygiene.md`), §J FU-4-Eval ergänzt 2026-05-30 (T10).
+
+**Tasks:** T1 `override_service.get_rooms_with_active_override` (EXISTS-Batch,
+R-D) · T2 `list_rooms` enrich `has_active_override` (1 Batch-Query, kein N+1)
+· T3 `HeatingZoneRead.active_override` + Zone-Endpoint per-Zone-Enrich (FU-5)
+· T4 Backend-Tests (EXISTS-Semantik, +1-Query-Beleg, Roundtrip) · T5 Type-
+Spiegel `Room.has_active_override` + `HeatingZone.active_override` (§5.63,
+Konsumenten-Audit gegen Phase-0 §B/§C ohne Drift) · T6 RoomTable-Zelle (R-B-
+Conditional Lock | „Aktiv" | leer) · T7 ZoneCard nutzt `zone.active_override`
+direkt (useZoneOverride-Roundtrip entfernt, 14b-Test angepasst) · T8 neuer
+Playwright `sprint-14d-room-list-override-indicator.spec.ts` (3 R-B-Fälle) ·
+T9 FU-6 SOURCE_LABEL: Quelle in Klammern (Option A) · T10 FU-4 Eval read-only
+in §J · T11 STATUS-Eintrag (dieser).
+
+**R-A/R-B-Entscheid (umgesetzt):** Bool-Indikator + Single-Zelle. Gesperrt
+schlägt has_active_override (R-B-Exklusivität), kein Zähler/Sub-Zeile/Spalten-
+Split. Test `sprint-14d-room-list-override-indicator.spec.ts` belegt die
+Exklusivität.
+
+**FU-6 Wording (Option A, vom Hotelier 2026-05-30 ausgewählt):**
+- `device` → „Drehknopf (Gast)"
+- `frontend_4h` → „4 Stunden (Mitarbeiter)"
+- `frontend_midnight` → „Bis Mitternacht (Mitarbeiter)"
+- `frontend_checkout` → „Bis Check-out (Mitarbeiter)"
+
+`SOURCE_LABEL` in `lib/overrides-display.ts` (Heizzonen-Tab + Übersteuerung-
+Tab + Engine-Decision-Panel teilen). `OVERRIDE_SOURCE_LABEL` auf der Geräte-
+Detail-Seite bleibt unverändert (eigener Map, „Rezeption (…)"-Form).
+
+**FU-4 Eval (Option 1, Status Quo, vom Hotelier 2026-05-30 bestätigt):**
+Heizzonen-Tab + Übersteuerung-Tab haben Anzeige-Doppelung (kein Bug), keine
+Aktions-Doppelung. AE-61-konform. B-14b-FU-4 bleibt Backlog (Strategie-Chat
+nach 14d-Cowork-Begehung).
+
+**Toolchain (lokal grün):** ruff check + format (154 Dateien), mypy strict (101
+Source-Files), tsc --noEmit, eslint, pytest collection 548 Tests
+(`test_sprint14d_override_visibility.py` 3 Tests skip ohne DATABASE_URL, §5.50).
+
+**Backlog-Auflösung:**
+- **B-14b-FU-5** (HeatingZoneRead.active_override) → **erledigt** (T3).
+- **B-14b-FU-6** (SourceBadge-Wording) → **erledigt** (T9, Option A).
+- **B-14b-FU-4** (Übersteuerung-Tab evaluieren) → **Doku-Eval erledigt** (T10,
+  §J), UI-Folge offen (Strategie-Chat nach Cowork-Begehung).
+- B-14b-FU-1/-2/-3, B-14c-FU-3 bleiben → 14e-Bündel-Vorschlag (Phase-0 §H).
+
+**Out of Scope** (14e): B-14b-FU-1 (Zone-Ist-Temp), -FU-2 (Engine-Setpoint,
+M), -FU-3 (Inline-Edit), B-14c-FU-3 (display_name + Migration, M).
+
+**Pflicht-Stops genutzt:** T5 (Konsumenten-Drift — keine Drift gefunden,
+weiterlaufen), T9 (Wording — Hotelier-Entscheid Option A), T10 (Eval-Folge —
+Hotelier-Entscheid Option 1 Status Quo). PR-Stop + Tag-Stop ausstehend
+(Cowork-Begehung + Live-Verify).
+
+**Querverweise:** AE-58, AE-61, §5.63 (Type-Spiegel), §5.65 (UTC→Vienna im
+UI), §5.66 (Multi-Badge-Slots — R-B Single-Zelle bewusst gewählt), §5.67
+(Live-Verify pending), Phase-0-Brief `2026-05-28-sprint-14d-phase0-hygiene.md`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
