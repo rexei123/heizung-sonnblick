@@ -139,9 +139,10 @@ async def get_room(
     summary="Zimmer partiell aktualisieren",
 )
 async def update_room(
+    request: Request,
     payload: RoomUpdate,
     room_id: int = RoomIdPath,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Room:
     room = await _get_or_404(session, room_id)
@@ -153,8 +154,31 @@ async def update_room(
         )
     if "room_type_id" in updates:
         await _ensure_room_type_exists(session, updates["room_type_id"])
+    # Sprint 14e T4 (R4): Audit nur fuer ``room_type_id`` — Engine-Wirkung via
+    # RuleConfig-Scope (engine.py:856) macht den Wechsel zur fachlich
+    # heizverhaltens-relevanten Aktion. Andere PATCH-Felder (number,
+    # display_name, floor, orientation, status, notes) bleiben Audit-frei
+    # (bewusste 14e-Scope-Eingrenzung, Phase-0 R4).
+    old_room_type_id = room.room_type_id
+    room_type_changed = "room_type_id" in updates and updates["room_type_id"] != old_room_type_id
     for field, value in updates.items():
         setattr(room, field, value)
+    if room_type_changed:
+        await record_business_action(
+            session,
+            user_id=user.id,
+            action="ROOM_TYPE_CHANGED",
+            target_type="room",
+            target_id=room_id,
+            old_value={"room_type_id": old_room_type_id},
+            new_value={
+                "room_type_id": updates["room_type_id"],
+                # Engine-Wirkungs-Hinweis: naechster Tick (~60s) zieht die
+                # RuleConfigs des neuen room_type.
+                "engine_effect": "rule_config_scope_room_type",
+            },
+            request_ip=request.client.host if request.client else None,
+        )
     try:
         await session.commit()
     except IntegrityError as e:

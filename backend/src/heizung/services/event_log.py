@@ -14,21 +14,77 @@ Off-Pipeline-Events bekommen jeweils eine eigene ``evaluation_id``
 Evaluations vermischt werden. ``setpoint_in == setpoint_out`` ist
 ein Marker, dass das Event keine Setpoint-Aenderung ausgeloest hat
 (passive Beobachtung).
+
+Sprint 14e FU-2 ergaenzt Read-Helper fuer die ZoneCard-Anzeige des
+zuletzt von der Engine als HARD_CLAMP geschriebenen Setpoints
+(``latest_hard_clamp_setpoint_per_room``).
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
+
+from sqlalchemy import select
 
 from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from heizung.rules.inferred_window import InferredWindowResult
+
+
+# Sprint 14e FU-2: Frische-Fenster, jenseits dessen die HARD_CLAMP-Row als
+# "veraltet" gilt (keine Anzeige im ZoneCard). 1 h ist >> 60s-Heartbeat
+# (engine_tasks.py:255), bleibt aber kurz genug, dass ein steckender Tick
+# auffaellt.
+_HARD_CLAMP_FRESHNESS = timedelta(hours=1)
+
+
+async def latest_hard_clamp_setpoint_per_room(
+    session: AsyncSession,
+    room_ids: Iterable[int],
+) -> dict[int, Decimal | None]:
+    """Pro Zimmer den juengsten ``HARD_CLAMP``-Setpoint im 1h-Fenster.
+
+    DISTINCT ON (room_id) … ORDER BY time DESC — Index-Pfad
+    ``ix_event_log_room_time`` (models/event_log.py:100). Filter:
+
+    - ``layer == HARD_CLAMP`` (Engine-Final-Setpoint, AE-55 P1; deckt sowohl
+      die normale Pipeline als auch den Sommer-Fast-Path, §5.32-konsistent).
+    - ``time > now - 1h`` (``_HARD_CLAMP_FRESHNESS``) — ohne diesen Filter
+      laesst ein totes Zimmer einen Stale-Setpoint stehen.
+    - ``room_id = ANY(:room_ids)``.
+
+    Quelle des Wertes ist die Top-Level-Spalte ``EventLog.setpoint_out``
+    (Numeric(4,1), models/event_log.py:80) — NICHT die ``details``-JSONB.
+
+    Rueckgabe: ``dict[room_id, Decimal | None]``. Rooms ohne Eintrag im
+    Frische-Fenster fehlen im Resultat-dict (Konsument leitet auf ``None``).
+    Decimal wird unveraendert durchgereicht, Quantisierung passiert in der
+    Engine (``rules.engine._quantize``) — wir spiegeln den persistierten Wert.
+    """
+    ids = list(room_ids)
+    if not ids:
+        return {}
+
+    since = datetime.now(tz=UTC) - _HARD_CLAMP_FRESHNESS
+    stmt = (
+        select(EventLog.room_id, EventLog.setpoint_out)
+        .where(EventLog.layer == EventLogLayer.HARD_CLAMP)
+        .where(EventLog.room_id.in_(ids))
+        .where(EventLog.time > since)
+        .order_by(EventLog.room_id, EventLog.time.desc())
+        .distinct(EventLog.room_id)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {row.room_id: row.setpoint_out for row in rows}
 
 
 async def log_inferred_window_event(
