@@ -2928,8 +2928,24 @@ Zustände); HeatingZoneRead liefert `active_override` (FU-5, useZoneOverride-
 Roundtrip in ZoneCard entfällt); FU-6 SourceBadge-Wording mit Quelle Gast/
 Mitarbeiter sichtbar; FU-4 Doku-Eval Übersteuerung-Tab (KEIN UI-Code).
 
-**Tag (vorgeschlagen):** `v0.1.19d-override-sichtbarkeit` (NACH Merge + Live-
-Verify + Cowork-Begehung §5.66/§5.67).
+**Tag:** `v0.1.19d-override-sichtbarkeit` (develop-HEAD `34ee75c`, PR #198
+gemerged 2026-05-30, Tag gesetzt 2026-05-30 nach Cowork-OK).
+
+**Live-Verify heizung-test (§5.68):** Server-HEAD = develop-HEAD `34ee75c`
+nach 93 s SYNC-Loop. Container `deploy-api-1` / `deploy-web-1` /
+`deploy-celery_worker-1` healthy nach Recreate; `deploy-celery_beat-1` mit
+§5.32-akzeptiertem `health: starting`-Drift; `deploy-db-1` healthy. Alembic
+no-op („Migrationen angewendet — Kopf erreicht"). Schema-Sanity im
+laufenden API-Container: `RoomRead.has_active_override` + `HeatingZoneRead.
+active_override` + `override_service.get_rooms_with_active_override` aus
+Container importierbar.
+
+**Cowork-Begehung 2026-05-30 (§5.66):** 5 × ✅. (a) Zimmer 101 mit aktivem
+Override → „Aktiv"-Indikator (tune-Icon) sichtbar. (b) gesperrtes Zimmer →
+Lock-Symbol sichtbar, KEIN „Aktiv"-Doppel-Render (R-B-Exklusivität). (c)
+leeres Zimmer (vacant / occupied ohne Override) → leere Zelle. (d) Listen-
+Sanity: kein Zimmer kombiniert Lock + „Aktiv". (e) Hard-Reload Ctrl+Shift+R
+vor jedem Check durchgeführt.
 
 **Phase-0:** PR #197 (read-only Audit, `docs/features/2026-05-28-sprint-14d-phase0-hygiene.md`), §J FU-4-Eval ergänzt 2026-05-30 (T10).
 
