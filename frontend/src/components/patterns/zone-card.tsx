@@ -12,16 +12,25 @@
  * Der aktive Override wird read-only aus ``zone.active_override``
  * (HeatingZoneRead, Sprint 14d FU-5) gelesen.
  *
+ * Sprint 14e Header-Erweiterung:
+ *  - FU-1 Ist-Temp: ``zone.mean_temperature_c`` (Aggregat ueber healthy +
+ *    aktive Vickis, AE-51 §4.1), null → „—" (R2).
+ *  - FU-2 Effektiver Setpoint (R1): bei aktivem Override dessen Wert + Source-
+ *    Label-Badge, sonst ``zone.engine_setpoint_c`` (HARD_CLAMP-Spiegel, AE-55).
+ *    null → „—". Eine Zahl, keine konkurrierenden Werte.
+ *
  * Wording §5.20: „Thermostat"; „Vicki" höchstens im Tooltip.
  */
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import { ThermostatBubble } from "@/components/patterns/thermostat-bubble";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useDeleteHeatingZone } from "@/lib/api/hooks-rooms";
+import { Input } from "@/components/ui/input";
+import { useAuth } from "@/contexts/auth-context";
+import { useDeleteHeatingZone, useUpdateHeatingZone } from "@/lib/api/hooks-rooms";
 import { SOURCE_LABEL } from "@/lib/overrides-display";
 import type { ApiError, Device, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
 
@@ -46,6 +55,8 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
   const deleteMut = useDeleteHeatingZone(roomId);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const zoneDevices = devices.filter((d) => d.heating_zone_id === zone.id);
   // Sprint 14d FU-5: aktiver Zone-Override direkt aus HeatingZoneRead
@@ -73,13 +84,23 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
     >
       <div>
         <div className="flex items-center gap-2">
-          <h3 className="text-base font-medium text-text-primary">{zone.name}</h3>
+          {isAdmin ? (
+            <ZoneNameInlineEdit zone={zone} roomId={roomId} />
+          ) : (
+            <h3
+              className="text-base font-medium text-text-primary"
+              data-testid={`zone-card-${zone.id}-name-readonly`}
+            >
+              {zone.name}
+            </h3>
+          )}
           <ZoneHealthBadge healthState={zone.health_state} variant="compact" />
         </div>
         <p className="text-xs text-text-tertiary mt-0.5">
           {KIND_LABEL[zone.kind]}
           {zone.is_towel_warmer ? " · Handtuchtrockner" : ""}
         </p>
+        <ZoneHeaderMetrics zone={zone} />
       </div>
 
       {zoneDevices.length === 0 ? (
@@ -166,6 +187,146 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
         onCancel={() => setConfirmDelete(false)}
       />
     </div>
+  );
+}
+
+/**
+ * Sprint 14e T5a — Zone-Name als Inline-Edit fuer Admins (AE-46).
+ *
+ * Pattern aus ``app/devices/page.tsx`` LabelCell (Sprint 14a). Admin-Gating
+ * (R5) liegt am Aufrufer; diese Komponente vertraut darauf, dass sie nur fuer
+ * Admins gerendert wird. Backend-Security bleibt unabhaengig
+ * (``require_admin`` an PATCH /heating-zones, Sprint 14e T4-Audit).
+ *
+ * Kein Confirm-Dialog (Brief T5: ``name`` ohne Warnung, ohne Engine-Wirkung).
+ */
+function ZoneNameInlineEdit({ zone, roomId }: { zone: HeatingZone; roomId: number }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(zone.name);
+  const [error, setError] = useState<string | null>(null);
+  const updateMut = useUpdateHeatingZone(roomId);
+
+  const save = async () => {
+    const trimmed = draft.trim();
+    if (trimmed.length === 0) {
+      setError("Name darf nicht leer sein");
+      return;
+    }
+    if (trimmed === zone.name) {
+      setEditing(false);
+      return;
+    }
+    setError(null);
+    try {
+      await updateMut.mutateAsync({ zoneId: zone.id, payload: { name: trimmed } });
+      setEditing(false);
+    } catch (e) {
+      setError(toMessage(e));
+    }
+  };
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setDraft(zone.name);
+      setError(null);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            onBlur={() => void save()}
+            autoFocus
+            autoComplete="off"
+            disabled={updateMut.isPending}
+            className="h-8 text-base"
+            aria-label="Zonenname bearbeiten"
+            data-testid={`zone-card-${zone.id}-name-input`}
+          />
+        </div>
+        {error ? (
+          <span role="alert" className="text-xs text-error">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="text-base font-medium text-text-primary hover:text-text-secondary text-left"
+      data-testid={`zone-card-${zone.id}-name-edit`}
+    >
+      {zone.name}
+    </button>
+  );
+}
+
+/**
+ * Sprint 14e (FU-1 + FU-2): zwei Zeilen unter Kind-Label.
+ *
+ * Zeile 1: Ist-Temp aus zone.mean_temperature_c.
+ * Zeile 2: Effektiver Setpoint (R1) — active_override > engine_setpoint_c >
+ * „—". Bei aktivem Override Source-Badge dahinter, weil dann die Quelle
+ * (Gast/Mitarbeiter) für den Hotelier relevant ist.
+ */
+function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
+  const override = zone.active_override;
+  const effectiveSetpoint = override ? override.setpoint_celsius : zone.engine_setpoint_c;
+  return (
+    <dl className="mt-2 grid grid-cols-1 gap-1 text-sm">
+      <div
+        className="flex items-baseline gap-2"
+        data-testid={`zone-card-${zone.id}-mean-temp`}
+      >
+        <dt className="text-text-tertiary inline-flex items-center gap-1">
+          <span className="material-symbols-outlined text-base" aria-hidden>
+            thermostat
+          </span>
+          Ist-Temp
+        </dt>
+        <dd className="tabular-nums text-text-primary">
+          {zone.mean_temperature_c === null
+            ? "—"
+            : `${zone.mean_temperature_c.toFixed(1)} °C`}
+        </dd>
+      </div>
+      <div
+        className="flex items-baseline gap-2"
+        data-testid={`zone-card-${zone.id}-effective-setpoint`}
+      >
+        <dt className="text-text-tertiary inline-flex items-center gap-1">
+          <span className="material-symbols-outlined text-base" aria-hidden>
+            target
+          </span>
+          Soll
+        </dt>
+        <dd className="tabular-nums text-text-primary">
+          {effectiveSetpoint === null ? "—" : `${effectiveSetpoint.toFixed(1)} °C`}
+        </dd>
+        {override ? (
+          <dd
+            className="text-xs text-text-tertiary"
+            data-testid={`zone-card-${zone.id}-soll-source`}
+          >
+            {SOURCE_LABEL[override.source]}
+          </dd>
+        ) : null}
+      </div>
+    </dl>
   );
 }
 

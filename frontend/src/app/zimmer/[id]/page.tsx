@@ -17,6 +17,7 @@ import { ReplaceDeviceDialog } from "@/components/patterns/replace-device-dialog
 import { RetireDeviceDialog } from "@/components/patterns/retire-device-dialog";
 import { RoomForm } from "@/components/patterns/room-form";
 import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
+import { RoomTypeInlineEditor } from "@/components/patterns/room-type-inline-editor";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useDetachDeviceZone, useDevices } from "@/lib/api/hooks";
@@ -190,12 +191,19 @@ export default function ZimmerDetailPage() {
       ) : (
         <div className="bg-surface border border-border rounded-md p-5">
           {tab === "stammdaten" ? (
-            <RoomForm
-              initial={room.data}
-              onSubmit={handleUpdate}
-              submitting={updateMut.isPending}
-              error={error}
-            />
+            <div className="space-y-4">
+              {/* Sprint 14e T5b: Inline-Edit room_type mit Confirm + Audit
+                  (Engine-Wirkungs-Warnung, R5-Gating). Steht vor dem Form,
+                  weil room_type heizverhalten-relevant ist. RoomForm
+                  bleibt fuer die uebrigen Stammdaten unveraendert. */}
+              <RoomTypeInlineEditor room={room.data} />
+              <RoomForm
+                initial={room.data}
+                onSubmit={handleUpdate}
+                submitting={updateMut.isPending}
+                error={error}
+              />
+            </div>
           ) : tab === "zonen" ? (
             <HeatingZoneList roomId={id} onSwitchToOverrideTab={() => setTab("override")} />
           ) : tab === "geraete" ? (
