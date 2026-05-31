@@ -3312,6 +3312,16 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | OP-4 | ~/.ssh/config Eintrag heizung-test | erledigt |
 | OP-5 | RUNBOOK-Sektion für DB-Zugang via SSH-Tunnel ergänzen | 🟡 |
 
+### 6.4 — Sprint 15a Diagnose-Folgen (Backlog-Notizen)
+
+Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle: `docs/features/2026-05-31-hardware-health-diagnose.md`.
+
+| ID | Inhalt | Priorität |
+|---|---|---|
+| B-15a-1 | **Reboot-Drift-Detection per fcnt-Reset** (BLOCK D.5). Struktureller Defekt im AE-45-Pfad: kein Reboot-Schutz, kein fcnt-Check in `services/device_adapter.py`. Bei `guest_override_blocked=false` UND OCCUPIED wird ein Reboot-Frame als echter Gast-Setpoint-Change adoptiert (Override mit Drift-Wert, 7-Tage-Expiry). Default-Exposition: 43/45 Räume (Q-D5, 2026-05-31). Winter-Worst-Case: bis zu 7 Tage kein Nachheizen. Fix-Kern: 1 Diskriminator-Funktion (`is_reboot_frame(uplink, last_fcnt)`) + 1 Gate-Einschub vor Gate 0 in `handle_uplink_for_override` + Pytest-Cases. Leitplanke D.5.2 (kein aggressives Dauer-Korrigieren gegen Vicki-Setpoint — würde echte Gast-Drehring-Overrides zerstören). Sprint-Größe S/M. **Vor Heizperiode 2026/27 schneiden.** | 🔴 VORRANG vor Heizperiode |
+| B-15a-2 | **AE-17 als superseded markieren** (BLOCK H2). AE-17-Text in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:197-205` beschreibt eine `uplinks`-Hypertable mit JSONB-Payload — existiert real nicht. Sprint 5 (STATUS §2g.5.7) hat `sensor_reading` wiederverwendet (`models/sensor_reading.py:30-73`, Migration `0001_initial_domain_model.py:263-289` legt sie als Hypertable an, keine `uplinks`-Migration existiert). Separater `chore/`-Doku-PR mit ADR-Markierung „Status: Superseded — siehe `sensor_reading`-Schema". Nicht in andere PRs mischen. | 🟡 |
+| B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). Q-D4 zeigt 0 `MANUAL_OVERRIDE_BLOCKED`-event_log-Rows trotz wirkendem `guest_override_blocked=true`-Block über Stunden. Vermutete Ursache: `_write_blocked_event_log` (`device_adapter.py:143-177`) wird nur dann gerufen, wenn `detect_user_override` einen User-Setpoint gefunden hat — Frames innerhalb Toleranz oder im Ack-Window passieren das Block-Gate ohne Audit-Spur. Konsequenz: Block-Wirkung unsichtbar im event_log, Operator kann nicht beziffern, wie oft der Block tatsächlich wirkte. Eigener Hygiene-Sprint-Brief, klein. Mit B-15a-1 kombinierbar (gleiches Code-Modul). | 🟡 |
+
 ---
 
 ## 7. Schmerzpunkte aus heute (Lessons Learned)
