@@ -394,6 +394,10 @@ async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
                 uplink_target_temp=Decimal(str(target_temp_raw)),
                 fport=uplink.fPort or 1,
                 received_at=received_at,
+                # Sprint 15c (AE-63): dev_eui + current_fcnt fuer Reboot-Gate.
+                # Beide Pflicht-Felder im Schema (kein None-Fallback noetig).
+                dev_eui=dev_eui,
+                current_fcnt=uplink.fCnt,
             )
             if override is not None:
                 await session.commit()

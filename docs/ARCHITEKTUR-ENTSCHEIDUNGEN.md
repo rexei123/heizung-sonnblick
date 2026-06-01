@@ -2345,4 +2345,144 @@ sollen Zone-Karten den Override anzeigen und das Setzen anstoßen.
 - **Chrome-loses-Inner-Refactor in 14b:** Stufe-1-Eskalation in einem Stufe-2-
   Sprint; Bestands-Tests (12b/12c/13b.2) hätten angefasst werden müssen.
 
+---
+
+# AE-63 — Vicki-Reboot via fcnt-Reset diskriminieren, Re-Sync statt Drift-Adopt (Sprint 15c)
+
+**Datum:** 2026-06-01
+**Status:** Akzeptiert
+**Bezug:** Sprint 15c, AE-45 (Device-Auto-Detect-Override), AE-58
+(Override-Modell konsolidiert), AE-09/AE-32 (Hysterese), CLAUDE.md §5.21
+(Hardware-Realität: Codec-Routing über Payload-Byte).
+
+## Kontext
+
+Sprint 15a hat live beobachtet: ein Vicki, der nach Batteriewechsel (oder
+Power-Cycle) wieder online kommt, sendet mit `fcnt=0..n` (frischer
+LoRaWAN-Frame-Counter, weil Vicki keinen FCntUp persistiert) und einem
+**internen Setpoint, der mehrere Grad vom Engine-Sollwert abweichen kann**
+(letzter Drehring-Wert vor Reboot, oder Werks-Default). Der seit Sprint 9.9
+(AE-45) etablierte Auto-Detect-Override-Pfad in
+`device_adapter.handle_uplink_for_override` würde diesen Setpoint
+fälschlich als Drehring-Override adoptieren → `source=DEVICE`-Override
+mit `expires_at = next_checkout_at` (Hard-Cap 7 Tage). Folge: Zimmer
+heizt für bis zu 7 Tage nicht nach (Fehlmodus M1).
+
+Drei Klassen sind zu trennen:
+
+- **Reboot-Frame** (fcnt-Reset + Setpoint-Drift) — falsch adoptierbar.
+- **Echter Drehring-Override** (fcnt monoton + Setpoint-Diff) — gewollt
+  adoptierbar (AE-45-Pfad).
+- **Normaler Frame** (kein Setpoint-Diff) — keine Aktion.
+
+ChirpStack-FCntUp ist 32-Bit-monoton (LoRaWAN-Spec, Server rekonstruiert
+MSB/LSB); Wraparound über Vicki-Lebensdauer ausgeschlossen. fcnt ist
+bereits in `sensor_reading.fcnt` persistiert (Migration 0002, Sprint 5)
+mit Index `ix_sensor_reading_device_time` auf `(device_id, time)`.
+
+## Entscheidung
+
+1. **Reboot-Diskriminator:**
+   ```
+   is_reboot_frame(prior_fcnt, current_fcnt) := True
+       :⇔ prior_fcnt is not None
+          ∧ current_fcnt < prior_fcnt
+          ∧ current_fcnt < FCNT_REBOOT_THRESHOLD
+   ```
+   Konstante `FCNT_REBOOT_THRESHOLD = 10` schützt gegen Out-of-Order-
+   Frames innerhalb des Normalbetriebs (Late-Arrivals haben nach
+   > 10 Uplinks Uptime nahezu nie fcnt < 10). `prior_fcnt`
+   stammt aus `sensor_reading` via
+   `SELECT fcnt WHERE device_id=$1 AND time < $received_at
+    ORDER BY time DESC LIMIT 1` — nutzt
+   `ix_sensor_reading_device_time`, keine neue Spalte, **keine
+   Migration**.
+
+2. **Reboot-Gate** in `device_adapter.handle_uplink_for_override`:
+   nach `detect_user_override` + `room_id`-Lookup, **vor** Block-/
+   OCCUPIED-/Window-Gate. Bei `is_reboot_frame == True`:
+   - **KEIN** `ManualOverride`-Insert (`source=DEVICE`-Adopt
+     übersprungen).
+   - Redis-Flag `resync_pending:{dev_eui}` mit TTL 1 h
+     (`services/resync_flag.mark_pending`).
+   - Off-pipeline `event_log`-Eintrag (AE-58 §9-Pattern,
+     synthetische `evaluation_id`), Layer
+     `EventLogLayer.REBOOT_RESYNC`, Reason
+     `CommandReason.REBOOT_RESYNC`, `details` mit
+     `prior_fcnt` / `current_fcnt` / `uplink_setpoint` /
+     `resync_flag_set`.
+
+3. **Re-Sync-Konsum (Weg B, Hysterese-Bypass einmalig)** in
+   `engine_tasks._dispatch_downlinks_per_zone`: pro Vicki atomarer
+   `GETDEL`-Check (`resync_flag.consume`) im Hysterese-Loop. Flag
+   wird **immer** konsumiert wenn gesetzt (Cleanup); nur wenn die
+   Hysterese ohne Flag geskippt hätte, wird die Entscheidung auf
+   `should_send=True` mit `reason=reboot_resync` umgeschrieben →
+   genau **ein** Downlink des aktuellen Engine-Sollwerts, danach
+   Flag weg. `control_command.reason = REBOOT_RESYNC` für den
+   forcierten Downlink.
+
+4. **Schema-Erweiterungen** rein Python-side:
+   - `CommandReason.REBOOT_RESYNC = "reboot_resync"`
+   - `EventLogLayer.REBOOT_RESYNC = "reboot_resync"`
+
+   Migrationsfreigemacht durch §5.45-Korrektur: das initiale Schema
+   (`0001_initial_domain_model`) legt `reason`/`layer` als nackte
+   `VARCHAR(30)` ohne `CHECK` an — neue kurze Enum-Werte funktionieren
+   ohne Migration. Konsistent mit
+   `DEVICE_BLOCKED_VACANT/_WINDOW/_ROOM_BLOCKED` (Sprint 12a/12c) und
+   `MANUAL_OVERRIDE_BLOCKED`.
+
+5. **AE-45-Pfad bleibt unberührt:** Echte Drehring-Overrides (fcnt
+   monoton + Setpoint-Diff außerhalb Toleranz + außerhalb Ack-Window)
+   laufen unverändert durch `detect_user_override` → Gates →
+   `override_service.create(source=DEVICE)`. Reboot-Gate filtert nur
+   die Reboot-Klasse.
+
+## Konsequenzen
+
+- Fehlmodus M1 (Drift-Adopt nach Batteriewechsel) eliminiert für jeden
+  Vicki, dessen Reboot-Frame fcnt < 10 ist (LoRaWAN-Cold-Boot-Default).
+- Prompter Re-Sync auf Engine-Soll im selben Evaluate-Flow (Subscriber
+  schedult `evaluate_room.delay()` für den Raum direkt nach
+  `_persist_uplink`; Worker liest Flag im
+  `_dispatch_downlinks_per_zone`-Loop). Race-Klausel: wenn Worker den
+  Task vor Subscriber-Flag-Commit picked, wird das Flag erst im
+  nächsten 60-s-Beat-Tick konsumiert (≤ 1 Tick statt ≤ 6 h Drift,
+  funktional unkritisch).
+- Audit-Sichtbarkeit: jeder Reboot-Skip schreibt einen `event_log`-Eintrag
+  (Layer `REBOOT_RESYNC`). Behebt für diesen Pfad den Block-Audit-Gap,
+  den B-15a-3 sonst breiter behandeln müsste. Generelle Block-Audit-
+  Lücke bleibt separater Sprint.
+- Massen-Batteriewechsel (100 Vickis tagweise im Sprint 17 Pre-Pairing):
+  100 forcierte Downlinks verteilt über die Vicki-Heartbeat-Reihenfolge —
+  Duty-Cycle-fähig, kein Sturm wie bei einem sofortigen Worker-Loop
+  (Weg A wurde deshalb verworfen).
+- Trade-off: zusätzlicher indizierter `sensor_reading`-Read pro Uplink
+  (~1 ms). Bei ~100 Vickis und 5–15 min Heartbeat: vernachlässigbar.
+
+## Verworfen
+
+- **Migration `Device.last_fcnt`:** spart den `sensor_reading`-Read, aber
+  Schema-Aufwand + Backfill stehen in keinem Verhältnis zum Lookup-Cost.
+  Konsistent mit §5.44 (Detail in JSONB statt Schema-Migration, wo
+  möglich).
+- **Reboot-Gate vor `detect_user_override`:** würde Flag auch für
+  Reboot-Frames ohne Setpoint-Diff setzen → 100 redundante Downlinks
+  bei harmlosem Power-Cycle. Heutige Platzierung (nach
+  `detect_user_override`) löst nur Re-Syncs aus, wo wirklich gedriftet
+  wurde.
+- **Reboot-Gate in `mqtt_subscriber`:** Schichtbruch. Adapter-Logik
+  gehört in `device_adapter`, der Subscriber bleibt reiner Persistenz-
+  und Trigger-Pfad.
+- **Weg A (Sofort-Downlink außerhalb Hysterese-Gate):** würde Massen-
+  Batteriewechsel zu Burst-Sturm machen, ChirpStack-Queue + LoRaWAN-
+  Duty-Cycle wären ein Risiko.
+- **Wraparound-Sonderfall im Diskriminator:** 32-Bit-fcnt
+  (ChirpStack-Server-rekonstruiert) ist über Vicki-Lebensdauer
+  unmöglich zu überrollen. Code bleibt einfacher; falls ein Vendor in
+  Zukunft 16-Bit-fcnt liefert, fügt ein separater Sprint die Margin-
+  Klausel `prior >= 65535 - MARGIN → kein Reboot` nach.
+
+
 **Querverweise:** AE-51 §4.1, AE-52, AE-58, Sprint 12b + 14b (PR #191), §5.69.

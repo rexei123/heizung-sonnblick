@@ -138,6 +138,12 @@ class CommandReason(enum.StrEnum):
     # Drehring wird silent geskippt. Off-pipeline Audit via
     # ``EventLogLayer.MANUAL_OVERRIDE_BLOCKED``.
     DEVICE_BLOCKED_ROOM_BLOCKED = "device_blocked_room_blocked"
+    # Sprint 15c (AE-63): Vicki-Reboot via fcnt-Reset erkannt -> Auto-
+    # Detect-Adopt uebersprungen, Re-Sync auf Engine-Soll im naechsten
+    # Engine-Tick erzwungen. Off-pipeline Audit via
+    # ``EventLogLayer.REBOOT_RESYNC``. Auch fuer den erzwungenen
+    # Re-Sync-Downlink im ``control_command.reason``.
+    REBOOT_RESYNC = "reboot_resync"
 
 
 class ScenarioScope(enum.StrEnum):
@@ -192,3 +198,8 @@ class EventLogLayer(enum.StrEnum):
     # Pre-Insert-Skip (VACANT-Raum oder Fenster offen). Erzeugt synthetische
     # evaluation_id, gehoert KEINER Engine-Tick-Evaluation an.
     MANUAL_OVERRIDE_BLOCKED = "manual_override_blocked"
+    # Sprint 15c (AE-63): off-pipeline Audit-Schicht fuer device_adapter
+    # Reboot-Gate. Vicki-Reboot via fcnt-Reset erkannt, Auto-Detect-Adopt
+    # uebersprungen + Redis-Re-Sync-Flag gesetzt. Synthetische
+    # evaluation_id (uuid4), gehoert KEINER Engine-Tick-Evaluation an.
+    REBOOT_RESYNC = "reboot_resync"
