@@ -35,6 +35,7 @@ from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.rules.engine import (
+    HysteresisDecision,
     _last_command_for_device,
     _last_command_for_room,
     hysteresis_decision,
@@ -42,7 +43,7 @@ from heizung.rules.engine import (
 from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
-from heizung.services import engine_lock
+from heizung.services import engine_lock, resync_flag
 from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.downlink_adapter import send_setpoint
 
@@ -424,6 +425,30 @@ async def _dispatch_downlinks_per_zone(
                 prev_issued_at=prev_at,
                 new_setpoint_c=zone_target_setpoint_c,
             )
+
+            # Sprint 15c (AE-63): Reboot-Re-Sync-Bypass. ``resync_flag.consume``
+            # ist atomarer GETDEL — gibt True zurueck wenn das Flag gesetzt
+            # war (und ist jetzt geloescht). Konsumiert unabhaengig von
+            # ``dev_decision.should_send`` (cleanup, vermeidet doppelten
+            # Re-Sync im naechsten Tick wenn die Hysterese ohnehin senden
+            # wuerde). Nur wenn die Hysterese skippen wollte UND das Flag
+            # gesetzt war, ueberschreiben wir die Entscheidung auf
+            # forced-send mit ``reason=reboot_resync``.
+            flag_was_set = await asyncio.to_thread(resync_flag.consume, dev.dev_eui)
+            resync_forced = False
+            if flag_was_set and not dev_decision.should_send:
+                resync_forced = True
+                dev_decision = HysteresisDecision(
+                    should_send=True,
+                    reason=f"reboot_resync (was: {dev_decision.reason})",
+                )
+                logger.info(
+                    "reboot_resync forced dev_eui=%s zone_id=%s setpoint_c=%s",
+                    dev.dev_eui,
+                    zone.id,
+                    zone_target_setpoint_c,
+                )
+
             if not dev_decision.should_send:
                 skipped_count += 1
                 per_device_results.append(
@@ -437,10 +462,11 @@ async def _dispatch_downlinks_per_zone(
                     }
                 )
                 continue
+            cc_reason = CommandReason.REBOOT_RESYNC if resync_forced else base_reason
             cc = ControlCommand(
                 device_id=dev.id,
                 target_setpoint=Decimal(zone_target_setpoint_c),
-                reason=base_reason,
+                reason=cc_reason,
                 rule_context=json.dumps(
                     {
                         "evaluation_id": str(eval_id),

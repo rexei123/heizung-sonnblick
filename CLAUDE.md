@@ -1975,6 +1975,73 @@ zweiter Versuch via `--body-file` lief sauber durch.
 **Querverweis:** §5.3 (PowerShell-Encoding/Escaping-Familie, BOM-Falle),
 §5.6 (Befehl-Trennung), Sprint 14c Phase-0 (PR #193).
 
+### 5.71 Vicki kommt nach Reboot mit gedriftetem Setpoint + fcnt-Reset (Sprint 15a/15c)
+
+Beobachtet 2026-05-28 (Sprint 15a Live-Test) und behoben in Sprint 15c
+(AE-63): Ein Vicki, der nach Batteriewechsel oder Power-Cycle wieder
+online kommt, hat **drei** beobachtbare Hardware-Eigenheiten:
+
+1. **fcnt-Reset:** LoRaWAN-Frame-Counter startet wieder bei `0..n`
+   (Vicki persistiert FCntUp nicht über den Boot). Erster Frame nach
+   Reboot hat `fcnt = 0`, zweiter `1`, usw. Tagealte Pre-Reboot-Frames
+   in `sensor_reading` haben dagegen vierstellige fcnt-Werte
+   (z. B. 4338).
+2. **Setpoint-Drift:** Der interne Vicki-Setpoint nach Reboot ist der
+   letzte vor dem Reboot gespeicherte Drehring-Wert ODER der Werks-
+   Default — er weicht typischerweise mehrere Grad vom Engine-Sollwert
+   ab. Das ist kein neuer Drehring-Akt, sondern eine Drift-Adoption
+   des alten Werts.
+3. **Auto-Detect-Trigger:** Der seit Sprint 9.9 (AE-45) etablierte
+   Auto-Detect-Pfad in `device_adapter.handle_uplink_for_override`
+   sieht "Uplink-Setpoint ≠ letzter Engine-Send" und würde diesen
+   Wert als `source=DEVICE`-Override mit `expires_at=next_checkout_at`
+   adoptieren (M1: Zimmer heizt bis zu 7 Tage nicht nach).
+
+**Konsequenzen für Code-Änderungen:**
+
+- **Reboot-Gate in `device_adapter`** ist ab AE-63 Pflicht-Bestandteil
+  des Auto-Detect-Pfads. Vor jeder neuen Logik, die DEVICE-Overrides
+  schreibt, prüfen, dass der Reboot-Gate vorher greift (Reihenfolge:
+  detect_user_override → room_id → Reboot-Gate → Block/OCCUPIED/Window).
+- **fcnt-Persistenz lebt in `sensor_reading.fcnt`** (Migration 0002).
+  Kein `Device.last_fcnt`, kein Redis-Counter. Andere
+  Reboot-/Replay-Logik in zukünftigen Sprints nutzt denselben Pfad
+  (`SELECT fcnt WHERE device_id=$1 AND time < $received_at ORDER BY
+  time DESC LIMIT 1` über `ix_sensor_reading_device_time`).
+- **Re-Sync-Flag** `resync_pending:{dev_eui}` in Redis (TTL 1 h) ist
+  die einzige Cross-Process-State zwischen Subscriber-Reboot-Erkennung
+  und Worker-Hysterese-Bypass. Neue Bypass-Mechaniken sollten dem
+  gleichen Pattern folgen (`services/resync_flag` als Vorlage —
+  `mark_pending` / atomares `consume` via GETDEL).
+- **Massen-Reboots** (Pre-Pairing Sprint 17, Hotel-Strom-Ereignis) sind
+  über den Hysterese-Bypass-Pfad Duty-Cycle-fähig: pro Vicki ein
+  forcierter Downlink, gestaffelt über die Heartbeat-Reihenfolge. Kein
+  Sofort-Burst (Weg A, AE-63 §Verworfen).
+
+**Test-Patterns:**
+
+- Pure-Function-Tests für `is_reboot_frame` (Schwelle, Edge-Cases) ohne
+  DB / Redis (`tests/test_fcnt_reboot_drift.py`).
+- DB-Integration für `_get_prior_fcnt` + Reboot-Gate-End-to-End.
+- `_FakeRedis` mit `getdel`-Support für `resync_flag.consume`-Tests —
+  Vorlage in `test_fcnt_reboot_drift.py`, kann als zweiter Konsument
+  neben `_FakeRedis` aus `test_engine_lock.py` stehen, bis ein
+  Hygiene-Sprint die beiden konsolidiert.
+
+**Querverweise:**
+
+- AE-63 (Master-ADR Reboot-Diskriminator + Re-Sync).
+- AE-45 (Drehring-Auto-Detect, unangetastet).
+- AE-58 §9 (Off-pipeline-Audit-Pattern mit synthetischer
+  `evaluation_id` — Reboot-Audit nutzt dasselbe Muster).
+- AE-09 / AE-32 (Hysterese — der Bypass-Punkt).
+- §5.21 (Hardware-Realität via Payload-Byte, nicht Transport-Feld —
+  analoge Lesson aus Sprint 9.10c).
+- §5.44 (Per-Entity-Sub-Audits ohne neue PK-Migration — gleiche
+  Schema-Diät-Linie).
+- `docs/SESSION-START.md` "Kritische Hardware-Befunde" verlinkt
+  diese Lesson plus AE-63.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

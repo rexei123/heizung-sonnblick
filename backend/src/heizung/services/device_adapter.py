@@ -22,6 +22,7 @@ Reply in diesem Fenster ist erwartet -> kein Override.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import timedelta
@@ -38,8 +39,9 @@ from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
+from heizung.models.sensor_reading import SensorReading
 from heizung.rules.window_state import detect_open_window_zones
-from heizung.services import override_service
+from heizung.services import override_service, resync_flag
 from heizung.services.occupancy_service import derive_room_status, next_active_checkout
 
 if TYPE_CHECKING:
@@ -52,6 +54,96 @@ logger = logging.getLogger(__name__)
 ACK_WINDOW_SECONDS = 60
 TOLERANCE_FPORT1 = Decimal("0.6")
 TOLERANCE_FPORT2 = Decimal("0.1")
+
+# Sprint 15c (AE-63): Reboot-Diskriminator-Schwelle. Vicki startet nach
+# Reboot bei fcnt=0 und zaehlt einzeln hoch. ``current < FCNT_REBOOT_THRESHOLD``
+# kombiniert mit ``current < prior`` ist robuste Reboot-Erkennung — Late-
+# Arrival-Out-of-Order-Frames haben nach > 10 Frames Uptime nahezu nie
+# einen fcnt unterhalb dieser Schwelle. 32-Bit-Wraparound ist ueber Vicki-
+# Lebensdauer ausgeschlossen (Sprint-15c-Task-0-Beleg).
+FCNT_REBOOT_THRESHOLD = 10
+
+
+def is_reboot_frame(prior_fcnt: int | None, current_fcnt: int) -> bool:
+    """Erkennt Vicki-Reboot-Frame anhand fcnt-Reset (Sprint 15c, AE-63).
+
+    True wenn ``current_fcnt < prior_fcnt`` UND
+    ``current_fcnt < FCNT_REBOOT_THRESHOLD``. ``prior_fcnt is None``
+    (kein Vorframe in ``sensor_reading``) -> False, weil ohne Vorgaenger
+    nicht entscheidbar.
+
+    Reine Funktion — keine DB- oder Redis-Zugriffe, deterministisch
+    testbar.
+
+    :param prior_fcnt: fcnt des unmittelbaren Vorgaenger-Frames.
+    :param current_fcnt: fcnt des aktuellen Uplinks.
+    """
+    if prior_fcnt is None:
+        return False
+    return current_fcnt < prior_fcnt and current_fcnt < FCNT_REBOOT_THRESHOLD
+
+
+async def _get_prior_fcnt(
+    session: AsyncSession,
+    device_id: int,
+    received_at: datetime,
+) -> int | None:
+    """fcnt des unmittelbaren Vorgaenger-Frames aus ``sensor_reading``.
+
+    Nutzt ``ix_sensor_reading_device_time`` (Index (device_id, time) aus
+    Migration 0001). ``time < received_at`` macht den Lookup eindeutig in
+    beiden Subscriber-Pfaden — Periodic (aktueller Frame ist bereits
+    committed) und Reply (Frame wird gar nicht ins ``sensor_reading``
+    geschrieben). Keine neue Spalte, keine Migration.
+    """
+    stmt = (
+        select(SensorReading.fcnt)
+        .where(SensorReading.device_id == device_id)
+        .where(SensorReading.time < received_at)
+        .order_by(SensorReading.time.desc())
+        .limit(1)
+    )
+    return await session.scalar(stmt)
+
+
+async def _write_reboot_resync_event_log(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    device_id: int,
+    received_at: datetime,
+    prior_fcnt: int | None,
+    current_fcnt: int,
+    uplink_setpoint: Decimal,
+    flag_set: bool,
+) -> None:
+    """Off-pipeline ``REBOOT_RESYNC``-Audit-Eintrag (Sprint 15c, AE-63).
+
+    Pattern analog ``_write_blocked_event_log`` (AE-58 §9): synthetische
+    ``evaluation_id`` (uuid4), gehoert keiner Engine-Tick-Eval. ``details``
+    traegt fcnt-Uebergang plus ``flag_set``-Beleg, damit im Live-Bug-
+    Verfolg sichtbar ist, ob der Re-Sync-Flag erfolgreich in Redis
+    landete oder ob Redis offline war.
+    """
+    entry = EventLog(
+        time=received_at,
+        room_id=room_id,
+        evaluation_id=uuid.uuid4(),
+        layer=EventLogLayer.REBOOT_RESYNC,
+        device_id=device_id,
+        setpoint_in=None,
+        setpoint_out=None,
+        reason=CommandReason.REBOOT_RESYNC,
+        details={
+            "source": "device_adapter",
+            "prior_fcnt": prior_fcnt,
+            "current_fcnt": current_fcnt,
+            "uplink_setpoint": str(uplink_setpoint),
+            "resync_flag_set": flag_set,
+        },
+    )
+    session.add(entry)
+    await session.flush()
 
 
 async def detect_user_override(
@@ -183,12 +275,25 @@ async def handle_uplink_for_override(
     uplink_target_temp: Decimal,
     fport: int,
     received_at: datetime,
+    *,
+    dev_eui: str | None = None,
+    current_fcnt: int | None = None,
 ) -> ManualOverride | None:
     """Vollstaendiger Pfad: Detection + Pre-Insert-Gates + Override-Erzeugung.
 
     Aufrufer: ``mqtt_subscriber`` nach erfolgreicher Reading-Persistenz.
-    Gate-Reihenfolge (AE-58):
+    Gate-Reihenfolge (AE-58 + AE-63):
 
+    pre-r) **Reboot-Gate** (Sprint 15c, AE-63): Vicki-Reboot via fcnt-Reset
+       erkannt (``current_fcnt < prior_fcnt`` UND
+       ``current_fcnt < FCNT_REBOOT_THRESHOLD``) -> silent skip + Redis-Re-
+       Sync-Flag ``resync_pending:{dev_eui}`` (TTL 1 h) +
+       ``REBOOT_RESYNC``-event_log mit fcnt-Uebergang. Der Re-Sync-Flag
+       wird im naechsten Engine-Tick im
+       ``engine_tasks._dispatch_downlinks_per_zone``-Loop konsumiert
+       (Hysterese-Bypass fuer genau EINEN Downlink). Greift nur wenn
+       ``dev_eui`` und ``current_fcnt`` gesetzt sind (Backward-Compat fuer
+       Aufrufer ohne fcnt-Kontext).
     pre-a) **Block-Gate** (Sprint 12c): ``room.guest_override_blocked``
        gesetzt -> silent skip + ``MANUAL_OVERRIDE_BLOCKED``-event_log-
        Eintrag mit ``reason=DEVICE_BLOCKED_ROOM_BLOCKED``. Spiegelt das
@@ -215,8 +320,8 @@ async def handle_uplink_for_override(
     Returns:
         ``ManualOverride`` bei erfolgreicher Anlage.
         ``None`` bei: kein Engine-Intent, Ack-Window, innerhalb Toleranz,
-        kein Room-Mapping, Block-Gate-Skip, OCCUPIED-Gate-Skip,
-        Window-Gate-Skip.
+        kein Room-Mapping, Reboot-Gate-Skip, Block-Gate-Skip,
+        OCCUPIED-Gate-Skip, Window-Gate-Skip.
     """
     user_setpoint = await detect_user_override(
         session,
@@ -235,6 +340,41 @@ async def handle_uplink_for_override(
             device_id,
         )
         return None
+
+    # Gate (pre-r): Reboot-Gate (Sprint 15c, AE-63). Vicki-Reboot via
+    # fcnt-Reset erkannt -> Adopt ueberspringen + Re-Sync-Flag setzen +
+    # event_log. Greift nur wenn dev_eui und current_fcnt vorhanden sind
+    # (Tests / Legacy-Aufrufer ohne fcnt-Kontext laufen wie bisher).
+    if dev_eui is not None and current_fcnt is not None:
+        prior_fcnt = await _get_prior_fcnt(session, device_id, received_at)
+        if is_reboot_frame(prior_fcnt, current_fcnt):
+            # Redis-mark_pending ist sync -> asyncio.to_thread, damit der
+            # Event-Loop nicht blockiert. Failure (Redis offline) ist
+            # akzeptiert: flag_set landet im event_log fuer Diagnose; der
+            # naechste 60-s-Beat-Tick wuerde den Re-Sync trotzdem ausloesen
+            # sobald der Vicki nach Heartbeat-Ablauf ohnehin gesendet bekommt.
+            flag_set = await asyncio.to_thread(resync_flag.mark_pending, dev_eui)
+            logger.info(
+                "reboot-frame erkannt dev_eui=%s device_id=%s prior_fcnt=%s "
+                "current_fcnt=%s uplink_setpoint=%s resync_flag_set=%s",
+                dev_eui,
+                device_id,
+                prior_fcnt,
+                current_fcnt,
+                user_setpoint,
+                flag_set,
+            )
+            await _write_reboot_resync_event_log(
+                session,
+                room_id=room_id,
+                device_id=device_id,
+                received_at=received_at,
+                prior_fcnt=prior_fcnt,
+                current_fcnt=current_fcnt,
+                uplink_setpoint=user_setpoint,
+                flag_set=flag_set,
+            )
+            return None
 
     # Gate (pre-a): Sperre-Check (Sprint 12c, AE-58). Spiegelt den Block-Gate
     # in ``override_service.create``. Wenn der Raum aus dem Mapping nicht

@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-05-30
+**Stichtag:** 2026-06-01
 **Letzter Tag:** `v0.1.19e-hygiene-rest` (Sprint 14e, develop-HEAD `112b827`, PR #201, gemerged 2026-05-30, §2bd). Davor: `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, PR #198, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 14e Hygiene-Rest abgeschlossen 2026-05-30 (§2bd). Nächster Sprint: offen (Strategie-Chat).
+**Aktueller Sprint:** Sprint 15c fcnt-Reboot-Drift-Fix (§2be) — Code-Stand 2026-06-01, Branch `feature/15c-fcnt-reboot-drift`, PR pending (NACH Merge: Live-Verify + Tag `v0.1.20-fcnt-reboot-drift`). Sprint 14e Hygiene-Rest davor abgeschlossen 2026-05-30 (§2bd).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3072,6 +3072,84 @@ Hotelier-Entscheid Option 1 Status Quo). PR-Stop + Tag-Stop ausstehend
 UI), §5.66 (Multi-Badge-Slots — R-B Single-Zelle bewusst gewählt), §5.67
 (Live-Verify pending), Phase-0-Brief `2026-05-28-sprint-14d-phase0-hygiene.md`.
 
+## 2be. Sprint 15c fcnt-Reboot-Drift-Fix (2026-06-01, Code-Stand, PR pending)
+
+**Ziel:** Vicki-Reboot (Batteriewechsel, Power-Cycle) wird nicht mehr als
+Drehring-Override adoptiert (Fehlmodus M1 aus Sprint-15a-Diagnose).
+Diskriminator: `current_fcnt < prior_fcnt` UND
+`current_fcnt < FCNT_REBOOT_THRESHOLD (=10)`. prior_fcnt aus
+`sensor_reading.fcnt` (Migration 0002, `ix_sensor_reading_device_time` —
+keine neue Spalte, keine Migration). Reboot-Gate in
+`device_adapter.handle_uplink_for_override` schreibt `event_log`-Eintrag
+(Layer `REBOOT_RESYNC`) + Redis-Re-Sync-Flag `resync_pending:{dev_eui}`
+(TTL 1 h). `engine_tasks._dispatch_downlinks_per_zone` konsumiert das
+Flag atomar (GETDEL) und überschreibt Hysterese-Skip einmalig auf
+`should_send=True` mit `reason=REBOOT_RESYNC`. AE-45-Pfad (echter
+Drehring, fcnt monoton) bleibt unangetastet.
+
+**Tag (vorgeschlagen):** `v0.1.20-fcnt-reboot-drift` (NACH Merge + Live-
+Verify, §5.67).
+
+**Tasks:**
+- T0 Read-only-Belege (A1 fcnt-Breite, A2 Call-Order, A3 einzige
+  DEVICE-Override-Stelle) — alle drei Annahmen halten, kein Pflicht-Stop.
+- T1 Pure-Funktion `is_reboot_frame` + `_get_prior_fcnt` + Konstante
+  `FCNT_REBOOT_THRESHOLD` in `device_adapter.py`.
+- T2 Reboot-Gate in `handle_uplink_for_override` (neue Parameter
+  `dev_eui`, `current_fcnt`; off-pipeline Audit
+  `_write_reboot_resync_event_log` mit synthetischer `evaluation_id`,
+  AE-58 §9-Pattern; `mqtt_subscriber` reicht beide Werte durch).
+- T3 Re-Sync-Consume in `engine_tasks._dispatch_downlinks_per_zone`
+  (`flag_was_set` via atomarem GETDEL, Bypass nur wenn Hysterese
+  geskippt hätte, sonst nur Cleanup).
+- T4 Tests `tests/test_fcnt_reboot_drift.py`: 8 Pure-Funktion (Threshold-
+  Boundary, Out-of-Order, Cold-Boot, Monotonie), 3 resync_flag-Helper,
+  3 `_get_prior_fcnt`-DB, 3 Reboot-Gate-Integration, 3 Dispatch-Consume.
+- T5 Doku: AE-63, CLAUDE.md §5.71, SESSION-START.md Hardware-Befunde,
+  STATUS-Eintrag, B-15a-1 schließen.
+
+**Schema-Änderungen (rein Python):** `CommandReason.REBOOT_RESYNC` +
+`EventLogLayer.REBOOT_RESYNC`. Keine Migration (`event_log.reason`/
+`layer` + `control_command.reason` sind im 0001-Schema als
+`String(30)` ohne `CHECK` angelegt — §5.45 ist überstreng).
+
+**Neues Modul:** `services/resync_flag.py` (Pattern analog
+`engine_lock`: synchroner Redis-Client via
+`asyncio.to_thread`-Wrapper, `mark_pending` + atomares `consume` via
+`GETDEL`).
+
+**Toolchain (lokal grün, 2026-06-01):**
+- `ruff check`: 0 Befunde
+- `ruff format --check`: 179 Files OK
+- `mypy --strict src`: 0 issues in 103 Files
+- pytest ohne DB (`ENVIRONMENT=test ALLOW_DEFAULT_SECRETS=1`):
+  268 passed, 310 skipped, 0 fail
+- pytest mit DB (TimescaleDB via `heizung-sonnblick-db-1` auf 5432):
+  **577 passed, 1 xfailed**, neue Datei
+  `test_fcnt_reboot_drift.py` 20/20 grün (§5.50 Lokal-DB-Verify-Pflicht
+  erfüllt)
+
+**Backlog-Auflösung:**
+- **B-15a-1** (Reboot-Drift-Detection per fcnt-Reset) → **erledigt**.
+- **B-15a-3** (AE-45-Block-Pfad lückenlos auditieren) bleibt offen
+  als separater Sprint — Reboot-Pfad ist jetzt audit-sichtbar
+  (`REBOOT_RESYNC`-Layer), aber der ursprüngliche Befund umfasst
+  auch frame-innerhalb-Toleranz / im-Ack-Window-Blöcke ohne
+  Audit-Spur. Out-of-Scope für 15c.
+
+**Pflicht-Stops genutzt:** keiner. T0-Belege halten alle drei Annahmen,
+keine Brief-Abweichung. Stop vor PR-Merge + Stop vor Tag stehen aus
+(Cowork-Begehung + Live-Verify auf heizung-test nach Merge).
+
+**Branch:** `feature/15c-fcnt-reboot-drift`.
+
+**Querverweise:** AE-63 (Master), AE-45 (Drehring unverändert), AE-58 §9
+(off-pipeline Audit), AE-09/AE-32 (Hysterese — der Bypass-Punkt),
+CLAUDE.md §5.71 (Hardware-Lesson), §5.50 (Lokal-DB-Verify-Pflicht),
+§5.44 (Per-Entity-Audit ohne PK-Migration — analoge Diät), §5.43
+(Phase-0-grep-Belege), §5.45 (Enum-Length-Check, hier durch
+nacktes-VARCHAR-Schema entschärft), §5.70 (PR-Body via `--body-file`).
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -3318,7 +3396,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 
 | ID | Inhalt | Priorität |
 |---|---|---|
-| B-15a-1 | **Reboot-Drift-Detection per fcnt-Reset** (BLOCK D.5). Struktureller Defekt im AE-45-Pfad: kein Reboot-Schutz, kein fcnt-Check in `services/device_adapter.py`. Bei `guest_override_blocked=false` UND OCCUPIED wird ein Reboot-Frame als echter Gast-Setpoint-Change adoptiert (Override mit Drift-Wert, 7-Tage-Expiry). Default-Exposition: 43/45 Räume (Q-D5, 2026-05-31). Winter-Worst-Case: bis zu 7 Tage kein Nachheizen. Fix-Kern: 1 Diskriminator-Funktion (`is_reboot_frame(uplink, last_fcnt)`) + 1 Gate-Einschub vor Gate 0 in `handle_uplink_for_override` + Pytest-Cases. Leitplanke D.5.2 (kein aggressives Dauer-Korrigieren gegen Vicki-Setpoint — würde echte Gast-Drehring-Overrides zerstören). Sprint-Größe S/M. **Vor Heizperiode 2026/27 schneiden.** | 🔴 VORRANG vor Heizperiode |
+| B-15a-1 | **Reboot-Drift-Detection per fcnt-Reset** (BLOCK D.5). | ✅ erledigt 2026-06-01 (Sprint 15c, AE-63, Branch `feature/15c-fcnt-reboot-drift`, §2be). Diskriminator `is_reboot_frame(prior_fcnt, current_fcnt)` + Reboot-Gate in `device_adapter.handle_uplink_for_override` + Re-Sync-Flag (Hysterese-Bypass im `engine_tasks._dispatch_downlinks_per_zone`) + off-pipeline Audit `REBOOT_RESYNC`. Keine Migration. AE-45-Pfad unangetastet. 20 neue Tests grün lokal mit DB. |
 | B-15a-2 | **AE-17 als superseded markieren** (BLOCK H2). AE-17-Text in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:197-205` beschreibt eine `uplinks`-Hypertable mit JSONB-Payload — existiert real nicht. Sprint 5 (STATUS §2g.5.7) hat `sensor_reading` wiederverwendet (`models/sensor_reading.py:30-73`, Migration `0001_initial_domain_model.py:263-289` legt sie als Hypertable an, keine `uplinks`-Migration existiert). Separater `chore/`-Doku-PR mit ADR-Markierung „Status: Superseded — siehe `sensor_reading`-Schema". Nicht in andere PRs mischen. | 🟡 |
 | B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). Q-D4 zeigt 0 `MANUAL_OVERRIDE_BLOCKED`-event_log-Rows trotz wirkendem `guest_override_blocked=true`-Block über Stunden. Vermutete Ursache: `_write_blocked_event_log` (`device_adapter.py:143-177`) wird nur dann gerufen, wenn `detect_user_override` einen User-Setpoint gefunden hat — Frames innerhalb Toleranz oder im Ack-Window passieren das Block-Gate ohne Audit-Spur. Konsequenz: Block-Wirkung unsichtbar im event_log, Operator kann nicht beziffern, wie oft der Block tatsächlich wirkte. Eigener Hygiene-Sprint-Brief, klein. Mit B-15a-1 kombinierbar (gleiches Code-Modul). | 🟡 |
 

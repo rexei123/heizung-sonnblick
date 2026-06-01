@@ -125,10 +125,17 @@ Inhalte — die Wahrheit steht in den verlinkten Dokumenten.
 
 - **CLAUDE.md §5.27** — Open-Window-Detection im Default disabled,
   Algorithmus-Trägheit, Sommer-Test-Strategie
+- **CLAUDE.md §5.71** — Vicki kommt nach Reboot mit gedriftetem
+  Setpoint + fcnt-Reset (Sprint 15a/15c, AE-63). Drei-Klassen-Logik
+  (Reboot/Drehring/Normal), Re-Sync-Flag, Hysterese-Bypass einmalig.
 - **AE-45 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Auto-Detect-Override
   bei Hand-Drehung am Vicki
 - **AE-47 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Hardware-First-Window-
   Detection mit drei Trigger-Quellen
+- **AE-63 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Reboot-Diskriminator
+  über fcnt-Reset, Off-pipeline-Audit `REBOOT_RESYNC`, Re-Sync-Flag
+  in Redis (TTL 1 h), Hysterese-Bypass via
+  `engine_tasks._dispatch_downlinks_per_zone`.
 - **`docs/vendor/mclimate-vicki/README.md`** — Hersteller-Doku-Stand
   2026-05-09 mit FW-Tabelle und Command-Cheat-Sheet
 
