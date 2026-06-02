@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-06-01
 **Letzter Tag:** `v0.1.19e-hygiene-rest` (Sprint 14e, develop-HEAD `112b827`, PR #201, gemerged 2026-05-30, §2bd). Davor: `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, PR #198, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15c fcnt-Reboot-Drift-Fix (§2be) — Code-Stand 2026-06-01, Branch `feature/15c-fcnt-reboot-drift`, PR pending (NACH Merge: Live-Verify + Tag `v0.1.20-fcnt-reboot-drift`). Sprint 14e Hygiene-Rest davor abgeschlossen 2026-05-30 (§2bd).
+**Aktueller Sprint:** Sprint 15c fcnt-Reboot-Drift-Fix (§2be) — abgeschlossen 2026-06-02, Tag `v0.1.19f-fcnt-reboot-drift` (annotated, zeigt auf develop-HEAD `45e7f6e` = PR #204 squash-Merge). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f. Sprint 14e Hygiene-Rest davor abgeschlossen 2026-05-30 (§2bd).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3072,7 +3072,7 @@ Hotelier-Entscheid Option 1 Status Quo). PR-Stop + Tag-Stop ausstehend
 UI), §5.66 (Multi-Badge-Slots — R-B Single-Zelle bewusst gewählt), §5.67
 (Live-Verify pending), Phase-0-Brief `2026-05-28-sprint-14d-phase0-hygiene.md`.
 
-## 2be. Sprint 15c fcnt-Reboot-Drift-Fix (2026-06-01, Code-Stand, PR pending)
+## 2be. Sprint 15c fcnt-Reboot-Drift-Fix (2026-06-01/02, abgeschlossen)
 
 **Ziel:** Vicki-Reboot (Batteriewechsel, Power-Cycle) wird nicht mehr als
 Drehring-Override adoptiert (Fehlmodus M1 aus Sprint-15a-Diagnose).
@@ -3087,8 +3087,12 @@ Flag atomar (GETDEL) und überschreibt Hysterese-Skip einmalig auf
 `should_send=True` mit `reason=REBOOT_RESYNC`. AE-45-Pfad (echter
 Drehring, fcnt monoton) bleibt unangetastet.
 
-**Tag (vorgeschlagen):** `v0.1.20-fcnt-reboot-drift` (NACH Merge + Live-
-Verify, §5.67).
+**Tag:** `v0.1.19f-fcnt-reboot-drift` (annotated, gesetzt 2026-06-02
+NACH Live-Verify §5.67, zeigt auf develop-HEAD `45e7f6e` = PR #204
+squash-Merge). Tag-Namens-Korrektur: ursprünglich `v0.1.20-fcnt-reboot-
+drift` vorgeschlagen, dann revidiert — `v0.1.20-arc42-konsolidierung`
+ist in `docs/SPRINT-PLAN.md:1328,1479` für Sprint 14b reserviert, daher
+v0.1.19-Reihe um Suffix `f` fortgesetzt.
 
 **Tasks:**
 - T0 Read-only-Belege (A1 fcnt-Breite, A2 Call-Order, A3 einzige
@@ -3138,10 +3142,22 @@ Verify, §5.67).
   Audit-Spur. Out-of-Scope für 15c.
 
 **Pflicht-Stops genutzt:** keiner. T0-Belege halten alle drei Annahmen,
-keine Brief-Abweichung. Stop vor PR-Merge + Stop vor Tag stehen aus
-(Cowork-Begehung + Live-Verify auf heizung-test nach Merge).
+keine Brief-Abweichung. Merge-Freigabe (PR #204 → develop squash am
+2026-06-02) und Tag-Freigabe nach Live-Verify durch Strategie-Chat.
 
-**Branch:** `feature/15c-fcnt-reboot-drift`.
+**Branch:** `feature/15c-fcnt-reboot-drift` (gemerged + remote-seitig
+gelöscht via `gh pr merge --squash --delete-branch`).
+
+**Live-Verify (heizung-test, 2026-06-02):** Deploy integer, kein
+Migrationslauf (15c ist additiv: zwei Python-Enum-Werte, keine
+Schema-Änderung). Engine-Beat fehlerfrei, 15c-Symbol (`is_reboot_frame`,
+`REBOOT_RESYNC`-Enum-Wert, `services/resync_flag`) in API + Worker live
+verifiziert. Cowork-Begehung 5/5 OK. **Hardware-Reboot-Trigger im Sommer
+physisch nicht provozierbar** (AE-47-Sommerlücke — Δ-T zu klein für
+Vicki-Hardware-Tests, analog zu Open-Window-Detection §5.27); der Pfad
+ist durch 20 Tests inkl. Drehring-Regression abgedeckt — Live-Wirkung
+des Reboot-Gates wird erst in der Heizperiode 2026/27 beobachtbar (per
+Hotelier-Batteriewechsel oder Hotel-Strom-Ereignis).
 
 **Querverweise:** AE-63 (Master), AE-45 (Drehring unverändert), AE-58 §9
 (off-pipeline Audit), AE-09/AE-32 (Hysterese — der Bypass-Punkt),
