@@ -2530,19 +2530,34 @@ Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
 
 1. **Nicht-lineare Stützstellen-Interpolation** in
    `services/mqtt_subscriber._battery_pct_from_volts`. Anker als benannte
-   Konstante `BATTERY_CURVE_2XAA`:
+   Konstante `BATTERY_CURVE_2XAA`, Live-kalibriert gegen die 4 produktiven
+   Vickis auf heizung-test (2026-06-02 — 3× Codec-Sättigung 3.5 V, 1× 3.0 V):
 
    | Spannung | Prozent | Bedeutung |
    |---|---|---|
-   | 2.80 V | 0 % | MClimate-Wechsel-Schwelle (NICHT Tiefentladung — Gerät läuft bis 2.7 V Vcc weiter) |
-   | 2.85 V | 40 % | Alkaline-Knie (steiler Spannungsabfall ab hier) |
-   | 2.90 V | 70 % | Mitte des oberen Plateaus |
-   | 3.00 V | 100 % | Frische 2xAA Alkaline unter LoRaWAN-Sende-Last |
+   | 2.70 V | 0 % | Geräte-Mindestbetrieb (MClimate-Spec-Untergrenze 2.7 V); Wechsel überfällig |
+   | 2.80 V | 10 % | MClimate-Warnschwelle — Vicki funktioniert noch, baldiger Wechsel nötig |
+   | 2.90 V | 30 % | Alkaline-Knie (steiler Spannungsabfall ab hier abwärts) |
+   | 3.00 V | 50 % | Mitte; entspricht der schwächsten der 4 Live-Vickis |
+   | 3.20 V | 80 % | Plateau „gut" |
+   | 3.50 V | 100 % | Codec-Sättigung (Nibble=15), frische 2xAA Alkaline |
 
    Linear zwischen den zwei umfassenden Anchors interpoliert, geclampt
-   `0..100` außerhalb der Endpunkte. Anchor-Werte auf 0.05-V-Raster,
-   damit die diskreten Codec-Quantisierungen (2.0/2.1/…/3.5 V) alle
-   deterministisch landen.
+   `0..100` außerhalb der Endpunkte. Anchor-Werte auf 0.10-V-Raster
+   (alle Codec-Quantisierungs-Schritte landen deterministisch),
+   Plateau-Bereich bewusst gröber (0.20 V Abstand zwischen 3.00-3.20-3.50)
+   wegen Codec-Sättigung am oberen Ende.
+
+   **WICHTIG — Codec-Sättigung:** Nibble 15 (= 3.5 V im Decoder) ist das
+   4-Bit-MAXIMUM des Codec-Felds, NICHT „genau 3.5 V". Vicki-Firmware
+   clampt intern bei `nibble >= 15`. Oberhalb von ~3.4 V tatsächlicher
+   Geräte-Spannung gibt es keine Codec-Auflösung mehr — frische
+   Batterien sitzen am oberen Anschlag (Live-Beleg 2026-06-02:
+   3 von 4 Vickis dauerhaft auf `nibble=15`). Konsequenz: zwischen
+   „frisch" und „etwas verbraucht" zeigt das System keinen Unterschied,
+   bis die Geräte-Spannung unter ~3.4 V fällt. Folge-UI-Backlog
+   B-15b-2: 2-stellige Prozentzahl ist Scheinpräzision — Stufen-Badge
+   (frisch/gut/mittel/warn/leer) wäre die ehrlichere Darstellung.
 
 2. **Decimal-Vergleich gegen Float-Drift.** Eingang ist `float` (aus
    JSON-Decode), aber der Codec emittiert exakte 0.1-V-Werte
@@ -2572,25 +2587,44 @@ Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
 
 ## Konsequenzen
 
-- Cowork-Befund Sprint 15a behoben: intakter 2xAA-Vicki zeigt
-  100 % statt 0 %; Geräte unter Wechsel-Schwelle zeigen sauber 0 %.
+- Cowork-Befund Sprint 15a behoben: 4 produktive Vickis zeigen nach
+  AE-64-Kennlinie plausible Werte (3 frisch = 100 %, 1 mittel = 50 %)
+  statt 0 % unter alter LiPo-Linear-Skala. Geräte unter MClimate-Wechsel-
+  Schwelle (< 2.8 V) zeigen sauber 0-10 %, was die Hotelier-UI als
+  „demnächst wechseln" lesbar macht.
 - Kein Schema-Touch, keine Migration. AE-45-Pfad und AE-58-Gates
   unangetastet.
-- Hardware-Annahme (Standard 2xAA Alkaline) ist in der Lesson festgehalten;
-  falls Hotel-Sonnblick irgendwann auf Lithium-AA wechselt (Spec erlaubt
-  bis 3.6 V), bleibt die Kurve im oberen Bereich konservativ (höhere
-  Lithium-Spannung → 100 % geclampt). Untere Schwelle 2.8 V wäre für
-  Lithium pessimistisch — separater Sprint, falls relevant.
+- Hardware-Annahme (Standard 2xAA Alkaline) ist in der Lesson festgehalten
+  und per Live-Beleg 2026-06-02 bestätigt; falls Hotel-Sonnblick
+  irgendwann auf Lithium-AA wechselt (Spec erlaubt bis 3.6 V), bleibt
+  die Kurve im oberen Bereich konservativ — Lithium-Spannung > 3.5 V wird
+  ohnehin auf 100 % geclampt (Codec-Sättigung), und Lithium-Discharge
+  ist auch nicht-linear. Untere Schwelle 2.7 V wäre für Lithium
+  marginal pessimistisch (Lithium-AA hält Spannung länger über
+  ~2.8 V) — separater Sprint, falls relevant.
+- **Codec-Sättigung-Konsequenz für die UI:** das System hat effektiv
+  nur ~6 wirklich unterscheidbare Stufen (0/10/30/50/65/80/(87/93)/100),
+  und der Bereich „frisch bis etwas verbraucht" (~3.4-3.6 V tatsächlich)
+  ist nicht auflösbar. 2-stellige Prozentzahlen sind Scheinpräzision.
+  Folge-Backlog **B-15b-2** (kein Bug): UI sollte perspektivisch
+  Stufen-Badge (frisch/gut/mittel/warn/leer) statt Prozentzahl zeigen.
 - **Toter `alert_battery_warn_percent`-Schalter** in `global_config` wird
   als Folge-Sprint B-15b-1 verdrahtet (Konsument an `health_alerts`
   ankoppeln; eigene Brief-Entscheidung wegen Email-Versand-Scope).
 
 ## Verworfen
 
-- **Linear-Skala mit korrektem 2xAA-Bereich** (z. B. linear 2.8-3.0 V):
+- **Linear-Skala mit korrektem 2xAA-Bereich** (z. B. linear 2.7-3.5 V):
   würde die Alkaline-Knie ignorieren und im Plateau-Bereich zu
-  optimistische Werte liefern (z. B. 2.85 V wäre 25 % statt 40 %).
-  Stützstellen-Kurve bildet das physikalische Verhalten besser ab.
+  optimistische Werte liefern. Stützstellen-Kurve bildet das
+  physikalische Verhalten besser ab.
+- **Konservative Initial-Anchors aus dem Brief-Vorschlag**
+  (2.80 = 0 %, 3.00 = 100 %): nach Live-Beleg der 4 Produktiv-Vickis
+  (3× Codec-Sättigung 3.5 V, 1× 3.0 V) zu eng gefasst — die
+  schwächste Vicki hätte fälschlich 100 % gezeigt, die oberen 3 wären
+  ohne Auflösung im 100-%-Clamp gelandet. Anchors um ~0.4-0.5 V nach
+  oben verschoben, Plateau-Stützpunkte ergänzt
+  (2.70 V = 0 %, 3.50 V = 100 %).
 - **Backfill via `raw_payload`-Re-Decode:** technisch möglich
   (`raw_payload` ist base64-Original), aber Aufwand (Migration plus
   Python-Re-Decoder pro Row, oder JS-Codec-Re-Run) steht in keinem

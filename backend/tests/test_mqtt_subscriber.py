@@ -42,15 +42,16 @@ SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
 @pytest.mark.parametrize(
     ("volts", "expected"),
     [
-        # Stuetzstellen exakt
-        (3.00, 100),
-        (2.90, 70),
-        (2.85, 40),
-        (2.80, 0),
+        # Stuetzstellen exakt (AE-64-Live-Kalibrierung 2026-06-02)
+        (3.50, 100),  # Codec-Saettigung (Nibble=15), frische 2xAA
+        (3.20, 80),
+        (3.00, 50),
+        (2.90, 30),
+        (2.80, 10),  # MClimate-Warnschwelle
+        (2.70, 0),  # Geraete-Mindestbetrieb, Wechsel ueberfaellig
         # Clamps oberhalb / unterhalb der Kennlinien-Endpunkte
-        (3.50, 100),  # Codec-Maximum (Nibble=15)
-        (3.10, 100),
-        (2.70, 0),  # MClimate-Spec-Mindestbetrieb, unter Wechsel-Schwelle
+        (3.60, 100),  # ueber Codec-Bereich (Lithium-AA-Spec)
+        (2.60, 0),  # unter MClimate-Mindestbetrieb
         (2.00, 0),  # Codec-Minimum (Nibble=0)
         # None-Eingang
         (None, None),
@@ -65,8 +66,9 @@ def test_battery_pct_curve_anchors_and_clamps(volts: float | None, expected: int
     ("volts", "expected"),
     [
         # 0.1-V-Raster aus Codec (V = 2.0 + nibble * 0.1, nibble 0..15)
-        # Erwartung: alle Werte 2.0..2.8 V geclampt auf 0; 2.9 V -> 70 %;
-        # 3.0..3.5 V geclampt auf 100 %. KEINE Stufen-Luecken.
+        # AE-64-Live-kalibrierte Kennlinie:
+        # 2.0..2.7 V geclampt auf 0; dann 10/30/50/65/80/87/93/100 % an
+        # den Codec-Stufen 2.8..3.5 V. KEINE Stufen-Luecken.
         (2.0, 0),
         (2.1, 0),
         (2.2, 0),
@@ -75,13 +77,13 @@ def test_battery_pct_curve_anchors_and_clamps(volts: float | None, expected: int
         (2.5, 0),
         (2.6, 0),
         (2.7, 0),
-        (2.8, 0),
-        (2.9, 70),
-        (3.0, 100),
-        (3.1, 100),
-        (3.2, 100),
-        (3.3, 100),
-        (3.4, 100),
+        (2.8, 10),
+        (2.9, 30),
+        (3.0, 50),
+        (3.1, 65),  # Interpolation Mittelpunkt (3.0,50)-(3.2,80)
+        (3.2, 80),
+        (3.3, 87),  # ~1/3 zwischen (3.2,80)-(3.5,100) -> 86.67 ROUND_HALF_UP
+        (3.4, 93),  # ~2/3 -> 93.33 ROUND_HALF_UP
         (3.5, 100),
     ],
 )
@@ -108,33 +110,48 @@ def test_battery_pct_curve_monotonically_non_decreasing() -> None:
 
 def test_battery_pct_interpolation_between_anchors() -> None:
     """Sub-Quantisierung (Hypothetisch — Codec-Raster ist 0.1 V, aber
-    die Interpolation muss zwischen den Anchors korrekt rechnen): 2.825 V
-    liegt mittig zwischen 2.80 (0%) und 2.85 (40%) -> 20 %.
+    die Interpolation muss zwischen den Anchors korrekt rechnen): 2.85 V
+    liegt mittig zwischen 2.80 (10%) und 2.90 (30%) -> 20 %.
     """
-    assert _battery_pct_from_volts(2.825) == 20
+    assert _battery_pct_from_volts(2.85) == 20
 
 
 def test_battery_curve_anchors_match_adr_definition() -> None:
     """Schutzlatte gegen versehentliches Verschieben der Anker-Werte.
-    Anker-Definition gegen AE-64 (MClimate-Spec-Anker 2.80 V = 0 %,
-    Wechsel-Schwelle; 3.00 V = 100 %, frische 2xAA).
+    Anker-Definition gegen AE-64 (Live-Kalibrierung 2026-06-02).
     """
     assert (
-        (Decimal("2.80"), 0),
-        (Decimal("2.85"), 40),
-        (Decimal("2.90"), 70),
-        (Decimal("3.00"), 100),
+        (Decimal("2.70"), 0),
+        (Decimal("2.80"), 10),
+        (Decimal("2.90"), 30),
+        (Decimal("3.00"), 50),
+        (Decimal("3.20"), 80),
+        (Decimal("3.50"), 100),
     ) == BATTERY_CURVE_2XAA
 
 
-def test_battery_pct_real_vicki_frame_returns_plausible_value() -> None:
-    """Regression Sprint 15a Cowork-Befund: ein intakter 2xAA-Vicki, der
-    3.0 V meldet, darf NICHT mehr 0 % anzeigen (alte LiPo-Formel
-    (3.0-3.0)/1.2*100 = 0). Mit AE-64-Kennlinie -> 100 %.
+@pytest.mark.parametrize(
+    ("volts", "expected", "vicki_label"),
+    [
+        # AE-64-Live-Kalibrierung 2026-06-02: 4 produktive Vickis auf
+        # heizung-test. Alte LiPo-Linear-Skala zeigte intakte Vickis als
+        # 0 % (Cowork-Befund Sprint 15a). Mit AE-64-Kennlinie:
+        (3.5, 100, "Vicki-3 (Codec-Saettigung, frisch)"),
+        (3.5, 100, "Vicki-4 (Codec-Saettigung, frisch)"),
+        (3.5, 100, "Vicki-5 (Codec-Saettigung, frisch)"),
+        (3.0, 50, "Vicki-2 (schwaechste der 4, mittlere Restkapazitaet)"),
+    ],
+)
+def test_battery_pct_real_live_fixture_4_vickis(
+    volts: float, expected: int, vicki_label: str
+) -> None:
+    """Akzeptanztest gegen die realen Live-Werte der 4 Produktiv-Vickis
+    (heizung-test, 2026-06-02): intaktes Geraet ist NICHT 0 %, schwaechstes
+    Geraet ist mittig, nicht voll. Der eigentliche AE-64-Akzeptanzpunkt.
     """
-    real_codec_voltage = 3.0  # nibble=10 in 2 + 10*0.1
-    pct = _battery_pct_from_volts(real_codec_voltage)
-    assert pct == 100, f"intakte Vicki muss plausibel anzeigen, ist {pct}"
+    assert _battery_pct_from_volts(volts) == expected, (
+        f"Live-Kalibrierungs-Regression fuer {vicki_label}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +184,8 @@ def _valid_payload() -> dict[str, Any]:
         "object": {
             "command": 1,
             # Sprint 15b (AE-64): realer Codec-Bereich 2.0-3.5 V in 0.1-V-Schritten.
-            # 3.0 V = frische 2xAA Alkaline = 100 %.
+            # 3.0 V = Kennlinien-Mitte = 50 % (entspricht der schwaechsten der
+            # 4 Produktiv-Vickis bei Live-Kalibrierung 2026-06-02).
             "battery_voltage": 3.0,
             "temperature": 24,
             "target_temperature": 21.0,
@@ -223,7 +241,7 @@ def test_map_to_reading_full() -> None:
     assert row["temperature"] == Decimal("24")
     assert row["setpoint"] == Decimal("21.0")
     assert row["valve_position"] == 100
-    assert row["battery_percent"] == 100  # AE-64: 3.0 V = frische 2xAA = 100 %
+    assert row["battery_percent"] == 50  # AE-64: 3.0 V = Mitte der Kennlinie
     assert row["rssi_dbm"] == -85
     assert row["snr_db"] == Decimal("7.5")
     assert row["raw_payload"] == "AQkYKshkAA=="
@@ -341,8 +359,8 @@ def test_map_to_reading_live_codec_output_fport2_periodic() -> None:
     assert row["temperature"] == Decimal("19.42")
     assert row["setpoint"] == Decimal("22")
     assert row["valve_position"] == 65
-    # Sprint 15b (AE-64): 3.5 V ist Codec-Max (Nibble=15), oberhalb des
-    # Kennlinien-Anchors 3.00 V geclampt auf 100 % — frische 2xAA. Alte
+    # Sprint 15b (AE-64): 3.5 V ist Codec-Saettigung (Nibble=15) und
+    # oberer Kennlinien-Anchor = 100 % — frische 2xAA Alkaline. Alte
     # LiPo-Formel ergab 42 % bei intakter Batterie (Cowork-Befund 15a).
     assert row["battery_percent"] == 100
     assert row["open_window"] is False

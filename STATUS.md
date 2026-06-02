@@ -3199,11 +3199,16 @@ Verify, §5.67). v0.1.20 bleibt arc42-Konsolidierung vorbehalten
   Erkenntnis-Vermerk geschlossen.
 
 **Tasks:**
-- T1 Stützstellen-Kennlinie `BATTERY_CURVE_2XAA = ((2.80, 0), (2.85, 40),
-  (2.90, 70), (3.00, 100))` als benannte Konstante in
-  `services/mqtt_subscriber.py`. Lineare Interpolation zwischen Anchors,
-  Decimal-Vergleich gegen Float-Drift an Wechsel-Schwelle, Clamps
-  außerhalb der Endpunkte.
+- T1 Stützstellen-Kennlinie `BATTERY_CURVE_2XAA = ((2.70, 0), (2.80, 10),
+  (2.90, 30), (3.00, 50), (3.20, 80), (3.50, 100))` als benannte
+  Konstante in `services/mqtt_subscriber.py`. Lineare Interpolation
+  zwischen Anchors, Decimal-Vergleich gegen Float-Drift an
+  Wechsel-Schwelle, Clamps außerhalb der Endpunkte. **Live-kalibriert
+  2026-06-02** gegen die 4 produktiven Vickis auf heizung-test (3×
+  Codec-Sättigung 3.5 V, 1× 3.0 V — Zellbestückung einheitlich
+  Alkaline). Initial-Anchors aus dem Brief (2.80 = 0, 3.00 = 100)
+  waren ~0.4-0.5 V zu niedrig — schwächste Vicki hätte fälschlich
+  100 % gezeigt; nach Verschiebung landet sie korrekt mittig (50 %).
 - T2 Tests in `tests/test_mqtt_subscriber.py`-Sektion
   `_battery_pct_from_volts`: Anchor-Werte exakt, Clamps, alle 16
   Codec-Quantisierungen (2.0..3.5 V in 0.1-V-Schritten), Monotonie über
@@ -3219,12 +3224,13 @@ Verify, §5.67). v0.1.20 bleibt arc42-Konsolidierung vorbehalten
 Modul `services/mqtt_subscriber.py` ergänzt (Konstante + Helper-Logik
 in Bestands-Funktion).
 
-**Toolchain (lokal grün, 2026-06-02):**
+**Toolchain (lokal grün, 2026-06-02 nach Live-Kalibrierungs-Refactor):**
 - `ruff check`: 0 Befunde
 - `ruff format --check`: 179 Files OK
 - `mypy --strict src`: 0 issues in 103 Files
 - pytest mit DB (TimescaleDB-Container, §5.50 Lokal-DB-Verify-Pflicht):
-  **599 passed, 1 xfailed** (22 neue Battery-Tests gegenüber 15c-Stand).
+  **603 passed, 1 xfailed** (26 Battery-Tests gegenüber 15c-Stand, inkl.
+  4-Vicki-Live-Fixture als eigentlicher AE-64-Akzeptanztest).
 
 **Backlog-Auflösung:**
 - **B-15a-3** (AE-45-Block-Pfad lückenlos auditieren) → **by-design
@@ -3498,6 +3504,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | B-15a-2 | **AE-17 als superseded markieren** (BLOCK H2). AE-17-Text in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:197-205` beschreibt eine `uplinks`-Hypertable mit JSONB-Payload — existiert real nicht. Sprint 5 (STATUS §2g.5.7) hat `sensor_reading` wiederverwendet (`models/sensor_reading.py:30-73`, Migration `0001_initial_domain_model.py:263-289` legt sie als Hypertable an, keine `uplinks`-Migration existiert). Separater `chore/`-Doku-PR mit ADR-Markierung „Status: Superseded — siehe `sensor_reading`-Schema". Nicht in andere PRs mischen. | 🟡 |
 | B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). | ✅ by-design geschlossen 2026-06-02 (Sprint 15b B0-Beleg, AE-64 §Verworfen). Code-Pipeline post-Sprint-12c/15c schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-event_log (`reason=DEVICE_BLOCKED_ROOM_BLOCKED`) im pre-a-Gate `device_adapter.handle_uplink_for_override` Z.385-399, sobald `detect_user_override` einen echten Setpoint-Change in gesperrtem Raum findet. Q-D4-Befund („0 Rows trotz Block über Stunden") war eine Heartbeat-Phase ohne Drehring-Akte — kein Bug. Heartbeats / Toleranz / Ack-Window dürfen unter der Strategie-Brief-Bedingung „nur echte Setpoint-Changes auditieren" bewusst keinen Audit erzeugen (Skalierungs-Risiko bei ~105 Vickis × ~12 Heartbeats/h). |
 | B-15b-1 | **`alert_battery_warn_percent` real verdrahten — toter Schalter in Config-UI.** Sprint 15a Pre-Beleg + 15b A2-Bestätigung: das Feld existiert in `global_config` (Default 20 %, CHECK 1..100) plus Read/Write-Schemas, aber **kein Konsument** in `services/`/`tasks/`. `health_alerts.py` reagiert nur auf `offline_24h` + `implausible_readings_24h`. Hotelier kann den Wert in der Config-UI setzen, aber nichts passiert. Folge-Sprint: Email-Versand-Scope-Entscheidung (`alert_email` ebenfalls heute nur in `global_config`, Email-Service noch nicht implementiert — vgl. §5.20-Pattern „aspirativer Kommentar in Sprint-13"). Klein-mittel, vor Heizperiode 2026/27 wünschenswert (Batterie-Wechsel-Vorlauf). | 🟡 |
+| B-15b-2 | **Batterie-UI: Stufen-Badge statt Prozentzahl** (kein Bug, Scheinpräzisions-Hygiene). Codec liefert Geräte-Spannung im 0.1-V-Raster mit 4-Bit-Nibble — Wertebereich 2.0-3.5 V, nibble 15 (= 3.5 V) ist Sättigung am oberen Ende. Effektiv hat das System ~6 unterscheidbare Stufen oberhalb der Wechsel-Schwelle (0/10/30/50/65/80/87/93/100 % an den Codec-Quantisierungs-Stufen 2.7..3.5 V); der Bereich „frisch bis etwas verbraucht" (Live-Beleg 2026-06-02: 3 von 4 Vickis auf nibble=15 saturiert) ist ohne Auflösung. 2-stellige Prozentzahl in der UI ist Scheinpräzision. Vorschlag Folge-Sprint: Stufen-Badge mit ~5 Stufen (`frisch` ≥ 80 %, `gut` ≥ 50 %, `mittel` ≥ 30 %, `warn` ≥ 10 %, `leer` < 10 %), tooltip-Anzeige der Rohspannung für Diagnose. Mit B-15b-1 gemeinsam planbar (UI + Alarm-Anbindung). | 🟢 |
 
 ---
 

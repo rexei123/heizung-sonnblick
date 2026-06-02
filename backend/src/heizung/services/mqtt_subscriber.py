@@ -86,28 +86,46 @@ class ChirpStackUplink(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# Sprint 15b (AE-64): Vicki-2xAA-Alkaline-Entladekurve. Anker auf MClimate-
-# Spec (Betriebsspannung 2.7-3.6 VDC, Wechsel-Empfehlung < 2.8 V) und die
-# nicht-lineare Alkaline-Entladekurve (steile Knie am Lebensende). Stuetz-
-# stellen sortiert aufsteigend nach Volt. ``2.80 V`` = 0 % entspricht der
-# MClimate-Wechsel-Schwelle, NICHT der Tiefentladung (Geraet laeuft bis
-# 2.7 V weiter). ``3.00 V`` = 100 % ist der typische geladene Stand frischer
-# 2xAA-Alkaline unter LoRaWAN-Sende-Last.
+# Sprint 15b (AE-64): Vicki-2xAA-Alkaline-Entladekurve. Stuetzstellen
+# aus Live-Kalibrierung der 4 produktiven Vickis auf heizung-test
+# (2026-06-02): 3x Codec-Saettigung 3.5 V (Nibble 15) plus 1x 3.0 V —
+# zellbestueckung einheitlich Alkaline. Anker auf MClimate-Spec
+# (Betriebsspannung 2.7-3.6 VDC, Wechsel-Empfehlung < 2.8 V) verankert,
+# Zwischenpunkte an realer Alkaline-Entladekurve unter LoRaWAN-Sende-
+# Last:
+#   2.70 V =   0 %  (Geraete-Mindestbetrieb, Wechsel ueberfaellig)
+#   2.80 V =  10 %  (MClimate-Warnschwelle — Vicki funktioniert noch)
+#   2.90 V =  30 %  (Knie der Alkaline-Entladekurve)
+#   3.00 V =  50 %  (Mitte; entspricht der schwaechsten der 4 Vickis)
+#   3.20 V =  80 %  (Plateau "gut")
+#   3.50 V = 100 %  (Codec-Saettigung, frische 2xAA)
+#
+# WICHTIG — Codec-Saettigung: Nibble 15 ist das 4-Bit-MAXIMUM des
+# Codec-Felds, NICHT "genau 3.5 V". Vicki-Firmware clamped intern bei
+# nibble >= 15. Oberhalb ~3.4 V tatsaechlicher Geraete-Spannung gibt
+# es keine Codec-Aufloesung mehr — frische Batterien sitzen am oberen
+# Anschlag (Live-Beleg: 3 von 4 Vickis dauerhaft auf nibble=15).
 #
 # Quelle:
 # - Codec ``infra/chirpstack/codecs/mclimate-vicki.js:119-121``: Geraete-
 #   Spannung = 2.0 + Nibble * 0.1, 0.1-V-Raster, Wertebereich 2.0-3.5 V.
-# - MClimate-Hauptdoku: Power 2x AA (1.5 V Alkaline, keine Akkus, Lithium-AA
-#   optional bis 3.6 V Geraete-Spannung), Betriebsbereich 2.7-3.6 VDC.
+# - MClimate-Hauptdoku: Power 2x AA (1.5 V Alkaline, keine Akkus,
+#   Lithium-AA optional bis 3.6 V Geraete-Spannung), Betriebsbereich
+#   2.7-3.6 VDC.
+# - Live-Kalibrierung 4 Vickis heizung-test 2026-06-02
+#   (B-15b-1-Vorlauf: Vergleich battery_percent alt vs. raw_payload
+#   Byte 7 high-nibble decoded).
 #
 # Die alte lineare LiPo-Skala (3.0-4.2 V) war doppelt falsch: falscher
-# Spannungsbereich UND falsche Kurvenform — produzierte 0 % bei intakter
-# 2xAA-Batterie (Cowork-Befund Sprint 15a).
+# Spannungsbereich UND falsche Kurvenform — produzierte 0 % bei
+# intakter 2xAA-Batterie (Cowork-Befund Sprint 15a).
 BATTERY_CURVE_2XAA: tuple[tuple[Decimal, int], ...] = (
-    (Decimal("2.80"), 0),
-    (Decimal("2.85"), 40),
-    (Decimal("2.90"), 70),
-    (Decimal("3.00"), 100),
+    (Decimal("2.70"), 0),
+    (Decimal("2.80"), 10),
+    (Decimal("2.90"), 30),
+    (Decimal("3.00"), 50),
+    (Decimal("3.20"), 80),
+    (Decimal("3.50"), 100),
 )
 
 

@@ -2071,8 +2071,16 @@ umrechnete. Doppelter Fehler:
 
 - **Batterie-Skala ab AE-64 lebt in `BATTERY_CURVE_2XAA`** in
   `services/mqtt_subscriber.py`. Stützstellen-Interpolation mit Decimal-
-  Vergleich gegen Float-Drift an der 2.80-V-Wechsel-Schwelle. Anker:
-  2.80 V → 0 %, 2.85 V → 40 %, 2.90 V → 70 %, 3.00 V → 100 %.
+  Vergleich gegen Float-Drift an der Wechsel-Schwelle. Live-kalibrierte
+  Anker (4 produktive Vickis 2026-06-02): 2.70 V → 0 %, 2.80 V → 10 %,
+  2.90 V → 30 %, 3.00 V → 50 %, 3.20 V → 80 %, 3.50 V → 100 % (Codec-
+  Sättigung Nibble=15).
+- **Codec-Sättigung beachten:** Nibble 15 (= 3.5 V im Decoder) ist das
+  4-Bit-Maximum; oberhalb von ~3.4 V tatsächlicher Geräte-Spannung gibt
+  es keine Codec-Auflösung mehr (Live-Beleg: 3 von 4 Vickis dauerhaft
+  saturiert). 2-stellige Prozentzahlen sind Scheinpräzision —
+  B-15b-2 (kein Bug, eigener UI-Sprint) bewegt sich Richtung
+  Stufen-Badge statt Prozentzahl.
 - **Kein Backfill:** historische `sensor_reading.battery_percent`-Rows
   bleiben mit alter Skala. Rohspannung ist nicht persistiert, nur
   `raw_payload` (base64). Re-Decode wäre möglich, aber Aufwand >> Nutzen
