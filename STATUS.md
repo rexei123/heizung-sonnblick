@@ -7,8 +7,8 @@
 ## 1. Aktueller Stand
 
 **Stichtag:** 2026-06-02
-**Letzter Tag:** `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, develop-HEAD `45e7f6e` = PR #204 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2be). Davor: `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15b Batterie-Skala-Fix (§2bf) — Code-Stand 2026-06-02, Branch `feature/15b-batterie-skala`, PR pending (NACH Merge: Live-Verify + Tag-Vorschlag `v0.1.19g-batterie-skala`, Name beim Tag-Schritt festziehen). Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Letzter Tag:** `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3166,16 +3166,18 @@ CLAUDE.md §5.71 (Hardware-Lesson), §5.50 (Lokal-DB-Verify-Pflicht),
 (Phase-0-grep-Belege), §5.45 (Enum-Length-Check, hier durch
 nacktes-VARCHAR-Schema entschärft), §5.70 (PR-Body via `--body-file`).
 
-## 2bf. Sprint 15b Batterie-Skala-Fix (2026-06-02, Code-Stand, PR pending)
+## 2bf. Sprint 15b Batterie-Skala-Fix (2026-06-02, abgeschlossen)
 
 **Ziel:** Vicki-Batterie-Prozent korrekt aus 2xAA-Alkaline-Geräte-
 Spannung ableiten. Alte LiPo-Linear-Skala 3.0-4.2 V hat intakte 2xAA
 als 0 % angezeigt (Cowork-Befund Sprint 15a). MClimate-Spec-Anker:
 Betriebsspannung 2.7-3.6 VDC, Wechsel < 2.8 V, Power 2x AA Alkaline.
 
-**Tag (vorgeschlagen):** `v0.1.19g-batterie-skala` (NACH Merge + Live-
-Verify, §5.67). v0.1.20 bleibt arc42-Konsolidierung vorbehalten
-(`docs/SPRINT-PLAN.md:1328`).
+**Tag:** `v0.1.19g-batterie-skala` (annotated, gesetzt 2026-06-02 NACH
+Live-Verify §5.67, zeigt auf develop-HEAD `bfc2810` = PR #206 squash-
+Merge). v0.1.20 bleibt `v0.1.20-arc42-konsolidierung` vorbehalten
+(`docs/SPRINT-PLAN.md:1328,1479`), daher v0.1.19-Reihe um Suffix `g`
+fortgesetzt.
 
 **Belege (T0):**
 - **A1 hält:** `battery_voltage` aus
@@ -3242,10 +3244,25 @@ in Bestands-Funktion).
 **Pflicht-Stops genutzt:** B0 hat einen Pflicht-Stop ausgelöst
 (B-15a-3-Gap unter Brief-Bedingung nicht erreichbar) → Strategie-Chat-
 Entscheid „Block B streichen". A0/A1/A2 alle bestätigt, kein weiterer
-Stop. Stop vor PR-Merge + Stop vor Tag (Cowork-Begehung + Live-Verify
-auf heizung-test) stehen aus.
+Stop. Zusätzlicher Live-Beleg-Stop nach Initial-Commit: Realwerte der
+4 Vickis (3× 3.5 V Codec-Sättigung, 1× 3.0 V) zeigten, dass die Brief-
+Initial-Anchors um ~0.4-0.5 V zu niedrig waren → Strategie-Chat-
+Entscheid „Anchor-Verschiebung", Commit `03802aa` mit neuer Kennlinie
+((2.70, 0), (2.80, 10), (2.90, 30), (3.00, 50), (3.20, 80), (3.50, 100)).
+Merge-Freigabe + Tag-Freigabe nach Live-Verify durch Strategie-Chat.
 
-**Branch:** `feature/15b-batterie-skala`.
+**Branch:** `feature/15b-batterie-skala` (gemerged + remote-seitig
+gelöscht via `gh pr merge --squash --delete-branch`).
+
+**Live-Verify (heizung-test, 2026-06-02):** Deploy integer, kein
+Migrationslauf (15b ist additiv: Kennlinien-Konstante + überarbeitete
+Helper-Funktion in `services/mqtt_subscriber.py`, keine Schema-Änderung).
+DB ist == soll alle 4 Geräte: 3.0 V → 50 %, 3.4 V → 93 %, 3.5 V → 100 %.
+Cowork-UI 4/4 deckungsgleich mit DB-Werten; Vicki-001 zeigt jetzt 50 %
+statt vormals 0 % unter LiPo-Skala. **Echter Hardware-Verify** (anders
+als bei 15c, wo der Reboot-Pfad im Sommer wegen AE-47-Sommerlücke
+physisch nicht provozierbar war — hier sendet jeder Periodic-Frame den
+neuen Wert sofort sichtbar).
 
 **Querverweise:** AE-64 (Master), AE-53 (Health-Modell — derzeit ohne
 Batterie-Trigger; B-15b-1 schließt die Lücke), AE-45 / AE-58
