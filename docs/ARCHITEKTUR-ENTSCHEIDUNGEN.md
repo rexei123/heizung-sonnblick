@@ -2486,3 +2486,122 @@ mit Index `ix_sensor_reading_device_time` auf `(device_id, time)`.
 
 
 **Querverweise:** AE-51 §4.1, AE-52, AE-58, Sprint 12b + 14b (PR #191), §5.69.
+
+---
+
+# AE-64 — Vicki-Batterie: 2xAA-Alkaline-Kennlinie statt LiPo-linear (Sprint 15b)
+
+**Datum:** 2026-06-02
+**Status:** Akzeptiert
+**Bezug:** Sprint 15b, Sprint 15a Cowork-Befund (intakte Vicki zeigt 0 %),
+AE-53 (Health-Modell — derzeit ohne Batterie-Trigger), CLAUDE.md §5.27
+(Vicki-Hardware-Realität).
+
+## Kontext
+
+Der Subscriber rechnete `battery_voltage` aus dem Codec über die lineare
+Formel `(volts - 3.0) / 1.2 * 100` in einen Prozentwert um — eine
+LiPo-Kennlinie (3.0 V = 0 %, 4.2 V = 100 %). Das war **doppelt falsch**:
+
+1. **Falscher Spannungsbereich.** Die offizielle MClimate-Decoder-Formel
+   ist `V = 2.0 + nibble * 0.1` (4-Bit-Nibble in `bytes[7] >> 4`,
+   `infra/chirpstack/codecs/mclimate-vicki.js:119-121`). Wertebereich
+   `2.0-3.5 V` in 0.1-V-Schritten — das ist die **Geräte-Spannung** der
+   in Reihe geschalteten 2xAA-Zellen, nicht eine LiPo-Spannung.
+2. **Falsche Kurvenform.** Alkaline hat eine ausgeprägt nicht-lineare
+   Entladekurve mit steiler Knie am Lebensende. Eine lineare Skala
+   produziert systematisch zu niedrige Werte: ein realer Vicki mit
+   `battery_voltage = 3.0 V` (frische 2xAA) ergab `(3.0-3.0)/1.2*100 =
+   0 %` (Cowork-Befund Sprint 15a) — die Hotelier-UI zeigte intakte
+   Geräte als „Batterie leer".
+
+MClimate-Spec (Hauptdoku + lokaler `README.md` Sektion „Power"):
+**Betriebsspannung 2.7-3.6 VDC, Wechsel-Empfehlung < 2.8 V, Power 2x AA
+Alkaline (1.5 V, KEINE Akkus, Lithium-AA optional bis 3.6 V Geräte-
+Spannung).**
+
+Sprint-15a-Pre-Beleg (Frage D) hat außerdem belegt: **kein Konsument** in
+`services/` oder `tasks/` reagiert auf `battery_percent`. Das
+`global_config.alert_battery_warn_percent`-Feld existiert mit
+Default 20 %, hat aber **keinen Konsumenten** — toter Schalter in der
+Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
+
+## Entscheidung
+
+1. **Nicht-lineare Stützstellen-Interpolation** in
+   `services/mqtt_subscriber._battery_pct_from_volts`. Anker als benannte
+   Konstante `BATTERY_CURVE_2XAA`:
+
+   | Spannung | Prozent | Bedeutung |
+   |---|---|---|
+   | 2.80 V | 0 % | MClimate-Wechsel-Schwelle (NICHT Tiefentladung — Gerät läuft bis 2.7 V Vcc weiter) |
+   | 2.85 V | 40 % | Alkaline-Knie (steiler Spannungsabfall ab hier) |
+   | 2.90 V | 70 % | Mitte des oberen Plateaus |
+   | 3.00 V | 100 % | Frische 2xAA Alkaline unter LoRaWAN-Sende-Last |
+
+   Linear zwischen den zwei umfassenden Anchors interpoliert, geclampt
+   `0..100` außerhalb der Endpunkte. Anchor-Werte auf 0.05-V-Raster,
+   damit die diskreten Codec-Quantisierungen (2.0/2.1/…/3.5 V) alle
+   deterministisch landen.
+
+2. **Decimal-Vergleich gegen Float-Drift.** Eingang ist `float` (aus
+   JSON-Decode), aber der Codec emittiert exakte 0.1-V-Werte
+   (`parseFloat(toFixed(2))`). IEEE-754-Repräsentation von z. B. 2.8 ist
+   nicht exakt — Konversion via `Decimal(str(volts))` macht den Anker-
+   Vergleich exakt. Vermeidet Off-by-Epsilon an der Wechsel-Schwelle.
+
+3. **Kein Backfill, keine Migration.** Historische
+   `sensor_reading.battery_percent`-Rows behalten ihren falschen Wert
+   (die Rohspannung ist nicht gespeichert; nur `raw_payload` als base64
+   wäre rekonstruierbar — zu aufwändig für den Nutzen). Der Fix wirkt
+   ab erstem neuen Frame nach Deploy. UI-Diagnose-Kachel und Thermostat-
+   Bubble (Sprint 14b) zeigen neue Werte korrekt; historische Charts (in
+   einem späteren Analytics-Sprint) müssten ggf. einen Stichtag
+   markieren.
+
+4. **B-15a-3 als by-design geschlossen.** Die Block-Audit-Pipeline
+   (Sprint 12c + 15c, pre-a-Gate in `device_adapter.handle_uplink_for_
+   override` Z.385-399) schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-
+   event_log mit `reason=DEVICE_BLOCKED_ROOM_BLOCKED`, sobald
+   `detect_user_override` einen echten Setpoint-Change in einem
+   geblockten Raum findet. Die Sprint-15a-Q-D4-Beobachtung („0 Rows
+   trotz Block über Stunden") war eine Heartbeat-Phase ohne
+   Drehring-Akte — kein Bug. Sprint 15b enthält daher **keinen**
+   Block-Audit-Code-Fix. Der Befund wandert mit Erkenntnis-Vermerk in
+   STATUS.md §6.4 (B-15a-3 abgeschlossen).
+
+## Konsequenzen
+
+- Cowork-Befund Sprint 15a behoben: intakter 2xAA-Vicki zeigt
+  100 % statt 0 %; Geräte unter Wechsel-Schwelle zeigen sauber 0 %.
+- Kein Schema-Touch, keine Migration. AE-45-Pfad und AE-58-Gates
+  unangetastet.
+- Hardware-Annahme (Standard 2xAA Alkaline) ist in der Lesson festgehalten;
+  falls Hotel-Sonnblick irgendwann auf Lithium-AA wechselt (Spec erlaubt
+  bis 3.6 V), bleibt die Kurve im oberen Bereich konservativ (höhere
+  Lithium-Spannung → 100 % geclampt). Untere Schwelle 2.8 V wäre für
+  Lithium pessimistisch — separater Sprint, falls relevant.
+- **Toter `alert_battery_warn_percent`-Schalter** in `global_config` wird
+  als Folge-Sprint B-15b-1 verdrahtet (Konsument an `health_alerts`
+  ankoppeln; eigene Brief-Entscheidung wegen Email-Versand-Scope).
+
+## Verworfen
+
+- **Linear-Skala mit korrektem 2xAA-Bereich** (z. B. linear 2.8-3.0 V):
+  würde die Alkaline-Knie ignorieren und im Plateau-Bereich zu
+  optimistische Werte liefern (z. B. 2.85 V wäre 25 % statt 40 %).
+  Stützstellen-Kurve bildet das physikalische Verhalten besser ab.
+- **Backfill via `raw_payload`-Re-Decode:** technisch möglich
+  (`raw_payload` ist base64-Original), aber Aufwand (Migration plus
+  Python-Re-Decoder pro Row, oder JS-Codec-Re-Run) steht in keinem
+  Verhältnis zum Nutzen — historische Werte werden nur in Diagnose-
+  Kacheln gezeigt; UI-Verwirrung über den Stichtag ist akzeptabel.
+- **Eigene Cell-Typ-Konfiguration in `global_config`** (Alkaline /
+  Lithium / NiMH-Skalen umschaltbar): Over-Engineering für ein
+  Einzel-Hotel mit einheitlicher Cell-Strategie. Wenn benötigt,
+  einfacher Sprint später.
+- **Mitnahme von Block B (B-15a-3 Block-Audit-Gap):** Nach B0-Beleg
+  ist die Lücke unter der Brief-Bedingung „nur echte Setpoint-Changes
+  auditieren" nicht erreichbar — pre-a-Gate schreibt schon das
+  event_log. Brief Block B gestrichen, B-15a-3 als by-design
+  geschlossen.

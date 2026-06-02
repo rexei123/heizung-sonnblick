@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-06-01
-**Letzter Tag:** `v0.1.19e-hygiene-rest` (Sprint 14e, develop-HEAD `112b827`, PR #201, gemerged 2026-05-30, §2bd). Davor: `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, PR #198, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15c fcnt-Reboot-Drift-Fix (§2be) — abgeschlossen 2026-06-02, Tag `v0.1.19f-fcnt-reboot-drift` (annotated, zeigt auf develop-HEAD `45e7f6e` = PR #204 squash-Merge). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f. Sprint 14e Hygiene-Rest davor abgeschlossen 2026-05-30 (§2bd).
+**Stichtag:** 2026-06-02
+**Letzter Tag:** `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, develop-HEAD `45e7f6e` = PR #204 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2be). Davor: `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 15b Batterie-Skala-Fix (§2bf) — Code-Stand 2026-06-02, Branch `feature/15b-batterie-skala`, PR pending (NACH Merge: Live-Verify + Tag-Vorschlag `v0.1.19g-batterie-skala`, Name beim Tag-Schritt festziehen). Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3166,6 +3166,88 @@ CLAUDE.md §5.71 (Hardware-Lesson), §5.50 (Lokal-DB-Verify-Pflicht),
 (Phase-0-grep-Belege), §5.45 (Enum-Length-Check, hier durch
 nacktes-VARCHAR-Schema entschärft), §5.70 (PR-Body via `--body-file`).
 
+## 2bf. Sprint 15b Batterie-Skala-Fix (2026-06-02, Code-Stand, PR pending)
+
+**Ziel:** Vicki-Batterie-Prozent korrekt aus 2xAA-Alkaline-Geräte-
+Spannung ableiten. Alte LiPo-Linear-Skala 3.0-4.2 V hat intakte 2xAA
+als 0 % angezeigt (Cowork-Befund Sprint 15a). MClimate-Spec-Anker:
+Betriebsspannung 2.7-3.6 VDC, Wechsel < 2.8 V, Power 2x AA Alkaline.
+
+**Tag (vorgeschlagen):** `v0.1.19g-batterie-skala` (NACH Merge + Live-
+Verify, §5.67). v0.1.20 bleibt arc42-Konsolidierung vorbehalten
+(`docs/SPRINT-PLAN.md:1328`).
+
+**Belege (T0):**
+- **A1 hält:** `battery_voltage` aus
+  `infra/chirpstack/codecs/mclimate-vicki.js:119-121` ist
+  Geräte-Spannung (2xAA in Reihe), `V = 2.0 + nibble * 0.1`,
+  Wertebereich 2.0-3.5 V in 0.1-V-Schritten. **Nicht** pro Zelle.
+- **A2 hält:** kein realer Konsument auf `battery_percent` in
+  `services/`/`tasks/` — `health_alerts.py` reagiert nur auf
+  `offline_24h` / `implausible_readings_24h`. Skala-Fix verschiebt
+  keine aktiv wirkende Alarm-Schwelle.
+- **B0 (Block-Audit-Gap B-15a-3): Pflicht-Stop → Block B gestrichen.**
+  Pre-a-Gate (`device_adapter.handle_uplink_for_override` Z.385-399)
+  schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-event_log
+  (`reason=DEVICE_BLOCKED_ROOM_BLOCKED`) bei echtem Setpoint-Change in
+  gesperrtem Raum (Sprint 12c). Frames ohne Setpoint-Change
+  (Heartbeats / Toleranz / Ack-Window) erzeugen unter der Brief-
+  Bedingung „nur echte Setpoint-Changes auditieren" bewusst keinen
+  Audit-Eintrag. Q-D4-Befund („0 Rows trotz Block über Stunden") war
+  eine Heartbeat-Phase ohne Drehring-Akte — by-design, kein Bug.
+  Strategie-Chat hat Block B gestrichen, B-15a-3 in §6.4 mit
+  Erkenntnis-Vermerk geschlossen.
+
+**Tasks:**
+- T1 Stützstellen-Kennlinie `BATTERY_CURVE_2XAA = ((2.80, 0), (2.85, 40),
+  (2.90, 70), (3.00, 100))` als benannte Konstante in
+  `services/mqtt_subscriber.py`. Lineare Interpolation zwischen Anchors,
+  Decimal-Vergleich gegen Float-Drift an Wechsel-Schwelle, Clamps
+  außerhalb der Endpunkte.
+- T2 Tests in `tests/test_mqtt_subscriber.py`-Sektion
+  `_battery_pct_from_volts`: Anchor-Werte exakt, Clamps, alle 16
+  Codec-Quantisierungen (2.0..3.5 V in 0.1-V-Schritten), Monotonie über
+  das gesamte Codec-Raster, Sub-Quantisierungs-Interpolation,
+  Schutz-Test gegen Anchor-Drift gegen AE-64, Live-Frame-Regression
+  (3.5 V → 100 %, war vorher 42 % unter LiPo).
+- T5 Doku: AE-64 (Master), CLAUDE.md §5.72 (Hardware-Lesson),
+  SESSION-START.md Hardware-Befund-Verweise + AE-64-Verweis, STATUS
+  §2bf + §6.4 B-15a-3 schließen + B-15b-1 NEU
+  (`alert_battery_warn_percent` toter Schalter — Folge-Sprint).
+
+**Schema-Änderungen:** keine. Keine Migration, keine neue Spalte.
+Modul `services/mqtt_subscriber.py` ergänzt (Konstante + Helper-Logik
+in Bestands-Funktion).
+
+**Toolchain (lokal grün, 2026-06-02):**
+- `ruff check`: 0 Befunde
+- `ruff format --check`: 179 Files OK
+- `mypy --strict src`: 0 issues in 103 Files
+- pytest mit DB (TimescaleDB-Container, §5.50 Lokal-DB-Verify-Pflicht):
+  **599 passed, 1 xfailed** (22 neue Battery-Tests gegenüber 15c-Stand).
+
+**Backlog-Auflösung:**
+- **B-15a-3** (AE-45-Block-Pfad lückenlos auditieren) → **by-design
+  geschlossen** (B0-Code-Beleg, kein Fix). Erkenntnis-Vermerk in §6.4.
+- **B-15b-1** NEU: `alert_battery_warn_percent` real verdrahten
+  (toter Schalter in `global_config`-UI; kein Konsument in `services/`
+  oder `tasks/`). Folge-Sprint mit Email-Versand-Scope-Entscheidung.
+
+**Pflicht-Stops genutzt:** B0 hat einen Pflicht-Stop ausgelöst
+(B-15a-3-Gap unter Brief-Bedingung nicht erreichbar) → Strategie-Chat-
+Entscheid „Block B streichen". A0/A1/A2 alle bestätigt, kein weiterer
+Stop. Stop vor PR-Merge + Stop vor Tag (Cowork-Begehung + Live-Verify
+auf heizung-test) stehen aus.
+
+**Branch:** `feature/15b-batterie-skala`.
+
+**Querverweise:** AE-64 (Master), AE-53 (Health-Modell — derzeit ohne
+Batterie-Trigger; B-15b-1 schließt die Lücke), AE-45 / AE-58
+(unangetastet), CLAUDE.md §5.72 (Hardware-Lesson), §5.27 (Vicki-
+Hardware-Realität, gleiche Lesson-Familie), §5.21 (Codec-Routing-
+Pattern), §5.50 (Lokal-DB-Verify-Pflicht), §5.70 (PR-Body via
+`--body-file`).
+
 ---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
@@ -3414,7 +3496,8 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 |---|---|---|
 | B-15a-1 | **Reboot-Drift-Detection per fcnt-Reset** (BLOCK D.5). | ✅ erledigt 2026-06-01 (Sprint 15c, AE-63, Branch `feature/15c-fcnt-reboot-drift`, §2be). Diskriminator `is_reboot_frame(prior_fcnt, current_fcnt)` + Reboot-Gate in `device_adapter.handle_uplink_for_override` + Re-Sync-Flag (Hysterese-Bypass im `engine_tasks._dispatch_downlinks_per_zone`) + off-pipeline Audit `REBOOT_RESYNC`. Keine Migration. AE-45-Pfad unangetastet. 20 neue Tests grün lokal mit DB. |
 | B-15a-2 | **AE-17 als superseded markieren** (BLOCK H2). AE-17-Text in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:197-205` beschreibt eine `uplinks`-Hypertable mit JSONB-Payload — existiert real nicht. Sprint 5 (STATUS §2g.5.7) hat `sensor_reading` wiederverwendet (`models/sensor_reading.py:30-73`, Migration `0001_initial_domain_model.py:263-289` legt sie als Hypertable an, keine `uplinks`-Migration existiert). Separater `chore/`-Doku-PR mit ADR-Markierung „Status: Superseded — siehe `sensor_reading`-Schema". Nicht in andere PRs mischen. | 🟡 |
-| B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). Q-D4 zeigt 0 `MANUAL_OVERRIDE_BLOCKED`-event_log-Rows trotz wirkendem `guest_override_blocked=true`-Block über Stunden. Vermutete Ursache: `_write_blocked_event_log` (`device_adapter.py:143-177`) wird nur dann gerufen, wenn `detect_user_override` einen User-Setpoint gefunden hat — Frames innerhalb Toleranz oder im Ack-Window passieren das Block-Gate ohne Audit-Spur. Konsequenz: Block-Wirkung unsichtbar im event_log, Operator kann nicht beziffern, wie oft der Block tatsächlich wirkte. Eigener Hygiene-Sprint-Brief, klein. Mit B-15a-1 kombinierbar (gleiches Code-Modul). | 🟡 |
+| B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). | ✅ by-design geschlossen 2026-06-02 (Sprint 15b B0-Beleg, AE-64 §Verworfen). Code-Pipeline post-Sprint-12c/15c schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-event_log (`reason=DEVICE_BLOCKED_ROOM_BLOCKED`) im pre-a-Gate `device_adapter.handle_uplink_for_override` Z.385-399, sobald `detect_user_override` einen echten Setpoint-Change in gesperrtem Raum findet. Q-D4-Befund („0 Rows trotz Block über Stunden") war eine Heartbeat-Phase ohne Drehring-Akte — kein Bug. Heartbeats / Toleranz / Ack-Window dürfen unter der Strategie-Brief-Bedingung „nur echte Setpoint-Changes auditieren" bewusst keinen Audit erzeugen (Skalierungs-Risiko bei ~105 Vickis × ~12 Heartbeats/h). |
+| B-15b-1 | **`alert_battery_warn_percent` real verdrahten — toter Schalter in Config-UI.** Sprint 15a Pre-Beleg + 15b A2-Bestätigung: das Feld existiert in `global_config` (Default 20 %, CHECK 1..100) plus Read/Write-Schemas, aber **kein Konsument** in `services/`/`tasks/`. `health_alerts.py` reagiert nur auf `offline_24h` + `implausible_readings_24h`. Hotelier kann den Wert in der Config-UI setzen, aber nichts passiert. Folge-Sprint: Email-Versand-Scope-Entscheidung (`alert_email` ebenfalls heute nur in `global_config`, Email-Service noch nicht implementiert — vgl. §5.20-Pattern „aspirativer Kommentar in Sprint-13"). Klein-mittel, vor Heizperiode 2026/27 wünschenswert (Batterie-Wechsel-Vorlauf). | 🟡 |
 
 ---
 

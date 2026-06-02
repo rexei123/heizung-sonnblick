@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from heizung.services import redis_client
 from heizung.services.mqtt_subscriber import (
+    BATTERY_CURVE_2XAA,
     ChirpStackUplink,
     _battery_pct_from_volts,
     _handle_firmware_version_report,
@@ -34,24 +35,106 @@ TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
 
 # ---------------------------------------------------------------------------
-# _battery_pct_from_volts
+# _battery_pct_from_volts (Sprint 15b: 2xAA-Alkaline-Kennlinie, AE-64)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("volts", "expected"),
     [
+        # Stuetzstellen exakt
+        (3.00, 100),
+        (2.90, 70),
+        (2.85, 40),
+        (2.80, 0),
+        # Clamps oberhalb / unterhalb der Kennlinien-Endpunkte
+        (3.50, 100),  # Codec-Maximum (Nibble=15)
+        (3.10, 100),
+        (2.70, 0),  # MClimate-Spec-Mindestbetrieb, unter Wechsel-Schwelle
+        (2.00, 0),  # Codec-Minimum (Nibble=0)
+        # None-Eingang
         (None, None),
-        (3.0, 0),
-        (4.2, 100),
-        (3.6, 50),
-        (3.9, 75),  # vom Mock-Uplink-Test in Sprint 5.6
-        (2.5, 0),  # unter Lower-Bound -> geclampt
-        (5.0, 100),  # ueber Upper-Bound -> geclampt
     ],
 )
-def test_battery_pct_clamping(volts: float | None, expected: int | None) -> None:
+def test_battery_pct_curve_anchors_and_clamps(volts: float | None, expected: int | None) -> None:
+    """Stuetzstellen exakt + Clamps an Kennlinien-Raendern."""
     assert _battery_pct_from_volts(volts) == expected
+
+
+@pytest.mark.parametrize(
+    ("volts", "expected"),
+    [
+        # 0.1-V-Raster aus Codec (V = 2.0 + nibble * 0.1, nibble 0..15)
+        # Erwartung: alle Werte 2.0..2.8 V geclampt auf 0; 2.9 V -> 70 %;
+        # 3.0..3.5 V geclampt auf 100 %. KEINE Stufen-Luecken.
+        (2.0, 0),
+        (2.1, 0),
+        (2.2, 0),
+        (2.3, 0),
+        (2.4, 0),
+        (2.5, 0),
+        (2.6, 0),
+        (2.7, 0),
+        (2.8, 0),
+        (2.9, 70),
+        (3.0, 100),
+        (3.1, 100),
+        (3.2, 100),
+        (3.3, 100),
+        (3.4, 100),
+        (3.5, 100),
+    ],
+)
+def test_battery_pct_each_codec_step_has_defined_value(volts: float, expected: int) -> None:
+    """Jede diskrete Codec-Spannungsstufe (0.1-V-Raster) liefert einen
+    definierten %-Wert — keine Sprung-Luecken im Aussage-Raster.
+    """
+    assert _battery_pct_from_volts(volts) == expected
+
+
+def test_battery_pct_curve_monotonically_non_decreasing() -> None:
+    """Ueber alle Codec-Stufen (2.0..3.5 V in 0.1-V-Schritten) ist die
+    Funktion monoton nicht-fallend — hoehere Spannung => >= Prozent.
+    """
+    pcts: list[int] = []
+    for nibble in range(16):  # nibble 0..15 -> 2.0..3.5 V
+        v = 2.0 + nibble * 0.1
+        pct = _battery_pct_from_volts(v)
+        assert pct is not None
+        pcts.append(pct)
+    for prev, curr in zip(pcts[:-1], pcts[1:], strict=True):
+        assert curr >= prev, f"nicht monoton: prev={prev} curr={curr} in {pcts}"
+
+
+def test_battery_pct_interpolation_between_anchors() -> None:
+    """Sub-Quantisierung (Hypothetisch — Codec-Raster ist 0.1 V, aber
+    die Interpolation muss zwischen den Anchors korrekt rechnen): 2.825 V
+    liegt mittig zwischen 2.80 (0%) und 2.85 (40%) -> 20 %.
+    """
+    assert _battery_pct_from_volts(2.825) == 20
+
+
+def test_battery_curve_anchors_match_adr_definition() -> None:
+    """Schutzlatte gegen versehentliches Verschieben der Anker-Werte.
+    Anker-Definition gegen AE-64 (MClimate-Spec-Anker 2.80 V = 0 %,
+    Wechsel-Schwelle; 3.00 V = 100 %, frische 2xAA).
+    """
+    assert (
+        (Decimal("2.80"), 0),
+        (Decimal("2.85"), 40),
+        (Decimal("2.90"), 70),
+        (Decimal("3.00"), 100),
+    ) == BATTERY_CURVE_2XAA
+
+
+def test_battery_pct_real_vicki_frame_returns_plausible_value() -> None:
+    """Regression Sprint 15a Cowork-Befund: ein intakter 2xAA-Vicki, der
+    3.0 V meldet, darf NICHT mehr 0 % anzeigen (alte LiPo-Formel
+    (3.0-3.0)/1.2*100 = 0). Mit AE-64-Kennlinie -> 100 %.
+    """
+    real_codec_voltage = 3.0  # nibble=10 in 2 + 10*0.1
+    pct = _battery_pct_from_volts(real_codec_voltage)
+    assert pct == 100, f"intakte Vicki muss plausibel anzeigen, ist {pct}"
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +166,9 @@ def _valid_payload() -> dict[str, Any]:
         "time": "2026-04-28T08:00:00Z",
         "object": {
             "command": 1,
-            "battery_voltage": 3.9,
+            # Sprint 15b (AE-64): realer Codec-Bereich 2.0-3.5 V in 0.1-V-Schritten.
+            # 3.0 V = frische 2xAA Alkaline = 100 %.
+            "battery_voltage": 3.0,
             "temperature": 24,
             "target_temperature": 21.0,
             "motor_position": 100,
@@ -138,7 +223,7 @@ def test_map_to_reading_full() -> None:
     assert row["temperature"] == Decimal("24")
     assert row["setpoint"] == Decimal("21.0")
     assert row["valve_position"] == 100
-    assert row["battery_percent"] == 75
+    assert row["battery_percent"] == 100  # AE-64: 3.0 V = frische 2xAA = 100 %
     assert row["rssi_dbm"] == -85
     assert row["snr_db"] == Decimal("7.5")
     assert row["raw_payload"] == "AQkYKshkAA=="
@@ -256,7 +341,10 @@ def test_map_to_reading_live_codec_output_fport2_periodic() -> None:
     assert row["temperature"] == Decimal("19.42")
     assert row["setpoint"] == Decimal("22")
     assert row["valve_position"] == 65
-    assert row["battery_percent"] == 42  # (3.5 - 3.0) / 1.2 * 100 = 41.67 -> 42
+    # Sprint 15b (AE-64): 3.5 V ist Codec-Max (Nibble=15), oberhalb des
+    # Kennlinien-Anchors 3.00 V geclampt auf 100 % — frische 2xAA. Alte
+    # LiPo-Formel ergab 42 % bei intakter Batterie (Cowork-Befund 15a).
+    assert row["battery_percent"] == 100
     assert row["open_window"] is False
     assert row["rssi_dbm"] == -90
     assert row["snr_db"] == Decimal("9.8")

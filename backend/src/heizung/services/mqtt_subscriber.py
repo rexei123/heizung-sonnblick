@@ -21,7 +21,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import aiomqtt
@@ -86,12 +86,73 @@ class ChirpStackUplink(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# Sprint 15b (AE-64): Vicki-2xAA-Alkaline-Entladekurve. Anker auf MClimate-
+# Spec (Betriebsspannung 2.7-3.6 VDC, Wechsel-Empfehlung < 2.8 V) und die
+# nicht-lineare Alkaline-Entladekurve (steile Knie am Lebensende). Stuetz-
+# stellen sortiert aufsteigend nach Volt. ``2.80 V`` = 0 % entspricht der
+# MClimate-Wechsel-Schwelle, NICHT der Tiefentladung (Geraet laeuft bis
+# 2.7 V weiter). ``3.00 V`` = 100 % ist der typische geladene Stand frischer
+# 2xAA-Alkaline unter LoRaWAN-Sende-Last.
+#
+# Quelle:
+# - Codec ``infra/chirpstack/codecs/mclimate-vicki.js:119-121``: Geraete-
+#   Spannung = 2.0 + Nibble * 0.1, 0.1-V-Raster, Wertebereich 2.0-3.5 V.
+# - MClimate-Hauptdoku: Power 2x AA (1.5 V Alkaline, keine Akkus, Lithium-AA
+#   optional bis 3.6 V Geraete-Spannung), Betriebsbereich 2.7-3.6 VDC.
+#
+# Die alte lineare LiPo-Skala (3.0-4.2 V) war doppelt falsch: falscher
+# Spannungsbereich UND falsche Kurvenform — produzierte 0 % bei intakter
+# 2xAA-Batterie (Cowork-Befund Sprint 15a).
+BATTERY_CURVE_2XAA: tuple[tuple[Decimal, int], ...] = (
+    (Decimal("2.80"), 0),
+    (Decimal("2.85"), 40),
+    (Decimal("2.90"), 70),
+    (Decimal("3.00"), 100),
+)
+
+
 def _battery_pct_from_volts(volts: float | None) -> int | None:
-    """Linear 3.0 V (0 %) bis 4.2 V (100 %), geclampt 0..100."""
+    """Vicki-2xAA-Alkaline Batterie-Prozent aus Codec-Geraete-Spannung.
+
+    Stuetzstellen-Interpolation nach ``BATTERY_CURVE_2XAA``. Linear
+    zwischen zwei umfassenden Anchors, geclampt 0..100 ausserhalb der
+    Endpunkte (``volts <= 2.80`` -> 0, ``volts >= 3.00`` -> 100).
+
+    Decimal-Vergleich gegen Float-Drift an den Anker-Schwellen: der
+    Codec emittiert exakte 0.1-V-Werte (``parseFloat(volts.toFixed(2))``),
+    aber IEEE-754-Repraesentation von z. B. ``2.8`` ist nicht exakt — der
+    ``Decimal(str(volts))``-Konversionspfad ist exakt und vermeidet
+    Off-by-Epsilon an der Wechsel-Schwelle.
+
+    :param volts: ``object.battery_voltage`` aus Codec-Output (Float).
+        Realer Wertebereich 2.0-3.5 V in 0.1-V-Schritten.
+    :returns: Integer 0..100. ``None`` wenn ``volts`` ``None`` ist.
+    """
     if volts is None:
         return None
-    pct = int(round((volts - 3.0) / 1.2 * 100))
-    return max(0, min(100, pct))
+
+    v = Decimal(str(volts))
+
+    # Clamps an den Kennlinien-Raendern
+    lo_v, lo_pct = BATTERY_CURVE_2XAA[0]
+    hi_v, hi_pct = BATTERY_CURVE_2XAA[-1]
+    if v <= lo_v:
+        return lo_pct
+    if v >= hi_v:
+        return hi_pct
+
+    # Lineare Interpolation zwischen den zwei umfassenden Stuetzstellen
+    for (v_lo, p_lo), (v_hi, p_hi) in zip(
+        BATTERY_CURVE_2XAA[:-1], BATTERY_CURVE_2XAA[1:], strict=True
+    ):
+        if v_lo <= v <= v_hi:
+            span_v = v_hi - v_lo
+            span_p = Decimal(p_hi - p_lo)
+            pct = Decimal(p_lo) + (v - v_lo) / span_v * span_p
+            return int(pct.to_integral_value(rounding=ROUND_HALF_UP))
+
+    # Unreachable (Clamps decken Ausserhalb-Faelle ab); fuer mypy noetig.
+    return hi_pct
 
 
 def _to_decimal(v: Any) -> Decimal | None:

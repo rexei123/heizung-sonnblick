@@ -2042,6 +2042,77 @@ online kommt, hat **drei** beobachtbare Hardware-Eigenheiten:
 - `docs/SESSION-START.md` "Kritische Hardware-Befunde" verlinkt
   diese Lesson plus AE-63.
 
+### 5.72 Vicki-Batterie ist 2xAA-Alkaline mit nicht-linearer Entladekurve (Sprint 15a/15b)
+
+Beobachtet 2026-05-28 (Sprint 15a Cowork-Befund) und behoben in
+Sprint 15b (AE-64): Eine intakte Vicki mit frischen 2xAA-Alkaline zeigte
+`battery_percent = 0 %`, weil der Subscriber den Codec-Output
+`battery_voltage` über eine LiPo-Linear-Skala (3.0-4.2 V) auf 0..100 %
+umrechnete. Doppelter Fehler:
+
+1. **Falscher Spannungsbereich.** Codec emittiert die Vicki-Geräte-
+   Spannung als `V = 2.0 + nibble * 0.1` (Bytes 7-Hi-Nibble, 4-Bit,
+   `infra/chirpstack/codecs/mclimate-vicki.js:119-121`). Wertebereich
+   **2.0-3.5 V** in 0.1-V-Schritten — das sind die in Reihe geschalteten
+   2xAA-Zellen, KEINE LiPo-Spannung.
+2. **Falsche Kurvenform.** Alkaline hat nicht-linear-flache Entladung im
+   oberen Plateau und einen steilen Knie am Lebensende. Lineare Skala
+   produziert systematisch zu niedrige Werte.
+
+**MClimate-Spec** (Quelle: `docs/vendor/mclimate-vicki/README.md` „Power"
++ Hauptdoku):
+
+- Betriebsspannung **2.7-3.6 VDC**.
+- Wechsel-Empfehlung **< 2.8 V**.
+- Power **2x AA Alkaline (1.5 V)**, keine Akkus.
+- Optional Lithium-AA bis 3.6 V Geräte-Spannung.
+
+**Konsequenzen für Code-Änderungen:**
+
+- **Batterie-Skala ab AE-64 lebt in `BATTERY_CURVE_2XAA`** in
+  `services/mqtt_subscriber.py`. Stützstellen-Interpolation mit Decimal-
+  Vergleich gegen Float-Drift an der 2.80-V-Wechsel-Schwelle. Anker:
+  2.80 V → 0 %, 2.85 V → 40 %, 2.90 V → 70 %, 3.00 V → 100 %.
+- **Kein Backfill:** historische `sensor_reading.battery_percent`-Rows
+  bleiben mit alter Skala. Rohspannung ist nicht persistiert, nur
+  `raw_payload` (base64). Re-Decode wäre möglich, aber Aufwand >> Nutzen
+  (UI zeigt Werte nur in Diagnose-Kacheln).
+- **Kein Konsument auf `battery_percent` in der Engine.** `services/`
+  und `tasks/` reagieren nicht auf den Wert.
+  `global_config.alert_battery_warn_percent` ist konfigurierbar (Default
+  20 %), aber **toter Schalter** — kein Konsument. Folge-Sprint
+  B-15b-1: real verdrahten (Email-Alarm an Wechsel-Schwelle).
+- **Cell-Typ-Annahme:** Standard 2xAA Alkaline. Wenn Hotel-Sonnblick auf
+  Lithium-AA wechselt (Spec erlaubt bis 3.6 V Geräte-Spannung), bleibt
+  die Kurve im oberen Bereich konservativ (höhere Lithium-Spannung
+  ohnehin auf 100 % geclampt). Untere Schwelle 2.8 V wäre für Lithium
+  pessimistisch — separater Sprint, falls relevant.
+
+**Test-Patterns:**
+
+- Pure-Function-Tests pro Codec-Stufe (`2.0..3.5 V` in 0.1-V-Schritten),
+  Anchor-Werte exakt, Monotonie über das gesamte Raster, Decimal-Sub-
+  Quantisierungs-Interpolation
+  (`tests/test_mqtt_subscriber.py`-Sektion `_battery_pct_from_volts`).
+- Schutz-Test gegen versehentliches Verschieben der Anker:
+  `test_battery_curve_anchors_match_adr_definition` vergleicht die
+  Konstante direkt gegen die AE-64-Tabelle.
+- Live-Frame-Regression:
+  `test_map_to_reading_live_codec_output_fport2_periodic` (3.5 V →
+  100 %, war vorher 42 % unter LiPo-Linear).
+
+**Querverweise:**
+
+- AE-64 (Master-ADR Kennlinie).
+- §5.27 (Vicki-Hardware-Realität, Open-Window-Default — gleiche Lesson-
+  Familie „Vicki-Verhalten weicht von Default-Annahme ab").
+- §5.21 (Codec-Routing über Payload-Byte vs. Transport-Feld — analoge
+  Hardware-Annahme-Korrektur aus Sprint 9.10c).
+- AE-53 (Health-Modell — heute ohne Batterie-Trigger; B-15b-1 schließt
+  die Lücke).
+- `docs/SESSION-START.md` „Kritische Hardware-Befunde": verlinkt diese
+  Lesson + AE-64.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
