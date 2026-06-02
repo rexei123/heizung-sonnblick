@@ -128,6 +128,11 @@ Inhalte — die Wahrheit steht in den verlinkten Dokumenten.
 - **CLAUDE.md §5.71** — Vicki kommt nach Reboot mit gedriftetem
   Setpoint + fcnt-Reset (Sprint 15a/15c, AE-63). Drei-Klassen-Logik
   (Reboot/Drehring/Normal), Re-Sync-Flag, Hysterese-Bypass einmalig.
+- **CLAUDE.md §5.72** — Vicki-Batterie ist 2xAA-Alkaline mit
+  nicht-linearer Entladekurve (Sprint 15a/15b, AE-64). Stützstellen-
+  Kennlinie 2.80 V = 0 % (MClimate-Wechsel-Schwelle), 3.00 V = 100 %
+  (frische 2xAA); Codec-Spannung im 0.1-V-Raster 2.0-3.5 V. Alte
+  LiPo-Linear-Skala 3.0-4.2 V hat intakte Vickis als 0 % angezeigt.
 - **AE-45 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Auto-Detect-Override
   bei Hand-Drehung am Vicki
 - **AE-47 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Hardware-First-Window-
@@ -136,6 +141,10 @@ Inhalte — die Wahrheit steht in den verlinkten Dokumenten.
   über fcnt-Reset, Off-pipeline-Audit `REBOOT_RESYNC`, Re-Sync-Flag
   in Redis (TTL 1 h), Hysterese-Bypass via
   `engine_tasks._dispatch_downlinks_per_zone`.
+- **AE-64 in `ARCHITEKTUR-ENTSCHEIDUNGEN.md`** — Vicki-Batterie-
+  Kennlinie 2xAA-Alkaline (nicht LiPo), Stützstellen-Interpolation
+  mit `BATTERY_CURVE_2XAA` in `services/mqtt_subscriber.py`, MClimate-
+  Spec 2.7-3.6 VDC / Wechsel < 2.8 V als Anker.
 - **`docs/vendor/mclimate-vicki/README.md`** — Hersteller-Doku-Stand
   2026-05-09 mit FW-Tabelle und Command-Cheat-Sheet
 

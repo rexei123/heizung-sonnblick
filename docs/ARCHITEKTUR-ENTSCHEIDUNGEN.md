@@ -2486,3 +2486,156 @@ mit Index `ix_sensor_reading_device_time` auf `(device_id, time)`.
 
 
 **Querverweise:** AE-51 §4.1, AE-52, AE-58, Sprint 12b + 14b (PR #191), §5.69.
+
+---
+
+# AE-64 — Vicki-Batterie: 2xAA-Alkaline-Kennlinie statt LiPo-linear (Sprint 15b)
+
+**Datum:** 2026-06-02
+**Status:** Akzeptiert
+**Bezug:** Sprint 15b, Sprint 15a Cowork-Befund (intakte Vicki zeigt 0 %),
+AE-53 (Health-Modell — derzeit ohne Batterie-Trigger), CLAUDE.md §5.27
+(Vicki-Hardware-Realität).
+
+## Kontext
+
+Der Subscriber rechnete `battery_voltage` aus dem Codec über die lineare
+Formel `(volts - 3.0) / 1.2 * 100` in einen Prozentwert um — eine
+LiPo-Kennlinie (3.0 V = 0 %, 4.2 V = 100 %). Das war **doppelt falsch**:
+
+1. **Falscher Spannungsbereich.** Die offizielle MClimate-Decoder-Formel
+   ist `V = 2.0 + nibble * 0.1` (4-Bit-Nibble in `bytes[7] >> 4`,
+   `infra/chirpstack/codecs/mclimate-vicki.js:119-121`). Wertebereich
+   `2.0-3.5 V` in 0.1-V-Schritten — das ist die **Geräte-Spannung** der
+   in Reihe geschalteten 2xAA-Zellen, nicht eine LiPo-Spannung.
+2. **Falsche Kurvenform.** Alkaline hat eine ausgeprägt nicht-lineare
+   Entladekurve mit steiler Knie am Lebensende. Eine lineare Skala
+   produziert systematisch zu niedrige Werte: ein realer Vicki mit
+   `battery_voltage = 3.0 V` (frische 2xAA) ergab `(3.0-3.0)/1.2*100 =
+   0 %` (Cowork-Befund Sprint 15a) — die Hotelier-UI zeigte intakte
+   Geräte als „Batterie leer".
+
+MClimate-Spec (Hauptdoku + lokaler `README.md` Sektion „Power"):
+**Betriebsspannung 2.7-3.6 VDC, Wechsel-Empfehlung < 2.8 V, Power 2x AA
+Alkaline (1.5 V, KEINE Akkus, Lithium-AA optional bis 3.6 V Geräte-
+Spannung).**
+
+Sprint-15a-Pre-Beleg (Frage D) hat außerdem belegt: **kein Konsument** in
+`services/` oder `tasks/` reagiert auf `battery_percent`. Das
+`global_config.alert_battery_warn_percent`-Feld existiert mit
+Default 20 %, hat aber **keinen Konsumenten** — toter Schalter in der
+Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
+
+## Entscheidung
+
+1. **Nicht-lineare Stützstellen-Interpolation** in
+   `services/mqtt_subscriber._battery_pct_from_volts`. Anker als benannte
+   Konstante `BATTERY_CURVE_2XAA`, Live-kalibriert gegen die 4 produktiven
+   Vickis auf heizung-test (2026-06-02 — 3× Codec-Sättigung 3.5 V, 1× 3.0 V):
+
+   | Spannung | Prozent | Bedeutung |
+   |---|---|---|
+   | 2.70 V | 0 % | Geräte-Mindestbetrieb (MClimate-Spec-Untergrenze 2.7 V); Wechsel überfällig |
+   | 2.80 V | 10 % | MClimate-Warnschwelle — Vicki funktioniert noch, baldiger Wechsel nötig |
+   | 2.90 V | 30 % | Alkaline-Knie (steiler Spannungsabfall ab hier abwärts) |
+   | 3.00 V | 50 % | Mitte; entspricht der schwächsten der 4 Live-Vickis |
+   | 3.20 V | 80 % | Plateau „gut" |
+   | 3.50 V | 100 % | Codec-Sättigung (Nibble=15), frische 2xAA Alkaline |
+
+   Linear zwischen den zwei umfassenden Anchors interpoliert, geclampt
+   `0..100` außerhalb der Endpunkte. Anchor-Werte auf 0.10-V-Raster
+   (alle Codec-Quantisierungs-Schritte landen deterministisch),
+   Plateau-Bereich bewusst gröber (0.20 V Abstand zwischen 3.00-3.20-3.50)
+   wegen Codec-Sättigung am oberen Ende.
+
+   **WICHTIG — Codec-Sättigung:** Nibble 15 (= 3.5 V im Decoder) ist das
+   4-Bit-MAXIMUM des Codec-Felds, NICHT „genau 3.5 V". Vicki-Firmware
+   clampt intern bei `nibble >= 15`. Oberhalb von ~3.4 V tatsächlicher
+   Geräte-Spannung gibt es keine Codec-Auflösung mehr — frische
+   Batterien sitzen am oberen Anschlag (Live-Beleg 2026-06-02:
+   3 von 4 Vickis dauerhaft auf `nibble=15`). Konsequenz: zwischen
+   „frisch" und „etwas verbraucht" zeigt das System keinen Unterschied,
+   bis die Geräte-Spannung unter ~3.4 V fällt. Folge-UI-Backlog
+   B-15b-2: 2-stellige Prozentzahl ist Scheinpräzision — Stufen-Badge
+   (frisch/gut/mittel/warn/leer) wäre die ehrlichere Darstellung.
+
+2. **Decimal-Vergleich gegen Float-Drift.** Eingang ist `float` (aus
+   JSON-Decode), aber der Codec emittiert exakte 0.1-V-Werte
+   (`parseFloat(toFixed(2))`). IEEE-754-Repräsentation von z. B. 2.8 ist
+   nicht exakt — Konversion via `Decimal(str(volts))` macht den Anker-
+   Vergleich exakt. Vermeidet Off-by-Epsilon an der Wechsel-Schwelle.
+
+3. **Kein Backfill, keine Migration.** Historische
+   `sensor_reading.battery_percent`-Rows behalten ihren falschen Wert
+   (die Rohspannung ist nicht gespeichert; nur `raw_payload` als base64
+   wäre rekonstruierbar — zu aufwändig für den Nutzen). Der Fix wirkt
+   ab erstem neuen Frame nach Deploy. UI-Diagnose-Kachel und Thermostat-
+   Bubble (Sprint 14b) zeigen neue Werte korrekt; historische Charts (in
+   einem späteren Analytics-Sprint) müssten ggf. einen Stichtag
+   markieren.
+
+4. **B-15a-3 als by-design geschlossen.** Die Block-Audit-Pipeline
+   (Sprint 12c + 15c, pre-a-Gate in `device_adapter.handle_uplink_for_
+   override` Z.385-399) schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-
+   event_log mit `reason=DEVICE_BLOCKED_ROOM_BLOCKED`, sobald
+   `detect_user_override` einen echten Setpoint-Change in einem
+   geblockten Raum findet. Die Sprint-15a-Q-D4-Beobachtung („0 Rows
+   trotz Block über Stunden") war eine Heartbeat-Phase ohne
+   Drehring-Akte — kein Bug. Sprint 15b enthält daher **keinen**
+   Block-Audit-Code-Fix. Der Befund wandert mit Erkenntnis-Vermerk in
+   STATUS.md §6.4 (B-15a-3 abgeschlossen).
+
+## Konsequenzen
+
+- Cowork-Befund Sprint 15a behoben: 4 produktive Vickis zeigen nach
+  AE-64-Kennlinie plausible Werte (3 frisch = 100 %, 1 mittel = 50 %)
+  statt 0 % unter alter LiPo-Linear-Skala. Geräte unter MClimate-Wechsel-
+  Schwelle (< 2.8 V) zeigen sauber 0-10 %, was die Hotelier-UI als
+  „demnächst wechseln" lesbar macht.
+- Kein Schema-Touch, keine Migration. AE-45-Pfad und AE-58-Gates
+  unangetastet.
+- Hardware-Annahme (Standard 2xAA Alkaline) ist in der Lesson festgehalten
+  und per Live-Beleg 2026-06-02 bestätigt; falls Hotel-Sonnblick
+  irgendwann auf Lithium-AA wechselt (Spec erlaubt bis 3.6 V), bleibt
+  die Kurve im oberen Bereich konservativ — Lithium-Spannung > 3.5 V wird
+  ohnehin auf 100 % geclampt (Codec-Sättigung), und Lithium-Discharge
+  ist auch nicht-linear. Untere Schwelle 2.7 V wäre für Lithium
+  marginal pessimistisch (Lithium-AA hält Spannung länger über
+  ~2.8 V) — separater Sprint, falls relevant.
+- **Codec-Sättigung-Konsequenz für die UI:** das System hat effektiv
+  nur ~6 wirklich unterscheidbare Stufen (0/10/30/50/65/80/(87/93)/100),
+  und der Bereich „frisch bis etwas verbraucht" (~3.4-3.6 V tatsächlich)
+  ist nicht auflösbar. 2-stellige Prozentzahlen sind Scheinpräzision.
+  Folge-Backlog **B-15b-2** (kein Bug): UI sollte perspektivisch
+  Stufen-Badge (frisch/gut/mittel/warn/leer) statt Prozentzahl zeigen.
+- **Toter `alert_battery_warn_percent`-Schalter** in `global_config` wird
+  als Folge-Sprint B-15b-1 verdrahtet (Konsument an `health_alerts`
+  ankoppeln; eigene Brief-Entscheidung wegen Email-Versand-Scope).
+
+## Verworfen
+
+- **Linear-Skala mit korrektem 2xAA-Bereich** (z. B. linear 2.7-3.5 V):
+  würde die Alkaline-Knie ignorieren und im Plateau-Bereich zu
+  optimistische Werte liefern. Stützstellen-Kurve bildet das
+  physikalische Verhalten besser ab.
+- **Konservative Initial-Anchors aus dem Brief-Vorschlag**
+  (2.80 = 0 %, 3.00 = 100 %): nach Live-Beleg der 4 Produktiv-Vickis
+  (3× Codec-Sättigung 3.5 V, 1× 3.0 V) zu eng gefasst — die
+  schwächste Vicki hätte fälschlich 100 % gezeigt, die oberen 3 wären
+  ohne Auflösung im 100-%-Clamp gelandet. Anchors um ~0.4-0.5 V nach
+  oben verschoben, Plateau-Stützpunkte ergänzt
+  (2.70 V = 0 %, 3.50 V = 100 %).
+- **Backfill via `raw_payload`-Re-Decode:** technisch möglich
+  (`raw_payload` ist base64-Original), aber Aufwand (Migration plus
+  Python-Re-Decoder pro Row, oder JS-Codec-Re-Run) steht in keinem
+  Verhältnis zum Nutzen — historische Werte werden nur in Diagnose-
+  Kacheln gezeigt; UI-Verwirrung über den Stichtag ist akzeptabel.
+- **Eigene Cell-Typ-Konfiguration in `global_config`** (Alkaline /
+  Lithium / NiMH-Skalen umschaltbar): Over-Engineering für ein
+  Einzel-Hotel mit einheitlicher Cell-Strategie. Wenn benötigt,
+  einfacher Sprint später.
+- **Mitnahme von Block B (B-15a-3 Block-Audit-Gap):** Nach B0-Beleg
+  ist die Lücke unter der Brief-Bedingung „nur echte Setpoint-Changes
+  auditieren" nicht erreichbar — pre-a-Gate schreibt schon das
+  event_log. Brief Block B gestrichen, B-15a-3 als by-design
+  geschlossen.
