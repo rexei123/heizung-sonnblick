@@ -196,13 +196,33 @@ Bei Widersprüchen zwischen STRATEGIE.md v1.0 und diesem Dokument gilt dieses Do
 
 ## AE-17 · Uplinks als TimescaleDB-Hypertable mit JSONB-Payload
 
+**Status: Superseded — siehe `sensor_reading`-Schema (Migration 0001),
+`uplinks`-Hypertable existiert nicht.**
+
+Sprint 5 (LoRaWAN-Foundation) hat statt einer neuen `uplinks`-Tabelle die
+bestehende `sensor_reading`-Tabelle wiederverwendet und in
+`0001_initial_domain_model.py` als TimescaleDB-Hypertable über `time`
+definiert (Composite-PK `(time, device_id)`, Sekundär-Index
+`ix_sensor_reading_device_time` auf `(device_id, time)`). Der LoRaWAN-
+Frame-Counter wurde via Migration `0002_lorawan_fcnt` als
+`sensor_reading.fcnt`-Spalte nachgereicht. **Keine `uplinks`-Migration
+existiert.** Das JSONB-Payload-Pattern wurde nicht übernommen — Sensor-
+Werte liegen als typisierte Spalten (`temperature`, `setpoint`,
+`valve_position`, `battery_percent`, `open_window`, `attached_backplate`,
+…) plus `raw_payload` (base64) für Diagnose. Beleg: B-15a-2 (Sprint 15a
+Phase-0-Read-only-Diagnose), geschlossen Sprint 15b 2026-06-02 per
+Doku-Korrektur.
+
+**Historischer Inhalt** (zur Nachvollziehbarkeit der Entscheidungs-
+Sequenz belassen — gilt nicht mehr):
+
 **Kontext.** Sensor-Uplinks sind Zeitreihen (typisch 1× pro 15 Min × 130 Geräte = ~1 Mio Rows/Jahr). Schema-Optionen: normalisiert (Spalte pro Sensor-Wert), JSONB, oder Wide-Table.
 
-**Entscheidung.** Eine `uplinks`-Hypertable mit Kernfeldern (`device_id`, `ts`, `fcnt`, `rssi`, `snr`, `freq`) und einem `payload`-JSONB-Feld für die decoded Vicki-Werte. Chunk-Intervall 7 Tage. Eindeutigkeit via `UNIQUE (device_id, fcnt)` für idempotente Inserts.
+**Entscheidung (überholt).** Eine `uplinks`-Hypertable mit Kernfeldern (`device_id`, `ts`, `fcnt`, `rssi`, `snr`, `freq`) und einem `payload`-JSONB-Feld für die decoded Vicki-Werte. Chunk-Intervall 7 Tage. Eindeutigkeit via `UNIQUE (device_id, fcnt)` für idempotente Inserts.
 
-**Begründung.** JSONB hält uns offen für unterschiedliche Geräte-Typen ohne Migrations-Hölle. TimescaleDB komprimiert ältere Chunks automatisch (~10× Reduktion typisch). Kernfelder bleiben indizierbar/queryable. UNIQUE-Constraint via DevEUI+FrameCounter macht MQTT-Replays bei Reconnects unproblematisch.
+**Begründung (überholt).** JSONB hält uns offen für unterschiedliche Geräte-Typen ohne Migrations-Hölle. TimescaleDB komprimiert ältere Chunks automatisch (~10× Reduktion typisch). Kernfelder bleiben indizierbar/queryable. UNIQUE-Constraint via DevEUI+FrameCounter macht MQTT-Replays bei Reconnects unproblematisch.
 
-**Konsequenz.** Frontend-Queries auf Sensor-Werte (z. B. `payload->>'temperature'`) sind etwas teurer als Spaltenzugriffe — bei 1 Mio Rows/Jahr mit Indices auf `(device_id, ts DESC)` aber unkritisch. Bei Performance-Engpässen später materialized views.
+**Konsequenz (überholt).** Frontend-Queries auf Sensor-Werte (z. B. `payload->>'temperature'`) sind etwas teurer als Spaltenzugriffe — bei 1 Mio Rows/Jahr mit Indices auf `(device_id, ts DESC)` aber unkritisch. Bei Performance-Engpässen später materialized views.
 
 ---
 
