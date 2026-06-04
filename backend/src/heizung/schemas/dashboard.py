@@ -30,6 +30,10 @@ class DashboardKpiRead(BaseModel):
     active_overrides: int
     zones_window_open: int
     last_engine_tick: datetime | None
+    # Sprint 15d (AE-65): aktive Geraete mit schwacher Batterie (juengster
+    # battery_percent < alert_battery_warn_percent). Additiv, die bestehenden
+    # KPI-Felder bleiben unveraendert.
+    battery_low_count: int
 
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:

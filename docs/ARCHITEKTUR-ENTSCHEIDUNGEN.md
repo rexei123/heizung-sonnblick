@@ -2659,3 +2659,95 @@ Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
   auditieren" nicht erreichbar — pre-a-Gate schreibt schon das
   event_log. Brief Block B gestrichen, B-15a-3 als by-design
   geschlossen.
+
+---
+
+# AE-65 — Batterie als additive Health-Dimension (Sprint 15d, PR1 Backend)
+
+**Datum:** 2026-06-04
+**Status:** Akzeptiert
+**Bezug:** Sprint 15d (PR1 Backend), AE-53 (Health-State-Modell —
+offline/implausible), AE-64 (2xAA-Kennlinie liefert den `battery_percent`),
+CLAUDE.md §5.72 (Batterie-Hardware-Realität), B-15b-1 (Schwellwert), B-15b-2
+(Badge in PR2).
+
+## Kontext
+
+AE-53 modelliert Geräte-Health heute über **zwei Achsen**, beide gebündelt im
+persistierten `device.health_state` (`{healthy, degraded, silent, suspicious}`,
+berechnet vom 5-min-Beat-Task `tasks/health_tasks.py`): Offline-Alter und
+implausible Readings. Eine **schwache Batterie** war bis hierher keine
+Health-Information — `battery_percent` wurde vom Subscriber geschrieben
+(AE-64), aber von keinem Service/Task konsumiert; der konfigurierbare
+Schwellwert `global_config.alert_battery_warn_percent` (Default 20) war ein
+**toter Schalter** (AE-64 Kontext, §5.72).
+
+Batterie ist eine **orthogonale** Eigenschaft: ein Vicki kann online und
+voll plausibel sein (`health_state = healthy`) **und** zugleich eine fast
+leere Batterie haben. Ein Falten in den einen `health_state`-String würde
+die Achsen konflieren und die offline/implausible-Semantik brechen
+(Umbau, kein additiver Sprint).
+
+## Entscheidung
+
+1. **Batterie ist eine eigene, dritte Health-Achse** — nicht Teil von
+   `device.health_state`. Reine Funktion
+   `services/battery_health.battery_health_state(pct, warn_threshold)
+   -> Literal["ok","warn","kritisch","unbekannt"]`:
+
+   | Zustand | Bedingung |
+   |---|---|
+   | `unbekannt` | `pct is None` (kein Reading / Codec-NULL) |
+   | `kritisch` | `pct < BATTERY_CRITICAL_PCT` (10, fix, nicht konfigurierbar) |
+   | `warn` | `pct < warn_threshold` |
+   | `ok` | sonst (`pct >= warn_threshold`) |
+
+   Reihenfolge verbindlich: `unbekannt` → `kritisch` → `warn` → `ok`.
+   `kritisch` ist **absolut** (schlägt `warn` auch bei kleiner Schwelle).
+
+2. **`warn_threshold` aus `alert_battery_warn_percent`** (Default 20) —
+   damit ist B-15b-1s Schwellwert erstmals **als Health-Status verdrahtet**,
+   bewusst **OHNE** Email-/Alarm-Versand. Aktiver Versand bleibt B-15b-1.
+   `BATTERY_CRITICAL_PCT = 10` ist fix (Hardware-Untergrenze am steilen
+   Alkaline-Knie, §5.72), nicht konfigurierbar.
+
+3. **Exposition als eigenes Read-Feld**
+   `DeviceRead.battery_state` (read-time abgeleitet aus
+   `latest_reading.battery_percent` + Schwelle, via `model_copy`). Die
+   offline/implausible-Pfade in `health_tasks.py` bleiben **unverändert**.
+
+4. **Dashboard-Aggregat** `DashboardKpiRead.battery_low_count`: Anzahl
+   aktiver Geräte (`retired_at IS NULL`, §5.58), deren jüngster
+   `battery_percent < warn_threshold` (fasst `warn` + `kritisch`).
+   `NULL`-battery zählt nicht. Query via `DISTINCT ON device_id` über
+   `ix_sensor_reading_device_time` (15b/15c-Muster).
+
+5. **Keine Migration, kein persistentes Feld.** `battery_state` ist read-
+   time abgeleitet aus vorhandenen Daten (`battery_percent` + Config). Es
+   gibt keine zwei Wahrheiten und keinen Beat-Task-Touch.
+
+## Konsequenzen
+
+- **PR2 (Frontend)** kombiniert beide Achsen (`health_state` +
+  `battery_state`) für `statusScore`-Sortierung, Kachel/Badge/Spalte
+  (B-15b-2). Frontend-Type-Spiegel zu `DeviceRead.battery_state` +
+  `DashboardKpiRead.battery_low_count` kommt in PR2 (§5.63), hier nur Backend.
+- **Codec-Sättigung (AE-64):** `battery_percent` hat nur ~6 unterscheidbare
+  Stufen; die Schwellen-Logik ist davon unberührt (Vergleich gegen int).
+- **Schwellen-Schutz:** `test_battery_health.test_constants_match_adr_65`
+  pinnt `BATTERY_CRITICAL_PCT=10` / `DEFAULT_BATTERY_WARN_PCT=20` gegen
+  versehentliches Verschieben.
+
+## Verworfen
+
+- **Batterie in `device.health_state` falten** (z. B. neuer Wert
+  `battery_low`): konfligiert die orthogonalen Achsen — ein online-Gerät
+  mit schwacher Batterie hätte entweder seinen online-Status oder seinen
+  Batterie-Status verloren. Eigene Achse ist die einzige verlustfreie Form.
+- **Persistentes `device.battery_state`-Feld + Beat-Compute:** bräuchte
+  Migration und einen zweiten Schreibpfad neben `battery_percent` — zwei
+  Wahrheiten, kein Mehrwert. Read-time-Ableitung ist deterministisch und
+  immer aktuell.
+- **`BATTERY_CRITICAL_PCT` konfigurierbar machen:** Over-Engineering; die
+  10-%-Grenze ist eine Hardware-Eigenschaft (Alkaline-Knie), keine
+  Hotelier-Präferenz.

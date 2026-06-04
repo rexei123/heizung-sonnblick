@@ -41,4 +41,5 @@ async def get_dashboard_kpi(
         active_overrides=await agg.count_active_overrides(session),
         zones_window_open=await agg.count_zones_window_open(session),
         last_engine_tick=await agg.last_engine_tick(session),
+        battery_low_count=await agg.count_battery_low(session),
     )

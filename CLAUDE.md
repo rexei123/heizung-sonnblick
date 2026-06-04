@@ -2121,6 +2121,50 @@ umrechnete. Doppelter Fehler:
 - `docs/SESSION-START.md` „Kritische Hardware-Befunde": verlinkt diese
   Lesson + AE-64.
 
+### 5.73 Batterie ist eine orthogonale Health-Achse, nicht Teil von health_state (Sprint 15d)
+
+Geräte-Health hat seit Sprint 15d **drei** Achsen, die NICHT in einen
+String gehören:
+
+- `device.health_state` (`{healthy, degraded, silent, suspicious}`,
+  persistiert, 5-min-Beat) bündelt **offline-Alter** + **implausible
+  Readings** (AE-53).
+- `device.battery_state` (`{ok, warn, kritisch, unbekannt}`, read-time
+  abgeleitet, AE-65) ist eine **separate** Achse.
+
+Ein Vicki kann `health_state = healthy` UND `battery_state = kritisch`
+sein — beide Wahrheiten gleichzeitig. Wer eine schwache Batterie in
+`health_state` faltet (z. B. ein neuer Wert `battery_low`), zerstört
+genau diese Orthogonalität: das Gerät verliert entweder seinen
+online-Status oder seinen Batterie-Status. **Eigene Achse ist die
+einzige verlustfreie Form.**
+
+**Schwellen (AE-65, benannte Konstanten in `services/battery_health.py`):**
+
+- `BATTERY_CRITICAL_PCT = 10` — **fix, nicht konfigurierbar**. Hardware-
+  Untergrenze am steilen Alkaline-Knie (§5.72), keine Hotelier-Präferenz.
+- warn-Schwelle aus `global_config.alert_battery_warn_percent` (Default
+  20, `DEFAULT_BATTERY_WARN_PCT` als Fallback wenn Singleton-Row fehlt).
+  Reihenfolge im Mapping verbindlich: `unbekannt` → `kritisch` → `warn`
+  → `ok`; `kritisch` ist absolut und schlägt `warn` auch bei kleiner
+  Schwelle.
+
+**Verdrahtung B-15b-1:** 15d hängt `alert_battery_warn_percent` erstmals
+an einen Konsumenten (Health-Status + Dashboard-`battery_low_count`),
+aber **ohne** Email-/Alarm-Versand. Der war vorher toter Schalter (§5.72,
+AE-64). Aktiver Versand bleibt offen als B-15b-1.
+
+**Regel für neue abgeleitete Status-Felder:** Wenn ein Wert deterministisch
+aus vorhandenen Daten (hier `battery_percent` + Config) ableitbar ist,
+**read-time im Schema-Assembler ableiten** statt persistieren —
+keine Migration, kein zweiter Schreibpfad, keine zwei Wahrheiten. Schwelle
+aus Config laden via `session.get(GlobalConfig, 1)` (Identity-Map ⇒ ein
+Roundtrip pro Request, kein N+1) mit defensivem Fallback wenn Row fehlt.
+
+**Querverweise:** AE-65 (Master-ADR), AE-53 (offline/implausible-Achse),
+§5.72 (2xAA-Kennlinie liefert `battery_percent`), §5.58 (Lifecycle-Filter
+im Aggregat), §5.63 (Frontend-Type-Spiegel folgt in PR2).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

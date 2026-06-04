@@ -137,8 +137,9 @@ async def _mk_reading(
     session: AsyncSession,
     device_id: int,
     *,
-    temperature: Decimal | None,
-    open_window: bool | None,
+    temperature: Decimal | None = None,
+    open_window: bool | None = None,
+    battery_percent: int | None = None,
     when: datetime,
 ) -> None:
     session.add(
@@ -147,6 +148,7 @@ async def _mk_reading(
             device_id=device_id,
             temperature=temperature,
             open_window=open_window,
+            battery_percent=battery_percent,
         )
     )
     await session.flush()
@@ -285,3 +287,74 @@ async def test_count_zones_window_open_delta(db_session: AsyncSession) -> None:
     db = await _mk_device(db_session, f"{s}b", zone_id=zone_b.id, health_state="healthy")
     await _mk_reading(db_session, db.id, temperature=Decimal("21.0"), open_window=False, when=now)
     assert await agg.count_zones_window_open(db_session) - base == 1
+
+
+# ---------------------------------------------------------------------------
+# Sprint 15d (AE-65) — battery_low_count
+# ---------------------------------------------------------------------------
+#
+# Seed-Schwelle ``alert_battery_warn_percent`` = 20 (Migration 0003a). Tests
+# sind delta-basiert (Wert vor/nach), robust gegen Leftover-Bestand (§5.39).
+
+
+async def test_count_battery_low_counts_active_below_threshold(db_session: AsyncSession) -> None:
+    """Zaehlt nur aktive Geraete unter der Schwelle; ignoriert retired + None.
+
+    Default-Schwelle 20: warn (15) + kritisch (5) zaehlen, ok (50) nicht,
+    None nicht, retired (3) nicht.
+    """
+    base = await agg.count_battery_low(db_session)
+    s = uuid.uuid4().hex[:8]
+    room = await _mk_room(db_session, s, RoomStatus.VACANT)
+    zone = await _mk_zone(db_session, room.id, s)
+    now = datetime.now(tz=UTC)
+
+    d_warn = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
+    await _mk_reading(db_session, d_warn.id, battery_percent=15, when=now)  # 15 < 20 -> zaehlt
+    d_crit = await _mk_device(db_session, f"{s}2", zone_id=zone.id, health_state="silent")
+    await _mk_reading(db_session, d_crit.id, battery_percent=5, when=now)  # 5 < 20 -> zaehlt
+    d_ok = await _mk_device(db_session, f"{s}3", zone_id=zone.id, health_state="healthy")
+    await _mk_reading(db_session, d_ok.id, battery_percent=50, when=now)  # 50 >= 20 -> nein
+    d_none = await _mk_device(db_session, f"{s}4", zone_id=zone.id, health_state="healthy")
+    await _mk_reading(db_session, d_none.id, battery_percent=None, when=now)  # NULL -> nein
+    d_retired = await _mk_device(
+        db_session, f"{s}5", zone_id=zone.id, health_state="healthy", retired=True
+    )
+    await _mk_reading(db_session, d_retired.id, battery_percent=3, when=now)  # retired -> nein
+
+    assert await agg.count_battery_low(db_session) - base == 2, "nur warn(15) + kritisch(5)"
+
+
+async def test_count_battery_low_uses_latest_reading_per_device(db_session: AsyncSession) -> None:
+    """Nur das juengste Reading je Geraet zaehlt (DISTINCT ON device_id).
+
+    Geraet mit altem low-Reading (5) und neuerem ok-Reading (60) zaehlt NICHT.
+    """
+    base = await agg.count_battery_low(db_session)
+    s = uuid.uuid4().hex[:8]
+    room = await _mk_room(db_session, s, RoomStatus.VACANT)
+    zone = await _mk_zone(db_session, room.id, s)
+    now = datetime.now(tz=UTC)
+
+    d = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
+    await _mk_reading(db_session, d.id, battery_percent=5, when=now - timedelta(hours=6))  # alt
+    await _mk_reading(db_session, d.id, battery_percent=60, when=now)  # juengstes -> ok
+
+    assert await agg.count_battery_low(db_session) - base == 0
+
+
+async def test_count_battery_low_real_four_vicki_fixture_zero(db_session: AsyncSession) -> None:
+    """Reale 4-Vicki-Werte aus 15b-Verify (50/93/100/100) -> alle ueber 20.
+
+    battery_low_count-Delta = 0 (kein Vicki unter der Warn-Schwelle).
+    """
+    base = await agg.count_battery_low(db_session)
+    s = uuid.uuid4().hex[:8]
+    room = await _mk_room(db_session, s, RoomStatus.OCCUPIED)
+    zone = await _mk_zone(db_session, room.id, s)
+    now = datetime.now(tz=UTC)
+    for i, pct in enumerate((50, 93, 100, 100)):
+        d = await _mk_device(db_session, f"{s}{i}", zone_id=zone.id, health_state="healthy")
+        await _mk_reading(db_session, d.id, battery_percent=pct, when=now)
+
+    assert await agg.count_battery_low(db_session) - base == 0

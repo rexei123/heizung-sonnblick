@@ -194,6 +194,14 @@ class DeviceRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
+    # ``health_state`` (offline/implausible). Abgeleitet aus
+    # ``latest_reading.battery_percent`` + ``alert_battery_warn_percent``, vom
+    # Endpoint via model_copy gesetzt (kein ORM-Attribut, kein persistentes
+    # Feld). Default "unbekannt", damit ``model_validate(device)`` greift, wenn
+    # kein Reading vorliegt. PR2 kombiniert beide Achsen fuer die Sortierung.
+    battery_state: Literal["ok", "warn", "kritisch", "unbekannt"] = "unbekannt"
+
     # Sprint 14a (D1/D2): additive Cross-Sicht-Felder. Defaults None, damit
     # ``model_validate(device)`` (from_attributes) bei fehlenden ORM-
     # Attributen (active_override, latest_reading) den Default nimmt; der
