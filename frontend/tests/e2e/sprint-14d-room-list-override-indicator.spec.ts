@@ -30,14 +30,14 @@ const MOCK_MITARBEITER = {
 function roomMock(
   id: number,
   number: string,
-  opts: { blocked?: boolean; hasActiveOverride?: boolean } = {},
+  opts: { blocked?: boolean; hasActiveOverride?: boolean; floor?: number } = {},
 ): Record<string, unknown> {
   return {
     id,
     number,
     display_name: null,
     room_type_id: 1,
-    floor: 1,
+    floor: opts.floor ?? 1,
     orientation: null,
     status: "occupied",
     guest_override_blocked: opts.blocked ?? false,
@@ -130,5 +130,25 @@ test.describe("Sprint 14d — Aktiv-Indikator in Zimmer-Uebersicht", () => {
     await expect(page.getByRole("row").filter({ hasText: "301" })).toBeVisible();
     await expect(page.getByLabel("Übersteuerung aktiv")).toHaveCount(0);
     await expect(page.getByLabel("Übersteuerung gesperrt")).toHaveCount(0);
+  });
+
+  test("Zimmer-Liste rendert die API-Reihenfolge (floor ASC, dann numerisch)", async ({ page }) => {
+    // Die Sortierung liegt im Backend (GET /rooms: floor ASC, number numerisch);
+    // das Frontend rendert die API-Reihenfolge unveraendert (kein Client-Sort).
+    // Dieser Smoke schuetzt gegen ein versehentliches Re-Sortieren im FE.
+    await mockApi(page, [
+      roomMock(1, "10", { floor: 0 }),
+      roomMock(2, "99", { floor: 0 }),
+      roomMock(3, "101", { floor: 1 }),
+      roomMock(4, "102", { floor: 1 }),
+      roomMock(5, "110", { floor: 1 }),
+    ]);
+    await page.goto("/zimmer");
+
+    // Auf die gerenderten Zeilen warten (allInnerTexts wartet nicht von selbst).
+    const cells = page.locator("tbody tr td:first-child");
+    await expect(cells).toHaveCount(5);
+    const numbers = (await cells.allInnerTexts()).map((t) => t.trim());
+    expect(numbers).toEqual(["10", "99", "101", "102", "110"]);
   });
 });

@@ -330,3 +330,49 @@ async def test_patch_override_block_state_404_unknown_room(
         json={"blocked": True},
     )
     assert resp.status_code == 404, resp.text
+
+
+# ---------------------------------------------------------------------------
+# GET /rooms — Sortierung: floor ASC, dann number numerisch
+# ---------------------------------------------------------------------------
+
+
+async def test_list_rooms_ordered_floor_then_numeric(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+) -> None:
+    """Liste sortiert primaer floor ASC, sekundaer number numerisch.
+
+    Belegt beide Korrekturen: (1) Etage zuerst (0 vor 1 vor 2), (2) innerhalb
+    der Etage numerisch (799 vor 7700 — String-Sort wuerde "7700" vor "799"
+    stellen). Nicht-numerische Nummer (X700) landet via NULLS LAST am Ende.
+    Nummern ausserhalb des Seed-Bereichs (>4xx) -> keine Kollision.
+    """
+    # number -> floor. Erwartete Reihenfolge unten.
+    rooms = {"7900": 0, "7800": 1, "799": 2, "7700": 2, "X700": 2}
+    numbers = set(rooms)
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    suffix = datetime.now(tz=UTC).strftime("%H%M%S%f")
+    async with sessionmaker() as session:
+        rt = RoomType(name=f"t-ord-{suffix}")
+        session.add(rt)
+        await session.flush()
+        for number, fl in rooms.items():
+            session.add(Room(number=number, room_type_id=rt.id, floor=fl))
+        await session.commit()
+        rt_id = rt.id
+
+    try:
+        resp = await http_client.get("/api/v1/rooms?limit=1000")
+        assert resp.status_code == 200, resp.text
+        order = [r["number"] for r in resp.json() if r["number"] in numbers]
+        # floor 0, floor 1, floor 2 (numerisch 799<7700), nicht-numerisch zuletzt.
+        assert order == ["7900", "7800", "799", "7700", "X700"]
+    finally:
+        async with sessionmaker() as session:
+            await session.execute(
+                text("DELETE FROM room WHERE number = ANY(:nums)"),
+                {"nums": list(numbers)},
+            )
+            await session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": rt_id})
+            await session.commit()
