@@ -16,6 +16,11 @@ export type DeviceVendor = "mclimate" | "milesight" | "manual";
 /** Device-Health (AE-53): aus Uplink-Latenz + Plausibilitaet abgeleitet. */
 export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious";
 
+// Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
+// DeviceHealthState (offline/implausible). Abgeleitet aus battery_percent +
+// alert_battery_warn_percent; Spiegel zu DeviceRead.battery_state.
+export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
+
 /** Zone-Health (AE-53): aus den Devices der Zone aggregiert (no_device statt suspicious). */
 export type ZoneHealthState = "healthy" | "degraded" | "silent" | "no_device";
 
@@ -88,8 +93,13 @@ export interface Device {
   last_seen_at: string | null;
   /** Sprint 9.11x.b: vom MQTT-Subscriber aus FW-Reply gepflegt. */
   firmware_version: string | null;
-  /** Sprint 11 (AE-53): Device-Health-Aggregat. */
+  /** Sprint 11 (AE-53): Device-Health-Aggregat (offline/implausible). */
   health_state: DeviceHealthState;
+  /**
+   * Sprint 15d (AE-65): Batterie-Health-Achse, orthogonal zu health_state.
+   * Read-time abgeleitet aus latest_reading.battery_percent + Config-Schwelle.
+   */
+  battery_state: BatteryHealthState;
   created_at: string;
   updated_at: string;
   // Sprint 14a (D1/D2): Cross-Sicht-Felder.
@@ -687,4 +697,6 @@ export interface DashboardKpi {
   active_overrides: number;
   zones_window_open: number;
   last_engine_tick: string | null;
+  // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch).
+  battery_low_count: number;
 }

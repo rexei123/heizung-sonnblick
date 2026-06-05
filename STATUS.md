@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-06-02
 **Letzter Tag:** `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15d Batterie als Health-Zustand — **PR1 Backend offen** (§2bg, Branch `feature/15d-batterie-health-backend`, NICHT gemerged, kein Tag; PR2 Frontend folgt nach Merge). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3354,6 +3354,65 @@ PR2), §5.50 (Lokal-DB-Verify-Pflicht).
 
 ---
 
+## 2bh. Sprint 15d Batterie-Sichtbarkeit — PR2 Frontend (2026-06-05, PR offen)
+
+**Ziel (PR2):** `battery_state` + `battery_low_count` (PR1) im UI sichtbar —
+Badge (3+1 an die Achse gekoppelt), Dashboard-Kachel, Batterie-Spalte in der
+Geräte-Tabelle, Fehlerstatus-Sortierung über BEIDE Health-Achsen.
+
+**Type-Spiegel (Task 0, §5.63/§5.64 — Pflicht zuerst):**
+- `types.ts`: `Device.battery_state` + neuer `BatteryHealthState`,
+  `DashboardKpi.battery_low_count`.
+- `dashboard.ts`: `dashboardKpiSchema` um `battery_low_count: z.number()` —
+  ohne den Key strippt Zod das Feld → Kachel `undefined` (§5.64-Falle).
+- `devices.ts` ohne Zod (raw fetch) — nur TS-Typ greift. tsc-Gate grün
+  vor Komponenten-Bau.
+
+**Tasks:**
+- T1 `BatteryBadge` (`components/patterns/battery-badge.tsx`, Muster von
+  `ZoneHealthBadge`): 3+1 Zustände aus `battery_state` (ok grün · warn gelb ·
+  kritisch rot · unbekannt grau), prop-getrieben, kein API-Call, defensiver
+  Fallback. Material Symbols, Prozent nur im `title`-Tooltip.
+- T2 Thermostat-Bubble: `formatPercent` durch `<BatteryBadge>` ersetzt.
+- T3 Dashboard: 7. Kachel „Schwache Batterie" (`battery_low_count`,
+  warning-soft wenn > 0) + `CARD_META`-Skeleton synchron (sonst 6/7-Drift)
+  + Header-Kommentar 6→7.
+- T4 `statusScore`-REDESIGN: feste Tabelle über beide Achsen (retired 5 ·
+  silent 4 · degraded/suspicious 3 · batt-kritisch 2 · batt-warn 1 · ok 0),
+  Maximum pro Gerät; ersetzt die frühere reine `last_seen`-Zeit-Heuristik
+  (las `health_state` gar nicht). Beleg-Test: offline (4) schlägt
+  batt-kritisch (2).
+- T5 Batterie-Spalte in `DevicesTable` (eigener `<td>` zwischen Gerät und
+  Zone, §5.66). Detail-„Batterie"-Kachel-Tone von hartkodiertem
+  `battery_percent < 20` auf `battery_state` umgestellt (Doppel-Achse
+  beseitigt, §5.73) — `warning`-Tone in lokaler `KpiCard` ergänzt.
+- T6 Doku: AE-65 Frontend-Teil, CLAUDE.md §5.73, STATUS §2bh + §6.4.
+
+**Tests:** neue `sprint-15d-battery.spec.ts` (Badge-Zustände + statusScore-
+Sortier-Beweis). Angepasst: `sprint-14c-dashboard` (Zod-Pflichtfeld + 6→7
+zwei Stellen), `devices.spec` (th-Header 4→5, Mocks um `battery_state`),
+`sprint-14b-zone-cards` (Bubble Prozent→Badge). Defensiver Badge hält die
+übrigen Tabellen-Specs grün ohne Mock-Touch.
+
+**Toolchain (lokal grün, 2026-06-05):**
+- `type-check` (tsc): 0 Fehler · `lint` (eslint): 0 · `build` (next): OK
+- Playwright E2E: **96 passed** (4 betroffene Specs verifiziert + voller Lauf).
+
+**Backlog-Auflösung:**
+- **B-15b-2 ✅ erledigt** in 15d: Stufen-Badge (3+1) ersetzt die Prozent-
+  Scheinpräzision (AE-64). Prozent nur noch im Tooltip + Detail-Diagnose.
+- **B-15b-1** unverändert offen: nur noch aktiver Email-/Alarm-Versand.
+
+**Status:** PR2 offen nach `develop`, **NICHT gemerged** — Freigabe abwarten.
+**Tag `v0.1.19h`** erst nach PR2-Merge + Live-Verify (per Brief). Branch
+`feature/15d-batterie-health-frontend`.
+
+**Querverweise:** AE-65 (Master inkl. Frontend-Teil), CLAUDE.md §5.73,
+§5.63/§5.64 (Type-Spiegel + Zod-Strip), §5.66 (Multi-Badge-Slots), §5.73
+(Achsen-Kopplung), §2bg (PR1 Backend).
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -3602,7 +3661,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | B-15a-2 | **AE-17 als superseded markieren** (BLOCK H2). AE-17-Text in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:197-205` beschreibt eine `uplinks`-Hypertable mit JSONB-Payload — existiert real nicht. Sprint 5 (STATUS §2g.5.7) hat `sensor_reading` wiederverwendet (`models/sensor_reading.py:30-73`, Migration `0001_initial_domain_model.py:263-289` legt sie als Hypertable an, keine `uplinks`-Migration existiert). Separater `chore/`-Doku-PR mit ADR-Markierung „Status: Superseded — siehe `sensor_reading`-Schema". Nicht in andere PRs mischen. | 🟡 |
 | B-15a-3 | **AE-45-Block-Pfad lückenlos auditieren** (BLOCK D.6.4 Audit-Gap). | ✅ by-design geschlossen 2026-06-02 (Sprint 15b B0-Beleg, AE-64 §Verworfen). Code-Pipeline post-Sprint-12c/15c schreibt bereits `MANUAL_OVERRIDE_BLOCKED`-event_log (`reason=DEVICE_BLOCKED_ROOM_BLOCKED`) im pre-a-Gate `device_adapter.handle_uplink_for_override` Z.385-399, sobald `detect_user_override` einen echten Setpoint-Change in gesperrtem Raum findet. Q-D4-Befund („0 Rows trotz Block über Stunden") war eine Heartbeat-Phase ohne Drehring-Akte — kein Bug. Heartbeats / Toleranz / Ack-Window dürfen unter der Strategie-Brief-Bedingung „nur echte Setpoint-Changes auditieren" bewusst keinen Audit erzeugen (Skalierungs-Risiko bei ~105 Vickis × ~12 Heartbeats/h). |
 | B-15b-1 | **`alert_battery_warn_percent` → Email-/Alarm-Versand** (Schwellwert jetzt verdrahtet, Versand offen). **Update Sprint 15d (AE-65):** der Schwellwert ist **als Health-Status verdrahtet** — Device-`battery_state` (`ok`/`warn`/`kritisch`/`unbekannt`) + Dashboard-`battery_low_count` konsumieren `alert_battery_warn_percent` (Default 20). Der Schalter ist **nicht mehr tot**. Offen bleibt **nur** der **aktive Email-/Alarm-Versand** an der Wechsel-Schwelle: Email-Versand-Scope-Entscheidung (`alert_email` heute nur in `global_config`, Email-Service noch nicht implementiert — vgl. §5.20-Pattern). Klein-mittel, vor Heizperiode 2026/27 wünschenswert (Batterie-Wechsel-Vorlauf). | 🟡 |
-| B-15b-2 | **In Sprint 15d konsolidiert (Badge in PR2).** Batterie-UI: Stufen-Badge statt Prozentzahl (kein Bug, Scheinpräzisions-Hygiene). Codec liefert Geräte-Spannung im 0.1-V-Raster mit 4-Bit-Nibble — Wertebereich 2.0-3.5 V, nibble 15 (= 3.5 V) ist Sättigung am oberen Ende. Effektiv hat das System ~6 unterscheidbare Stufen oberhalb der Wechsel-Schwelle (0/10/30/50/65/80/87/93/100 % an den Codec-Quantisierungs-Stufen 2.7..3.5 V); der Bereich „frisch bis etwas verbraucht" (Live-Beleg 2026-06-02: 3 von 4 Vickis auf nibble=15 saturiert) ist ohne Auflösung. 2-stellige Prozentzahl in der UI ist Scheinpräzision. **Empirie-Beleg 2026-06-02:** ein Gerät kippte zwischen Anchor-Refactor-Snapshot (nibble=15 / 3.5 V) und Live-Verify (nibble=14 / 3.4 V) von 100 % auf 93 % bei minimalem realem Batterie-Abfall — erster konkreter Beleg der Sättigungs-Scheinpräzision in einer einzelnen Codec-Stufe. Vorschlag Folge-Sprint: Stufen-Badge mit ~5 Stufen (`frisch` ≥ 80 %, `gut` ≥ 50 %, `mittel` ≥ 30 %, `warn` ≥ 10 %, `leer` < 10 %), tooltip-Anzeige der Rohspannung für Diagnose. Mit B-15b-1 gemeinsam planbar (UI + Alarm-Anbindung). | 🟢 |
+| B-15b-2 | ✅ **erledigt 2026-06-05 (Sprint 15d PR2, §2bh):** Batterie-`BatteryBadge` (3+1 Zustände aus `battery_state`) ersetzt die Prozentzahl in Bubble + Geräte-Tabelle; exakte Prozente nur noch im Tooltip + Detail-Diagnose. Stufen-Badge statt Prozentzahl (kein Bug, Scheinpräzisions-Hygiene). Codec liefert Geräte-Spannung im 0.1-V-Raster mit 4-Bit-Nibble — Wertebereich 2.0-3.5 V, nibble 15 (= 3.5 V) ist Sättigung am oberen Ende. Effektiv hat das System ~6 unterscheidbare Stufen oberhalb der Wechsel-Schwelle (0/10/30/50/65/80/87/93/100 % an den Codec-Quantisierungs-Stufen 2.7..3.5 V); der Bereich „frisch bis etwas verbraucht" (Live-Beleg 2026-06-02: 3 von 4 Vickis auf nibble=15 saturiert) ist ohne Auflösung. 2-stellige Prozentzahl in der UI ist Scheinpräzision. **Empirie-Beleg 2026-06-02:** ein Gerät kippte zwischen Anchor-Refactor-Snapshot (nibble=15 / 3.5 V) und Live-Verify (nibble=14 / 3.4 V) von 100 % auf 93 % bei minimalem realem Batterie-Abfall — erster konkreter Beleg der Sättigungs-Scheinpräzision in einer einzelnen Codec-Stufe. Vorschlag Folge-Sprint: Stufen-Badge mit ~5 Stufen (`frisch` ≥ 80 %, `gut` ≥ 50 %, `mittel` ≥ 30 %, `warn` ≥ 10 %, `leer` < 10 %), tooltip-Anzeige der Rohspannung für Diagnose. Mit B-15b-1 gemeinsam planbar (UI + Alarm-Anbindung). | 🟢 |
 
 ---
 

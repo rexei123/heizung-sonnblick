@@ -14,8 +14,9 @@
 
 import Link from "next/link";
 
+import { BatteryBadge } from "@/components/patterns/battery-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
-import { formatPercent, formatTemperature } from "@/lib/format";
+import { formatTemperature } from "@/lib/format";
 import type { Device } from "@/lib/api/types";
 
 export function ThermostatBubble({ device }: { device: Device }) {
@@ -39,12 +40,13 @@ export function ThermostatBubble({ device }: { device: Device }) {
             </span>{" "}
             {formatTemperature(reading?.temperature ?? null)}
           </span>
-          <span title="Batterie (letzte Messung)">
-            <span className="material-symbols-outlined align-middle" aria-hidden style={{ fontSize: 14 }}>
-              battery_horiz_075
-            </span>{" "}
-            {formatPercent(reading?.battery_percent ?? null)}
-          </span>
+          {/* Sprint 15d (AE-65): Batterie als Badge (battery_state-Achse),
+              Prozent nur im Tooltip — ersetzt die frühere formatPercent-Zahl. */}
+          <BatteryBadge
+            batteryState={device.battery_state}
+            batteryPercent={reading?.battery_percent ?? null}
+            variant="compact"
+          />
         </div>
       </div>
       <Link

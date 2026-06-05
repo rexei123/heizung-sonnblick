@@ -4,8 +4,9 @@
  * Startseite / Dashboard (Sprint 14c).
  *
  * Begruessung (tageszeit-aware, Browser-Lokalzeit — R3: KEIN SSR-Zeitwert)
- * + 6 KPI-Kacheln aus ``GET /api/v1/dashboard/kpi`` (60-s-Refresh via
- * ``useDashboardKpi``). Ersetzt den frueheren ``redirect("/devices")``.
+ * + 7 KPI-Kacheln aus ``GET /api/v1/dashboard/kpi`` (60-s-Refresh via
+ * ``useDashboardKpi``; Sprint 15d ergänzt „Schwache Batterie"). Ersetzt den
+ * frueheren ``redirect("/devices")``.
  *
  * Wording: „Thermostat"/„Geraete" generisch, nicht „Vicki" (§5.20);
  * „Algorithmen-Lauf" konsistent zum Sidebar-Eintrag „Algorithmenverlauf".
@@ -28,6 +29,9 @@ const CARD_META: { label: string; icon: string }[] = [
   { label: "Aktive Übersteuerungen", icon: "tune" },
   { label: "Fenster offen", icon: "sensor_window" },
   { label: "Letzter Algorithmen-Lauf", icon: "history" },
+  // Sprint 15d (AE-65): 7. Kachel — Skeleton-Array muss synchron sein, sonst
+  // zeigt das Lade-Skelett 6 und geladen 7.
+  { label: "Schwache Batterie", icon: "battery_alert" },
 ];
 
 function greetingPrefix(now: Date): string {
@@ -87,6 +91,14 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       subValue: tick ? formatDateTime(tick) : undefined,
       icon: "history",
       tone: tickStale ? "warning-soft" : "neutral",
+    },
+    {
+      // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch),
+      // dieselbe Achse wie die BatteryBadges — warning-soft sobald > 0.
+      label: "Schwache Batterie",
+      value: data.battery_low_count,
+      icon: "battery_alert",
+      tone: data.battery_low_count > 0 ? "warning-soft" : "neutral",
     },
   ];
 }

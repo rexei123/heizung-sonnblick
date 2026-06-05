@@ -2755,3 +2755,48 @@ die Achsen konflieren und die offline/implausible-Semantik brechen
 - **`BATTERY_CRITICAL_PCT` konfigurierbar machen:** Over-Engineering; die
   10-%-Grenze ist eine Hardware-Eigenschaft (Alkaline-Knie), keine
   Hotelier-Präferenz.
+
+## Frontend (PR2, Sprint 15d)
+
+Der Frontend-Teil macht die `battery_state`-Achse sichtbar — **an die Achse
+gekoppelt, keine zweite Schwelle**:
+
+1. **`BatteryBadge`** (`components/patterns/battery-badge.tsx`, Muster von
+   `ZoneHealthBadge`): 3+1 Zustände direkt aus `device.battery_state`
+   (ok=grün · warn=gelb · kritisch=rot · unbekannt=grau), prop-getrieben,
+   kein eigener API-Call. **Keine 5-Stufen-Skala** — der Badge ist die
+   Achse, nicht eine erneute Prozent-Schwelle. Die exakte Prozentzahl steht
+   **nur im `title`-Tooltip** (`Batterie: N %`), weil der Codec sättigt und
+   2-stellige Prozente Scheinpräzision sind (AE-64 / §5.72). Damit ist
+   **B-15b-2 erledigt** (Stufen-Badge ersetzt die Prozent-Scheinpräzision).
+2. **Sichtbar an drei Stellen, eine Quelle:** Thermostat-Bubble (ersetzt die
+   frühere `formatPercent`-Zahl), neue Batterie-Spalte in der `/devices`-
+   Tabelle, und die Detail-„Batterie"-Kachel-Tone (zuvor hartkodiertes
+   `battery_percent < 20` — eine Doppel-Achse, §5.73 — jetzt aus
+   `battery_state`). Dashboard-Kachel „Schwache Batterie" =
+   `battery_low_count`.
+3. **`statusScore`-Redesign** (`/devices`-Sortierung): die frühere reine
+   `last_seen`-Zeit-Heuristik (die `health_state` gar nicht las) wird durch
+   eine feste Tabelle über **beide Health-Achsen** ersetzt, pro Gerät der
+   höchste Wert:
+
+   | Score | Bedingung |
+   |---|---|
+   | 5 | `retired_at` gesetzt |
+   | 4 | `health_state` silent (offline) |
+   | 3 | `health_state` degraded/suspicious (unplausibel) |
+   | 2 | `battery_state` kritisch |
+   | 1 | `battery_state` warn |
+   | 0 | healthy + ok |
+
+   Rangfolge = Betriebsentscheidung: offline > unplausibel > batt-kritisch >
+   batt-warn > ok. Die `health_state`-Achse schlägt die Batterie-Achse.
+
+**Visuelle Konsistenz-Invariante:** Badge gelb/rot ⇔ Gerät zählt in
+`battery_low_count` (Dashboard-Kachel) — dieselbe Achse, dieselbe Schwelle
+(`alert_battery_warn_percent`), kein Drift zwischen Badge und Kachel.
+
+**Type-Spiegel (§5.63/§5.64, Pflicht):** `types.ts` `Device.battery_state` +
+`BatteryHealthState` + `DashboardKpi.battery_low_count`; **Zod**
+`dashboardKpiSchema.battery_low_count` (ohne den Key strippt Zod das Feld →
+Kachel `undefined`, §5.64). `devices.ts` ohne Zod (raw fetch) — nur TS-Typ.
