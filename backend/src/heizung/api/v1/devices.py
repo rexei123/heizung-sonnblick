@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.device import Device
+from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.models.user import User
@@ -45,6 +46,7 @@ from heizung.schemas.device import (
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service
+from heizung.services.battery_health import DEFAULT_BATTERY_WARN_PCT, battery_health_state
 from heizung.services.device_service import (
     get_device_with_relations,
     get_latest_reading,
@@ -97,16 +99,28 @@ async def _ensure_zone_exists(session: AsyncSession, zone_id: int | None) -> Non
         )
 
 
+async def _battery_warn_threshold(session: AsyncSession) -> int:
+    """Liest ``alert_battery_warn_percent`` aus der GlobalConfig-Singleton (id=1).
+
+    Defensiver Fallback ``DEFAULT_BATTERY_WARN_PCT`` wenn die Row fehlt
+    (frische DB ohne Seed, S5). ``session.get`` nutzt die Identity-Map — der
+    Aufruf je Geraet in der Listen-Schleife loest nur einen DB-Roundtrip pro
+    Request aus (Folge-Aufrufe treffen den Cache), kein N+1.
+    """
+    gc = await session.get(GlobalConfig, 1)
+    return gc.alert_battery_warn_percent if gc is not None else DEFAULT_BATTERY_WARN_PCT
+
+
 async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
-    + latest_reading (Sprint 14a, D2).
+    + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
 
     Erwartet ein Device mit eager-geladener ``heating_zone``-Kette (via
     ``list_devices_with_relations`` / ``get_device_with_relations``), sonst
     Lazy-Load-Fehler im async-Pfad. ``heating_zone`` (Nested),
     ``hardware_number`` und die Basis-Felder kommen via ``model_validate``
-    (from_attributes); ``active_override`` + ``latest_reading`` werden
-    nachgesetzt, weil sie keine ORM-Attribute sind.
+    (from_attributes); ``active_override`` + ``latest_reading`` +
+    ``battery_state`` werden nachgesetzt, weil sie keine ORM-Attribute sind.
 
     Hinweis (D3): pro Device je eine Override- + eine Reading-Query (N+1).
     Bewusst akzeptiert bei < 200 Geraeten; Optimierung im Backlog falls noetig.
@@ -140,8 +154,19 @@ async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRea
             recorded_at=reading.time,
         )
 
+    # Sprint 15d (AE-65): Batterie-Health-Achse aus dem juengsten Reading +
+    # konfigurierter Warn-Schwelle ableiten. ``None`` (kein Reading) -> wird
+    # in ``battery_health_state`` zu "unbekannt".
+    battery_pct = reading.battery_percent if reading is not None else None
+    threshold = await _battery_warn_threshold(session)
+    battery_state = battery_health_state(battery_pct, threshold)
+
     return read.model_copy(
-        update={"active_override": override_read, "latest_reading": reading_read}
+        update={
+            "active_override": override_read,
+            "latest_reading": reading_read,
+            "battery_state": battery_state,
+        }
     )
 
 

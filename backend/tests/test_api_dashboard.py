@@ -53,6 +53,7 @@ _EXPECTED_KEYS = {
     "active_overrides",
     "zones_window_open",
     "last_engine_tick",
+    "battery_low_count",
 }
 
 
@@ -177,6 +178,7 @@ async def test_dashboard_kpi_admin_200_schema(
         "devices_total",
         "active_overrides",
         "zones_window_open",
+        "battery_low_count",
     ):
         assert isinstance(body[key], int), f"{key} muss int sein, war {body[key]!r}"
     assert body["avg_temperature_celsius"] is None or isinstance(

@@ -291,6 +291,73 @@ async def test_latest_reading_with_valve_position(
 
 
 # ---------------------------------------------------------------------------
+# battery_state (Sprint 15d, AE-65) — orthogonale Health-Achse
+# ---------------------------------------------------------------------------
+
+
+async def test_battery_state_warn_without_touching_health_state(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+    setup_engine: AsyncEngine,
+) -> None:
+    """Gerät mit pct=15 erscheint als battery_state="warn" (Schwelle 20),
+    während health_state unveraendert "healthy" bleibt (Regression: Batterie
+    ist eine eigene Achse, faltet NICHT in offline/implausible).
+    """
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        session.add(
+            SensorReading(
+                time=datetime.now(tz=UTC),
+                device_id=int(setup["device_id"]),
+                fcnt=1,
+                temperature=Decimal("21.0"),
+                battery_percent=15,
+                open_window=False,
+            )
+        )
+        await session.commit()
+
+    resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
+    dev = resp.json()
+    assert dev["battery_state"] == "warn", dev
+    assert dev["health_state"] == "healthy", "Batterie-Achse darf health_state nicht aendern"
+    assert dev["latest_reading"]["battery_percent"] == 15
+
+
+async def test_battery_state_kritisch_below_ten(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+    setup_engine: AsyncEngine,
+) -> None:
+    """pct=5 -> battery_state="kritisch" (absolute Schwelle 10)."""
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        session.add(
+            SensorReading(
+                time=datetime.now(tz=UTC),
+                device_id=int(setup["device_id"]),
+                fcnt=2,
+                battery_percent=5,
+                open_window=False,
+            )
+        )
+        await session.commit()
+
+    resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
+    assert resp.json()["battery_state"] == "kritisch", resp.text
+
+
+async def test_battery_state_unbekannt_without_reading(
+    http_client: httpx.AsyncClient, setup: dict[str, int | str]
+) -> None:
+    """Pool-Device ohne Reading -> battery_state="unbekannt"."""
+    resp = await http_client.get(f"/api/v1/devices/{setup['pool_device_id']}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["battery_state"] == "unbekannt"
+
+
+# ---------------------------------------------------------------------------
 # Pool-Device + Lifecycle-Filter
 # ---------------------------------------------------------------------------
 
