@@ -1292,6 +1292,57 @@ ohne Diagnose der Failure-Ursache.
 > Bezug: STRATEGIE-THERMOSTAT-ZUORDNUNG.md §15 (Migrations-Plan),
 > SPRINT-PLAN.md Sprint 13 + Sprint 17.
 
+### 10h.0 Zimmer-Seed vor Pairing (Stammdaten)
+
+**Pflicht VOR dem Pairing:** Die echten Zimmer + Zonen müssen in der DB
+stehen, bevor Vickis Zonen zugeordnet werden. Das Skript
+`heizung.scripts.seed_rooms` ersetzt die fiktiven Test-Zimmer durch die
+echte Zimmerliste (**45 Zimmer / 103 Zonen**) aus `Zimmerliste_seed.csv`.
+
+**Reiner Stammdaten-Seed** — kein device-Bezug, kein MQTT-Downlink, keine
+Migration, kein Enum-Touch, keine neue Spalte (Weg A, Mapping auf das
+Bestandsschema). Mapping:
+`Zimmer_Kategorie → room.room_type_id` (RoomType Doppelzimmer/Suite),
+`Room_Type → heating_zone.kind` (Schlafzimmer/Kinderzimmer → bedroom,
+Badezimmer → bathroom), `Zone_Label → heating_zone.name`. PMS_Mapping wird
+ignoriert (== Zimmernummer, kein Konsument).
+
+Die CSV ist als **Package-Data** ins Image eingebettet
+(`heizung/scripts/seed_data/Zimmerliste_seed.csv`) → **Lauf ohne scp**.
+Ein optionaler Positionsparameter überschreibt den Pfad.
+
+**Blockierende Vorstufe:** Hängt an einer bestehenden `heating_zone` ein
+Device, **bricht `import` ab** (kein Wipe, keine Vicki-Orphans) und nennt
+die betroffenen Devices. Wipe nur bei null Pairings — daher Zimmer-Seed
+**vor** dem Pairing ausführen.
+
+**Container-Name nicht hart annehmen** (Prod-Pattern `deploy-api-1`,
+heizung-test ggf. anders — via `docker ps` prüfen):
+
+```bash
+# 1) Schema-Pre-Flight (kein Side-Effekt, keine DB):
+docker exec <api-container> python -m heizung.scripts.seed_rooms validate
+
+# 2) Trockenlauf (Wipe+Reseed, danach Rollback — zeigt Step-0 + Counts):
+docker exec <api-container> python -m heizung.scripts.seed_rooms import --dry-run
+
+# 3) Scharf (in EINER Transaktion: room+heating_zone löschen, neu anlegen):
+docker exec <api-container> python -m heizung.scripts.seed_rooms import
+```
+
+**Schritt 0 (automatisch):** fehlt RoomType `Doppelzimmer`/`Suite`, legt
+das Skript sie mit Default-Setpoints an (21/18/19 °C). Zonentyp-RoomTypes
+(Schlafzimmer/Bad/Kind) werden **nicht** angelegt — das ist Absicht.
+
+**Erwartetes Resultat:** `45 room + 103 heating_zone`, jedes Zimmer genau 1
+`bathroom`-Zone, 9 Zonen `name="Kinderzimmer"` (alle `bedroom`) an den
+Zimmern 107/115/207/215/302/303/306/310/401.
+
+**Achtung Daten-Wipe:** `import` löscht **alle** `room` + `heating_zone`;
+per FK-Cascade auch raumbezogene `occupancy`/`manual_override`/`event_log`/
+room-scope-`rule_config`. Globale + Raumtyp-Configs (room_id NULL) bleiben.
+Auf produktiven Daten nur bewusst und nach `--dry-run`-Sichtung.
+
 ### 10h.1 Vicki-Eingangstest (5 Schritte pro Gerät)
 
 Pro Vicki vor der Montage auf dem Tisch im Hotel-Office:

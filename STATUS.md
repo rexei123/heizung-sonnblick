@@ -3418,6 +3418,42 @@ Slots), §5.73 (Achsen-Kopplung), §2bg (PR1 Backend).
 
 ---
 
+## 2bi. Zimmer-Stammdaten-Seed (Weg A, 2026-06-05, PR offen)
+
+**Ziel:** Die fiktiven Test-Zimmer durch die echte Zimmerliste ersetzen
+(**45 Zimmer / 103 Zonen**) aus `docs/inventar/Zimmerliste_seed.csv`.
+**Reiner Stammdaten-Seed** — kein device-Bezug, **keine Migration, kein
+Enum-Touch, keine neue Spalte** (Weg A nach Schema-Stop: der erste Brief
+nahm `room_type` fälschlich als Zonentyp an + drei nicht-existente Felder).
+
+**Mapping CSV → Bestandsschema (develop `b2fa884`):**
+`Zimmer_Kategorie → room.room_type_id` (RoomType Doppelzimmer/Suite),
+`Room_Type → heating_zone.kind` (Schlafzimmer/Kinderzimmer → bedroom,
+Badezimmer → bathroom), `Zone_Label → heating_zone.name`,
+`Ausrichtung` N/S/O/W → Orientation (O=EAST). PMS_Mapping ignoriert
+(== Zimmernummer, kein Konsument). „Kinderzimmer" bleibt nur in
+`heating_zone.name` (kein neuer Enum-Wert).
+
+**Skript:** `heizung.scripts.seed_rooms` (`validate` / `import --dry-run`),
+CSV als **Package-Data** eingebettet (Lauf ohne scp), optionaler Pfad-
+Override. **Blockierende Vorstufe:** bricht bei Device-an-Zone ab (kein
+Wipe). Schritt 0 legt fehlende RoomTypes Doppelzimmer/Suite an. Wipe+Reseed
+in EINER Transaktion (RUNBOOK §10h.0).
+
+**Verifikation (lokal, TimescaleDB-Container):**
+- `validate`: `[OK] 45 Zimmer / 103 Zonen`.
+- `import --dry-run` (leere migrierte DB): Step 0 legte Doppelzimmer+Suite
+  an, `45 room + 103 heating_zone`, Rollback.
+- ruff/mypy grün; `pytest`: **636 passed, 1 xfailed** (14 neue seed_rooms-
+  Tests: 10 Pure-Function + 4 DB inkl. Vorstufe-Abbruch + dry-run-Rollback).
+
+**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
+`feat/zimmer-seed-reseed`. Doku-Hinweis: `05-aktueller-stand.md` (Brief-DoD)
+existiert im Repo nicht (Docs flach, arc42-Konsolidierung erst `v0.1.20`
+geplant) — Eintrag hier in STATUS.md, separater arc42-File offen.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

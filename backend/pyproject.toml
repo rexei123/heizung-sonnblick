@@ -41,6 +41,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Seed-CSVs als Package-Data ins Wheel/Image packen (Zimmer-Seed): der
+# seed_rooms-Default-Pfad zeigt auf die eingebettete Datei -> Lauf ohne scp.
+[tool.setuptools.package-data]
+"heizung.scripts.seed_data" = ["*.csv"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
