@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
+import { BatteryBadge } from "@/components/patterns/battery-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
@@ -18,7 +19,6 @@ import {
 } from "@/lib/format";
 import type {
   ApiError,
-  BatteryHealthState,
   Device,
   DeviceActiveOverride,
   OverrideSource,
@@ -171,12 +171,32 @@ export default function DeviceDetailPage() {
               value={formatTemperature(latest?.setpoint ?? null)}
               tone="info"
             />
-            <KpiCard
-              icon="battery_horiz_075"
-              label="Batterie"
-              value={formatPercent(latest?.battery_percent ?? null)}
-              tone={batteryTone(device.battery_state)}
-            />
+            {/* Sprint 15d PR3: Batterie als Badge (detailed) statt Prozent-
+                Wert — konsistent zu Liste/Bubble, Prozent nur im Tooltip.
+                Card-Chrome wie die Geschwister-Kacheln, Badge ersetzt den
+                grossen Wert. */}
+            <div
+              className="bg-surface rounded-lg border border-border p-4"
+              data-testid="battery-card"
+            >
+              <div className="flex items-center gap-2 text-text-tertiary text-xs">
+                <span
+                  className="material-symbols-outlined"
+                  aria-hidden="true"
+                  style={{ fontSize: 18 }}
+                >
+                  battery_horiz_075
+                </span>
+                <span>Batterie</span>
+              </div>
+              <div className="mt-2">
+                <BatteryBadge
+                  batteryState={device.battery_state}
+                  batteryPercent={latest?.battery_percent ?? null}
+                  variant="detailed"
+                />
+              </div>
+            </div>
             <KpiCard
               icon="signal_cellular_alt"
               label="Signal"
@@ -461,7 +481,7 @@ interface KpiCardProps {
   label: string;
   value: string;
   hint?: string;
-  tone: "default" | "primary" | "info" | "warning" | "danger";
+  tone: "default" | "primary" | "info" | "danger";
   testId?: string;
 }
 
@@ -470,8 +490,6 @@ function KpiCard({ icon, label, value, hint, tone, testId }: KpiCardProps) {
     default: "text-text-primary",
     primary: "text-primary",
     info: "text-info",
-    // Sprint 15d (AE-65): gelber Warn-Tone für battery_state="warn".
-    warning: "text-warning",
     danger: "text-danger",
   }[tone];
 
@@ -491,18 +509,6 @@ function KpiCard({ icon, label, value, hint, tone, testId }: KpiCardProps) {
       {hint ? <div className="mt-1 text-xs text-text-tertiary">{hint}</div> : null}
     </div>
   );
-}
-
-/**
- * Sprint 15d (AE-65): Batterie-Kachel-Tone aus der `battery_state`-Achse —
- * ersetzt die frühere hartkodierte `battery_percent < 20`-Schwelle (Doppel-
- * Achse, §5.73). kritisch -> rot, warn -> gelb, sonst neutral. Konsistent zur
- * BatteryBadge-Farbe und zur Dashboard-Kachel (dieselbe Achse).
- */
-function batteryTone(state: BatteryHealthState): "danger" | "warning" | "default" {
-  if (state === "kritisch") return "danger";
-  if (state === "warn") return "warning";
-  return "default";
 }
 
 /** D7: Ventilstellung defensiv — Werte ausserhalb 0..100 als „nicht verfügbar". */

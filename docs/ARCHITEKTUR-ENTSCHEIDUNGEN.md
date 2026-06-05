@@ -2775,6 +2775,17 @@ gekoppelt, keine zweite Schwelle**:
    `battery_percent < 20` — eine Doppel-Achse, §5.73 — jetzt aus
    `battery_state`). Dashboard-Kachel „Schwache Batterie" =
    `battery_low_count`.
+
+   **PR3 (Konsistenz-Nachzug, Sprint 15d):** Die Detail-„Batterie"-Kachel
+   zeigte als einzige Stelle weiterhin die **Prozentzahl als großen Wert**
+   (nur der Tone war achsen-gekoppelt). PR3 ersetzt den Prozent-Wert durch
+   das `BatteryBadge` (`detailed`-Variante) — dieselbe Komponente wie Liste +
+   Bubble, Prozent nur noch im Tooltip. Der zuvor nötige `batteryTone`-Helper
+   und der `warning`-Tone der lokalen Detail-`KpiCard` sind damit obsolet und
+   entfernt (kein toter Pfad). **Eine Regel überall: Badge + Tooltip, kein
+   Prozent im Haupttext.** (Die Roh-Zeitreihen-Tabelle auf der Detail-Seite
+   behält die Prozente pro Frame — diagnostischer Verlauf wie RSSI/Ventil,
+   kein Status-Badge-Ort.)
 3. **`statusScore`-Redesign** (`/devices`-Sortierung): die frühere reine
    `last_seen`-Zeit-Heuristik (die `health_state` gar nicht las) wird durch
    eine feste Tabelle über **beide Health-Achsen** ersetzt, pro Gerät der
