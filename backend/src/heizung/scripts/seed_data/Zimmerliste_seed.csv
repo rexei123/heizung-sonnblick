@@ -1,0 +1,104 @@
+Zimmer_Nummer,Anzeigename,Etage,Ausrichtung,Zimmer_Kategorie,PMS_Mapping,Zone_Index,Zone_Label,Room_Type
+52,Zimmer 52,0,N,Suite,52,1,Schlafzimmer L,Schlafzimmer
+52,Zimmer 52,0,N,Suite,52,2,Schlafzimmer R,Schlafzimmer
+52,Zimmer 52,0,N,Suite,52,3,Bad,Badezimmer
+53,Zimmer 53,0,N,Doppelzimmer,53,1,Schlafzimmer,Schlafzimmer
+53,Zimmer 53,0,N,Doppelzimmer,53,2,Bad,Badezimmer
+54,Zimmer 54,0,O,Suite,54,1,Schlafzimmer L,Schlafzimmer
+54,Zimmer 54,0,O,Suite,54,2,Schlafzimmer R,Schlafzimmer
+54,Zimmer 54,0,O,Suite,54,3,Bad,Badezimmer
+101,Zimmer 101,1,W,Doppelzimmer,101,1,Schlafzimmer,Schlafzimmer
+101,Zimmer 101,1,W,Doppelzimmer,101,2,Bad,Badezimmer
+102,Zimmer 102,1,N,Suite,102,1,Schlafzimmer L,Schlafzimmer
+102,Zimmer 102,1,N,Suite,102,2,Schlafzimmer R,Schlafzimmer
+102,Zimmer 102,1,N,Suite,102,3,Bad,Badezimmer
+103,Zimmer 103,1,N,Doppelzimmer,103,1,Schlafzimmer,Schlafzimmer
+103,Zimmer 103,1,N,Doppelzimmer,103,2,Bad,Badezimmer
+104,Zimmer 104,1,N,Doppelzimmer,104,1,Schlafzimmer,Schlafzimmer
+104,Zimmer 104,1,N,Doppelzimmer,104,2,Bad,Badezimmer
+105,Zimmer 105,1,O,Doppelzimmer,105,1,Schlafzimmer,Schlafzimmer
+105,Zimmer 105,1,O,Doppelzimmer,105,2,Bad,Badezimmer
+107,Zimmer 107,1,O,Suite,107,1,Schlafzimmer,Schlafzimmer
+107,Zimmer 107,1,O,Suite,107,2,Kinderzimmer,Kinderzimmer
+107,Zimmer 107,1,O,Suite,107,3,Bad,Badezimmer
+108,Zimmer 108,1,O,Doppelzimmer,108,1,Schlafzimmer,Schlafzimmer
+108,Zimmer 108,1,O,Doppelzimmer,108,2,Bad,Badezimmer
+109,Zimmer 109,1,S,Doppelzimmer,109,1,Schlafzimmer,Schlafzimmer
+109,Zimmer 109,1,S,Doppelzimmer,109,2,Bad,Badezimmer
+110,Zimmer 110,1,W,Doppelzimmer,110,1,Schlafzimmer,Schlafzimmer
+110,Zimmer 110,1,W,Doppelzimmer,110,2,Bad,Badezimmer
+111,Zimmer 111,1,W,Doppelzimmer,111,1,Schlafzimmer,Schlafzimmer
+111,Zimmer 111,1,W,Doppelzimmer,111,2,Bad,Badezimmer
+112,Zimmer 112,1,W,Doppelzimmer,112,1,Schlafzimmer,Schlafzimmer
+112,Zimmer 112,1,W,Doppelzimmer,112,2,Bad,Badezimmer
+114,Zimmer 114,1,W,Doppelzimmer,114,1,Schlafzimmer,Schlafzimmer
+114,Zimmer 114,1,W,Doppelzimmer,114,2,Bad,Badezimmer
+115,Zimmer 115,1,W,Suite,115,1,Schlafzimmer,Schlafzimmer
+115,Zimmer 115,1,W,Suite,115,2,Kinderzimmer,Kinderzimmer
+115,Zimmer 115,1,W,Suite,115,3,Bad,Badezimmer
+201,Zimmer 201,2,W,Doppelzimmer,201,1,Schlafzimmer,Schlafzimmer
+201,Zimmer 201,2,W,Doppelzimmer,201,2,Bad,Badezimmer
+202,Zimmer 202,2,N,Suite,202,1,Schlafzimmer L,Schlafzimmer
+202,Zimmer 202,2,N,Suite,202,2,Schlafzimmer R,Schlafzimmer
+202,Zimmer 202,2,N,Suite,202,3,Bad,Badezimmer
+203,Zimmer 203,2,N,Doppelzimmer,203,1,Schlafzimmer,Schlafzimmer
+203,Zimmer 203,2,N,Doppelzimmer,203,2,Bad,Badezimmer
+204,Zimmer 204,2,N,Doppelzimmer,204,1,Schlafzimmer,Schlafzimmer
+204,Zimmer 204,2,N,Doppelzimmer,204,2,Bad,Badezimmer
+205,Zimmer 205,2,O,Doppelzimmer,205,1,Schlafzimmer,Schlafzimmer
+205,Zimmer 205,2,O,Doppelzimmer,205,2,Bad,Badezimmer
+207,Zimmer 207,2,O,Suite,207,1,Schlafzimmer,Schlafzimmer
+207,Zimmer 207,2,O,Suite,207,2,Kinderzimmer,Kinderzimmer
+207,Zimmer 207,2,O,Suite,207,3,Bad,Badezimmer
+208,Zimmer 208,2,O,Doppelzimmer,208,1,Schlafzimmer,Schlafzimmer
+208,Zimmer 208,2,O,Doppelzimmer,208,2,Bad,Badezimmer
+209,Zimmer 209,2,S,Doppelzimmer,209,1,Schlafzimmer,Schlafzimmer
+209,Zimmer 209,2,S,Doppelzimmer,209,2,Bad,Badezimmer
+210,Zimmer 210,2,W,Doppelzimmer,210,1,Schlafzimmer,Schlafzimmer
+210,Zimmer 210,2,W,Doppelzimmer,210,2,Bad,Badezimmer
+211,Zimmer 211,2,W,Doppelzimmer,211,1,Schlafzimmer,Schlafzimmer
+211,Zimmer 211,2,W,Doppelzimmer,211,2,Bad,Badezimmer
+212,Zimmer 212,2,W,Doppelzimmer,212,1,Schlafzimmer,Schlafzimmer
+212,Zimmer 212,2,W,Doppelzimmer,212,2,Bad,Badezimmer
+214,Zimmer 214,2,W,Doppelzimmer,214,1,Schlafzimmer,Schlafzimmer
+214,Zimmer 214,2,W,Doppelzimmer,214,2,Bad,Badezimmer
+215,Zimmer 215,2,W,Suite,215,1,Schlafzimmer,Schlafzimmer
+215,Zimmer 215,2,W,Suite,215,2,Kinderzimmer,Kinderzimmer
+215,Zimmer 215,2,W,Suite,215,3,Bad,Badezimmer
+301,Zimmer 301,3,N,Doppelzimmer,301,1,Schlafzimmer,Schlafzimmer
+301,Zimmer 301,3,N,Doppelzimmer,301,2,Bad,Badezimmer
+302,Zimmer 302,3,N,Suite,302,1,Schlafzimmer,Schlafzimmer
+302,Zimmer 302,3,N,Suite,302,2,Kinderzimmer,Kinderzimmer
+302,Zimmer 302,3,N,Suite,302,3,Bad,Badezimmer
+303,Zimmer 303,3,O,Suite,303,1,Schlafzimmer,Schlafzimmer
+303,Zimmer 303,3,O,Suite,303,2,Kinderzimmer,Kinderzimmer
+303,Zimmer 303,3,O,Suite,303,3,Bad,Badezimmer
+304,Zimmer 304,3,O,Doppelzimmer,304,1,Schlafzimmer,Schlafzimmer
+304,Zimmer 304,3,O,Doppelzimmer,304,2,Bad,Badezimmer
+305,Zimmer 305,3,O,Doppelzimmer,305,1,Schlafzimmer,Schlafzimmer
+305,Zimmer 305,3,O,Doppelzimmer,305,2,Bad,Badezimmer
+306,Zimmer 306,3,O,Suite,306,1,Schlafzimmer,Schlafzimmer
+306,Zimmer 306,3,O,Suite,306,2,Kinderzimmer,Kinderzimmer
+306,Zimmer 306,3,O,Suite,306,3,Bad,Badezimmer
+307,Zimmer 307,3,W,Doppelzimmer,307,1,Schlafzimmer,Schlafzimmer
+307,Zimmer 307,3,W,Doppelzimmer,307,2,Bad,Badezimmer
+308,Zimmer 308,3,W,Doppelzimmer,308,1,Schlafzimmer,Schlafzimmer
+308,Zimmer 308,3,W,Doppelzimmer,308,2,Bad,Badezimmer
+309,Zimmer 309,3,W,Doppelzimmer,309,1,Schlafzimmer,Schlafzimmer
+309,Zimmer 309,3,W,Doppelzimmer,309,2,Bad,Badezimmer
+310,Zimmer 310,3,W,Suite,310,1,Schlafzimmer,Schlafzimmer
+310,Zimmer 310,3,W,Suite,310,2,Kinderzimmer,Kinderzimmer
+310,Zimmer 310,3,W,Suite,310,3,Bad,Badezimmer
+401,Zimmer 401,4,N,Suite,401,1,Schlafzimmer,Schlafzimmer
+401,Zimmer 401,4,N,Suite,401,2,Kinderzimmer,Kinderzimmer
+401,Zimmer 401,4,N,Suite,401,3,Bad,Badezimmer
+402,Zimmer 402,4,O,Doppelzimmer,402,1,Schlafzimmer,Schlafzimmer
+402,Zimmer 402,4,O,Doppelzimmer,402,2,Bad,Badezimmer
+403,Zimmer 403,4,O,Doppelzimmer,403,1,Schlafzimmer,Schlafzimmer
+403,Zimmer 403,4,O,Doppelzimmer,403,2,Bad,Badezimmer
+404,Zimmer 404,4,O,Doppelzimmer,404,1,Schlafzimmer,Schlafzimmer
+404,Zimmer 404,4,O,Doppelzimmer,404,2,Bad,Badezimmer
+405,Zimmer 405,4,W,Doppelzimmer,405,1,Schlafzimmer,Schlafzimmer
+405,Zimmer 405,4,W,Doppelzimmer,405,2,Bad,Badezimmer
+406,Zimmer 406,4,W,Doppelzimmer,406,1,Schlafzimmer,Schlafzimmer
+406,Zimmer 406,4,W,Doppelzimmer,406,2,Bad,Badezimmer
