@@ -2720,7 +2720,11 @@ die Achsen konflieren und die offline/implausible-Semantik brechen
    aktiver Geräte (`retired_at IS NULL`, §5.58), deren jüngster
    `battery_percent < warn_threshold` (fasst `warn` + `kritisch`).
    `NULL`-battery zählt nicht. Query via `DISTINCT ON device_id` über
-   `ix_sensor_reading_device_time` (15b/15c-Muster).
+   `ix_sensor_reading_device_time` (15b/15c-Muster). Die warn-Schwelle ist
+   konfigurierbar (1..100); das Aggregat vergleicht gegen
+   `max(warn_threshold, BATTERY_CRITICAL_PCT)` — bei inverser Konfig
+   (`warn_threshold < 10`) bleibt die Kachel deckungsgleich mit den
+   warn/kritisch-Badges (ein kritisch-Gerät wird immer gezählt).
 
 5. **Keine Migration, kein persistentes Feld.** `battery_state` ist read-
    time abgeleitet aus vorhandenen Daten (`battery_percent` + Config). Es

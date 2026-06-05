@@ -35,7 +35,7 @@ from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.aggregation import ReadingForAggregate, aggregate_zone_readings
-from heizung.services.battery_health import DEFAULT_BATTERY_WARN_PCT
+from heizung.services.battery_health import BATTERY_CRITICAL_PCT, DEFAULT_BATTERY_WARN_PCT
 
 _ONLINE_STATES = ("healthy", "degraded")
 _QUANT_TENTH: Decimal = Decimal("0.1")
@@ -185,6 +185,13 @@ async def count_battery_low(session: AsyncSession) -> int:
     Achse aus Sprint 15d (AE-65). ``battery_percent IS NULL`` zaehlt nicht
     (kein ``< threshold``-Match).
 
+    Untergrenze auf ``BATTERY_CRITICAL_PCT`` geklemmt, damit ein als kritisch
+    angezeigtes Geraet auch bei fehlkonfigurierter warn-Schwelle (< 10)
+    gezaehlt wird — die Kachel spiegelt immer warn∪kritisch. ``kritisch`` ist
+    absolut (< 10), die warn-Schwelle ist konfigurierbar (1..100); ohne
+    Klemmung wuerde ``threshold < 10`` ein kritisch-Badge ohne Kachel-Count
+    erzeugen.
+
     Effizienz: juengstes Reading je Geraet via ``DISTINCT ON device_id`` ueber
     ``ix_sensor_reading_device_time`` (gleiches Muster wie
     ``_collect_zone_aggregates`` / 15b/15c). Lifecycle-Filter ``retired_at IS
@@ -192,6 +199,9 @@ async def count_battery_low(session: AsyncSession) -> int:
     """
     gc = await session.get(GlobalConfig, 1)
     threshold = gc.alert_battery_warn_percent if gc is not None else DEFAULT_BATTERY_WARN_PCT
+    # Gegen die fixe Kritisch-Grenze klemmen (AE-65): warn∪kritisch == alles
+    # unter max(warn-Schwelle, 10). Haelt die Kachel == Achse in JEDEM Regime.
+    effective_threshold = max(threshold, BATTERY_CRITICAL_PCT)
 
     latest = (
         select(SensorReading.device_id, SensorReading.battery_percent)
@@ -205,6 +215,6 @@ async def count_battery_low(session: AsyncSession) -> int:
         .join(latest, latest.c.device_id == Device.id)
         .where(Device.retired_at.is_(None))
         .where(latest.c.battery_percent.is_not(None))
-        .where(latest.c.battery_percent < threshold)
+        .where(latest.c.battery_percent < effective_threshold)
     )
     return (await session.execute(stmt)).scalar_one()

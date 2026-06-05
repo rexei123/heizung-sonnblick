@@ -39,12 +39,14 @@ from heizung.models.enums import (
     RoomStatus,
 )
 from heizung.models.event_log import EventLog
+from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.services import dashboard_aggregates as agg
+from heizung.services.battery_health import battery_health_state
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt — DB-Tests brauchen Postgres"
@@ -358,3 +360,42 @@ async def test_count_battery_low_real_four_vicki_fixture_zero(db_session: AsyncS
         await _mk_reading(db_session, d.id, battery_percent=pct, when=now)
 
     assert await agg.count_battery_low(db_session) - base == 0
+
+
+async def test_count_battery_low_clamps_to_critical_in_degenerate_config(
+    db_session: AsyncSession,
+) -> None:
+    """Invariante "Kachel == warn∪kritisch" auch bei warn-Schwelle < 10 (AE-65).
+
+    Degenerierte Konfig: warn-Schwelle 5 (CHECK erlaubt 1..100). Ein Geraet mit
+    pct=7 ist battery_state="kritisch" (7 < 10), wuerde aber ohne Klemmung NICHT
+    gezaehlt (7 nicht < 5). Mit der Klemmung auf BATTERY_CRITICAL_PCT (10) zaehlt
+    es -> Kachel deckungsgleich mit dem kritisch-Badge.
+
+    Die GlobalConfig-Mutation laeuft nur im Session-Scope (flush, kein commit);
+    die db_session-Fixture rollt am Testende zurueck. Restore zusaetzlich
+    defensiv im finally.
+    """
+    gc = await db_session.get(GlobalConfig, 1)
+    assert gc is not None, "Singleton-Row muss durch Migration 0003a existieren"
+    original = gc.alert_battery_warn_percent
+    gc.alert_battery_warn_percent = 5  # warn-Schwelle absichtlich unter Kritisch-Grenze
+    await db_session.flush()
+    try:
+        # Badge-Seite: pct=7 ist kritisch (absolut, < 10) trotz threshold=5.
+        assert battery_health_state(7, 5) == "kritisch"
+
+        base = await agg.count_battery_low(db_session)
+        s = uuid.uuid4().hex[:8]
+        room = await _mk_room(db_session, s, RoomStatus.VACANT)
+        zone = await _mk_zone(db_session, room.id, s)
+        d = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="silent")
+        await _mk_reading(db_session, d.id, battery_percent=7, when=datetime.now(tz=UTC))
+
+        # Kachel-Seite: trotz threshold=5 wird das kritisch-Geraet gezaehlt.
+        assert await agg.count_battery_low(db_session) - base == 1, (
+            "Klemmung auf BATTERY_CRITICAL_PCT: kritisch-Badge muss in der Kachel landen"
+        )
+    finally:
+        gc.alert_battery_warn_percent = original
+        await db_session.flush()
