@@ -235,6 +235,27 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     await expect(page.getByTestId("override-card")).toContainText("Kein Override aktiv");
   });
 
+  test("Sprint 15d PR3: Batterie-Kachel zeigt Badge, Prozent nur im Tooltip", async ({ page }) => {
+    // battery_state kommt aus dem Device (DeviceRead, PR1); der Prozentwert im
+    // Tooltip aus dem jüngsten Reading (SAMPLE_READINGS.battery_percent = 75),
+    // konsistent zu den Schwester-Kacheln (Temperatur/Signal nutzen `latest`).
+    const withBattery = { ...ASSIGNED_DEVICE, battery_state: "warn" };
+    await mockDetail(page, withBattery);
+    await page.goto("/devices/42");
+
+    const card = page.getByTestId("battery-card");
+    const badge = card.getByTestId("battery-badge");
+    // Badge (3+1) mit Zustand aus battery_state — konsistent zu Liste/Bubble.
+    await expect(badge).toHaveAttribute("data-battery", "warn");
+    // Prozent NUR im title-Tooltip, NICHT im sichtbaren Kachel-Text.
+    await expect(badge).toHaveAttribute("title", "Batterie: 75 %");
+    // formatPercent rendert immer „N %" — kein „%" im Haupttext beweist, dass
+    // kein Prozentwert mehr gerendert wird (Badge + Tooltip statt Zahl).
+    // (Die „75" im Icon-Ligatur-Namen `battery_horiz_075` ist aria-hidden-
+    // Glyph-Text, kein sichtbarer Wert — daher gezielt auf „%" geprüft.)
+    await expect(card).not.toContainText("%");
+  });
+
   test("Override-Kachel zeigt aktiven Override read-only", async ({ page }) => {
     const withOverride = {
       ...ASSIGNED_DEVICE,

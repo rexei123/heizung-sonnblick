@@ -3403,13 +3403,18 @@ zwei Stellen), `devices.spec` (th-Header 4→5, Mocks um `battery_state`),
   Scheinpräzision (AE-64). Prozent nur noch im Tooltip + Detail-Diagnose.
 - **B-15b-1** unverändert offen: nur noch aktiver Email-/Alarm-Versand.
 
-**Status:** PR2 offen nach `develop`, **NICHT gemerged** — Freigabe abwarten.
-**Tag `v0.1.19h`** erst nach PR2-Merge + Live-Verify (per Brief). Branch
-`feature/15d-batterie-health-frontend`.
+**Status:** PR2 gemerged (`54759c9`, #211). **PR3 (Konsistenz-Nachzug,
+Branch `feature/15d-detail-badge-konsistenz`):** Cowork-Befund — die Geräte-
+Detail-Seite zeigte Batterie als einzige Stelle noch als Prozent-Kachel im
+Haupttext. **Detail-Seite in PR3 nachgezogen: Batterie überall als Badge
+(`detailed`), Prozent nur Tooltip — Konsistenz komplett**; toter
+`batteryTone`/`warning`-Tone-Pfad entfernt. Roh-Zeitreihen-Tabelle behält die
+Prozente (diagnostischer Verlauf). **Tag `v0.1.19h`** erst nach PR3-Merge +
+Live-Verify (per Brief).
 
-**Querverweise:** AE-65 (Master inkl. Frontend-Teil), CLAUDE.md §5.73,
-§5.63/§5.64 (Type-Spiegel + Zod-Strip), §5.66 (Multi-Badge-Slots), §5.73
-(Achsen-Kopplung), §2bg (PR1 Backend).
+**Querverweise:** AE-65 (Master inkl. Frontend-Teil + PR3-Konsistenz),
+CLAUDE.md §5.73, §5.63/§5.64 (Type-Spiegel + Zod-Strip), §5.66 (Multi-Badge-
+Slots), §5.73 (Achsen-Kopplung), §2bg (PR1 Backend).
 
 ---
 
