@@ -11,7 +11,7 @@ CRUD:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,7 +106,24 @@ async def list_rooms(
         stmt = stmt.where(Room.status == status_filter)
     if floor is not None:
         stmt = stmt.where(Room.floor == floor)
-    stmt = stmt.order_by(Room.number).offset(offset).limit(limit)
+    # Sortierung: primaer floor ASC (Etage 0 zuerst; Integer, kein String-
+    # Vergleich), sekundaer number numerisch aufsteigend. number ist VARCHAR
+    # ("101A" moeglich), daher numerischer Prefix via regexp statt String-Sort
+    # (sonst "101" vor "99"). Nicht-numerische Nummern -> NULL -> NULLS LAST,
+    # number als Tiebreak ("101" vor "101A"). floor NULL ebenfalls ans Ende.
+    numeric_prefix = cast(
+        func.nullif(func.regexp_replace(Room.number, "[^0-9].*$", ""), ""),
+        Integer,
+    )
+    stmt = (
+        stmt.order_by(
+            Room.floor.asc().nullslast(),
+            numeric_prefix.asc().nullslast(),
+            Room.number.asc(),
+        )
+        .offset(offset)
+        .limit(limit)
+    )
     rooms = list((await session.execute(stmt)).scalars().all())
 
     # Sprint 14d (R-A/R-D): EIN Batch-Aggregat fuer den Override-Indikator,

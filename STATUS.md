@@ -3454,6 +3454,33 @@ geplant) — Eintrag hier in STATUS.md, separater arc42-File offen.
 
 ---
 
+## 2bj. Sortierung Zimmerübersicht: floor ASC, dann number numerisch (2026-06-05, PR offen)
+
+**Problem:** Die Zimmerübersicht stand nicht nach Etage 0..4 oben; sortiert
+wurde **backend-seitig** in `GET /api/v1/rooms` per `order_by(Room.number)` —
+nur nach `number` und als **String** (`VARCHAR(20)`), daher „101" vor „99"
+und keine Etage-Primärsortierung.
+
+**Fix (`api/v1/rooms.py`):** `order_by(Room.floor.asc().nullslast(),
+numeric_prefix.asc().nullslast(), Room.number.asc())`. `numeric_prefix =
+cast(nullif(regexp_replace(number, '[^0-9].*$', ''), ''), Integer)` —
+numerischer Prefix, weil `number` VARCHAR ist und „101A" möglich:
+sortiert „99" vor „101", „101" vor „101A" (String-Tiebreak), nicht-numerische
+Nummern definiert via `NULLS LAST` ans Ende. `floor` als Integer sortiert
+(kein „10 vor 2"-String-Problem), NULL ans Ende. **Frontend** rendert die
+API-Reihenfolge unverändert (kein Client-Sort). Filter (Raumtyp/Status/Etage)
+unverändert (WHERE-Clauses). **Kein Schema-Change, keine Migration.**
+
+**Tests:** Backend `test_list_rooms_ordered_floor_then_numeric` (floor-primär +
+numerisch 799<7700 + NULLS-LAST für „X700"); Frontend-E2E-Smoke (Liste rendert
+floor-ASC-dann-numerisch-Reihenfolge). tsc/lint/ruff/mypy grün; Backend
+**637 passed, 1 xfailed**; Frontend-Zimmer-Spec 4 passed.
+
+**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
+`feat/zimmer-sort-floor-number`.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
