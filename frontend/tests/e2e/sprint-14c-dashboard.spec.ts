@@ -16,6 +16,8 @@ interface Kpi {
   active_overrides: number;
   zones_window_open: number;
   last_engine_tick: string | null;
+  // Sprint 15d (AE-65): Zod verlangt den Key jetzt — ohne ihn wirft parse.
+  battery_low_count: number;
 }
 
 const BASE_KPI: Kpi = {
@@ -27,6 +29,7 @@ const BASE_KPI: Kpi = {
   active_overrides: 0,
   zones_window_open: 0,
   last_engine_tick: new Date(Date.now() - 60_000).toISOString(),
+  battery_low_count: 0,
 };
 
 async function mockKpi(
@@ -45,11 +48,20 @@ async function mockKpi(
 }
 
 test.describe("Sprint 14c Dashboard", () => {
-  test("rendert 6 KPI-Kacheln", async ({ page }) => {
+  test("rendert 7 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
-    await expect(page.getByTestId("kpi-card")).toHaveCount(6);
+    // Sprint 15d (AE-65): 7. Kachel „Schwache Batterie".
+    await expect(page.getByTestId("kpi-card")).toHaveCount(7);
+  });
+
+  test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({ page }) => {
+    await mockKpi(page, { battery_low_count: 3 });
+    await page.goto("/");
+    const card = page.getByTestId("kpi-card").filter({ hasText: "Schwache Batterie" });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("3");
   });
 
   test("zeigt eine Begruessung", async ({ page }) => {
@@ -72,12 +84,12 @@ test.describe("Sprint 14c Dashboard", () => {
     await expect.poll(() => counter.n).toBeGreaterThan(before);
   });
 
-  test("Mobile 390px: 6 Kacheln einspaltig gestapelt", async ({ page }) => {
+  test("Mobile 390px: 7 Kacheln einspaltig gestapelt", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    await expect(cards).toHaveCount(6);
+    await expect(cards).toHaveCount(7);
     // Einspaltig: alle Karten teilen dieselbe linke Kante (gleiche x).
     const box0 = await cards.nth(0).boundingBox();
     const box1 = await cards.nth(1).boundingBox();

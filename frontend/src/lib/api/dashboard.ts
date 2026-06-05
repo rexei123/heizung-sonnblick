@@ -20,6 +20,9 @@ const dashboardKpiSchema = z.object({
   active_overrides: z.number(),
   zones_window_open: z.number(),
   last_engine_tick: z.string().nullable(),
+  // Sprint 15d (AE-65): ohne diesen Key strippt Zod battery_low_count -> Kachel
+  // bekäme undefined (§5.64).
+  battery_low_count: z.number(),
 });
 
 export const dashboardApi = {

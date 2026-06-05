@@ -2161,9 +2161,22 @@ keine Migration, kein zweiter Schreibpfad, keine zwei Wahrheiten. Schwelle
 aus Config laden via `session.get(GlobalConfig, 1)` (Identity-Map ⇒ ein
 Roundtrip pro Request, kein N+1) mit defensivem Fallback wenn Row fehlt.
 
-**Querverweise:** AE-65 (Master-ADR), AE-53 (offline/implausible-Achse),
-§5.72 (2xAA-Kennlinie liefert `battery_percent`), §5.58 (Lifecycle-Filter
-im Aggregat), §5.63 (Frontend-Type-Spiegel folgt in PR2).
+**Frontend (PR2):** Das `BatteryBadge` ist an die `battery_state`-Achse
+gekoppelt — **keine eigene Skala, keine zweite Schwelle**. 3+1 Zustände
+direkt aus `device.battery_state`, exakte Prozentzahl NUR im `title`-Tooltip
+(Codec-Sättigung, §5.72/AE-64). Jede UI-Stelle, die zuvor eine eigene
+Batterie-Schwelle hartkodierte (Detail-Kachel war `battery_percent < 20`),
+zieht ihren Tone aus `battery_state` — sonst entsteht ein zweiter
+Schwellwert, der vom Config-Wert driftet. `statusScore` (Geräte-Sortierung)
+nimmt das **Maximum über beide Health-Achsen** (`health_state` schlägt
+`battery_state`); battery ist nie ein additiver, separater Sort, sondern Teil
+EINER Fehlerstatus-Rangfolge. Visuelle Invariante: Badge gelb/rot ⇔ Gerät in
+`battery_low_count` (Dashboard-Kachel) — dieselbe Achse.
+
+**Querverweise:** AE-65 (Master-ADR, inkl. Frontend-Teil), AE-53
+(offline/implausible-Achse), §5.72 (2xAA-Kennlinie liefert
+`battery_percent`), §5.58 (Lifecycle-Filter im Aggregat), §5.63/§5.64
+(Frontend-Type-Spiegel + Zod-Strip-Falle, in PR2 umgesetzt).
 
 ---
 

@@ -85,6 +85,7 @@ function makeDevice(activeOverride: unknown = null) {
     last_seen_at: NOW,
     firmware_version: "4.2",
     health_state: "healthy" as const,
+    battery_state: "ok" as const,
     created_at: NOW,
     updated_at: NOW,
     hardware_number: null,
@@ -187,13 +188,17 @@ test.describe("Sprint 14b — Zone-Karten Heizzonen-Tab", () => {
     await expect(badge).toHaveAttribute("data-health", "degraded");
   });
 
-  test("3 ThermostatBubble mit Ist-Temp + Batterie aus latest_reading", async ({ page }) => {
+  test("3 ThermostatBubble mit Ist-Temp + Batterie-Badge", async ({ page }) => {
     await mockZonen(page, { zonesRef: { current: [ZONE] }, devices: [makeDevice()] });
     await gotoZonenTab(page);
     const bubble = page.getByTestId("thermostat-bubble-42");
     await expect(bubble).toBeVisible();
     await expect(bubble).toContainText("21.0 °C");
-    await expect(bubble).toContainText("80");
+    // Sprint 15d (AE-65): Batterie als Badge (battery_state="ok"), Prozent (80)
+    // wandert in den title-Tooltip — kein sichtbarer Zahl-Text mehr.
+    const badge = bubble.getByTestId("battery-badge");
+    await expect(badge).toHaveAttribute("data-battery", "ok");
+    await expect(badge).toHaveAttribute("title", "Batterie: 80 %");
   });
 
   test("4 Read-only Override-Banner bei aktivem Override (FU-5)", async ({ page }) => {

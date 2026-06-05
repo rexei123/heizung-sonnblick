@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type KeyboardEvent } from "react";
 
+import { BatteryBadge } from "@/components/patterns/battery-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
@@ -13,9 +14,6 @@ import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
 
 type SortMode = "status" | "label";
-
-const STALE_HOURS_HIGH = 24;
-const STALE_HOURS_LOW = 1;
 
 function toMessage(e: unknown): string {
   if (typeof e === "object" && e !== null && "detail" in e) {
@@ -27,23 +25,35 @@ function toMessage(e: unknown): string {
 
 /**
  * Fehlerstatus-Score absteigend: hoeher = problematischer.
- * - stillgelegt: 3
- * - last_seen > 24h: 2
- * - last_seen > 1h: 1
- * - sonst (frisch): 0
  *
- * Sprint 13b.1 (AE-57): retired_at IS NULL = aktiv. Listen-Endpoint
- * blendet retired Devices per Default aus — Bucket 3 ist Schutz fuer
- * `?include_retired=true`-Sichten.
+ * Sprint 15d (AE-65) — REDESIGN: kombiniert beide Health-Achsen statt der
+ * frueheren reinen `last_seen`-Zeit-Heuristik (die `health_state` gar nicht
+ * las). Feste Tabelle, pro Geraet der HOECHSTE zutreffende Wert (max ueber
+ * beide Achsen):
+ *   retired_at gesetzt                -> 5
+ *   health_state silent               -> 4  (offline / kein Frame)
+ *   health_state degraded|suspicious  -> 3  (unplausibel)
+ *   battery_state kritisch            -> 2
+ *   battery_state warn                -> 1
+ *   sonst (healthy + ok)              -> 0
+ *
+ * Rangfolge ist die Betriebsentscheidung: offline > unplausibel >
+ * batt-kritisch > batt-warn > ok. Die `health_state`-Achse schlaegt die
+ * Batterie-Achse. `retired_at` (5) ist Schutz fuer `?include_retired=true`-
+ * Sichten (Default-Liste blendet retired aus, AE-57).
  */
 function statusScore(d: Device): number {
-  if (d.retired_at !== null) return 3;
-  if (d.last_seen_at === null) return 2;
-  const ageMs = Date.now() - new Date(d.last_seen_at).getTime();
-  const ageH = ageMs / (1000 * 60 * 60);
-  if (ageH > STALE_HOURS_HIGH) return 2;
-  if (ageH > STALE_HOURS_LOW) return 1;
-  return 0;
+  if (d.retired_at !== null) return 5;
+
+  let health = 0;
+  if (d.health_state === "silent") health = 4;
+  else if (d.health_state === "degraded" || d.health_state === "suspicious") health = 3;
+
+  let battery = 0;
+  if (d.battery_state === "kritisch") battery = 2;
+  else if (d.battery_state === "warn") battery = 1;
+
+  return Math.max(health, battery);
 }
 
 export default function DevicesPage() {
@@ -154,6 +164,7 @@ function DevicesTable({ devices }: { devices: Device[] }) {
             <th className="text-left px-4 py-3 font-medium">Bezeichnung</th>
             <th className="text-left px-4 py-3 font-medium">Zuordnung</th>
             <th className="text-left px-4 py-3 font-medium">Gerät</th>
+            <th className="text-left px-4 py-3 font-medium">Batterie</th>
             <th className="text-left px-4 py-3 font-medium">Zone</th>
           </tr>
         </thead>
@@ -178,6 +189,13 @@ function DeviceRow({ device: d }: { device: Device }) {
       </td>
       <td className="px-4 py-3" data-testid="device-hardware-cell">
         <HardwareStatusBadge deviceId={d.id} variant="detailed" />
+      </td>
+      <td className="px-4 py-3" data-testid="device-battery-cell">
+        <BatteryBadge
+          batteryState={d.battery_state}
+          batteryPercent={d.latest_reading?.battery_percent ?? null}
+          variant="compact"
+        />
       </td>
       <td className="px-4 py-3" data-testid="device-zone-cell">
         {d.heating_zone ? (

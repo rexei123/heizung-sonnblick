@@ -18,6 +18,7 @@ import {
 } from "@/lib/format";
 import type {
   ApiError,
+  BatteryHealthState,
   Device,
   DeviceActiveOverride,
   OverrideSource,
@@ -174,11 +175,7 @@ export default function DeviceDetailPage() {
               icon="battery_horiz_075"
               label="Batterie"
               value={formatPercent(latest?.battery_percent ?? null)}
-              tone={
-                latest?.battery_percent != null && latest.battery_percent < 20
-                  ? "danger"
-                  : "default"
-              }
+              tone={batteryTone(device.battery_state)}
             />
             <KpiCard
               icon="signal_cellular_alt"
@@ -464,7 +461,7 @@ interface KpiCardProps {
   label: string;
   value: string;
   hint?: string;
-  tone: "default" | "primary" | "info" | "danger";
+  tone: "default" | "primary" | "info" | "warning" | "danger";
   testId?: string;
 }
 
@@ -473,6 +470,8 @@ function KpiCard({ icon, label, value, hint, tone, testId }: KpiCardProps) {
     default: "text-text-primary",
     primary: "text-primary",
     info: "text-info",
+    // Sprint 15d (AE-65): gelber Warn-Tone für battery_state="warn".
+    warning: "text-warning",
     danger: "text-danger",
   }[tone];
 
@@ -492,6 +491,18 @@ function KpiCard({ icon, label, value, hint, tone, testId }: KpiCardProps) {
       {hint ? <div className="mt-1 text-xs text-text-tertiary">{hint}</div> : null}
     </div>
   );
+}
+
+/**
+ * Sprint 15d (AE-65): Batterie-Kachel-Tone aus der `battery_state`-Achse —
+ * ersetzt die frühere hartkodierte `battery_percent < 20`-Schwelle (Doppel-
+ * Achse, §5.73). kritisch -> rot, warn -> gelb, sonst neutral. Konsistent zur
+ * BatteryBadge-Farbe und zur Dashboard-Kachel (dieselbe Achse).
+ */
+function batteryTone(state: BatteryHealthState): "danger" | "warning" | "default" {
+  if (state === "kritisch") return "danger";
+  if (state === "warn") return "warning";
+  return "default";
 }
 
 /** D7: Ventilstellung defensiv — Werte ausserhalb 0..100 als „nicht verfügbar". */
