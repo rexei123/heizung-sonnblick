@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-06-02
 **Letzter Tag:** `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** Sprint 15e Belegungs-Import-Webhook (Backend, AE-66) — Branch `feature/15e-belegungs-import`, PR offen, kein Tag (`v0.1.19i-belegungs-import` erst nach Merge + Live-Verify, §2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3478,6 +3478,71 @@ floor-ASC-dann-numerisch-Reihenfolge). tsc/lint/ruff/mypy grün; Backend
 
 **Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
 `feat/zimmer-sort-floor-number`.
+
+---
+
+## 2bk. Sprint 15e Belegungs-Import via mailparser-Webhook (Backend, 2026-06-06, PR offen)
+
+**Ziel:** Zweckgebundener Webhook, der die tägliche Belegungsliste
+(Casablanca via mailparser.io, nested JSON) entgegennimmt und die
+`occupancy`-Tabelle deklarativ abgleicht, plus ein Lese-Endpoint, der
+Dashboard-Kachel + Detailseite (Sprint 2 / Frontend, künftig 15f) speist.
+Mail-Surrogat vor der eigentlichen Casablanca-FIAS-Anbindung (Sprint 16a).
+Kein UI in diesem Sprint, kein generisches Webhook/api_key-Framework.
+
+**Phase-0-Befunde (im Repo belegt):** `occupancy` trägt bereits alle Felder
+(`external_id`, `source`, `is_active`, `cancelled_at`, `check_in/out`),
+`OccupancySource={manual,pms}` vorhanden, `global_config` hat
+`default_checkin_time`/`default_checkout_time`/`timezone` → Default-Zeiten aus
+DB statt Konstanten. **Keine Migration, keine neue Tabelle:** Idempotenz +
+Import-Log laufen über `business_audit` (JSONB), Schlüssel ist das Paar
+`(external_id, list_date)`. Insert/Cancel waren inline im Endpoint → in
+`occupancy_service` extrahiert (eigener Refactor-Commit `0b1fb66`, Bestands-
+Endpoints umgestellt, Bestands-Tests grün), vom Import wiederverwendet statt
+dupliziert.
+
+**Endpoint A** `POST /api/v1/integrations/occupancy-import` (Auth
+`X-Webhook-Token`, constant-time, fail-closed): `reconcile_from_import` —
+Listen-Zimmer ohne aktive pms-Belegung anlegen, fehlende pms-Belegungen
+schließen (nie löschen), `manual` hat Vorrang (Konflikt-Audit, manual
+unangetastet), unbekannte Nummer → 422 **atomar** (nichts geschrieben).
+Zimmerwechsel-Parser (nur Zielzimmer nach `⇒`/`=>`/Newline). Engine-Re-Eval
+der betroffenen Räume nach Commit (bestehender `evaluate_room.delay`-Pfad).
+**Endpoint B** `GET .../log` (Login-Session): Backend-berechneter Ampel-Status
+(green/yellow/red, Europe/Vienna §5.65) + letzte 30 Importe — **fixer Vertrag
+für Sprint 2 (Frontend)**.
+
+**Watchdog** `heizung.check_occupancy_import_freshness` (Celery-Beat täglich
+08:15 UTC, nach 09:00 Europe/Vienna): kein Import heute → Audit
+`OCCUPANCY_IMPORT_STALE`, **gibt keine Zimmer frei** (S5, letzter Stand
+eingefroren). Email-Versand bewusst NICHT implementiert — an B-15b-1 gekoppelt
+(Schalter vorbereitet).
+
+**Config:** `OCCUPANCY_IMPORT_TOKEN` (fail-closed) +
+`OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` (Default `09:00`) in beiden
+`.env.example`.
+
+**Tests:** 33 neu (reconcile-Fälle inkl. Anreise/Abreise/Zimmerwechsel/Storno/
+unbekannt-422/manual-Konflikt/Idempotenz/leere Liste, Parser, Ampel-Matrix,
+Log-Shape, Token-/Login-Auth, Watchdog). `ruff check src tests` +
+`ruff format --check` + `mypy src` grün; volle Suite **509 passed, 162
+skipped** lokal gegen Test-DB.
+
+**Architektur-Touch:** AE-66. **Doku:** RUNBOOK §10d.9, CLAUDE.md unverändert.
+
+**Tag (vorgeschlagen):** `v0.1.19i-belegungs-import` (v0.1.20 bleibt
+arc42-reserviert) — erst nach PR-Merge auf `develop` **+ Live-Verify** auf
+heizung-test. **Live-Verify pending (§5.67):** echter POST des webhook.site-
+Beispiels nur am Hauptrechner mit Server-SSH-Key möglich, auf dem Build-PC
+nicht. Bis dahin Tag aufschieben.
+
+**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
+`feature/15e-belegungs-import` (Refactor-Commit `0b1fb66` + Feature-Commit
+`2c3322f`). Frontend-Folgesprint wird 15f.
+
+**Querverweise:** AE-66, AE-02 (occupancy als Belegungsquelle), §5.65 (UTC→
+Vienna nur bei Anzeige), §5.67 (Tag/Live-Verify-pending), §2bg/§2bh (15d),
+B-15b-1 (Email-Alarm offen).
 
 ---
 
