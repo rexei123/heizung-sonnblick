@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-06-02
 **Letzter Tag:** `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15e Belegungs-Import-Webhook (Backend, AE-66) — Branch `feature/15e-belegungs-import`, PR offen, kein Tag (`v0.1.19i-belegungs-import` erst nach Merge + Live-Verify, §2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) — Branch `feature/15f-belegungs-import-sicht`, PR offen, kein Tag (§2bl). Davor: Sprint 15e Belegungs-Import-Webhook (Backend) **gemerged** (PR #215, develop-HEAD `0fdfbd9`), Tag `v0.1.19i-belegungs-import` pending Live-Verify (§2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3536,13 +3536,66 @@ heizung-test. **Live-Verify pending (§5.67):** echter POST des webhook.site-
 Beispiels nur am Hauptrechner mit Server-SSH-Key möglich, auf dem Build-PC
 nicht. Bis dahin Tag aufschieben.
 
-**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
-`feature/15e-belegungs-import` (Refactor-Commit `0b1fb66` + Feature-Commit
-`2c3322f`). Frontend-Folgesprint wird 15f.
+**Status:** **gemerged** (PR #215, Merge-Commit `0fdfbd9`, 2026-06-07,
+regulär ohne `--admin`). Branch `feature/15e-belegungs-import` (Refactor
+`0b1fb66` + Feature `2c3322f`) gelöscht. Tag `v0.1.19i-belegungs-import`
+**pending Live-Verify** am Hauptrechner (§5.67) — Reihenfolge `v0.1.19h` (15d)
+vor `v0.1.19i`. Frontend-Sichtbarkeit in 15f (§2bl).
 
 **Querverweise:** AE-66, AE-02 (occupancy als Belegungsquelle), §5.65 (UTC→
 Vienna nur bei Anzeige), §5.67 (Tag/Live-Verify-pending), §2bg/§2bh (15d),
 B-15b-1 (Email-Alarm offen).
+
+---
+
+## 2bl. Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, 2026-06-07, PR offen)
+
+**Ziel:** Zwei Lese-Ansichten für den täglichen Belegungs-Import, beide lesen
+NUR `GET /api/v1/integrations/occupancy-import/log` (15e-Vertrag). `status`
+ist backend-berechnet — das Frontend zeigt nur an, baut KEINE Schwellen nach.
+
+**Daten-Layer (T1):** `lib/api/types.ts` `OccupancyImportLog`/`…LogRow`
+(+ `OccupancyImportStatus`/`…Result`); `lib/api/occupancy-import.ts` Zod-
+Spiegel (§5.63) + `occupancyImportApi.log()`; `lib/api/hooks-occupancy-import.ts`
+`useOccupancyImportLog` (refetch 60 s / stale 30 s) — **ein** Hook, beide Views
+teilen den Cache.
+
+**Dashboard-Kachel (T2):** 8. Kachel „Belegungsliste" in `app/page.tsx`
+(`KpiCard`, Icon `event_available`). `tone` kommt **ausschliesslich** aus
+`status` (green→success-soft, yellow→warning-soft, red→danger-soft); Wert =
+`formatRelative(last_success_at)` bzw. „Noch nie" bei `null`. Kachel in
+`<Link href="/einstellungen/api">` gewrappt (klickbar, kein `KpiCard`-Touch).
+Eigene Datenquelle → eigener Loading/Error-State neben den 7 KPI-Kacheln.
+
+**Detailseite (T3):** `app/einstellungen/api/page.tsx` — `EmptyState`
+„In Vorbereitung" ersetzt durch Client-Page: Status-Kopf (Ampel-Badge +
+zuletzt eingegangen + erwartet-bis) + Importtabelle im Thermostat-Tabellen-
+Look (`app/devices/[id]` §). Spalten Eingegangen/Listendatum/Belegt/
+Geschlossen/Konflikte/Ergebnis; `result` als Badge (Übernommen/Abgewiesen);
+Zeile mit `rejected` ODER `conflicts>0` `bg-warning-soft` hervorgehoben; leere
+Liste sauber. **`list_date` als Kalendertag** via neuem `formatCalendarDate`
+(reine String-Formatierung, NICHT durch `new Date()`/UTC — §5.74). Menüpunkt
+„API & Webhooks" bleibt.
+
+**Tests (T4):** neuer `sprint-15f-occupancy-import.spec.ts` (Kachel-Ampel
+grün/gelb/rot, „Noch nie", Klick→Detailseite; Tabelle gefüllt/leer,
+rejected+conflict-Hervorhebung, Kalendertag-ohne-Shift, Endpoint-Fehler-
+Fallback). `sprint-14c-dashboard.spec.ts` auf 8 Kacheln + Log-Mock angepasst.
+
+**Toolchain (lokal grün, 2026-06-07):** `type-check` (tsc) 0 · `lint`
+(eslint) 0 · `build` (next) OK · Playwright **107 passed**.
+
+**Scope-Grenzen (v1):** keine Sortierung/Filter/Pagination/Charts; kein
+Backend-/Engine-/Migration-Touch. Architektur-Touch: AE-66 (Frontend-Teil),
+neue Lesson CLAUDE.md §5.74 (Kalendertag-Strings nie durch `new Date()`).
+
+**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
+`feature/15f-belegungs-import-sicht`. **Tag-Slot offen** bis Freigabe
+([Annahme] `v0.1.19j-belegungs-import-front`; `v0.1.20` arc42-reserviert) —
+Tag erst nach Merge + Live-Verify gegen den echten Endpoint auf heizung-test.
+
+**Querverweise:** AE-66, §2bk (15e Backend/Vertrag), §5.65 (UTC→Vienna),
+§5.74 (Kalendertag-Falle), §5.64 (Zod-Strip), §5.66 (feste Tabellen-Slots).
 
 ---
 

@@ -2178,6 +2178,30 @@ EINER Fehlerstatus-Rangfolge. Visuelle Invariante: Badge gelb/rot ⇔ Gerät in
 `battery_percent`), §5.58 (Lifecycle-Filter im Aggregat), §5.63/§5.64
 (Frontend-Type-Spiegel + Zod-Strip-Falle, in PR2 umgesetzt).
 
+### 5.74 Kalendertag-Strings (`YYYY-MM-DD`) nie durch `new Date()` (Sprint 15f)
+
+Ein **Kalendertag** aus dem Backend (`list_date: "2026-06-06"`, ein
+date-only-Feld ohne Uhrzeit) darf im Frontend **nicht** durch `new Date()`
+oder die Intl-DateTime-Pipeline laufen. `new Date("2026-06-06")` parst als
+**UTC-Mitternacht**; in einer Zeitzone westlich von UTC kippt die Anzeige auf
+den **Vortag**. Für Europe/Vienna (UTC+1/+2) wäre der Fehler heute unsichtbar
+(Mitternacht-UTC liegt am selben lokalen Tag) — also eine **latente** Falle,
+die erst bei anderer TZ oder am Datumsrand zuschlägt.
+
+**Regel:** date-only-Felder rein als String formatieren. Im Repo:
+`formatCalendarDate("2026-06-06") -> "06.06.2026"` (`lib/format.ts`, Regex-
+Split, kein `Date`). Nur echte **Zeitstempel** (UTC ISO mit Uhrzeit, z. B.
+`received_at`/`last_success_at`) gehen durch `formatDateTime`/`formatRelative`
+(→ Europe/Vienna, §5.65).
+
+**Abgrenzung zu §5.65:** §5.65 ist der Engine-Backend-Fall (UTC-Wallclock vs.
+Lokal-Konfig). §5.74 ist der Frontend-Anzeige-Fall (date-only-String vs.
+Timestamp). Gleiche Wurzel — Datum/Zeit ohne expliziten TZ-Kontext
+interpretiert — verschiedene Fix-Pfade.
+
+**Querverweise:** §5.65 (UTC→Vienna Engine), AE-66 (Belegungs-Import-
+Sichtbarkeit, erster Konsument), §5.63 (Type-Spiegel).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
