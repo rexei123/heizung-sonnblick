@@ -608,6 +608,11 @@ Hotel Sonnblick Heizung/
 
 ## 10. Roadmap – 12 Sprints in 6 Monaten
 
+> Superseded (2026-05-15): Diese 12-Sprint-/6-Monats-Roadmap ist
+> historisch, abgelöst durch docs/STRATEGIE-REFRESH-2026-05-15.md +
+> docs/SPRINT-PLAN.md. Nicht als aktuelle Termin-/Sprint-Quelle
+> verwenden.
+
 ### Phase 1 – Fundament (Monat 1)
 
 **Sprint 1 (Woche 1–2): Infrastruktur aufbauen**
