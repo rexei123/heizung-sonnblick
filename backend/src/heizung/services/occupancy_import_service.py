@@ -35,6 +35,7 @@ from heizung.schemas.occupancy_import import (
     OccupancyImportLogResponse,
     OccupancyImportLogRow,
     OccupancyImportPayload,
+    resolve_stay_dates,
 )
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import (
@@ -332,14 +333,15 @@ async def reconcile_from_import(
         if room_id is None:
             unknown.append(number)
             continue
-        check_in = datetime.combine(entry.anreise, checkin_t, tzinfo=tz).astimezone(UTC)
-        check_out = datetime.combine(entry.abreise, checkout_t, tzinfo=tz).astimezone(UTC)
+        anreise_date, abreise_date = resolve_stay_dates(entry.anreise, entry.abreise, list_date)
+        check_in = datetime.combine(anreise_date, checkin_t, tzinfo=tz).astimezone(UTC)
+        check_out = datetime.combine(abreise_date, checkout_t, tzinfo=tz).astimezone(UTC)
         resolved.append(
             _Resolved(
                 room_id=room_id,
                 check_in=check_in,
                 check_out=check_out,
-                entry_anreise=entry.anreise,
+                entry_anreise=anreise_date,
                 entry_typ=entry.aufenthaltstyp,
             )
         )

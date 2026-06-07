@@ -2848,6 +2848,10 @@ jederzeit Vorrang-Fallback, kein generisches Webhook-/api_key-Framework
    aktive `pms`-Belegung, deren Zimmer fehlt → schließen
    (`is_active=False`, nie löschen). `check_in`/`check_out` = Anreise/Abreise
    + `global_config.default_checkin/checkout_time` (Lokal) → UTC.
+   **Jahr-Ableitung (Sprint 15e-1):** Das reale mailparser-Payload liefert
+   `Anreise` ohne Jahr (`TT.MM.`) und `Abreise` mit Jahr; `resolve_stay_dates`
+   nimmt das Anreise-Jahr aus der Abreise und korrigiert beim Jahreswechsel
+   (Anreise nach Abreise → Vorjahr). Beide Formen werden defensiv akzeptiert.
 
 3. **`manual` > `pms`, hart.** Überlappt eine aktive `manual`-Belegung das
    Zeitfenster, wird der `pms`-Eintrag **verworfen** (Audit

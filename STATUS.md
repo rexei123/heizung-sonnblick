@@ -3542,6 +3542,17 @@ regulär ohne `--admin`). Branch `feature/15e-belegungs-import` (Refactor
 **pending Live-Verify** am Hauptrechner (§5.67) — Reihenfolge `v0.1.19h` (15d)
 vor `v0.1.19i`. Frontend-Sichtbarkeit in 15f (§2bl).
 
+**Nachtrag 15e-1 (2026-06-07, Branch `feature/15e-1-import-datum`, PR offen):**
+Reales mailparser-Payload (verifiziert via webhook.site) liefert `Anreise`
+OHNE Jahr (`TT.MM.`), `Abreise` MIT Jahr — der 15e-Parser lehnte die Anreise
+mit 422 ab. Fix: `parse_partial_date` + `resolve_stay_dates`
+(`schemas/occupancy_import.py`) akzeptieren beide Formen und leiten das
+Anreise-Jahr aus der Abreise ab (Jahreswechsel-Wrap). Nur Datums-Parser
+geändert; Reconcile/Vertrag/Model/Migration unverändert. +19 Tests
+(Datums-Matrix, Silvester-E2E, reales Format via API), Bestands-15e-Tests
+unverändert grün. Live-Verify am Hauptrechner mit dem ECHTEN automatischen
+Payload offen; Tag-Reihenfolge unverändert.
+
 **Querverweise:** AE-66, AE-02 (occupancy als Belegungsquelle), §5.65 (UTC→
 Vienna nur bei Anzeige), §5.67 (Tag/Live-Verify-pending), §2bg/§2bh (15d),
 B-15b-1 (Email-Alarm offen).

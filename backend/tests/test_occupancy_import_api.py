@@ -174,6 +174,34 @@ async def test_import_with_valid_token_applies(
     assert await _count_active_pms(engine, room_id) == 1
 
 
+async def test_import_real_format_anreise_without_year(
+    http_client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    """Sprint 15e-1: reales Format (Anreise "04.06." ohne Jahr) -> 200, kein 422."""
+    number = f"{PREFIX}-{uuid.uuid4().hex[:6]}-101"
+    room_id = await _seed_room(engine, number)
+    body = {
+        "id": uuid.uuid4().hex,
+        "received_at": "2026-06-06 07:14:15",
+        "liste": [
+            {
+                "Zimmer": number,
+                "Anreise": "04.06.",
+                "Abreise": "06.06.2026",
+                "Aufenthaltstyp": "Abreise",
+            }
+        ],
+    }
+    resp = await http_client.post(
+        "/api/v1/integrations/occupancy-import",
+        json=body,
+        headers={"X-Webhook-Token": TOKEN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "applied"
+    assert await _count_active_pms(engine, room_id) == 1
+
+
 async def test_import_missing_token_401(http_client: httpx.AsyncClient) -> None:
     resp = await http_client.post("/api/v1/integrations/occupancy-import", json=_body("t15e-x-1"))
     assert resp.status_code == 401
