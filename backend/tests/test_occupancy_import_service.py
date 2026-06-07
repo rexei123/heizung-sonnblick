@@ -329,6 +329,55 @@ async def test_empty_list_closes_all_pms(session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sprint 15e-1 — reales Datumsformat (Anreise ohne Jahr)
+# ---------------------------------------------------------------------------
+
+
+async def test_real_payload_anreise_without_year(session: AsyncSession) -> None:
+    """Reales 07.06-Format: Anreise ohne Jahr + Zimmerwechsel -> kein 422."""
+    a = _room_number("101")
+    b = _room_number("201")
+    a_id = await _seed_room(session, a)
+    b_id = await _seed_room(session, b)
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(
+            entries=[
+                _entry(a, "04.06.", "06.06.2026", "Abreise"),
+                _entry(f"52\n⇒ {b}", "05.06.", "07.06.2026", "Zimmerwechsel"),
+            ]
+        ),
+    )
+
+    assert outcome.status == "applied"
+    assert outcome.rooms_occupied == 2
+    occ_a = (await _active_pms(session, a_id))[0]
+    assert occ_a.check_in == datetime(2026, 6, 4, 14, 0, tzinfo=VIENNA).astimezone(UTC)
+    assert occ_a.check_out == datetime(2026, 6, 6, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    assert len(await _active_pms(session, b_id)) == 1
+
+
+async def test_silvester_year_wrap_e2e(session: AsyncSession) -> None:
+    """Anreise 29.12. (ohne Jahr) + Abreise 02.01.2027 -> check_in 29.12.2026."""
+    num = _room_number("301")
+    room_id = await _seed_room(session, num)
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at="2027-01-02 07:14:15",
+            entries=[_entry(num, "29.12.", "02.01.2027", "Abreise")],
+        ),
+    )
+
+    assert outcome.status == "applied"
+    occ = (await _active_pms(session, room_id))[0]
+    assert occ.check_in == datetime(2026, 12, 29, 14, 0, tzinfo=VIENNA).astimezone(UTC)
+    assert occ.check_out == datetime(2027, 1, 2, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+
+
+# ---------------------------------------------------------------------------
 # Watchdog-Tests
 # ---------------------------------------------------------------------------
 
