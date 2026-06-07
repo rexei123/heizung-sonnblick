@@ -2811,3 +2811,74 @@ gekoppelt, keine zweite Schwelle**:
 `BatteryHealthState` + `DashboardKpi.battery_low_count`; **Zod**
 `dashboardKpiSchema.battery_low_count` (ohne den Key strippt Zod das Feld →
 Kachel `undefined`, §5.64). `devices.ts` ohne Zod (raw fetch) — nur TS-Typ.
+
+---
+
+# AE-66 — Belegungs-Import via mailparser-Webhook als source=pms-Schreibquelle (Sprint 15e, Backend)
+
+**Datum:** 2026-06-06
+**Status:** Akzeptiert
+**Bezug:** AE-02 (occupancy als Belegungsquelle), AE-28 (`global_config`-
+Singleton), AE-50 (`business_audit`), §5.65 (UTC→Vienna), §5.67 (Tag/Live-
+Verify), B-15b-1 (Email-Alarm), Sprint 16a (PMS-Casablanca-FIAS — diese
+Webhook-Variante ist das Mail-Surrogat davor).
+
+## Kontext
+
+Die tägliche Belegungsliste kommt heute (vor der FIAS-Anbindung) als
+E-Mail aus Casablanca, von mailparser.io in nested JSON gewandelt und per
+Webhook zugestellt (eine E-Mail = ein Request). Sie muss in die
+`occupancy`-Tabelle, die die Engine in Layer 1 liest. Anforderung: keine
+Falschzustände aus einer externen Quelle (S5), `manual`-Pflege bleibt
+jederzeit Vorrang-Fallback, kein generisches Webhook-/api_key-Framework
+(YAGNI/S6 — eine Quelle, ein Zweck).
+
+## Entscheidung
+
+1. **Eigener, zweckgebundener Endpoint** `POST /api/v1/integrations/
+   occupancy-import`, abgesichert über ein **Shared Secret** im Header
+   `X-Webhook-Token` (constant-time-Vergleich gegen
+   `OCCUPANCY_IMPORT_TOKEN`, fail-closed: leer → 401). Keine Cookie-/JWT-
+   Auth (die Quelle ist eine Maschine, kein Browser), kein api_key-Modell.
+
+2. **Deklarativer Reconcile statt Event-Diff.** `reconcile_from_import`
+   behandelt die Liste als Soll-Zustand für `list_date` (Datumsteil von
+   `received_at`, Europe/Vienna): Listen-Zimmer ohne aktive `pms`-Belegung
+   → anlegen (`source=pms`, `external_id`=mailparser-id, `guest_count=NULL`);
+   aktive `pms`-Belegung, deren Zimmer fehlt → schließen
+   (`is_active=False`, nie löschen). `check_in`/`check_out` = Anreise/Abreise
+   + `global_config.default_checkin/checkout_time` (Lokal) → UTC.
+
+3. **`manual` > `pms`, hart.** Überlappt eine aktive `manual`-Belegung das
+   Zeitfenster, wird der `pms`-Eintrag **verworfen** (Audit
+   `OCCUPANCY_IMPORT_CONFLICT`), `manual` nie angefasst. Unbekannte
+   Zimmernummer → **gesamter Request 422, nichts geschrieben** (atomar),
+   Audit `OCCUPANCY_IMPORT_REJECTED`.
+
+4. **Kein neues Modell, keine Migration.** Idempotenz-Schlüssel ist das
+   **Paar `(external_id, list_date)`** (gleiche mailparser-id an zwei Tagen
+   ist gültig), Import-Log ist die Menge der `OCCUPANCY_IMPORT_APPLIED/
+   REJECTED`-Zeilen in `business_audit` (JSONB trägt
+   `rooms_occupied/closed/conflicts/received_at/result`). `occupancy` hatte
+   `external_id` bereits — Phase 0 belegte: nichts fehlt.
+
+5. **Status ist Backend-berechnet** (`GET .../log`): green/yellow/red on-the-
+   fly aus `last_success_at` + `expected_by_local` + jetzt, keine
+   gespeicherte Flag-Spalte. Das Frontend (Sprint 2) zeigt nur an, baut die
+   Schwellen nicht nach.
+
+6. **Staleness-Watchdog friert ein, statt freizugeben.** Kein Import bis
+   `expected_by_local` → Audit `OCCUPANCY_IMPORT_STALE`; der letzte bekannte
+   Stand bleibt aktiv (S5). Email-Alarm bleibt B-15b-1 vorbehalten
+   (Schalter vorbereitet, kein Versand in 15e).
+
+## Konsequenzen
+
+- Die Engine bekommt eine zweite automatische Schreibquelle in `occupancy`
+  neben dem manuellen CRUD — beide über dieselbe extrahierte Service-
+  Sequenz (`create/cancel_occupancy_record`), kein Logik-Duplikat.
+- Wenn Casablanca-FIAS (Sprint 16a) kommt, ersetzt es die Webhook-Quelle
+  oder läuft parallel; das `source=pms`-Reconcile-Modell bleibt, nur der
+  Adapter wechselt. Migrationspfad offen, ohne heute etwas dafür zu bauen.
+- Ein zweites Hotel / mehrere Listen pro Tag sind NICHT abgedeckt
+  (Single-Mandant, eine Liste/Tag) — bewusst, bis ein realer Bedarf da ist.

@@ -81,6 +81,17 @@ class Settings(BaseSettings):
     # ChirpStack v4 erwartet: application/{ApplicationID}/device/{DevEUI}/command/down
     downlink_topic_template: str = "application/{app_id}/device/{dev_eui}/command/down"
 
+    # --- Belegungs-Import-Webhook (Sprint 15e, AE-66) ---
+    # Shared Secret fuer den mailparser->Casablanca-Webhook. Konstant-Zeit-
+    # Vergleich gegen den Header ``X-Webhook-Token``. Leer = fail-closed
+    # (Endpoint lehnt jede Anfrage mit 401 ab). Server-spezifisch in .env
+    # setzen, NIE committen.
+    occupancy_import_token: str = ""
+    # Lokale Uhrzeit (Europe/Vienna, HH:MM), bis zu der die taegliche
+    # Belegungsliste erwartet wird. Steuert Ampel-Status (gelb ab hier ohne
+    # Import) + Staleness-Watchdog.
+    occupancy_import_expected_by_local: str = "09:00"
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.

@@ -15,7 +15,7 @@ room.status wird automatisch synchronisiert (occupancy_service).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import select
@@ -28,7 +28,11 @@ from heizung.models.room import Room
 from heizung.models.user import User
 from heizung.schemas.occupancy import OccupancyCancel, OccupancyCreate, OccupancyRead
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.occupancy_service import has_overlap, sync_room_status
+from heizung.services.occupancy_service import (
+    cancel_occupancy_record,
+    create_occupancy_record,
+    has_overlap,
+)
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
 
 INT4_MAX = 2_147_483_647
@@ -85,10 +89,15 @@ async def create_occupancy(
             ),
         )
 
-    occ = Occupancy(**payload.model_dump())
-    session.add(occ)
-    await session.flush()  # ID generieren
-    await sync_room_status(session, payload.room_id)
+    occ = await create_occupancy_record(
+        session,
+        room_id=payload.room_id,
+        check_in=payload.check_in,
+        check_out=payload.check_out,
+        guest_count=payload.guest_count,
+        source=payload.source,
+        external_id=payload.external_id,
+    )
     await record_business_action(
         session,
         user_id=user.id,
@@ -186,9 +195,7 @@ async def cancel_occupancy(
             detail=f"Belegung {occupancy_id} ist bereits storniert",
         )
 
-    occ.is_active = False
-    occ.cancelled_at = datetime.now(tz=UTC)
-    await sync_room_status(session, occ.room_id)
+    await cancel_occupancy_record(session, occ)
     await record_business_action(
         session,
         user_id=user.id,

@@ -41,6 +41,7 @@ app: Celery = Celery(
         "heizung.tasks.engine_tasks",
         "heizung.tasks.health_tasks",
         "heizung.tasks.override_cleanup_tasks",
+        "heizung.tasks.occupancy_import_tasks",
     ],
 )
 
@@ -87,6 +88,16 @@ app.conf.update(
         "compute-health-state-every-5min": {
             "task": "heizung.tasks.health_tasks.compute_health_state",
             "schedule": 300.0,
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 15e (AE-66): Belegungs-Import-Staleness-Watchdog.
+        # 08:15 UTC liegt ganzjaehrig NACH 09:00 Europe/Vienna
+        # (CET 09:15 / CEST 10:15 lokal). Default expected_by_local=09:00;
+        # wird das Setting deutlich spaeter gestellt, diesen UTC-Slot
+        # mit-nachziehen. Der Task selbst no-opt vor expected_by_local.
+        "occupancy-import-freshness-daily": {
+            "task": "heizung.check_occupancy_import_freshness",
+            "schedule": crontab(hour=8, minute=15),
             "options": {"queue": "heizung_default"},
         },
     },

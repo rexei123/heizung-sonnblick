@@ -917,6 +917,85 @@ docker exec -it heizung-redis redis-cli
   function-tauglich, kann lokal gegen Test-DB laufen (siehe
   `tests/test_health_compute.py`).
 
+### 10d.9 Belegungs-Import-Webhook (Sprint 15e, AE-66)
+
+**Bezug:** AE-66, Endpoints in `api/v1/integrations.py`, Service
+`services/occupancy_import_service.py`. Mail-Surrogat für Casablanca
+(mailparser.io → Webhook), bis FIAS (Sprint 16a) kommt.
+
+**Secret setzen (je Server, einmalig):** in
+`/opt/heizung-sonnblick/infra/deploy/.env`:
+
+```
+OCCUPANCY_IMPORT_TOKEN=<openssl rand -hex 32>
+OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL=09:00
+```
+
+Leeres/fehlendes Token = der Endpoint lehnt **jede** Anfrage mit 401 ab
+(fail-closed). In mailparser.io denselben Wert als Custom-Header
+`X-Webhook-Token` hinterlegen.
+
+**Endpoint A — Import (Webhook):**
+
+```
+POST /api/v1/integrations/occupancy-import
+Header: X-Webhook-Token: <secret>
+Content-Type: application/json
+```
+
+Body (mailparser „Nested - array of objects", „One request per email"):
+
+```json
+{
+  "id": "a149d8a3-...",
+  "received_at": "2026-06-06 07:14:15",
+  "liste": [
+    { "Zimmer": "103", "Anreise": "04.06.2026", "Abreise": "06.06.2026", "Aufenthaltstyp": "Abreise" },
+    { "Zimmer": "52\n⇒ 101", "Anreise": "05.06.2026", "Abreise": "07.06.2026", "Aufenthaltstyp": "Zimmerwechsel" }
+  ]
+}
+```
+
+- `received_at`-Datumsteil = `list_date` (Europe/Vienna). `id` = Idempotenz
+  (gleiche `id` + `list_date` zweimal → `{"status":"already_processed"}`).
+- Zimmerwechsel (`⇒`): nur das Zielzimmer zählt.
+- Unbekannte Zimmernummer → **422, nichts geschrieben** (atomar).
+- Leere `liste` → alle aktiven pms-Belegungen des Tages werden geschlossen.
+
+```bash
+# SSH (heizung-test) — Smoke-Test gegen das webhook.site-Beispiel
+curl -sS -X POST https://heizung-test.hoteltec.at/api/v1/integrations/occupancy-import \
+  -H "X-Webhook-Token: $OCCUPANCY_IMPORT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"smoke-1","received_at":"2026-06-06 07:14:15","liste":[{"Zimmer":"103","Anreise":"04.06.2026","Abreise":"06.06.2026","Aufenthaltstyp":"Abreise"}]}'
+# -> {"status":"applied","rooms_occupied":1,"rooms_closed":0,"conflicts":0}
+# Zweiter identischer POST -> {"status":"already_processed"}
+```
+
+**Endpoint B — Status/Log (Login-Session, NICHT das Webhook-Token):**
+
+```
+GET /api/v1/integrations/occupancy-import/log
+```
+
+Liefert `status` (green/yellow/red, Backend-berechnet), `last_success_at`
+(UTC), `expected_by_local`, `today_received`, `imports` (letzte 30, neueste
+zuerst). Quelle ist `business_audit` — kein eigenes Log-Modell.
+
+**Watchdog:** `heizung.check_occupancy_import_freshness` (Celery-Beat
+täglich 08:15 UTC). Kein Import bis `expected_by_local` → Audit
+`OCCUPANCY_IMPORT_STALE`. Gibt **keine** Zimmer frei (letzter Stand bleibt
+eingefroren). Diagnose:
+
+```bash
+docker logs deploy-celery_beat-1 --since 24h 2>&1 | grep -i occupancy
+# business_audit nach STALE/APPLIED fragen (DB):
+#   SELECT ts, action, new_value FROM business_audit
+#   WHERE action LIKE 'OCCUPANCY_IMPORT%' ORDER BY ts DESC LIMIT 10;
+```
+
+Email-Alarm bei STALE ist NICHT aktiv (an B-15b-1 gekoppelt).
+
 ---
 
 ## 10e. Vicki-Konfiguration via Downlink (Sprint 9.11x.b)

@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.models.enums import RoomStatus
+from heizung.models.enums import OccupancySource, RoomStatus
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 
@@ -25,6 +25,59 @@ logger = logging.getLogger(__name__)
 
 def _now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+async def create_occupancy_record(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    check_in: datetime,
+    check_out: datetime,
+    guest_count: int | None = None,
+    source: OccupancySource = OccupancySource.MANUAL,
+    external_id: str | None = None,
+    now: datetime | None = None,
+) -> Occupancy:
+    """Legt eine Belegung an, flusht (ID) und synchronisiert ``room.status``.
+
+    Reiner DB-Schreibpfad — KEIN Commit, KEIN Audit, KEIN Engine-Trigger.
+    Diese drei sind Aufrufer-spezifisch (manueller Endpoint schreibt
+    ``OCCUPANCY_CREATE``, der Import-Service schreibt eine Sammel-Audit-
+    Zeile). Overlap-Pruefung obliegt ebenfalls dem Aufrufer, weil die
+    Konfliktsemantik unterschiedlich ist (Endpoint -> 409, Import ->
+    manual-Vorrang-Skip). Konsolidiert die bislang im Occupancy-Endpoint
+    inline liegende Insert-Sequenz (Sprint 15e T0).
+    """
+    occ = Occupancy(
+        room_id=room_id,
+        check_in=check_in,
+        check_out=check_out,
+        guest_count=guest_count,
+        source=source,
+        external_id=external_id,
+    )
+    session.add(occ)
+    await session.flush()  # ID generieren
+    await sync_room_status(session, room_id, now)
+    return occ
+
+
+async def cancel_occupancy_record(
+    session: AsyncSession,
+    occ: Occupancy,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Storniert eine Belegung (``is_active=False`` + ``cancelled_at``) und
+    synchronisiert ``room.status``.
+
+    Reiner DB-Schreibpfad — KEIN Commit, KEIN Audit, KEIN Engine-Trigger
+    (Aufrufer-spezifisch, vgl. ``create_occupancy_record``). Daten bleiben
+    fuer Audit-/Reproduzierbarkeit erhalten, kein DELETE (Sprint 15e T0).
+    """
+    occ.is_active = False
+    occ.cancelled_at = now or _now()
+    await sync_room_status(session, occ.room_id, now)
 
 
 async def has_overlap(
