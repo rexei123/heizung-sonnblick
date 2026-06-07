@@ -75,12 +75,15 @@ als Code-Konstante unangetastet). Keine eigene Sprint-Zuordnung
 vor Heizperiode. Reaktivierungs-Pfad in Phase 7, falls aus der
 Heizperiode 2026/27 konkreter Bedarf entsteht.
 
-### Phase 4 — heizung-main-Migration (Sprint 15, Anfang August 2026)
+### Phase 4 — heizung-main-Migration (Nummer und Termin offen)
+
+Verbindliche Roadmap-/Termin-Quelle ist SPRINT-PLAN.md; diese Phase ist
+dort termin- und nummernlos geführt.
 
 Vorgezogen gegenüber Strategie-Refresh-Initialstand: heizung-main
-wird Anfang August „leer" vom Sprint-9.8a-Stand auf aktuellen
-develop-Stand gebracht, BEVOR im September Vickis pre-paired
-werden (Phase 4b). Migrationen 0005-0014+ anwenden,
+wird zu offenem Zeitpunkt (nach der letzten Feature-Funktion) „leer"
+vom Sprint-9.8a-Stand auf aktuellen develop-Stand gebracht, BEVOR
+Vickis pre-paired werden (Phase 4b). Migrationen 0005-0014+ anwenden,
 `safe.directory`-Fix (CLAUDE.md §5.7), Auth-Cutover-Sprint analog
 9.17a/b, Backup-Cron plus Off-Site-Replikation, Migrations-
 Trockenlauf. Vier bisherige Vickis bleiben in Phase 4 zunächst
@@ -94,7 +97,7 @@ Phase 6.
   alle Sprint-14-Resultate (UI / Health-Badges) ausgerollt
 - Backup-Cron läuft, ein Disaster-Recovery-Drill bestanden
 
-### Phase 4b — Pre-Pairing September (Sprint 17, September 2026)
+### Phase 4b — Pre-Pairing (Nummer und Termin offen, nach Cutover)
 
 Sub-Phase von Phase 4. Massen-Pairing-Vorbereitung aller ~100
 Vickis auf einem Tisch im Hotel-Office, ohne Montage. Pro Vicki
@@ -183,11 +186,11 @@ Zeit-Plan 2026-05-15 → 2026-10-01: ~4,5 Monate.
 
 - **Mai-Juli:** Phase 1 (Stabilisierung + Zuordnungs-Architektur
   + arc42-Konsolidierung), Phase 2 parallel
-- **Anfang August:** Phase 4 (heizung-main-Migration, „leer")
-- **August:** Phase 5 (PMS) — falls FIAS-Antwort, sonst Fallback
-  manueller Betrieb
-- **September:** Phase 4b (Pre-Pairing aller ~100 Vickis auf
-  einem Tisch, ohne Montage)
+- **Zeitpunkt offen (nach letzter Feature-Funktion):** Phase 4 (heizung-main-Migration, „leer")
+- **August (verschiebt sich mit Phase 4):** Phase 5 (PMS) — falls
+  FIAS-Antwort, sonst Fallback manueller Betrieb
+- **September (verschiebt sich mit Phase 4):** Phase 4b (Pre-Pairing
+  aller ~100 Vickis auf einem Tisch, ohne Montage)
 - **Oktober Woche 1:** Phase 6 (Pilot-Go-Live mit 5 Pilot-Zimmern)
 - **Oktober-Frühjahr 2027:** schrittweiser Rückbau, dann Phase 7
 
@@ -201,8 +204,8 @@ Hauptaktion und Hotel-Steuerung pro Zeitfenster:
 | Zeitraum | Hauptaktion | Hotel-Steuerung |
 |---|---|---|
 | Mai-Juli | Stabilisierung + Zuordnungs-Architektur + arc42 auf heizung-test (Phase 1) | Betterspace |
-| August | heizung-main-Migration leer (Phase 4, Sprint 15 + 16); optional PMS Sprint 16a (Phase 5) | Betterspace |
-| September | Pre-Pairing aller ~100 Vickis ohne Montage (Phase 4b) | Betterspace |
+| offen / nach Cutover | heizung-main-Migration leer (Phase 4); optional PMS (Phase 5) | Betterspace |
+| offen / nach Cutover | Pre-Pairing aller ~100 Vickis ohne Montage (Phase 4b) | Betterspace |
 | Oktober Woche 1 | 5 Pilot-Zimmer umgerüstet, Pilot-Go-Live (Phase 6), Tag `v1.0.0-pilot` | 5 Vicki + Rest Betterspace |
 | Oktober-Frühjahr 2027 | Schrittweiser Rückbau pro Zimmer (Phase 7); danach Betterspace-Kündigung, Tag `v1.0.0` | gemischt → nur Vicki |
 

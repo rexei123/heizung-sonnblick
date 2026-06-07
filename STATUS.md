@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-06-07
 **Letzter Tag:** `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` reserviert für 15d, erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h reserviert für Sprint 15d (noch nicht gesetzt, Lücke bewusst)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3932,3 +3932,8 @@ Tag-Slot `v0.2.0` bleibt frei für späteren Meilenstein.*
 geplant. Sprint zurückgestellt 2026-05-11 (siehe §2aa, AE-42).
 Tag-Slot `v0.1.10` bleibt ungenutzt als sprechender Marker für den
 zurückgestellten Sprint.*
+
+*`v0.1.19h` war für Sprint 15d reserviert; alle drei 15d-PRs
+(#210/#211/#212) sind auf develop. Tag bewusst nicht gesetzt, da über
+den `v0.1.19j`-Verify (2026-06-07) mitverifiziert; Slot bleibt als
+sprechender Marker leer.*

@@ -18,13 +18,22 @@ Features umgestellt. Sechs Phasen mit klaren Abschluss-Kriterien:
 | 1 Stabilisierung | Mai-Juni 2026 | 10, 10a, 10b, 10c | CI-Hygiene, Vicki-Diagnose, Code-Fixes, Polish |
 | 2 Live-Beobachtung | Juni-Juli 2026 | — | Hotelier produktiv auf heizung-test, Befund-Sprints ad-hoc |
 | 3 Frostschutz | Juli 2026 | 11 | AE-42-Reaktivierung, Engine Layer 5 nutzt `min_temp_celsius` |
-| 4 heizung-main-Migration | Juli-August 2026 | 12 | B-9.11x-2, Auth-Cutover analog 9.17a/b, Backup-Cron |
-| 5 PMS-Casablanca | August 2026 | 13 | Casablanca-Anbindung, Fallback manuelle Pflege |
-| 6 Go-Live | September 2026 | 14 | Tag v1.0.0, produktiv vor Heizperiode 01.10.2026 |
+| 4 heizung-main-Migration | offen (nach letzter Funktion) | 12 | B-9.11x-2, Auth-Cutover analog 9.17a/b, Backup-Cron |
+| 5 PMS-Casablanca | August 2026 (verschiebt sich mit Phase 4) | 13 | Casablanca-Anbindung, Fallback manuelle Pflege |
+| 6 Go-Live | September 2026 (verschiebt sich mit Phase 4) | 14 | Tag v1.0.0, produktiv vor Heizperiode 01.10.2026 |
 | 7 Features | Winter 2026+ | 15+ | Nach Hotelier-Bedarf: Dashboard, Analytics, API-Keys, Gateway-UI, Wetter, ... |
 
 **Heizperiode-Start:** 1. Oktober 2026, Hotel Sonnblick Kaprun.
 Phasen-Plan hat zwei Wochen Puffer pro Phase.
+
+main-Cutover (Phase 4) ist bewusst termin- und nummernlos. Keine feste
+Sprint-Nummer, kein fixes Datum — startet nach der letzten auf
+heizung-test gebauten Funktion; Zeitpunkt offen, rutscht nach hinten,
+wenn vorher noch ein Feature gebaut wird. Folgephasen (4b Pre-Pairing,
+5 PMS, 6 Go-Live) verschieben sich mit. Einziger externer Fixpunkt:
+Heizperiode 01.10.2026 als Vollausbau-Zielhorizont, NICHT als
+Cutover-Gate. Im Herbst beginnt der schrittweise Einbau der ~105
+Vicki-Thermostate.
 
 Details siehe `docs/STRATEGIE-REFRESH-2026-05-15.md`.
 
@@ -1353,6 +1362,11 @@ entfallen.
 
 # SPRINT 15 — heizung-main-Migration „leer" (Phase 4)
 
+> **Hinweis (Hotelier-Entscheidung 2026-06-07):** Nummer und Termin
+> bewusst offen. Die hier genutzte „15" ist historisch (STATUS §2bg,
+> getrennter Track) und nicht bindend; der Cutover kommt nach der
+> letzten Feature-Funktion.
+
 **Priorität:** 🔴 (vor Phase 4b Pflicht)
 **Geschätzte Dauer:** 1-2 Wochen
 **Autonomiestufe:** 1 (Production-Migration)
@@ -1477,10 +1491,10 @@ Pilot-Go-Live Oktober Woche 1.
 | `v0.1.18-pairing-wizard` | Sprint 13: Pairing-Wizard + Mass-Pairing-CSV + Eingangstest |
 | `v0.1.19-cross-sicht-ui` | Sprint 14: Cross-Sicht-UI + Health-Badges + Mail-Platzhalter |
 | `v0.1.20-arc42-konsolidierung` | Sprint 14b: arc42-Doku-Konsolidierung (Phase-1-Abschluss) |
-| `v0.2.0-main-cutover` | Sprint 15: heizung-main-Migration „leer" (Phase 4) |
-| `v0.2.1-test-main-sync` | Sprint 16: Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4) |
+| `v0.2.0-main-cutover` | heizung-main-Migration „leer" (Phase 4) — Zeitpunkt offen, nach letzter Feature-Funktion |
+| `v0.2.1-test-main-sync` | Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4) |
 | `v0.2.2-pms-fias` | Sprint 16a (conditional): PMS-Casablanca-Integration (Phase 5) |
-| `v0.2.3-pre-pairing` | Sprint 17: Pre-Pairing September (Phase 4b) |
+| `v0.2.3-pre-pairing` | Pre-Pairing (Phase 4b) |
 | `v1.0.0-pilot` | Phase 6 Pilot-Go-Live (Oktober Woche 1, 5 Pilot-Zimmer) |
 | `v1.0.0` | Vollausbau-Migration abgeschlossen (Frühjahr 2027) |
 
