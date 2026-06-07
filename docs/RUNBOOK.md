@@ -950,12 +950,16 @@ Body (mailparser „Nested - array of objects", „One request per email"):
   "id": "a149d8a3-...",
   "received_at": "2026-06-06 07:14:15",
   "liste": [
-    { "Zimmer": "103", "Anreise": "04.06.2026", "Abreise": "06.06.2026", "Aufenthaltstyp": "Abreise" },
-    { "Zimmer": "52\n⇒ 101", "Anreise": "05.06.2026", "Abreise": "07.06.2026", "Aufenthaltstyp": "Zimmerwechsel" }
+    { "Zimmer": "103", "Anreise": "04.06.", "Abreise": "06.06.2026", "Aufenthaltstyp": "Abreise" },
+    { "Zimmer": "52\n⇒ 101", "Anreise": "05.06.", "Abreise": "07.06.2026", "Aufenthaltstyp": "Zimmerwechsel" }
   ]
 }
 ```
 
+- **Datumsformat (Sprint 15e-1):** `Anreise` kommt real OHNE Jahr (`TT.MM.`),
+  `Abreise` MIT Jahr (`TT.MM.JJJJ`). Der Server leitet das Anreise-Jahr aus der
+  Abreise ab — Jahreswechsel inklusive (Anreise `29.12.` + Abreise `02.01.2027`
+  → Anreise 29.12.2026). Beide Formen werden defensiv akzeptiert.
 - `received_at`-Datumsteil = `list_date` (Europe/Vienna). `id` = Idempotenz
   (gleiche `id` + `list_date` zweimal → `{"status":"already_processed"}`).
 - Zimmerwechsel (`⇒`): nur das Zielzimmer zählt.
@@ -967,7 +971,7 @@ Body (mailparser „Nested - array of objects", „One request per email"):
 curl -sS -X POST https://heizung-test.hoteltec.at/api/v1/integrations/occupancy-import \
   -H "X-Webhook-Token: $OCCUPANCY_IMPORT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"id":"smoke-1","received_at":"2026-06-06 07:14:15","liste":[{"Zimmer":"103","Anreise":"04.06.2026","Abreise":"06.06.2026","Aufenthaltstyp":"Abreise"}]}'
+  -d '{"id":"smoke-1","received_at":"2026-06-06 07:14:15","liste":[{"Zimmer":"103","Anreise":"04.06.","Abreise":"06.06.2026","Aufenthaltstyp":"Abreise"}]}'
 # -> {"status":"applied","rooms_occupied":1,"rooms_closed":0,"conflicts":0}
 # Zweiter identischer POST -> {"status":"already_processed"}
 ```
