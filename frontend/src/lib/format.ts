@@ -38,6 +38,19 @@ export function formatRelative(iso: string | null | undefined): string {
   return RTF.format(Math.round(diffSec / 86400), "day");
 }
 
+/**
+ * Kalendertag-Formatter: "YYYY-MM-DD" -> "DD.MM.YYYY", rein als String,
+ * OHNE Date/Timezone. ``new Date("2026-06-06")`` wäre UTC-Mitternacht und
+ * würde in westlichen Zeitzonen auf den Vortag kippen (§5.65-Falle); ein
+ * Kalendertag (``list_date``) darf nie durch die UTC-Pipeline.
+ */
+export function formatCalendarDate(value: string | null | undefined): string {
+  if (!value) return "–";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!m) return "–";
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
 export function formatTemperature(v: number | null | undefined): string {
   if (v === null || v === undefined) return "–";
   return `${v.toFixed(1)} °C`;
