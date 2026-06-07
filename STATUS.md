@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-06-02
-**Letzter Tag:** `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) — Branch `feature/15f-belegungs-import-sicht`, PR offen, kein Tag (§2bl). Davor: Sprint 15e Belegungs-Import-Webhook (Backend) **gemerged** (PR #215, develop-HEAD `0fdfbd9`), Tag `v0.1.19i-belegungs-import` pending Live-Verify (§2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Stichtag:** 2026-06-07
+**Letzter Tag:** `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand. PR1 Backend gemerged (develop-HEAD `106789d`, §2bg). **PR2 Frontend offen** (§2bh, Branch `feature/15d-batterie-health-frontend`, NICHT gemerged, kein Tag; `v0.1.19h` reserviert für 15d, erst nach PR2-Merge + Live-Verify). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h reserviert für Sprint 15d (noch nicht gesetzt, Lücke bewusst)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3481,7 +3481,7 @@ floor-ASC-dann-numerisch-Reihenfolge). tsc/lint/ruff/mypy grün; Backend
 
 ---
 
-## 2bk. Sprint 15e Belegungs-Import via mailparser-Webhook (Backend, 2026-06-06, PR offen)
+## 2bk. Sprint 15e Belegungs-Import via mailparser-Webhook (Backend, 2026-06-06, abgeschlossen + getaggt)
 
 **Ziel:** Zweckgebundener Webhook, der die tägliche Belegungsliste
 (Casablanca via mailparser.io, nested JSON) entgegennimmt und die
@@ -3530,19 +3530,17 @@ skipped** lokal gegen Test-DB.
 
 **Architektur-Touch:** AE-66. **Doku:** RUNBOOK §10d.9, CLAUDE.md unverändert.
 
-**Tag (vorgeschlagen):** `v0.1.19i-belegungs-import` (v0.1.20 bleibt
-arc42-reserviert) — erst nach PR-Merge auf `develop` **+ Live-Verify** auf
-heizung-test. **Live-Verify pending (§5.67):** echter POST des webhook.site-
-Beispiels nur am Hauptrechner mit Server-SSH-Key möglich, auf dem Build-PC
-nicht. Bis dahin Tag aufschieben.
+**Tag:** `v0.1.19i-belegungs-import` gesetzt (`4fbf7d2`); `v0.1.20` bleibt
+arc42-reserviert. Live-Verify 2026-06-07 am Hauptrechner erledigt (§5.67,
+echter webhook.site-POST gegen heizung-test).
 
-**Status:** **gemerged** (PR #215, Merge-Commit `0fdfbd9`, 2026-06-07,
-regulär ohne `--admin`). Branch `feature/15e-belegungs-import` (Refactor
-`0b1fb66` + Feature `2c3322f`) gelöscht. Tag `v0.1.19i-belegungs-import`
-**pending Live-Verify** am Hauptrechner (§5.67) — Reihenfolge `v0.1.19h` (15d)
-vor `v0.1.19i`. Frontend-Sichtbarkeit in 15f (§2bl).
+**Status:** **abgeschlossen.** PR #215 (Backend) + PR #217 (15e-1) gemerged,
+develop-HEAD `4fbf7d2`, Branches gelöscht. **Live-verifiziert 2026-06-07** am
+Hauptrechner (echtes mailparser-Payload: POST → applied, Wiederholung →
+already_processed, GET log → Status + Imports). Tag `v0.1.19i-belegungs-import`
+(`4fbf7d2`) gesetzt. Frontend-Sichtbarkeit in 15f (§2bl).
 
-**Nachtrag 15e-1 (2026-06-07, Branch `feature/15e-1-import-datum`, PR offen):**
+**Nachtrag 15e-1 (2026-06-07, Branch `feature/15e-1-import-datum`, PR #217 gemerged):**
 Reales mailparser-Payload (verifiziert via webhook.site) liefert `Anreise`
 OHNE Jahr (`TT.MM.`), `Abreise` MIT Jahr — der 15e-Parser lehnte die Anreise
 mit 422 ab. Fix: `parse_partial_date` + `resolve_stay_dates`
@@ -3550,16 +3548,16 @@ mit 422 ab. Fix: `parse_partial_date` + `resolve_stay_dates`
 Anreise-Jahr aus der Abreise ab (Jahreswechsel-Wrap). Nur Datums-Parser
 geändert; Reconcile/Vertrag/Model/Migration unverändert. +19 Tests
 (Datums-Matrix, Silvester-E2E, reales Format via API), Bestands-15e-Tests
-unverändert grün. Live-Verify am Hauptrechner mit dem ECHTEN automatischen
-Payload offen; Tag-Reihenfolge unverändert.
+unverändert grün. Live-verifiziert 2026-06-07 am Hauptrechner mit dem echten
+automatischen Payload; Teil des Tags `v0.1.19i-belegungs-import`.
 
 **Querverweise:** AE-66, AE-02 (occupancy als Belegungsquelle), §5.65 (UTC→
-Vienna nur bei Anzeige), §5.67 (Tag/Live-Verify-pending), §2bg/§2bh (15d),
+Vienna nur bei Anzeige), §5.67 (Tag nach Live-Verify), §2bg/§2bh (15d),
 B-15b-1 (Email-Alarm offen).
 
 ---
 
-## 2bl. Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, 2026-06-07, PR offen)
+## 2bl. Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, 2026-06-07, abgeschlossen + getaggt)
 
 **Ziel:** Zwei Lese-Ansichten für den täglichen Belegungs-Import, beide lesen
 NUR `GET /api/v1/integrations/occupancy-import/log` (15e-Vertrag). `status`
@@ -3600,10 +3598,10 @@ Fallback). `sprint-14c-dashboard.spec.ts` auf 8 Kacheln + Log-Mock angepasst.
 Backend-/Engine-/Migration-Touch. Architektur-Touch: AE-66 (Frontend-Teil),
 neue Lesson CLAUDE.md §5.74 (Kalendertag-Strings nie durch `new Date()`).
 
-**Status:** PR offen nach `develop`, **NICHT gemerged**. Branch
-`feature/15f-belegungs-import-sicht`. **Tag-Slot offen** bis Freigabe
-([Annahme] `v0.1.19j-belegungs-import-front`; `v0.1.20` arc42-reserviert) —
-Tag erst nach Merge + Live-Verify gegen den echten Endpoint auf heizung-test.
+**Status:** **abgeschlossen.** PR #216 gemerged (`eb9e98a`), Branch gelöscht.
+**Live-verifiziert 2026-06-07** auf heizung-test (Kachel + Detailseite mit
+echten Daten, UTC→Vienna korrekt). Tag `v0.1.19j-belegungs-import-front`
+(`eb9e98a`) gesetzt; `v0.1.20` bleibt arc42-reserviert.
 
 **Querverweise:** AE-66, §2bk (15e Backend/Vertrag), §5.65 (UTC→Vienna),
 §5.74 (Kalendertag-Falle), §5.64 (Zod-Strip), §5.66 (feste Tabellen-Slots).
