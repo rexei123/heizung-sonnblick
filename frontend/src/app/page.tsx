@@ -13,10 +13,13 @@
  * Zeit-Anzeige lokalisiert (de-AT), Backend liefert UTC (§5.65).
  */
 
+import Link from "next/link";
+
 import { KpiCard, type KpiTone } from "@/components/patterns/kpi-card";
 import { useAuth } from "@/contexts/auth-context";
 import { useDashboardKpi } from "@/lib/api/hooks-dashboard";
-import type { DashboardKpi } from "@/lib/api/types";
+import { useOccupancyImportLog } from "@/lib/api/hooks-occupancy-import";
+import type { DashboardKpi, OccupancyImportStatus } from "@/lib/api/types";
 import { formatDateTime, formatRelative, formatTemperature } from "@/lib/format";
 
 /** Engine-Tick gilt als „alt", wenn aelter als 10 Minuten (T0-Erwartung < 10 min). */
@@ -33,6 +36,14 @@ const CARD_META: { label: string; icon: string }[] = [
   // zeigt das Lade-Skelett 6 und geladen 7.
   { label: "Schwache Batterie", icon: "battery_alert" },
 ];
+
+// Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
+// aus dem backend-berechneten ``status`` — keine Schwellen im Frontend.
+const IMPORT_STATUS_TONE: Record<OccupancyImportStatus, KpiTone> = {
+  green: "success-soft",
+  yellow: "warning-soft",
+  red: "danger-soft",
+};
 
 function greetingPrefix(now: Date): string {
   const h = now.getHours();
@@ -106,6 +117,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
 export default function Home() {
   const { user } = useAuth();
   const kpiQ = useDashboardKpi();
+  const importQ = useOccupancyImportLog();
 
   const name = user?.email ?? null;
   const heading = name ? `${greetingPrefix(new Date())}, ${name}!` : "Hallo!";
@@ -138,6 +150,32 @@ export default function Home() {
                   tone={c.tone}
                 />
               ))}
+
+        {/* Sprint 15f (AE-66): Belegungsliste-Kachel — eigene Datenquelle
+            (GET .../occupancy-import/log), klickbar zur Detailseite. */}
+        <Link href="/einstellungen/api" className="block">
+          {importQ.isLoading ? (
+            <KpiCard loading label="Belegungsliste" value="" icon="event_available" />
+          ) : importQ.isError || !importQ.data ? (
+            <KpiCard error label="Belegungsliste" value="" icon="event_available" />
+          ) : (
+            <KpiCard
+              label="Belegungsliste"
+              value={
+                importQ.data.last_success_at
+                  ? formatRelative(importQ.data.last_success_at)
+                  : "Noch nie"
+              }
+              subValue={
+                importQ.data.last_success_at
+                  ? formatDateTime(importQ.data.last_success_at)
+                  : undefined
+              }
+              icon="event_available"
+              tone={IMPORT_STATUS_TONE[importQ.data.status]}
+            />
+          )}
+        </Link>
       </div>
     </div>
   );

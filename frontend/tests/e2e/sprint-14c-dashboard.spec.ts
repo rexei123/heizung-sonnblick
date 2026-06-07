@@ -48,12 +48,31 @@ async function mockKpi(
 }
 
 test.describe("Sprint 14c Dashboard", () => {
-  test("rendert 7 KPI-Kacheln", async ({ page }) => {
+  // Sprint 15f (AE-66): 8. Kachel „Belegungsliste" hat eine eigene Datenquelle
+  // (GET .../occupancy-import/log). Ohne Mock liefe sie in den Error-State,
+  // zählte aber weiter als kpi-card -> hier deterministisch grün mocken.
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/v1/integrations/occupancy-import/log", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "green",
+          last_success_at: new Date(Date.now() - 3_600_000).toISOString(),
+          expected_by_local: "09:00",
+          today_received: true,
+          imports: [],
+        }),
+      });
+    });
+  });
+
+  test("rendert 8 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
-    // Sprint 15d (AE-65): 7. Kachel „Schwache Batterie".
-    await expect(page.getByTestId("kpi-card")).toHaveCount(7);
+    // Sprint 15d: „Schwache Batterie" (7.), Sprint 15f: „Belegungsliste" (8.).
+    await expect(page.getByTestId("kpi-card")).toHaveCount(8);
   });
 
   test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({ page }) => {
@@ -84,12 +103,12 @@ test.describe("Sprint 14c Dashboard", () => {
     await expect.poll(() => counter.n).toBeGreaterThan(before);
   });
 
-  test("Mobile 390px: 7 Kacheln einspaltig gestapelt", async ({ page }) => {
+  test("Mobile 390px: Kacheln einspaltig gestapelt", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    await expect(cards).toHaveCount(7);
+    await expect(cards).toHaveCount(8);
     // Einspaltig: alle Karten teilen dieselbe linke Kante (gleiche x).
     const box0 = await cards.nth(0).boundingBox();
     const box1 = await cards.nth(1).boundingBox();

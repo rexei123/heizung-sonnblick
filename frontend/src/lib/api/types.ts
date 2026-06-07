@@ -700,3 +700,31 @@ export interface DashboardKpi {
   // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch).
   battery_low_count: number;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 15f — Belegungs-Import-Sichtbarkeit. Spiegel zu
+// ``schemas/occupancy_import.OccupancyImportLogResponse`` (AE-66, §5.63).
+// Zod-Validierung in ``lib/api/occupancy-import.ts``. ``status`` ist
+// BACKEND-berechnet — das Frontend zeigt nur an, baut die Schwellen NICHT nach.
+// ---------------------------------------------------------------------------
+
+export type OccupancyImportStatus = "green" | "yellow" | "red";
+export type OccupancyImportResult = "applied" | "rejected";
+
+export interface OccupancyImportLogRow {
+  received_at: string; // UTC ISO-8601 (Anzeige -> Europe/Vienna, §5.65)
+  list_date: string; // YYYY-MM-DD — Kalendertag, NICHT durch die UTC-Pipeline
+  external_id: string;
+  rooms_occupied: number;
+  rooms_closed: number;
+  conflicts: number;
+  result: OccupancyImportResult;
+}
+
+export interface OccupancyImportLog {
+  status: OccupancyImportStatus;
+  last_success_at: string | null; // UTC ISO-8601 oder null ("noch nie")
+  expected_by_local: string; // "HH:MM" (Lokal-Zeit)
+  today_received: boolean;
+  imports: OccupancyImportLogRow[]; // letzte 30, neueste zuerst
+}
