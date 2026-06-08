@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-05-24. Sprints 0-12 + 12a + 12b + 12c + 12c.a + Hygiene-Mini-Sprint + 13a + 13b.1 + 13b.2 abgeschlossen. Sprint 13b.2 Tag `v0.1.18b2-device-replacement-frontend` wird in Stop 6 nach PR-Merge gesetzt; vorletzter Tag `v0.1.18b1-device-replacement-backend` (Sprint 13b.1, Squash-Commit `55a91fa`, gemerged 2026-05-23, Live-Verify auf heizung-test 2026-05-23, siehe §2au).
+**Stand:** 2026-06-08, develop-HEAD `0331fd0`. Letzter Sprint/Tag: 15f / `v0.1.19j-belegungs-import-front`. Danach Aufräum-Sprint abgeschlossen (Doku-Konsolidierung PR #219, node24-Actions-Bump PR #220), kein neues Feature offen. Sprint-Aufzählung siehe §1 für laufenden Stand.
 
 ---
 
