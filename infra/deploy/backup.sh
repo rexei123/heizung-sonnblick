@@ -23,8 +23,9 @@
 # BACKUP_OFFSITE_SSH_KEY, BACKUP_OFFSITE_SSH_PORT - Default 23). Kein
 # hardcodierter Host, kein Secret im Skript. Fail-soft: Off-Site-Fehler
 # markieren den Lauf NICHT als Failure (lokal ist Primaersicherung),
-# werden aber mit dem Token OFFSITE_PUSH_FAILED geloggt. Kein rsync
-# --delete (Off-Site-Retention bleibt Storage-Box-seitig).
+# werden aber mit dem Token OFFSITE_PUSH_FAILED geloggt. Der Ziel-Pfad
+# wird via rsync --mkpath angelegt (Box hat keine Shell fuer mkdir). Kein
+# rsync --delete (Off-Site-Retention bleibt Storage-Box-seitig).
 #
 # Lokale Container-Verbindung nutzt Trust-Auth (wie rotate-secrets.sh),
 # daher kein Passwort noetig. Server-.env wird nur fuer User/DB-Namen
@@ -141,9 +142,16 @@ push_offsite() {
         return
     fi
     log "Off-Site: rsync ${BACKUP_DIR}/ -> ${OFFSITE_TARGET} (ssh port ${OFFSITE_PORT}) ..."
+    # --mkpath legt den Ziel-Pfad auf der Box an, falls er fehlt. Noetig, weil
+    #   die Storage Box keine volle Shell hat (rsync kann den Zielordner sonst
+    #   nicht remote anlegen) und der erste Push auf eine frische Box sonst
+    #   mangels Ordner fehlschlaegt. Braucht rsync >= 3.2.3 (heizung-test:
+    #   3.2.7, 2026-06-09 geprueft). Auf aelterem rsync = unbekannte Option =>
+    #   rsync bricht non-zero ab => Fail-soft loggt OFFSITE_PUSH_FAILED (kein
+    #   stilles "ok"), statt leer zu pushen.
     # Kein --delete: Off-Site akkumuliert, Retention bleibt Storage-Box-seitig.
     # BatchMode=yes => kein interaktiver Prompt, scheitert statt zu haengen.
-    if rsync -a \
+    if rsync -a --mkpath \
             -e "ssh -p ${OFFSITE_PORT} -i ${OFFSITE_KEY} -o StrictHostKeyChecking=accept-new -o BatchMode=yes" \
             "$BACKUP_DIR"/ "$OFFSITE_TARGET" >>"$LOG" 2>&1; then
         log "Off-Site: Push erfolgreich."
