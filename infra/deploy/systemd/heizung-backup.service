@@ -1,0 +1,11 @@
+[Unit]
+Description=Heizung Sonnblick taegliches DB-Backup (pg_dump Heizung + ChirpStack)
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/heizung-sonnblick/infra/deploy/backup.sh
+# Kein SuccessExitStatus-Override: ein fehlgeschlagenes Backup soll als
+# `failed` sichtbar bleiben (Monitoring/journalctl). Der Timer feuert
+# unabhaengig vom Service-Status weiter.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Heizung Sonnblick DB-Backup taeglich 03:30
+
+[Timer]
+# Taeglich 03:30 Server-Lokalzeit (Europe/Vienna).
+OnCalendar=*-*-* 03:30:00
+# Verpasste Laeufe (z. B. waehrend Neustart/Downtime) nachholen.
+Persistent=true
+Unit=heizung-backup.service
+
+[Install]
+WantedBy=timers.target
