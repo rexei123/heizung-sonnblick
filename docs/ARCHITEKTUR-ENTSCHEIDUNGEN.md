@@ -2886,3 +2886,83 @@ jederzeit Vorrang-Fallback, kein generisches Webhook-/api_key-Framework
   Adapter wechselt. Migrationspfad offen, ohne heute etwas dafür zu bauen.
 - Ein zweites Hotel / mehrere Listen pro Tag sind NICHT abgedeckt
   (Single-Mandant, eine Liste/Tag) — bewusst, bis ein realer Bedarf da ist.
+
+# AE-67 — Promote heizung-test zu Prod statt heizung-main-Daten-Migration; kein main-Strang (Sprint 15g)
+
+**Datum:** 2026-06-09
+**Status:** Akzeptiert
+**Bezug:** AE-41 (Stabilitätsregeln S2/S4 + Autonomie), SPRINT-PLAN Sprint 15
+(„heizung-main-Migration leer") + Sprint 16 (Test→Main-Sync) — beide hiermit
+SUPERSEDED, RUNBOOK §1/§9 (Server-Rollen/DNS), §5.68 (Server-State
+verifizieren statt behaupten), Sprint 15g (dieser Promote).
+
+## Kontext
+
+Der bisherige Plan (SPRINT-PLAN Sprint 15/16, Phase 4) sah eine klassische
+Migration vor: heizung-main vom Sprint-9.8a-Stand auf develop heben,
+Migrationen 0005–0015 anwenden, Auth-Cutover, Migrations-Trockenlauf +
+Disaster-Recovery-Drill, dann Test→Main-Sync. Der teuerste und riskanteste
+Teil daran ist, den **Live-Datenstand** (TimescaleDB-Hypertables
+`sensor_reading`/`event_log`, vier produktive Vickis) auf einen zweiten
+Server zu portieren und dort verlässlich wiederherzustellen.
+
+Phase-0-Befund Sprint 15g (read-only, live verifiziert): heizung-test
+(.17.150) fährt bereits den develop-Stand **mit** genau diesem Live-
+Datenstand. heizung-main (.30.116) ist ein eingefrorener alter Live-Prod-
+Server (v0.1.0-Skelett, ~183 Commits hinter develop), der die Prod-Domain
+`heizung.hoteltec.at` bediente. Eine Daten-Migration würde also den
+gepflegten, datenführenden Server auf einen veralteten kopieren — verkehrte
+Richtung.
+
+## Entscheidung
+
+1. **Server-Promote statt Daten-Migration.** heizung-test (.17.150,
+   develop-Stand) wird formal zur Produktion, indem ausschließlich
+   `PUBLIC_HOSTNAME=heizung.hoteltec.at` gesetzt wird (Caddy zieht den
+   Hostnamen aus `{$PUBLIC_HOSTNAME}`). Der Live-Datenstand bleibt **1:1
+   stehen** — keine Migration, kein Trockenlauf, kein DR-Drill für einen
+   Datentransfer.
+
+2. **Kein main-Strang.** `STAGE` bleibt bewusst `test`; `develop` = Prod.
+   Es gibt keinen separaten `main`-Branch-/Server-Strang im Betrieb. Eine
+   zweite `STAGE=main`-Welt würde Drift-Risiko und doppelte Pflege
+   einführen, ohne Schutzgewinn — es gibt **einen** Server und **eine** DB
+   (S6: einfacher).
+
+3. **Timing macht es billig.** Sommer, kein Heizbetrieb, nur vier Vickis —
+   der günstigste Zeitpunkt. Der teuerste Migrationsteil (Datenstand
+   portieren) entfällt vollständig.
+
+4. **Sicherheitsnetz ist Hardware, nicht Software-Staging.** Abgesichert
+   wird über den **parallelen Betterspace-Betrieb** und den **zimmerweisen
+   Hardware-Rückbau** (Vicki ab → Betterspace-eQ-3 wieder dran, ~5 Min/
+   Zimmer, jederzeit), nicht über einen zweiten Software-Stack.
+
+5. **Warum S2/S4 die test→main-Trennung hier nicht erzwingen.** Die
+   Trennung schützt Determinismus (S2) und Hardware (S4) bei
+   risikoreichen Deploys mit zwei Schreibpfaden. Hier gibt es einen
+   einzigen, CI-gateten Strang (`develop`) und einen einzigen
+   Hardware-Befehlspfad. Ein zweiter Strang erhöht die Drift-Oberfläche,
+   statt sie zu senken.
+
+6. **Wann die Entkopplung doch nachgezogen wird.** Vor der Heizperiode
+   (01.10.2026) wird der Deploy-Zeitpunkt vom CI entkoppelt — nicht über
+   einen zweiten Strang, sondern über **Image-Pinning** (`IMAGE_TAG` auf
+   einen SHA statt das mutierende `develop`, Backlog H-6). Das gibt
+   kontrollierte Deploy-Fenster ohne main-Welt.
+
+## Konsequenzen
+
+- SPRINT-PLAN Sprint 15 (main-Migration „leer") + Sprint 16 (Test→Main-
+  Sync) sind **SUPERSEDED**; Phase 4 ist „Prod-Domain-Promote" (Sprint 15g).
+- Der alte Live-Prod-Server (.30.116) wird **nicht** migriert. Er bleibt
+  vorerst laufende Rollback-Reserve; die Stilllegung ist ein eigener
+  späterer Schritt (Sprint 15g C1, nur Stop, kein Löschen).
+- **Rollback** des Promotes ist ein DNS-Schwenk `heizung.hoteltec.at` →
+  .30.116 + `.env`-`PUBLIC_HOSTNAME` zurück (gültig, solange .30.116 nur
+  gestoppt, nicht gelöscht ist). `caddy_data` persistent → altes Zert
+  reused (RUNBOOK §9.2).
+- Die alte Sprint-15-Aufgabe „Backup-Cron + Off-Site-Replikation" ist
+  durch Block A erledigt: lokales `pg_dump` (Heizung + ChirpStack,
+  Rotation 7) + Off-Site-Push auf eine Hetzner Storage Box, systemd-Timer
+  03:30, Restore-Drill bestanden.

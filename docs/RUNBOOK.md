@@ -10,9 +10,15 @@ Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-28.
 
 | Rolle | Hetzner | Public-IP / Hostname | Tailscale | GHCR-Tag | Branch |
 |---|---|---|---|---|---|
-| Test | CPX22 | `157.90.17.150` / `heizung-test.hoteltec.at` | `heizung-test` = `100.82.226.57` | `develop` | `develop` |
-| Main | CPX32 | `157.90.30.116` / `heizung.hoteltec.at` | `heizung-main` = `100.82.254.20` | `main` | `main` |
+| Test (= **Prod** seit 2026-06-09) | CPX22 | `157.90.17.150` / **`heizung.hoteltec.at`** (Prod, develop-Stand; `heizung-test.hoteltec.at` nicht mehr bedient) | `heizung-test` = `100.82.226.57` | `develop` | `develop` |
+| Main (**alter Live-Prod-Server**) | CPX32 | `157.90.30.116` / — (bediente `heizung.hoteltec.at` bis zum Promote; jetzt Rollback-Reserve, Stilllegung C1 offen) | `heizung-main` = `100.82.254.20` | `main` | `main` |
 | Entwickler-Client | — | — | `work02` = `100.78.38.29` | — | — |
+
+**Stand 2026-06-09 (Sprint 15g / AE-67):** Single-Server-Prod — heizung-test
+ist die Produktion unter `heizung.hoteltec.at`, `STAGE` bleibt bewusst `test`
+(kein main-Strang, develop=Prod). heizung-main ist der alte Live-Prod-Server
+(Rollback-Reserve, DNS-Schwenk zurück → `157.90.30.116`); Stilllegung (nur
+Stop) ist C1 und noch offen.
 
 **SSH-Key lokal:** `$HOME\.ssh\id_ed25519_heizung` (Pubkey in Hetzner als `ssh-heizung` registriert, gilt auch im Rescue-Modus).
 
@@ -335,11 +341,15 @@ Der Default-Key `~/.ssh/id_ed25519` funktioniert **nicht** mit den Heizungs-Serv
 ## 9. Domain & DNS (hoteltec.at)
 
 **Stand 2026-04-22 (Sprint 4):** Produktiv unter `hoteltec.at`, LE-Zertifikate laufen.
+**Update 2026-06-09 (Sprint 15g / AE-67):** `heizung.hoteltec.at` zeigt seit dem
+Prod-Domain-Promote auf **`157.90.17.150`** (heizung-test). Der alte Server
+`157.90.30.116` bedient die Prod-Domain nicht mehr (Rollback-Reserve, C1 offen).
 
 | Rolle | Hostname | IP |
 |---|---|---|
-| Main | `heizung.hoteltec.at` | `157.90.30.116` |
-| Test | `heizung-test.hoteltec.at` | `157.90.17.150` |
+| **Prod** (heizung-test) | `heizung.hoteltec.at` | `157.90.17.150` |
+| Zweitname (nicht mehr bedient) | `heizung-test.hoteltec.at` | `157.90.17.150` |
+| alter Live-Prod (heizung-main) | — (kein aktiver Prod-Hostname; Rollback-Reserve) | `157.90.30.116` |
 
 **DNS-Hosting:** Hetzner Online / konsoleH (NICHT Hetzner Cloud DNS).
 Admin-Konsole: https://console.hetzner.com/ → Domain `hoteltec.at` → DNS-Records.
@@ -349,7 +359,7 @@ A-Records (TTL 300):
 
 | Name | Wert |
 |---|---|
-| `heizung` | `157.90.30.116` |
+| `heizung` | `157.90.17.150` (seit 2026-06-09, Sprint 15g; vorher `157.90.30.116`) |
 | `heizung-test` | `157.90.17.150` |
 
 ### 9.1 Neue Subdomain hinzufügen / Server umschalten
@@ -629,7 +639,7 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 
 **Hintergrund.** Repo-Codec (`infra/chirpstack/codecs/mclimate-vicki.js`) ist Source of Truth, ChirpStack zieht ihn aber nicht selbst. Jeder Repo-Codec-Touch erfordert anschliessend einen manuellen Re-Paste in der ChirpStack-UI je Server. Siehe CLAUDE.md §5.22.
 
-**Zielserver:** `heizung-test` zuerst, `heizung-main` nachgezogen, sobald Production-Migration ansteht.
+**Zielserver:** `heizung-test` (= **Prod**, `heizung.hoteltec.at` seit AE-67). Der frühere Zusatz „`heizung-main` nachgezogen, sobald Production-Migration ansteht" **entfällt** — kein main-Strang, heizung-main wird stillgelegt (AE-67 / Sprint 15g).
 
 ### 10c.1 UI-Re-Paste
 
@@ -671,7 +681,7 @@ Nach 1–2 Minuten muss ein neues Vicki-Event mit dem geänderten Codec laufen:
 
 UI-Re-Paste je Server ist fehleranfällig (Copy-Paste-Verlust, ungetesteter Stand). Eigener Hygiene-Sprint via ChirpStack gRPC-API (`UpdateDeviceProfile`-RPC mit `payload_codec_script`-Feld) macht Repo → ChirpStack reproduzierbar. Siehe STATUS.md §6 Backlog-Eintrag „ChirpStack-Codec-Bootstrap-Skript".
 
-**Production-Hinweis:** Sobald heizung-main Live-Vickis bekommt, muss dieser Codec-Deploy-Schritt dort wiederholt werden. Backlog: B-9.10c-2.
+**Production-Hinweis:** Die Live-Vickis laufen auf **heizung-test = Prod** (AE-67); jeder Repo-Codec-Touch erfordert dort den UI-Re-Paste. Der frühere Verweis auf einen separaten heizung-main-Prod **entfällt** (kein main-Strang). Backlog: B-9.10c-2 (programmatisches Bootstrap).
 
 ---
 
@@ -1478,8 +1488,9 @@ SSH-Zugang auf den Server. Skript laeuft im Backend-Container via
      Pool-Device, legt `heating_zone_id = NULL` an.
 
 3. Zimmer + Heating-Zones sind in heizung-DB vorhanden. Falls nicht
-   (heizung-main beim Live-Lauf im September), vorher Zimmer-Seed-
-   Sprint ausfuehren.
+   (heizung-test = Prod beim Live-Lauf im September; AE-67 — kein
+   separater heizung-main-Server mehr), vorher Zimmer-Seed-Sprint
+   ausfuehren.
 
 **Workflow Schritt fuer Schritt:**
 
@@ -1511,8 +1522,10 @@ C. Smoke-Test gegen heizung-test (NUR vor Live-Lauf September,
 
    ACHTUNG: `--dry-run` rollt die DB-Aenderungen zurueck, sendet
    aber trotzdem MQTT-Downlinks an die in der CSV gelisteten Vickis.
-   Auf heizung-test mit 4 Test-Vickis akzeptabel — heizung-main
-   wuerde echte Hardware konfigurieren.
+   Seit dem Promote (AE-67) laufen auf heizung-test (= Prod) die 4
+   **produktiven** Vickis — der dry-run sendet also auch hier echte
+   Downlinks an echte Hardware (S4). Entsprechend bewusst einsetzen;
+   nur DevEUIs in der CSV listen, deren Konfiguration gewollt ist.
 
 D. Live-Lauf:
 
