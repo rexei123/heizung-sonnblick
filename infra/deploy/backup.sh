@@ -16,6 +16,17 @@
 # Ziel: /var/backups/heizung/  (root-only, chmod 700).
 # Rotation: die 7 juengsten Dumps je DB bleiben, aeltere werden geloescht.
 #
+# Optionaler Off-Site-Push (Sprint 15g A3): bei gesetztem
+# BACKUP_OFFSITE_TARGET werden die lokalen Dumps nach erfolgreichem Lauf
+# per rsync-over-SSH auf eine Hetzner Storage Box gespiegelt. Ziel + Key +
+# (optional) Port kommen aus der .env (BACKUP_OFFSITE_TARGET,
+# BACKUP_OFFSITE_SSH_KEY, BACKUP_OFFSITE_SSH_PORT - Default 23). Kein
+# hardcodierter Host, kein Secret im Skript. Fail-soft: Off-Site-Fehler
+# markieren den Lauf NICHT als Failure (lokal ist Primaersicherung),
+# werden aber mit dem Token OFFSITE_PUSH_FAILED geloggt. Der Ziel-Pfad
+# wird via rsync --mkpath angelegt (Box hat keine Shell fuer mkdir). Kein
+# rsync --delete (Off-Site-Retention bleibt Storage-Box-seitig).
+#
 # Lokale Container-Verbindung nutzt Trust-Auth (wie rotate-secrets.sh),
 # daher kein Passwort noetig. Server-.env wird nur fuer User/DB-Namen
 # gelesen (Defaults heizung/heizung), nicht fuer Secrets.
@@ -28,6 +39,8 @@
 # History:
 #   2026-06-09  Sprint 15g Block A: Erstanlage. Voraussetzung fuer die
 #               Prod-Domain-Promote (vor B-Block scharfgestellt).
+#   2026-06-09  Sprint 15g A3: optionaler Off-Site-Push (rsync-over-SSH auf
+#               Hetzner Storage Box) ergaenzt. Fail-soft, Keys aus .env.
 
 set -euo pipefail
 
@@ -56,6 +69,12 @@ fi
 
 HEIZUNG_USER=$(read_env_key POSTGRES_USER); HEIZUNG_USER=${HEIZUNG_USER:-heizung}
 HEIZUNG_DB=$(read_env_key POSTGRES_DB);     HEIZUNG_DB=${HEIZUNG_DB:-heizung}
+
+# Off-Site-Push-Konfiguration (alle optional; leeres TARGET => kein Push).
+OFFSITE_TARGET=$(read_env_key BACKUP_OFFSITE_TARGET)
+OFFSITE_KEY=$(read_env_key BACKUP_OFFSITE_SSH_KEY)
+OFFSITE_PORT=$(read_env_key BACKUP_OFFSITE_SSH_PORT); OFFSITE_PORT=${OFFSITE_PORT:-23}
+OFFSITE_STATUS=skipped
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
@@ -103,6 +122,47 @@ rotate() {
         done
 }
 
+# Off-Site-Push der lokalen Dumps auf die Storage Box (rsync-over-SSH).
+# Fail-soft: setzt OFFSITE_STATUS, gibt NIE einen Fehler an den
+# Haupt-Exit weiter. Leeres TARGET => sauber uebersprungen.
+push_offsite() {
+    if [ -z "$OFFSITE_TARGET" ]; then
+        log "Off-Site: BACKUP_OFFSITE_TARGET leer - uebersprungen (nur lokales Backup)."
+        OFFSITE_STATUS=skipped
+        return
+    fi
+    if [ -z "$OFFSITE_KEY" ] || [ ! -f "$OFFSITE_KEY" ]; then
+        log "OFFSITE_PUSH_FAILED: BACKUP_OFFSITE_SSH_KEY fehlt/ungueltig ('${OFFSITE_KEY}') - Off-Site uebersprungen."
+        OFFSITE_STATUS=failed
+        return
+    fi
+    if ! command -v rsync >/dev/null 2>&1; then
+        log "OFFSITE_PUSH_FAILED: rsync nicht installiert - Off-Site uebersprungen."
+        OFFSITE_STATUS=failed
+        return
+    fi
+    log "Off-Site: rsync ${BACKUP_DIR}/ -> ${OFFSITE_TARGET} (ssh port ${OFFSITE_PORT}) ..."
+    # --mkpath legt den Ziel-Pfad auf der Box an, falls er fehlt. Noetig, weil
+    #   die Storage Box keine volle Shell hat (rsync kann den Zielordner sonst
+    #   nicht remote anlegen) und der erste Push auf eine frische Box sonst
+    #   mangels Ordner fehlschlaegt. Braucht rsync >= 3.2.3 (heizung-test:
+    #   3.2.7, 2026-06-09 geprueft). Auf aelterem rsync = unbekannte Option =>
+    #   rsync bricht non-zero ab => Fail-soft loggt OFFSITE_PUSH_FAILED (kein
+    #   stilles "ok"), statt leer zu pushen.
+    # Kein --delete: Off-Site akkumuliert, Retention bleibt Storage-Box-seitig.
+    # BatchMode=yes => kein interaktiver Prompt, scheitert statt zu haengen.
+    if rsync -a --mkpath \
+            -e "ssh -p ${OFFSITE_PORT} -i ${OFFSITE_KEY} -o StrictHostKeyChecking=accept-new -o BatchMode=yes" \
+            "$BACKUP_DIR"/ "$OFFSITE_TARGET" >>"$LOG" 2>&1; then
+        log "Off-Site: Push erfolgreich."
+        OFFSITE_STATUS=ok
+    else
+        rc=$?
+        log "OFFSITE_PUSH_FAILED: rsync-Exit ${rc} - lokales Backup bleibt Primaersicherung, Off-Site bitte pruefen."
+        OFFSITE_STATUS=failed
+    fi
+}
+
 log "Backup-Lauf start (Ziel ${BACKUP_DIR}, behalte ${KEEP} je DB)."
 
 dump_db db                  "$HEIZUNG_USER" "$HEIZUNG_DB" heizung
@@ -112,8 +172,19 @@ rotate heizung
 rotate chirpstack
 
 if [ "$FAILED" -ne 0 ]; then
-    log "Backup-Lauf mit FEHLERN beendet (siehe oben)."
+    log "Backup-Lauf mit FEHLERN beendet (lokaler Dump fehlgeschlagen, siehe oben)."
     exit 1
 fi
 
-log "Backup-Lauf erfolgreich beendet."
+# Lokales Backup ist durch. Off-Site ist additiv und fail-soft: ein
+# Push-Fehler markiert den Lauf NICHT als Failure (exit 0), wird aber
+# laut geloggt (Token OFFSITE_PUSH_FAILED).
+push_offsite
+
+case "$OFFSITE_STATUS" in
+    ok)      log "Backup-Lauf erfolgreich beendet (lokal + Off-Site)." ;;
+    skipped) log "Backup-Lauf erfolgreich beendet (lokal; Off-Site nicht konfiguriert)." ;;
+    failed)  log "Backup-Lauf beendet: lokal OK, OFF-SITE-PUSH FEHLGESCHLAGEN (Token OFFSITE_PUSH_FAILED im Log). Primaersicherung lokal vorhanden." ;;
+esac
+
+exit 0
