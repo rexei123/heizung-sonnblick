@@ -6,7 +6,7 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-06-07
+**Stichtag:** 2026-06-09
 **Letzter Tag:** `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
 **Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
@@ -16,7 +16,8 @@ Phasen 1-7 verbindlich, AE-51..AE-54)
 ### Server heizung-test
 
 - **IP:** `157.90.17.150` (Hetzner)
-- **App** (Frontend + API): https://heizung-test.hoteltec.at
+- **Prod-Domain (seit 2026-06-09, Sprint 15g / AE-67):** **https://heizung.hoteltec.at** — dieser Server **ist** die Produktion (develop-Stand, gültiges Let's-Encrypt-Zert bis 2026-09-07). `STAGE` bleibt bewusst `test` (Single-Server-Prod, kein main-Strang).
+- **App** (Frontend + API): https://heizung.hoteltec.at — alter Name `heizung-test.hoteltec.at` wird seit dem Promote **nicht mehr** bedient (Variante 1).
   - [Annahme] FastAPI ist auf derselben Domain unter `/api/v1`
     erreichbar (Caddy-Reverse-Proxy). Falls API auf eigener Subdomain:
     Brief korrigieren.
@@ -26,7 +27,37 @@ Phasen 1-7 verbindlich, AE-51..AE-54)
 
 ### Server heizung-main
 
-Noch nicht produktiv. Bootstrap in Sprint 12 (siehe `docs/SPRINT-PLAN.md`).
+**Alter Live-Prod-Server** (`157.90.30.116`, v0.1.0-Skelett, ~183 Commits
+hinter develop). Bediente `heizung.hoteltec.at` bis zum Prod-Domain-Promote
+(2026-06-09, Sprint 15g / AE-67); seitdem zeigt die Domain auf heizung-test.
+**Läuft aktuell noch** — die Stilllegung (Sprint 15g **C1**: nur Stop, kein
+Löschen) ist **ausstehend**. Dient bis dahin als Rollback-Reserve
+(DNS-Schwenk zurück → .30.116). Keine Daten-Migration — AE-67 ersetzt die
+frühere „Noch-nicht-produktiv/Bootstrap"-Planung (die ohnehin nicht zum IST
+passte: der Server bedient die Prod-Domain seit Sprint 4, §2f).
+
+### Sprint 15g — Prod-Domain-Promote (läuft, 2026-06-09)
+
+Promote heizung-test → Prod-Domain **statt** Daten-Migration, **kein**
+main-Strang (AE-67; ersetzt SPRINT-PLAN Sprint 15/16).
+
+- **Block A — Backup scharf:** `infra/deploy/backup.sh` macht tägliche
+  `pg_dump`-Dumps (Heizung + ChirpStack, custom-format, Rotation 7) nach
+  `/var/backups/heizung`, plus Off-Site-Push (rsync `--mkpath`, fail-soft)
+  auf eine **Hetzner Storage Box** (Key `id_ed25519_storagebox`, Port 23,
+  Ziel `…:heizung/`). systemd-Timer `heizung-backup.timer` aktiv (täglich
+  03:30). **Restore-Drill bestanden** (Dump von der Box → Wegwerf-Container;
+  Hypertables `sensor_reading`/`event_log`, Zeilen == Live-as-of, ChirpStack
+  plain, keine Continuous Aggregates).
+- **Block B — Prod-Domain vollzogen:** `PUBLIC_HOSTNAME=heizung.hoteltec.at`
+  auf heizung-test, Caddy-Reload (nur caddy via `--no-deps`), LE-Zert geholt
+  (CN `heizung.hoteltec.at`, Let's Encrypt, gültig bis 2026-09-07),
+  `/health` 200. **Rollback** ~5 Min: DNS zurück → .30.116 + `.env` zurück +
+  `up -d caddy` (caddy_data persistent → Zert reused).
+- **Block C — Stilllegen + Doku:** C2–C4 (dieser Eintrag, AE-67,
+  SPRINT-PLAN-SUPERSEDED, RUNBOOK §1/§9) erledigt. **C1 (alter main stoppen)
+  noch ausstehend** — der alte Server läuft aktuell noch (s. o.).
+- **Offen:** C1 (main-Stop), Tag (Strategie-Chat-Freigabe), Doku-PR-Merge.
 
 ---
 

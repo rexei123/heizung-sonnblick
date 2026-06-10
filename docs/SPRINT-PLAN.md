@@ -18,13 +18,20 @@ Features umgestellt. Sechs Phasen mit klaren Abschluss-Kriterien:
 | 1 Stabilisierung | Mai-Juni 2026 | 10, 10a, 10b, 10c | CI-Hygiene, Vicki-Diagnose, Code-Fixes, Polish |
 | 2 Live-Beobachtung | Juni-Juli 2026 | — | Hotelier produktiv auf heizung-test, Befund-Sprints ad-hoc |
 | 3 Frostschutz | Juli 2026 | 11 | AE-42-Reaktivierung, Engine Layer 5 nutzt `min_temp_celsius` |
-| 4 heizung-main-Migration | offen (nach letzter Funktion) | 12 | B-9.11x-2, Auth-Cutover analog 9.17a/b, Backup-Cron |
+| 4 Prod-Domain-Promote | 2026-06-09 (Promote vollzogen, Sprint 15g; main-Stop C1 offen) | 15g | heizung-test→Prod-Domain statt Daten-Migration, **kein main-Strang** (AE-67); Backup lokal+Off-Site |
 | 5 PMS-Casablanca | August 2026 (verschiebt sich mit Phase 4) | 13 | Casablanca-Anbindung, Fallback manuelle Pflege |
 | 6 Go-Live | September 2026 (verschiebt sich mit Phase 4) | 14 | Tag v1.0.0, produktiv vor Heizperiode 01.10.2026 |
 | 7 Features | Winter 2026+ | 15+ | Nach Hotelier-Bedarf: Dashboard, Analytics, API-Keys, Gateway-UI, Wetter, ... |
 
 **Heizperiode-Start:** 1. Oktober 2026, Hotel Sonnblick Kaprun.
 Phasen-Plan hat zwei Wochen Puffer pro Phase.
+
+**Update 2026-06-09 (Sprint 15g, AE-67):** Phase 4 ist als
+**Prod-Domain-Promote** umgesetzt — heizung-test (.17.150, develop-Stand)
+wurde formal zur Prod-Domain `heizung.hoteltec.at` promotet, **statt** einer
+heizung-main-Daten-Migration und **ohne** main-Strang. Der folgende Absatz
+zum „main-Cutover" ist damit historisch (siehe AE-67; Sprint 15/16 unten
+SUPERSEDED).
 
 main-Cutover (Phase 4) ist bewusst termin- und nummernlos. Keine feste
 Sprint-Nummer, kein fixes Datum — startet nach der letzten auf
@@ -1362,6 +1369,15 @@ entfallen.
 
 # SPRINT 15 — heizung-main-Migration „leer" (Phase 4)
 
+> **⚠️ SUPERSEDED (2026-06-09, Sprint 15g, AE-67).** Dieser Sprint (klassische
+> heizung-main-Daten-Migration: 9.8a-Stand → develop, Migrationen 0005–0015,
+> Auth-Cutover, Migrations-Trockenlauf, DR-Drill) wird **nicht mehr
+> ausgeführt**. Ersetzt durch den **Prod-Domain-Promote** (Sprint 15g):
+> heizung-test ist datenführend und wurde zur Prod-Domain promotet — kein
+> main-Strang, keine Daten-Migration (Begründung: AE-67). Die Aufgabe
+> „Backup-Cron + Off-Site-Replikation" ist via Block A (Sprint 15g) erledigt.
+> Text unten nur noch historisch.
+
 > **Hinweis (Hotelier-Entscheidung 2026-06-07):** Nummer und Termin
 > bewusst offen. Die hier genutzte „15" ist historisch (STATUS §2bg,
 > getrennter Track) und nicht bindend; der Cutover kommt nach der
@@ -1396,6 +1412,12 @@ Vickis bleiben in Phase 4 zunächst auf heizung-test.
 ---
 
 # SPRINT 16 — Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4)
+
+> **⚠️ SUPERSEDED (2026-06-09, Sprint 15g, AE-67).** Setzt den main-Strang aus
+> Sprint 15 voraus, den es nicht mehr gibt (Single-Server-Prod, kein
+> main-Strang). Der Last-Test-/Bug-Fixing-Anteil (synthetische Readings für
+> ~100 Vickis, Engine-Performance unter Last) bleibt als Kandidat relevant
+> und wird bei Bedarf neu als eigener Sprint geschnitten — ohne Test→Main-Sync.
 
 **Priorität:** 🔴 (vor Phase 4b Pflicht)
 **Geschätzte Dauer:** 1 Woche
@@ -1491,8 +1513,8 @@ Pilot-Go-Live Oktober Woche 1.
 | `v0.1.18-pairing-wizard` | Sprint 13: Pairing-Wizard + Mass-Pairing-CSV + Eingangstest |
 | `v0.1.19-cross-sicht-ui` | Sprint 14: Cross-Sicht-UI + Health-Badges + Mail-Platzhalter |
 | `v0.1.20-arc42-konsolidierung` | Sprint 14b: arc42-Doku-Konsolidierung (Phase-1-Abschluss) |
-| `v0.2.0-main-cutover` | heizung-main-Migration „leer" (Phase 4) — Zeitpunkt offen, nach letzter Feature-Funktion |
-| `v0.2.1-test-main-sync` | Test→Main-Sync + Last-Test + Bug-Fixing (Phase 4) |
+| `v0.2.0-main-cutover` | **SUPERSEDED** (AE-67 / Sprint 15g) → ersetzt durch **`v0.2.0-prod-domain`** (Prod-Domain-Promote statt main-Migration). Finale Tag-Vergabe offen (Strategie/Hotelier nach C1), hier nur Doku-Name vereinheitlicht. |
+| `v0.2.1-test-main-sync` | **SUPERSEDED** (AE-67) — Test→Main-Sync entfällt mit dem main-Strang; Last-Test/Bug-Fixing-Anteil ggf. als eigener Sprint. |
 | `v0.2.2-pms-fias` | Sprint 16a (conditional): PMS-Casablanca-Integration (Phase 5) |
 | `v0.2.3-pre-pairing` | Pre-Pairing (Phase 4b) |
 | `v1.0.0-pilot` | Phase 6 Pilot-Go-Live (Oktober Woche 1, 5 Pilot-Zimmer) |
