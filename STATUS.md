@@ -6,9 +6,9 @@
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-06-09
-**Letzter Tag:** `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Stichtag:** 2026-06-14
+**Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
+**Aktueller Sprint:** Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3689,10 +3689,22 @@ AE-67 war belegt (Prod-Promote) → **AE-68**.
 `mypy src` (112 files) · `pytest -q` **702 passed, 1 xfailed** (volle Suite mit
 DB, keine Regression).
 
-**Status:** **PR offen, kein Tag.** Branch `feature/15g-room-status-sync`.
-**Sofort-Workaround auf Prod** (RUNBOOK §10k) + Live-Verify über einen
-14:00-/11:00-Übergang **ausstehend** (vor Tag). Tag-Slot
-`v0.1.19k-room-status-sync` reserviert, erst nach Merge + Live-Verify.
+**Status:** **abgeschlossen + live-verifiziert 14.06.2026.** PR #225 gemerged
+(`a26d781`), Branch gelöscht. Tag `v0.1.19k-room-status-sync` (annotated,
+`a26d781`) gesetzt 2026-06-14. `build-images.yml` für `a26d781` = success
+(neues `:develop`-Image im GHCR), Pull-Timer recreated Prod.
+
+**Live-Verify auf Prod 14.06.2026:**
+1. Sofort-Workaround (RUNBOOK §10k) lief — Ausgabe „30 aktive Räume
+   synchronisiert".
+2. celery_beat feuert `sync-room-statuses-every-60s` (Scheduler sendet den
+   Task).
+3. DB-Stichprobe gegen `now()` = 09:25 UTC bestätigt die Transition **ohne
+   neue Liste**: Zimmer 102/104 OCCUPIED (check_in 13.06. ≤ jetzt < check_out
+   20.06.), Zimmer 52/103 VACANT (check_out 14.06. 11:00 Vienna, ~25 min
+   vorbei) — die 11:00-Check-out-Transition hat live gegriffen.
+
+DoD erfüllt (Merge + Live-Verify); Tag steht.
 
 **Querverweise:** AE-68, AE-58 (Auto-Revoke), §5.53 (Status-Wahrheit),
 §5.61 (Script-Commit), §5.49/§5.59 (Test-Fixture-Hygiene), RUNBOOK §10k.
