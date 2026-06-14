@@ -42,6 +42,7 @@ app: Celery = Celery(
         "heizung.tasks.health_tasks",
         "heizung.tasks.override_cleanup_tasks",
         "heizung.tasks.occupancy_import_tasks",
+        "heizung.tasks.occupancy_status_tasks",
     ],
 )
 
@@ -98,6 +99,18 @@ app.conf.update(
         "occupancy-import-freshness-daily": {
             "task": "heizung.check_occupancy_import_freshness",
             "schedule": crontab(hour=8, minute=15),
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 15g (AE-68): Periodischer room.status-Sync. Trifft die
+        # uhrzeitgenauen Check-in-14:00- / Check-out-11:00-Uebergaenge ohne
+        # Import-Event (Zeiten stecken als UTC-Timestamp in check_in/
+        # check_out, Import-Defaults via GlobalConfig). 60 s = Drift-Fenster
+        # <= 60 s, fuer Check-in/out unkritisch (Vorheizen ueber Layer 2 vor
+        # check_in). Eigener Task statt Engine-Tick-Anhang — Belegungs-
+        # Domain bleibt aus der Engine.
+        "sync-room-statuses-every-60s": {
+            "task": "heizung.sync_room_statuses",
+            "schedule": 60.0,
             "options": {"queue": "heizung_default"},
         },
     },
