@@ -27,6 +27,17 @@ def _now() -> datetime:
     return datetime.now(tz=UTC)
 
 
+# Sprint 15g: Halb-Radius des Sweep-Fensters fuer ``sync_active_rooms``.
+# Ein Raum wird synchronisiert, wenn eine aktive Belegung das Intervall
+# [now - radius, now + radius] BERUEHRT (Intervall-Overlap, nicht
+# Endpunkt-im-Fenster). Overlap statt Containment ist bewusst: ein langer
+# Aufenthalt (z.B. 30 Tage) ueberlappt das 2-Tage-Fenster ebenfalls und
+# wird nicht uebersehen (Brief-Risiko "lange Aufenthalte"). Das Fenster
+# dient nur der Arbeits-Reduktion: rein vergangene/zukuenftige Belegungen
+# ausserhalb +-1 Tag haben keinen anstehenden 14:00/11:00-Uebergang.
+_SYNC_WINDOW = timedelta(days=1)
+
+
 async def create_occupancy_record(
     session: AsyncSession,
     *,
@@ -252,3 +263,38 @@ async def sync_room_status(
                 revoked,
                 room_id,
             )
+
+
+async def sync_active_rooms(session: AsyncSession, now: datetime | None = None) -> int:
+    """Bulk-Sync: haelt ``room.status`` aller Raeume mit anstehendem
+    Belegungs-Uebergang aktuell (Sprint 15g).
+
+    Selektiert alle Raeume mit mindestens einer AKTIVEN Belegung, deren
+    Intervall ``[check_in, check_out]`` das Fenster
+    ``[now - 1 Tag, now + 1 Tag]`` beruehrt (Overlap), und ruft pro Raum
+    das bestehende ``sync_room_status(session, room_id, now)``. Die
+    CLEANING/BLOCKED-Schutzklausel bleibt unangetastet (steckt in
+    ``sync_room_status``) — manuelle Stati werden nicht ueberschrieben.
+
+    Kein Commit (Aufrufer-Verantwortung, vgl. ``create_occupancy_record``).
+    Returns die Anzahl der synchronisierten Raeume (zur Beat-Log-Sicht).
+    """
+    current_time = now or _now()
+    window_start = current_time - _SYNC_WINDOW
+    window_end = current_time + _SYNC_WINDOW
+
+    stmt = (
+        select(Occupancy.room_id)
+        .where(
+            and_(
+                Occupancy.is_active.is_(True),
+                Occupancy.check_in <= window_end,
+                Occupancy.check_out >= window_start,
+            )
+        )
+        .distinct()
+    )
+    room_ids = list((await session.execute(stmt)).scalars().all())
+    for room_id in room_ids:
+        await sync_room_status(session, room_id, current_time)
+    return len(room_ids)

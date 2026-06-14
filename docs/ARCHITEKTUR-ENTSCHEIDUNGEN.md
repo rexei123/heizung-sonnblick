@@ -2966,3 +2966,97 @@ Richtung.
   durch Block A erledigt: lokales `pg_dump` (Heizung + ChirpStack,
   Rotation 7) + Off-Site-Push auf eine Hetzner Storage Box, systemd-Timer
   03:30, Restore-Drill bestanden.
+
+---
+
+# AE-68 — Periodischer room.status-Sync als eigener Beat-Task (Sprint 15g)
+
+**Datum:** 2026-06-14
+**Status:** Akzeptiert
+**Bezug:** AE-02 (occupancy als Belegungsquelle), AE-58 (OCCUPIED-Gate /
+Auto-Revoke bei Check-out), §5.53 (Status-Wahrheit eine Quelle), Engine
+Layer 1 (`rules/engine.layer_base_target` liest `room.status`), Layer 2
+(Vorheizen vor `check_in`).
+
+## Kontext / Problem
+
+`room.status` wurde bisher **nur** bei Belegungs-POST/Storno über
+`occupancy_service.sync_room_status()` abgeleitet. Es gab keinen
+periodischen Sweep. Folge: eine beim Import als RESERVED gesetzte Belegung
+wurde am Anreisetag um 14:00 nicht von selbst OCCUPIED, ein laufender
+Aufenthalt nach Abreise um 11:00 nicht von selbst frei — der Übergang
+brauchte ein neues Import-/POST-Event. Live bestätigt 2026-06-13: Anreisen
+vom 12.06. standen auf RESERVED statt OCCUPIED.
+
+`derive_room_status()` (occupancy_service.py) rechnet bereits korrekt und
+**uhrzeitgenau** auf dem vollen Timestamp (`check_in <= jetzt < check_out`).
+Die Hotelzeiten stecken als UTC-Timestamp in den Belegungen (Import-Defaults
+`DEFAULT_CHECKIN_LOCAL` 14:00 / `CHECKOUT_LOCAL` 11:00, Vienna→UTC, via
+GlobalConfig konfigurierbar). Es fehlte ausschließlich der **periodische
+Aufruf**.
+
+## Entscheidung
+
+1. **Eigener celery_beat-Task** `heizung.sync_room_statuses` (alle 60 s) ruft
+   die neue Bulk-Domain-Funktion `occupancy_service.sync_active_rooms(session,
+   now)`. Diese selektiert alle Räume mit mind. einer **aktiven** Belegung,
+   deren Intervall `[check_in, check_out]` das Fenster `[now−1 Tag, now+1 Tag]`
+   **berührt** (Intervall-Overlap, nicht Endpunkt-im-Fenster), und ruft pro
+   Raum das bestehende `sync_room_status` unverändert.
+2. **NICHT in den Engine-Tick gehängt.** Die Belegungs-Domain bleibt aus der
+   Engine — Schichttrennung (S6). Der Engine-Tick (`evaluate_due_rooms`)
+   bleibt unangetastet.
+3. **`derive_room_status` wird NICHT geändert.** Nur der Aufruf-Pfad ist neu.
+4. **CLEANING/BLOCKED** bleiben unangetastet (Schutzklausel steckt bereits in
+   `sync_room_status` — manuelle Operations-Stati).
+
+## Gap-Semantik (festgehalten): Back-to-back = RESERVED
+
+Bei Back-to-back-Belegung (Gast A Abreise 11:00, Gast B Anreise 14:00) ist
+der Raum im Fenster **11:00–14:00 RESERVED**, nicht VACANT — bewusst.
+`derive_room_status` liefert RESERVED, weil die Folge-Belegung eine
+zukünftige aktive Belegung ist. Begründung: der Raum ist für den Folgegast
+reserviert; **VACANT würde das Zimmer im Gap auskühlen lassen, RESERVED
+erhält das Vorheizen** für den Folgegast. Konsistent mit dem bestehenden
+Import-Zeit-Verhalten und mit der „eine Status-Wahrheit"-Regel (§5.53). Test
+`test_back_to_back_gap_reserved` hält das fest.
+
+## Abgrenzung
+
+- Ob Layer 2 bei **weit entfernter** Anreise zu früh vorheizt, ist eine
+  separate **Vorlaufzeit-Frage** in der Engine (`next_active_checkin` /
+  Vorheiz-Horizont) — **nicht** Gegenstand von Sprint 15g. 15g stellt nur
+  sicher, dass `room.status` den uhrzeitgenauen Übergang abbildet.
+- „Ausgecheckt" liefert VACANT, **nicht** automatisch CLEANING. Auto-CLEANING
+  nach Check-out (Housekeeping-Workflow) ist ein eigener Sprint.
+- Kein Touch an Engine-Tick, Import oder 15f-Anzeige.
+
+## Warum 60 s
+
+Trifft die minutengenauen 14:00-/11:00-Übergänge ohne Import-Event;
+Drift-Fenster ≤ 60 s ist für Check-in/out unkritisch (das eigentliche
+Vorheizen läuft ohnehin über Layer 2 vor `check_in`). Kosten trivial: ein
+`SELECT DISTINCT room_id` über das ±1-Tag-Fenster plus pro Treffer der
+bestehende, idempotente `sync_room_status` (Schreib-Side-Effect nur bei
+echtem Status-Wechsel).
+
+## Konsequenzen
+
+- Neue Beat-Schedule-Zeile `sync-room-statuses-every-60s` (Queue
+  `heizung_default`). Task-Pattern wie `override_cleanup_tasks`
+  (`_task_session` + `asyncio.run`).
+- Overlap- statt Endpunkt-Query entschärft das Risiko „lange Aufenthalte
+  übersehen": ein 30-Tage-Aufenthalt überlappt das 2-Tage-Fenster ebenfalls.
+- Sofort-Workaround-Script `python -m heizung.scripts.sync_room_statuses`
+  zieht aktuell falsch stehende Zimmer einmalig auf den korrekten Stand
+  (RUNBOOK §10k).
+- Beim Check-out-Wechsel OCCUPIED→VACANT greift weiterhin der AE-58-Auto-
+  Revoke (`auto_revoke_on_checkout`) inkl. `business_audit` — jetzt auch
+  ohne Import-Event ausgelöst. Idempotent: kein Audit bei unverändertem
+  Status.
+
+## Querverweise
+
+AE-02, AE-58, §5.53 (Status-Wahrheit), §5.65 (UTC/Vienna — hier NICHT
+relevant, weil Timestamp-vs-Timestamp verglichen wird), CLAUDE.md §0
+(S6 Schichttrennung).
