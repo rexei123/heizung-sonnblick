@@ -3639,6 +3639,66 @@ echten Daten, UTC→Vienna korrekt). Tag `v0.1.19j-belegungs-import-front`
 
 ---
 
+## 2bm. Sprint 15g Periodischer room.status-Sync (Backend, 2026-06-14, PR offen, kein Tag)
+
+**Ziel:** Ein periodischer Task hält `room.status` aller aktiven Belegungen
+aktuell, sodass die uhrzeitgenauen Übergänge ohne neuen Import passieren:
+Anreisetag ab 14:00 → OCCUPIED, Abreisetag ab 11:00 → VACANT, künftig →
+RESERVED. Root Cause: `sync_room_status` lief bisher nur bei Belegungs-POST/
+Storno; kein periodischer Sweep. Live-Befund 2026-06-13: Anreisen vom 12.06.
+standen auf RESERVED statt OCCUPIED.
+
+**T1 — Bulk-Domain + CLI:** `occupancy_service.sync_active_rooms(session, now)`
+— `SELECT DISTINCT room_id` über aktive Belegungen, deren Intervall das
+Fenster `[now−1d, now+1d]` **berührt** (Overlap, nicht Endpunkt — fängt lange
+Aufenthalte), ruft pro Raum das unveränderte `sync_room_status` (CLEANING/
+BLOCKED-Schutz bleibt). Script `heizung.scripts.sync_room_statuses`
+(commit-explizit §5.61) als Sofort-Workaround **und** CLI.
+
+**T2 — Beat-Task:** `tasks/occupancy_status_tasks.py` `heizung.sync_room_statuses`
+(`_task_session`+`_run`+`asyncio.run`-Pattern), `celery_app` `include` +
+Beat `sync-room-statuses-every-60s` (60.0, Queue `heizung_default`).
+**Engine-Tick (`evaluate_due_rooms`) unverändert** — eigener Task, keine
+Engine-Integration (Schichttrennung).
+
+**T3 — Tests:** `tests/test_sync_active_rooms.py`, 13 DB-Fälle, **alle grün
+lokal gegen Postgres** (TimescaleDB pg16): Datum-Übergänge, Uhrzeit-Grenzen
+14:00/11:00 (±1 min), Back-to-back-Gap, lange Aufenthalte, CLEANING/BLOCKED,
+Storno-Filter, Idempotenz (Checkout-Revoke schreibt genau 1 `business_audit`,
+Re-Run 0).
+
+**Gap-Entscheidung A (Strategie-Chat):** Back-to-back-Gap 11:00–14:00 =
+**RESERVED**, bewusst. `derive_room_status` liefert RESERVED (Folgegast =
+zukünftige aktive Belegung) und bleibt **unverändert**. VACANT würde das
+Zimmer im Gap auskühlen, RESERVED erhält das Vorheizen. Festgehalten in
+**AE-68** + Test `test_back_to_back_gap_reserved`. (Der Brief hatte VACANT
+skizziert — als Pflicht-Stop korrigiert.)
+
+**Abgrenzung:** Vorheiz-Vorlaufzeit bei weit entfernter Anreise
+(`next_active_checkin`) ist eine separate Engine-Frage, nicht 15g.
+Auto-CLEANING nach Check-out eigener Sprint. Kein Engine-/Import-/15f-Touch.
+
+**Phase-0-Befund:** Brief-Referenz `scripts/seed_rooms.py` → real
+`src/heizung/scripts/seed_rooms.py` (Workaround-Befehl konsistent). Idempotenz-
+Formulierung „business_audit … wie Z.245" präzisiert: `sync_room_status`
+auditiert den reinen Flip nicht; einziger Audit ist der AE-58-Checkout-Revoke
+(`OVERRIDES_AUTO_REVOKED_ON_CHECKOUT`) — Test prüft genau das. ADR-Nummer
+AE-67 war belegt (Prod-Promote) → **AE-68**.
+
+**Toolchain (lokal grün, 2026-06-14):** `ruff format --check` · `ruff check` ·
+`mypy src` (112 files) · `pytest -q` **702 passed, 1 xfailed** (volle Suite mit
+DB, keine Regression).
+
+**Status:** **PR offen, kein Tag.** Branch `feature/15g-room-status-sync`.
+**Sofort-Workaround auf Prod** (RUNBOOK §10k) + Live-Verify über einen
+14:00-/11:00-Übergang **ausstehend** (vor Tag). Tag-Slot
+`v0.1.19k-room-status-sync` reserviert, erst nach Merge + Live-Verify.
+
+**Querverweise:** AE-68, AE-58 (Auto-Revoke), §5.53 (Status-Wahrheit),
+§5.61 (Script-Commit), §5.49/§5.59 (Test-Fixture-Hygiene), RUNBOOK §10k.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

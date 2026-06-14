@@ -1898,6 +1898,45 @@ Frontend-Tausch + CLI-Bulk-Import komplementaer.
 
 ---
 
+## 10k. Sofort room.status-Sync (Sprint 15g, AE-68)
+
+**Zweck:** Zimmer, die auf einem falschen `room.status` haengen, einmalig
+auf den korrekten Stand ziehen — z.B. Anreisen, die als RESERVED stehen,
+weil vor dem Beat-Task-Deploy kein periodischer Sweep lief. Im Normalbetrieb
+haelt der celery_beat-Task `heizung.sync_room_statuses` (alle 60 s) denselben
+Stand; diese Prozedur ist der manuelle Anstoss.
+
+**Was es tut:** ruft `occupancy_service.sync_active_rooms` einmal — leitet
+`room.status` aller Raeume mit anstehendem Belegungs-Uebergang aus den
+aktiven Belegungen ab (uhrzeitgenau, `check_in`/`check_out` sind
+UTC-Timestamps mit den Import-Defaults 14:00/11:00 lokal). CLEANING/BLOCKED
+bleiben unangetastet (Schutzklausel in `sync_room_status`). Back-to-back-Gap
+(11:00–14:00) ist bewusst RESERVED (AE-68).
+
+**Befehl** (Prod = heizung-test, Container-Name nicht hart annehmen,
+Prod-Pattern `deploy-api-1`):
+
+```bash
+# SSH (Prod-Server, root), im Deploy-Verzeichnis
+docker compose -f infra/deploy/docker-compose.prod.yml exec api \
+  python -m heizung.scripts.sync_room_statuses
+```
+
+**Erwartete Ausgabe:**
+
+```
+[OK] room.status-Sync: <N> aktive Raeume synchronisiert (now=<UTC-ISO>).
+```
+
+**Verifikation:** im Frontend (Zimmer-Liste / Dashboard) zeigen laufende
+Aufenthalte „Belegt", abgereiste „Frei", kuenftige „Reserviert". Danach
+haelt der Beat-Task den Stand ueber die 14:00-/11:00-Uebergaenge.
+
+**Idempotent:** mehrfaches Ausfuehren ist unschaedlich — Schreib-Side-Effect
+nur bei echtem Status-Wechsel, kein doppelter Audit-Eintrag.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
