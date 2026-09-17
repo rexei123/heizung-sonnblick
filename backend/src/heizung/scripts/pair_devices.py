@@ -9,11 +9,15 @@ Subcommands:
 
 - ``validate <csv>``   Pre-Flight (kein Side-Effekt). Liest CSV,
                         prueft Zone-Aufloesung + DevEUI-Duplikate.
-- ``import <csv>``     Bulk-Anlage Device-Rows + DEVICE_PAIRED-Audit
-                        + Open-Window-Detection-Downlink. ``--dry-run``
-                        rollbackt DB-Aenderungen (Downlinks bleiben).
+- ``import <csv>``     Bulk-Anlage Device-Rows + DEVICE_PAIRED-Audit.
+                        ``--dry-run`` rollbackt die DB-Aenderungen.
+                        **Sendet keine Downlinks** (Sprint 17 / E3).
 - ``test <device-id>``  6-Schritt-Eingangstest pro Vicki.
 - ``list-pool``        Reserve-Pool-Devices (heating_zone_id IS NULL).
+
+Sprint 17 (E3/C3): ``import`` ist ein reiner Datenbank-Vorgang. Die
+Open-Window-Detection wird **nach** der Montage gesetzt, mit FW-Gate,
+via ``python -m heizung.scripts.activate_open_window_detection``.
 
 Aufruf-Beispiele:
 
@@ -175,27 +179,14 @@ async def _cmd_import(args: argparse.Namespace) -> int:
         else:
             user_id = None
 
-        # --dry-run-Warnung VOR pair_batch: ChirpStack-Downlinks gehen
-        # auch im Dry-Run raus, weil MQTT-Publish nicht-transaktional ist.
-        if args.dry_run:
-            print(
-                "[WARN] --dry-run aktiv: DB-Aenderungen werden zurueckgerollt. "
-                "ChirpStack-Downlinks (Open-Window-Detection) werden GESENDET. "
-                "Vickis aus der CSV erhalten Konfigurations-Befehle.",
-                file=sys.stderr,
-            )
-
-        # Pair-Batch.
+        # Pair-Batch. Sprint 17 (C3): rein transaktional, kein Downlink —
+        # ein --dry-run hat damit garantiert KEINEN Aussen-Effekt mehr.
         results = await pair_batch(rows, session, user_id=user_id)
 
         if args.dry_run:
             await session.rollback()
-            # B-Sprint13a-9: "trotzdem gesendet" war im unreachable-Host-
-            # Pfad nicht korrekt — Downlinks koennen scheitern. Praeziser:
-            # "versucht (Ergebnisse siehe oben)".
             print(
-                "[DRY-RUN] DB-Aenderungen zurueckgerollt. "
-                "ChirpStack-Downlinks wurden versucht (Ergebnisse siehe oben).",
+                "[DRY-RUN] DB-Aenderungen zurueckgerollt. Keine Downlinks gesendet.",
                 file=sys.stderr,
             )
         else:
@@ -212,30 +203,13 @@ async def _cmd_import(args: argparse.Namespace) -> int:
             f"(device_id={r.device_id}, is_pool={r.is_pool}) -> {detail}"
         )
 
-    # B-Sprint13a-8: "errors" allein war irrefuehrend, weil DOWNLINK_FAILED-
-    # Rows ein device.id haben (DB-Row angelegt, nur OW-Downlink scheiterte).
-    # Disambiguation in Klammer wenn errors > 0.
-    error_count = counts["error"]
-    errors_msg = f"{error_count} errors"
-    if error_count > 0:
-        db_present_errors = sum(
-            1 for r in results if r.status == "error" and r.device_id is not None
-        )
-        db_absent_errors = error_count - db_present_errors
-        if db_present_errors > 0 and db_absent_errors == 0:
-            errors_msg += (
-                f" ({db_present_errors} Device-Rows in DB, OW-Downlink fuer "
-                f"alle {db_present_errors} fehlgeschlagen)"
-            )
-        elif db_present_errors > 0 and db_absent_errors > 0:
-            errors_msg += (
-                f" ({db_present_errors} mit Device-Row in DB, OW-Downlink "
-                f"fehlgeschlagen; {db_absent_errors} ohne Device-Row)"
-            )
-        # db_present_errors == 0: alle errors sind echte Pairing-Fails -> kein Suffix.
-
+    # B-Sprint13a-8 ist mit Sprint 17 (C3) gegenstandslos: seit dem Wegfall
+    # des OW-Downlinks gibt es keinen error-Pfad mehr, der eine Device-Row
+    # zuruecklaesst. "N errors" heisst jetzt eindeutig "N Zeilen ohne
+    # Device-Row" — keine Disambiguation noetig.
     print(
-        f"\nResultat: {counts['paired']} paired, {counts['skipped_exists']} skipped, {errors_msg}."
+        f"\nResultat: {counts['paired']} paired, "
+        f"{counts['skipped_exists']} skipped, {counts['error']} errors."
     )
     return 0 if counts["error"] == 0 else 1
 
@@ -309,7 +283,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # import
     p_import = sub.add_parser(
         "import",
-        help="Bulk-Anlage Device-Rows + DEVICE_PAIRED-Audit + OW-Downlink.",
+        help="Bulk-Anlage Device-Rows + DEVICE_PAIRED-Audit (kein Downlink).",
     )
     p_import.add_argument("path", help="Pfad zur Pairing-CSV.")
     p_import.add_argument(
@@ -320,8 +294,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_import.add_argument(
         "--dry-run",
         action="store_true",
-        help="DB-Aenderungen werden zurueckgerollt. ChirpStack-Downlinks werden "
-        "gesendet. Geeignet fuer Smoke-Test auf heizung-test.",
+        help="DB-Aenderungen werden zurueckgerollt. Seit Sprint 17 ohne jeden "
+        "Aussen-Effekt — es werden keine Downlinks gesendet.",
     )
 
     # test

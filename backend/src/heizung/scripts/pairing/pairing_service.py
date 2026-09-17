@@ -1,4 +1,4 @@
-"""Pairing-Service: legt Device-Row + DEVICE_PAIRED-Audit + OW-Downlink an (Sprint 13a T4).
+"""Pairing-Service: legt Device-Row + DEVICE_PAIRED-Audit an (Sprint 13a T4).
 
 Konsumiert ``PairingCsvRow`` (T2) + Pre-Flight-Validierung (T3).
 ``pair_batch`` iteriert mit Pro-Row-Savepoint (``session.begin_nested()``)
@@ -8,31 +8,52 @@ T6), damit Tests die Session am Ende sauber rollback koennen
 (analog ``test_override_pms_hook`` Pattern).
 
 ``app_key`` aus der CSV wird **nicht** in der heizung-DB persistiert.
-Der AppKey gehoert zur ChirpStack-Registrierung (Hotelier macht das
-manuell vor September via ChirpStack-Web-UI-Bulk-Import) — heizung-DB
-kennt nur ``dev_eui`` als Identifier-Schluessel. Die CSV-Spalte
-``app_key`` ist informational fuer den Hotelier zum Cross-Reference
-mit der ChirpStack-UI.
+Der AppKey gehoert zur ChirpStack-Registrierung (Sprint 17 / C1:
+``infra/chirpstack/provision_devices.py``) — heizung-DB kennt nur
+``dev_eui`` als Identifier-Schluessel. Die CSV-Spalte ``app_key`` ist
+Eingabe fuer das Provisioning-Skript und Cross-Reference fuer den
+Hotelier.
+
+Sprint 17 (Entscheidung E3, Task C3): **Der Pairing-Lauf sendet keinen
+Downlink mehr.** Bis Sprint 16 schickte Gate 5 hier einen
+Open-Window-Detection-Downlink (``0x45``) an jedes frisch gepairte
+Geraet. Das war aus drei Gruenden falsch:
+
+1. **Kein FW-Gate.** ``set_open_window_detection`` kodiert die
+   0x45-Variante, die erst ab FW >= 4.2 existiert. Der Pairing-Lauf
+   kennt die Firmware des Geraets zu diesem Zeitpunkt nicht — bei drei
+   Produktionschargen ging der Befehl blind raus (B-9.11x.b-2).
+2. **S4 (Hardware-Schutz).** Ein CSV-Import ist ein Datenbank-Vorgang.
+   Dass er als Seiteneffekt ~104 Funkbefehle an produktive Hardware
+   ausloest — im ``--dry-run`` sogar dann, wenn die DB-Aenderung
+   verworfen wird — ist ein Befehlspfad ohne Bestaetigungs-Strategie.
+3. **Reihenfolge.** Die Open-Window-Detection gehoert nach der Montage
+   gesetzt, nicht beim Tisch-Import.
+
+Der OW-Rollout laeuft stattdessen ueber
+``heizung.scripts.activate_open_window_detection`` — dasselbe Vendor-
+Byte-Layout, aber mit FW-Query (0x04), Wartezeit und FW-Gate
+(``MIN_FW_FOR_OW_SET``). RUNBOOK §10h beschreibt die Reihenfolge.
 
 Gate-Stack-Reihenfolge (§S5 Defensive bei externen Quellen):
 
-1. ``DEV_EUI_EXISTS``: Pre-Check, kein Audit, kein Downlink (skipped).
+1. ``DEV_EUI_EXISTS``: Pre-Check, kein Audit (skipped).
 2. ``ZONE_NOT_FOUND``: Defensive — Pre-Flight ``validate_against_db``
    (T3) sollte das schon abfangen. Hier nur Sicherheitsnetz.
 3. Device-Row anlegen + flush.
 4. ``DEVICE_PAIRED``-BusinessAudit in derselben Transaktion.
-5. Open-Window-Detection-Downlink (``0x4501020F``-aequivalent via
-   ``set_open_window_detection`` AE-48). Bei Downlink-Failure bleibt
-   die Device-Row erhalten (kein Rollback), Status ``error`` — der
-   Downlink kann via Eingangstest (T5) oder manueller Re-Send
-   wiederholt werden.
+
+Der Lauf ist damit rein transaktional: entweder Device-Row + Audit
+stehen, oder die Row ist nicht angelegt. Kein Teil-Zustand aus einem
+fehlgeschlagenen Funkbefehl mehr (B-Sprint13a-5 ist damit gegenstandslos
+— es gibt keinen ``pending_ow_resend``-Zustand, den man markieren
+muesste).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import select
@@ -42,7 +63,6 @@ from heizung.models.enums import DeviceKind, DeviceVendor
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.downlink_adapter import set_open_window_detection
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,12 +70,6 @@ if TYPE_CHECKING:
     from heizung.scripts.pairing.csv_row import PairingCsvRow
 
 logger = logging.getLogger(__name__)
-
-# Open-Window-Detection-Defaults aus AE-47-Vendor-Konvention
-# (identisch zu ``scripts/activate_open_window_detection.py``).
-OW_DEFAULT_ENABLED: bool = True
-OW_DEFAULT_DURATION_MIN: int = 10
-OW_DEFAULT_DELTA_C: Decimal = Decimal("1.5")
 
 # Vicki-Hardware-Identifikation. Heute pairen wir ausschliesslich
 # MClimate-Vickis (Thermostat). Andere Vendoren / Sensor-Devices
@@ -71,11 +85,12 @@ class PairResult:
     """Ein Pairing-Ergebnis pro CSV-Row.
 
     ``status``:
-    - ``paired``: Device-Row angelegt, Audit geschrieben, Downlink OK.
+    - ``paired``: Device-Row angelegt, Audit geschrieben.
     - ``skipped_exists``: DevEUI existiert bereits in DB, kein Side-Effekt.
-    - ``error``: Pairing fehlgeschlagen oder Downlink failed. Bei
-      Downlink-Failure ist das Device dennoch in DB (``device_id``
-      gesetzt).
+    - ``error``: Pairing fehlgeschlagen. Seit Sprint 17 (C3) gibt es
+      keinen Downlink-Pfad mehr, der eine Device-Row zuruecklaesst —
+      ``error`` bedeutet ausnahmslos: **keine** Device-Row angelegt
+      (``device_id is None``).
     """
 
     status: PairStatus
@@ -110,16 +125,14 @@ async def pair_device(
     *,
     user_id: int | None = None,
 ) -> PairResult:
-    """Pairt ein einzelnes Geraet: Device-Row + Audit + OW-Downlink.
+    """Pairt ein einzelnes Geraet: Device-Row + Audit.
 
     Caller ist fuer ``session.commit()`` zustaendig (vgl. override_service-
     Pattern). Diese Funktion macht nur ``flush()``, damit ``device.id``
     fuer Audit + Logger verfuegbar ist.
 
-    Downlink-Fehler werden hier gefangen und in ``PairResult(status=
-    "error")`` konvertiert — der Device-Row bleibt erhalten, damit
-    ein nachgelagerter Eingangstest (T5) oder manueller Re-Send den
-    Downlink wiederholen kann.
+    Sprint 17 (C3): kein Downlink mehr. Die Funktion beruehrt
+    ausschliesslich die Datenbank.
 
     :param row: validierte Pydantic-Row aus T2/T3.
     :param row_number: 1-basierter CSV-Zeilen-Offset (Zeile 1 = Header,
@@ -206,35 +219,6 @@ async def pair_device(
         },
     )
 
-    # Gate 5: Open-Window-Detection-Downlink (AE-48).
-    # Pool-Geraete bekommen ebenfalls den OW-Downlink — Reserve soll
-    # ab Werkseinstellung funktionsbereit sein wenn spaeter zugewiesen.
-    try:
-        await set_open_window_detection(
-            row.dev_eui,
-            enabled=OW_DEFAULT_ENABLED,
-            duration_min=OW_DEFAULT_DURATION_MIN,
-            delta_c=OW_DEFAULT_DELTA_C,
-        )
-    except Exception as exc:  # noqa: BLE001 — Downlink-Failure ist Soft-Fail
-        # Device-Row + Audit bleiben in DB. Downlink kann via Eingangstest
-        # (T5) oder manuellem Re-Send wiederholt werden. Re-Run des CSV-
-        # Imports trifft Gate 1 (skipped_exists), kein Doppel-Insert.
-        logger.warning(
-            "pair_device: OW-Downlink failed dev_eui=%s device_id=%s exc=%s",
-            row.dev_eui,
-            device.id,
-            exc,
-        )
-        return PairResult(
-            status="error",
-            dev_eui=row.dev_eui,
-            row_number=row_number,
-            is_pool=row.is_pool_device,
-            device_id=device.id,
-            error_msg=f"DOWNLINK_FAILED: {type(exc).__name__}: {exc}",
-        )
-
     logger.info(
         "pair_device ok: dev_eui=%s device_id=%s heating_zone_id=%s is_pool=%s",
         row.dev_eui,
@@ -260,11 +244,10 @@ async def pair_batch(
     """Iteriert ueber alle Rows mit Pro-Row-Savepoint-Isolation.
 
     Pro Row ``session.begin_nested()``-Savepoint. Bei sauberem Durchlauf
-    (auch bei Downlink-Failure mit ``PairResult.status="error"`` und
-    erhaltenem Device-Row) wird der Savepoint committed. Bei
-    unerwarteter Exception (z.B. DB-Connection-Drop, Schema-Verstoss)
-    wird der Savepoint rollback und ein Error-Result eingehaengt;
-    nachfolgende Rows werden trotzdem versucht.
+    wird der Savepoint committed. Bei unerwarteter Exception (z.B.
+    DB-Connection-Drop, Schema-Verstoss) wird der Savepoint rollback und
+    ein Error-Result eingehaengt; nachfolgende Rows werden trotzdem
+    versucht.
 
     Top-Level-``commit()`` ist Caller-Aufgabe (CLI T6) — diese Funktion
     flusht nur, damit Tests die Session am Ende sauber rollback koennen

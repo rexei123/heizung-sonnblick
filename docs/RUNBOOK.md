@@ -1042,10 +1042,18 @@ Warten im Helper.
 **SSH (heizung-test, root):**
 
 ```bash
-docker exec deploy-api-1 python scripts/activate_open_window_detection.py
+docker exec <api-container> python -m heizung.scripts.activate_open_window_detection
 # Empfohlen für realistische Wartezeit (4 Vickis × 10 Min Periodic):
-docker exec deploy-api-1 python scripts/activate_open_window_detection.py --wait-secs 600
+docker exec <api-container> python -m heizung.scripts.activate_open_window_detection   --wait-secs 600
 ```
+
+> **Pfad-Änderung Sprint 17 (B-Sprint13a-1):** Das Skript liegt seit
+> Sprint 17 unter `backend/src/heizung/scripts/` und wird wie
+> `seed_rooms` / `pair_devices` mit `python -m heizung.scripts.<name>`
+> aufgerufen. Der alte Aufruf
+> `python scripts/activate_open_window_detection.py` existiert nicht mehr.
+> Container-Namen nicht hart annehmen (`docker ps`, Prod-Pattern
+> `deploy-api-1`).
 
 3-Phasen-Logik:
 

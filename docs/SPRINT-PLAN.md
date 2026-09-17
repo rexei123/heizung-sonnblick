@@ -1109,8 +1109,10 @@ develop @ `8f3554b`).
   (im neuen Sub-Package `heizung.scripts/`), nicht
   `backend/scripts/`. Aufruf via `python -m
   heizung.scripts.pair_devices …`. Bestehendes
-  `backend/scripts/activate_open_window_detection.py` bleibt am
-  alten Ort — Migration in Backlog B-Sprint13a-1.
+  `backend/scripts/activate_open_window_detection.py` blieb zunaechst
+  am alten Ort (Backlog B-Sprint13a-1); **mit Sprint 17 / C3 migriert**
+  nach `backend/src/heizung/scripts/` — ein einheitlicher `-m`-Pfad
+  fuer alle drei Hotelier-Skripte.
 - **Subcommands:** `validate`, `import` (mit `--dry-run`), `test`,
   `list-pool`. `retire-device` verworfen — gehoert thematisch zu
   Sprint 13b (Tausch-Endpoint), wo es als Service-Helper unter dem

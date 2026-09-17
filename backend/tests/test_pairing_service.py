@@ -1,7 +1,12 @@
 """Sprint 13a T4 — Pairing-Service Tests.
 
 DB-Tests gegen ``TEST_DATABASE_URL`` (analog T3 ``test_pairing_csv_parser``).
-Downlink wird via ``monkeypatch`` gemockt — kein echter MQTT-Call.
+
+Sprint 17 (E3/C3): Der Pairing-Service sendet keinen Downlink mehr. Die
+frueheren ``mock_downlink_ok`` / ``mock_downlink_raises``-Fixtures und der
+``DOWNLINK_FAILED``-Test sind entfallen; stattdessen belegt
+``test_pair_device_sends_no_downlink`` negativ, dass kein MQTT-Pfad mehr
+angefasst wird.
 """
 
 from __future__ import annotations
@@ -10,7 +15,6 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
-from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -34,12 +38,10 @@ from heizung.models.room_type import RoomType
 from heizung.scripts.pairing import pairing_service
 from heizung.scripts.pairing.csv_row import PairingCsvRow
 from heizung.scripts.pairing.pairing_service import (
-    OW_DEFAULT_DELTA_C,
-    OW_DEFAULT_DURATION_MIN,
-    OW_DEFAULT_ENABLED,
     pair_batch,
     pair_device,
 )
+from heizung.services import downlink_adapter
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -108,31 +110,6 @@ async def _seed_zone(s: AsyncSession, *, room_number: str, zone_name: str) -> tu
     return room.id, hz.id
 
 
-@pytest_asyncio.fixture
-def mock_downlink_ok(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bool, int, Decimal]]:
-    """Monkeypatch ``set_open_window_detection`` zu einem Recorder."""
-    calls: list[tuple[str, bool, int, Decimal]] = []
-
-    async def fake_set_ow(dev_eui: str, enabled: bool, duration_min: int, delta_c: Decimal) -> str:
-        calls.append((dev_eui, enabled, duration_min, delta_c))
-        return f"application/test/device/{dev_eui}/command/down"
-
-    monkeypatch.setattr(pairing_service, "set_open_window_detection", fake_set_ow)
-    return calls
-
-
-@pytest_asyncio.fixture
-def mock_downlink_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Monkeypatch ``set_open_window_detection`` zu einem Raiser."""
-
-    async def fake_set_ow_raise(
-        dev_eui: str, enabled: bool, duration_min: int, delta_c: Decimal
-    ) -> str:
-        raise RuntimeError("simulated MQTT failure")
-
-    monkeypatch.setattr(pairing_service, "set_open_window_detection", fake_set_ow_raise)
-
-
 # ---------------------------------------------------------------------------
 # Tests fuer pair_device
 # ---------------------------------------------------------------------------
@@ -140,9 +117,8 @@ def mock_downlink_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_pair_device_happy_path_active(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
-    """Active-Row: Device + Audit + Downlink-Call. status='paired'."""
+    """Active-Row: Device + Audit. status='paired'."""
     await _seed_zone(session, room_number="9401", zone_name="Schlafzimmer")
     row = PairingCsvRow(
         stockwerk=1,
@@ -164,17 +140,12 @@ async def test_pair_device_happy_path_active(
     assert device.heating_zone_id is not None
     assert device.kind == DeviceKind.THERMOSTAT
     assert device.vendor == DeviceVendor.MCLIMATE
-    # Downlink mit Default-Werten.
-    assert mock_downlink_ok == [
-        (row.dev_eui, OW_DEFAULT_ENABLED, OW_DEFAULT_DURATION_MIN, OW_DEFAULT_DELTA_C)
-    ]
 
 
 async def test_pair_device_happy_path_pool(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
-    """Pool-Row: Device mit heating_zone_id=NULL. Downlink trotzdem getriggert."""
+    """Pool-Row: Device mit heating_zone_id=NULL."""
     row = PairingCsvRow(
         stockwerk=None,
         zimmer_nummer=None,
@@ -189,15 +160,12 @@ async def test_pair_device_happy_path_pool(
     device = await session.get(Device, result.device_id)
     assert device is not None
     assert device.heating_zone_id is None
-    # Pool-Device bekommt OW-Downlink trotzdem.
-    assert len(mock_downlink_ok) == 1
 
 
 async def test_pair_device_dev_eui_exists_skipped(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
-    """DEV_EUI_EXISTS -> status='skipped_exists', kein Audit, kein Downlink."""
+    """DEV_EUI_EXISTS -> status='skipped_exists', kein Audit."""
     _, zone_id = await _seed_zone(session, room_number="9402", zone_name="Schlafzimmer")
     existing_eui = _eui()
     existing_device = Device(
@@ -223,16 +191,13 @@ async def test_pair_device_dev_eui_exists_skipped(
     assert result.device_id == existing_device.id
     assert result.error_msg is not None
     assert "DEV_EUI_EXISTS" in result.error_msg
-    # Kein Downlink.
-    assert mock_downlink_ok == []
 
 
 async def test_pair_device_zone_not_found_defensive(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
     """Active-Row mit nicht-existierender Zone -> status='error',
-    kein Device-Row, kein Downlink (Defensive fuer §S5)."""
+    kein Device-Row (Defensive fuer §S5)."""
     row = PairingCsvRow(
         stockwerk=1,
         zimmer_nummer=99999,
@@ -246,17 +211,30 @@ async def test_pair_device_zone_not_found_defensive(
     assert result.device_id is None
     assert result.error_msg is not None
     assert "ZONE_NOT_FOUND" in result.error_msg
-    assert mock_downlink_ok == []
     # Kein Device wurde angelegt.
     stmt = select(Device.id).where(Device.dev_eui == row.dev_eui)
     assert (await session.execute(stmt)).scalar_one_or_none() is None
 
 
-async def test_pair_device_downlink_failure_device_persists(
+async def test_pair_device_sends_no_downlink(
     session: AsyncSession,
-    mock_downlink_raises: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Downlink-Failure -> status='error' aber Device + Audit existieren in DB."""
+    """Sprint 17 (E3/C3): der Pairing-Lauf fasst keinen MQTT-Pfad an.
+
+    Negativ-Beleg statt Downlink-Mock: ``send_raw_downlink`` ist die
+    einzige MQTT-Publish-Stelle im Repo (AE-48). Wir patchen sie zu einem
+    Raiser — wuerde der Pairing-Service noch irgendeinen Downlink-Wrapper
+    rufen, schlaegt der Test fehl.
+    """
+    calls: list[str] = []
+
+    async def explode(*args: object, **kwargs: object) -> str:
+        calls.append("send_raw_downlink")
+        raise AssertionError("Pairing darf keinen Downlink senden (Sprint 17 E3)")
+
+    monkeypatch.setattr(downlink_adapter, "send_raw_downlink", explode)
+
     await _seed_zone(session, room_number="9403", zone_name="Schlafzimmer")
     row = PairingCsvRow(
         stockwerk=1,
@@ -267,18 +245,13 @@ async def test_pair_device_downlink_failure_device_persists(
         app_key=_VALID_APP_KEY,
     )
     result = await pair_device(row, row_number=2, session=session)
-    assert result.status == "error"
-    assert result.device_id is not None  # Device existiert
-    assert result.error_msg is not None
-    assert "DOWNLINK_FAILED" in result.error_msg
-    # Device-Row ist da.
-    device = await session.get(Device, result.device_id)
-    assert device is not None
-    assert device.dev_eui == row.dev_eui
+    assert result.status == "paired"
+    assert result.device_id is not None
+    assert calls == []
     # Audit-Row ist da.
     audit_stmt = select(BusinessAudit).where(
         BusinessAudit.action == "DEVICE_PAIRED",
-        BusinessAudit.target_id == device.id,
+        BusinessAudit.target_id == result.device_id,
     )
     audits = list((await session.execute(audit_stmt)).scalars().all())
     assert len(audits) == 1
@@ -286,7 +259,6 @@ async def test_pair_device_downlink_failure_device_persists(
 
 async def test_pair_device_audit_content(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
     """BusinessAudit-new_value enthaelt erwartete Keys."""
     await _seed_zone(session, room_number="9404", zone_name="Bad")
@@ -327,7 +299,6 @@ async def test_pair_device_audit_content(
 
 async def test_pair_device_user_id_none_system_trigger(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
     """user_id=None Pfad (System-Trigger analog T2-AuditGap-Pattern)."""
     await _seed_zone(session, room_number="9405", zone_name="Schlafzimmer")
@@ -348,7 +319,6 @@ async def test_pair_device_user_id_none_system_trigger(
 
 async def test_pair_device_lowercase_normalization_sanity(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
     """Pydantic-Normalisierung (T2) wirkt: Uppercase-DevEUI landet als lowercase in DB."""
     await _seed_zone(session, room_number="9406", zone_name="Schlafzimmer")
@@ -377,7 +347,6 @@ async def test_pair_device_lowercase_normalization_sanity(
 
 async def test_pair_batch_mixed_active_pool_duplicate(
     session: AsyncSession,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
     """2 Active + 1 Pool + 1 Duplikat-DevEUI -> 3 paired, 1 skipped."""
     await _seed_zone(session, room_number="9501", zone_name="Schlafzimmer")
@@ -442,16 +411,13 @@ async def test_pair_batch_mixed_active_pool_duplicate(
     assert results[0].dev_eui == eui1
     assert results[3].dev_eui == eui_dup
     assert results[3].status == "skipped_exists"
-    # 3 paired Devices triggern 3 Downlink-Calls (Duplikat NICHT).
-    assert len(mock_downlink_ok) == 3
 
 
 async def test_pair_batch_savepoint_rollback_on_unexpected_exception(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
-    mock_downlink_ok: list[tuple[str, bool, int, Decimal]],
 ) -> None:
-    """Row 1 OK, Row 2 wirft unerwartete Exception (vor Downlink),
+    """Row 1 OK, Row 2 wirft unerwartete Exception im Zone-Lookup,
     Row 3 OK. Savepoint-Rollback raeumt Row 2 ohne Device-Row in DB,
     Row 1 + 3 bleiben — Brief-Anforderung 'andere Rows unangetastet'."""
     call_count = [0]
@@ -515,5 +481,3 @@ async def test_pair_batch_savepoint_rollback_on_unexpected_exception(
     assert (await session.execute(stmt2)).scalar_one_or_none() is None
     stmt3 = select(Device.id).where(Device.dev_eui == eui3)
     assert (await session.execute(stmt3)).scalar_one_or_none() is not None
-    # Nur 2 Downlinks (Row 1 + Row 3), Row 2 hat es nie bis dahin geschafft.
-    assert len(mock_downlink_ok) == 2

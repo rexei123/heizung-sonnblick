@@ -4,7 +4,7 @@ DB-Tests gegen ``TEST_DATABASE_URL`` (analog T3-T5). ``SessionLocal``
 wird via ``monkeypatch`` durch eine Test-Session-Factory ersetzt, damit
 der CLI denselben Session-Context nutzt wie die Test-Fixtures.
 
-Downlinks (``set_open_window_detection`` + ``send_setpoint``) werden
+Downlinks des Eingangstests (``set_open_window_detection`` + ``send_setpoint``) werden
 ueber den jeweiligen Modul-Pfad gemockt — kein echter MQTT-Call.
 """
 
@@ -39,7 +39,7 @@ from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.models.user import User
 from heizung.scripts import pair_devices
-from heizung.scripts.pairing import inbound_test, pairing_service
+from heizung.scripts.pairing import inbound_test
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -103,8 +103,12 @@ def patched_session_local(session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 
 @pytest_asyncio.fixture
 def mock_all_downlinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    """Mockt set_open_window_detection + send_setpoint in BEIDEN
-    konsumierenden Modulen (pairing_service + inbound_test)."""
+    """Mockt set_open_window_detection + send_setpoint im Eingangstest.
+
+    Sprint 17 (E3/C3): ``pairing_service`` hat keinen Downlink-Pfad mehr,
+    daher patcht die Fixture nur noch ``inbound_test``. ``counters`` bleibt
+    als Negativ-Beleg fuer die import-Tests ("es wurde nichts gesendet").
+    """
     counters = {"set_ow": 0, "send_setpoint": 0}
 
     async def fake_set_ow(*args: object, **kwargs: object) -> str:
@@ -118,7 +122,6 @@ def mock_all_downlinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     async def no_sleep(seconds: int) -> None:
         return None
 
-    monkeypatch.setattr(pairing_service, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
@@ -201,7 +204,7 @@ async def test_cmd_import_dry_run_db_unchanged(
     mock_all_downlinks: dict[str, int],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """import --dry-run: Device-Count unveraendert, Downlinks gesendet."""
+    """import --dry-run: Device-Count unveraendert, KEINE Downlinks (Sprint 17 E3)."""
     await _seed_zone(patched_session_local, room_number="7102", zone_name="Schlafzimmer")
     before = await patched_session_local.scalar(select(func.count(Device.id)))
     csv_path = tmp_path / "dry.csv"
@@ -214,11 +217,15 @@ async def test_cmd_import_dry_run_db_unchanged(
     assert exit_code == 0
     after = await patched_session_local.scalar(select(func.count(Device.id)))
     assert before == after  # Rollback hat geklappt
-    # Downlink wurde trotzdem gesendet.
-    assert mock_all_downlinks["set_ow"] == 1
+    # Sprint 17 (E3/C3): der Import ist rein transaktional.
+    assert mock_all_downlinks["set_ow"] == 0
     captured = capsys.readouterr()
-    assert "[WARN] --dry-run aktiv" in captured.err
+    # Die frueher noetige "[WARN] --dry-run aktiv: Downlinks gehen trotzdem
+    # raus"-Warnung ist mit Sprint 17 (E3/C3) entfallen — es gibt nichts
+    # mehr zu warnen.
+    assert "[WARN]" not in captured.err
     assert "[DRY-RUN]" in captured.err
+    assert "Keine Downlinks gesendet" in captured.err
 
 
 async def test_cmd_import_real_with_user_email(
@@ -285,7 +292,7 @@ async def test_cmd_import_invalid_user_email_aborts(
     assert exit_code == 1
     err = capsys.readouterr().err
     assert "[FAIL] User-Email 'nonexistent@example.com' nicht gefunden" in err
-    # Kein Downlink, weil Abbruch VOR pair_batch.
+    # Kein Downlink — weder durch den Abbruch noch durch pair_batch.
     assert mock_all_downlinks["set_ow"] == 0
 
 

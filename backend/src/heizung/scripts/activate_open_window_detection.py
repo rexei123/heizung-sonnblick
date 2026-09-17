@@ -16,15 +16,24 @@ IS NOT NULL``):
    - FW NULL : skip + Warning (Vicki hat nicht geantwortet)
 4. Tabellen-Output: dev_eui, label, fw_version, action, result.
 
-Aufruf (auf heizung-test):
+Aufruf (Sprint 17 / B-Sprint13a-1: einheitlicher ``-m``-Pfad wie
+``seed_rooms`` und ``pair_devices``, Container-Name nicht hart annehmen,
+Prod-Pattern ``deploy-api-1``):
 
-    docker exec deploy-api-1 python scripts/activate_open_window_detection.py
-    docker exec deploy-api-1 python scripts/activate_open_window_detection.py --wait-secs 600
+    docker exec <api-container> python -m heizung.scripts.activate_open_window_detection
+    docker exec <api-container> python -m heizung.scripts.activate_open_window_detection \
+        --wait-secs 600
 
 Lokal:
 
     cd backend; $env:ENVIRONMENT = "test"; $env:DATABASE_URL = "..."
-    .\.venv\Scripts\python.exe scripts\activate_open_window_detection.py
+    .\.venv\Scripts\python.exe -m heizung.scripts.activate_open_window_detection
+
+Sprint 17 (E3/C3): Seit dem Entfernen des Open-Window-Downlinks aus dem
+Pairing-Service ist dieses Skript der **einzige** Weg, die Open-Window-
+Detection auf den Vickis zu setzen. Der Gewinn gegenueber dem alten
+Pairing-Downlink ist das FW-Gate (``MIN_FW_FOR_OW_SET``): Geraete mit
+FW < 4.2 werden uebersprungen statt blind mit 0x45 beschickt.
 
 S4-relevant: aktiviert produktive Vicki-Hardware-Konfiguration.
 Idempotent — Re-Run sendet die gleichen 0x45-Bytes erneut, kein
@@ -185,7 +194,8 @@ async def main_async(wait_secs: int, fw_only: bool) -> int:
         print(
             "\n=== --fw-only: Phase 1 abgeschlossen, kein Wait, keine "
             "Phase 3. ===\n    Re-Run von Phase 3 spaeter via "
-            "`activate_open_window_detection.py` ohne --fw-only "
+            "`python -m heizung.scripts.activate_open_window_detection` "
+            "ohne --fw-only "
             "(wenn neu aktiviert werden soll)."
         )
         print(
