@@ -513,6 +513,7 @@ async def revoke_all_active_overrides(
     room_id: int,
     *,
     reason: str = "auto: guest checked out",
+    now: datetime | None = None,
 ) -> int:
     """Revoked ALLE aktiven Overrides des Raums (Sprint 12a T2, AE-58).
 
@@ -526,19 +527,33 @@ async def revoke_all_active_overrides(
     Filter: ``revoked_at IS NULL AND expires_at > now``, kein
     ``source``-Filter mehr.
 
+    ``now`` ist der Bezugszeitpunkt fuer den ``expires_at``-Vergleich UND
+    fuer den gesetzten ``revoked_at``-Stempel. Default ``None`` = Wanduhr
+    (``_now()``), damit die bestehenden Aufrufer unveraendert bleiben.
+
+    Warum injizierbar: der Aufrufer-Stack
+    ``sync_active_rooms -> sync_room_status -> auto_revoke_on_checkout``
+    reicht seit Sprint 15g ein explizites ``now`` durch (Beat-Task, CLI,
+    Tests). Nur diese letzte Stufe brach die Kette und griff auf die
+    Wanduhr zurueck. In Produktion sind beide Werte praktisch identisch —
+    sichtbar wurde die Inkonsistenz ausschliesslich in Tests mit
+    absoluten Fixture-Zeiten (§5.59-Familie): sobald die Wanduhr das
+    Fixture-``expires_at`` ueberholt, findet der Filter nichts mehr und
+    der Revoke-Audit bleibt aus.
+
     Returns Anzahl der revokierten Overrides.
     """
-    now = _now()
+    effective_now = now or _now()
     stmt = (
         select(ManualOverride)
         .where(ManualOverride.room_id == room_id)
         .where(ManualOverride.revoked_at.is_(None))
-        .where(ManualOverride.expires_at > now)
+        .where(ManualOverride.expires_at > effective_now)
     )
     result = await session.execute(stmt)
     overrides = list(result.scalars().all())
     for override in overrides:
-        override.revoked_at = now
+        override.revoked_at = effective_now
         override.revoked_reason = reason
     if overrides:
         await session.flush()

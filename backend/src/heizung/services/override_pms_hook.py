@@ -86,6 +86,7 @@ async def auto_revoke_on_checkout(
         session,
         room_id,
         reason=REVOKE_REASON_CHECKOUT,
+        now=now,
     )
     if revoked > 0:
         await record_business_action(
