@@ -13,6 +13,8 @@ Subcommands:
                         ``--dry-run`` rollbackt die DB-Aenderungen.
                         **Sendet keine Downlinks** (Sprint 17 / E3).
 - ``test <device-id>``  6-Schritt-Eingangstest pro Vicki.
+- ``inbound-test --all-pool``  Batch-Eingangstest ueber ALLE Pool-Geraete
+                        gleichzeitig, inkl. Firmware-Inventar (Sprint 17 / C4).
 - ``list-pool``        Reserve-Pool-Devices (heating_zone_id IS NULL).
 
 Sprint 17 (E3/C3): ``import`` ist ein reiner Datenbank-Vorgang. Die
@@ -28,6 +30,9 @@ Aufruf-Beispiele:
     python -m heizung.scripts.pair_devices test 47                  # via device.id
     python -m heizung.scripts.pair_devices test aabbccdd11223344    # via dev_eui
     python -m heizung.scripts.pair_devices test 47 --non-interactive
+    python -m heizung.scripts.pair_devices test 47 --skip-backplate
+    python -m heizung.scripts.pair_devices inbound-test --all-pool
+    python -m heizung.scripts.pair_devices inbound-test --all-pool --timeout 7200
     python -m heizung.scripts.pair_devices list-pool
 
 Auf heizung-test/heizung-main via Docker:
@@ -66,6 +71,12 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
 from heizung.models.user import User  # noqa: E402
+from heizung.scripts.pairing.batch_inbound_test import (  # noqa: E402
+    DEFAULT_POLL_INTERVAL_S,
+    DEFAULT_TIMEOUT_S,
+    format_report,
+    run_batch_inbound_test,
+)
 from heizung.scripts.pairing.csv_parser import (  # noqa: E402
     check_dev_eui_duplicates_in_csv,
     find_existing_dev_euis,
@@ -255,9 +266,55 @@ async def _cmd_test(args: argparse.Namespace) -> int:
             device.id,
             session,
             interactive=not args.non_interactive,
+            skip_backplate=args.skip_backplate,
         )
     print(format_test_result(result))
     return 0 if result.overall_status == "passed" else 1
+
+
+async def _cmd_inbound_test(args: argparse.Namespace) -> int:
+    """``inbound-test --all-pool``: Batch ueber alle Pool-Geraete.
+
+    Keine interaktiven Rueckfragen — bei 104 Geraeten waeren das 208
+    Tastendruecke. Das Ventilkriterium ersetzt die akustische Kontrolle.
+    """
+    async with SessionLocal() as session:
+        devices = await get_pool_devices(session)
+        if not devices:
+            print("Pool ist leer — keine Geraete zu pruefen.")
+            return 0
+
+        user_id: int | None = None
+        if args.user_email:
+            user_id = await _lookup_user_id(session, args.user_email)
+            if user_id is None:
+                print(
+                    f"[FAIL] User-Email '{args.user_email}' nicht gefunden oder inaktiv.",
+                    file=sys.stderr,
+                )
+                return 1
+
+        print(
+            f"Batch-Eingangstest ueber {len(devices)} Pool-Geraet(e). "
+            f"Zeitfenster {args.timeout} s je Sollwert-Schritt, Abfrage alle "
+            f"{args.poll_interval} s."
+        )
+        print(
+            "Class A: ein Downlink geht erst mit dem naechsten Uplink raus. "
+            "Der Lauf dauert im unguenstigen Fall zwei Zeitfenster.\n"
+        )
+        report = await run_batch_inbound_test(
+            session,
+            devices,
+            timeout_s=args.timeout,
+            poll_interval_s=args.poll_interval,
+            valve_check=not args.no_valve_check,
+            user_id=user_id,
+        )
+        await session.commit()
+
+    print(format_report(report))
+    return report.exit_code
 
 
 async def _cmd_list_pool(args: argparse.Namespace) -> int:
@@ -334,6 +391,48 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Setpoint-Schritte ohne User-Prompt (fuer CI/Smoke).",
     )
+    p_test.add_argument(
+        "--skip-backplate",
+        action="store_true",
+        help="Schritt 5 auslassen. Am Tisch ist attached_backplate=false "
+        "erwartet (RUNBOOK 10h.1) — dort ist die Pruefung sinnlos.",
+    )
+
+    # inbound-test (Batch)
+    p_batch = sub.add_parser(
+        "inbound-test",
+        help="Batch-Eingangstest ueber alle Pool-Geraete inkl. Firmware-Inventar.",
+    )
+    p_batch.add_argument(
+        "--all-pool",
+        action="store_true",
+        required=True,
+        help="Alle Pool-Geraete pruefen (heating_zone_id IS NULL, nicht retired).",
+    )
+    p_batch.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_S,
+        help=f"Wartefenster je Sollwert-Schritt in Sekunden. Default {DEFAULT_TIMEOUT_S}. "
+        "Bei Geraeten mit bekannten Uplink-Luecken hoeher setzen — ein zu "
+        "kurzes Fenster erzeugt Falsch-TIMEOUTs.",
+    )
+    p_batch.add_argument(
+        "--poll-interval",
+        type=int,
+        default=DEFAULT_POLL_INTERVAL_S,
+        help=f"Abstand zwischen zwei DB-Abfragen in Sekunden. Default {DEFAULT_POLL_INTERVAL_S}.",
+    )
+    p_batch.add_argument(
+        "--no-valve-check",
+        action="store_true",
+        help="Ventilkriterium abschalten. Dann zaehlt nur der Sollwert-Readback.",
+    )
+    p_batch.add_argument(
+        "--user-email",
+        default=None,
+        help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
+    )
 
     # list-pool
     sub.add_parser(
@@ -348,6 +447,7 @@ _DISPATCH = {
     "validate": _cmd_validate,
     "import": _cmd_import,
     "test": _cmd_test,
+    "inbound-test": _cmd_inbound_test,
     "list-pool": _cmd_list_pool,
 }
 

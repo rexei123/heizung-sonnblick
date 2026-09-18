@@ -14,8 +14,11 @@ OW-Resend, T4-Variante-A-Mitigation):
 3. ``setpoint_25``: ``send_setpoint(25)`` + 30 Sek Wartezeit + optional
    interaktiver Mitarbeiter-Prompt "Ventil hoerbar geoeffnet?".
 4. ``setpoint_10``: analog mit 10 °C.
-5. ``backplate``: ``attached_backplate=True`` im letzten Reading
-   (Hardware ist auf Vicki-Wandhalterung angeflanscht).
+5. ``backplate``: ``attached_backplate=True`` im **frisch nachgelesenen**
+   Reading (Hardware ist auf Vicki-Wandhalterung angeflanscht).
+   ``skip_backplate=True`` laesst den Schritt aus — am Tisch ist ``false``
+   der erwartete Zustand (RUNBOOK §10h.1), dort ist die Pruefung
+   sinnlos.
 
 ``interactive=True`` (Default fuer CLI): User-Prompts via ``input()``.
 ``interactive=False`` (Tests + Smoke): Prompts werden uebersprungen,
@@ -292,7 +295,8 @@ def _finalize(result: TestResult) -> None:
     Priorisierung:
     1. Erster ``user_aborted`` -> overall=user_aborted, failed_step=dieser Schritt.
     2. Erster ``failed`` -> overall=failed, failed_step=dieser Schritt.
-    3. Alle ok -> overall=passed.
+    3. Alle ok (oder ``skipped``) -> overall=passed. Ein bewusst
+       uebersprungener Schritt ist kein Mangel.
     """
     for step_result in result.steps:
         if step_result.status == "user_aborted":
@@ -313,6 +317,7 @@ async def run_inbound_test(
     session: AsyncSession,
     *,
     interactive: bool = True,
+    skip_backplate: bool = False,
 ) -> TestResult:
     """Fuehrt den 6-Schritt-Eingangstest aus (RUNBOOK §10h.1 + Schritt 0).
 
@@ -321,6 +326,10 @@ async def run_inbound_test(
     :param interactive: ``True`` (Default) zeigt User-Prompts bei
         Setpoint-Schritten. ``False`` ueberspringt Prompts — fuer
         Tests + Smoke-Runs.
+    :param skip_backplate: laesst Schritt 5 aus (Sprint 17 / C4). Am Tisch
+        ist ``attached_backplate=false`` der erwartete Zustand (RUNBOOK
+        §10h.1) — den Schritt dort zu pruefen hiesse, jedes Geraet
+        durchfallen zu lassen. Er gehoert nach die Montage.
     :raises ValueError: Device nicht in DB.
     """
     device = await session.get(Device, device_id)
@@ -379,7 +388,37 @@ async def run_inbound_test(
         return result
 
     # Schritt 5: Backplate-Bit.
-    step5 = _step_backplate(latest)
+    #
+    # Sprint 17 (C4): liest bewusst NEU aus der DB. Bis Sprint 16 wertete
+    # dieser Schritt ``latest`` aus Schritt 1 aus — also den Stand VOR den
+    # beiden Setpoint-Downlinks und den 60 Sekunden Wartezeit. Der Test
+    # behauptete damit eine Aussage ueber "jetzt", belegte aber eine ueber
+    # "vor einer Minute". Zwischen beiden liegen bei einem Vicki mit
+    # 15-Minuten-Periodik durchaus neue Frames.
+    if skip_backplate:
+        result.steps.append(
+            TestStepResult(
+                step=STEP_BACKPLATE,
+                status="skipped",
+                detail="Uebersprungen (--skip-backplate): am Tisch ist false erwartet.",
+            )
+        )
+        _finalize(result)
+        return result
+
+    fresh = await _get_latest_reading(session, device_id)
+    if fresh is None:
+        result.steps.append(
+            TestStepResult(
+                step=STEP_BACKPLATE,
+                status="failed",
+                detail="Kein Reading mehr auffindbar — Backplate nicht bewertbar.",
+            )
+        )
+        _finalize(result)
+        return result
+
+    step5 = _step_backplate(fresh)
     result.steps.append(step5)
 
     _finalize(result)

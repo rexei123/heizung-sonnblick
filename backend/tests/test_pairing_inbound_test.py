@@ -348,3 +348,101 @@ async def test_inbound_test_device_not_found_raises(
     """Nicht-existierendes Device -> ValueError."""
     with pytest.raises(ValueError, match=r"Device id=999999 existiert nicht"):
         await run_inbound_test(999999, session, interactive=False)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 17 (C4) — Schritt 5 liest frisch, und laesst sich ueberspringen
+# ---------------------------------------------------------------------------
+
+
+async def test_backplate_step_reads_a_fresh_reading(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blocker-Fix: Schritt 5 wertet den Stand NACH den Downlinks aus.
+
+    Bis Sprint 16 nahm der Schritt ``latest`` aus Schritt 1 — also den Stand
+    vor den beiden Setpoint-Downlinks und den 60 Sekunden Wartezeit. Der Test
+    behauptete damit etwas ueber "jetzt" und belegte etwas ueber "vorhin".
+
+    Aufbau: das juengste Reading zu Beginn meldet ``attached_backplate=False``
+    (Geraet lag noch neben der Halterung). Waehrend der Setpoint-Schritte
+    kommt ein neuer Frame mit ``True`` herein. Der Test muss bestehen.
+    """
+    device_id = await _seed_device(session)
+    await _add_reading(session, device_id, age_min=1, attached_backplate=False)
+
+    async def fake_set_ow(dev_eui: str, enabled: bool, duration_min: int, delta_c: Decimal) -> str:
+        return "topic"
+
+    async def fake_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
+        return "topic"
+
+    geliefert = False
+
+    async def sleep_and_deliver(seconds: int) -> None:
+        # Der Vicki meldet sich EINMAL waehrend der Wartezeit — jetzt montiert.
+        # Nur einmal, sonst kollidiert der Primaerschluessel (time, device_id).
+        nonlocal geliefert
+        if geliefert:
+            return
+        geliefert = True
+        await _add_reading(session, device_id, age_min=0, attached_backplate=True)
+
+    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
+    monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
+    monkeypatch.setattr(inbound_test, "_sleep", sleep_and_deliver)
+
+    result = await run_inbound_test(device_id, session, interactive=False)
+    assert result.overall_status == "passed", [(x.step, x.status, x.detail) for x in result.steps]
+    backplate = next(s for s in result.steps if s.step == "backplate")
+    assert backplate.status == "ok"
+
+
+async def test_backplate_step_still_fails_on_fresh_false(
+    session: AsyncSession,
+    mock_downlinks_ok: dict[str, list[tuple[str, ...]]],
+) -> None:
+    """Gegenprobe: bleibt das frische Reading False, faellt der Schritt durch.
+
+    Der Fix macht den Schritt frischer, nicht nachgiebiger.
+    """
+    device_id = await _seed_device(session)
+    await _add_reading(session, device_id, age_min=1, attached_backplate=False)
+
+    result = await run_inbound_test(device_id, session, interactive=False)
+    assert result.overall_status == "failed"
+    assert result.failed_step == "backplate"
+
+
+async def test_skip_backplate_marks_step_skipped_and_passes(
+    session: AsyncSession,
+    mock_downlinks_ok: dict[str, list[tuple[str, ...]]],
+) -> None:
+    """Am Tisch ist ``false`` der erwartete Zustand (RUNBOOK §10h.1).
+
+    Ohne ``--skip-backplate`` wuerde dort jedes Geraet durchfallen — der
+    Widerspruch zwischen RUNBOOK und Code aus dem Phase-0-Bericht.
+    """
+    device_id = await _seed_device(session)
+    await _add_reading(session, device_id, age_min=1, attached_backplate=False)
+
+    result = await run_inbound_test(device_id, session, interactive=False, skip_backplate=True)
+    assert result.overall_status == "passed", [(x.step, x.status, x.detail) for x in result.steps]
+    backplate = next(s for s in result.steps if s.step == "backplate")
+    assert backplate.status == "skipped"
+    assert "--skip-backplate" in backplate.detail
+
+
+async def test_skip_backplate_does_not_mask_earlier_failure(
+    session: AsyncSession,
+    mock_downlinks_ok: dict[str, list[tuple[str, ...]]],
+) -> None:
+    """Ein frueherer Fehler bleibt ein Fehler, auch mit --skip-backplate."""
+    device_id = await _seed_device(session)
+    # Temperatur ausserhalb [15, 30] -> Schritt 2 faellt durch.
+    await _add_reading(session, device_id, age_min=1, temperature=Decimal("45.0"))
+
+    result = await run_inbound_test(device_id, session, interactive=False, skip_backplate=True)
+    assert result.overall_status == "failed"
+    assert result.failed_step == "temp_plausi"
