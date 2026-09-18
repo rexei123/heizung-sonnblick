@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,8 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from provision_devices import (  # noqa: E402
     DEFAULT_KEY_FIELD,
+    LIST_PAGE_SIZE,
     OPTIONAL_COLUMNS,
     REQUIRED_COLUMNS,
+    GrpcChirpStackClient,
     ProvisionError,
     RemoteDevice,
     RemoteKeys,
@@ -46,6 +49,16 @@ def write_csv(path: Path, *rows: str) -> Path:
     return path
 
 
+class FakeUnauthenticatedError(RuntimeError):
+    """Was ChirpStack bei ``Get`` auf ein unbekanntes DevEUI liefert.
+
+    Kein NOT_FOUND: die Berechtigung wird ueber das Geraet auf den Tenant
+    aufgeloest, und ein nicht existierendes Geraet hat keinen Tenant. Der
+    Probelauf auf heizung-test am 18.09. ist genau daran gescheitert —
+    mit gueltigem Key, unmittelbar nach erfolgreichem Pre-Flight.
+    """
+
+
 class FakeClient:
     """Doppelgaenger fuer ChirpStack. Zeichnet alle Schreibzugriffe auf."""
 
@@ -66,6 +79,10 @@ class FakeClient:
         self.created: list[dict[str, str]] = []
         self.created_keys: list[dict[str, str]] = []
         self.closed = False
+        # Zaehler, damit Tests belegen koennen, dass der Bestand EINMAL
+        # geholt wird und nicht pro CSV-Zeile.
+        self.list_calls = 0
+        self.get_calls: list[str] = []
 
     def application_exists(self, application_id: str) -> bool:
         return application_id in self.known_apps
@@ -73,8 +90,18 @@ class FakeClient:
     def device_profile_exists(self, device_profile_id: str) -> bool:
         return device_profile_id in self.known_profiles
 
+    def list_device_euis(self, application_id: str) -> set[str]:
+        self.list_calls += 1
+        return {eui for eui, dev in self.devices.items() if dev.application_id == application_id}
+
     def get_device(self, dev_eui: str) -> RemoteDevice | None:
-        return self.devices.get(dev_eui)
+        self.get_calls.append(dev_eui)
+        if dev_eui not in self.devices:
+            # Absichtlich hart: so verhaelt sich ChirpStack. Ein Rueckfall
+            # auf "Get pro Zeile" faellt damit sofort auf, statt erst beim
+            # naechsten Probelauf auf dem Server.
+            raise FakeUnauthenticatedError(f"StatusCode.UNAUTHENTICATED fuer {dev_eui}")
+        return self.devices[dev_eui]
 
     def get_device_keys(self, dev_eui: str) -> RemoteKeys | None:
         return self.keys.get(dev_eui)
@@ -512,3 +539,195 @@ def test_key_field_override_wins_over_ambiguous_reference(tmp_path: Path) -> Non
     )
     assert code == 1
     assert client.created == []
+
+
+# ---------------------------------------------------------------------------
+# Bestandsabgleich per List statt Get (Hotfix nach Probelauf 18.09.)
+# ---------------------------------------------------------------------------
+
+
+def test_unbekanntes_dev_eui_ohne_get_angelegt(tmp_path: Path) -> None:
+    """Der Kernfall des Probelaufs: ein Geraet, das es noch nicht gibt.
+
+    Frueher lief pro CSV-Zeile ein ``Get``; auf ein unbekanntes DevEUI
+    antwortet ChirpStack mit UNAUTHENTICATED und der Lauf brach ab. Jetzt
+    entscheidet der einmal geholte Bestand, und ``Get`` wird fuer das
+    unbekannte Geraet gar nicht erst gerufen.
+    """
+    csv_path = write_csv(tmp_path / "p.csv", f"1,101,Bad,{EUI_A},{KEY_A},001,{JOIN_EUI}")
+    client = FakeClient()  # leerer Bestand
+
+    code = run(base_args(csv_path, "--apply"), client_factory=lambda: client)
+
+    assert code == 0
+    assert client.get_calls == []
+    assert client.list_calls == 1
+    assert [c["dev_eui"] for c in client.created] == [EUI_A]
+
+
+def test_bestand_wird_einmal_geholt_nicht_pro_zeile(tmp_path: Path) -> None:
+    """Vier vorhandene, hundert fehlende Geraete — ein einziger List-Aufruf."""
+    vorhanden = {}
+    rows = []
+    for i in range(104):
+        eui = f"70b3d57ed000{i:04x}"
+        rows.append(f"1,{100 + i},Bad,{eui},{KEY_A},{i + 1:03d},{JOIN_EUI}")
+        if i < 4:
+            vorhanden[eui] = RemoteDevice(
+                dev_eui=eui,
+                name=f"{i + 1:03d}",
+                application_id=APP_ID,
+                device_profile_id=PROFILE_ID,
+                join_eui=JOIN_EUI,
+            )
+
+    csv_path = write_csv(tmp_path / "p.csv", *rows)
+    client = FakeClient(devices=vorhanden)
+
+    code = run(base_args(csv_path, "--apply"), client_factory=lambda: client)
+
+    assert code == 0
+    assert client.list_calls == 1
+    # Get nur fuer die vier, die es laut Bestand gibt.
+    assert sorted(client.get_calls) == sorted(vorhanden)
+    assert len(client.created) == 100
+
+
+def test_bericht_nennt_bestandsgroesse(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Die Bestandszeile gehoert in die Ausgabe — sie ist die Grundlage
+    des Abgleichs und muss am 26.09. nachvollziehbar sein."""
+    csv_path = write_csv(tmp_path / "p.csv", f"1,101,Bad,{EUI_A},{KEY_A},001,{JOIN_EUI}")
+    device = RemoteDevice(
+        dev_eui=EUI_B,
+        name="002",
+        application_id=APP_ID,
+        device_profile_id=PROFILE_ID,
+        join_eui=JOIN_EUI,
+    )
+
+    run(base_args(csv_path), client_factory=lambda: FakeClient(devices={EUI_B: device}))
+
+    out = capsys.readouterr().out
+    assert "Bestand in der Application: 1 Geraete" in out
+    assert "1 CSV-Zeilen" in out
+
+
+def test_list_beachtet_die_application(tmp_path: Path) -> None:
+    """Ein Geraet in einer FREMDEN Application zaehlt nicht als vorhanden.
+
+    Sonst wuerde das Skript es faelschlich als Bestand werten und still
+    ueberspringen — das Geraet fehlte dann in der eigenen Application.
+    """
+    fremd = RemoteDevice(
+        dev_eui=EUI_A,
+        name="001",
+        application_id="ffffffff-ffff-ffff-ffff-ffffffffffff",
+        device_profile_id=PROFILE_ID,
+        join_eui=JOIN_EUI,
+    )
+    csv_path = write_csv(tmp_path / "p.csv", f"1,101,Bad,{EUI_A},{KEY_A},001,{JOIN_EUI}")
+    client = FakeClient(devices={EUI_A: fremd})
+
+    code = run(base_args(csv_path), client_factory=lambda: client)
+
+    assert code == 0
+    assert client.get_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Paginierung der List-Antwort (echte Client-Klasse, gefaelschter Stub)
+# ---------------------------------------------------------------------------
+
+
+class _FakeListItem:
+    def __init__(self, dev_eui: str) -> None:
+        self.dev_eui = dev_eui
+
+
+class _FakeListResponse:
+    def __init__(self, result: list[_FakeListItem], total_count: int) -> None:
+        self.result = result
+        self.total_count = total_count
+
+
+class _FakeDeviceStub:
+    """Liefert ``euis`` seitenweise aus, wie ChirpStack es taete."""
+
+    def __init__(self, euis: list[str], page_size: int) -> None:
+        self.euis = euis
+        self.page_size = page_size
+        self.requests: list[tuple[int, int, str]] = []
+
+    def List(self, req: Any, metadata: Any = None) -> _FakeListResponse:  # noqa: N802
+        self.requests.append((req.limit, req.offset, req.application_id))
+        page = self.euis[req.offset : req.offset + self.page_size]
+        return _FakeListResponse([_FakeListItem(e) for e in page], len(self.euis))
+
+
+class _FakeDevicePb2:
+    class ListDevicesRequest:
+        def __init__(self, *, limit: int, offset: int, application_id: str) -> None:
+            self.limit = limit
+            self.offset = offset
+            self.application_id = application_id
+
+
+def _client_with_stub(stub: _FakeDeviceStub) -> GrpcChirpStackClient:
+    """``GrpcChirpStackClient`` ohne ``__init__`` — kein gRPC, kein Import
+    von ``chirpstack_api``. Nur die drei Attribute, die ``list_device_euis``
+    tatsaechlich benutzt."""
+    client = object.__new__(GrpcChirpStackClient)
+    client._devices = stub
+    client._device_pb2 = _FakeDevicePb2
+    client._auth = [("authorization", "Bearer x")]
+    return client
+
+
+def test_list_paginiert_ueber_mehrere_seiten() -> None:
+    euis = [f"70b3d57ed000{i:04x}" for i in range(250)]
+    stub = _FakeDeviceStub(euis, page_size=100)
+
+    found = _client_with_stub(stub).list_device_euis(APP_ID)
+
+    assert found == set(euis)
+    # 100 + 100 + 50 -> drei Seiten, Offsets sauber hochgezaehlt.
+    assert [offset for _, offset, _ in stub.requests] == [0, 100, 200]
+    assert all(limit == LIST_PAGE_SIZE for limit, _, _ in stub.requests)
+    assert all(app == APP_ID for _, _, app in stub.requests)
+
+
+def test_list_eine_seite_ein_aufruf() -> None:
+    """Passt alles auf eine Seite, bleibt es bei genau einem Aufruf."""
+    euis = [f"70b3d57ed000{i:04x}" for i in range(104)]
+    stub = _FakeDeviceStub(euis, page_size=LIST_PAGE_SIZE)
+
+    found = _client_with_stub(stub).list_device_euis(APP_ID)
+
+    assert found == set(euis)
+    assert len(stub.requests) == 1
+
+
+def test_list_leere_application() -> None:
+    stub = _FakeDeviceStub([], page_size=LIST_PAGE_SIZE)
+    assert _client_with_stub(stub).list_device_euis(APP_ID) == set()
+    assert len(stub.requests) == 1
+
+
+def test_list_bricht_bei_zu_hohem_total_count_ab() -> None:
+    """Meldet der Server mehr Geraete als er ausliefert, endet die Schleife
+    trotzdem — eine leere Seite ist das zweite Abbruchkriterium."""
+    stub = _FakeDeviceStub([EUI_A, EUI_B], page_size=LIST_PAGE_SIZE)
+    stub.euis = [EUI_A, EUI_B]
+
+    class _LuegenStub(_FakeDeviceStub):
+        def List(self, req: Any, metadata: Any = None) -> _FakeListResponse:  # noqa: N802
+            self.requests.append((req.limit, req.offset, req.application_id))
+            page = self.euis[req.offset : req.offset + self.page_size]
+            # total_count viel zu hoch -> nur die leere Seite stoppt.
+            return _FakeListResponse([_FakeListItem(e) for e in page], 9999)
+
+    luegner = _LuegenStub([EUI_A, EUI_B], page_size=LIST_PAGE_SIZE)
+    found = _client_with_stub(luegner).list_device_euis(APP_ID)
+
+    assert found == {EUI_A, EUI_B}
+    assert len(luegner.requests) == 2  # volle Seite, dann leere Seite
