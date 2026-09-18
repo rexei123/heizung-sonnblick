@@ -1,0 +1,16 @@
+# Abhaengigkeiten fuer provision_devices.py (Sprint 17 / C1, D3).
+#
+# Bewusst NICHT in backend/pyproject.toml: das API-Image spricht mit
+# ChirpStack ausschliesslich ueber MQTT (AE-48, CLAUDE.md 5.28). Ein
+# gRPC-Client dort waere eine zweite Steuerleitung zur Hardware.
+#
+# Versionen exakt gepinnt, damit der Lauf im September reproduzierbar ist
+# und nicht an einem Upstream-Release scheitert. Stand 2026-09-18, gegen
+# PyPI verifiziert.
+#
+# Installation nur im Einmal-Container (RUNBOOK 10h.1):
+#   pip install -r requirements-provision.txt
+
+chirpstack-api==4.19.0
+grpcio==1.84.0
+protobuf==7.36.1

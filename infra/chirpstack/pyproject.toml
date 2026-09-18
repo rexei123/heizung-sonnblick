@@ -1,0 +1,25 @@
+# Werkzeug-Konfiguration fuer die ChirpStack-Hilfsskripte (Sprint 17 / C1).
+#
+# Eigene Datei, weil dieser Baum bewusst NICHT Teil des Backend-Packages ist
+# (D3). Die Regeln spiegeln backend/pyproject.toml, damit hier derselbe Stil
+# gilt wie im uebrigen Python-Code des Repos.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RET"]
+
+[tool.ruff.lint.per-file-ignores]
+# Die Tests legen das Skript-Verzeichnis per sys.path davor, bevor sie
+# importieren — ein Modul-Import nach Anweisungen ist hier beabsichtigt.
+"tests/*" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
