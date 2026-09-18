@@ -136,6 +136,15 @@ Phase 7, manuelle Belegungs-Pflege bleibt Fallback (§4).
 
 ### Phase 6 — Pilot-Go-Live (Oktober Woche 1, zeit-definiert)
 
+> **ERSETZT DURCH AE-70 (2026-09-18).** Statt fuenf Pilotzimmern und
+> anschliessendem schrittweisen Rueckbau wird im Schliessfenster
+> 29.09.–01.11. **vollmontiert**, mit einem Gate nach den ersten fuenf
+> Zimmern (54, 102, 207, 310, 406 — 14 Geraete, von unten nach oben,
+> Referenz ist 310 im Gateway-Geschoss). Anlass: das Montagefenster gibt
+> es nicht wieder, und die Hardware ist vollstaendig da. Das Risiko, das
+> diese Phase abfangen sollte, faengt jetzt das Gate ab. Der Abschnitt
+> bleibt als Historie stehen.
+
 Kein einzelner Sprint. 5 Pilot-Zimmer werden umgerüstet
 (Betterspace-Thermostate ab, Vickis dran), Auswahl maximaler
 Vielfalt (Standard / Suite / Mehrfach-Vicki / Funk-Rand /

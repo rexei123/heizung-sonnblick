@@ -3060,3 +3060,262 @@ echtem Status-Wechsel).
 AE-02, AE-58, §5.53 (Status-Wahrheit), §5.65 (UTC/Vienna — hier NICHT
 relevant, weil Timestamp-vs-Timestamp verglichen wird), CLAUDE.md §0
 (S6 Schichttrennung).
+
+
+---
+
+# AE-69 — ChirpStack-Geräte-Provisioning per gRPC (revidiert die Verwerfung vom 2026-05-21, Sprint 17)
+
+**Datum:** 2026-09-18
+**Status:** Akzeptiert
+**Bezug:** AE-48 (Downlink-Pfad ist MQTT), §5.28 (gRPC nicht für Device-Downlinks
+öffnen), §5.22 (Codec-Deploy ist nicht automatisch), SPRINT-PLAN Sprint-13-Cut
+(Z. 1088–1094, Z. 1265), B-9.10c-1 (Codec-Bootstrap, weiter offen).
+
+## Kontext / Problem
+
+Sprint 13 hat den gRPC-Bootstrap am 2026-05-21 verworfen. Die Begründung steht
+an vier Stellen im Repo — SPRINT-PLAN Z. 1088–1090 und Z. 1265,
+`pairing_service.py` (Modul-Docstring) und RUNBOOK §10h.2 Voraussetzung 1 —
+und lautet überall sinngemäß:
+
+> „ChirpStack-Provisioning bleibt manuell via ChirpStack-UI-Bulk-Import
+> (vorab durch den Hotelier)."
+
+**Einen solchen Bulk-Import gibt es in ChirpStack v4 nicht.** Der Phase-0-
+Quellcheck vom 2026-09-17 hat die Annahme geprüft: im Repo existiert kein
+Beleg für die Funktion — kein Screenshot, keine Anleitung, kein Menüpfad,
+anders als beim Codec-Re-Paste in §10c, der Schritt für Schritt dokumentiert
+ist. Die Verwerfung ruhte damit auf einer nicht verifizierten Annahme.
+
+Der Stand am 2026-09-17: 4 von 104 Geräten sind in ChirpStack registriert.
+Die übrigen 100 müssten von Hand angelegt werden — je Gerät DevEUI, Name,
+JoinEUI, Device-Profile und der AppKey vom Aufkleber. Das ist nicht nur
+Fleißarbeit, sondern fehleranfällig an genau der Stelle, an der ein Fehler
+erst beim Einschalten auffällt: ein falsch eingetippter AppKey verhindert den
+Join, und zwar still.
+
+Dazu kommt die Nachlieferung: 3 weitere Vickis ~30.10., und jede spätere
+Nachbestellung ebenso. Handarbeit ist kein einmaliger Kraftakt, sondern ein
+dauerhafter Zustand.
+
+## Entscheidung
+
+1. **`infra/chirpstack/provision_devices.py` legt die Geräte per gRPC an.**
+   Eingabe ist dieselbe Pairing-CSV, aus der auch der Import kommt.
+2. **`chirpstack-api` wird KEINE Abhängigkeit des API-Images.** Das Skript
+   liegt unter `infra/`, hat eine eigene, exakt gepinnte Requirements-Datei
+   und läuft als Einmal-Container im Compose-Netz. §5.28 bleibt damit
+   unangetastet: der Betriebspfad der Anwendung zu ChirpStack ist und bleibt
+   MQTT. Provisioning ist Infrastruktur-Setup, kein Betriebspfad.
+3. **Default ist Dry-Run.** Geschrieben wird nur mit `--apply`.
+4. **Bestehende Geräte werden nie überschrieben.** Abweichungen bei Name,
+   Device-Profile oder JoinEUI werden gemeldet, der Bestand hat Vorrang.
+   Zweiter Lauf = null Änderungen.
+5. **Das Key-Feld wird gespiegelt, nicht geraten.** `DeviceKeys` hat in
+   ChirpStack v4 **beide** Felder `nwk_key` und `app_key`. Bei LoRaWAN 1.0.x
+   — Hotel Sonnblick fährt MAC 1.0.3, RegParams A — gehört der AppKey vom
+   Aufkleber in `nwk_key`; `app_key` ist dort ungenutzt. Verwechseln ist
+   leicht, und der Fehler fällt erst auf, wenn 100 Geräte nicht joinen.
+   `--key-reference-dev-eui` liest deshalb per `GetKeys` die Feldbelegung
+   eines nachweislich funktionierenden Geräts und bricht bei Widerspruch ab.
+6. **Keine Schlüsselwerte in der Ausgabe**, auch nicht gekürzt. Die Vorschau
+   zeigt `<32 Hex-Zeichen, nicht angezeigt>`. Aus `GetKeys` wird nur
+   „gesetzt"/„leer" gelesen, nie der Wert. Der API-Token kommt ausschließlich
+   aus `CHIRPSTACK_API_KEY` — nie als Argument, sonst stünde er in der
+   Shell-History und in `docker inspect`.
+7. **`--expected-app-id` gegen `CHIRPSTACK_APP_ID` der Heizungs-API.** Bei
+   Abweichung bricht der Lauf ab. Ohne diese Prüfung würden die Geräte zwar
+   angelegt, aber jeder Setpoint ginge auf ein Topic, das niemand abonniert —
+   ein stiller Totalausfall der Steuerung.
+
+## Verworfen
+
+- **Weiter von Hand im UI.** 104 Geräte plus Nachlieferungen, jede Eingabe
+  ein potenzieller stiller Join-Fehler.
+- **`chirpstack-api` ins API-Image.** Wäre eine zweite Steuerleitung zur
+  Hardware neben MQTT. §5.28 hat gute Gründe, und sie gelten weiter.
+- **Codec-Deploy gleich mitmachen.** Wäre naheliegend (die gRPC-Anbindung
+  liegt jetzt vor), ist aber ein anderes Thema mit anderem Risiko —
+  `UpdateDeviceProfile` ändert die Dekodierung **aller** Geräte auf einmal.
+  Bleibt B-9.10c-1.
+
+## Konsequenzen
+
+- Die vier Doku-Stellen, die den UI-Bulk-Import als Voraussetzung nennen,
+  werden korrigiert (SPRINT-PLAN, `pairing_service`-Docstring, RUNBOOK §10h.2).
+- Eigener CI-Workflow `chirpstack-tools-ci.yml`: `backend-ci.yml` filtert auf
+  `backend/**` und würde das Skript nie prüfen.
+- Tests laufen gegen einen Doppelgänger des gRPC-Clients, ohne
+  `chirpstack-api` und ohne laufenden ChirpStack. Das beweist nebenbei, dass
+  der Import wirklich lazy ist.
+
+---
+
+# AE-70 — Vollmontage aller 45 Zimmer mit Pilot-Gate statt Fünf-Zimmer-Pilot (Sprint 17)
+
+**Datum:** 2026-09-18
+**Status:** Akzeptiert
+**Bezug:** `docs/STRATEGIE-REFRESH-2026-05-15.md` Phase 6 (**hiermit
+ersetzt**), §5.34 (Phasen-Modell statt Big-Bang), AE-53 (Health-Modell),
+AE-47 (Detached-Trigger), B-11prep-4 (Pilot-Zimmer-Auswahl, hiermit
+geschlossen), B-11prep-5 (Funklast-Monitoring).
+
+## Kontext / Problem
+
+Phase 6 des Strategie-Refresh sah einen Pilotbetrieb in fünf Zimmern vor,
+danach zimmerweisen Rückbau ab Oktober Woche 1. Zwei Dinge haben sich
+seither geändert:
+
+1. **Das Hotel ist vom 29.09. bis 01.11. geschlossen.** Ein Montagefenster
+   dieser Länge gibt es nicht wieder. Wer es nicht nutzt, montiert im
+   laufenden Betrieb, Zimmer für Zimmer, zwischen Abreise und Anreise.
+2. **Die Hardware ist vollständig da**, 104 Geräte für 103 Zonen.
+
+Gleichzeitig bleibt das Risiko, das Phase 6 abfangen wollte: das System hat
+noch nie mit mehr als vier Vickis gelaufen. Funkreichweite bei einem einzigen
+Gateway, Engine-Verhalten bei 45 Zimmern gleichzeitig, Batterieverhalten über
+Wochen — alles unbelegt.
+
+## Entscheidung
+
+**Vollmontage im Schließfenster, aber mit einem Gate nach den ersten fünf
+Zimmern.** Nicht „fünf Zimmer, dann Monate warten", sondern „fünf Zimmer,
+72 Stunden messen, dann entscheiden".
+
+### Pilotzimmer und Reihenfolge
+
+Das Gateway (UG65) steht im 3. Stock. Montiert wird am 29.09. **von unten
+nach oben**, damit der kritischste Funkfall zuerst gemessen wird:
+
+| Reihenfolge | Zimmer | Etage | Kategorie | Zonen |
+|---|---|---|---|---|
+| 1 | **54** | 0 | Suite | Schlafzimmer L · Schlafzimmer R · Bad |
+| 2 | **102** | 1 | Suite | Schlafzimmer L · Schlafzimmer R · Bad |
+| 3 | **207** | 2 | Suite | Schlafzimmer · Kinderzimmer · Bad |
+| 4 | **310** | 3 | Suite | Schlafzimmer · Kinderzimmer · Bad |
+| 5 | **406** | 4 | Doppelzimmer | Schlafzimmer · Bad |
+
+**14 Geräte.** Zimmer 310 liegt im selben Geschoss wie das Gateway und ist
+damit die **Referenz**: was dort nicht geht, liegt nicht an der Entfernung.
+Zimmer 406 erhält die Testgeräte 102 und 103.
+
+Frühere Nennungen (107, 215) sind ungültig. Die Zusammensetzung ist gegen
+`Zimmerliste_seed.csv` geprüft: Etage, Kategorie, Zonenzahl und die Summe 14
+stimmen überein.
+
+### Gate-Kriterien — alle vier müssen erfüllt sein
+
+**a) Montage bestätigt.** Alle 14 Geräte melden `attached_backplate=true`,
+und kein Gerät ist im Beobachtungszeitraum auf `health_state='silent'`
+gewechselt.
+
+**b) Regelung wirkt.** In mindestens zwei Pilotzimmern eine Belegung von Hand
+setzen: der Sollwert steigt, der Readback bestätigt ihn innerhalb von zwei
+Uplinks, und nach Belegungsende senkt die Engine wieder ab.
+
+**c) Funk trägt — pro Geschoss ausgewertet, nicht als Gesamtwert.** Ein
+Mittelwert über alle fünf Zimmer würde ein schlechtes Erdgeschoss hinter vier
+guten Etagen verstecken. Bewertet werden RSSI-/SNR-Median und die
+fcnt-Lückenquote je Zimmer und Zone über 24 Stunden, jeweils **gegen die
+Referenz 310**.
+
+**d) Keine Fehlauslösung.** Kein `DEVICE_DETACHED`-Trace in den
+Pilotzimmern.
+
+### Schwelle für (c) — Vorschlag, keine Messung
+
+Eine belastbare Schwelle lässt sich heute **nicht** messen: dafür fehlt der
+Zugriff auf Produktionsdaten. Was sich rechnen lässt:
+
+- Vicki-Periodik im Default ~15 Minuten → rund **96 Uplinks in 24 Stunden**.
+- Die Lückenquote ergibt sich aus der fcnt-Folge:
+  `(max − min + 1 − Anzahl) / (max − min + 1)`.
+- Gerät 101 zeigte am 17./18.09. Lücken von 1 bis 4 Stunden. Vier Stunden
+  sind 16 fehlende Frames, also rund **17 %** eines Tages.
+
+Daraus der Vorschlag:
+
+> **Go**, wenn die Lückenquote je Zone über 24 Stunden **≤ 10 %** beträgt
+> **und** höchstens **doppelt so hoch** ist wie in Zimmer 310.
+
+Beide Bedingungen zusammen, weil jede allein eine Lücke hat: der absolute
+Wert allein geht fehl, wenn die Periodik in der Praxis länger als 15 Minuten
+ist; der relative allein geht fehl, wenn schon 310 schlecht dasteht — das
+Doppelte von 9 % wären 18 %, und das wäre kein tragfähiges Netz.
+
+**Der Hotelier misst 310 zuerst.** Die Abfrage steht im RUNBOOK §10h mit dem
+Zeitfenster als Parameter. Liegt 310 deutlich unter 5 %, ist die
+10-%-Schranke die bindende; liegt es darüber, ist das selbst schon ein
+Befund.
+
+### No-Go ist kein Abbruch
+
+**Fällt ein unteres Geschoss durch, ist die Konsequenz ein zweites Gateway —
+nicht der Stopp des Rollouts in den oberen Geschossen.** Die oberen Etagen
+sind dann nachweislich versorgt; sie stillzulegen würde ein gelöstes Problem
+gegen ein ungelöstes eintauschen. Beschaffungsvorlauf für das zweite Gateway
+einplanen.
+
+Fällt das Gate aus anderen Gründen (a, b, d) durch, stoppt die Montage. Die
+Betterspace-Thermostate werden **pro Zimmer beschriftet eingelagert**, das
+Betterspace-Abo läuft bis Frühjahr 2027 weiter — der Rückweg bleibt offen.
+
+## Konsequenzen
+
+- **Kein Ersatzgerät im Montagefenster.** 104 Geräte auf 103 Zonen ist genau
+  eine Reserve; die Nachlieferung von 3 Stück kommt erst ~30.10. Jeder Ausfall
+  im Eingangstest reduziert unmittelbar die Zahl besetzbarer Zonen. Für jede
+  Zone ohne funktionierendes Gerät bleibt das Betterspace-Thermostat montiert
+  und die Zone kommt auf die Nachrüstliste.
+- **Geräte ohne Fenstererkennung werden trotzdem montiert.** FW < 4.2 oder
+  keine FW-Antwort heißt nur, dass der Open-Window-Rollout sie überspringt —
+  regeln tun sie normal. Die betroffenen Zonen werden namentlich in der
+  lebenden Doku geführt, damit später niemand aus dem fehlenden
+  Fenster-Trigger ein Engine-Problem konstruiert.
+- B-11prep-4 (Pilot-Zimmer-Auswahl) ist geschlossen.
+- Phase 6 in `STRATEGIE-REFRESH-2026-05-15.md` wird als „ersetzt durch AE-70"
+  markiert.
+
+---
+
+# AE-71 — FIAS entfällt dauerhaft, Mail-Import ist die produktive PMS-Quelle (Sprint 17)
+
+**Datum:** 2026-09-18
+**Status:** Akzeptiert
+**Bezug:** AE-66 (Belegungs-Import via mailparser-Webhook — **dies ist der
+Nachtrag dazu**), B-11prep-1 (FIAS-Anbindung, hiermit geschlossen),
+`STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §13, SPRINT-PLAN Sprint 16a (**hiermit
+gestrichen**).
+
+## Kontext / Problem
+
+Phase 5 der Strategie sah eine Casablanca-FIAS-Anbindung als produktive
+PMS-Quelle vor. B-11prep-1 wartete seit 2026-05-15 auf die Antwort des
+Hoteliers zur FIAS-Verfügbarkeit — vier Monate ohne Klärung. Sprint 16a war
+dafür reserviert.
+
+Inzwischen läuft der Mail-Import (AE-66) seit 2026-06-07 produktiv: der
+Hotelier schickt die Tagesliste, mailparser ruft den Webhook, die Belegungen
+landen als `source=pms` in der Datenbank. Sprint 15f hat die Sichtbarkeit
+ergänzt, Sprint 15g den periodischen Status-Sync.
+
+## Entscheidung
+
+1. **FIAS entfällt dauerhaft.** Nicht „verschoben", nicht „wenn die Antwort
+   kommt" — die Option wird geschlossen.
+2. **Der Mail-Import ist die produktive PMS-Quelle.** AE-66 ist damit kein
+   Zwischenschritt mehr, sondern der Zielzustand.
+3. **Sprint 16a ist gestrichen**, B-11prep-1 geschlossen.
+
+## Konsequenzen
+
+- Der Import-Watchdog (AE-66) wird damit zur einzigen Absicherung gegen eine
+  ausbleibende Belegungsliste. Er schreibt heute ein
+  `OCCUPANCY_IMPORT_STALE`-Audit und eine Logzeile — **kein Alarm erreicht
+  den Hotelier aktiv**. Solange FIAS als Rückfalloption galt, war das
+  vertretbar; als alleinige Quelle ist es das nicht.
+  **B-15b-1 (Alarm-Versand) wird deshalb zum Go-Live-Blocker mit Frist
+  25.10.2026.**
+- `STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §13 und die Phasen-Logik im
+  Strategie-Refresh verweisen auf diesen Eintrag.

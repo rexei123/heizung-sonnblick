@@ -1442,7 +1442,15 @@ verifizieren). Bug-Fixing aus Phase-2-Live-Beobachtung.
 
 ---
 
-# SPRINT 16a — PMS-Casablanca-Integration (Phase 5, conditional)
+# SPRINT 16a — PMS-Casablanca-Integration (Phase 5, conditional) — GESTRICHEN
+
+> **GESTRICHEN 2026-09-18 (AE-71).** FIAS entfaellt dauerhaft; der
+> Mail-Import (AE-66) ist seit 2026-06-07 die produktive PMS-Quelle und
+> damit der Zielzustand, nicht mehr der Zwischenschritt. B-11prep-1 ist
+> geschlossen. **Folge:** der Import-Watchdog ist jetzt die einzige
+> Absicherung gegen eine ausbleibende Belegungsliste — B-15b-1
+> (Alarm-Versand) wird dadurch zum Go-Live-Blocker mit Frist 25.10.2026.
+> Der Abschnitt bleibt als Historie stehen.
 
 **Priorität:** 🟠 (conditional auf FIAS-Antwort B-11prep-1)
 **Geschätzte Dauer:** 2-3 Wochen
