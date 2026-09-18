@@ -90,6 +90,11 @@ Sprint 5 läuft komplett lokal auf `work02`. Test-Server-Deployment ist Sprint 6
 1. **ChirpStack v4 Bootstrap-Komplexität:**
    ChirpStack-UI verlangt initialen Tenant + Admin + Application + DeviceProfile + JS-Codec. Bei jedem `docker compose down -v` muss alles neu rein.
    **Gegenmaßnahme:** Bootstrap-Skript (`infra/chirpstack/bootstrap.py` via gRPC API oder REST API) — idempotent, prüft erst ob Objekte existieren.
+   > **Richtigstellung 2026-09-18 (Sprint 17 / C1):** Dieses Skript wurde nie
+   > gebaut. Tenant, Application und DeviceProfile sind von Hand im
+   > ChirpStack-UI angelegt worden, der Codec ebenfalls (RUNBOOK §10c). Seit
+   > Sprint 17 gibt es `infra/chirpstack/provision_devices.py` — das legt
+   > allerdings nur *Geräte* an, nicht Tenant/Application/Profile/Codec.
 
 2. **MClimate Vicki Codec:**
    Hersteller stellt Codec als JS-File bereit (Quelle: MClimate Developer Hub). Format kann sich zwischen Firmware-Versionen ändern.
@@ -138,7 +143,8 @@ Entscheidungen A–F als ADR-Eintrag in `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md`. **
 **Dauer:** 1–1.5 h.
 
 ### 5.4 — ChirpStack initialisieren
-- Bootstrap-Skript `infra/chirpstack/bootstrap.py`:
+- Bootstrap-Skript `infra/chirpstack/bootstrap.py` *(nie umgesetzt — siehe
+  Richtigstellung oben unter Risiken)*:
   - Verbindet via ChirpStack-API (`localhost:8090` gRPC oder REST)
   - Idempotent: Tenant `Hotel Sonnblick`, Application `heizung`, DeviceProfile `MClimate Vicki` mit JS-Codec
   - JS-Codec aus `infra/chirpstack/codecs/mclimate-vicki.js`

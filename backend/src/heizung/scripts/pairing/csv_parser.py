@@ -5,13 +5,21 @@ Reports zum DB-Stand zurueck. Trennt drei Phasen sauber:
 
 1. ``parse_csv``: pure Parsing + Pydantic-Validation (kein DB-Zugriff).
 2. ``validate_against_db``: Pre-Flight-Lookup Zimmer + Zone in heizung-DB.
-3. ``check_dev_eui_duplicates``: Duplikat-Check innerhalb CSV + gegen DB.
+3. ``check_dev_eui_duplicates_in_csv``: Duplikat-Check innerhalb der CSV.
+4. ``find_existing_dev_euis``: welche DevEUIs stehen schon in der DB
+   (Information, kein Fehler — siehe Docstring dort).
 
 Convention (Phase-0 §F):
 - Encoding ``utf-8-sig`` (Excel-Bomb-Toleranz fuer deutsche Excel-Exporte).
 - Trennzeichen via ``csv.Sniffer().sniff(sample, delimiters=";,")`` —
   Excel-DE produziert oft Semikolon, Anglo-Excel Komma.
 - Spalten-Header werden case-insensitive auf Pydantic-Feldnamen gemappt.
+- Kopflose Spalten (leerer Header) werden ignoriert, nicht abgewiesen.
+
+Spalten (Sprint 17 / E4): ``stockwerk``, ``zimmer_nummer``, ``zimmer_typ``,
+``zone_label``, ``dev_eui``, ``app_key`` — dazu optional
+``hardware_nummer``, ``app_eui``, ``serial_number``. Reihenfolge egal,
+Gross-/Kleinschreibung egal, unbekannte Spalten werden ignoriert.
 
 Sanity-Limit: 200 Zeilen. Hotel Sonnblick hat 110 Vickis (Sprint-13a-
 Kontext); 200 ist sicherer Headroom mit Crash-Schutz gegen versehentliche
@@ -40,7 +48,22 @@ MAX_ROWS = 200
 """Sanity-Limit. 110 Vickis im Hotel Sonnblick, 200 ist Headroom mit Schutz
 gegen versehentliche Full-DB-Dumps."""
 
-_NULLABLE_FIELDS = frozenset({"stockwerk", "zimmer_nummer", "zimmer_typ", "zone_label"})
+_NULLABLE_FIELDS = frozenset(
+    {
+        "stockwerk",
+        # Sprint 17 (C8): die Montage-CSV wird ohne AppKey-Spalte exportiert.
+        "app_key",
+        "zimmer_nummer",
+        "zimmer_typ",
+        "zone_label",
+        # Sprint 17 (E4/C2): optionale Metadaten. Leere Zelle == "nicht
+        # erfasst" und darf nicht als Leerstring in die Validierung laufen
+        # (app_eui wuerde sonst am Hex-Pattern scheitern).
+        "hardware_nummer",
+        "app_eui",
+        "serial_number",
+    }
+)
 """Felder die leere Strings ("") als None interpretieren. dev_eui + app_key
 muessen immer gesetzt sein."""
 
@@ -57,6 +80,14 @@ def _row_to_dict(raw_row: dict[str, str], line_no: int) -> dict[str, object]:
     - Leere Strings in NULLABLE-Feldern auf None (Pydantic-int|None erlaubt
       sonst kein '').
     - Unbekannte Spalten werden ignoriert (Pydantic extra='ignore' default).
+    - **Kopflose Spalten werden uebersprungen** (Sprint 17 / C2): Excel-
+      Exporte schleppen haeufig eine leere Spalte mit — etwa Spalte J, in
+      der einmal etwas stand. ``csv.DictReader`` gibt ihr den Key ``""``
+      (leerer Header) bzw. ``None`` (mehr Werte als Header-Spalten). Beides
+      ist Rauschen, kein Datenfehler: der Hotelier soll die CSV nicht von
+      Hand nachbearbeiten muessen, bevor 104 Geraete importiert werden.
+      Zwei kopflose Spalten wuerden sonst als "doppelte Spalte ''"
+      abgewiesen.
 
     :raises ParseError: wenn ein Header-Key kollidiert (z.B. ``Dev_EUI`` und
         ``dev_eui`` gleichzeitig).
@@ -64,8 +95,12 @@ def _row_to_dict(raw_row: dict[str, str], line_no: int) -> dict[str, object]:
     cleaned: dict[str, object] = {}
     for raw_key, raw_val in raw_row.items():
         if raw_key is None:
+            # DictReader-``restkey``: Zeile hat mehr Werte als der Header
+            # Spalten. Ueberzaehlige Werte landen gesammelt unter None.
             continue
         key = _normalize_header(raw_key)
+        if key == "":
+            continue
         if key in cleaned:
             raise ParseError(f"Zeile {line_no}: doppelte Spalte '{key}' (case-insensitive).")
         value: object = raw_val.strip() if isinstance(raw_val, str) else raw_val
@@ -75,9 +110,14 @@ def _row_to_dict(raw_row: dict[str, str], line_no: int) -> dict[str, object]:
     return cleaned
 
 
-def parse_csv(path: Path) -> list[PairingCsvRow]:
+def parse_csv(path: Path, *, require_app_key: bool = True) -> list[PairingCsvRow]:
     """CSV-Datei einlesen, validieren und Liste der Rows zurueckgeben.
 
+    :param require_app_key: ``True`` (Default) fuer den Import — ohne AppKey
+        kann ChirpStack das Geraet nicht registrieren. ``False`` fuer
+        ``assign`` (Sprint 17 / C8): die Montage-CSV wird bewusst ohne
+        AppKey-Spalte exportiert, damit das Geheimnis nicht ein zweites Mal
+        ueber den Tisch wandert.
     :raises ParseError: bei strukturellen Problemen (zu viele Zeilen, kein
         Trennzeichen, kein Header) ODER wenn mindestens eine Row die
         Pydantic-Validation nicht besteht. ``ParseError.errors`` enthaelt
@@ -113,13 +153,18 @@ def parse_csv(path: Path) -> list[PairingCsvRow]:
             errors.append(str(exc))
             continue
         try:
-            rows.append(PairingCsvRow.model_validate(cleaned))
+            row = PairingCsvRow.model_validate(cleaned)
         except ValidationError as exc:
             # Pydantic-Errors kompakt: nur die Messages, ohne Loc-Paths.
             msgs = "; ".join(
                 f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
             )
             errors.append(f"Zeile {offset}: {msgs}")
+            continue
+        if require_app_key and row.app_key is None:
+            errors.append(f"Zeile {offset}: app_key fehlt (fuer den Import Pflicht).")
+            continue
+        rows.append(row)
 
     if errors:
         raise ParseError(f"{len(errors)} Zeile(n) mit Validierungs-Fehlern.", errors=errors)
@@ -139,7 +184,8 @@ async def validate_against_db(
     ``heating_zone.room_id == room.id`` AND ``heating_zone.name == row.zone_label``.
 
     Hinweis: ``Room.number`` ist VARCHAR(20) im Schema (kann "101", "201b"
-    sein); CSV-``zimmer_nummer`` ist int. Konvertierung via ``str()``.
+    sein). Seit Sprint 17 (C8/B-Sprint13a-2) ist ``zimmer_nummer`` ebenfalls
+    ein String — keine Konvertierung mehr noetig.
     ``HeatingZone.name`` ist VARCHAR(100) (Modell-Feldname ``name``, NICHT
     ``label`` — die CSV-Spalte heisst ``zone_label`` aus Hotelier-Sprache,
     wird auf das DB-Feld ``name`` gemappt).
@@ -158,7 +204,7 @@ async def validate_against_db(
         stmt = (
             select(HeatingZone.id)
             .join(Room, Room.id == HeatingZone.room_id)
-            .where(Room.number == str(row.zimmer_nummer))
+            .where(Room.number == row.zimmer_nummer)
             .where(HeatingZone.name == row.zone_label)
             .limit(1)
         )
@@ -171,32 +217,17 @@ async def validate_against_db(
     return errors
 
 
-async def check_dev_eui_duplicates(
-    rows: list[PairingCsvRow],
-    session: AsyncSession,
-) -> list[str]:
-    """Duplikat-Check: innerhalb CSV + gegen DB.
+def check_dev_eui_duplicates_in_csv(rows: list[PairingCsvRow]) -> list[str]:
+    """Duplikat-Check **innerhalb** der CSV. Reine Funktion, kein DB-Zugriff.
 
-    Innerhalb CSV: Set-basiert, pro Duplikat eine Nachricht mit den
-    kollidierenden Zeilen-Nummern.
+    Dieselbe DevEUI zweimal in einer Datei ist ein echter Datenfehler
+    (Copy-Paste im Excel, zwei Zeilen fuer dasselbe Geraet) und bleibt ein
+    harter Abbruchgrund.
 
-    Gegen DB: SELECT id, dev_eui FROM device WHERE dev_eui IN (...).
-    Bewusst KEIN ``retired_at IS NULL``-Filter (Sprint 13b.1, AE-57).
-    Migration 0018 hat die Voll-Unique-Constraint auf ``dev_eui``
-    durch einen Partial-Unique-Index ersetzt
-    (``ix_device_dev_eui_active_unique WHERE retired_at IS NULL``),
-    der DevEUI-Wiederverwendung nach Werksreset technisch erlaubt.
-    Dieser Pre-Flight-Check ist absichtlich strenger als die DB-
-    Constraint: er rejected auch retired Devices mit derselben
-    DevEUI. Begruendung: CSV-Bulk-Import ist nicht der Pfad fuer
-    Re-Pair nach Werksreset — das laeuft ueber den Sprint-13b
-    Tausch-Endpoint mit explizitem ``DEVICE_REPLACED``-Audit.
-
-    :return: Liste von Konflikt-Messages. Leere Liste = OK.
+    :return: Liste von Konflikt-Messages mit den kollidierenden Zeilen-
+        Nummern. Leere Liste = OK.
     """
     errors: list[str] = []
-
-    # Innerhalb CSV.
     seen: dict[str, int] = {}
     for offset, row in enumerate(rows, start=2):
         if row.dev_eui in seen:
@@ -205,12 +236,38 @@ async def check_dev_eui_duplicates(
             )
         else:
             seen[row.dev_eui] = offset
-
-    # Gegen DB.
-    if rows:
-        dev_euis = [row.dev_eui for row in rows]
-        stmt = select(Device.id, Device.dev_eui).where(Device.dev_eui.in_(dev_euis))
-        result = await session.execute(stmt)
-        for device_id, dev_eui in result.all():
-            errors.append(f"DevEUI {dev_eui} existiert bereits in DB (Device-ID {device_id}).")
     return errors
+
+
+async def find_existing_dev_euis(
+    rows: list[PairingCsvRow],
+    session: AsyncSession,
+) -> dict[str, int]:
+    """DevEUIs aus der CSV, die bereits als ``device``-Row existieren.
+
+    Bewusst KEIN ``retired_at IS NULL``-Filter (Sprint 13b.1, AE-57).
+    Migration 0018 hat die Voll-Unique-Constraint auf ``dev_eui`` durch
+    einen Partial-Unique-Index ersetzt
+    (``ix_device_dev_eui_active_unique WHERE retired_at IS NULL``), der
+    DevEUI-Wiederverwendung nach Werksreset technisch erlaubt. Auch ein
+    retired Geraet zaehlt hier als "existiert" — Re-Pair nach Werksreset
+    laeuft ueber den Sprint-13b-Tausch-Endpoint mit explizitem
+    ``DEVICE_REPLACED``-Audit, nicht ueber den CSV-Import.
+
+    **Sprint 17 (E4/C2) — Verhaltensaenderung.** Bis Sprint 16 war ein
+    bereits vorhandenes Geraet ein Pre-Flight-**Fehler** und brach den
+    gesamten Import ab. Das ist mit der Metadaten-Anreicherung nicht mehr
+    haltbar: die vier Testgeraete (Vicki-001..004) stehen in der DB und
+    sollen aus derselben CSV ihre AppEUI und Seriennummer bekommen. Ein
+    Abbruch waere genau der Fall, den E4 ermoeglichen soll. Die Existenz
+    ist deshalb jetzt eine **Information** — der Pairing-Service
+    entscheidet pro Zeile zwischen Anreichern und Konflikt.
+
+    :return: Mapping ``dev_eui -> device.id``. Leeres Dict = alles neu.
+    """
+    if not rows:
+        return {}
+    dev_euis = [row.dev_eui for row in rows]
+    stmt = select(Device.dev_eui, Device.id).where(Device.dev_eui.in_(dev_euis))
+    result = await session.execute(stmt)
+    return dict(result.all())  # type: ignore[arg-type]  # Row[str, int] -> (str, int)

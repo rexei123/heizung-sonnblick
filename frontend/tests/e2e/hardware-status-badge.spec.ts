@@ -6,6 +6,10 @@ import { test, expect } from "@playwright/test";
  * /zimmer/[id]-Geraete-Tab.
  *
  * Backend wird via page.route gemockt — kein laufender FastAPI noetig.
+ *
+ * Sprint 17 (C9): Beschriftung von "Aktiv"/"Inaktiv" auf "Montiert"/
+ * "Nicht montiert"/"Keine Daten (30 Min)" umgestellt. Die drei Zustaende
+ * selbst pruefen tests/e2e/sprint-17-hardware-status-drei-zustaende.spec.ts.
  */
 
 const SAMPLE_DEVICE = {
@@ -92,9 +96,11 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
     // Sprint 14a.1 Wording: Spalte heisst jetzt "Gerät" (Hardware-Status-Badge,
     // Status-Spalte gesplittet in Gerät + Zone).
     await expect(page.locator("th").filter({ hasText: "Gerät" })).toBeVisible();
-    // Detailed-Variante: Badge mit "Aktiv" plus "Zuletzt: ..."-Hinweis
-    await expect(page.getByText("Aktiv").first()).toBeVisible();
-    await expect(page.getByText(/Zuletzt:/)).toBeVisible();
+    // Detailed-Variante: Badge plus Unterzeile. Ueber die Testid, weil im
+    // Pill das Icon-Glyph vor dem Label steht (exact-Text greift nicht).
+    const badge = page.getByTestId("hardware-status").first();
+    await expect(badge).toContainText("Montiert");
+    await expect(badge).toContainText(/Montiert zuletzt:/);
   });
 
   test("Badge erscheint auf /devices/[id] Detail-Page", async ({ page }) => {
@@ -128,9 +134,10 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
 
     // Sprint 9.13c Wording: Detail-Page-Label heisst jetzt "Status"
     await expect(page.getByText("Status", { exact: true })).toBeVisible();
-    // Detailed-Variante: Aktiv-Label + Zuletzt-Hinweis
-    await expect(page.getByText("Aktiv").first()).toBeVisible();
-    await expect(page.getByText(/Zuletzt:/)).toBeVisible();
+    // Detailed-Variante: Label + Unterzeile.
+    const badge = page.getByTestId("hardware-status").first();
+    await expect(badge).toContainText("Montiert");
+    await expect(badge).toContainText(/Montiert zuletzt:/);
   });
 
   test("Badge erscheint auf /zimmer/[id] Geraete-Tab", async ({ page }) => {
@@ -180,6 +187,6 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
     await page.getByRole("button", { name: "Geräte", exact: true }).click();
 
     // Compact-Badge neben Bezeichnung sichtbar
-    await expect(page.getByText("Aktiv").first()).toBeVisible();
+    await expect(page.getByTestId("hardware-status").first()).toContainText("Montiert");
   });
 });

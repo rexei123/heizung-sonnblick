@@ -48,6 +48,7 @@ from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service
 from heizung.services.battery_health import DEFAULT_BATTERY_WARN_PCT, battery_health_state
 from heizung.services.device_service import (
+    assign_zone,
     get_device_with_relations,
     get_latest_reading,
     get_pool_devices,
@@ -350,27 +351,31 @@ async def update_device(
 async def assign_device_to_zone(
     payload: DeviceAssignZoneRequest,
     device_id: int = DeviceIdPath,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
-    device = await session.get(Device, device_id)
-    if device is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="device_not_found",
-        )
+    """Sprint 17 (C8): Logik liegt jetzt in ``device_service.assign_zone``.
 
-    zone = await session.get(HeatingZone, payload.heating_zone_id)
-    if zone is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="heating_zone_not_found",
-        )
+    Der Endpoint war bis Sprint 16 inline implementiert und schrieb **kein**
+    Audit — die einzige Spur einer Zonen-Zuordnung war eine Logzeile. Mit dem
+    ``assign``-CLI kam ein zweiter Schreibpfad dazu; beide nutzen jetzt
+    dieselbe Funktion und erzeugen dasselbe ``DEVICE_ZONE_ASSIGNED``-Audit.
 
-    if device.heating_zone_id == payload.heating_zone_id:
+    Fehler kommen als ``DeviceNotFound`` / ``ZoneNotFound`` (AE-59) mit
+    ``error_code`` im Body statt als nackte 404-``detail``-Strings.
+    """
+    device, changed = await assign_zone(
+        session,
+        device_id=device_id,
+        heating_zone_id=payload.heating_zone_id,
+        user_id=user.id,
+        source="api",
+    )
+    if not changed:
         return device
 
-    device.heating_zone_id = payload.heating_zone_id
+    zone = await session.get(HeatingZone, payload.heating_zone_id)
+    assert zone is not None  # assign_zone haette sonst ZoneNotFound geworfen
     await session.commit()
     await session.refresh(device)
 

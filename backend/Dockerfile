@@ -22,8 +22,13 @@ RUN pip install --no-cache-dir -e ".[dev]"
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY tests ./tests
-# Sprint 9.11x.b: One-Shot-Skripte (Bulk-Aktivierung Open-Window-Detection
-# etc.). Aufruf via `docker exec deploy-api-1 python scripts/<name>.py`.
+# Hand-Smoke-Tools ohne Test-Coverage (heute nur smoke_engine_lock.py).
+# Die Hotelier-Skripte liegen NICHT hier, sondern als Sub-Package in src/ und
+# kommen ueber den editable Install ins Image. Aufruf seit Sprint 17
+# einheitlich via `docker exec <api-container> python -m heizung.scripts.<name>`
+# (seed_rooms, pair_devices, activate_open_window_detection,
+# sync_room_statuses). Der alte Pfad `python scripts/<name>.py` gilt nur noch
+# fuer die Smoke-Tools in diesem Verzeichnis.
 COPY scripts ./scripts
 
 # Entrypoint (führt beim Start automatisch alembic upgrade head aus)

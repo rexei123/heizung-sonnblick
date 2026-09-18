@@ -1,0 +1,52 @@
+name: ChirpStack-Tools CI
+
+# Sprint 17 (C1): infra/chirpstack/ liegt bewusst ausserhalb des Backend-
+# Packages (D3 — chirpstack-api ist keine Abhaengigkeit des API-Images).
+# backend-ci.yml filtert auf `backend/**` und wuerde dieses Skript nie
+# pruefen. Eigener Workflow, gleiche Gates wie das Backend.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "infra/chirpstack/**"
+      - ".github/workflows/chirpstack-tools-ci.yml"
+  pull_request:
+    paths:
+      - "infra/chirpstack/**"
+      - ".github/workflows/chirpstack-tools-ci.yml"
+
+defaults:
+  run:
+    working-directory: infra/chirpstack
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        # Bewusst OHNE requirements-provision.txt: die Tests laufen gegen
+        # einen Doppelgaenger des gRPC-Clients, nicht gegen chirpstack-api.
+        # Das haelt die CI schnell und beweist nebenbei, dass der Import
+        # wirklich lazy ist.
+        run: pip install "ruff>=0.3" "mypy>=1.9" "pytest>=8.0"
+
+      - name: Ruff (Lint)
+        run: ruff check .
+
+      - name: Ruff (Format-Check)
+        run: ruff format --check .
+
+      - name: Mypy (Type-Check)
+        run: mypy provision_devices.py
+
+      - name: Pytest
+        run: pytest -q

@@ -1,4 +1,4 @@
-"""Pairing-Service: legt Device-Row + DEVICE_PAIRED-Audit + OW-Downlink an (Sprint 13a T4).
+"""Pairing-Service: legt Device-Row + DEVICE_PAIRED-Audit an (Sprint 13a T4).
 
 Konsumiert ``PairingCsvRow`` (T2) + Pre-Flight-Validierung (T3).
 ``pair_batch`` iteriert mit Pro-Row-Savepoint (``session.begin_nested()``)
@@ -8,31 +8,68 @@ T6), damit Tests die Session am Ende sauber rollback koennen
 (analog ``test_override_pms_hook`` Pattern).
 
 ``app_key`` aus der CSV wird **nicht** in der heizung-DB persistiert.
-Der AppKey gehoert zur ChirpStack-Registrierung (Hotelier macht das
-manuell vor September via ChirpStack-Web-UI-Bulk-Import) — heizung-DB
-kennt nur ``dev_eui`` als Identifier-Schluessel. Die CSV-Spalte
-``app_key`` ist informational fuer den Hotelier zum Cross-Reference
-mit der ChirpStack-UI.
+Der AppKey gehoert zur ChirpStack-Registrierung (Sprint 17 / C1:
+``infra/chirpstack/provision_devices.py``) — heizung-DB kennt nur
+``dev_eui`` als Identifier-Schluessel. Die CSV-Spalte ``app_key`` ist
+Eingabe fuer das Provisioning-Skript und Cross-Reference fuer den
+Hotelier.
+
+Sprint 17 (Entscheidung E3, Task C3): **Der Pairing-Lauf sendet keinen
+Downlink mehr.** Bis Sprint 16 schickte Gate 5 hier einen
+Open-Window-Detection-Downlink (``0x45``) an jedes frisch gepairte
+Geraet. Das war aus drei Gruenden falsch:
+
+1. **Kein FW-Gate.** ``set_open_window_detection`` kodiert die
+   0x45-Variante, die erst ab FW >= 4.2 existiert. Der Pairing-Lauf
+   kennt die Firmware des Geraets zu diesem Zeitpunkt nicht — bei drei
+   Produktionschargen ging der Befehl blind raus (B-9.11x.b-2).
+2. **S4 (Hardware-Schutz).** Ein CSV-Import ist ein Datenbank-Vorgang.
+   Dass er als Seiteneffekt ~104 Funkbefehle an produktive Hardware
+   ausloest — im ``--dry-run`` sogar dann, wenn die DB-Aenderung
+   verworfen wird — ist ein Befehlspfad ohne Bestaetigungs-Strategie.
+3. **Reihenfolge.** Die Open-Window-Detection gehoert nach der Montage
+   gesetzt, nicht beim Tisch-Import.
+
+Der OW-Rollout laeuft stattdessen ueber
+``heizung.scripts.activate_open_window_detection`` — dasselbe Vendor-
+Byte-Layout, aber mit FW-Query (0x04), Wartezeit und FW-Gate
+(``MIN_FW_FOR_OW_SET``). RUNBOOK §10h beschreibt die Reihenfolge.
 
 Gate-Stack-Reihenfolge (§S5 Defensive bei externen Quellen):
 
-1. ``DEV_EUI_EXISTS``: Pre-Check, kein Audit, kein Downlink (skipped).
+1. Geraet existiert bereits -> ``_handle_existing``: leere Metadaten-
+   Felder befuellen (``enriched``), abweichende melden (``conflict``),
+   nichts zu tun (``skipped_exists``). Zone bleibt unangetastet.
 2. ``ZONE_NOT_FOUND``: Defensive — Pre-Flight ``validate_against_db``
    (T3) sollte das schon abfangen. Hier nur Sicherheitsnetz.
-3. Device-Row anlegen + flush.
+3. Device-Row anlegen + flush, inkl. der optionalen Metadaten.
 4. ``DEVICE_PAIRED``-BusinessAudit in derselben Transaktion.
-5. Open-Window-Detection-Downlink (``0x4501020F``-aequivalent via
-   ``set_open_window_detection`` AE-48). Bei Downlink-Failure bleibt
-   die Device-Row erhalten (kein Rollback), Status ``error`` — der
-   Downlink kann via Eingangstest (T5) oder manueller Re-Send
-   wiederholt werden.
+
+Sprint 17 (E4/C2) — Metadaten-Anreicherung
+------------------------------------------
+
+Die CSV bringt optional ``hardware_nummer``, ``app_eui`` und
+``serial_number`` mit (Abbildung siehe ``csv_row``-Docstring). Fuer neue
+Geraete wandern sie direkt in die Device-Row. Fuer **bestehende** Geraete
+gilt: nachtragen, nie korrigieren. Leere Felder werden befuellt,
+abweichende Werte bleiben stehen und werden als Konflikt gemeldet.
+
+Das ist der Fall der vier Testgeraete: sie stehen seit Sprint 6 in der DB,
+haben aber weder AppEUI noch Seriennummer. Aus derselben CSV, aus der die
+100 neuen Geraete kommen, holen sie sich die fehlenden Werte — ohne dass
+ihr gewachsenes ``label`` stillschweigend ueberschrieben wird.
+
+Der Lauf ist damit rein transaktional: entweder Device-Row + Audit
+stehen, oder die Row ist nicht angelegt. Kein Teil-Zustand aus einem
+fehlgeschlagenen Funkbefehl mehr (B-Sprint13a-5 ist damit gegenstandslos
+— es gibt keinen ``pending_ow_resend``-Zustand, den man markieren
+muesste).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import select
@@ -42,7 +79,6 @@ from heizung.models.enums import DeviceKind, DeviceVendor
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.downlink_adapter import set_open_window_detection
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,19 +87,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Open-Window-Detection-Defaults aus AE-47-Vendor-Konvention
-# (identisch zu ``scripts/activate_open_window_detection.py``).
-OW_DEFAULT_ENABLED: bool = True
-OW_DEFAULT_DURATION_MIN: int = 10
-OW_DEFAULT_DELTA_C: Decimal = Decimal("1.5")
-
 # Vicki-Hardware-Identifikation. Heute pairen wir ausschliesslich
 # MClimate-Vickis (Thermostat). Andere Vendoren / Sensor-Devices
 # laufen ueber eigenen Pfad, nicht ueber diesen CSV-Import.
 DEVICE_MODEL_VICKI: str = "Vicki"
 
+# Sprint 17 (E4/C2): Abbildung CSV-Spalte -> Device-Spalte fuer die drei
+# optionalen Metadaten. Begruendung der Zuordnung steht im Modul-Docstring
+# von ``csv_row`` (AE-61 fuer hardware_number, D5 fuer label).
+METADATA_MAP: dict[str, str] = {
+    "hardware_nummer": "label",
+    "app_eui": "app_eui",
+    "serial_number": "hardware_number",
+}
 
-PairStatus = Literal["paired", "skipped_exists", "error"]
+
+PairStatus = Literal["paired", "enriched", "skipped_exists", "conflict", "error"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,11 +110,22 @@ class PairResult:
     """Ein Pairing-Ergebnis pro CSV-Row.
 
     ``status``:
-    - ``paired``: Device-Row angelegt, Audit geschrieben, Downlink OK.
-    - ``skipped_exists``: DevEUI existiert bereits in DB, kein Side-Effekt.
-    - ``error``: Pairing fehlgeschlagen oder Downlink failed. Bei
-      Downlink-Failure ist das Device dennoch in DB (``device_id``
-      gesetzt).
+    - ``paired``: Device-Row neu angelegt, Audit geschrieben.
+    - ``enriched``: Geraet existierte, mindestens ein leeres Metadaten-Feld
+      wurde aus der CSV befuellt (Sprint 17 / E4).
+    - ``skipped_exists``: Geraet existierte, nichts zu befuellen, kein
+      Widerspruch — echter No-op.
+    - ``conflict``: Geraet existierte und die CSV nennt fuer mindestens ein
+      Feld einen **anderen**, nicht-leeren Wert. Der Bestand wird **nicht**
+      ueberschrieben; leere Felder derselben Zeile werden trotzdem befuellt.
+    - ``error``: Pairing fehlgeschlagen. Seit Sprint 17 (C3) gibt es
+      keinen Downlink-Pfad mehr, der eine Device-Row zuruecklaesst —
+      ``error`` bedeutet ausnahmslos: **keine** Device-Row angelegt
+      (``device_id is None``).
+
+    ``filled`` und ``conflicts`` sind nur bei ``enriched``/``conflict``/
+    ``skipped_exists`` gefuellt und tragen die betroffenen **Device**-
+    Spaltennamen.
     """
 
     status: PairStatus
@@ -84,23 +134,156 @@ class PairResult:
     is_pool: bool
     device_id: int | None = None
     error_msg: str | None = None
+    filled: tuple[str, ...] = ()
+    conflicts: tuple[str, ...] = ()
 
 
-async def _lookup_zone(session: AsyncSession, zimmer_nummer: int, zone_label: str) -> int | None:
+def _csv_metadata(row: PairingCsvRow) -> dict[str, str]:
+    """Gesetzte Metadaten der Zeile als ``device``-Spalte -> Wert.
+
+    ``None``-Werte (Spalte fehlt oder Zelle leer) fallen raus — eine nicht
+    erfasste Angabe darf einen Bestandswert weder ueberschreiben noch als
+    Konflikt gelten.
+    """
+    out: dict[str, str] = {}
+    for csv_field, device_attr in METADATA_MAP.items():
+        value = getattr(row, csv_field)
+        if value is not None:
+            out[device_attr] = value
+    return out
+
+
+def _reconcile_metadata(device: Device, row: PairingCsvRow) -> tuple[list[str], list[str]]:
+    """Gleicht die CSV-Metadaten gegen ein **bestehendes** Geraet ab.
+
+    Regel (Sprint 17 / E4): leere Bestandsfelder werden befuellt,
+    abweichende Werte werden **nicht** ueberschrieben, sondern gemeldet.
+    Der Import ist damit nachtragend, nie korrigierend — eine Korrektur
+    ist ein bewusster Einzelakt ueber ``PATCH /api/v1/devices/{id}``.
+
+    Mutiert ``device`` fuer die befuellbaren Felder (Caller flusht/committet).
+
+    :return: ``(befuellte Spalten, widerspruechliche Spalten)``, beide
+        sortiert fuer deterministische Ausgabe.
+    """
+    filled: list[str] = []
+    conflicts: list[str] = []
+    for device_attr, csv_value in _csv_metadata(row).items():
+        current = getattr(device, device_attr)
+        if current is None or current == "":
+            setattr(device, device_attr, csv_value)
+            filled.append(device_attr)
+        elif current != csv_value:
+            conflicts.append(device_attr)
+    return sorted(filled), sorted(conflicts)
+
+
+async def _lookup_zone(session: AsyncSession, zimmer_nummer: str, zone_label: str) -> int | None:
     """Aufloesung ``(zimmer_nummer, zone_label) -> heating_zone.id``.
 
     Identische Lookup-Logik wie ``validate_against_db`` aus T3
-    (``Room.number == str(...)`` + ``HeatingZone.name == ...``).
+    (``Room.number == ...`` + ``HeatingZone.name == ...``).
     """
     stmt = (
         select(HeatingZone.id)
         .join(Room, Room.id == HeatingZone.room_id)
-        .where(Room.number == str(zimmer_nummer))
+        .where(Room.number == zimmer_nummer)
         .where(HeatingZone.name == zone_label)
         .limit(1)
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def _handle_existing(
+    device: Device,
+    row: PairingCsvRow,
+    row_number: int,
+    session: AsyncSession,
+    *,
+    user_id: int | None,
+) -> PairResult:
+    """Gate 1b (Sprint 17 / E4): Geraet existiert — anreichern statt abweisen.
+
+    Die Zone-Zuordnung bleibt **unangetastet**. Ein bereits gepairtes Geraet
+    umzuhaengen ist Aufgabe von ``assign`` bzw. des Tausch-Endpoints, nicht
+    des Imports — sonst wuerde ein versehentlich zweimal eingelesenes CSV
+    stillschweigend Zonen verschieben (S2/S4).
+    """
+    filled, conflicts = _reconcile_metadata(device, row)
+
+    if filled:
+        await session.flush()
+        await record_business_action(
+            session,
+            user_id=user_id,
+            action="DEVICE_METADATA_ENRICHED",
+            target_type="device",
+            target_id=device.id,
+            old_value=None,
+            new_value={
+                "dev_eui": row.dev_eui,
+                "filled_fields": filled,
+                "conflicting_fields": conflicts,
+                "csv_row_number": row_number,
+            },
+        )
+
+    if conflicts:
+        details = ", ".join(
+            f"{attr}: DB={getattr(device, attr)!r} != CSV={_csv_metadata(row)[attr]!r}"
+            for attr in conflicts
+        )
+        msg = (
+            f"METADATA_CONFLICT: {details}. Bestand NICHT ueberschrieben — "
+            "Korrektur bewusst via PATCH /api/v1/devices/{id}."
+        )
+        if filled:
+            msg += f" Befuellt wurden: {', '.join(filled)}."
+        logger.warning("pair_device conflict: dev_eui=%s %s", row.dev_eui, details)
+        return PairResult(
+            status="conflict",
+            dev_eui=row.dev_eui,
+            row_number=row_number,
+            is_pool=row.is_pool_device,
+            device_id=device.id,
+            error_msg=msg,
+            filled=tuple(filled),
+            conflicts=tuple(conflicts),
+        )
+
+    if filled:
+        logger.info(
+            "pair_device enriched: dev_eui=%s device_id=%s felder=%s",
+            row.dev_eui,
+            device.id,
+            filled,
+        )
+        return PairResult(
+            status="enriched",
+            dev_eui=row.dev_eui,
+            row_number=row_number,
+            is_pool=row.is_pool_device,
+            device_id=device.id,
+            filled=tuple(filled),
+        )
+
+    logger.info(
+        "pair_device skipped: dev_eui=%s existiert bereits (device_id=%s), nichts zu ergaenzen",
+        row.dev_eui,
+        device.id,
+    )
+    return PairResult(
+        status="skipped_exists",
+        dev_eui=row.dev_eui,
+        row_number=row_number,
+        is_pool=row.is_pool_device,
+        device_id=device.id,
+        error_msg=(
+            "DEV_EUI_EXISTS: keine neuen Metadaten. Re-Pair nach Werksreset "
+            "laeuft ueber den Sprint-13b-Tausch-Workflow."
+        ),
+    )
 
 
 async def pair_device(
@@ -110,16 +293,14 @@ async def pair_device(
     *,
     user_id: int | None = None,
 ) -> PairResult:
-    """Pairt ein einzelnes Geraet: Device-Row + Audit + OW-Downlink.
+    """Pairt ein einzelnes Geraet: Device-Row + Audit.
 
     Caller ist fuer ``session.commit()`` zustaendig (vgl. override_service-
     Pattern). Diese Funktion macht nur ``flush()``, damit ``device.id``
     fuer Audit + Logger verfuegbar ist.
 
-    Downlink-Fehler werden hier gefangen und in ``PairResult(status=
-    "error")`` konvertiert — der Device-Row bleibt erhalten, damit
-    ein nachgelagerter Eingangstest (T5) oder manueller Re-Send den
-    Downlink wiederholen kann.
+    Sprint 17 (C3): kein Downlink mehr. Die Funktion beruehrt
+    ausschliesslich die Datenbank.
 
     :param row: validierte Pydantic-Row aus T2/T3.
     :param row_number: 1-basierter CSV-Zeilen-Offset (Zeile 1 = Header,
@@ -135,25 +316,10 @@ async def pair_device(
     # 13b.1, AE-57). Pre-Flight-Disziplin: CSV-Bulk-Pairing rejected auch
     # retired Devices mit identischer DevEUI. Re-Pair nach Werksreset
     # geht ueber Tausch-Endpoint (DEVICE_REPLACED), nicht CSV.
-    existing_stmt = select(Device.id).where(Device.dev_eui == row.dev_eui)
-    existing_id = (await session.execute(existing_stmt)).scalar_one_or_none()
-    if existing_id is not None:
-        logger.info(
-            "pair_device skipped: dev_eui=%s existiert bereits (device_id=%s)",
-            row.dev_eui,
-            existing_id,
-        )
-        return PairResult(
-            status="skipped_exists",
-            dev_eui=row.dev_eui,
-            row_number=row_number,
-            is_pool=row.is_pool_device,
-            device_id=existing_id,
-            error_msg=(
-                "DEV_EUI_EXISTS: Re-Pair via Sprint 13b Tausch-Workflow "
-                "(retired_at + replaced_by_device_id)."
-            ),
-        )
+    existing_stmt = select(Device).where(Device.dev_eui == row.dev_eui)
+    existing = (await session.execute(existing_stmt)).scalar_one_or_none()
+    if existing is not None:
+        return await _handle_existing(existing, row, row_number, session, user_id=user_id)
 
     # Gate 2: Zone-Lookup falls Active-Row.
     heating_zone_id: int | None = None
@@ -178,13 +344,15 @@ async def pair_device(
                 ),
             )
 
-    # Gate 3: Device-Row anlegen.
+    # Gate 3: Device-Row anlegen, inkl. der optionalen Metadaten (E4/C2).
+    metadata = _csv_metadata(row)
     device = Device(
         dev_eui=row.dev_eui,
         kind=DeviceKind.THERMOSTAT,
         vendor=DeviceVendor.MCLIMATE,
         model=DEVICE_MODEL_VICKI,
         heating_zone_id=heating_zone_id,
+        **metadata,
     )
     session.add(device)
     await session.flush()
@@ -203,44 +371,20 @@ async def pair_device(
             "heating_zone_id": heating_zone_id,
             "is_pool": row.is_pool_device,
             "csv_row_number": row_number,
+            # Welche Metadaten der Import mitgebracht hat — leere Spalten
+            # erscheinen nicht, damit "nicht erfasst" und "leer gesetzt"
+            # im Audit unterscheidbar bleiben.
+            "metadata": metadata,
         },
     )
 
-    # Gate 5: Open-Window-Detection-Downlink (AE-48).
-    # Pool-Geraete bekommen ebenfalls den OW-Downlink — Reserve soll
-    # ab Werkseinstellung funktionsbereit sein wenn spaeter zugewiesen.
-    try:
-        await set_open_window_detection(
-            row.dev_eui,
-            enabled=OW_DEFAULT_ENABLED,
-            duration_min=OW_DEFAULT_DURATION_MIN,
-            delta_c=OW_DEFAULT_DELTA_C,
-        )
-    except Exception as exc:  # noqa: BLE001 — Downlink-Failure ist Soft-Fail
-        # Device-Row + Audit bleiben in DB. Downlink kann via Eingangstest
-        # (T5) oder manuellem Re-Send wiederholt werden. Re-Run des CSV-
-        # Imports trifft Gate 1 (skipped_exists), kein Doppel-Insert.
-        logger.warning(
-            "pair_device: OW-Downlink failed dev_eui=%s device_id=%s exc=%s",
-            row.dev_eui,
-            device.id,
-            exc,
-        )
-        return PairResult(
-            status="error",
-            dev_eui=row.dev_eui,
-            row_number=row_number,
-            is_pool=row.is_pool_device,
-            device_id=device.id,
-            error_msg=f"DOWNLINK_FAILED: {type(exc).__name__}: {exc}",
-        )
-
     logger.info(
-        "pair_device ok: dev_eui=%s device_id=%s heating_zone_id=%s is_pool=%s",
+        "pair_device ok: dev_eui=%s device_id=%s heating_zone_id=%s is_pool=%s metadata=%s",
         row.dev_eui,
         device.id,
         heating_zone_id,
         row.is_pool_device,
+        sorted(metadata),
     )
     return PairResult(
         status="paired",
@@ -248,6 +392,7 @@ async def pair_device(
         row_number=row_number,
         is_pool=row.is_pool_device,
         device_id=device.id,
+        filled=tuple(sorted(metadata)),
     )
 
 
@@ -260,11 +405,10 @@ async def pair_batch(
     """Iteriert ueber alle Rows mit Pro-Row-Savepoint-Isolation.
 
     Pro Row ``session.begin_nested()``-Savepoint. Bei sauberem Durchlauf
-    (auch bei Downlink-Failure mit ``PairResult.status="error"`` und
-    erhaltenem Device-Row) wird der Savepoint committed. Bei
-    unerwarteter Exception (z.B. DB-Connection-Drop, Schema-Verstoss)
-    wird der Savepoint rollback und ein Error-Result eingehaengt;
-    nachfolgende Rows werden trotzdem versucht.
+    wird der Savepoint committed. Bei unerwarteter Exception (z.B.
+    DB-Connection-Drop, Schema-Verstoss) wird der Savepoint rollback und
+    ein Error-Result eingehaengt; nachfolgende Rows werden trotzdem
+    versucht.
 
     Top-Level-``commit()`` ist Caller-Aufgabe (CLI T6) — diese Funktion
     flusht nur, damit Tests die Session am Ende sauber rollback koennen

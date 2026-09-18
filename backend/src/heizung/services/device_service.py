@@ -7,6 +7,8 @@ Single Source of Truth fuer Device-Lifecycle-Operationen:
 - ``replace_device`` — atomarer Pool-Reassign-Tausch (alt retiren +
   neu zuweisen + DEVICE_REPLACED-Audit in einer Transaktion).
 - ``retire_device`` — Stilllegung ohne Ersatz (DEVICE_RETIRED-Audit).
+- ``assign_zone`` — Zonen-Zuordnung mit DEVICE_ZONE_ASSIGNED-Audit
+  (Sprint 17 / C8; vorher inline im Endpoint und ohne Audit).
 
 Race-Safety bei ``replace_device``: der UPDATE-Statement-WHERE-Block
 (``heating_zone_id IS NULL AND retired_at IS NULL``) ist die echte
@@ -48,6 +50,7 @@ from heizung.services.exceptions import (  # noqa: F401 — re-export
     DeviceStateError,
     PoolDeviceUnavailable,
     SelfReplacementError,
+    ZoneNotFound,
 )
 
 
@@ -317,3 +320,67 @@ async def retire_device(
     )
     await session.refresh(device)
     return device
+
+
+async def assign_zone(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    heating_zone_id: int,
+    user_id: int | None,
+    source: str,
+) -> tuple[Device, bool]:
+    """Ordnet ein Geraet einer Heizzone zu. Caller committet.
+
+    Sprint 17 (C8): bis hierher lebte diese Logik **inline** im Endpoint
+    ``PUT /api/v1/devices/{id}/heating-zone`` — ohne Service-Funktion und
+    **ohne Audit**. Der Phase-0-Quellcheck hat das aufgedeckt: die einzige
+    Spur einer Zonen-Zuordnung war eine Logzeile. Mit dem ``assign``-CLI kam
+    ein zweiter Schreibpfad dazu; zwei Pfade mit je eigener Logik waeren die
+    Vorlage fuer genau die Art Drift, die §5.53 beschreibt. Also: eine
+    Funktion, ein Audit, zwei Aufrufer.
+
+    **Absichtlich nicht hier:** die Pruefung "Zone hat schon ein Geraet".
+    Mehrere Vickis pro Zone sind ausdruecklich vorgesehen (AE-51, Aggregat-
+    Lesen und symmetrisches Schreiben). Das ist eine Regel des
+    Montage-Workflows, keine Domaenen-Invariante — sie lebt im Pre-Flight
+    von ``assign``, nicht hier.
+
+    :param source: landet im Audit (``api`` oder ``assign_cli``), damit im
+        Nachhinein erkennbar ist, welcher Weg die Zuordnung gesetzt hat.
+    :return: ``(device, veraendert)``. ``veraendert=False`` heisst: das
+        Geraet hing bereits an dieser Zone, es wurde nichts geschrieben und
+        kein Audit erzeugt (Idempotenz).
+    :raises DeviceNotFound: Geraet existiert nicht.
+    :raises ZoneNotFound: Zone existiert nicht.
+    """
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise DeviceNotFound(f"Device {device_id} nicht gefunden.")
+
+    zone = await session.get(HeatingZone, heating_zone_id)
+    if zone is None:
+        raise ZoneNotFound(f"HeatingZone {heating_zone_id} nicht gefunden.")
+
+    previous_zone_id = device.heating_zone_id
+    if previous_zone_id == heating_zone_id:
+        return device, False
+
+    device.heating_zone_id = heating_zone_id
+    await session.flush()
+
+    await record_business_action(
+        session,
+        user_id=user_id,
+        action="DEVICE_ZONE_ASSIGNED",
+        target_type="device",
+        target_id=device.id,
+        old_value={"heating_zone_id": previous_zone_id},
+        new_value={
+            "heating_zone_id": heating_zone_id,
+            "room_id": zone.room_id,
+            "dev_eui": device.dev_eui,
+            "source": source,
+        },
+    )
+    return device, True

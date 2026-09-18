@@ -16,15 +16,24 @@ IS NOT NULL``):
    - FW NULL : skip + Warning (Vicki hat nicht geantwortet)
 4. Tabellen-Output: dev_eui, label, fw_version, action, result.
 
-Aufruf (auf heizung-test):
+Aufruf (Sprint 17 / B-Sprint13a-1: einheitlicher ``-m``-Pfad wie
+``seed_rooms`` und ``pair_devices``, Container-Name nicht hart annehmen,
+Prod-Pattern ``deploy-api-1``):
 
-    docker exec deploy-api-1 python scripts/activate_open_window_detection.py
-    docker exec deploy-api-1 python scripts/activate_open_window_detection.py --wait-secs 600
+    docker exec <api-container> python -m heizung.scripts.activate_open_window_detection
+    docker exec <api-container> python -m heizung.scripts.activate_open_window_detection \
+        --wait-secs 600
 
 Lokal:
 
     cd backend; $env:ENVIRONMENT = "test"; $env:DATABASE_URL = "..."
-    .\.venv\Scripts\python.exe scripts\activate_open_window_detection.py
+    .\.venv\Scripts\python.exe -m heizung.scripts.activate_open_window_detection
+
+Sprint 17 (E3/C3): Seit dem Entfernen des Open-Window-Downlinks aus dem
+Pairing-Service ist dieses Skript der **einzige** Weg, die Open-Window-
+Detection auf den Vickis zu setzen. Der Gewinn gegenueber dem alten
+Pairing-Downlink ist das FW-Gate (``MIN_FW_FOR_OW_SET``): Geraete mit
+FW < 4.2 werden uebersprungen statt blind mit 0x45 beschickt.
 
 S4-relevant: aktiviert produktive Vicki-Hardware-Konfiguration.
 Idempotent — Re-Run sendet die gleichen 0x45-Bytes erneut, kein
@@ -54,6 +63,11 @@ from sqlalchemy import select  # noqa: E402
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
 from heizung.models.enums import DeviceKind  # noqa: E402
+from heizung.scripts.pairing.firmware import (  # noqa: E402
+    MIN_FW_FOR_OW_SET,
+    min_fw_text,
+    parse_fw_tuple,
+)
 from heizung.services.downlink_adapter import (  # noqa: E402
     get_open_window_detection,
     query_firmware_version,
@@ -68,25 +82,9 @@ OW_DEFAULT_ENABLED: bool = True
 OW_DEFAULT_DURATION_MIN: int = 10
 OW_DEFAULT_DELTA_C: Decimal = Decimal("1.5")
 
-# Mindest-FW fuer 0x45-Encoding-Variante (0.1 °C-Resolution). Vendor-Doku
-# §01-open-window-detection.md.
-MIN_FW_FOR_OW_SET: tuple[int, int] = (4, 2)
-
-
-def _parse_fw_tuple(fw: str | None) -> tuple[int, int] | None:
-    """``"4.5"`` -> ``(4, 5)``. None / Format-Fehler -> None.
-
-    Akzeptiert auch ``"4.5.1"`` (3-Komponenten-Variante, falls Codec
-    spaeter erweitert wird) — nimmt dann nur major.minor."""
-    if fw is None:
-        return None
-    parts = fw.split(".")
-    if len(parts) < 2:
-        return None
-    try:
-        return (int(parts[0]), int(parts[1]))
-    except ValueError:
-        return None
+# Schwelle + Parsing liegen seit Sprint 17 (C4) in
+# ``heizung.scripts.pairing.firmware`` — zweiter Konsument ist das
+# FW-Inventar im Batch-Eingangstest. Eine Zahl, eine Stelle.
 
 
 async def _phase1_query_firmware(devices: list[tuple[int, str, str | None]]) -> None:
@@ -111,7 +109,7 @@ async def _phase3_activate_per_device(
                 select(Device.firmware_version).where(Device.id == dev_id)
             )
             fw = result.scalar_one_or_none()
-            fw_tuple = _parse_fw_tuple(fw)
+            fw_tuple = parse_fw_tuple(fw)
             row: dict[str, str] = {
                 "dev_eui": dev_eui,
                 "label": label or "",
@@ -122,9 +120,7 @@ async def _phase3_activate_per_device(
                 row["result"] = "no FW (Vicki hat nicht geantwortet)"
             elif fw_tuple < MIN_FW_FOR_OW_SET:
                 row["action"] = "skip"
-                row["result"] = (
-                    f"FW<{MIN_FW_FOR_OW_SET[0]}.{MIN_FW_FOR_OW_SET[1]} (B-9.11x.b-2: 0x06-Fallback)"
-                )
+                row["result"] = f"FW<{min_fw_text()} (B-9.11x.b-2: 0x06-Fallback)"
             else:
                 try:
                     await set_open_window_detection(
@@ -185,7 +181,8 @@ async def main_async(wait_secs: int, fw_only: bool) -> int:
         print(
             "\n=== --fw-only: Phase 1 abgeschlossen, kein Wait, keine "
             "Phase 3. ===\n    Re-Run von Phase 3 spaeter via "
-            "`activate_open_window_detection.py` ohne --fw-only "
+            "`python -m heizung.scripts.activate_open_window_detection` "
+            "ohne --fw-only "
             "(wenn neu aktiviert werden soll)."
         )
         print(

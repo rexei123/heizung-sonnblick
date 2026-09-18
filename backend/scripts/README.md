@@ -5,6 +5,11 @@ Pytest-Test ausdruecken lassen (echte Redis-/Celery-Last, parallele
 Worker, Burst-Verhalten). Laufen ausserhalb der Test-Suite und sind
 nicht in CI eingebunden.
 
+> **Sprint 17 (B-Sprint13a-1):** `activate_open_window_detection.py`
+> ist von hier nach `backend/src/heizung/scripts/` gewandert und wird
+> jetzt als `python -m heizung.scripts.activate_open_window_detection`
+> aufgerufen. Hier liegen nur noch Smoke-Tools.
+
 ## smoke_engine_lock.py (Sprint 9.10 T3.5)
 
 Verifiziert AE-40 (Redis-SETNX-Lock fuer ``evaluate_room``):

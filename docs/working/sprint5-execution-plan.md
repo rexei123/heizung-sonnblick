@@ -54,6 +54,11 @@ Datei: `docs/features/2026-04-27-sprint5-lorawan-foundation.md`. User-Gate 1+2 a
 **Dauer:** 1–1.5 h. **In_progress markieren beim Start.**
 
 ### 5.4 — ChirpStack initialisieren (Bootstrap-Skript)
+
+> **Richtigstellung 2026-09-18 (Sprint 17 / C1):** Nicht umgesetzt. Die
+> ChirpStack-Objekte wurden von Hand im UI angelegt. Ein gRPC-Skript gibt es
+> seit Sprint 17 nur für *Geräte*: `infra/chirpstack/provision_devices.py`.
+
 **Datei:** `infra/chirpstack/bootstrap.py`.
 **Stack:** Python + `grpcio` + `chirpstack-api` (PyPI: `chirpstack-api`). Oder einfacher: REST API über `requests`.
 **Idempotenz-Pattern:**
