@@ -1438,8 +1438,41 @@ Betroffen sind:
 > Rechten, nicht an der Technik. Vor dem Montagetag prüfen, dass das Konto,
 > mit dem gearbeitet wird, die Admin-Rolle hat.
 
-Die CLI-Skripte laufen im API-Container und kennen keine Rollen — dort ist
-`--user-email` nur die Zuordnung für den Audit-Eintrag.
+#### `--user-email` in den CLI-Aufrufen
+
+Die Adresse muss einem **aktiven Konto aus der Benutzer-Tabelle** entsprechen.
+Steht sie dort nicht oder ist das Konto deaktiviert, bricht der Aufruf ab:
+
+```
+[FAIL] User-Email 'tippfehler@hotel-sonnblick.at' nicht gefunden oder inaktiv.
+```
+
+Das ist kein Schönheitsfehler: `import`, `inbound-test` und `assign` brechen
+**vor** dem ersten Schreibvorgang ab. Ein Tippfehler am Montage-Abend kostet
+einen zweiten Anlauf, mehr nicht — aber prüfen Sie die Adresse vorher.
+
+**Verwenden Sie das Admin-Konto.** Der Eintrag landet als Urheber im Audit
+(`DEVICE_PAIRED`, `DEVICE_INBOUND_TEST`, `DEVICE_ZONE_ASSIGNED`) und
+beantwortet später die Frage „wer hat das zugeordnet".
+
+> **Wichtig, und anders als in der Oberfläche:** die CLI prüft die **Rolle
+> nicht**. `_lookup_user_id` filtert auf `email` und `is_active` — eine
+> Mitarbeiter-Adresse würde angenommen und stünde dann als Urheber im Audit.
+> Die Admin-Pflicht aus der Tabelle oben gilt für die **Oberfläche**
+> (`PUT/DELETE /devices/{id}/heating-zone` und die Tausch-Endpoints), nicht
+> für die Skripte. Wer über die CLI arbeitet, umgeht die Rollenprüfung — das
+> ist bewusst so, weil der Aufruf ohnehin Shell-Zugang auf dem Server
+> voraussetzt, aber man sollte es wissen.
+
+Prüfen, welche Konten es gibt und welche Rolle sie haben:
+
+```bash
+# SSH (Prod-Server, root)
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT email, role, is_active FROM \"user\" ORDER BY role, email;"
+```
 
 ### 10h.0.3 Zwei CSV-Varianten aus derselben Excel
 
@@ -1464,11 +1497,12 @@ Der Parser toleriert: Semikolon oder Komma, BOM aus dem deutschen Excel,
 Groß-/Kleinschreibung im Header, unbekannte Spalten (`hinweis` wird
 ignoriert) und leere Spalten ohne Überschrift.
 
-**Nach jedem Lauf die CSV vom Server löschen:**
+**Nach jedem Lauf die CSV löschen — auf dem Server UND im Container:**
 
 ```bash
 # SSH (Prod-Server, root)
 rm -f /tmp/pairings.csv /tmp/montage.csv
+docker exec <api-container> rm -f /tmp/pairings.csv /tmp/montage.csv
 ```
 
 ### 10h.0.4 Container-Namen nicht hart annehmen
@@ -1551,6 +1585,40 @@ einen Platzhalter mit demselben ersten Segment (`b7d74615-aaaa-…`), und das
 ist jahrelang niemandem aufgefallen. Ein fehlendes Argument bricht laut; ein
 falscher Default legt 104 Geräte in die falsche Application.
 
+#### Schritt 0 — Probelauf am Vortag (25.09.)
+
+**Am Tag vorher ausführen, nicht am 26.09.** Der Aufruf lädt `chirpstack-api`,
+`grpcio` und `protobuf` **zur Laufzeit** aus dem Internet — es gibt kein
+vorgebautes Image. Ohne funktionierenden Paketzugriff des Servers scheitert
+Schritt A, und zwar erst nach dem Kopieren der CSV und dem Setzen des Tokens.
+
+```bash
+# SSH (Prod-Server, root)
+docker run --rm \
+  --network "$(docker network ls --format '{{.Name}}' | grep -m1 deploy)" \
+  -v /opt/heizung-sonnblick/infra/chirpstack:/app:ro \
+  python:3.12-slim sh -c '
+    pip install -q -r /app/requirements-provision.txt &&
+    python /app/provision_devices.py --help >/dev/null &&
+    echo PROBELAUF-OK'
+```
+
+**Erwartung:** genau eine Zeile `PROBELAUF-OK`. Der Lauf braucht ein bis zwei
+Minuten, davon fast alles für den Download.
+
+**Abbruchkriterium:** erscheint `PROBELAUF-OK` nicht, ist Schritt A am 26.09.
+**nicht** durchführbar. Häufigste Ursachen, in dieser Reihenfolge prüfen:
+
+| Symptom in der Ausgabe | Ursache |
+|---|---|
+| `Could not resolve host` / `Temporary failure in name resolution` | Kein DNS im Container-Netz |
+| `Connection timed out` zu `pypi.org` | Ausgehender Verkehr blockiert (UFW, Proxy) |
+| `manifest unknown` / `pull access denied` | `python:3.12-slim` nicht ladbar |
+| `No such file or directory: /app/requirements-provision.txt` | Repo-Stand auf dem Server veraltet — Deploy-Timer prüfen (§5.7) |
+
+Der Probelauf berührt **weder** ChirpStack **noch** die CSV: kein Token, kein
+Bind-Mount der Geräteliste, nur `--help`. Er kann beliebig oft laufen.
+
 #### Schritt A — Vorschau über die volle Liste
 
 ```bash
@@ -1581,6 +1649,11 @@ Bestand in der Application: 4 Geraete — Abgleich gegen 104 CSV-Zeilen.
 [OK]             Zeile 93 70b3d52dd3034de4 (101) — bereits vorhanden.
 Resultat: 100 anzulegen, 4 unveraendert, 0 Abweichungen, 0 Fehler.
 ```
+
+> **Am 18.09. auf heizung-test gelaufen und bestätigt.** Die Vorschau lieferte
+> genau dieses Resultat — `100 anzulegen, 4 unveraendert, 0 Abweichungen,
+> 0 Fehler` — und die Key-Referenz meldete `nwk_key`. Die Erwartungswerte
+> oben sind damit gemessen, nicht gerechnet.
 
 **Zur Key-Feld-Spiegelung:** `--key-reference-dev-eui` nennt ein Gerät, das
 nachweislich joint — eines der vier Testgeräte (hier 101). Das Skript liest
@@ -1669,6 +1742,23 @@ das Gerät im UI bewusst anpassen.
 
 Legt die `device`-Zeilen an. **Sendet keine Downlinks** (Sprint 17).
 
+**Zuerst die CSV in den Container kopieren.** Das Server-`/tmp` ist **nicht**
+das Container-`/tmp` — `docker exec` sieht nur das Dateisystem des Containers:
+
+```bash
+# SSH (Prod-Server, root)
+docker cp /tmp/pairings.csv <api-container>:/tmp/pairings.csv
+docker exec <api-container> ls -l /tmp/pairings.csv
+```
+
+> **Nach jedem Container-Neustart wiederholen**, also nach jedem Deploy. Der
+> Deploy-Timer läuft alle 5 Minuten; zieht er zwischen zwei Aufrufen ein neues
+> Image, ist die Kopie weg und der nächste Aufruf endet in
+> `FileNotFoundError`. Genau das ist am 18.09. passiert.
+>
+> `provision_devices` (§10h.2) ist **nicht** betroffen — es bekommt die Datei
+> über `-v … :ro` als Bind-Mount, nicht über eine Kopie.
+
 ```bash
 # SSH (Prod-Server, root)
 docker exec <api-container> python -m heizung.scripts.pair_devices \
@@ -1696,6 +1786,8 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   import /tmp/pairings.csv --user-email admin@hotel-sonnblick.at
 ```
 
+> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+
 **Erwartung:**
 `Resultat: 100 angelegt, 4 ergaenzt, 0 unveraendert, 0 Konflikte, 0 Fehler.`
 
@@ -1715,7 +1807,16 @@ die CSV anpassen oder das Label bewusst über die Geräte-Detailseite ändern.
 haben — er hängt nichts um. Umhängen ist `assign` (§10h.6) oder der
 Tausch-Dialog.
 
-Danach: `rm -f /tmp/pairings.csv`.
+**Danach aufräumen — es gibt zwei Kopien:**
+
+```bash
+# SSH (Prod-Server, root)
+rm -f /tmp/pairings.csv
+docker exec <api-container> rm -f /tmp/pairings.csv
+```
+
+Die Datei enthält die AppKeys aller 104 Geräte. Beide Kopien müssen weg,
+nicht nur die auf dem Server.
 
 ---
 
@@ -1725,6 +1826,10 @@ Prüft **alle Pool-Geräte gleichzeitig** und erstellt dabei das
 Firmware-Inventar. Das Inventar muss **vor** dem Open-Window-Rollout
 vorliegen, nicht erst dabei — die Firmware der 100 neuen Geräte ist unbekannt.
 
+**In zwei Durchläufen**, nicht in einem. Der Grund steht unter Lauf 2.
+
+#### Lauf 1 — alle Geräte, Standardfenster
+
 **Alle Geräte einschalten**, dann:
 
 ```bash
@@ -1733,6 +1838,8 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   inbound-test --all-pool --user-email admin@hotel-sonnblick.at
 ```
 
+> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+
 Ablauf: Firmware-Abfrage an alle → Sollwert 25 °C an alle → gemeinsames
 Warten auf den Readback → Sollwert 10 °C → Warten → Urteil.
 
@@ -1740,16 +1847,43 @@ Warten auf den Readback → Sollwert 10 °C → Warten → Urteil.
 verlässt die Warteschlange erst beim nächsten Uplink des Geräts. Bis der
 neue Sollwert zurückgemeldet wird, können zwei Periodic-Intervalle vergehen.
 
-**Zeitfenster anpassen**, wenn Geräte bekannte Uplink-Lücken haben:
+#### Lauf 2 — nur die TIMEOUT-Geräte, verlängertes Fenster
+
+Aus dem Report von Lauf 1 die Nummern aller `[TIMEOUT]`-Zeilen abschreiben —
+**nicht** die `[FAIL]`-Zeilen, die sind bereits beurteilt. Dann:
 
 ```bash
+# SSH (Prod-Server, root)
 docker exec <api-container> python -m heizung.scripts.pair_devices \
-  inbound-test --all-pool --timeout 14400    # 4 Stunden je Schritt
+  inbound-test --devices 017,042,088 --timeout 14400 \
+  --user-email admin@hotel-sonnblick.at
 ```
 
-> Gerät 101 zeigte am 17./18.09. Lücken von 1 bis 4 Stunden. Mit dem
-> Standardfenster (2700 s) würde es als TIMEOUT erscheinen, obwohl es
-> in Ordnung ist.
+> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+
+**Erwartung:** `Auswahl: 3 von 104 Pool-Geraeten.` als erste Zeile, dann der
+gewohnte Ablauf.
+
+**Warum nicht gleich alle mit 14400 s:** das Zeitfenster gilt **je
+Sollwert-Schritt**, und es gibt zwei. Ein Lauf über alle 104 Geräte mit vier
+Stunden Fenster belegt im ungünstigen Fall **acht Stunden** — ein ganzer
+Arbeitstag, für ein Ergebnis, das für die meisten Geräte schon nach 45
+Minuten feststand. Der zweite Durchlauf betrifft erfahrungsgemäß eine
+Handvoll Geräte.
+
+> **Anlass:** Gerät 101 zeigte am 17./18.09. Uplink-Lücken von 1 bis 4
+> Stunden. Mit dem Standardfenster (2700 s) erscheint es als TIMEOUT, obwohl
+> es in Ordnung ist. Genau dafür ist Lauf 2 da.
+
+Ein Tippfehler in der Liste bricht ab, statt das Gerät still zu überspringen:
+
+```
+[FAIL] Nicht im Pool gefunden: 0177. Erwartet werden Hardware-Nummern
+       wie im Report oder DevEUIs.
+```
+
+Geräte ohne `hardware_nummer` stehen im Report mit ihrer DevEUI — dann diese
+angeben.
 
 #### Ergebnis lesen
 
@@ -1865,9 +1999,15 @@ Gateway.
 # Montage-CSV (OHNE Spalte app_key) vom Office-Laptop kopieren:
 #   scp montage.csv root@heizung-test:/tmp/montage.csv
 
+# Dann in den Container — Server-/tmp ist nicht Container-/tmp (§10h.3):
+docker cp /tmp/montage.csv <api-container>:/tmp/montage.csv
+
 docker exec <api-container> python -m heizung.scripts.pair_devices \
   assign /tmp/montage.csv --rooms 54,102,207,310,406 --dry-run
 ```
+
+> An jedem Montage-Abend neu kopieren. Der Deploy-Timer kann den Container
+> tagsüber ersetzt haben.
 
 **Erwartung:**
 
@@ -1886,6 +2026,8 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   --user-email admin@hotel-sonnblick.at
 ```
 
+> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+
 **`--rooms` ist Pflicht.** Die CSV enthält alle 103 Zonen; ohne Filter würden
 Geräte Zimmern zugeordnet, an denen noch niemand war. Die Zimmernummern sind
 Ihre Bestätigung „diese habe ich heute montiert".
@@ -1903,7 +2045,13 @@ sich seit der Montage nur noch nicht gemeldet (Vicki-Periodik ~15 Minuten)
 oder sitzt nicht richtig auf der Halterung. Am nächsten Morgen erneut prüfen
 (§10h.7). Meldet es sich dann immer noch nicht, sitzt es nicht richtig.
 
-Danach: `rm -f /tmp/montage.csv`.
+**Danach aufräumen, beide Kopien:**
+
+```bash
+# SSH (Prod-Server, root)
+rm -f /tmp/montage.csv
+docker exec <api-container> rm -f /tmp/montage.csv
+```
 
 #### Wenn der Monteur zwei Geräte vertauscht hat
 

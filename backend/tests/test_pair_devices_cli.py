@@ -400,3 +400,93 @@ async def test_cmd_list_pool_shows_pool_devices(
     assert pool_eui in out
     # Active-Device taucht NICHT auf (es hat heating_zone_id).
     assert active_eui not in out
+
+
+# ---------------------------------------------------------------------------
+# Sprint 17 Nachtrag — Geraete-Auswahl fuer den zweiten Eingangstest-Durchlauf
+# ---------------------------------------------------------------------------
+#
+# Reine Funktion, keine DB: _filter_pool_devices bekommt die bereits geladene
+# Pool-Liste und waehlt daraus aus. Getestet wird genau das, was der Hotelier
+# am 26.09. tut — die TIMEOUT-Nummern aus dem Report abtippen.
+
+
+class _FakeDevice:
+    """Nur die zwei Felder, die die Auswahl liest."""
+
+    def __init__(self, label: str | None, dev_eui: str) -> None:
+        self.label = label
+        self.dev_eui = dev_eui
+
+
+POOL = [
+    _FakeDevice("001", "70b3d57ed0000001"),
+    _FakeDevice("017", "70b3d57ed0000017"),
+    _FakeDevice("042", "70b3d57ed0000042"),
+    _FakeDevice(None, "70b3d57ed0000099"),  # ohne hardware_nummer
+]
+
+
+def test_filter_pool_devices_nach_hardware_nummer() -> None:
+    from heizung.scripts.pair_devices import _filter_pool_devices
+
+    selected, unknown = _filter_pool_devices(POOL, "017,042")
+
+    assert [d.label for d in selected] == ["017", "042"]
+    assert unknown == []
+
+
+def test_filter_pool_devices_toleriert_leerzeichen_und_grossschreibung() -> None:
+    from heizung.scripts.pair_devices import _filter_pool_devices
+
+    selected, unknown = _filter_pool_devices(POOL, " 017 , 70B3D57ED0000042 ")
+
+    assert [d.label for d in selected] == ["017", "042"]
+    assert unknown == []
+
+
+def test_filter_pool_devices_findet_geraet_ohne_hardware_nummer_ueber_dev_eui() -> None:
+    """Ohne ``hardware_nummer`` benennt der Report das Geraet mit der DevEUI —
+    dann muss auch die Auswahl darueber gehen."""
+    from heizung.scripts.pair_devices import _filter_pool_devices
+
+    selected, unknown = _filter_pool_devices(POOL, "70b3d57ed0000099")
+
+    assert [d.dev_eui for d in selected] == ["70b3d57ed0000099"]
+    assert unknown == []
+
+
+def test_filter_pool_devices_meldet_unbekannte_statt_sie_zu_schlucken() -> None:
+    """Ein Tippfehler in der TIMEOUT-Liste darf nicht dazu fuehren, dass ein
+    Geraet still uebersprungen wird — der zweite Durchlauf ist genau der,
+    der es klaeren soll."""
+    from heizung.scripts.pair_devices import _filter_pool_devices
+
+    selected, unknown = _filter_pool_devices(POOL, "017,0177,999")
+
+    assert [d.label for d in selected] == ["017"]
+    assert unknown == ["0177", "999"]
+
+
+def test_filter_pool_devices_behaelt_pool_reihenfolge() -> None:
+    from heizung.scripts.pair_devices import _filter_pool_devices
+
+    selected, _ = _filter_pool_devices(POOL, "042,001")
+
+    assert [d.label for d in selected] == ["001", "042"]
+
+
+def test_inbound_test_verlangt_genau_einen_auswahl_schalter() -> None:
+    """--all-pool und --devices schliessen sich aus, einer ist Pflicht."""
+    from heizung.scripts.pair_devices import _build_parser
+
+    parser = _build_parser()
+
+    args = parser.parse_args(["inbound-test", "--devices", "017"])
+    assert args.devices == "017"
+    assert args.all_pool is False
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["inbound-test"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["inbound-test", "--all-pool", "--devices", "017"])
