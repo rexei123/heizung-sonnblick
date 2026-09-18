@@ -72,11 +72,12 @@ Abweichung oder Anlage-Fehler.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import os
 import re
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -104,6 +105,11 @@ _HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
 # LoRaWAN-Nullwert fuer die JoinEUI. ChirpStack verlangt das Feld; wenn die
 # CSV keine AppEUI nennt, ist die Acht-Byte-Null die uebliche Belegung.
 ZERO_JOIN_EUI = "0000000000000000"
+
+# Seitengroesse fuer DeviceService.List. 250 deckt die 104 Geraete des
+# Hotels in einem Aufruf ab; die Paginierung bleibt trotzdem implementiert,
+# weil ChirpStack die Seitengroesse serverseitig deckeln darf.
+LIST_PAGE_SIZE = 250
 
 
 class ProvisionError(Exception):
@@ -248,6 +254,8 @@ class ChirpStackClient(Protocol):
 
     def device_profile_exists(self, device_profile_id: str) -> bool: ...
 
+    def list_device_euis(self, application_id: str) -> set[str]: ...
+
     def get_device(self, dev_eui: str) -> RemoteDevice | None: ...
 
     def get_device_keys(self, dev_eui: str) -> RemoteKeys | None: ...
@@ -299,25 +307,74 @@ class GrpcChirpStackClient:
         code = getattr(exc, "code", None)
         return callable(code) and code() == self._grpc.StatusCode.NOT_FOUND
 
-    def application_exists(self, application_id: str) -> bool:
-        req = self._application_pb2.GetApplicationRequest(id=application_id)
+    def _is_unauthenticated(self, exc: Exception) -> bool:
+        code = getattr(exc, "code", None)
+        return callable(code) and code() == self._grpc.StatusCode.UNAUTHENTICATED
+
+    def _probe(self, call: Callable[[], object], *, what: str, ident: str) -> bool:
+        """Existenz-Probe per ``Get`` auf ein benanntes Objekt.
+
+        ChirpStack loest die Berechtigung ueber das Objekt auf. Fehlt das
+        Objekt, gibt es keinen Tenant, an dem der API-Key haengen koennte —
+        die Antwort ist dann ``UNAUTHENTICATED`` und nicht ``NOT_FOUND``.
+        Beim Pre-Flight ist noch nicht bewiesen, dass der Key ueberhaupt
+        gilt; aus ``UNAUTHENTICATED`` laesst sich hier also nicht auf
+        "existiert nicht" schliessen. Statt zu raten nennen wir beide
+        Moeglichkeiten.
+        """
         try:
-            self._applications.Get(req, metadata=self._auth)
+            call()
         except Exception as exc:
             if self._is_not_found(exc):
                 return False
+            if self._is_unauthenticated(exc):
+                raise ProvisionError(
+                    f"{what} {ident}: ChirpStack antwortet UNAUTHENTICATED. Entweder "
+                    f"ist die ID falsch (dann gibt es kein Objekt, ueber das die "
+                    f"Berechtigung aufgeloest werden koennte), oder der API-Key gilt "
+                    f"nicht fuer diesen Tenant. Beides zuerst im ChirpStack-UI pruefen."
+                ) from exc
             raise
         return True
 
+    def application_exists(self, application_id: str) -> bool:
+        req = self._application_pb2.GetApplicationRequest(id=application_id)
+        return self._probe(
+            lambda: self._applications.Get(req, metadata=self._auth),
+            what="Application",
+            ident=application_id,
+        )
+
     def device_profile_exists(self, device_profile_id: str) -> bool:
         req = self._device_profile_pb2.GetDeviceProfileRequest(id=device_profile_id)
-        try:
-            self._profiles.Get(req, metadata=self._auth)
-        except Exception as exc:
-            if self._is_not_found(exc):
-                return False
-            raise
-        return True
+        return self._probe(
+            lambda: self._profiles.Get(req, metadata=self._auth),
+            what="Device-Profile",
+            ident=device_profile_id,
+        )
+
+    def list_device_euis(self, application_id: str) -> set[str]:
+        """Alle DevEUIs der Application, in so wenig Aufrufen wie moeglich.
+
+        Ersetzt die frueheren 104 Einzel-``Get``-Aufrufe. ``List`` laeuft
+        gegen die Application — ein existierendes Objekt, an dem die
+        Berechtigung haengt. Damit entfaellt das UNAUTHENTICATED-Problem
+        unbekannter DevEUIs vollstaendig.
+        """
+        found: set[str] = set()
+        offset = 0
+        while True:
+            req = self._device_pb2.ListDevicesRequest(
+                limit=LIST_PAGE_SIZE, offset=offset, application_id=application_id
+            )
+            resp = self._devices.List(req, metadata=self._auth)
+            page = [item.dev_eui.lower() for item in resp.result]
+            found.update(page)
+            offset += len(page)
+            # Abbruch auf zwei Wegen, damit eine unerwartete Antwort keine
+            # Endlosschleife erzeugt: leere Seite oder total_count erreicht.
+            if not page or offset >= resp.total_count:
+                return found
 
     def get_device(self, dev_eui: str) -> RemoteDevice | None:
         req = self._device_pb2.GetDeviceRequest(dev_eui=dev_eui)
@@ -510,8 +567,31 @@ def provision(
     """
     report = Report()
     lines: list[str] = []
+
+    # Der Bestand wird EINMAL ueber die Application geholt, nicht pro Zeile
+    # per ``Get`` erfragt. Zwei Gruende, der erste ist der zwingende:
+    #
+    # 1. ``DeviceService.Get`` auf ein **unbekanntes** DevEUI antwortet mit
+    #    UNAUTHENTICATED, nicht mit NOT_FOUND: ChirpStack loest die
+    #    Berechtigung ueber das Geraet auf den Tenant auf, und ein nicht
+    #    existierendes Geraet hat keinen Tenant. Der Probelauf am 18.09. ist
+    #    genau daran gescheitert — beim ersten noch nicht angelegten Geraet,
+    #    mit gueltigem Key und unmittelbar nach erfolgreichem Pre-Flight.
+    # 2. Ein Aufruf statt 104.
+    existing = client.list_device_euis(application_id)
+    lines.append(
+        f"Bestand in der Application: {len(existing)} Geraete — "
+        f"Abgleich gegen {len(devices)} CSV-Zeilen."
+    )
+
     for dev in devices:
-        remote = client.get_device(dev.dev_eui)
+        # ``Get`` nur fuer Geraete, die laut Bestand existieren: dort ist die
+        # Berechtigung aufloesbar, und nur dort gibt es etwas zu vergleichen
+        # (``DeviceListItem`` traegt weder application_id noch join_eui).
+        # Liefert ``Get`` wider Erwarten nichts, faellt die Zeile auf den
+        # Anlage-Pfad durch — das ist der richtige Umgang mit einem Geraet,
+        # das zwischen List und Get geloescht wurde.
+        remote = client.get_device(dev.dev_eui) if dev.dev_eui in existing else None
         if remote is not None:
             diffs = _compare(dev, remote, device_profile_id)
             if diffs:
@@ -631,7 +711,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_line_buffering() -> None:
+    """stdout zeilenweise leeren, damit der Ablauf lesbar bleibt.
+
+    Ohne das puffert Python stdout in Bloecken, sobald die Ausgabe nicht
+    an ein Terminal geht — und im ``docker run``-Aufruf ist das der
+    Normalfall. stderr ist ungepuffert. Folge im Probelauf am 18.09.:
+    die Pre-Flight-Zeilen erschienen erst beim Prozess-Ende und landeten
+    optisch mitten im Traceback. Der Ablauf am 26.09. muss von oben nach
+    unten lesbar sein.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            # Umgelenkte Streams (pytest-capsys, Pipes ohne fileno) koennen
+            # das ablehnen. Kein Grund, den Lauf abzubrechen.
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(line_buffering=True)
+
+
 def run(argv: Sequence[str] | None, client_factory: Any = None) -> int:
+    _force_line_buffering()
     args = build_parser().parse_args(argv)
 
     api_token = os.environ.get("CHIRPSTACK_API_KEY", "").strip()

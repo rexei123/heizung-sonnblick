@@ -1575,6 +1575,7 @@ docker run --rm -i \
 Pre-Flight: Application + Device-Profile vorhanden, 104 CSV-Zeilen.
   Referenz 70b3d52dd3034de4: nwk_key=gesetzt, app_key=leer
   -> 'nwk_key' bestaetigt.
+Bestand in der Application: 4 Geraete — Abgleich gegen 104 CSV-Zeilen.
 [WUERDE ANLEGEN] Zeile 2 70b3d52dd30333de name=001 join_eui=70b3d52dd3000000 nwk_key=<32 Hex-Zeichen, nicht angezeigt>
 ...
 [OK]             Zeile 93 70b3d52dd3034de4 (101) — bereits vorhanden.
@@ -1595,6 +1596,12 @@ in `nwk_key`; `app_key` ist ungenutzt.
 | keines belegt | **Abbruch** — nichts zu spiegeln |
 
 **Schlüsselwerte erscheinen nie in der Ausgabe**, auch nicht gekürzt.
+
+**Am 18.09. auf heizung-test bestätigt:** Der Probelauf hat an Gerät 101
+`nwk_key=gesetzt, app_key=leer` gelesen. Die Spiegelung ist damit kein
+Vorgriff mehr, sondern belegt — `nwk_key` ist das richtige Feld. Der
+Pre-Flight prüft es beim Echtlauf trotzdem erneut; die Zeile im Protokoll
+ist der Nachweis für den jeweiligen Lauf.
 
 #### Schritt B — Ein-Gerät-Gate
 

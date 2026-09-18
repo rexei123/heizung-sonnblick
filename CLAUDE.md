@@ -2202,6 +2202,57 @@ interpretiert — verschiedene Fix-Pfade.
 **Querverweise:** §5.65 (UTC→Vienna Engine), AE-66 (Belegungs-Import-
 Sichtbarkeit, erster Konsument), §5.63 (Type-Spiegel).
 
+### 5.75 ChirpStack antwortet auf `Get` mit unbekannter ID UNAUTHENTICATED, nicht NOT_FOUND (Sprint 17 Hotfix)
+
+Beobachtet 2026-09-18 im Dry-Run von `provision_devices.py` auf
+heizung-test: Der Pre-Flight lief sauber durch — Application gefunden,
+Device-Profile gefunden, `GetKeys` am Referenzgerät gelesen. Der erste
+`DeviceService.Get` auf ein **noch nicht angelegtes** DevEUI brach dann
+mit `StatusCode.UNAUTHENTICATED` ab, `details` leer. Der API-Key war
+gültig; er hatte Sekunden vorher drei andere Objekte gelesen.
+
+**Ursache:** ChirpStack löst die Autorisierung **über das angefragte
+Objekt** auf den Tenant auf. Ein Objekt, das es nicht gibt, hat keinen
+Tenant — die Berechtigungsprüfung scheitert also vor der Existenzprüfung
+und antwortet UNAUTHENTICATED. Das betrifft `DeviceService.Get` ebenso
+wie `ApplicationService.Get` und `DeviceProfileService.Get` mit einer
+falsch getippten UUID.
+
+**Regel:** `Get` ist in ChirpStack **keine Existenzprüfung**. Wer wissen
+will, ob ein Objekt existiert, fragt die übergeordnete Sammlung ab:
+
+```python
+# FALSCH — bricht beim ersten unbekannten Geraet ab
+for dev in devices:
+    remote = client.get_device(dev.dev_eui)   # UNAUTHENTICATED statt None
+
+# RICHTIG — einmal ueber die Application, die nachweislich existiert
+existing = client.list_device_euis(application_id)   # DeviceService.List
+for dev in devices:
+    remote = client.get_device(dev.dev_eui) if dev.dev_eui in existing else None
+```
+
+`List` läuft gegen die Application — ein existierendes Objekt, an dem die
+Berechtigung hängt. Nebeneffekt: ein bis zwei Aufrufe statt 104.
+
+**Was NICHT die Lösung ist:** UNAUTHENTICATED pauschal als „existiert
+nicht" zu behandeln. Der Code kann nicht unterscheiden, ob das Objekt
+fehlt oder der Key ungültig ist — bei einem abgelaufenen Token würde
+das Skript dann 104 Geräte anlegen wollen und jeden Fehlschlag als
+neuen Befund melden. Wo die Unterscheidung unmöglich ist (Pre-Flight,
+bevor der Key sich bewährt hat), nennt die Fehlermeldung **beide**
+Möglichkeiten statt zu raten.
+
+**Test-Pattern:** Der Doppelgänger im Test muss das Produktionsverhalten
+abbilden — `FakeClient.get_device` wirft für unbekannte DevEUIs. Ein
+Rückfall auf „Get pro Zeile" fällt damit in der Suite auf und nicht erst
+beim nächsten Probelauf auf dem Server.
+
+**Querverweise:** §5.13 (ChirpStack-Downlink verlangt `devEui` im Payload
+— gleiche Familie: ChirpStack-API-Verhalten weicht von der naheliegenden
+Annahme ab), §5.21 (Hardware-/Protokoll-Annahmen defensiv interpretieren),
+§5.68 (Server-Realität schlägt Annahme), AE-69 (gRPC-Provisioning).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
