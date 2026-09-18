@@ -1,15 +1,33 @@
 name: Frontend CI
 
+# Kein `paths`-Filter: `lint-and-build` und `e2e` sind Pflicht-Checks und
+# muessen deshalb auf JEDEM Pull-Request ein Ergebnis melden.
+#
+# Bis 2026-09-18 uebernahm das ein Spiegel-Workflow (frontend-ci-skip.yml)
+# mit `paths-ignore` und denselben Job-Namen. Der ist geloescht, weil er
+# einen Pflicht-Check unterlaufen konnte:
+#
+# `paths-ignore` ueberspringt einen Workflow nur, wenn ALLE geaenderten
+# Dateien dem Muster entsprechen. Bei einem gemischten PR — Frontend und
+# Doku — lief der Spiegel deshalb ZUSAETZLICH zum echten Workflow, und
+# beide meldeten `lint-and-build` und `e2e`. Welcher den Pflicht-Check
+# erfuellt, entscheidet der zuletzt gemeldete Status. Dass bisher der
+# echte gewann, lag allein an seiner laengeren Laufzeit: verzoegert die
+# GitHub-Warteschlange den Spiegel ueber den echten Lauf hinaus,
+# ueberschreibt ein Vier-Sekunden-Echo ein rotes Playwright-Ergebnis.
+# Zufall als Schutzmechanismus. Belegt an PR #228 (zwei "Frontend CI"-
+# Laeufe, 3s und 2m18s).
+#
+# Preis: rund 2m20s pro PR, der `frontend/**` nicht beruehrt. Vertretbar —
+# 168 Laeufe seit 19.04. haben 4 Fehlschlaege, der letzte am 30.05., alle
+# drei auf konkrete Brueche zurueckfuehrbar. Kein Flackern, das ein Gate
+# unbrauchbar machen wuerde.
+#
+# CLAUDE.md §5.55 (Nachtrag) haelt die Regel fest.
 on:
   push:
     branches: [main, develop]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend-ci.yml"
   pull_request:
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend-ci.yml"
 
 defaults:
   run:
