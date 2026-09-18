@@ -1349,6 +1349,33 @@ Skip-Step enthaelt nur Echo-Output.
 Querverweis: §5.10 (Workflow-Reporting-Race), §5.25 (stale concurrency-
 cancel), §5.54 (Playwright route() Glob vs. Regex)
 
+**Nachtrag 2026-09-18 — der Spiegel ist nicht mehr die Standardantwort.**
+Beim Setzen von Backend CI und ChirpStack-Tools CI als Pflicht-Checks
+stand dieselbe Frage erneut an: ein Pflicht-Check, der wegen eines
+`paths`-Filters nicht startet, blockiert jeden PR dauerhaft. Statt zwei
+weiterer Spiegel wurde bei beiden Workflows der `paths`-Filter
+**entfernt** — sie laufen jetzt auf jedem PR.
+
+Begruendung: ein Spiegel-Paar haelt zwei Listen (`paths` und
+`paths-ignore`) von Hand synchron. Laufen sie auseinander, entsteht
+genau die Luecke, die der Pflicht-Check schliessen soll — und zwar
+unsichtbar, weil der Check gruen meldet. Bei einem Gate, das die
+Produktion schuetzt, ist das kein akzeptabler Mechanismus. Der Preis
+sind rund 2m40s CI pro PR, der `backend/**` nicht beruehrt.
+
+**Regel ab jetzt:** Ein Workflow, dessen Job Pflicht-Check ist, laeuft
+ohne `paths`-Filter. Spiegel nur dort, wo die Laufzeit den Aufwand
+wirklich rechtfertigt — heute nur noch `frontend-ci-skip.yml` (Playwright,
+~2m20s). Wird das Frontend-Paar spaeter ebenfalls aufgeloest, faellt
+§5.55 als Fehlerklasse ganz weg.
+
+**Zweite Regel aus demselben Anlass:** Job-Namen sind repo-weit
+eindeutig. Der Status wird unter dem Job-Namen gemeldet, nicht unter dem
+Workflow-Namen — zwei Workflows mit einem Job `lint-and-test` erzeugen
+einen Pflicht-Check, den ein beliebiger der beiden erfuellt. `backend-ci`
+und `chirpstack-tools-ci` hatten genau das; der ChirpStack-Job heisst
+seither `chirpstack-lint-and-test`.
+
 ### 5.56 Migration-Roundtrip-Tests muessen bei NOT-NULL ohne DB-Default revisionsabhaengig inserten (Sprint 12c Lesson)
 
 Wenn eine Migration eine `NOT NULL`-Spalte hinzufuegt und der
@@ -2302,7 +2329,10 @@ npm run build
 - Caddy `fmt --overwrite` (kosmetisch, mit Sprint 6 wenn Caddy-Touch fuer ChirpStack-UI ohnehin)
 - `~/.ssh/config`-Eintraege auf work02
 - Caddy: `/_health` als oeffentlicher Health-Endpoint trennen vom internen `/api/*`-Routing
-- CI-Mirror-Workflow `frontend-ci-skip.yml` aufraeumen, wenn Branch-Protection-Matcher smarter wird
+- CI-Mirror-Workflow `frontend-ci-skip.yml` aufloesen: `paths`-Filter aus
+  `frontend-ci.yml` entfernen und den Spiegel loeschen, wie am 2026-09-18
+  fuer Backend CI und ChirpStack-Tools CI gemacht (§5.55 Nachtrag). Kostet
+  ~2m20s Playwright pro PR, raeumt dafuer die letzte Spiegel-Mehrdeutigkeit weg.
 - ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup nach `docker compose down -v` (Sprint 6 oder spaeter)
 - `.github/CODEOWNERS` einrichten, wenn weitere Mitwirkende dazukommen
 - `services/_common.py` (Sprint 9.9-Backlog): konsolidiert duplicates `_task_session` aus `engine_tasks.py`/`override_cleanup_tasks.py`

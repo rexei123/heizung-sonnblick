@@ -1,15 +1,27 @@
 name: Backend CI
 
+# Kein `paths`-Filter: dieser Workflow laeuft auf JEDEM Pull-Request.
+#
+# Grund: `lint-and-test` ist Pflicht-Check auf develop und main. Ein
+# Pflicht-Check, der wegen eines Pfadfilters gar nicht erst startet, bleibt
+# dauerhaft auf "Expected — Waiting for status to be reported" stehen und
+# blockiert den PR fuer immer — bei `enforce_admins: true` ohne Notbremse.
+# Jeder Doku-PR waere betroffen.
+#
+# Die Alternative waere ein Skip-Spiegel nach dem Muster von
+# frontend-ci-skip.yml. Bewusst verworfen: zwei Dateien, deren `paths` und
+# `paths-ignore` synchron bleiben muessen, und ein `gh pr checks`, das nicht
+# mehr erkennen laesst, welcher Workflow geantwortet hat (CLAUDE.md §5.55).
+# Ein Pflicht-Check, der die Produktion schuetzen soll, darf nicht davon
+# abhaengen, dass zwei Listen nicht auseinanderlaufen.
+#
+# Preis: rund 2m40s pro PR, der `backend/**` gar nicht beruehrt. Das ist
+# billiger als eine Luecke im Gate — ab 29.09. deployt der Timer alle
+# 5 Minuten automatisch.
 on:
   push:
     branches: [main, develop]
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
   pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
 
 defaults:
   run:

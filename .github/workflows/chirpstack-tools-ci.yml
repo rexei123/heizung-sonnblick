@@ -2,26 +2,29 @@ name: ChirpStack-Tools CI
 
 # Sprint 17 (C1): infra/chirpstack/ liegt bewusst ausserhalb des Backend-
 # Packages (D3 — chirpstack-api ist keine Abhaengigkeit des API-Images).
-# backend-ci.yml filtert auf `backend/**` und wuerde dieses Skript nie
-# pruefen. Eigener Workflow, gleiche Gates wie das Backend.
+# backend-ci.yml arbeitet mit `working-directory: backend` und prueft nur
+# `src tests` darunter — dieses Skript wuerde es nie erfassen. Eigener
+# Workflow, gleiche Gates wie das Backend.
 
+# Kein `paths`-Filter, gleiche Begruendung wie in backend-ci.yml:
+# `chirpstack-lint-and-test` ist Pflicht-Check, und ein Pflicht-Check muss
+# auf jedem PR ein Ergebnis melden. Der Lauf dauert rund 15 Sekunden.
 on:
   push:
     branches: [main, develop]
-    paths:
-      - "infra/chirpstack/**"
-      - ".github/workflows/chirpstack-tools-ci.yml"
   pull_request:
-    paths:
-      - "infra/chirpstack/**"
-      - ".github/workflows/chirpstack-tools-ci.yml"
 
 defaults:
   run:
     working-directory: infra/chirpstack
 
 jobs:
-  lint-and-test:
+  # Eigener Job-Name, NICHT `lint-and-test`: backend-ci.yml hat einen Job
+  # desselben Namens. Beide melden ihren Status unter dem Job-Namen, und
+  # als Pflicht-Check waere `lint-and-test` dann von einem beliebigen der
+  # beiden erfuellbar — ein PR, der nur infra/chirpstack aendert, haette
+  # einen gruenen Check "Backend getestet", ohne dass ein Backend-Test lief.
+  chirpstack-lint-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -46,7 +49,10 @@ jobs:
         run: ruff format --check .
 
       - name: Mypy (Type-Check)
-        run: mypy provision_devices.py
+        # Ganzes Verzeichnis, nicht nur das Skript: sonst bleiben die Tests
+        # ungeprueft, und gerade dort lebt der Doppelgaenger, der das
+        # ChirpStack-Verhalten nachbildet.
+        run: mypy .
 
       - name: Pytest
         run: pytest -q
