@@ -67,7 +67,8 @@ from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
 from heizung.models.user import User  # noqa: E402
 from heizung.scripts.pairing.csv_parser import (  # noqa: E402
-    check_dev_eui_duplicates,
+    check_dev_eui_duplicates_in_csv,
+    find_existing_dev_euis,
     parse_csv,
     validate_against_db,
 )
@@ -98,9 +99,10 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
             print(f"  - {err}")
         return 1
 
+    dup_errors = check_dev_eui_duplicates_in_csv(rows)
     async with SessionLocal() as session:
         db_errors = await validate_against_db(rows, session)
-        dup_errors = await check_dev_eui_duplicates(rows, session)
+        existing = await find_existing_dev_euis(rows, session)
     all_errors = db_errors + dup_errors
 
     if all_errors:
@@ -109,6 +111,16 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
             print(f"  - {err}")
         return 1
     print(f"[OK] {len(rows)} CSV-Rows validiert. Bereit fuer import.")
+    # Sprint 17 (E4): Bestandsgeraete sind kein Fehler mehr, aber der
+    # Hotelier soll vor dem Lauf wissen, welche Zeilen angereichert statt
+    # angelegt werden.
+    if existing:
+        print(
+            f"[INFO] {len(existing)} der {len(rows)} DevEUIs stehen bereits in der DB — "
+            "diese Zeilen reichern Metadaten an, statt ein Geraet anzulegen:"
+        )
+        for dev_eui, device_id in sorted(existing.items()):
+            print(f"  - {dev_eui} (device_id={device_id})")
     return 0
 
 
@@ -154,9 +166,11 @@ async def _cmd_import(args: argparse.Namespace) -> int:
         return 1
 
     async with SessionLocal() as session:
-        # Pre-Flight.
+        # Pre-Flight. Sprint 17 (E4): DevEUI-Duplikate INNERHALB der CSV
+        # bleiben ein harter Abbruch; ein bereits vorhandenes Geraet ist
+        # dagegen der Anreicherungs-Normalfall und kein Fehler mehr.
         db_errors = await validate_against_db(rows, session)
-        dup_errors = await check_dev_eui_duplicates(rows, session)
+        dup_errors = check_dev_eui_duplicates_in_csv(rows)
         all_errors = db_errors + dup_errors
         if all_errors:
             print(f"[FAIL] {len(all_errors)} Pre-Flight-Fehler:")
@@ -193,11 +207,19 @@ async def _cmd_import(args: argparse.Namespace) -> int:
             await session.commit()
 
     # Pro-Row-Output.
-    counts = {"paired": 0, "skipped_exists": 0, "error": 0}
-    status_tag = {"paired": "[OK]", "skipped_exists": "[SKIP]", "error": "[FAIL]"}
+    counts = {"paired": 0, "enriched": 0, "skipped_exists": 0, "conflict": 0, "error": 0}
+    status_tag = {
+        "paired": "[OK]",
+        "enriched": "[ERG]",
+        "skipped_exists": "[SKIP]",
+        "conflict": "[KONFLIKT]",
+        "error": "[FAIL]",
+    }
     for r in results:
         counts[r.status] += 1
         detail = r.error_msg or "ok"
+        if r.status in ("paired", "enriched") and r.filled:
+            detail = f"{detail} (Felder: {', '.join(r.filled)})"
         print(
             f"{status_tag[r.status]} Zeile {r.row_number}: DevEUI {r.dev_eui} "
             f"(device_id={r.device_id}, is_pool={r.is_pool}) -> {detail}"

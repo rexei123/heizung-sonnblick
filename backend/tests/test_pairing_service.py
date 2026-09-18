@@ -289,12 +289,15 @@ async def test_pair_device_audit_content(
     assert audit.new_value["heating_zone_id"] is not None
     assert audit.new_value["is_pool"] is False
     assert audit.new_value["csv_row_number"] == 7
+    # Sprint 17 (E4/C2): "metadata" ist additiv dazugekommen.
     assert set(audit.new_value.keys()) == {
         "dev_eui",
         "heating_zone_id",
         "is_pool",
         "csv_row_number",
+        "metadata",
     }
+    assert audit.new_value["metadata"] == {}
 
 
 async def test_pair_device_user_id_none_system_trigger(
@@ -481,3 +484,264 @@ async def test_pair_batch_savepoint_rollback_on_unexpected_exception(
     assert (await session.execute(stmt2)).scalar_one_or_none() is None
     stmt3 = select(Device.id).where(Device.dev_eui == eui3)
     assert (await session.execute(stmt3)).scalar_one_or_none() is not None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 17 (E4/C2) — Metadaten: Neuanlage, Anreicherung, Konflikt
+# ---------------------------------------------------------------------------
+
+_APP_EUI = "70b3d57ed0000001"
+
+
+def _row_with_metadata(
+    *,
+    dev_eui: str,
+    hardware_nummer: str | None = None,
+    app_eui: str | None = None,
+    serial_number: str | None = None,
+) -> PairingCsvRow:
+    """Pool-Row (kein Zimmer noetig) mit den drei optionalen Metadaten."""
+    return PairingCsvRow(
+        stockwerk=None,
+        zimmer_nummer=None,
+        zimmer_typ=None,
+        zone_label=None,
+        dev_eui=dev_eui,
+        app_key=_VALID_APP_KEY,
+        hardware_nummer=hardware_nummer,
+        app_eui=app_eui,
+        serial_number=serial_number,
+    )
+
+
+async def test_pair_device_new_writes_all_three_metadata(session: AsyncSession) -> None:
+    """Neuanlage: alle drei CSV-Felder landen in den Device-Spalten.
+
+    Abbildung (ohne Migration): hardware_nummer -> label,
+    app_eui -> app_eui, serial_number -> hardware_number (AE-61).
+    """
+    row = _row_with_metadata(
+        dev_eui=_eui(),
+        hardware_nummer="101",
+        app_eui=_APP_EUI,
+        serial_number="MDC5419731K6UF",
+    )
+    result = await pair_device(row, row_number=2, session=session)
+    assert result.status == "paired"
+    device = await session.get(Device, result.device_id)
+    assert device is not None
+    assert device.label == "101"
+    assert device.app_eui == _APP_EUI
+    assert device.hardware_number == "MDC5419731K6UF"
+    # Audit haelt fest, WAS der Import mitgebracht hat.
+    audit_stmt = select(BusinessAudit).where(BusinessAudit.target_id == result.device_id)
+    audit = (await session.execute(audit_stmt)).scalar_one()
+    assert audit.action == "DEVICE_PAIRED"
+    assert audit.new_value["metadata"] == {
+        "label": "101",
+        "app_eui": _APP_EUI,
+        "hardware_number": "MDC5419731K6UF",
+    }
+
+
+async def test_pair_device_new_without_metadata_leaves_columns_null(
+    session: AsyncSession,
+) -> None:
+    """Bestands-CSV ohne die Spalten: Device-Spalten bleiben NULL."""
+    row = _row_with_metadata(dev_eui=_eui())
+    result = await pair_device(row, row_number=2, session=session)
+    assert result.status == "paired"
+    assert result.filled == ()
+    device = await session.get(Device, result.device_id)
+    assert device is not None
+    assert device.label is None
+    assert device.app_eui is None
+    assert device.hardware_number is None
+    audit_stmt = select(BusinessAudit).where(BusinessAudit.target_id == result.device_id)
+    audit = (await session.execute(audit_stmt)).scalar_one()
+    # Leeres Dict, nicht fehlender Key — "nichts mitgebracht" ist explizit.
+    assert audit.new_value["metadata"] == {}
+
+
+async def test_pair_device_existing_enriches_empty_fields(session: AsyncSession) -> None:
+    """Der Fall der vier Testgeraete: leere Felder werden nachgetragen.
+
+    Das Geraet steht seit Sprint 6 in der DB und hat ein gewachsenes
+    ``label``. AppEUI und Seriennummer fehlen und kommen jetzt aus der CSV.
+    Das ``label`` bleibt unberuehrt, weil die CSV es nicht nennt.
+    """
+    existing_eui = _eui()
+    existing = Device(
+        dev_eui=existing_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="Vicki",
+        label="Vicki-001",
+    )
+    session.add(existing)
+    await session.flush()
+
+    row = _row_with_metadata(
+        dev_eui=existing_eui,
+        app_eui=_APP_EUI,
+        serial_number="MDC-NEU-1",
+    )
+    result = await pair_device(row, row_number=5, session=session)
+    assert result.status == "enriched"
+    assert result.device_id == existing.id
+    assert result.filled == ("app_eui", "hardware_number")
+    assert result.conflicts == ()
+
+    await session.refresh(existing)
+    assert existing.app_eui == _APP_EUI
+    assert existing.hardware_number == "MDC-NEU-1"
+    assert existing.label == "Vicki-001"  # unveraendert
+
+    audit_stmt = select(BusinessAudit).where(
+        BusinessAudit.action == "DEVICE_METADATA_ENRICHED",
+        BusinessAudit.target_id == existing.id,
+    )
+    audit = (await session.execute(audit_stmt)).scalar_one()
+    assert audit.new_value["filled_fields"] == ["app_eui", "hardware_number"]
+    assert audit.new_value["conflicting_fields"] == []
+    assert audit.new_value["csv_row_number"] == 5
+
+
+async def test_pair_device_existing_conflict_does_not_overwrite(
+    session: AsyncSession,
+) -> None:
+    """Abweichender Wert wird gemeldet, nicht ueberschrieben."""
+    existing_eui = _eui()
+    existing = Device(
+        dev_eui=existing_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="Vicki",
+        label="Vicki-001",
+        hardware_number="MDC-ALT",
+    )
+    session.add(existing)
+    await session.flush()
+
+    row = _row_with_metadata(
+        dev_eui=existing_eui,
+        hardware_nummer="101",
+        serial_number="MDC-NEU",
+    )
+    result = await pair_device(row, row_number=7, session=session)
+    assert result.status == "conflict"
+    assert result.conflicts == ("hardware_number", "label")
+    assert result.filled == ()
+    assert result.error_msg is not None
+    assert "METADATA_CONFLICT" in result.error_msg
+
+    await session.refresh(existing)
+    assert existing.label == "Vicki-001"
+    assert existing.hardware_number == "MDC-ALT"
+
+    # Kein Anreicherungs-Audit, weil nichts geschrieben wurde.
+    audit_stmt = select(BusinessAudit).where(
+        BusinessAudit.action == "DEVICE_METADATA_ENRICHED",
+        BusinessAudit.target_id == existing.id,
+    )
+    assert list((await session.execute(audit_stmt)).scalars().all()) == []
+
+
+async def test_pair_device_existing_partial_conflict_fills_the_rest(
+    session: AsyncSession,
+) -> None:
+    """Gemischt: ein Feld widerspricht, ein anderes ist leer.
+
+    Das leere Feld wird trotzdem befuellt — sonst blockiert ein einzelner
+    Widerspruch die gesamte Nachtragung fuer dieses Geraet.
+    """
+    existing_eui = _eui()
+    existing = Device(
+        dev_eui=existing_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="Vicki",
+        label="Vicki-002",
+    )
+    session.add(existing)
+    await session.flush()
+
+    row = _row_with_metadata(
+        dev_eui=existing_eui,
+        hardware_nummer="102",
+        app_eui=_APP_EUI,
+    )
+    result = await pair_device(row, row_number=8, session=session)
+    assert result.status == "conflict"
+    assert result.conflicts == ("label",)
+    assert result.filled == ("app_eui",)
+
+    await session.refresh(existing)
+    assert existing.label == "Vicki-002"  # Widerspruch: unveraendert
+    assert existing.app_eui == _APP_EUI  # leer gewesen: befuellt
+
+    audit_stmt = select(BusinessAudit).where(
+        BusinessAudit.action == "DEVICE_METADATA_ENRICHED",
+        BusinessAudit.target_id == existing.id,
+    )
+    audit = (await session.execute(audit_stmt)).scalar_one()
+    assert audit.new_value["filled_fields"] == ["app_eui"]
+    assert audit.new_value["conflicting_fields"] == ["label"]
+
+
+async def test_pair_device_existing_identical_values_is_noop(session: AsyncSession) -> None:
+    """Zweiter Lauf derselben CSV: nichts zu tun, kein Audit (Idempotenz)."""
+    existing_eui = _eui()
+    existing = Device(
+        dev_eui=existing_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="Vicki",
+        label="103",
+        app_eui=_APP_EUI,
+        hardware_number="MDC-GLEICH",
+    )
+    session.add(existing)
+    await session.flush()
+
+    row = _row_with_metadata(
+        dev_eui=existing_eui,
+        hardware_nummer="103",
+        app_eui=_APP_EUI,
+        serial_number="MDC-GLEICH",
+    )
+    result = await pair_device(row, row_number=9, session=session)
+    assert result.status == "skipped_exists"
+    assert result.filled == ()
+    assert result.conflicts == ()
+
+    audit_stmt = select(BusinessAudit).where(BusinessAudit.target_id == existing.id)
+    assert list((await session.execute(audit_stmt)).scalars().all()) == []
+
+
+async def test_pair_device_existing_keeps_zone_assignment(session: AsyncSession) -> None:
+    """Anreicherung haengt ein gepairtes Geraet NICHT um.
+
+    Ein zweimal eingelesenes CSV darf keine Zonen verschieben (S2/S4) —
+    Umhaengen ist Aufgabe von ``assign`` bzw. des Tausch-Endpoints.
+    """
+    _, zone_id = await _seed_zone(session, room_number="9801", zone_name="Bad")
+    existing_eui = _eui()
+    existing = Device(
+        dev_eui=existing_eui,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="Vicki",
+        heating_zone_id=zone_id,
+    )
+    session.add(existing)
+    await session.flush()
+
+    # CSV nennt das Geraet als Pool-Zeile (ohne Zimmer/Zone).
+    row = _row_with_metadata(dev_eui=existing_eui, serial_number="MDC-Z")
+    result = await pair_device(row, row_number=3, session=session)
+    assert result.status == "enriched"
+
+    await session.refresh(existing)
+    assert existing.heating_zone_id == zone_id
+    assert existing.hardware_number == "MDC-Z"
