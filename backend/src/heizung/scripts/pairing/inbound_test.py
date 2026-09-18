@@ -1,4 +1,4 @@
-"""Vicki-Eingangstest gemaess RUNBOOK §10h.1 (Sprint 13a T5).
+"""Vicki-Eingangstest gemaess RUNBOOK §10h.4 (Sprint 13a T5).
 
 5 Schritte pro Vicki am Office-Laptop-Tisch (plus Schritt 0 idempotenter
 OW-Resend, T4-Variante-A-Mitigation):
@@ -17,7 +17,7 @@ OW-Resend, T4-Variante-A-Mitigation):
 5. ``backplate``: ``attached_backplate=True`` im **frisch nachgelesenen**
    Reading (Hardware ist auf Vicki-Wandhalterung angeflanscht).
    ``skip_backplate=True`` laesst den Schritt aus — am Tisch ist ``false``
-   der erwartete Zustand (RUNBOOK §10h.1), dort ist die Pruefung
+   der erwartete Zustand (RUNBOOK §10h.4), dort ist die Pruefung
    sinnlos.
 
 ``interactive=True`` (Default fuer CLI): User-Prompts via ``input()``.
@@ -67,7 +67,7 @@ StepName = Literal[
 StepStatus = Literal["ok", "skipped", "failed", "user_aborted"]
 OverallStatus = Literal["passed", "failed", "user_aborted"]
 
-# Schritt-Konstanten — aus RUNBOOK §10h.1 abgeleitet, plus Schritt 0
+# Schritt-Konstanten — aus RUNBOOK §10h.4 abgeleitet, plus Schritt 0
 # (T4-Variante-A-Mitigation: idempotenter OW-Resend bevor wir vertrauen
 # dass der Pairing-Service den ersten Downlink wirklich abgesetzt hat).
 STEP_RESEND_OW: StepName = "resend_open_window"
@@ -319,7 +319,7 @@ async def run_inbound_test(
     interactive: bool = True,
     skip_backplate: bool = False,
 ) -> TestResult:
-    """Fuehrt den 6-Schritt-Eingangstest aus (RUNBOOK §10h.1 + Schritt 0).
+    """Fuehrt den 6-Schritt-Eingangstest aus (RUNBOOK §10h.4 + Schritt 0).
 
     :param device_id: Device-PK aus heizung-DB (nach Pairing-Service-Run).
     :param session: ``AsyncSession`` (read-only, kein commit).
@@ -328,7 +328,7 @@ async def run_inbound_test(
         Tests + Smoke-Runs.
     :param skip_backplate: laesst Schritt 5 aus (Sprint 17 / C4). Am Tisch
         ist ``attached_backplate=false`` der erwartete Zustand (RUNBOOK
-        §10h.1) — den Schritt dort zu pruefen hiesse, jedes Geraet
+        §10h.4) — den Schritt dort zu pruefen hiesse, jedes Geraet
         durchfallen zu lassen. Er gehoert nach die Montage.
     :raises ValueError: Device nicht in DB.
     """

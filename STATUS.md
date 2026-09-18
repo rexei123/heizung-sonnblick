@@ -795,6 +795,12 @@ send_setpoint(dev_eui, setpoint_c) -> str    # 0x51 (refactored, verhalten-treu)
 - `REPLY_REPORT_TYPES`-frozenset filtert alle Reply-Typen sauber (verhindert NULL-Garbage-Inserts in `sensor_reading`)
 
 **Bulk-Aktivierungs-Skript** `backend/scripts/activate_open_window_detection.py`:
+
+> **Pfad-Hinweis (Sprint 17 / C3):** Das Skript liegt seit 2026-09-18 unter
+> `backend/src/heizung/scripts/` und wird als
+> `python -m heizung.scripts.activate_open_window_detection` aufgerufen.
+> Die Befehle in diesem historischen Abschnitt mit `python scripts/...`
+> funktionieren nicht mehr — aktuelle Fassung in RUNBOOK §10e.2 und §10h.
 - 3-Phasen (FW-Query → Wait → FW-Check + 0x45+0x46)
 - `--wait-secs N` CLI-Arg (default 60, empfohlen 600-1200)
 - Tabellen-Output, idempotent

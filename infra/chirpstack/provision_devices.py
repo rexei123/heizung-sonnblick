@@ -433,6 +433,19 @@ def verify_key_field(
             f"Referenzgeraet {reference_dev_eui} hat weder nwk_key noch app_key gesetzt — "
             "daraus laesst sich nichts spiegeln."
         )
+    if len(populated) > 1:
+        # Beide Felder belegt: daraus laesst sich NICHT ablesen, welches das
+        # joinende Geraet tatsaechlich benutzt. Stillschweigend nwk_key zu
+        # waehlen waere geraten — und genau das soll die Spiegelung
+        # verhindern. Der Hotelier klaert es im ChirpStack-UI und setzt dann
+        # --key-field bewusst.
+        raise ProvisionError(
+            f"Referenzgeraet {reference_dev_eui} hat BEIDE Key-Felder belegt "
+            "(nwk_key und app_key). Daraus ist nicht ablesbar, welches beim Join "
+            "wirksam ist. Bitte im ChirpStack-UI klaeren und das Feld dann mit "
+            "--key-field ausdruecklich setzen — oder ein Referenzgeraet waehlen, "
+            "bei dem nur eines belegt ist."
+        )
     if chosen_field not in populated:
         raise ProvisionError(
             f"Feld-Spiegelung widerspricht: gewaehlt ist '{chosen_field}', "

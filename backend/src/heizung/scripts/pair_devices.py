@@ -1,7 +1,7 @@
 r"""CLI-Entrypoint fuer das Pre-Pairing-Skript (Sprint 13a T6).
 
 Aufruf via ``python -m heizung.scripts.pair_devices <subcommand>``.
-Hotelier-Workflow im September 2026 (RUNBOOK §10h.2): CSV vom Office-
+Hotelier-Workflow im September 2026 (RUNBOOK §10h.3): CSV vom Office-
 Laptop scp-en, dann via ``docker exec deploy-api-1 python -m
 heizung.scripts.pair_devices ...`` aufrufen.
 
@@ -434,7 +434,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # test
     p_test = sub.add_parser(
         "test",
-        help="6-Schritt-Eingangstest pro Vicki (RUNBOOK §10h.1).",
+        help="6-Schritt-Eingangstest pro Vicki (RUNBOOK §10h.4).",
     )
     p_test.add_argument(
         "device",
@@ -449,7 +449,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-backplate",
         action="store_true",
         help="Schritt 5 auslassen. Am Tisch ist attached_backplate=false "
-        "erwartet (RUNBOOK 10h.1) — dort ist die Pruefung sinnlos.",
+        "erwartet (RUNBOOK 10h.4) — dort ist die Pruefung sinnlos.",
     )
 
     # inbound-test (Batch)

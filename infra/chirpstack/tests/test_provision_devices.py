@@ -473,3 +473,42 @@ def test_create_failure_continues_and_exits_nonzero(
     out = capsys.readouterr().out
     assert "[FEHLER]" in out
     assert "[ANGELEGT]" in out
+
+
+def test_key_reference_with_both_fields_set_aborts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Beide Key-Felder belegt -> Abbruch, kein stilles nwk_key.
+
+    Aus einer doppelten Belegung laesst sich nicht ablesen, welches Feld beim
+    Join wirksam ist. Sich fuer nwk_key zu entscheiden waere geraten — und
+    genau das soll die Spiegelung verhindern.
+    """
+    csv_path = write_csv(tmp_path / "p.csv", f"1,101,Bad,{EUI_A},{KEY_A},001,{JOIN_EUI}")
+    client = FakeClient(keys={EUI_B: RemoteKeys(nwk_key_set=True, app_key_set=True)})
+    code = run(
+        base_args(csv_path, "--apply", "--key-reference-dev-eui", EUI_B),
+        client_factory=lambda: client,
+    )
+    assert code == 1
+    assert client.created == []
+    err = capsys.readouterr().err
+    assert "BEIDE Key-Felder belegt" in err
+    assert "--key-field" in err
+
+
+def test_key_field_override_wins_over_ambiguous_reference(tmp_path: Path) -> None:
+    """Auch mit --key-field bleibt die doppelte Belegung ein Abbruch.
+
+    Der Override sagt, WELCHES Feld geschrieben wird — er beantwortet nicht
+    die Frage, warum beim Referenzgeraet beide gesetzt sind. Das ist ein
+    Datenbefund, der geklaert gehoert.
+    """
+    csv_path = write_csv(tmp_path / "p.csv", f"1,101,Bad,{EUI_A},{KEY_A},001,{JOIN_EUI}")
+    client = FakeClient(keys={EUI_B: RemoteKeys(nwk_key_set=True, app_key_set=True)})
+    code = run(
+        base_args(csv_path, "--apply", "--key-field", "nwk_key", "--key-reference-dev-eui", EUI_B),
+        client_factory=lambda: client,
+    )
+    assert code == 1
+    assert client.created == []

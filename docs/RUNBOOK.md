@@ -1383,17 +1383,745 @@ ohne Diagnose der Failure-Ursache.
 
 ---
 
-## 10h. Pre-Pairing-Workflow September 2026 (Stub)
+## 10h. Mass-Pairing und Montage September/Oktober 2026
 
-> **Status (2026-05-15):** Stub. Vollständige Anleitung folgt aus
-> Sprint 13 (Pairing-Wizard inkl. Mass-Pairing-CSV) und Sprint 17
-> (Pre-Pairing September, Phase 4b). Dieser Abschnitt existiert,
-> damit der Hotelier später weiß, wo gesucht werden muss.
->
-> Bezug: STRATEGIE-THERMOSTAT-ZUORDNUNG.md §15 (Migrations-Plan),
-> SPRINT-PLAN.md Sprint 13 + Sprint 17.
+**Stand 2026-09-18 (Sprint 17).** Diese Sektion ist der vollständige
+Arbeitsplan. Sie ersetzt den Stub von 2026-05-15 und die frühere §10h.2.
 
-### 10h.0 Zimmer-Seed vor Pairing (Stammdaten)
+### 10h.0 Überblick und Reihenfolge
+
+| # | Schritt | Wann | Abschnitt |
+|---|---|---|---|
+| 1 | Zimmer-Seed (falls noch nicht geschehen) | vor allem anderen | §10h.1 |
+| 2 | ChirpStack-Provisioning | 26.09. | §10h.2 |
+| 3 | Pool-Import in die Heizungs-DB | 26.09. | §10h.3 |
+| 4 | Batch-Eingangstest + Firmware-Inventar | 26.09. | §10h.4 |
+| 5 | Open-Window-Rollout | 28.09. | §10h.5 |
+| 6 | Montage Pilotzimmer + `assign` | 29.09. | §10h.6 |
+| 7 | Tagesabschluss-Kontrolle | jeden Montage-Abend | §10h.7 |
+| 8 | Pilot-Gate | ab 02.10. (≥ 72 h nach Pilotmontage) | §10h.8 |
+| 9 | Rest-Montage | nach Go | §10h.6 (wiederholt) |
+
+**Die Reihenfolge ist nicht beliebig.** Ohne ChirpStack-Registrierung joint
+kein Vicki; ohne Join kommt kein Uplink; ohne Uplink scheitert der
+Eingangstest an Schritt 1 und das Firmware-Inventar bleibt leer.
+
+### 10h.0.1 Was Sie über die Mengen wissen müssen
+
+**104 Geräte auf 103 Zonen. Das ist genau eine Reserve.**
+
+Die Nachbestellung von 3 Vickis kommt erst **ca. 30.10.** — während des
+gesamten Montagefensters gibt es also **kein** Ersatzgerät. Jeder Ausfall im
+Eingangstest reduziert unmittelbar die Zahl besetzbarer Zonen.
+
+**Für jede Zone ohne funktionierendes Gerät bleibt das Betterspace-Thermostat
+montiert.** Nicht abbauen. Diese Zonen kommen in die Nachrüstliste (§10h.9)
+und werden nach der Lieferung umgebaut.
+
+### 10h.0.2 Rollen
+
+Für **Zuordnen, Trennen und Tauschen** in der Oberfläche ist die
+**Admin-Rolle** nötig. Das Mitarbeiter-Konto reicht nicht — es darf lesen,
+aber nicht zuordnen.
+
+Betroffen sind:
+
+| Aktion | Endpoint | Rolle |
+|---|---|---|
+| Gerät einer Zone zuweisen | `PUT /api/v1/devices/{id}/heating-zone` | **Admin** |
+| Gerät von der Zone trennen | `DELETE /api/v1/devices/{id}/heating-zone` | **Admin** |
+| Gerät aus dem Pool tauschen | `POST /api/v1/devices/{id}/replace/from-pool` | **Admin** |
+| Gerät stilllegen | `POST /api/v1/devices/{id}/retire` | **Admin** |
+| Alles Lesen (Listen, Detail, Status) | `GET …` | Mitarbeiter genügt |
+
+> **Anlass:** Am 17.09. scheiterte das Trennen eines Geräts an fehlenden
+> Rechten, nicht an der Technik. Vor dem Montagetag prüfen, dass das Konto,
+> mit dem gearbeitet wird, die Admin-Rolle hat.
+
+Die CLI-Skripte laufen im API-Container und kennen keine Rollen — dort ist
+`--user-email` nur die Zuordnung für den Audit-Eintrag.
+
+### 10h.0.3 Zwei CSV-Varianten aus derselben Excel
+
+Die Master-Liste ist `Zimmer_Geraete_Liste.xlsx` am Office-Laptop. Sie
+enthält AppKeys und gehört **nicht** ins Repo, nicht in Slack, nicht per Mail.
+
+| Variante | Spalten | Verwendung |
+|---|---|---|
+| **Import-CSV** | alle, **mit** Spalte F (`app_key`) | §10h.2 Provisioning, §10h.3 Import |
+| **Montage-CSV** | **ohne** Spalte F | §10h.6 `assign` |
+
+**Warum zwei:** `assign` braucht den AppKey nicht. Ihn trotzdem mitzuführen
+hieße, das Geheimnis ein zweites Mal über den Tisch und auf den Server zu
+tragen, ohne Gegenwert.
+
+**Export:** Blatt `Pairing` aktivieren → *Speichern unter* → Dateityp
+**CSV UTF-8 (durch Trennzeichen getrennt)**. Excel exportiert nur das aktive
+Blatt; das Blatt `Hinweise` kommt nicht mit. Für die Montage-CSV vorher
+Spalte F löschen (**in der .xlsx stehen lassen**, nur im Export weg).
+
+Der Parser toleriert: Semikolon oder Komma, BOM aus dem deutschen Excel,
+Groß-/Kleinschreibung im Header, unbekannte Spalten (`hinweis` wird
+ignoriert) und leere Spalten ohne Überschrift.
+
+**Nach jedem Lauf die CSV vom Server löschen:**
+
+```bash
+# SSH (Prod-Server, root)
+rm -f /tmp/pairings.csv /tmp/montage.csv
+```
+
+### 10h.0.4 Container-Namen nicht hart annehmen
+
+Alle Befehle unten schreiben `<api-container>`. Den echten Namen ermitteln:
+
+```bash
+# SSH (Prod-Server, root)
+docker ps --format '{{.Names}}' | grep -E 'api|chirpstack'
+```
+
+Prod-Pattern ist `deploy-api-1`, aber das ist nicht garantiert.
+
+---
+
+### 10h.1 Zimmer-Seed (Vorbedingung)
+
+Die echten Zimmer und Zonen müssen in der Datenbank stehen, bevor Geräte
+Zonen zugeordnet werden. Vollständige Anleitung: **§10h.1a** (unverändert aus
+der bisherigen §10h.0).
+
+**Kurzprüfung, ob der Seed schon gelaufen ist:**
+
+```bash
+# SSH (Prod-Server, root), im Deploy-Verzeichnis
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+"SELECT (SELECT count(*) FROM room) AS zimmer,
+        (SELECT count(*) FROM heating_zone) AS zonen;"
+```
+
+**Erwartung nach dem Seed:** `45 | 103`.
+
+**Wichtig:** Die Zonen-Schreibweise in der Excel (`Bad`, `Schlafzimmer`,
+`Schlafzimmer L`, `Schlafzimmer R`, `Kinderzimmer`) stimmt **exakt** mit dem
+Seed überein — das wurde am 18.09. Zeile für Zeile geprüft. Die im
+Hinweis-Blatt der Excel offengelassene Frage, ob die Datenbank womöglich
+`Badezimmer` führt, ist damit beantwortet: **nein**. `Badezimmer` ist nur der
+Wert der Spalte `Room_Type` und wird auf den Zonentyp `bathroom` abgebildet,
+nicht auf den Namen. **Kein Suchen-und-Ersetzen nötig.**
+
+Ebenfalls beantwortet: das Pairing-Skript **liest** die Spalte
+`hardware_nummer` (seit Sprint 17). Spalte G bleibt im Export drin.
+
+---
+
+### 10h.2 ChirpStack-Provisioning (26.09.)
+
+Legt die 100 fehlenden Geräte in ChirpStack an. Ohne diesen Schritt joint
+kein Vicki.
+
+#### Vorbereitung
+
+```bash
+# SSH (Prod-Server, root)
+# 1. API-Key bereitlegen (ChirpStack-UI -> Tenant -> API Keys).
+#    NIE als Kommandozeilen-Argument - er stuende in der Shell-History
+#    und in "docker inspect".
+export CHIRPSTACK_API_KEY='<token>'
+
+# 2. Import-CSV (MIT app_key) auf den Server kopieren - vom Office-Laptop:
+#    scp pairings.csv root@heizung-test:/tmp/pairings.csv
+
+# 3. Compose-Netz ermitteln (der Einmal-Container muss hinein)
+docker network ls | grep deploy
+```
+
+#### Dauerhafte Werte (H2, Stand 2026-09-18)
+
+| Wert | |
+|---|---|
+| Application-ID | `b7d74615-6ea9-4b54-aa05-fd094e3c2cae` |
+| DeviceProfile-ID | `ca52f5f7-59b3-4376-94dd-ed0c7bf2fa44` (einziges Profil „Heizung") |
+| gRPC-Adresse im Compose-Netz | `chirpstack:8080` |
+
+Beide IDs stehen unten in den Aufrufen. Sie sind **Argumente**, keine
+Skript-Defaults — bewusst: `Settings.chirpstack_app_id` trägt seit Sprint 9
+einen Platzhalter mit demselben ersten Segment (`b7d74615-aaaa-…`), und das
+ist jahrelang niemandem aufgefallen. Ein fehlendes Argument bricht laut; ein
+falscher Default legt 104 Geräte in die falsche Application.
+
+#### Schritt A — Vorschau über die volle Liste
+
+```bash
+# SSH (Prod-Server, root)
+docker run --rm -i \
+  --network "$(docker network ls --format '{{.Name}}' | grep -m1 deploy)" \
+  -e CHIRPSTACK_API_KEY \
+  -v /tmp/pairings.csv:/data/pairings.csv:ro \
+  -v /opt/heizung-sonnblick/infra/chirpstack:/app:ro \
+  python:3.12-slim sh -c '
+    pip install -q -r /app/requirements-provision.txt &&
+    python /app/provision_devices.py /data/pairings.csv
+      --application-id b7d74615-6ea9-4b54-aa05-fd094e3c2cae
+      --device-profile-id ca52f5f7-59b3-4376-94dd-ed0c7bf2fa44
+      --expected-app-id "$CHIRPSTACK_APP_ID"
+      --key-reference-dev-eui 70b3d52dd3034de4'
+```
+
+**Erwartung:**
+
+```
+Pre-Flight: Application + Device-Profile vorhanden, 104 CSV-Zeilen.
+  Referenz 70b3d52dd3034de4: nwk_key=gesetzt, app_key=leer
+  -> 'nwk_key' bestaetigt.
+[WUERDE ANLEGEN] Zeile 2 70b3d52dd30333de name=001 join_eui=70b3d52dd3000000 nwk_key=<32 Hex-Zeichen, nicht angezeigt>
+...
+[OK]             Zeile 93 70b3d52dd3034de4 (101) — bereits vorhanden.
+Resultat: 100 anzulegen, 4 unveraendert, 0 Abweichungen, 0 Fehler.
+```
+
+**Zur Key-Feld-Spiegelung:** `--key-reference-dev-eui` nennt ein Gerät, das
+nachweislich joint — eines der vier Testgeräte (hier 101). Das Skript liest
+dessen Feldbelegung und bricht ab, wenn sie nicht zur Wahl passt. Bei
+LoRaWAN 1.0.x (hier MAC 1.0.3, RegParams A) gehört der AppKey vom Aufkleber
+in `nwk_key`; `app_key` ist ungenutzt.
+
+| Befund an der Referenz | Verhalten |
+|---|---|
+| nur `nwk_key` belegt | bestätigt, Lauf geht weiter |
+| nur `app_key` belegt | **Abbruch** — Widerspruch zur Wahl |
+| **beide belegt** | **Abbruch.** Daraus ist nicht ablesbar, welches beim Join wirksam ist. Im ChirpStack-UI klären, dann `--key-field` bewusst setzen |
+| keines belegt | **Abbruch** — nichts zu spiegeln |
+
+**Schlüsselwerte erscheinen nie in der Ausgabe**, auch nicht gekürzt.
+
+#### Schritt B — Ein-Gerät-Gate
+
+**Nicht die volle Liste scharf schalten.** Erst ein einziges Gerät anlegen,
+einschalten, Join abwarten. Erst wenn der Join durch ist, die restlichen 99.
+Das verhindert 100 falsch eingetragene Keys.
+
+**Das Testgerät muss eines sein, das in ChirpStack noch NICHT existiert** —
+zum Beispiel `hardware_nummer` **001**. Mit einem der vier Testgeräte wäre
+der scharfe Lauf ein No-op: nichts angelegt, kein Join, Key-Feld ungeprüft.
+
+```bash
+# SSH (Prod-Server, root)
+# Ein-Zeilen-CSV erzeugen: Kopfzeile + genau die Zeile von Geraet 001
+head -1 /tmp/pairings.csv > /tmp/eins.csv
+awk -F',' 'NR>1 && $7=="001"' /tmp/pairings.csv >> /tmp/eins.csv
+cat /tmp/eins.csv | cut -d',' -f1-5,7-   # Kontrolle OHNE app_key-Spalte
+```
+
+Dann denselben Aufruf wie in Schritt A, aber mit `/data/eins.csv` und
+**`--apply`**.
+
+**Erwartung:** `[ANGELEGT] Zeile 2 … name=001` und
+`Resultat: 1 angelegt, 0 unveraendert, 0 Abweichungen, 0 Fehler.`
+
+**Jetzt Gerät 001 einschalten und den Join abwarten:**
+
+```bash
+# SSH (Prod-Server, root)
+cd /opt/heizung-sonnblick/infra/deploy
+docker compose -f docker-compose.prod.yml logs chirpstack --since 10m 2>&1 \
+  | grep -iE 'join|otaa'
+```
+
+**Erwartung:** eine Join-Request- und eine Join-Accept-Zeile mit der DevEUI
+von 001. Zusätzlich muss innerhalb weniger Minuten ein Uplink ankommen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+"SELECT max(time) FROM sensor_reading s
+   JOIN device d ON d.id = s.device_id WHERE d.label = '001';"
+```
+
+> **Kein Join?** Nicht die restlichen 99 anlegen. Erst klären: richtiges
+> Key-Feld? AppKey korrekt abgetippt? Gateway online (§10h.8, Funk-Abfrage)?
+
+#### Schritt C — die restlichen 99
+
+Erst nach bestätigtem Join: Aufruf aus Schritt A mit `--apply` und der
+vollen `/data/pairings.csv`. Die bereits angelegten Geräte erscheinen als
+`[OK] … bereits vorhanden` — der Lauf ist idempotent.
+
+**Exit-Codes:** `0` = alles angelegt oder nichts zu tun · `1` =
+Pre-Flight-Fehler, Abweichung oder Anlage-Fehler.
+
+Eine **Abweichung** heißt: das Gerät steht mit anderem Namen oder Profil in
+ChirpStack. Es wurde **nichts** überschrieben. Entweder CSV korrigieren oder
+das Gerät im UI bewusst anpassen.
+
+---
+
+### 10h.3 Pool-Import in die Heizungs-Datenbank (26.09.)
+
+Legt die `device`-Zeilen an. **Sendet keine Downlinks** (Sprint 17).
+
+```bash
+# SSH (Prod-Server, root)
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  validate /tmp/pairings.csv
+```
+
+**Erwartung:**
+
+```
+[OK] 104 CSV-Rows validiert. Bereit fuer import.
+[INFO] 4 der 104 DevEUIs stehen bereits in der DB — diese Zeilen reichern
+       Metadaten an, statt ein Geraet anzulegen:
+  - 70b3d52dd3034d7b (device_id=4)
+  ...
+```
+
+Die vier Testgeräte sind **kein Fehler** mehr. Sie holen sich aus derselben
+CSV ihre AppEUI und Seriennummer nach.
+
+```bash
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  import /tmp/pairings.csv --dry-run
+
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  import /tmp/pairings.csv --user-email admin@hotel-sonnblick.at
+```
+
+**Erwartung:**
+`Resultat: 100 angelegt, 4 ergaenzt, 0 unveraendert, 0 Konflikte, 0 Fehler.`
+
+| Status | Bedeutung |
+|---|---|
+| `[OK]` angelegt | neue Device-Zeile |
+| `[ERG]` ergänzt | Gerät war da, leere Metadaten-Felder wurden gefüllt |
+| `[SKIP]` unverändert | Gerät war da, nichts zu ergänzen |
+| `[KONFLIKT]` | Gerät war da, die CSV nennt für ein Feld einen **anderen** Wert. **Nichts überschrieben.** Exit-Code 1 |
+| `[FAIL]` | Zeile nicht angelegt |
+
+**Ein Konflikt ist zu erwarten**, wenn ein Testgerät sein gewachsenes Label
+(`Vicki-001`) behält und die CSV `101` nennt. Der Bestand gewinnt. Entweder
+die CSV anpassen oder das Label bewusst über die Geräte-Detailseite ändern.
+
+**Wichtig:** Der Import setzt die Zone **nicht** für Geräte, die schon eine
+haben — er hängt nichts um. Umhängen ist `assign` (§10h.6) oder der
+Tausch-Dialog.
+
+Danach: `rm -f /tmp/pairings.csv`.
+
+---
+
+### 10h.4 Batch-Eingangstest und Firmware-Inventar (26.09.)
+
+Prüft **alle Pool-Geräte gleichzeitig** und erstellt dabei das
+Firmware-Inventar. Das Inventar muss **vor** dem Open-Window-Rollout
+vorliegen, nicht erst dabei — die Firmware der 100 neuen Geräte ist unbekannt.
+
+**Alle Geräte einschalten**, dann:
+
+```bash
+# SSH (Prod-Server, root)
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  inbound-test --all-pool --user-email admin@hotel-sonnblick.at
+```
+
+Ablauf: Firmware-Abfrage an alle → Sollwert 25 °C an alle → gemeinsames
+Warten auf den Readback → Sollwert 10 °C → Warten → Urteil.
+
+**Rechnen Sie mit zwei bis drei Stunden.** Class A heißt: ein Downlink
+verlässt die Warteschlange erst beim nächsten Uplink des Geräts. Bis der
+neue Sollwert zurückgemeldet wird, können zwei Periodic-Intervalle vergehen.
+
+**Zeitfenster anpassen**, wenn Geräte bekannte Uplink-Lücken haben:
+
+```bash
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  inbound-test --all-pool --timeout 14400    # 4 Stunden je Schritt
+```
+
+> Gerät 101 zeigte am 17./18.09. Lücken von 1 bis 4 Stunden. Mit dem
+> Standardfenster (2700 s) würde es als TIMEOUT erscheinen, obwohl es
+> in Ordnung ist.
+
+#### Ergebnis lesen
+
+```
+Nummer  Status     Firmware       Befund
+------  ---------  -------------  ---------------------------------
+001     [PASS]     4.5            Readback beidseitig korrekt, Ventil 5 % -> 80 %.
+017     [TIMEOUT]  keine Antwort  25 °C: Kein Uplink innerhalb von 2700 s. …
+042     [FAIL]     4.5            25 °C: Uplink kam, meldet aber 18 statt 25 °C.
+104     [PASS]     4.1            Readback beidseitig korrekt, Ventil 8 % -> 75 %.
+```
+
+| Status | Bedeutung | Was tun |
+|---|---|---|
+| **PASS** | Sollwert beidseitig bestätigt, Ventil hat sich bewegt | montieren |
+| **FAIL** | Uplink kam, aber Sollwert falsch oder Ventil unbewegt | **Hardware-Verdacht** — Gerät zurück in den Karton, Zone auf die Nachrüstliste |
+| **TIMEOUT** | gar kein Uplink im Fenster | **Kein** Hardware-Verdacht. Funk, Duty-Cycle oder Batterie. Mit größerem `--timeout` wiederholen |
+
+**Nur FAIL ist ein Hardware-Verdacht.** Ein TIMEOUT kann ein tadelloses Gerät
+an einem schlechten Platz sein.
+
+Hinweis: Fehlen im Reading die Ventildaten, steht das im Befund („Ventil­kriterium
+nicht prüfbar"). Das ist **kein** FAIL — das Kriterium ist dann nicht
+verletzt, sondern nicht bewertbar. Mit `--no-valve-check` lässt es sich ganz
+abschalten; dann zählt nur der Sollwert-Readback.
+
+#### Firmware-Inventar
+
+```
+Firmware-Inventar (kein Fehlerkriterium, steuert nur den OW-Rollout):
+   98  FW >= 4.2 — wird beim OW-Rollout beschickt
+       001, 002, 003, …
+    1  FW < 4.2 — wird uebersprungen (B-9.11x.b-2)
+       104
+    5  keine FW-Antwort — wird uebersprungen
+       017, 042, 063, 088, 103
+  Erwartungswert fuer den OW-Rollout: 6 Geraet(e) werden uebersprungen.
+```
+
+**Diese Zahl notieren.** Sie ist der Erwartungswert für §10h.5 — dort muss
+genau diese Menge übersprungen werden. Weicht es ab, stimmt etwas nicht.
+
+**Eine fehlende Firmware-Antwort macht ein Gerät nicht defekt.** Es regelt
+normal; nur die Fenstererkennung lässt sich nicht setzen. Bekannt sind
+bereits: **104** (FW 4.1) und **103** (FW-Abfrage ohne Antwort, Stand
+2026-09-17 unverändert).
+
+Das Ergebnis wird je Gerät als `DEVICE_INBOUND_TEST` in `business_audit`
+festgehalten — es ist später nachlesbar, nicht nur Konsolen-Ausgabe.
+
+---
+
+### 10h.5 Open-Window-Rollout (28.09.)
+
+**Einen Tag vor Montagebeginn.** Setzt die Fenstererkennung auf allen
+Geräten, die sie können.
+
+```bash
+# SSH (Prod-Server, root)
+docker exec <api-container> python -m heizung.scripts.activate_open_window_detection \
+  --wait-secs 1200
+```
+
+> **Pfad-Änderung Sprint 17:** Der frühere Aufruf
+> `python scripts/activate_open_window_detection.py` existiert nicht mehr.
+> Alle vier Hotelier-Skripte laufen jetzt einheitlich über
+> `python -m heizung.scripts.<name>`.
+
+**Wichtig:** Das Skript beschickt Geräte **mit Zone** (`heating_zone_id IS
+NOT NULL`). Vor der Montage sind die neuen Geräte noch im Pool — der Rollout
+gehört deshalb **nach** die erste `assign`-Runde, oder er wird pro
+Montagetag wiederholt. Für den 28.09. heißt das: er erreicht zunächst nur
+die bereits zugeordneten Geräte. **Nach jeder Montagerunde wiederholen.**
+
+**Erwartungswert:** genau die Anzahl aus dem Firmware-Inventar (§10h.4) wird
+übersprungen — nicht „eines". Stand 2026-09-18 sind mindestens 103 und 104
+darunter.
+
+Geräte ohne Fenstererkennung **werden trotzdem montiert**. Sie regeln
+normal; nur der Fenster-Trigger fehlt. Die betroffenen Zonen kommen in die
+Liste in §10h.9, damit später niemand aus dem fehlenden Trigger ein
+Engine-Problem konstruiert. Bevorzugt gehören solche Geräte in Zonen mit
+geringem Fensterbezug — Bad statt Schlafzimmer.
+
+---
+
+### 10h.6 Montage und Zuordnung (ab 29.09.)
+
+#### Reihenfolge am ersten Tag
+
+Das Gateway steht im **3. Stock**. Montiert wird **von unten nach oben**,
+damit der kritischste Funkfall zuerst gemessen wird:
+
+| # | Zimmer | Etage | Zonen | Geräte |
+|---|---|---|---|---|
+| 1 | **54** | 0 | Schlafzimmer L · Schlafzimmer R · Bad | 006, 007, 008 |
+| 2 | **102** | 1 | Schlafzimmer L · Schlafzimmer R · Bad | 011, 012, 013 |
+| 3 | **207** | 2 | Schlafzimmer · Kinderzimmer · Bad | 049, 050, 051 |
+| 4 | **310** | 3 | Schlafzimmer · Kinderzimmer · Bad | 088, 089, 090 |
+| 5 | **406** | 4 | Schlafzimmer · Bad | 102, 103 |
+
+**14 Geräte.** Zimmer 310 ist die **Referenz** — gleiches Geschoss wie das
+Gateway.
+
+> Beachten Sie die unterschiedlichen Zonennamen: 54 und 102 haben
+> `Schlafzimmer L` / `Schlafzimmer R`, 207 und 310 dagegen `Schlafzimmer` /
+> `Kinderzimmer`. In der Montage-CSV muss die Schreibweise exakt stimmen.
+
+#### Abends: Zuordnung eintragen
+
+```bash
+# SSH (Prod-Server, root)
+# Montage-CSV (OHNE Spalte app_key) vom Office-Laptop kopieren:
+#   scp montage.csv root@heizung-test:/tmp/montage.csv
+
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  assign /tmp/montage.csv --rooms 54,102,207,310,406 --dry-run
+```
+
+**Erwartung:**
+
+```
+Wuerde zuordnen: 14 Geraet(e)
+  Nr 006    70b3d52dd30333de  ->  Zimmer 54 / Schlafzimmer L
+  ...
+Vorschau. Zum Schreiben denselben Aufruf ohne --dry-run wiederholen.
+```
+
+Dann scharf:
+
+```bash
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  assign /tmp/montage.csv --rooms 54,102,207,310,406 \
+  --user-email admin@hotel-sonnblick.at
+```
+
+**`--rooms` ist Pflicht.** Die CSV enthält alle 103 Zonen; ohne Filter würden
+Geräte Zimmern zugeordnet, an denen noch niemand war. Die Zimmernummern sind
+Ihre Bestätigung „diese habe ich heute montiert".
+
+**Exit-Codes:**
+
+| Code | Bedeutung |
+|---|---|
+| `0` | alles zugeordnet, alle Geräte melden sich als montiert |
+| `1` | **Pre-Flight-Fehler — nichts geschrieben.** Alle Probleme stehen in einer Liste; einmal korrigieren, erneut laufen |
+| `2` | zugeordnet, aber mindestens ein Gerät meldet sich nicht als montiert. **Kein Rollback** |
+
+**Zu Exit-Code 2:** Die Zuordnung in der Datenbank ist richtig. Das Gerät hat
+sich seit der Montage nur noch nicht gemeldet (Vicki-Periodik ~15 Minuten)
+oder sitzt nicht richtig auf der Halterung. Am nächsten Morgen erneut prüfen
+(§10h.7). Meldet es sich dann immer noch nicht, sitzt es nicht richtig.
+
+Danach: `rm -f /tmp/montage.csv`.
+
+#### Wenn der Monteur zwei Geräte vertauscht hat
+
+**`assign` verhindert keine Doppelbelegung einer Zone strukturell — das tut
+nur sein Pre-Flight.** Die Datenbank erlaubt mehrere Geräte pro Zone
+ausdrücklich (AE-51, Mehrfach-Vicki). Wer über die Oberfläche zuordnet,
+kann eine Zone doppelt belegen, ohne dass etwas bremst.
+
+Hat der Monteur getauscht und hängen zwei Geräte an einer Zone:
+
+1. **Trennen** über die Oberfläche: Geräte-Liste → Gerät → Zone trennen.
+   **Admin-Rolle nötig** (§10h.0.2).
+2. `assign` erneut laufen lassen, mit korrigierter CSV.
+
+Doppelbelegungen finden Sie mit Abfrage 4 in §10h.7.
+
+---
+
+### 10h.7 Tagesabschluss-Kontrolle
+
+Abends nach dem `assign`-Lauf. Zeigt in einer Ausgabe: was heute zugeordnet
+wurde, was noch offen ist, und ob eine Zone doppelt belegt ist.
+
+```bash
+# SSH (Prod-Server, root)
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
+\echo '=== 1. Heute zugeordnet ==='
+SELECT r.number AS zimmer, z.name AS zone, d.label AS nummer, d.dev_eui,
+       to_char(a.ts AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS uhrzeit,
+       a.new_value ->> 'source' AS weg
+  FROM business_audit a
+  JOIN device       d ON d.id = a.target_id
+  JOIN heating_zone z ON z.id = (a.new_value ->> 'heating_zone_id')::int
+  JOIN room         r ON r.id = z.room_id
+ WHERE a.action = 'DEVICE_ZONE_ASSIGNED' AND a.target_type = 'device'
+   AND a.ts >= (current_date::timestamp AT TIME ZONE 'Europe/Vienna')
+ ORDER BY r.number, z.name;
+
+\echo ''
+\echo '=== 2. Noch unbesetzte Zonen ==='
+SELECT r.floor AS etage, r.number AS zimmer, z.name AS zone
+  FROM heating_zone z
+  JOIN room r ON r.id = z.room_id
+  LEFT JOIN device d ON d.heating_zone_id = z.id AND d.retired_at IS NULL
+ WHERE d.id IS NULL
+ ORDER BY r.floor NULLS LAST, r.number, z.name;
+
+\echo ''
+\echo '=== 3. Zaehlwerk ==='
+SELECT (SELECT count(*) FROM heating_zone) AS zonen_gesamt,
+       (SELECT count(DISTINCT heating_zone_id) FROM device
+         WHERE heating_zone_id IS NOT NULL AND retired_at IS NULL) AS zonen_belegt,
+       (SELECT count(*) FROM heating_zone z
+         WHERE NOT EXISTS (SELECT 1 FROM device d
+                            WHERE d.heating_zone_id = z.id
+                              AND d.retired_at IS NULL)) AS zonen_offen,
+       (SELECT count(*) FROM device
+         WHERE heating_zone_id IS NULL AND retired_at IS NULL) AS pool_frei;
+
+\echo ''
+\echo '=== 4. Doppelbelegungen (muss leer sein) ==='
+SELECT r.number AS zimmer, z.name AS zone, count(*) AS geraete,
+       string_agg(COALESCE(d.label, d.dev_eui), ', ' ORDER BY d.label) AS nummern
+  FROM heating_zone z
+  JOIN room   r ON r.id = z.room_id
+  JOIN device d ON d.heating_zone_id = z.id AND d.retired_at IS NULL
+ GROUP BY r.number, z.name
+HAVING count(*) > 1
+ ORDER BY r.number, z.name;
+SQL
+```
+
+**So lesen Sie das:**
+
+- **Block 1** ist das **Ist** des Tages. Vergleichen Sie es Zeile für Zeile
+  mit dem **Soll** aus Ihrer Excel für die heute montierten Zimmer. Die
+  Differenz ist das, was schiefgelaufen ist.
+- **Block 2** ist die Liste der noch offenen Zonen. Am Ende der Montage muss
+  sie leer sein — bis auf die Zonen der Nachrüstliste (§10h.9).
+- **Block 3**: `zonen_belegt + zonen_offen` muss `zonen_gesamt` (103)
+  ergeben. `pool_frei` zeigt die verbleibende Reserve — **am Anfang 1**.
+- **Block 4 muss leer sein.** Ist sie es nicht, hat der Monteur getauscht:
+  trennen und erneut zuordnen (§10h.6).
+
+---
+
+### 10h.8 Pilot-Gate (ab 02.10., ≥ 72 h nach der Pilotmontage)
+
+Entscheidung über die Rest-Montage. Master-Beschreibung: **AE-70**.
+
+**Alle vier Kriterien müssen erfüllt sein.**
+
+#### a) Montage bestätigt
+
+Alle 14 Pilotgeräte melden `attached_backplate=true`, keines ist auf
+`health_state='silent'` gewechselt.
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+"SELECT r.number AS zimmer, z.name AS zone, d.label AS nummer,
+        d.health_state, s.attached_backplate, s.time AS letzter_uplink
+   FROM device d
+   JOIN heating_zone z ON z.id = d.heating_zone_id
+   JOIN room r ON r.id = z.room_id
+   LEFT JOIN LATERAL (SELECT * FROM sensor_reading sr
+                       WHERE sr.device_id = d.id
+                       ORDER BY sr.time DESC LIMIT 1) s ON true
+  WHERE r.number IN ('54','102','207','310','406') AND d.retired_at IS NULL
+  ORDER BY r.number, z.name;"
+```
+
+#### b) Regelung wirkt
+
+In **mindestens zwei** Pilotzimmern eine Belegung von Hand setzen. Erwartet:
+der Sollwert steigt, der Readback bestätigt ihn **innerhalb von zwei
+Uplinks**, und nach Belegungsende senkt die Engine wieder ab. Belegung
+anlegen: §10d.7.
+
+#### c) Funk trägt — pro Geschoss
+
+**Nicht als Gesamtwert auswerten.** Ein Mittelwert über fünf Zimmer versteckt
+ein schlechtes Erdgeschoss hinter vier guten Etagen.
+
+```bash
+# Zeitfenster als Parameter: hier 24 Stunden.
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v fenster="'24 hours'" -c "
+SELECT r.floor AS etage, r.number AS zimmer, z.name AS zone, d.label AS nummer,
+       count(*)                                   AS frames,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.rssi_dbm)::numeric, 0) AS rssi_median,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.snr_db)::numeric, 1)   AS snr_median,
+       max(s.fcnt) - min(s.fcnt) + 1              AS erwartet,
+       round(100.0 * ((max(s.fcnt) - min(s.fcnt) + 1) - count(*))
+             / NULLIF(max(s.fcnt) - min(s.fcnt) + 1, 0), 1) AS luecken_prozent
+  FROM sensor_reading s
+  JOIN device d ON d.id = s.device_id
+  JOIN heating_zone z ON z.id = d.heating_zone_id
+  JOIN room r ON r.id = z.room_id
+ WHERE s.time >= now() - :fenster::interval
+   AND d.retired_at IS NULL
+   AND r.number IN ('54','102','207','310','406')
+ GROUP BY r.floor, r.number, z.name, d.label
+ ORDER BY r.floor, r.number, z.name;"
+```
+
+**Bewertung — Referenz ist Zimmer 310** (Gateway-Geschoss):
+
+> **Go**, wenn `luecken_prozent` je Zone **≤ 10** ist **und** höchstens
+> **doppelt so hoch** wie der Wert in 310.
+
+**Messen Sie 310 zuerst.** Liegt es deutlich unter 5 %, ist die 10-%-Schranke
+die bindende. Liegt 310 selbst darüber, ist das schon der Befund — dann
+trägt das Netz auch im Gateway-Geschoss nicht, und die Entfernung ist nicht
+die Ursache.
+
+> **Herkunft der Schwelle:** Bei ~15 Minuten Periodik sind rund 96 Uplinks
+> pro Tag zu erwarten. Gerät 101 zeigte Lücken von 1 bis 4 Stunden; vier
+> Stunden sind 16 fehlende Frames, also rund 17 % eines Tages. Die Schwelle
+> liegt bewusst darunter. Sie ist ein **Vorschlag aus Rechnung**, keine
+> Messung — es gab bisher keinen Produktionsdatensatz dafür.
+
+#### d) Keine Fehlauslösung
+
+Kein `DEVICE_DETACHED`-Eintrag in den Pilotzimmern:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+"SELECT r.number, e.time, e.reason, e.details ->> 'detached_devices' AS geraete
+   FROM event_log e JOIN room r ON r.id = e.room_id
+  WHERE e.layer = 'device_detached' AND e.reason = 'device_detached'
+    AND e.time >= now() - interval '72 hours'
+    AND r.number IN ('54','102','207','310','406')
+  ORDER BY e.time DESC;"
+```
+
+**Erwartung: keine Zeile.**
+
+#### Entscheidung
+
+| Ergebnis | Konsequenz |
+|---|---|
+| Alle vier erfüllt | **Go** — Rest-Montage nach §10h.6, Zimmer für Zimmer |
+| **Nur (c), und nur in unteren Geschossen** | **Kein Abbruch.** Die oberen Geschosse sind nachweislich versorgt und werden weiter montiert. Konsequenz ist ein **zweites Gateway** — Beschaffungsvorlauf einplanen |
+| (a), (b) oder (d) verletzt | **Stopp.** Betterspace-Thermostate **pro Zimmer beschriftet** einlagern, Abo läuft bis Frühjahr 2027 weiter. Der Rückweg bleibt offen |
+
+---
+
+### 10h.9 Listen, die mitzuführen sind
+
+Beide Listen leben **hier**, nicht in der Excel — sie beschreiben den
+Ist-Zustand der Anlage, nicht die Planung.
+
+#### Nachrüstliste — Zonen ohne Vicki
+
+Zonen, deren Gerät im Eingangstest durchgefallen ist (FAIL) und an denen das
+**Betterspace-Thermostat montiert bleibt**. Umbau nach der Nachlieferung
+(3 Stück, ca. 30.10.).
+
+| Zimmer | Zone | Grund | Betterspace montiert seit | Umgebaut am |
+|---|---|---|---|---|
+| _(leer — wird am 26.09. gefüllt)_ | | | | |
+
+#### Zonen ohne Fenstererkennung
+
+Geräte mit FW < 4.2 oder ohne FW-Antwort. Sie sind montiert und regeln
+normal; nur der Open-Window-Trigger fehlt.
+
+| Zimmer | Zone | Nummer | Firmware | Auflösung |
+|---|---|---|---|---|
+| _(leer — wird am 26.09. aus dem FW-Inventar gefüllt)_ | | | | |
+
+> **Warum namentlich:** Ohne diese Liste sieht später jemand, dass in
+> bestimmten Zonen nie ein Fenster-Trigger auslöst, und beginnt, einen
+> Engine-Fehler zu suchen. Es ist keiner — das Gerät kann es schlicht nicht.
+> Auflösung kommt mit B-9.11x.b-2 (0x06-Fallback für FW < 4.2).
+
+---
+
+### 10h.1a Zimmer-Seed im Detail (unveraendert aus Sprint 15)
 
 **Pflicht VOR dem Pairing:** Die echten Zimmer + Zonen müssen in der DB
 stehen, bevor Vickis Zonen zugeordnet werden. Das Skript
@@ -1443,184 +2171,6 @@ Zimmern 107/115/207/215/302/303/306/310/401.
 per FK-Cascade auch raumbezogene `occupancy`/`manual_override`/`event_log`/
 room-scope-`rule_config`. Globale + Raumtyp-Configs (room_id NULL) bleiben.
 Auf produktiven Daten nur bewusst und nach `--dry-run`-Sichtung.
-
-### 10h.1 Vicki-Eingangstest (5 Schritte pro Gerät)
-
-Pro Vicki vor der Montage auf dem Tisch im Hotel-Office:
-
-1. **Vicki einschalten + pairen.** Pairing-Wizard durchlaufen
-   (ChirpStack-Stufe + Zimmer/Zone/Label). Erster Uplink
-   erwartet innerhalb von 2 Min.
-2. **Temperatur lesen.** Plausi 15-30 °C im Lagerraum (sonst
-   AE-53 Plausi-Filter [-20 °C, 60 °C] greift; Werte ausserhalb
-   sind Hardware-/Sensor-Befund).
-3. **Setpoint 25 °C senden.** Downlink-Bestätigung im
-   ChirpStack-Event-Tab abwarten, Ventil hörbar auf.
-4. **Setpoint 10 °C senden.** Downlink-Bestätigung, Ventil
-   hörbar zu.
-5. **Backplate-Bit prüfen.** `attachedBackplate=false` ist
-   erwartet, weil Vicki nicht montiert ist. Falls `true`:
-   Backplate sitzt am Tisch fest oder Codec-Befund (siehe
-   CLAUDE.md §5.21 fPort-Routing).
-
-Bestandene Geräte werden als „eingangsgetestet" markiert und
-wandern in den Montage-Pool für Sprint 17 / Phase 6.
-
-### 10h.2 Pre-Pairing-Skript-Anwendung (Sprint 13a)
-
-Skript: `python -m heizung.scripts.pair_devices`.
-
-Aufrufkontext: Hotelier oder Mitarbeiter sitzt am Office-Laptop, hat
-SSH-Zugang auf den Server. Skript laeuft im Backend-Container via
-`docker exec`. CSV liegt auf dem Server unter `/tmp/`.
-
-**Voraussetzungen vor Pairing-Lauf:**
-
-1. ChirpStack-Bulk-Import von Tenants + Application + DeviceProfile +
-   alle DevEUIs ist bereits einmal vor September im ChirpStack-Web-UI
-   gemacht (Hotelier-Hand, nicht Skript-Aufgabe).
-2. CSV ist vorbereitet aus der Master-Vorlage
-   `docs/inventar/Zimmer_Geraete_Liste.xlsx`. Spalten:
-
-   stockwerk; zimmer_nummer; zimmer_typ; zone_label; dev_eui; app_key
-
-   - Encoding utf-8 oder utf-8-mit-BOM (Excel-Default Windows).
-   - Trennzeichen Semikolon oder Komma (auto-erkannt).
-   - dev_eui: 16-Hex-Zeichen vom Vicki-Aufkleber.
-   - app_key: 32-Hex-Zeichen vom Vicki-Aufkleber. WICHTIG: app_key
-     wird NICHT in heizung-DB persistiert — er gehoert zur
-     ChirpStack-Registrierung. Spalte ist Cross-Reference-Notiz fuer
-     den Hotelier.
-   - Reserve-Geraete: Spalten `stockwerk`, `zimmer_nummer`,
-     `zimmer_typ`, `zone_label` leer lassen. Skript erkennt das als
-     Pool-Device, legt `heating_zone_id = NULL` an.
-
-3. Zimmer + Heating-Zones sind in heizung-DB vorhanden. Falls nicht
-   (heizung-test = Prod beim Live-Lauf im September; AE-67 — kein
-   separater heizung-main-Server mehr), vorher Zimmer-Seed-Sprint
-   ausfuehren.
-
-**Workflow Schritt fuer Schritt:**
-
-A. CSV auf den Server kopieren (PowerShell auf Laptop):
-
-   ```powershell
-   scp pairings.csv server:/tmp/
-   ```
-
-B. Pre-Flight-Validierung (kein Side-Effekt):
-
-   ```bash
-   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
-       validate /tmp/pairings.csv"
-   ```
-
-   Erwartung: `[OK] N CSV-Rows validiert. Bereit fuer import.`
-   Bei Fehlern: jede Zeile bekommt eine eigene Fehlerzeile, Skript
-   exit-codet 1. Hotelier korrigiert CSV, lokal speichern, scp neu,
-   nochmal validate.
-
-C. Smoke-Test gegen heizung-test (NUR vor Live-Lauf September,
-   Sprint 13a-Verifikation):
-
-   ```bash
-   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
-       import /tmp/pairings.csv --dry-run"
-   ```
-
-   ACHTUNG: `--dry-run` rollt die DB-Aenderungen zurueck, sendet
-   aber trotzdem MQTT-Downlinks an die in der CSV gelisteten Vickis.
-   Seit dem Promote (AE-67) laufen auf heizung-test (= Prod) die 4
-   **produktiven** Vickis — der dry-run sendet also auch hier echte
-   Downlinks an echte Hardware (S4). Entsprechend bewusst einsetzen;
-   nur DevEUIs in der CSV listen, deren Konfiguration gewollt ist.
-
-D. Live-Lauf:
-
-   ```bash
-   ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
-       import /tmp/pairings.csv --user-email hotelier@hotel-sonnblick.at"
-   ```
-
-   Pro Row: `[OK] Zeile N: DevEUI ... -> paired (device_id=X)` oder
-   `[SKIP] Zeile N: DEV_EUI_EXISTS` oder `[FAIL] Zeile N: <Fehler>`.
-   Am Ende: Summary mit Counts.
-
-E. Pro Vicki am Tisch: 6-Schritt-Eingangstest (RUNBOOK §10h.1 plus
-   idempotenter Open-Window-Resend als Schritt 0):
-
-   ```bash
-   ssh server "docker exec -it deploy-api-1 python -m heizung.scripts.pair_devices \
-       test <device_id-oder-dev_eui>"
-   ```
-
-   Argument-Flexibilitaet: entweder `device.id` aus dem Import-Output
-   oder `dev_eui` vom Vicki-Aufkleber. Skript erkennt das automatisch.
-   `-it` ist wichtig fuer die Setpoint-Schritte (User-Prompt
-   "Ventil geoeffnet? [j/n]").
-
-   Erwartung pro Vicki: alle 6 Schritte `[OK]`,
-   `overall_status=passed`. Bei `[FAIL]`: Konsolen-Output nennt den
-   Defekt-Schritt, Mitarbeiter dokumentiert Hardware-Problem manuell,
-   Vicki wird physisch zurueck in den Karton.
-
-F. Nach Eingangstest pro Vicki: physische Markierung am Vicki-Gehaeuse
-   (Aufkleber mit Soll-Zimmer + Soll-Zone). Beispiel:
-   "207-Bad / device_id=47".
-
-**Reserve-Pool-Workflow:**
-
-Reserve-Vickis durchlaufen identisch B-D-E (Pre-Flight, Import als
-Pool, Eingangstest). In Schritt E ist KEIN Soll-Zimmer-Aufkleber noetig
-— Vicki kommt ins Lager mit Markierung "Reserve / device_id=X". Bei
-spaeterem Bedarf wird Reserve via Sprint-13b-Tausch-Dialog einem Zimmer
-zugewiesen.
-
-Pool-Status abfragen jederzeit:
-
-```bash
-ssh server "docker exec deploy-api-1 python -m heizung.scripts.pair_devices list-pool"
-```
-
-Ausgabe: Tabelle aller Pool-Devices mit `device_id`, `dev_eui`,
-`model`, `created_at`, `label`.
-
-**Stoerungsfaelle:**
-
-- `DEV_EUI_EXISTS`: DevEUI ist schon in heizung-DB. Doppelt importiert,
-  oder Vicki von vorigem Hotel-Lauf uebrig. Pruefen via list-pool oder
-  DB-Query.
-- Eingangstest `heartbeat`-failed: Vicki sendet keinen Uplink. Pruefen
-  ob Batterie eingelegt, ob ChirpStack-Application aktiv ist, ob die
-  Funkstrecke im Office-Raum funktioniert.
-- Eingangstest `temp_plausi`-failed: Temperatur ausserhalb 15-30 °C.
-  Vicki im Tiefkuehl oder am Heizkoerper — warten bis Raumtemperatur.
-- Eingangstest `backplate`-failed: Vicki erkennt nicht, dass er auf
-  einer Backplate sitzt. Hardware-Defekt oder Backplate falsch
-  zugeschoben.
-- Eingangstest `setpoint_25`/`setpoint_10` mit Status `user_aborted`:
-  Mitarbeiter hat Ventil-Bewegung nicht gehoert. Hardware-Defekt —
-  Vicki tauschen.
-- Eingangstest `resend_open_window`-failed (non-blocking): MQTT zu
-  ChirpStack hatte Hiccups beim OW-Resend. Test laeuft trotzdem
-  weiter — Vicki bleibt OW-aktiv aus dem urspruenglichen
-  Import-Downlink. Bei wiederholtem Resend-Fail: ChirpStack-Container-
-  Health pruefen.
-
-**Verwandt:**
-
-- §10h.1 (Eingangstest-Spec)
-- AE-57 (Device-Lifecycle, Pool-Status abgeleitet)
-- AE-48 (Downlink-Adapter, MQTT-Pfad)
-- AE-32 (Vicki-1.0-°C-Setpoint-Quantisierung)
-
-### 10h.3 Zimmer-Zuordnungs-Workflow ohne Montage (TBD, Sprint 17)
-
-Workflow zum Pre-Zuordnen aller ~100 Vickis zu Zimmern/Zonen
-ohne physische Montage. Spezifikation folgt aus Sprint 17 +
-Hotelier-Schulung (Pilot-Zimmer-Auswahl B-11prep-4). Bis
-dahin: vorläufig in „Pre-Pairing-Pool" parken, finale Zimmer-
-Zuordnung in Sprint 17.
 
 ---
 
@@ -1732,7 +2282,7 @@ gegen einen Reserve-Pool-Vicki. Drei API-Endpoints unter
   bereits silent/inactive). Wir nennen ihn ``OLD_ID``.
 - Reserve-Vicki ist im Pool (``heating_zone_id IS NULL``,
   ``retired_at IS NULL``). Pre-Pairing im Hotel-Office wurde
-  durchlaufen (Sprint 13a §10h.2). Wir nennen ihn ``POOL_ID``.
+  durchlaufen (Sprint 13a, heute §10h.3). Wir nennen ihn ``POOL_ID``.
 - Admin-Cookie im Browser oder als ``-b ...``-Header in curl.
 
 ### 10j.1 Pool-Liste anzeigen
@@ -1743,7 +2293,7 @@ curl -s -b "${COOKIE}" https://heizung-test.hoteltec.at/api/v1/devices/pool
 
 Liefert die aktiven Reserve-Vickis sortiert ``created_at DESC``
 (neueste zuerst). Wenn die Liste leer ist: Hotelier muss zuerst
-einen Pool-Vicki anlegen (§10h.2 Pre-Pairing).
+einen Pool-Vicki anlegen (§10h.3 Pool-Import).
 
 ### 10j.2 Tausch alt -> Pool-Vicki
 
@@ -1899,7 +2449,7 @@ treffen." und der Dropdown laedt sofort neu (jetzt ohne den
 vergebenen Eintrag). Backend-Race-Schutz via UPDATE-WHERE-Clause
 (CLAUDE.md §5.60).
 
-**CLI-Pfad (§10h.2) bleibt fuer Operator:** Pool-Refill nach
+**CLI-Pfad (§10h.3) bleibt fuer Operator:** Pool-Refill nach
 Defekten (Mass-Import neuer Vickis via CSV), Forensik-Lookup
 (`list-pool`-Subcommand), Bulk-Eingangstest neuer Vickis.
 Frontend-Tausch + CLI-Bulk-Import komplementaer.

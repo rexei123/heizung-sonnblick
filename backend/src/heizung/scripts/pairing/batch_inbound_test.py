@@ -53,7 +53,7 @@ Was der Batch **nicht** prueft
 ------------------------------
 
 Den Backplate-Schritt. Am Tisch ist ``attached_backplate=false`` der
-erwartete Zustand (RUNBOOK §10h.1) — ihn dort zu pruefen hiesse, jedes
+erwartete Zustand (RUNBOOK §10h.4) — ihn dort zu pruefen hiesse, jedes
 Geraet durchfallen zu lassen. Er gehoert nach der Montage.
 """
 
