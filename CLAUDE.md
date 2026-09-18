@@ -1363,11 +1363,31 @@ unsichtbar, weil der Check gruen meldet. Bei einem Gate, das die
 Produktion schuetzt, ist das kein akzeptabler Mechanismus. Der Preis
 sind rund 2m40s CI pro PR, der `backend/**` nicht beruehrt.
 
+**Nachtrag 2 vom selben Tag — das Spiegel-Pattern ist abgeschafft.**
+Beim Setzen der Pflicht-Checks fiel auf, dass der Frontend-Spiegel nicht
+nur schwer zu lesen, sondern unsicher ist. `paths-ignore` ueberspringt
+einen Workflow nur, wenn ALLE geaenderten Dateien dem Muster entsprechen.
+Bei einem gemischten PR — Frontend und Doku — lief der Spiegel deshalb
+**zusaetzlich** zum echten Workflow, und beide meldeten `lint-and-build`
+und `e2e`. Welcher den Pflicht-Check erfuellt, entscheidet der zuletzt
+gemeldete Status. Dass bisher der echte gewann, lag allein an seiner
+laengeren Laufzeit — verzoegert die Warteschlange den Spiegel ueber den
+echten Lauf hinaus, ueberschreibt ein Vier-Sekunden-Echo ein rotes
+Playwright-Ergebnis. Zufall als Schutzmechanismus.
+
+`frontend-ci-skip.yml` ist geloescht, `frontend-ci.yml` laeuft ohne
+`paths`-Filter. Damit hat das Repo **kein** Spiegel-Paar mehr.
+
 **Regel ab jetzt:** Ein Workflow, dessen Job Pflicht-Check ist, laeuft
-ohne `paths`-Filter. Spiegel nur dort, wo die Laufzeit den Aufwand
-wirklich rechtfertigt — heute nur noch `frontend-ci-skip.yml` (Playwright,
-~2m20s). Wird das Frontend-Paar spaeter ebenfalls aufgeloest, faellt
-§5.55 als Fehlerklasse ganz weg.
+ohne `paths`-Filter — ausnahmslos. `paths` bleibt nur dort erlaubt, wo
+der Workflow **kein** Pflicht-Check ist und ein Lauf echte Nebenwirkungen
+haette; im Repo ist das ausschliesslich `build-images.yml` (es pusht
+Images ins GHCR und soll nur bei echten Code-Aenderungen bauen).
+
+Die Diagnose-Anleitung oben bleibt als Wissensspeicher stehen: sie gilt
+weiterhin fuer die Frage "hat der echte Workflow gelaufen oder nur etwas,
+das so heisst" — und das Muster kann in jedem anderen Repo wieder
+auftauchen.
 
 **Zweite Regel aus demselben Anlass:** Job-Namen sind repo-weit
 eindeutig. Der Status wird unter dem Job-Namen gemeldet, nicht unter dem
@@ -2329,10 +2349,6 @@ npm run build
 - Caddy `fmt --overwrite` (kosmetisch, mit Sprint 6 wenn Caddy-Touch fuer ChirpStack-UI ohnehin)
 - `~/.ssh/config`-Eintraege auf work02
 - Caddy: `/_health` als oeffentlicher Health-Endpoint trennen vom internen `/api/*`-Routing
-- CI-Mirror-Workflow `frontend-ci-skip.yml` aufloesen: `paths`-Filter aus
-  `frontend-ci.yml` entfernen und den Spiegel loeschen, wie am 2026-09-18
-  fuer Backend CI und ChirpStack-Tools CI gemacht (§5.55 Nachtrag). Kostet
-  ~2m20s Playwright pro PR, raeumt dafuer die letzte Spiegel-Mehrdeutigkeit weg.
 - ChirpStack-Bootstrap-Skript (Tenant + App + DeviceProfile + Codec) fuer reproduzierbares Setup nach `docker compose down -v` (Sprint 6 oder spaeter)
 - `.github/CODEOWNERS` einrichten, wenn weitere Mitwirkende dazukommen
 - `services/_common.py` (Sprint 9.9-Backlog): konsolidiert duplicates `_task_session` aus `engine_tasks.py`/`override_cleanup_tasks.py`
