@@ -74,3 +74,15 @@ class SelfReplacementError(LifecycleError):
     """
 
     error_code: ClassVar[str] = "SELF_REPLACEMENT_FORBIDDEN"
+
+
+class ZoneNotFound(LifecycleError):  # noqa: N818 — Konvention wie DeviceNotFound
+    """Heizzonen-ID existiert nicht in der DB. HTTP 404.
+
+    Sprint 17 (C8): ``device_service.assign_zone`` braucht denselben
+    Diskriminator-Mechanismus wie die uebrigen Lifecycle-Fehler (AE-59),
+    damit das Frontend nicht wieder auf String-Matching im ``detail``
+    zurueckfallen muss (§5.64).
+    """
+
+    error_code: ClassVar[str] = "HEATING_ZONE_NOT_FOUND"

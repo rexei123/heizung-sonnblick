@@ -178,16 +178,16 @@ def _reconcile_metadata(device: Device, row: PairingCsvRow) -> tuple[list[str], 
     return sorted(filled), sorted(conflicts)
 
 
-async def _lookup_zone(session: AsyncSession, zimmer_nummer: int, zone_label: str) -> int | None:
+async def _lookup_zone(session: AsyncSession, zimmer_nummer: str, zone_label: str) -> int | None:
     """Aufloesung ``(zimmer_nummer, zone_label) -> heating_zone.id``.
 
     Identische Lookup-Logik wie ``validate_against_db`` aus T3
-    (``Room.number == str(...)`` + ``HeatingZone.name == ...``).
+    (``Room.number == ...`` + ``HeatingZone.name == ...``).
     """
     stmt = (
         select(HeatingZone.id)
         .join(Room, Room.id == HeatingZone.room_id)
-        .where(Room.number == str(zimmer_nummer))
+        .where(Room.number == zimmer_nummer)
         .where(HeatingZone.name == zone_label)
         .limit(1)
     )

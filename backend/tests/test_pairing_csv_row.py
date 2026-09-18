@@ -27,7 +27,7 @@ def test_happy_path_active_device() -> None:
         dev_eui=_VALID_DEV_EUI_LOWER,
         app_key=_VALID_APP_KEY_MIXED,
     )
-    assert row.zimmer_nummer == 101
+    assert row.zimmer_nummer == "101"  # Sprint 17: str statt int (B-Sprint13a-2)
     assert row.zone_label == "Schlafzimmer"
     assert row.is_pool_device is False
 

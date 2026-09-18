@@ -74,6 +74,13 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 _HEX16 = re.compile(r"^[0-9a-fA-F]{16}$")
 _HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
 
+# Excel-Export schreibt aus einer Text-Zelle "52" gern "52.0", sobald die
+# Spalte einmal als Zahl formatiert war. Der Seed-Pfad faengt das seit
+# Sprint 15 ab (``seed_rooms._coerce_int``); der Pairing-Pfad tat es nicht
+# (B-Sprint13a-3). Nur die Form "<Ziffern>.<Nullen>" wird gekuerzt — aus
+# "52.5" wird NICHT "52", das waere stilles Datenverbiegen.
+_TRAILING_ZERO_DECIMAL = re.compile(r"^(-?\d+)\.0+$")
+
 
 def _normalize_hex16(value: str, field: str) -> str:
     """LoRaWAN-EUI: 16 Hex-Zeichen, lowercase-normalisiert."""
@@ -107,9 +114,12 @@ class PairingCsvRow(BaseModel):
         default=None,
         description="Stockwerk-Nummer (z.B. 1, 2, 3). None bei Reserve-Pool.",
     )
-    zimmer_nummer: int | None = Field(
+    zimmer_nummer: str | None = Field(
         default=None,
-        description="Zimmer-Nummer im Hotel (z.B. 101, 207). None bei Reserve-Pool.",
+        max_length=20,
+        description="Zimmer-Nummer im Hotel (z.B. '101', '207'). None bei Reserve-Pool. "
+        "String, nicht int — ``room.number`` ist VARCHAR(20) und laesst "
+        "'101A' oder 'DG' zu (B-Sprint13a-2).",
     )
     zimmer_typ: str | None = Field(
         default=None,
@@ -127,9 +137,13 @@ class PairingCsvRow(BaseModel):
         ...,
         description="LoRaWAN DevEUI (8 Byte hex, 16 Zeichen). Wird lowercase normalisiert.",
     )
-    app_key: str = Field(
-        ...,
-        description="LoRaWAN AppKey (16 Byte hex, 32 Zeichen). Wird lowercase normalisiert.",
+    app_key: str | None = Field(
+        default=None,
+        description="LoRaWAN AppKey (16 Byte hex, 32 Zeichen). Wird lowercase "
+        "normalisiert. Fuer den Import Pflicht — das erzwingt ``parse_csv`` "
+        "mit ``require_app_key=True``. Fuer ``assign`` (Sprint 17 / C8) nicht: "
+        "die Montage-CSV wird ohne AppKey-Spalte exportiert, damit das "
+        "Geheimnis nicht ein zweites Mal ueber den Tisch wandert.",
     )
 
     # --- Sprint 17 (E4/C2): optionale Metadaten ---------------------------
@@ -153,6 +167,23 @@ class PairingCsvRow(BaseModel):
         "Wird UPPERCASE normalisiert. Ziel: device.hardware_number (AE-61).",
     )
 
+    @field_validator("zimmer_nummer", mode="before")
+    @classmethod
+    def _v_zimmer_nummer(cls, v: object) -> str | None:
+        """Als String fuehren, ``"52.0"`` auf ``"52"`` kuerzen (B-Sprint13a-3).
+
+        ``mode="before"``, damit auch ein int aus einer anderen Quelle
+        durchlaeuft. Nicht-numerische Nummern (``"101A"``, ``"DG"``) bleiben
+        unangetastet — das ist der Punkt an B-Sprint13a-2.
+        """
+        if v is None:
+            return None
+        text = str(v).strip()
+        if not text:
+            return None
+        match = _TRAILING_ZERO_DECIMAL.fullmatch(text)
+        return match.group(1) if match else text
+
     @field_validator("dev_eui")
     @classmethod
     def _v_dev_eui(cls, v: str) -> str:
@@ -160,7 +191,9 @@ class PairingCsvRow(BaseModel):
 
     @field_validator("app_key")
     @classmethod
-    def _v_app_key(cls, v: str) -> str:
+    def _v_app_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         return _normalize_hex32(v)
 
     @field_validator("app_eui")

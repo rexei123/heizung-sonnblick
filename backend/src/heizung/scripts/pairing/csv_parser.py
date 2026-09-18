@@ -51,6 +51,8 @@ gegen versehentliche Full-DB-Dumps."""
 _NULLABLE_FIELDS = frozenset(
     {
         "stockwerk",
+        # Sprint 17 (C8): die Montage-CSV wird ohne AppKey-Spalte exportiert.
+        "app_key",
         "zimmer_nummer",
         "zimmer_typ",
         "zone_label",
@@ -108,9 +110,14 @@ def _row_to_dict(raw_row: dict[str, str], line_no: int) -> dict[str, object]:
     return cleaned
 
 
-def parse_csv(path: Path) -> list[PairingCsvRow]:
+def parse_csv(path: Path, *, require_app_key: bool = True) -> list[PairingCsvRow]:
     """CSV-Datei einlesen, validieren und Liste der Rows zurueckgeben.
 
+    :param require_app_key: ``True`` (Default) fuer den Import — ohne AppKey
+        kann ChirpStack das Geraet nicht registrieren. ``False`` fuer
+        ``assign`` (Sprint 17 / C8): die Montage-CSV wird bewusst ohne
+        AppKey-Spalte exportiert, damit das Geheimnis nicht ein zweites Mal
+        ueber den Tisch wandert.
     :raises ParseError: bei strukturellen Problemen (zu viele Zeilen, kein
         Trennzeichen, kein Header) ODER wenn mindestens eine Row die
         Pydantic-Validation nicht besteht. ``ParseError.errors`` enthaelt
@@ -146,13 +153,18 @@ def parse_csv(path: Path) -> list[PairingCsvRow]:
             errors.append(str(exc))
             continue
         try:
-            rows.append(PairingCsvRow.model_validate(cleaned))
+            row = PairingCsvRow.model_validate(cleaned)
         except ValidationError as exc:
             # Pydantic-Errors kompakt: nur die Messages, ohne Loc-Paths.
             msgs = "; ".join(
                 f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
             )
             errors.append(f"Zeile {offset}: {msgs}")
+            continue
+        if require_app_key and row.app_key is None:
+            errors.append(f"Zeile {offset}: app_key fehlt (fuer den Import Pflicht).")
+            continue
+        rows.append(row)
 
     if errors:
         raise ParseError(f"{len(errors)} Zeile(n) mit Validierungs-Fehlern.", errors=errors)
@@ -172,7 +184,8 @@ async def validate_against_db(
     ``heating_zone.room_id == room.id`` AND ``heating_zone.name == row.zone_label``.
 
     Hinweis: ``Room.number`` ist VARCHAR(20) im Schema (kann "101", "201b"
-    sein); CSV-``zimmer_nummer`` ist int. Konvertierung via ``str()``.
+    sein). Seit Sprint 17 (C8/B-Sprint13a-2) ist ``zimmer_nummer`` ebenfalls
+    ein String — keine Konvertierung mehr noetig.
     ``HeatingZone.name`` ist VARCHAR(100) (Modell-Feldname ``name``, NICHT
     ``label`` — die CSV-Spalte heisst ``zone_label`` aus Hotelier-Sprache,
     wird auf das DB-Feld ``name`` gemappt).
@@ -191,7 +204,7 @@ async def validate_against_db(
         stmt = (
             select(HeatingZone.id)
             .join(Room, Room.id == HeatingZone.room_id)
-            .where(Room.number == str(row.zimmer_nummer))
+            .where(Room.number == row.zimmer_nummer)
             .where(HeatingZone.name == row.zone_label)
             .limit(1)
         )

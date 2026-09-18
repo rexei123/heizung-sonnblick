@@ -17,7 +17,7 @@ from heizung import __version__
 from heizung.api.v1 import router as v1_router
 from heizung.auth.rate_limit import limiter
 from heizung.config import get_settings
-from heizung.services.exceptions import DeviceNotFound, LifecycleError
+from heizung.services.exceptions import DeviceNotFound, LifecycleError, ZoneNotFound
 from heizung.services.mqtt_subscriber import start_subscriber, stop_subscriber
 from heizung.services.override_service import OverrideError
 
@@ -77,14 +77,17 @@ async def _lifecycle_error_handler(_request: Request, exc: LifecycleError) -> JS
     """B-Sprint13b2-4 (AE-59): App-weiter Handler fuer Lifecycle-Exceptions.
 
     Rendert ``{"detail": <message>, "error_code": <CODE>}``. ``DeviceNotFound``
-    -> 404, alle anderen Subklassen (``DeviceStateError`` /
-    ``PoolDeviceUnavailable`` / ``SelfReplacementError``) -> 409.
+    und ``ZoneNotFound`` -> 404, alle anderen Subklassen
+    (``DeviceStateError`` / ``PoolDeviceUnavailable`` /
+    ``SelfReplacementError``) -> 409.
 
     Scope: Lifecycle-Pfade (replace, retire). Override-Pfade nutzen den
     parallelen ``OverrideError``-Handler (B-Sprint13b2-7).
     """
     status_code = (
-        status.HTTP_404_NOT_FOUND if isinstance(exc, DeviceNotFound) else status.HTTP_409_CONFLICT
+        status.HTTP_404_NOT_FOUND
+        if isinstance(exc, DeviceNotFound | ZoneNotFound)
+        else status.HTTP_409_CONFLICT
     )
     return JSONResponse(
         status_code=status_code,

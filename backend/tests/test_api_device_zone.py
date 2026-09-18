@@ -233,7 +233,12 @@ async def test_assign_returns_404_when_device_missing(
         json={"heating_zone_id": setup["zone_a_id"]},
     )
     assert resp.status_code == 404, resp.text
-    assert resp.json()["detail"] == "device_not_found"
+    # Sprint 17 (C8): der Endpoint nutzt jetzt device_service.assign_zone und
+    # damit die LifecycleError-Hierarchie (AE-59) — maschinen-lesbarer
+    # error_code statt eines nackten detail-Strings (§5.64).
+    body = resp.json()
+    assert body["error_code"] == "DEVICE_NOT_FOUND"
+    assert isinstance(body["detail"], str)
 
 
 async def test_assign_returns_404_when_zone_missing(
@@ -246,7 +251,9 @@ async def test_assign_returns_404_when_zone_missing(
         json={"heating_zone_id": 99999},
     )
     assert resp.status_code == 404, resp.text
-    assert resp.json()["detail"] == "heating_zone_not_found"
+    body = resp.json()
+    assert body["error_code"] == "HEATING_ZONE_NOT_FOUND"
+    assert isinstance(body["detail"], str)
 
 
 async def test_assign_returns_422_when_zone_id_zero(

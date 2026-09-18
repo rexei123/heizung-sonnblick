@@ -15,6 +15,8 @@ Subcommands:
 - ``test <device-id>``  6-Schritt-Eingangstest pro Vicki.
 - ``inbound-test --all-pool``  Batch-Eingangstest ueber ALLE Pool-Geraete
                         gleichzeitig, inkl. Firmware-Inventar (Sprint 17 / C4).
+- ``assign <csv> --rooms 54,102``  Zonen-Zuordnung am Montage-Abend
+                        (Sprint 17 / C8). ``--dry-run`` zeigt nur die Vorschau.
 - ``list-pool``        Reserve-Pool-Devices (heating_zone_id IS NULL).
 
 Sprint 17 (E3/C3): ``import`` ist ein reiner Datenbank-Vorgang. Die
@@ -33,6 +35,8 @@ Aufruf-Beispiele:
     python -m heizung.scripts.pair_devices test 47 --skip-backplate
     python -m heizung.scripts.pair_devices inbound-test --all-pool
     python -m heizung.scripts.pair_devices inbound-test --all-pool --timeout 7200
+    python -m heizung.scripts.pair_devices assign /tmp/montage.csv         --rooms 54,102 --dry-run
+    python -m heizung.scripts.pair_devices assign /tmp/montage.csv --rooms 54,102
     python -m heizung.scripts.pair_devices list-pool
 
 Auf heizung-test/heizung-main via Docker:
@@ -71,6 +75,12 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
 from heizung.models.user import User  # noqa: E402
+from heizung.scripts.pairing.assign import (  # noqa: E402
+    format_report as format_assign_report,
+)
+from heizung.scripts.pairing.assign import (  # noqa: E402
+    run_assign,
+)
 from heizung.scripts.pairing.batch_inbound_test import (  # noqa: E402
     DEFAULT_POLL_INTERVAL_S,
     DEFAULT_TIMEOUT_S,
@@ -317,6 +327,50 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
     return report.exit_code
 
 
+async def _cmd_assign(args: argparse.Namespace) -> int:
+    """``assign <csv> --rooms 54,102 [--dry-run]``: Zuordnung am Montage-Abend.
+
+    Exit-Codes: 0 = alles zugeordnet und montiert gemeldet · 1 = Pre-Flight-
+    Fehler, nichts geschrieben · 2 = zugeordnet, aber mindestens ein Geraet
+    meldet sich nicht als montiert (kein Rollback).
+    """
+    csv_path = Path(args.path)
+    try:
+        # AppKey ist hier nicht noetig: die Montage-CSV wird ohne die Spalte
+        # exportiert, damit das Geheimnis nicht ein zweites Mal herumliegt.
+        rows = parse_csv(csv_path, require_app_key=False)
+    except ParseError as exc:
+        print(f"[FAIL] CSV-Parse-Fehler: {exc}")
+        for err in exc.errors:
+            print(f"  - {err}")
+        return 1
+
+    rooms = [r.strip() for r in args.rooms.split(",") if r.strip()]
+    if not rooms:
+        print("[FAIL] --rooms ist leer.", file=sys.stderr)
+        return 1
+
+    async with SessionLocal() as session:
+        user_id: int | None = None
+        if args.user_email:
+            user_id = await _lookup_user_id(session, args.user_email)
+            if user_id is None:
+                print(
+                    f"[FAIL] User-Email '{args.user_email}' nicht gefunden oder inaktiv.",
+                    file=sys.stderr,
+                )
+                return 1
+
+        report = await run_assign(session, rows, rooms, dry_run=args.dry_run, user_id=user_id)
+        if report.errors or args.dry_run:
+            await session.rollback()
+        else:
+            await session.commit()
+
+    print(format_assign_report(report, dry_run=args.dry_run))
+    return report.exit_code
+
+
 async def _cmd_list_pool(args: argparse.Namespace) -> int:
     """``list-pool``: Reserve-Devices (heating_zone_id IS NULL AND retired_at IS NULL).
 
@@ -434,6 +488,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
     )
 
+    # assign
+    p_assign = sub.add_parser(
+        "assign",
+        help="Zonen-Zuordnung am Montage-Abend aus der Montage-CSV.",
+    )
+    p_assign.add_argument("path", help="Pfad zur Montage-CSV (ohne app_key-Spalte).")
+    p_assign.add_argument(
+        "--rooms",
+        required=True,
+        help="Zimmernummern des Tages, kommagetrennt (z.B. 54,102). Pflicht — "
+        "die CSV enthaelt alle 103 Zonen, ohne Filter wuerden Geraete Zimmern "
+        "zugeordnet, an denen noch niemand war.",
+    )
+    p_assign.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Nur Vorschau. Es wird nichts geschrieben und nicht nachgeprueft.",
+    )
+    p_assign.add_argument(
+        "--user-email",
+        default=None,
+        help="Email des Aufrufers fuer das DEVICE_ZONE_ASSIGNED-Audit.",
+    )
+
     # list-pool
     sub.add_parser(
         "list-pool",
@@ -448,6 +526,7 @@ _DISPATCH = {
     "import": _cmd_import,
     "test": _cmd_test,
     "inbound-test": _cmd_inbound_test,
+    "assign": _cmd_assign,
     "list-pool": _cmd_list_pool,
 }
 

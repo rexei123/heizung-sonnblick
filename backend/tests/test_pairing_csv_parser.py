@@ -76,7 +76,7 @@ def test_parse_csv_happy_path_comma_delimiter(tmp_path: Path) -> None:
     )
     rows = parse_csv(csv_path)
     assert len(rows) == 3
-    assert rows[0].zimmer_nummer == 101
+    assert rows[0].zimmer_nummer == "101"  # Sprint 17: str statt int (B-Sprint13a-2)
     assert rows[0].zone_label == "Schlafzimmer"
     assert rows[0].is_pool_device is False
     assert rows[2].is_pool_device is True
