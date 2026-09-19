@@ -47,3 +47,17 @@ WINDOW_STALE_THRESHOLD_MIN: Final[int] = 30
 # §4 / Sprint-11-Brief.
 PLAUSI_TEMP_MIN_C: Final[Decimal] = Decimal("-20.0")
 PLAUSI_TEMP_MAX_C: Final[Decimal] = Decimal("60.0")
+
+
+# Zeitzone des Hotels. Fallback, wenn ``global_config.timezone`` fehlt oder
+# leer ist (AE-60, CLAUDE.md §5.65 — Engine rechnet in UTC und konvertiert
+# vor jedem Vergleich gegen eine Hotelier-Konfiguration).
+#
+# Sprint 18: aus ``rules/engine.py`` hierher gezogen. Anlass war der
+# Alarm-Versand: ``services/health_alerts`` braucht die Zeitzone, um dem
+# Hotelier Uhrzeiten in seiner Ortszeit zu nennen, und haette sonst das
+# ganze Engine-Modul importieren muessen, um an eine Zeichenkette zu
+# kommen. ``engine.py`` importiert den Wert jetzt von hier — derselbe
+# Grund wie bei ``FROST_PROTECTION_C``: wer ihn braucht, importiert ihn,
+# statt ihn nochmal hinzuschreiben (§5.46).
+DEFAULT_HOTEL_TIMEZONE: Final[str] = "Europe/Vienna"

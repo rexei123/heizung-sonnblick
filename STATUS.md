@@ -3981,9 +3981,82 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | B-17-5 | **Zonen ohne Fenstererkennung.** Geräte mit FW < 4.2 oder ohne FW-Antwort werden montiert und regeln normal, nur der Open-Window-Rollout überspringt sie. Die betroffenen Zonen werden namentlich in RUNBOOK §10h geführt, damit später niemand aus dem fehlenden Fenster-Trigger ein Engine-Problem konstruiert. Auflösung mit B-9.11x.b-2 (0x06-Fallback für FW < 4.2). | 🟡 |
 | B-17-6 | **Fixture-Suffixe auf `uuid` umstellen.** `tests/test_api_overrides.py:393` und `:428` bauen ihren Suffix aus `datetime.now().strftime("%H%M%S%f")` — genau das Muster, von dem §5.59 ausdrücklich abrät („Tageszeit-basierte Suffixe haben Parallel-Test-Race-Potenzial"). Kein Ablaufdatum, aber ein Kollisionsrisiko. Zwei Zeilen. | 🟢 |
 | B-17-8 | **Echter Online-Badge aus `device.last_seen_at` (Variante B).** Sprint 17 / C9 hat den `HardwareStatusBadge` auf die Montage-Semantik umbeschriftet — er sagt jetzt, was er misst. Was weiterhin **nirgends** sichtbar ist: ob ein Gerät überhaupt sendet. `device.last_seen_at` wird vom MQTT-Subscriber sauber gepflegt (inkl. monotonem Guard, `mqtt_subscriber.py:319`) und steht im Frontend-Type (`types.ts:93`), wird aber in **keiner** Ansicht gerendert. Eigener Badge neben dem Montage-Badge, Quelle `last_seen_at` bzw. `health_state`. Frontend + Type-Spiegel (§5.63) + Tests, geschätzt 2–3 h. Nicht dringend für die Montage — dort ist die Montage-Frage die richtige. | 🟢 |
+| **B-18-2** | **Secrets-Rotation vor Go-Live.** 🔴 **Frist 01.11.2026, vor der Inbetriebnahme.** Anlass: am 19.09. war der Inhalt der `.env` von heizung-test in einem Screenshot sichtbar — `SECRET_KEY` und `CHIRPSTACK_DB_PASSWORD` vollstaendig, `POSTGRES_PASSWORD` / `DATABASE_URL` / beide MQTT-Passwoerter / `CHIRPSTACK_API_SECRET` / Gateway-Passwoerter angeschnitten. Entscheidung des Hoteliers: **Rotation vor Go-Live, nicht sofort** — bis dahin liegen keine Gaestedaten im System und der Server ist nur ueber Tailscale und Basic-Auth erreichbar. Reihenfolge und Risiko je Wert stehen unten. Buendeln mit "Repo privat" (derselbe Wartungsblock nach dem 26.09.). | 🔴 |
 | B-17-7 | **Ragged-CSV-Meldung ist irreführend.** Eine Datenzeile mit mehr Werten als der Header Spalten scheitert an `csv.Sniffer`, weil Spaltenzahl-Konsistenz Teil seiner Trennzeichen-Heuristik ist. Die Datei wird abgewiesen statt still gekürzt (richtig, S5), aber die Meldung nennt fälschlich das Trennzeichen als Ursache. Der praktische Excel-Fall ist nicht betroffen. Verhalten ist als Test festgehalten. | 🟢 |
 
 ---
+
+#### B-18-2 im Detail — Reihenfolge, Risiko, Vorpruefung
+
+**Verbindliche Regel fuer den Rotationstag — vor der Tabelle lesen:**
+
+> **Nach JEDEM Schritt erst den Dead-Man-Check `engine` beobachten, dann
+> den naechsten Wert anfassen.** Bis zum naechsten Ping koennen 5 Minuten
+> vergehen (RUNBOOK §10l) — diese 5 Minuten sind Teil des Verfahrens, kein
+> Warten aus Vorsicht.
+>
+> **Bleibt der Ping aus, ist der letzte Schritt die Ursache.** Dann
+> zurueckrollen, bevor weitergemacht wird. Nicht den naechsten Wert
+> anfassen, um zu sehen, ob es besser wird — ab dem zweiten gleichzeitig
+> gebrochenen Wert ist die Ursache nicht mehr eindeutig.
+>
+> **Besonders vor Schritt 5 (MQTT).** Ein falsches MQTT-Passwort bleibt
+> **still**: kein Fehler in der Oberflaeche, keine Meldung im API-Log. Es
+> faellt sonst erst beim naechsten ausbleibenden Uplink auf, und den
+> bemerkt niemand, weil Vickis ohnehin nur alle 15 Minuten senden. Der
+> Ping ist an dieser Stelle die einzige zeitnahe Rueckmeldung.
+
+Damit wird aus der Rotation "aendern und den Ping beobachten" statt
+"aendern und hoffen".
+
+Rotiert wird in dieser Reihenfolge. Sie ist nicht beliebig: die harmlosen
+Werte zuerst, damit ein Fehlversuch nicht gleich die Datenbank betrifft.
+
+| # | Wert | Risiko beim Wechsel | Neustart-Pruefung danach |
+|---|---|---|---|
+| 1 | `SECRET_KEY` | **gering.** Alle aktiven Sitzungen werden ungueltig, jeder muss sich neu anmelden. Kein Datenverlust, keine Migration. Siehe Vorpruefung unten. | Anmeldung mit beiden Konten, danach eine beliebige Seite laden |
+| 2 | `CHIRPSTACK_API_SECRET` + Basic-Auth-Hash | mittel. ChirpStack-UI und der gRPC-Zugang haengen daran. Das Provisioning-Skript (§10h.2) braucht danach einen neuen API-Key. | `docker compose restart chirpstack`, dann ChirpStack-UI aufrufen und ein Geraet oeffnen |
+| 3 | `POSTGRES_PASSWORD` + `DATABASE_URL` | **hoch.** Beide muessen im selben Schritt geaendert werden, sonst startet die API nicht. Passwort erst in der DB aendern, dann in der `.env`. | `docker compose restart api celery_worker celery_beat`, dann `/health` und eine Zimmer-Liste |
+| 4 | `CHIRPSTACK_DB_PASSWORD` | hoch, aber isoliert. Betrifft nur `chirpstack-postgres`. | `docker compose restart chirpstack chirpstack-postgres`, dann Uplink eines aktiven Vickis abwarten |
+| 5 | MQTT-Passwoerter (3 Benutzer) | **hoch.** Die passwd-Datei wird auf dem Server neu erzeugt. Falsch gemacht, kommt kein Uplink mehr an und kein Downlink raus — der Ausfall ist still, weil MQTT nicht meckert. | Uplink abwarten (`sensor_reading`-Zeile neuer als der Wechsel), dann einen Sollwert setzen und den Downlink im ChirpStack-Log pruefen |
+| 6 | Gateway-Passwoerter (UG65) | hoch. Muss **am Gateway selbst** nachgezogen werden, nicht nur in der `.env`. | Gateway-Statusseite, dann Uplink |
+
+**Vorpruefung zu `SECRET_KEY` — am 19.09. read-only erledigt:**
+
+`SECRET_KEY` **signiert ausschliesslich, er verschluesselt nichts
+Persistiertes.** Der einzige Verbrauchspfad ist `backend/src/heizung/auth/jwt.py:24`:
+
+```python
+return settings.jwt_secret_key or settings.secret_key
+```
+
+Von dort geht er in `jwt.encode(payload, _get_secret(), algorithm="HS256")` —
+HMAC-SHA256, also eine Signatur. Sonst taucht `secret_key` im Backend nur
+noch im Startup-Validator auf, der den Default-Wert blockiert. Im gesamten
+Backend gibt es **keine** Verschluesselung: kein Fernet, kein AES, kein
+`encrypt`/`decrypt`; `cryptography` ist nur ein Extra von `python-jose`.
+Passwoerter liegen als bcrypt-Hash (§5.29) und sind vom `SECRET_KEY`
+unabhaengig.
+
+Damit ist die Bedingung erfuellt, unter der die Rotation freigegeben war.
+
+**Offene Frage, erst bei der Rotation zu klaeren:** Ist `JWT_SECRET_KEY`
+auf dem Server gesetzt? Wenn ja, hat `SECRET_KEY` **gar keinen**
+Konsumenten mehr, und der eigentlich zu rotierende Wert ist
+`JWT_SECRET_KEY`. Ein Befehl beantwortet es:
+
+```bash
+grep -c '^JWT_SECRET_KEY=' /opt/heizung-sonnblick/infra/deploy/.env
+```
+
+`1` = gesetzt, dann beide rotieren und `JWT_SECRET_KEY` als den
+wirksamen behandeln. `0` = nicht gesetzt, dann ist `SECRET_KEY` der
+JWT-Schluessel.
+
+**Nicht vergessen:** die `.env` liegt nur auf dem Server. Nach jeder
+Aenderung `docker compose up -d` (nicht nur `restart`), sonst lesen die
+Container die Datei nicht neu.
+
 
 ## 7. Schmerzpunkte aus heute (Lessons Learned)
 

@@ -37,12 +37,14 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
-from heizung.rules.constants import FROST_PROTECTION_C, WINDOW_STALE_THRESHOLD_MIN
+from heizung.rules.constants import (
+    DEFAULT_HOTEL_TIMEZONE,
+    FROST_PROTECTION_C,
+    WINDOW_STALE_THRESHOLD_MIN,
+)
 from heizung.rules.scenarios import is_summer_mode_active
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
-
-DEFAULT_HOTEL_TIMEZONE = "Europe/Vienna"
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
