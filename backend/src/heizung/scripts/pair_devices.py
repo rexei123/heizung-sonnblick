@@ -15,6 +15,9 @@ Subcommands:
 - ``test <device-id>``  6-Schritt-Eingangstest pro Vicki.
 - ``inbound-test --all-pool``  Batch-Eingangstest ueber ALLE Pool-Geraete
                         gleichzeitig, inkl. Firmware-Inventar (Sprint 17 / C4).
+                        ``--devices 017,042`` statt ``--all-pool`` prueft nur
+                        die genannten — fuer den zweiten Durchlauf ueber die
+                        TIMEOUT-Geraete mit verlaengertem Fenster.
 - ``assign <csv> --rooms 54,102``  Zonen-Zuordnung am Montage-Abend
                         (Sprint 17 / C8). ``--dry-run`` zeigt nur die Vorschau.
 - ``list-pool``        Reserve-Pool-Devices (heating_zone_id IS NULL).
@@ -35,6 +38,7 @@ Aufruf-Beispiele:
     python -m heizung.scripts.pair_devices test 47 --skip-backplate
     python -m heizung.scripts.pair_devices inbound-test --all-pool
     python -m heizung.scripts.pair_devices inbound-test --all-pool --timeout 7200
+    python -m heizung.scripts.pair_devices inbound-test --devices 017,042         --timeout 14400
     python -m heizung.scripts.pair_devices assign /tmp/montage.csv         --rooms 54,102 --dry-run
     python -m heizung.scripts.pair_devices assign /tmp/montage.csv --rooms 54,102
     python -m heizung.scripts.pair_devices list-pool
@@ -58,6 +62,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 # Stellen sicher, dass die App-Settings geladen werden koennen.
@@ -150,6 +155,34 @@ async def _lookup_user_id(session: AsyncSession, email: str) -> int | None:
     stmt = select(User.id).where(User.email == email).where(User.is_active.is_(True))
     result: int | None = await session.scalar(stmt)
     return result
+
+
+def _filter_pool_devices(devices: Sequence[Device], raw: str) -> tuple[list[Device], list[str]]:
+    """Waehlt aus den Pool-Geraeten die genannten aus.
+
+    Erkannt wird, womit der Report die Geraete benennt: die
+    ``hardware_nummer`` (``device.label``, z. B. ``017``) oder ersatzweise
+    die DevEUI. Gross-/Kleinschreibung egal, Leerzeichen um die Kommas egal.
+
+    Die Reihenfolge der Pool-Liste bleibt erhalten — nicht die Reihenfolge
+    der Eingabe. Der Report sortiert ohnehin nach Nummer.
+
+    :return: ``(ausgewaehlte Geraete, nicht gefundene Bezeichner)``
+    """
+    wanted = [token.strip() for token in raw.split(",") if token.strip()]
+    lookup = {token.casefold() for token in wanted}
+
+    selected = [
+        dev
+        for dev in devices
+        if (dev.label or "").casefold() in lookup or dev.dev_eui.casefold() in lookup
+    ]
+
+    found = {(dev.label or "").casefold() for dev in selected} | {
+        dev.dev_eui.casefold() for dev in selected
+    }
+    unknown = [token for token in wanted if token.casefold() not in found]
+    return selected, unknown
 
 
 _DEV_EUI_PATTERN = re.compile(r"^[0-9A-Fa-f]{16}$")
@@ -293,6 +326,21 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
         if not devices:
             print("Pool ist leer — keine Geraete zu pruefen.")
             return 0
+
+        if args.devices:
+            pool_total = len(devices)
+            devices, unknown = _filter_pool_devices(devices, args.devices)
+            if unknown:
+                # Hart abbrechen statt still weniger zu pruefen: ein Tippfehler
+                # in der TIMEOUT-Liste wuerde sonst ein Geraet ueberspringen,
+                # und der zweite Durchlauf ist genau der, der es klaeren soll.
+                print(
+                    f"[FAIL] Nicht im Pool gefunden: {', '.join(unknown)}. "
+                    "Erwartet werden Hardware-Nummern wie im Report oder DevEUIs.",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"Auswahl: {len(devices)} von {pool_total} Pool-Geraeten.")
 
         user_id: int | None = None
         if args.user_email:
@@ -457,11 +505,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "inbound-test",
         help="Batch-Eingangstest ueber alle Pool-Geraete inkl. Firmware-Inventar.",
     )
-    p_batch.add_argument(
+    p_batch_scope = p_batch.add_mutually_exclusive_group(required=True)
+    p_batch_scope.add_argument(
         "--all-pool",
         action="store_true",
-        required=True,
         help="Alle Pool-Geraete pruefen (heating_zone_id IS NULL, nicht retired).",
+    )
+    p_batch_scope.add_argument(
+        "--devices",
+        default=None,
+        help="Nur diese Pool-Geraete pruefen, kommagetrennt — Hardware-Nummern "
+        "wie im Report ('017,042') oder DevEUIs. Fuer den zweiten Durchlauf "
+        "ueber die TIMEOUT-Geraete mit verlaengertem Fenster, damit nicht alle "
+        "104 Geraete das lange Zeitfenster belegen (RUNBOOK 10h.4).",
     )
     p_batch.add_argument(
         "--timeout",
