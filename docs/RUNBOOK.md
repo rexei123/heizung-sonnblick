@@ -2731,6 +2731,183 @@ Log.
 ---
 
 
+## 10m. Alarm-Mails einrichten und prüfen (Sprint 18)
+
+Bis Sprint 18 hat dieses System **nie** eine Mail verschickt. Alarme
+standen im Container-Log, wo sie niemand liest. Ab jetzt gehen zwei
+Alarme an die Adresse, die in der Oberfläche unter *Einstellungen /
+Hotel* als **E-Mail für Warnungen** eingetragen ist.
+
+> **Abschlussbedingung Sprint 18 — verbindlich, keine Empfehlung.**
+> Der Sprint gilt erst als abgeschlossen, wenn auf heizung-test
+> a) die SMTP-Werte in der `.env` gesetzt sind und
+> b) `send_test_mail` erfolgreich gelaufen ist und die Nachricht im
+>    Postfach angekommen ist.
+>
+> Bis dahin ist der Alarmweg gebaut, aber nicht in Betrieb: jeder Alarm
+> scheitert still. Ein Alarmweg, von dem man nur annimmt, dass er
+> funktioniert, ist schlechter als gar keiner — er erzeugt die
+> Zuversicht, gewarnt zu werden.
+
+### Schritt 1: Zugangsdaten in die .env
+
+Die Zugangsdaten kommen aus der Umgebung, **nie** aus der Datenbank. Der
+Empfänger dagegen steht in der Oberfläche — er ist eine Hotelier-
+Einstellung, keine Serverkonfiguration.
+
+**SSH (heizung-test, root):**
+
+```bash
+nano /opt/heizung-sonnblick/infra/deploy/.env
+```
+
+Einzutragen:
+
+```
+SMTP_ENABLED=true
+SMTP_HOST=<mailserver des hotel-kontos>
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USER=<das hotel-mailkonto>
+SMTP_PASSWORD=<passwort dieses kontos>
+SMTP_FROM=
+```
+
+`SMTP_FROM` leer lassen: dann wird `SMTP_USER` als Absender verwendet.
+Die meisten Anbieter verlangen ohnehin, dass Absender und angemeldetes
+Konto übereinstimmen, und weisen eine abweichende Absenderadresse ab.
+
+**Zu `SMTP_SECURITY`:** `starttls` auf Port 587 ist der Normalfall und die
+Vorgabe. `ssl` gehört zu Port 465 (verschlüsselt ab dem ersten Byte).
+`none` ist nur für einen Relay im selben Netz vertretbar — über das
+Internet gingen Passwort und Inhalt offen.
+
+Danach die Container neu starten, damit sie die neuen Werte lesen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up -d api celery_worker celery_beat
+```
+
+### Schritt 2: Verbindung testen
+
+**SSH (heizung-test, root):**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.send_test_mail
+```
+
+Ohne Argument geht die Nachricht an die in der Oberfläche hinterlegte
+Alarm-Adresse — genau die soll ja geprüft werden. Mit `--to adresse@…`
+an eine andere.
+
+**Erwartete Ausgabe:**
+
+```
+Konfiguration:
+  Versand aktiv : ja
+  Server        : mail.example.com:587
+  Sicherheit    : starttls
+  Benutzer      : alarm@example.com
+  Passwort      : gesetzt
+  Absender      : alarm@example.com
+  Zeitlimit     : 20 s
+
+Sende an chef@hotel-sonnblick.at (aus den Einstellungen) ...
+[OK] Nachricht an chef@hotel-sonnblick.at uebergeben.
+
+Der Server hat die Nachricht angenommen. Das ist noch keine Zustellgarantie —
+bitte im Postfach nachsehen, auch im Spam-Ordner.
+```
+
+Das Passwort wird **nie** ausgegeben, nur „gesetzt" oder „NICHT gesetzt".
+Exit-Code 0 bei Erfolg, 1 sonst. Der Befehl ist beliebig oft
+wiederholbar: er löst keinen Alarm aus und berührt die
+Wiederholungsbremse nicht.
+
+**Der Test ist erst bestanden, wenn die Nachricht im Postfach liegt.**
+„Der Server hat angenommen" heißt nur, dass die Übergabe geklappt hat —
+danach kann die Mail immer noch im Spam landen oder verworfen werden.
+
+### Schritt 3: Die drei häufigsten Fehlermeldungen
+
+**1. `[FEHLER] SMTPAuthenticationError: 535 5.7.8 Username and Password not accepted`**
+
+Benutzername oder Passwort stimmen nicht — oder der Anbieter verlangt für
+Programmzugriffe ein eigenes Kennwort. Bei Google-Konten mit
+Zwei-Faktor-Anmeldung ist das der Regelfall: das normale Passwort wird
+abgelehnt, es braucht ein App-Passwort. Auch prüfen, ob `SMTP_USER` die
+vollständige Adresse ist und nicht nur der Teil vor dem `@`.
+
+Kein Netzwerkproblem: der Server war erreichbar und hat geantwortet.
+
+**2. `[FEHLER] OSError: [Errno 111] Connection refused` — oder der Befehl hängt bis zum Zeitlimit**
+
+Niemand horcht auf dieser Adresse und diesem Port. Fast immer eine falsche
+Kombination aus Port und `SMTP_SECURITY`: **587 gehört zu `starttls`, 465
+zu `ssl`.** Wer `ssl` auf 587 einstellt, wartet auf einen
+TLS-Aushandlungsversuch, der nie kommt, und läuft ins Zeitlimit.
+
+Zweite Möglichkeit: die ausgehende Verbindung ist blockiert. Prüfen mit
+
+```bash
+docker exec deploy-api-1 python -c "import socket;socket.create_connection(('mail.example.com',587),10);print('erreichbar')"
+```
+
+**3. `[FEHLER] SMTPSenderRefused` oder `SMTPRecipientsRefused`**
+
+Die Anmeldung hat geklappt, der Server nimmt aber diesen Absender oder
+Empfänger nicht an. Beim Absender: `SMTP_FROM` leeren, damit `SMTP_USER`
+verwendet wird. Beim Empfänger: die Adresse in der Oberfläche auf Tippfehler
+prüfen.
+
+Ein Sonderfall, der wie ein Fehler aussieht, aber keiner ist:
+`[FEHLER] SMTP ist nicht aktiviert (SMTP_ENABLED).` Dann fehlt
+`SMTP_ENABLED=true` oder die Container wurden nach der Änderung nicht neu
+gestartet.
+
+### Schritt 4: Im laufenden Betrieb — wo man den Zustand sieht
+
+Unter *Einstellungen / Hotel*, direkt unter der Alarm-Adresse, steht eine
+Zeile zum Versand:
+
+| Anzeige | Bedeutung |
+|---|---|
+| „Versand: noch nicht versucht" | Es gab seit der Inbetriebnahme keinen Anlass — oder die Einrichtung steht noch aus. |
+| „Versand zuletzt erfolgreich am …" | Der Weg funktioniert. |
+| „Versand fehlgeschlagen am … · Zuletzt erfolgreich: …" | Der Grund steht in derselben Zeile. Das Datum daneben sagt, seit wann. |
+
+Diese Zeile ist der Grund, warum `send_test_mail` seinen Versuch mit
+festhält: nach einem erfolgreichen Test steht dort sofort das Ergebnis,
+und nicht weiter „noch nicht versucht".
+
+Steht dort ein Fehler, **ohne** dass jemand etwas geändert hat, ist meist
+das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
+
+### Welche Alarme es gibt
+
+| Alarm | Auslöser | Frühestens wieder |
+|---|---|---|
+| **Thermostat meldet sich nicht** | Ein Gerät ist über 24 h stumm. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
+| **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit (Vorgabe 09:00) ist keine Liste eingetroffen. | am nächsten Tag |
+
+Beide gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
+Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
+erstes die Prüfreihenfolge Gateway / Strom / Geschoss. Denn ab dieser Menge
+ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
+
+**Was ausdrücklich keine Mail auslöst:** implausible Messwerte (ein Gerät
+sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
+Oberfläche sichtbar, aber nicht als Mail — die Batterie-Schwelle unter
+*Einstellungen / Hotel* färbt Anzeige und Kachel, verschickt aber nichts
+(B-15b-1).
+
+Die Ausfälle von Engine, Deploy und Backup laufen **nicht** über diesen
+Weg, sondern über die Dead-Man-Checks in §10l. Das ist Absicht: ein Alarm,
+der das eigene System zur Zustellung braucht, schweigt genau dann, wenn
+dieses System steht.
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

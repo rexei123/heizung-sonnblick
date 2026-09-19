@@ -45,6 +45,7 @@ Stufen
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -116,7 +117,26 @@ def emit_health_alert(
     )
 
 
-def handle_silent_transitions(transitions: list[dict[str, Any]], *, recipient: str | None) -> int:
+@dataclass(frozen=True, slots=True)
+class SammelmailErgebnis:
+    """Was ein Lauf von ``handle_silent_transitions`` hinterlassen hat.
+
+    Zwei Angaben, weil der Aufrufer zwei verschiedene Dinge damit tut:
+    ``gemeldet`` geht in seinen eigenen Logeintrag, ``result`` in die
+    Sichtbarkeits-Felder auf der ``global_config`` (``mail_status``).
+
+    ``result is None`` heisst: es wurde **gar nicht** versucht — kein
+    Empfaenger hinterlegt, nichts zu melden, oder alles gebremst. Das ist
+    kein Fehlversuch und darf die Fehleranzeige nicht fuellen.
+    """
+
+    gemeldet: int
+    result: mailer.MailResult | None = None
+
+
+def handle_silent_transitions(
+    transitions: list[dict[str, Any]], *, recipient: str | None
+) -> SammelmailErgebnis:
     """Logger je Uebergang, danach **eine** Sammelmail fuer Stufe 2.
 
     Der Einstiegspunkt fuer ``health_tasks``. Reihenfolge ist verbindlich:
@@ -129,9 +149,9 @@ def handle_silent_transitions(transitions: list[dict[str, Any]], *, recipient: s
     :param recipient: Alarm-Adresse aus ``global_config.alert_email``.
         ``None`` oder leer heisst "keine hinterlegt" — dann bleibt es bei
         den Logger-Eintraegen.
-    :return: Anzahl der Geraete in der versandten Mail. ``0`` heisst: keine
-        Mail verschickt. Rueckgabe dient dem Aufrufer als Kennzahl fuer
-        seinen eigenen Log-Eintrag.
+    :return: ``SammelmailErgebnis`` mit der Anzahl gemeldeter Geraete und
+        dem Versand-Ergebnis. Letzteres gehoert in ``mail_status``, damit
+        ein fehlgeschlagener Versand nicht nur im Container-Log steht.
     """
     for t in transitions:
         emit_health_alert(
@@ -148,7 +168,7 @@ def handle_silent_transitions(transitions: list[dict[str, Any]], *, recipient: s
         )
 
     if not recipient:
-        return 0
+        return SammelmailErgebnis(0)
 
     # Nur Stufe 2. Stufe 3 bleibt in diesem Sprint Logger-only.
     kandidaten = [t for t in transitions if t["reason"] != REASON_IMPLAUSIBLE]
@@ -172,7 +192,7 @@ def handle_silent_transitions(transitions: list[dict[str, Any]], *, recipient: s
                 "health_alert_sammelmail_entfaellt",
                 extra={"kandidaten": len(kandidaten), "grund": "alle gebremst"},
             )
-        return 0
+        return SammelmailErgebnis(0)
 
     result = mailer.send_mail(
         recipient=recipient,
@@ -184,7 +204,7 @@ def handle_silent_transitions(transitions: list[dict[str, Any]], *, recipient: s
             "health_alert_sammelmail_nicht_zugestellt",
             extra={"anzahl": len(zu_melden), "grund": result.reason, "detail": result.detail},
         )
-    return len(zu_melden)
+    return SammelmailErgebnis(len(zu_melden), result)
 
 
 # ---------------------------------------------------------------------------

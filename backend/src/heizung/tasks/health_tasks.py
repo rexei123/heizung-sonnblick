@@ -40,7 +40,7 @@ from sqlalchemy import select
 from heizung.celery_app import app
 from heizung.models import Device, HeatingZone, Room, SensorReading
 from heizung.models.global_config import GlobalConfig
-from heizung.services import redis_client
+from heizung.services import mail_status, redis_client
 from heizung.services.health_alerts import handle_silent_transitions
 from heizung.tasks.engine_tasks import _task_session
 
@@ -296,9 +296,19 @@ async def _compute_health_state_async() -> dict[str, Any]:
     # kippen alle Geraete im selben Tick auf silent — 104 Einzelmails waeren
     # unlesbar, und die eigentliche Information ("alle auf einmal") ginge
     # darin unter. Einzelheiten in services/health_alerts.
-    gemeldet = handle_silent_transitions(silent_transitions, recipient=alert_recipient)
-    if gemeldet:
-        logger.info("health_alert_sammelmail", extra={"geraete": gemeldet})
+    ergebnis = handle_silent_transitions(silent_transitions, recipient=alert_recipient)
+    if ergebnis.gemeldet:
+        logger.info("health_alert_sammelmail", extra={"geraete": ergebnis.gemeldet})
+
+    # Phase 7 (T4): Versuch festhalten, damit ein stiller Fehlschlag sichtbar
+    # wird. Eigene, kurze Session — die obige ist geschlossen, und das
+    # Protokollieren soll den Alarmpfad nicht an eine laengere Transaktion
+    # binden. Nur wenn wirklich versendet wurde: "nichts zu melden" ist kein
+    # Versandergebnis und darf die Anzeige nicht ueberschreiben.
+    if ergebnis.result is not None:
+        async with _task_session() as session:
+            await mail_status.record_attempt(session, ergebnis.result)
+            await session.commit()
 
     return {
         "devices_processed": len(devices),

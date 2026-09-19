@@ -441,6 +441,12 @@ export interface GlobalConfig {
   alert_email: string | null;
   alert_device_offline_minutes: number;
   alert_battery_warn_percent: number;
+  // Laufzeit-Felder zum Mailversand (Sprint 18, T4). Read-only — sie stehen
+  // NICHT in GlobalConfigUpdate, weil sie das System schreibt, nicht der
+  // Hotelier. Spiegel zu schemas/global_config.py (§5.63).
+  last_mail_attempt_at: string | null;
+  last_mail_ok_at: string | null;
+  last_mail_error: string | null;
   created_at: string;
   updated_at: string;
 }

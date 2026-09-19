@@ -53,6 +53,21 @@ class GlobalConfig(Base):
     alert_device_offline_minutes: Mapped[int] = mapped_column(default=120, nullable=False)
     alert_battery_warn_percent: Mapped[int] = mapped_column(default=20, nullable=False)
 
+    # --- Laufzeit-Felder zum Mailversand (Sprint 18, Migration 0021) -----
+    # KEINE Konfiguration. Alles andere in dieser Tabelle setzt der Hotelier
+    # und das System liest es; diese drei laufen andersherum. Sie gehoeren
+    # deshalb NICHT in ``GlobalConfigUpdate`` — ein PATCH darauf waere das
+    # Faelschen eines Messwerts.
+    #
+    # Geschrieben ausschliesslich von ``services/mail_status.record_attempt``.
+    last_mail_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Wird nie zurueckgesetzt — "hat es jemals funktioniert" ist am Tag der
+    # Inbetriebnahme die einzige Frage, die zaehlt.
+    last_mail_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ``NULL`` nach einem Erfolg. Enthaelt nie das SMTP-Passwort
+    # (``mailer._redact`` greift vor dem Schreiben).
+    last_mail_error: Mapped[str | None] = mapped_column(String(200))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
