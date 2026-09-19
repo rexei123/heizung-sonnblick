@@ -2133,10 +2133,25 @@ umrechnete. Doppelter Fehler:
   `raw_payload` (base64). Re-Decode wäre möglich, aber Aufwand >> Nutzen
   (UI zeigt Werte nur in Diagnose-Kacheln).
 - **Kein Konsument auf `battery_percent` in der Engine.** `services/`
-  und `tasks/` reagieren nicht auf den Wert.
-  `global_config.alert_battery_warn_percent` ist konfigurierbar (Default
-  20 %), aber **toter Schalter** — kein Konsument. Folge-Sprint
-  B-15b-1: real verdrahten (Email-Alarm an Wechsel-Schwelle).
+  und `tasks/` reagieren nicht auf den Wert — die Steuerlogik ist von der
+  Batterie unabhängig, das gilt weiterhin.
+- **`global_config.alert_battery_warn_percent` ist seit Sprint 15d
+  verdrahtet** (Stand 2026-09-19, geprüft). Zwei Konsumenten:
+  `api/v1/devices.py:112` speist die Schwelle in `battery_health_state`
+  und damit in das Badge an jedem Gerät, `services/dashboard_aggregates.py:201`
+  nutzt dieselbe Schwelle für die Kachel `battery_low_count`. Wer den Wert
+  von 20 auf 35 stellt, sieht sofort mehr gelbe Badges und eine höhere Zahl
+  auf dem Dashboard.
+
+  Der Satz an dieser Stelle lautete bis 2026-09-19 „**toter Schalter** —
+  kein Konsument" und stammte aus Sprint 15b. Sprint 15d (AE-65, §5.73) hat
+  ihn überholt, die Lesson wurde nicht nachgezogen. Siehe §5.77.
+
+- **B-15b-1 bleibt offen, aber verengt:** was fehlt, ist allein der
+  **Mailversand an der Schwelle**. Sprint 18 hat den Versandweg gebaut
+  (`services/mailer.py`) und zwei Alarme verdrahtet — die Batterie-Schwelle
+  gehört nicht dazu. Die UI weist das aus: „Wirkt auf die Batterie-Anzeige
+  und die Dashboard-Kachel. Löst noch keine E-Mail aus."
 - **Cell-Typ-Annahme:** Standard 2xAA Alkaline. Wenn Hotel-Sonnblick auf
   Lithium-AA wechselt (Spec erlaubt bis 3.6 V Geräte-Spannung), bleibt
   die Kurve im oberen Bereich konservativ (höhere Lithium-Spannung
@@ -2369,6 +2384,56 @@ bei Fehlern — dieselbe Familie: stiller Ausfall ohne Melder), §5.11
 (`docker compose pull` ist nicht beweisend), §5.32 (akzeptierter
 Healthcheck-Drift — Gegenstueck: dort war der Mechanik-Check rot und die
 Wirkung in Ordnung), B-18-1 (Alarm "Backup aelter als 48 h").
+
+### 5.77 Ein veralteter „wirkungslos"-Vermerk ist selbst ein Schalter ohne Wirkung (Sprint 18 / T7)
+
+§5.72 trug seit Sprint 15b den Satz, `global_config.alert_battery_warn_percent`
+sei ein „**toter Schalter** — kein Konsument". Sprint 15d (AE-65, §5.73) hat
+ihn verdrahtet: die Schwelle speist seither das Batterie-Badge an jedem Gerät
+und die Dashboard-Kachel `battery_low_count`. Die Lesson wurde nicht
+nachgezogen.
+
+Vier Monate später setzte ein Sprint-Auftrag auf der veralteten Stelle auf
+und verlangte, den Schalter in der Oberfläche **als unverdrahtet zu
+kennzeichnen**. Aufgefallen ist es nur, weil ein Vorab-`grep` die Prämisse
+prüfte statt sie zu übernehmen — zwei Fundstellen, beide produktiv.
+
+**Die Lesson:** Ein „wirkt nicht"-Vermerk, der nicht mehr stimmt, ist
+gefährlicher als gar keiner. Er hält jemanden davon ab, etwas zu benutzen,
+das funktioniert — und er pflanzt sich fort, weil er wie ein Befund gelesen
+wird. Hier wäre am Ende die **Oberfläche** mit einer Falschaussage versehen
+worden, also genau dort, wo der Hotelier hinschaut. Ein Schalter ohne Wirkung
+ist schlimmer als kein Schalter; ein Hinweis, der eine Wirkung
+fälschlicherweise bestreitet, ist dasselbe eine Ebene höher.
+
+**Regel:** Wer einen „noch nicht verdrahtet"/„kein Konsument"/„tot"-Vermerk
+in Doku, Kommentar oder UI schreibt, schreibt eine **Aussage über den
+aktuellen Code**, keine dauerhafte Eigenschaft. Sie verfällt, sobald jemand
+den Konsumenten baut.
+
+Daraus zwei Pflichten:
+
+1. **Beim Verdrahten:** Wer einen bisher folgenlosen Wert an einen
+   Konsumenten hängt, sucht im selben PR nach Vermerken, die das Gegenteil
+   behaupten — `grep -rn "<feld>" CLAUDE.md docs/ STATUS.md` — und zieht sie
+   nach. Das ist Teil des Features, nicht Nacharbeit.
+2. **Beim Aufsetzen auf einen solchen Vermerk:** Ein Auftrag, dessen
+   Prämisse „X hat keinen Konsumenten" lautet, beginnt mit dem `grep`, der
+   sie belegt. Fällt die Prämisse, wird gemeldet statt umgesetzt — die
+   Umsetzung hätte hier eine Lüge in die Oberfläche geschrieben.
+
+Verwandt, aber nicht dasselbe: §5.20 behandelt Kommentare, die etwas
+versprechen, das es **nie gab** (aspirativ). Hier geht es um Vermerke, die
+einmal **richtig waren** und durch einen späteren Sprint überholt wurden.
+Die erste Sorte findet man, indem man den versprochenen Code sucht; die
+zweite nur, indem man die Verneinung selbst nachprüft — und genau das tut
+niemand von sich aus, weil eine Verneinung wie eine erledigte Frage aussieht.
+
+**Querverweise:** §5.20 (aspirative Kommentare — Schwester-Klasse), §5.68
+(Behauptung vs. Befund — dieselbe Wurzel, andere Domäne: dort Server-Zustand,
+hier Code-Zustand), §5.72 (die korrigierte Stelle), §5.73 (der Sprint, der
+sie überholt hat), B-15b-1 (der verbliebene offene Rest: Mailversand an der
+Schwelle).
 
 ---
 
