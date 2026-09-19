@@ -1451,18 +1451,19 @@ Das ist kein Schönheitsfehler: `import`, `inbound-test` und `assign` brechen
 **vor** dem ersten Schreibvorgang ab. Ein Tippfehler am Montage-Abend kostet
 einen zweiten Anlauf, mehr nicht — aber prüfen Sie die Adresse vorher.
 
-**Verwenden Sie das Admin-Konto.** Der Eintrag landet als Urheber im Audit
-(`DEVICE_PAIRED`, `DEVICE_INBOUND_TEST`, `DEVICE_ZONE_ASSIGNED`) und
-beantwortet später die Frage „wer hat das zugeordnet".
+**Es muss ein Admin-Konto sein.** Seit 19.09. prüft die CLI die Rolle — die
+Admin-Pflicht aus der Tabelle oben gilt damit für Oberfläche **und** Skripte
+gleichermaßen. Der Eintrag landet als Urheber im Audit (`DEVICE_PAIRED`,
+`DEVICE_INBOUND_TEST`, `DEVICE_ZONE_ASSIGNED`) und beantwortet später die
+Frage „wer hat das zugeordnet".
 
-> **Wichtig, und anders als in der Oberfläche:** die CLI prüft die **Rolle
-> nicht**. `_lookup_user_id` filtert auf `email` und `is_active` — eine
-> Mitarbeiter-Adresse würde angenommen und stünde dann als Urheber im Audit.
-> Die Admin-Pflicht aus der Tabelle oben gilt für die **Oberfläche**
-> (`PUT/DELETE /devices/{id}/heating-zone` und die Tausch-Endpoints), nicht
-> für die Skripte. Wer über die CLI arbeitet, umgeht die Rollenprüfung — das
-> ist bewusst so, weil der Aufruf ohnehin Shell-Zugang auf dem Server
-> voraussetzt, aber man sollte es wissen.
+Die drei Abbruchgründe nennen jeweils den nächsten Schritt mit:
+
+| Lage | Meldung (gekürzt) |
+|---|---|
+| Adresse existiert nicht | `Es gibt kein Konto mit der Adresse '…'. Adresse pruefen (Tippfehler?) …` |
+| Konto deaktiviert | `Das Konto '…' ist deaktiviert … oder das Konto in der Benutzerverwaltung wieder aktivieren.` |
+| falsche Rolle | `Das Konto '…' hat die Rolle 'mitarbeiter'. Fuer diesen Aufruf ist ein Konto mit der Rolle 'admin' noetig …` |
 
 Prüfen, welche Konten es gibt und welche Rolle sie haben:
 
@@ -1786,7 +1787,7 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   import /tmp/pairings.csv --user-email admin@hotel-sonnblick.at
 ```
 
-> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+> `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
 
 **Erwartung:**
 `Resultat: 100 angelegt, 4 ergaenzt, 0 unveraendert, 0 Konflikte, 0 Fehler.`
@@ -1838,7 +1839,7 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   inbound-test --all-pool --user-email admin@hotel-sonnblick.at
 ```
 
-> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+> `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
 
 Ablauf: Firmware-Abfrage an alle → Sollwert 25 °C an alle → gemeinsames
 Warten auf den Readback → Sollwert 10 °C → Warten → Urteil.
@@ -1859,7 +1860,7 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   --user-email admin@hotel-sonnblick.at
 ```
 
-> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+> `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
 
 **Erwartung:** `Auswahl: 3 von 104 Pool-Geraeten.` als erste Zeile, dann der
 gewohnte Ablauf.
@@ -2026,7 +2027,7 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
   --user-email admin@hotel-sonnblick.at
 ```
 
-> `--user-email` muss ein **aktives Konto** aus der Benutzer-Tabelle sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab. Admin-Konto verwenden — die Adresse steht als Urheber im Audit (§10h.0.2).
+> `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
 
 **`--rooms` ist Pflicht.** Die CSV enthält alle 103 Zonen; ohne Filter würden
 Geräte Zimmern zugeordnet, an denen noch niemand war. Die Zimmernummern sind
