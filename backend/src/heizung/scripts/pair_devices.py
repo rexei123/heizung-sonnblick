@@ -79,6 +79,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
+from heizung.models.enums import UserRole  # noqa: E402
 from heizung.models.user import User  # noqa: E402
 from heizung.scripts.pairing.assign import (  # noqa: E402
     format_report as format_assign_report,
@@ -150,11 +151,49 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _lookup_user_id(session: AsyncSession, email: str) -> int | None:
-    """Email -> User.id. Erwartet aktiven User; None falls nicht gefunden."""
-    stmt = select(User.id).where(User.email == email).where(User.is_active.is_(True))
-    result: int | None = await session.scalar(stmt)
-    return result
+async def _lookup_user_id(session: AsyncSession, email: str) -> tuple[int | None, str | None]:
+    """Email -> ``User.id``, aber nur fuer **aktive Admin-Konten**.
+
+    Die Rollenpruefung spiegelt die Oberflaeche: Zuordnen, Trennen und
+    Tauschen verlangen dort die Admin-Rolle (RUNBOOK 10h.0.2). Vorher pruefte
+    dieser Lookup nur ``is_active``, eine Mitarbeiter-Adresse waere
+    angenommen worden und stuende als Urheber im Audit.
+
+    Gibt ``(None, Grund)`` zurueck statt nur ``None``: der Hotelier steht am
+    Montage-Abend allein davor und braucht aus der Meldung heraus den
+    naechsten Schritt, nicht nur ein "nicht gefunden".
+
+    :return: ``(user_id, None)`` bei Erfolg, sonst ``(None, Klartext-Grund)``.
+    """
+    stmt = select(User.id, User.role, User.is_active).where(User.email == email)
+    row = (await session.execute(stmt)).first()
+
+    if row is None:
+        return None, (
+            f"Es gibt kein Konto mit der Adresse '{email}'. "
+            "Adresse pruefen (Tippfehler?) oder die vorhandenen Konten auflisten — "
+            "die Abfrage dafuer steht im RUNBOOK 10h.0.2."
+        )
+
+    user_id, role, is_active = row
+
+    if not is_active:
+        return None, (
+            f"Das Konto '{email}' ist deaktiviert und kann deshalb nicht als "
+            "Urheber eingetragen werden. Ein aktives Admin-Konto verwenden, "
+            "oder das Konto in der Benutzerverwaltung wieder aktivieren."
+        )
+
+    if role is not UserRole.ADMIN:
+        return None, (
+            f"Das Konto '{email}' hat die Rolle '{role.value}'. Fuer diesen "
+            "Aufruf ist ein Konto mit der Rolle 'admin' noetig — dieselbe "
+            "Rolle, die in der Oberflaeche fuer Zuordnen, Trennen und Tauschen "
+            "verlangt wird. Die vorhandenen Admin-Konten listet die Abfrage im "
+            "RUNBOOK 10h.0.2."
+        )
+
+    return user_id, None
 
 
 def _filter_pool_devices(devices: Sequence[Device], raw: str) -> tuple[list[Device], list[str]]:
@@ -236,13 +275,9 @@ async def _cmd_import(args: argparse.Namespace) -> int:
         # Degradierung, expliziter Abbruch bei unbekannter Email.
         user_id: int | None
         if args.user_email:
-            user_id = await _lookup_user_id(session, args.user_email)
+            user_id, reason = await _lookup_user_id(session, args.user_email)
             if user_id is None:
-                print(
-                    f"[FAIL] User-Email '{args.user_email}' nicht gefunden "
-                    "oder inaktiv. Import abgebrochen.",
-                    file=sys.stderr,
-                )
+                print(f"[FAIL] {reason} Import abgebrochen.", file=sys.stderr)
                 return 1
         else:
             user_id = None
@@ -344,12 +379,9 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
 
         user_id: int | None = None
         if args.user_email:
-            user_id = await _lookup_user_id(session, args.user_email)
+            user_id, reason = await _lookup_user_id(session, args.user_email)
             if user_id is None:
-                print(
-                    f"[FAIL] User-Email '{args.user_email}' nicht gefunden oder inaktiv.",
-                    file=sys.stderr,
-                )
+                print(f"[FAIL] {reason}", file=sys.stderr)
                 return 1
 
         print(
@@ -401,12 +433,9 @@ async def _cmd_assign(args: argparse.Namespace) -> int:
     async with SessionLocal() as session:
         user_id: int | None = None
         if args.user_email:
-            user_id = await _lookup_user_id(session, args.user_email)
+            user_id, reason = await _lookup_user_id(session, args.user_email)
             if user_id is None:
-                print(
-                    f"[FAIL] User-Email '{args.user_email}' nicht gefunden oder inaktiv.",
-                    file=sys.stderr,
-                )
+                print(f"[FAIL] {reason}", file=sys.stderr)
                 return 1
 
         report = await run_assign(session, rows, rooms, dry_run=args.dry_run, user_id=user_id)

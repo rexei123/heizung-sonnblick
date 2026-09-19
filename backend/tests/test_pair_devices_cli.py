@@ -291,7 +291,11 @@ async def test_cmd_import_invalid_user_email_aborts(
     )
     assert exit_code == 1
     err = capsys.readouterr().err
-    assert "[FAIL] User-Email 'nonexistent@example.com' nicht gefunden" in err
+    # Sprint 17 Nachtrag: die Meldung nennt jetzt Grund UND naechsten Schritt,
+    # statt nur "nicht gefunden" (RUNBOOK 10h.0.2).
+    assert "[FAIL]" in err
+    assert "kein Konto mit der Adresse 'nonexistent@example.com'" in err
+    assert "Tippfehler" in err
     # Kein Downlink — weder durch den Abbruch noch durch pair_batch.
     assert mock_all_downlinks["set_ow"] == 0
 
@@ -490,3 +494,135 @@ def test_inbound_test_verlangt_genau_einen_auswahl_schalter() -> None:
         parser.parse_args(["inbound-test"])
     with pytest.raises(SystemExit):
         parser.parse_args(["inbound-test", "--all-pool", "--devices", "017"])
+
+
+# ---------------------------------------------------------------------------
+# Sprint 17 Nachtrag — --user-email verlangt ein aktives Admin-Konto
+# ---------------------------------------------------------------------------
+#
+# Bis dahin filterte _lookup_user_id nur auf email + is_active. Eine
+# Mitarbeiter-Adresse waere angenommen worden und stuende als Urheber im
+# Audit. Die Oberflaeche verlangt fuer Zuordnen/Trennen/Tauschen die
+# Admin-Rolle (RUNBOOK 10h.0.2) — die CLI zieht jetzt nach.
+#
+# Die Fehlermeldung muss den Grund UND den naechsten Schritt nennen: der
+# Hotelier steht am Montage-Abend allein davor.
+
+
+async def _make_user(session: AsyncSession, *, role: UserRole, is_active: bool = True) -> str:
+    """Legt ein Konto an und gibt seine Adresse zurueck."""
+    email = f"cli-rolle-{_short()}@example.com"
+    session.add(
+        User(
+            email=email,
+            password_hash="x" * 60,
+            role=role,
+            is_active=is_active,
+            must_change_password=False,
+        )
+    )
+    await session.flush()
+    return email
+
+
+async def test_lookup_akzeptiert_aktives_admin_konto(
+    patched_session_local: AsyncSession,
+) -> None:
+    from heizung.scripts.pair_devices import _lookup_user_id
+
+    email = await _make_user(patched_session_local, role=UserRole.ADMIN)
+
+    user_id, reason = await _lookup_user_id(patched_session_local, email)
+
+    assert user_id is not None
+    assert reason is None
+
+
+async def test_lookup_weist_mitarbeiter_konto_ab(
+    patched_session_local: AsyncSession,
+) -> None:
+    """Der Kern dieses Nachtrags."""
+    from heizung.scripts.pair_devices import _lookup_user_id
+
+    email = await _make_user(patched_session_local, role=UserRole.MITARBEITER)
+
+    user_id, reason = await _lookup_user_id(patched_session_local, email)
+
+    assert user_id is None
+    assert reason is not None
+    # Grund benannt …
+    assert "mitarbeiter" in reason
+    # … und das weitere Vorgehen.
+    assert "admin" in reason
+    assert "10h.0.2" in reason
+
+
+async def test_lookup_weist_deaktiviertes_admin_konto_ab(
+    patched_session_local: AsyncSession,
+) -> None:
+    """Deaktiviert ist ein anderer Grund als falsche Rolle — die Meldung
+    muss das unterscheiden, sonst sucht der Hotelier an der falschen Stelle."""
+    from heizung.scripts.pair_devices import _lookup_user_id
+
+    email = await _make_user(patched_session_local, role=UserRole.ADMIN, is_active=False)
+
+    user_id, reason = await _lookup_user_id(patched_session_local, email)
+
+    assert user_id is None
+    assert reason is not None
+    assert "deaktiviert" in reason
+    assert "aktivieren" in reason
+    # Nicht die Rollen-Begruendung.
+    assert "Rolle" not in reason
+
+
+async def test_lookup_weist_unbekannte_adresse_ab(
+    patched_session_local: AsyncSession,
+) -> None:
+    from heizung.scripts.pair_devices import _lookup_user_id
+
+    user_id, reason = await _lookup_user_id(patched_session_local, "gibtesnicht@example.com")
+
+    assert user_id is None
+    assert reason is not None
+    assert "kein Konto" in reason
+    assert "Tippfehler" in reason
+    # Weder Rolle noch Deaktivierung — die Adresse existiert schlicht nicht.
+    assert "Rolle" not in reason
+    assert "deaktiviert" not in reason
+
+
+async def test_import_bricht_bei_mitarbeiter_konto_ab_ohne_zu_schreiben(
+    patched_session_local: AsyncSession,
+    tmp_path: Path,
+    mock_all_downlinks: dict[str, int],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """End-to-End ueber den CLI-Pfad: Exit 1, nichts angelegt, Grund im stderr."""
+    room_num = str(7_300_000 + int(_short(), 16) % 100_000)
+    await _seed_zone(patched_session_local, room_number=room_num, zone_name="Schlafzimmer")
+    email = await _make_user(patched_session_local, role=UserRole.MITARBEITER)
+
+    dev_eui = _eui()
+    csv_path = tmp_path / "rolle.csv"
+    _write_csv(
+        csv_path,
+        "stockwerk,zimmer_nummer,zimmer_typ,zone_label,dev_eui,app_key\n"
+        f"1,{room_num},Standard,Schlafzimmer,{dev_eui},{_VALID_APP_KEY}\n",
+    )
+
+    exit_code = await pair_devices.main_async(["import", str(csv_path), "--user-email", email])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FAIL]" in err
+    assert "mitarbeiter" in err
+    assert "Import abgebrochen" in err
+
+    # Kein Device angelegt.
+    count = await patched_session_local.scalar(
+        select(func.count()).select_from(Device).where(Device.dev_eui == dev_eui)
+    )
+    assert count == 0
+    # Kein Downlink durch den Abbruch.
+    assert mock_all_downlinks["set_ow"] == 0
