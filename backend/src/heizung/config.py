@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     # Import) + Staleness-Watchdog.
     occupancy_import_expected_by_local: str = "09:00"
 
+    # --- Dead-Man-Checks (Sprint 18) --------------------------------------
+    # Ping-URLs eines externen Monitors (healthchecks.io). Bleibt eine URL
+    # leer, wird nicht gepingt — das Feature ist damit pro Umgebung
+    # zuschaltbar, ohne Code-Aenderung.
+    #
+    # Ueberwacht wird die WIRKUNG, nicht die Mechanik (CLAUDE.md §5.76):
+    # bleibt der Ping aus, schlaegt der Monitor Alarm, ganz gleich ob Beat,
+    # Worker, Timer, Skript oder Netzwerk der Grund ist.
+    #
+    # Die Werte sind Geheimnisse im schwachen Sinn — wer die URL kennt, kann
+    # den Monitor gruen halten und damit einen Ausfall verdecken. Sie
+    # gehoeren deshalb in die .env, nicht ins Repo.
+    healthcheck_engine_url: str = ""
+    healthcheck_deploy_url: str = ""
+    healthcheck_backup_url: str = ""
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.
