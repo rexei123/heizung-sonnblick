@@ -187,4 +187,43 @@ case "$OFFSITE_STATUS" in
     failed)  log "Backup-Lauf beendet: lokal OK, OFF-SITE-PUSH FEHLGESCHLAGEN (Token OFFSITE_PUSH_FAILED im Log). Primaersicherung lokal vorhanden." ;;
 esac
 
+# ---------------------------------------------------------------------
+# Dead-Man-Ping (Sprint 18)
+# ---------------------------------------------------------------------
+#
+# Gepingt wird NUR, wenn der lokale Dump UND der Off-Site-Push durch sind.
+# Das ist strenger als der Exit-Code: ein fehlgeschlagener Push laesst den
+# Lauf mit `exit 0` enden (Off-Site ist fail-soft), erzeugt hier aber
+# KEINEN Ping. Begruendung: eine Sicherung, die nur auf demselben Server
+# liegt, ist gegen den Ausfall genau dieses Servers wertlos - und der ist
+# der Grund, warum es ueberhaupt ein Backup gibt.
+#
+# Folge, die man kennen muss: auf einem Server OHNE konfigurierten
+# Off-Site-Push (OFFSITE_STATUS=skipped) pingt es nie, der Monitor schlaegt
+# also taeglich Alarm. Das ist beabsichtigt und in RUNBOOK 10l vermerkt -
+# aber wer einen zweiten Server ohne Off-Site aufsetzt, soll nicht raten
+# muessen, warum der Check rot ist.
+#
+# Der Ping darf den Lauf nie abbrechen: `|| true`, `return 0`.
+ping_healthcheck() {
+    local url="$1"
+    local label="$2"
+    if [ -z "$url" ]; then
+        return 0
+    fi
+    if curl -fsS -m 10 --retry 3 "$url" >/dev/null 2>&1; then
+        log "Dead-Man-Ping ${label}: ok."
+    else
+        log "Dead-Man-Ping ${label}: fehlgeschlagen. Lauf bleibt erfolgreich."
+    fi
+    return 0
+}
+
+if [ "$FAILED" -eq 0 ] && [ "$OFFSITE_STATUS" = "ok" ]; then
+    HEALTHCHECK_BACKUP_URL=$(read_env_key HEALTHCHECK_BACKUP_URL)
+    ping_healthcheck "$HEALTHCHECK_BACKUP_URL" "backup" || true
+else
+    log "Kein Dead-Man-Ping: lokal_fehler=${FAILED}, offsite=${OFFSITE_STATUS}."
+fi
+
 exit 0

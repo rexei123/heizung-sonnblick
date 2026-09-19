@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -43,7 +44,7 @@ from heizung.rules.engine import (
 from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
-from heizung.services import engine_lock, resync_flag
+from heizung.services import alert_throttle, engine_lock, resync_flag
 from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.downlink_adapter import send_setpoint
 
@@ -152,7 +153,45 @@ async def _evaluate_due_rooms_async() -> dict[str, Any]:
         evaluate_room.delay(rid)
         triggered += 1
     logger.info("evaluate_due_rooms: triggered=%s rooms_total=%s", triggered, len(ids))
+    _ping_engine_healthcheck()
     return {"triggered": triggered, "now": now.isoformat()}
+
+
+# Der Beat feuert jede Minute. Der Monitor ist auf 5 Minuten Periode
+# eingestellt, ein Ping je Minute waere also 5x mehr als noetig. 290 s
+# statt 300 s als Sperrzeit: bei exakt 300 s koennte ein Tick knapp vor
+# Ablauf landen und der naechste erst 60 s spaeter, was den Abstand auf
+# 6 Minuten dehnt und den Monitor grundlos ausloest.
+ENGINE_PING_THROTTLE_S = 290
+ENGINE_PING_KEY = "engine_tick"
+ENGINE_PING_TIMEOUT_S = 5
+
+
+def _ping_engine_healthcheck() -> None:
+    """Dead-Man-Ping fuer den Engine-Takt (Sprint 18, CLAUDE.md 5.76).
+
+    **Was der Ping belegt und was nicht.** Er belegt, dass Beat und Worker
+    die Kette durchlaufen: der Beat hat getaktet, der Task lief bis zum
+    Ende, die Datenbank war erreichbar. Er belegt **nicht**, dass die
+    Auswertung je Zimmer korrekt war. Nach AE-54 ist jede Raum-Evaluation
+    einzeln gekapselt — ein Lauf, in dem *jede* Zimmer-Evaluation
+    scheitert, kommt trotzdem hier an und pingt gruen. Wer das abdecken
+    will, braucht einen Alarm auf die Fehlerquote, nicht auf den Takt.
+
+    Faellt Redis aus, greift die Drosselung nicht und es wird bei jedem
+    Tick gepingt. Harmlos: der Monitor zaehlt nur, ob ueberhaupt etwas
+    ankommt. Ein Sonderfall dafuer waere mehr Code als Nutzen.
+    """
+    url = get_settings().healthcheck_engine_url
+    if not url:
+        return
+    if not alert_throttle.should_send(ENGINE_PING_KEY, "beat", ttl_s=ENGINE_PING_THROTTLE_S):
+        return
+    try:
+        with httpx.Client(timeout=ENGINE_PING_TIMEOUT_S) as client:
+            client.get(url).raise_for_status()
+    except Exception:  # noqa: BLE001 - ein Ping darf den Tick nie kippen
+        logger.warning("engine_healthcheck_ping_fehlgeschlagen", exc_info=True)
 
 
 async def _evaluate_room_async(room_id: int) -> dict[str, Any]:

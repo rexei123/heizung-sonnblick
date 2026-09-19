@@ -144,3 +144,38 @@ fi
 
 log "Aktiv: $(docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
 log "Fertig (HEAD=$NEW_SHA)."
+
+# ---------------------------------------------------------------------
+# Dead-Man-Ping (Sprint 18)
+# ---------------------------------------------------------------------
+#
+# Ueberwacht wird die WIRKUNG, nicht die Mechanik (CLAUDE.md 5.76): der
+# Monitor auf healthchecks.io schlaegt Alarm, wenn dieser Ping ausbleibt.
+# Ob der Timer laeuft, ob systemd ihn kennt, ob das Skript ausfuehrbar ist
+# - all das braucht niemand einzeln zu pruefen. Bleibt der Ping aus, ist
+# irgendetwas davon kaputt.
+#
+# Die Stelle ist mit Absicht hier unten: erreicht wird sie nur, wenn Fetch,
+# Working-Tree-Sync, Image-Pull und `up -d` durch sind. Jeder Fehlerpfad
+# oben endet in `exit 1`, also ohne Ping. Der No-op-Lauf ("Working-Tree
+# bereits auf origin/<branch>") laeuft dagegen bis hierher durch und pingt
+# - er IST ein erfolgreicher Lauf, nur ohne Aenderung.
+#
+# Der Ping darf den Lauf nie abbrechen. Deshalb `|| true` in der Funktion,
+# `return 0` am Ende und der Aufruf ohne `set -e`-Exposition.
+ping_healthcheck() {
+    local url="$1"
+    local label="$2"
+    if [ -z "$url" ]; then
+        return 0
+    fi
+    if curl -fsS -m 10 --retry 3 "$url" >/dev/null 2>&1; then
+        log "Dead-Man-Ping ${label}: ok."
+    else
+        log "Dead-Man-Ping ${label}: fehlgeschlagen. Lauf bleibt erfolgreich."
+    fi
+    return 0
+}
+
+HEALTHCHECK_DEPLOY_URL=$(read_env_key HEALTHCHECK_DEPLOY_URL)
+ping_healthcheck "$HEALTHCHECK_DEPLOY_URL" "deploy" || true

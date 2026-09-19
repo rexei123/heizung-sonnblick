@@ -2300,6 +2300,76 @@ beim nächsten Probelauf auf dem Server.
 Annahme ab), §5.21 (Hardware-/Protokoll-Annahmen defensiv interpretieren),
 §5.68 (Server-Realität schlägt Annahme), AE-69 (gRPC-Provisioning).
 
+
+### 5.76 Zwei Fehler koennen sich gegenseitig verdecken — Alarme gehoeren auf die Wirkung, nicht auf die Mechanik (Sprint 18)
+
+Am 19.09.2026 lag folgende Kette vor, ohne dass sie jemand geplant haette:
+
+1. `infra/deploy/backup.sh` stand im Repo als `100644`, also **ohne**
+   Ausfuehrungs-Bit. `heizung-backup.service` ruft es per `ExecStart`
+   direkt auf — das haette `status=203/EXEC` gegeben.
+2. `install-backup-timer.sh` setzte das Bit bei der Installation per
+   `chmod +x`. Der Timer lief also.
+3. `deploy-pull.sh` macht `git reset --hard origin/<branch>`. Das stellt
+   auch den **Dateimodus** aus dem Repo wieder her und haette den `chmod`
+   zurueckgedreht.
+4. Aber: der Deploy auf heizung-test stand seit 09.06. still. Der
+   `reset --hard` lief drei Monate lang nie erfolgreich durch.
+
+**Der Deploy-Stillstand hat das Backup am Leben gehalten.** Und die
+Reparatur des Deploys am 18.09. haette das Backup stillgelegt — genau die
+Handlung, die ein Problem behebt, haette ein zweites scharf geschaltet.
+Dass es nicht passierte, lag an einem dritten Zufall: `core.fileMode=false`
+war auf dem Server gesetzt, wodurch git den Modus gar nicht mehr
+zuruecksetzte.
+
+Keiner dieser drei Umstaende war jemandem als Schutzmechanismus bewusst.
+
+**Die Lesson ist nicht "pruefe Ausfuehrungs-Bits".** Sie ist: **ein
+Ueberwachungssystem, das Mechanik prueft, findet solche Ketten nie.** Wer
+haette gewarnt? Ein Check auf "Timer aktiv" haette gruen gemeldet — er war
+ja aktiv. Ein Check auf "Dateimodus stimmt" haette gemeldet, was auf dem
+Server galt, nicht was im Repo stand. Erst ein Alarm auf die **Wirkung** —
+"das juengste Backup ist aelter als 48 Stunden" — haette gegriffen, und
+zwar unabhaengig davon, welcher der drei Umstaende gerade kippt.
+
+**Regel:** Fuer jede Sache, deren Ausbleiben teuer ist, wird die Wirkung
+ueberwacht, nicht der Mechanismus.
+
+| Statt zu pruefen … | … das ueberwachen |
+|---|---|
+| laeuft der Backup-Timer | ist das juengste Backup juenger als 48 h |
+| laeuft der Deploy-Timer | entspricht der Server-HEAD dem Branch-HEAD |
+| laeuft der MQTT-Subscriber | kam in den letzten 2 h ein Uplink an |
+| laeuft der Beat | ist die juengste Engine-Evaluation juenger als X |
+
+Der Mechanik-Check ist nicht wertlos — er sagt einem *warum* etwas kaputt
+ist. Aber er darf nie die einzige Ueberwachung sein, denn er kann nur die
+Fehler finden, an die jemand beim Schreiben gedacht hat.
+
+**Zweiter Teil, unbequem:** Der Befund vom 19.09. war ein **Handgriff** —
+jemand hat aus einem konkreten Anlass nachgesehen. Bei einem echten
+Ausfall haette niemand diesen Anlass gehabt. Der Aufwand fuer einen
+Wirkungs-Alarm rechtfertigt sich nicht aus der Wahrscheinlichkeit des
+Fehlers, sondern daraus, dass ihn sonst **niemand bemerkt**.
+
+**Dritter Teil, in eigener Sache (§5.68 wiederholt):** Der PR-Text zu
+#234 enthielt den Satz "Der Timer lief also genau bis zum ersten Deploy
+nach der Installation." Das war eine Behauptung ueber den Server-Zustand,
+**abgeleitet aus dem Code**, ohne einen einzigen Diagnose-Output — und sie
+war falsch. Der Mechanismus stimmte, die Folge trat nie ein. §5.68 sagt
+genau das, und der Verstoss ist trotzdem in die Repo-Historie gelangt.
+Eine plausible Kausalkette ist kein Befund. Wer im PR-Text von einem
+Mechanismus auf einen Server-Zustand schliesst, schreibt eine Vermutung
+in eine Quelle, die spaeter als Beleg gelesen wird.
+
+**Querverweise:** §5.68 (Server-State-Aussagen sind Behauptungen — hier
+erneut verletzt, diesmal von Claude selbst), §5.7 (deploy-pull schweigt
+bei Fehlern — dieselbe Familie: stiller Ausfall ohne Melder), §5.11
+(`docker compose pull` ist nicht beweisend), §5.32 (akzeptierter
+Healthcheck-Drift — Gegenstueck: dort war der Mechanik-Check rot und die
+Wirkung in Ordnung), B-18-1 (Alarm "Backup aelter als 48 h").
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

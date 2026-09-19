@@ -2651,6 +2651,86 @@ nur bei echtem Status-Wechsel, kein doppelter Audit-Eintrag.
 
 ---
 
+## 10l. Dead-Man-Checks (Sprint 18)
+
+Drei Vorgänge laufen unbeaufsichtigt und fallen still aus, wenn etwas
+klemmt: der Engine-Takt, der Deploy und das Backup. Ein externer Monitor
+(healthchecks.io) erwartet von jedem einen regelmäßigen Ping. **Bleibt der
+Ping aus, meldet sich der Monitor** — unabhängig davon, ob Beat, Worker,
+systemd-Timer, Skript oder Netzwerk der Grund war.
+
+Das ist Absicht und der Kern von CLAUDE.md §5.76: überwacht wird die
+**Wirkung**, nicht die Mechanik. Eine Prüfung „läuft der Timer?" hätte am
+19.09. grün gemeldet, obwohl drei Fehler ineinandergriffen.
+
+### Was wo eingestellt ist
+
+| Check | Periode | Karenzzeit | Gepingt von |
+|---|---|---|---|
+| engine | 5 min | 15 min | `evaluate_due_rooms`, gedrosselt auf einen Ping je 5 Min |
+| deploy | 5 min | 20 min | `deploy-pull.sh`, am Ende des Erfolgspfads |
+| backup | 1 Tag | 6 h | `backup.sh`, **nur** bei lokalem Dump **und** Off-Site-Push |
+
+Die drei URLs stehen in `infra/deploy/.env` als `HEALTHCHECK_ENGINE_URL`,
+`HEALTHCHECK_DEPLOY_URL`, `HEALTHCHECK_BACKUP_URL`. **Leer = Check aus.**
+Sie gehören nicht ins Repo: wer die URL kennt, kann den Monitor grün halten
+und damit genau den Ausfall verdecken, den er melden soll.
+
+### Was eine Meldung bedeutet — und was zu tun ist
+
+| Meldung | Bedeutung | Erster Handgriff |
+|---|---|---|
+| **engine** | Seit über 15 Minuten kein Beat-Tick. Die Heizung regelt **nicht** mehr nach — sie hält den letzten Sollwert. | `docker compose -f docker-compose.prod.yml ps celery_beat celery_worker redis` — und beachten: `celery_beat` meldet dauerhaft `unhealthy`, das ist akzeptiert (§5.32) und **nicht** die Ursache. |
+| **deploy** | Seit über 20 Minuten kein erfolgreicher Deploy-Lauf. Neuer Code kommt nicht auf den Server; die Steuerung läuft unverändert weiter. | `journalctl -u heizung-deploy-pull -n 30 --no-pager`. Häufigste Ursachen: abgelaufener ghcr-Login, `safe.directory` (§5.7), lokale Änderungen am Working-Tree. |
+| **backup** | Seit über 30 Stunden kein vollständiges Backup. Kein akutes Betriebsproblem — aber ab jetzt ist ein Datenverlust nicht mehr abgedeckt. | `journalctl -u heizung-backup -n 30 --no-pager` und `tail -40 /var/log/heizung-backup.log`. Steht dort `OFFSITE_PUSH_FAILED`, ist das lokale Backup in Ordnung und nur die Spiegelung hängt. |
+
+### Eine Besonderheit beim Backup-Check
+
+Gepingt wird **nur**, wenn der lokale Dump *und* der Off-Site-Push
+erfolgreich waren. Das ist strenger als der Exit-Code des Skripts: ein
+fehlgeschlagener Push lässt den Lauf mit `exit 0` enden (Off-Site ist
+fail-soft), erzeugt aber keinen Ping.
+
+Begründung: eine Sicherung, die nur auf demselben Server liegt, hilft
+gegen den Ausfall genau dieses Servers nicht — und der ist der Grund,
+warum es überhaupt ein Backup gibt.
+
+**Folge, die man kennen muss:** auf einem Server ohne konfigurierten
+Off-Site-Push (`BACKUP_OFFSITE_TARGET` leer) wird nie gepingt, der Monitor
+schlägt also täglich Alarm. Wer einen zweiten Server ohne Off-Site
+aufsetzt, lässt dort `HEALTHCHECK_BACKUP_URL` leer.
+
+### Was der Engine-Check NICHT leistet
+
+Der Ping belegt, dass **Beat und Worker die Kette durchlaufen**: der Beat
+hat getaktet, der Task lief bis zum Ende, die Datenbank war erreichbar.
+
+Er belegt **nicht**, dass die Auswertung je Zimmer korrekt war. Nach AE-54
+ist jede Raum-Evaluation einzeln gekapselt — ein Lauf, in dem *jede*
+Zimmer-Evaluation scheitert, kommt trotzdem bis zum Ping und meldet grün.
+
+Wer das abdecken will, braucht einen Alarm auf die **Fehlerquote**, nicht
+auf den Takt. Das ist bewusst nicht Teil von Sprint 18: es verlangt eine
+Entscheidung darüber, ab welcher Quote ein Alarm gerechtfertigt ist, und
+die lässt sich erst nach ein paar Wochen Heizbetrieb mit echten Zahlen
+treffen.
+
+### Prüfen, ob die Pings wirklich abgehen
+
+**SSH (heizung-test, root):**
+
+```bash
+grep -c "Dead-Man-Ping deploy: ok" /var/log/heizung-deploy-pull.log 2>/dev/null; journalctl -u heizung-deploy-pull -n 20 --no-pager | grep -i "dead-man"; docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs celery_beat --tail 200 2>&1 | grep -ci "engine_healthcheck_ping_fehlgeschlagen"
+```
+
+Erwartung: Deploy-Pings im Log, und **null** fehlgeschlagene Engine-Pings.
+Der Engine-Ping schreibt im Erfolgsfall nichts — nur Fehlschläge werden
+protokolliert, sonst stünde alle fünf Minuten eine Zeile ohne Aussage im
+Log.
+
+---
+
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud
