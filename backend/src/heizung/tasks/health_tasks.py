@@ -39,8 +39,9 @@ from sqlalchemy import select
 
 from heizung.celery_app import app
 from heizung.models import Device, HeatingZone, Room, SensorReading
+from heizung.models.global_config import GlobalConfig
 from heizung.services import redis_client
-from heizung.services.health_alerts import emit_health_alert
+from heizung.services.health_alerts import handle_silent_transitions
 from heizung.tasks.engine_tasks import _task_session
 
 logger = logging.getLogger(__name__)
@@ -276,32 +277,28 @@ async def _compute_health_state_async() -> dict[str, Any]:
             if z.health_state != new_zone_state:
                 z.health_state = new_zone_state
 
+        # Alarm-Adresse holen, solange die Session offen ist. Phase 6 laeuft
+        # ausserhalb des Blocks (siehe dort), und ``emit_health_alert`` ist
+        # synchron — es soll keine Session bekommen, nur den fertigen Wert.
+        gc = await session.get(GlobalConfig, 1)
+        alert_recipient = gc.alert_email if gc is not None else None
+
         await session.commit()
 
-    # Phase 6: Health-Alerts emittieren fuer alle silent_transitions.
-    # T6 (AE-53): Stufe-2 (reason="offline_24h") oder Stufe-3
-    # (reason="implausible_readings_24h"). Heute Logger-Stub,
-    # SMTP-Versand ist eigener Sprint nach Heizperiode. Reihenfolge
-    # NACH commit() ist wichtig: nur persistierter State loest Alarm
-    # aus — bei transientem DB-Fehler waere die session bereits in
-    # rolled-back-Zustand und kein Phantom-Alarm wuerde rausgehen.
-    # silent_transitions-Sammlung in Phase 4 enthaelt bauartbedingt
-    # nur previous!=silent->new==silent-Uebergaenge, kein Re-Mail-
-    # Sturm beim 5-min-Beat-Tick.
-    for transition in silent_transitions:
-        level = 3 if transition["reason"] == "implausible_readings_24h" else 2
-        emit_health_alert(
-            level=level,
-            device_id=transition["device_id"],
-            dev_eui=transition["dev_eui"],
-            reason=transition["reason"],
-            device_name=transition["device_name"],
-            room_name=transition["room_name"],
-            zone_name=transition["zone_name"],
-            triggered_at=transition["triggered_at"],
-            last_uplink_at=transition["last_uplink_at"],
-            implausible_count_24h=transition["implausible_count_24h"],
-        )
+    # Phase 6: Logger je Uebergang, danach EINE Sammelmail fuer Stufe 2.
+    #
+    # Reihenfolge NACH commit() ist wichtig: nur persistierter State loest
+    # einen Alarm aus. Bei einem transienten DB-Fehler waere die Session
+    # bereits zurueckgerollt, und es ginge ein Alarm zu einem Zustand raus,
+    # den es nie gab.
+    #
+    # Sprint 18 (T2): der Versand ist aggregiert. Faellt das Gateway aus,
+    # kippen alle Geraete im selben Tick auf silent — 104 Einzelmails waeren
+    # unlesbar, und die eigentliche Information ("alle auf einmal") ginge
+    # darin unter. Einzelheiten in services/health_alerts.
+    gemeldet = handle_silent_transitions(silent_transitions, recipient=alert_recipient)
+    if gemeldet:
+        logger.info("health_alert_sammelmail", extra={"geraete": gemeldet})
 
     return {
         "devices_processed": len(devices),

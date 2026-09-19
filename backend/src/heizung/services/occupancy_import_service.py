@@ -31,12 +31,14 @@ from heizung.models.enums import OccupancySource
 from heizung.models.global_config import GlobalConfig
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
+from heizung.rules.constants import DEFAULT_HOTEL_TIMEZONE
 from heizung.schemas.occupancy_import import (
     OccupancyImportLogResponse,
     OccupancyImportLogRow,
     OccupancyImportPayload,
     resolve_stay_dates,
 )
+from heizung.services import alert_throttle, mailer
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import (
     cancel_occupancy_record,
@@ -52,7 +54,6 @@ ACTION_CONFLICT = "OCCUPANCY_IMPORT_CONFLICT"
 ACTION_STALE = "OCCUPANCY_IMPORT_STALE"
 TARGET_TYPE = "occupancy_import"
 
-DEFAULT_HOTEL_TIMEZONE = "Europe/Vienna"
 DEFAULT_CHECKIN_LOCAL = time(14, 0)
 DEFAULT_CHECKOUT_LOCAL = time(11, 0)
 
@@ -564,6 +565,63 @@ async def _stale_exists_for_list_date(
     return False
 
 
+async def _send_stale_alert(session: AsyncSession, *, today_local: date, expected: time) -> None:
+    """Alarm-Mail zur ausgebliebenen Belegungsliste (Sprint 18).
+
+    Gebremst ueber ``alert_throttle`` mit dem Listendatum als Gegenstand:
+    ein zweiter Watchdog-Lauf am selben Tag legt nicht nach, die taegliche
+    Erinnerung bleibt aber erhalten.
+
+    Der Versand ist bewusst ohne ``raise``: bleibt die Mail stecken, ist das
+    Audit trotzdem geschrieben und der Watchdog hat seine Aufgabe erfuellt.
+    """
+    gc = await session.get(GlobalConfig, 1)
+    recipient = gc.alert_email if gc is not None else None
+    if not recipient:
+        return
+
+    if not alert_throttle.should_send(
+        alert_throttle.KIND_IMPORT_STALE,
+        today_local.isoformat(),
+        ttl_s=alert_throttle.TTL_IMPORT_STALE_S,
+    ):
+        return
+
+    tag = today_local.strftime("%d.%m.%Y")
+    body = "\n".join(
+        [
+            f"Für den {tag} ist bis {_fmt_hhmm(expected)} Uhr keine Belegungsliste",
+            "eingetroffen.",
+            "",
+            "Was das System jetzt tut: nichts. Der letzte bekannte Belegungsstand",
+            "bleibt eingefroren, es wird kein Zimmer freigegeben und keines belegt.",
+            "Die Heizung regelt unverändert weiter.",
+            "",
+            "Was das heißt: Zimmer, die heute angereist oder abgereist sind, sind dem",
+            "System nicht bekannt. Je länger das anhält, desto weiter läuft die",
+            "Steuerung an der Wirklichkeit vorbei.",
+            "",
+            "Wahrscheinlichste Ursachen:",
+            "  1. Die Liste wurde heute nicht verschickt.",
+            "  2. Der Mail-Weiterleitungsdienst hat sie nicht durchgereicht.",
+            "  3. Die Liste kam an, wurde aber abgelehnt — dann steht der Grund",
+            "     in der Oberfläche unter Einstellungen / Belegungs-Import.",
+            "",
+            "Diese Meldung wiederholt sich frühestens morgen.",
+        ]
+    )
+    result = mailer.send_mail(
+        recipient=recipient,
+        subject=f"Heizung Sonnblick: keine Belegungsliste für {tag}",
+        body=body,
+    )
+    if not result.sent:
+        logger.warning(
+            "import_stale_mail_nicht_zugestellt",
+            extra={"grund": result.reason, "detail": result.detail},
+        )
+
+
 async def run_freshness_check(
     session: AsyncSession,
     *,
@@ -601,9 +659,12 @@ async def run_freshness_check(
     )
     await session.commit()
 
-    # Email-Alarm absichtlich NICHT implementiert — an B-15b-1 (Email-Service)
-    # gekoppelt. Sobald B-15b-1 live ist: hier global_config.alert_email
-    # triggern. Schalter steht bereit, kein Versand in Sprint 15e.
+    # Sprint 18 (B-15b-1): Der Alarm geht jetzt wirklich raus. Reihenfolge
+    # bewusst NACH dem commit() — nur ein persistiertes Audit loest eine Mail
+    # aus. Andernfalls koennte ein Rollback eine Mail hinterlassen, zu der es
+    # keinen Eintrag gibt.
+    await _send_stale_alert(session, today_local=today_local, expected=expected)
+
     logger.warning(
         "occupancy-import STALE: kein erfolgreicher Import fuer %s bis %s lokal",
         today_local.isoformat(),

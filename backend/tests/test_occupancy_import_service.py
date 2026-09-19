@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from alembic import command
 from heizung.models.business_audit import BusinessAudit
 from heizung.models.enums import OccupancySource, RoomStatus
+from heizung.models.global_config import GlobalConfig
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
@@ -498,3 +500,141 @@ async def test_get_import_log_shape_and_status(session: AsyncSession) -> None:
     assert resp.imports[0].result == "applied"
     assert resp.imports[0].rooms_occupied == 4
     assert resp.imports[1].result == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 18 / T3 — Alarm-Mail zum Watchdog
+# ---------------------------------------------------------------------------
+#
+# Bis Sprint 17 stand an dieser Stelle der Kommentar "Email-Alarm
+# absichtlich NICHT implementiert". Der Watchdog schrieb ein Audit, das
+# ausser seinem eigenen Idempotenz-Guard niemand las. Seit Sprint 18 geht
+# eine Mail raus — gebremst, damit ein langes Wochenende nicht jeden Tag
+# dieselbe Nachricht erzeugt.
+
+
+class _Postfach:
+    def __init__(self) -> None:
+        self.mails: list[dict[str, str]] = []
+
+    def __call__(self, *, recipient: str | None, subject: str, body: str) -> Any:
+        from heizung.services.mailer import MailResult
+
+        self.mails.append({"recipient": recipient or "", "subject": subject, "body": body})
+        return MailResult(True, None, "Testzustellung")
+
+
+class _AlarmRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> Any:
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    def delete(self, key: str) -> int:
+        return 1 if self.store.pop(key, None) is not None else 0
+
+
+async def _set_alert_email(session: AsyncSession, adresse: str | None) -> None:
+    gc = await session.get(GlobalConfig, 1)
+    assert gc is not None, "global_config-Singleton fehlt"
+    gc.alert_email = adresse
+    await session.commit()
+
+
+async def test_watchdog_verschickt_alarm_mail(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from heizung.services import occupancy_import_service as svc
+    from heizung.services import redis_client
+
+    postfach = _Postfach()
+    monkeypatch.setattr(svc.mailer, "send_mail", postfach)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: _AlarmRedis())
+    await _set_alert_email(session, "chef@example.com")
+
+    now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    assert result["stale"] is True
+    assert len(postfach.mails) == 1
+    mail = postfach.mails[0]
+    assert "06.06.2026" in mail["subject"]
+    # Der Text muss sagen, was das System TUT — nicht nur, was fehlt.
+    assert "eingefroren" in mail["body"]
+    assert "kein Zimmer freigegeben" in mail["body"]
+
+
+async def test_watchdog_ohne_alarm_adresse_schreibt_nur_das_audit(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from heizung.services import occupancy_import_service as svc
+    from heizung.services import redis_client
+
+    postfach = _Postfach()
+    monkeypatch.setattr(svc.mailer, "send_mail", postfach)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: _AlarmRedis())
+    await _set_alert_email(session, None)
+
+    now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    assert result["stale"] is True
+    assert len(await _audits(session, ACTION_STALE)) == 1
+    assert postfach.mails == []
+
+
+async def test_watchdog_alarm_wird_pro_tag_nur_einmal_verschickt(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Audit-Guard verhindert den zweiten Lauf am selben Tag ohnehin.
+    Die Bremse ist die zweite Schicht — sie greift auch dann, wenn der
+    Guard aus irgendeinem Grund nicht zieht."""
+    from heizung.services import alert_throttle, redis_client
+    from heizung.services import occupancy_import_service as svc
+
+    postfach = _Postfach()
+    geteilt = _AlarmRedis()
+    monkeypatch.setattr(svc.mailer, "send_mail", postfach)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: geteilt)
+    await _set_alert_email(session, "chef@example.com")
+
+    now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    # Das Audit von Hand entfernen, damit der Guard NICHT greift — jetzt
+    # ist die Bremse allein zustaendig.
+    for a in await _audits(session, ACTION_STALE):
+        await session.delete(a)
+    await session.commit()
+
+    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    assert len(postfach.mails) == 1, "die Bremse haelt, auch ohne Audit-Guard"
+    assert alert_throttle.KIND_IMPORT_STALE in " ".join(geteilt.store)
+
+
+async def test_watchdog_versandfehler_bricht_den_lauf_nicht_ab(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Das Audit ist die Spur, die Mail die Benachrichtigung. Bleibt die
+    Mail stecken, muss das Audit trotzdem stehen."""
+    from heizung.services import occupancy_import_service as svc
+    from heizung.services import redis_client
+    from heizung.services.mailer import MailResult
+
+    def _scheitert(**kwargs: Any) -> MailResult:
+        return MailResult(False, "SMTPConnectError", "Server nicht erreichbar")
+
+    monkeypatch.setattr(svc.mailer, "send_mail", _scheitert)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: _AlarmRedis())
+    await _set_alert_email(session, "chef@example.com")
+
+    now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    assert result["stale"] is True
+    assert len(await _audits(session, ACTION_STALE)) == 1

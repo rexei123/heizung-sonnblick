@@ -92,6 +92,32 @@ class Settings(BaseSettings):
     # Import) + Staleness-Watchdog.
     occupancy_import_expected_by_local: str = "09:00"
 
+    # --- SMTP (Sprint 18) -------------------------------------------------
+    # Zugangsdaten kommen ausschliesslich aus der Umgebung, nie aus der
+    # Datenbank und nie aus einem Argument. Der EMPFAENGER dagegen steht in
+    # ``global_config.alert_email`` — er ist eine Hotelier-Einstellung und
+    # gehoert in die Oberflaeche, nicht in die .env.
+    #
+    # ``smtp_enabled=False`` ist die Vorgabe: ohne gesetzte Zugangsdaten
+    # soll nichts versucht werden. Der Versand meldet dann "deaktiviert"
+    # statt in einen Verbindungsfehler zu laufen.
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    # Absender. Leer -> ``smtp_user`` wird verwendet; viele Anbieter
+    # verlangen ohnehin, dass Absender und angemeldetes Konto uebereinstimmen.
+    smtp_from: str = ""
+    # starttls: Klartext-Verbindung auf 587, danach Upgrade (Standard).
+    # ssl:      implizites TLS ab dem ersten Byte, ueblich auf 465.
+    # none:     ohne Verschluesselung — nur fuer einen lokalen Relay im
+    #           selben Netz vertretbar, nie ueber das Internet.
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+    # Zeitlimit je Verbindungsversuch. Der Alarm laeuft im Celery-Beat;
+    # ein haengender SMTP-Server darf den Tick nicht blockieren.
+    smtp_timeout_seconds: int = 20
+
     # --- Dead-Man-Checks (Sprint 18) --------------------------------------
     # Ping-URLs eines externen Monitors (healthchecks.io). Bleibt eine URL
     # leer, wird nicht gepingt — das Feature ist damit pro Umgebung
