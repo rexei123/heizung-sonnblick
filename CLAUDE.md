@@ -352,7 +352,7 @@ gh run watch $runId --exit-status
 
 Wenn das `:develop`-Tag im GHCR stale ist (siehe §5.10), zieht `docker compose pull` zwar ein Image, aber das ist das alte. Output `✔ Image ... Pulled` sagt NICHTS ueber Aktualitaet. Der Pull-Timer am Server schweigt dann ohne Hinweis stundenlang.
 
-**Pflicht-Check nach `docker compose pull`:**
+**Pflicht-Check nach `docker compose -f docker-compose.prod.yml pull`** (das `-f` ist auf dem Server nicht optional, siehe §5.78)**:**
 
 ```bash
 # SSH (Server, root)
@@ -2434,6 +2434,68 @@ niemand von sich aus, weil eine Verneinung wie eine erledigte Frage aussieht.
 hier Code-Zustand), §5.72 (die korrigierte Stelle), §5.73 (der Sprint, der
 sie überholt hat), B-15b-1 (der verbliebene offene Rest: Mailversand an der
 Schwelle).
+
+### 5.78 Auf dem Server gibt es kein `docker compose` ohne `-f` (Sprint 18, Abschluss)
+
+Das Repo enthaelt **zwei** Compose-Dateien:
+
+| Datei | Beschreibt | Dienste |
+|---|---|---|
+| `docker-compose.yml` (Wurzel) | Entwicklungs-Stack | db, redis, mosquitto, chirpstack*, api, web |
+| `infra/deploy/docker-compose.prod.yml` | produktiver Stack | dieselben **plus** `celery_worker`, `celery_beat`, `caddy` |
+
+`docker compose` ohne `-f` nimmt die Standarddatei — also die
+Entwicklungs-Datei. Auf dem Server liegt sie im selben Arbeitsverzeichnis
+wie alles andere, es kommt also keine Fehlermeldung.
+
+Die beiden Fehlerbilder, in aufsteigender Kostenordnung:
+
+1. **`ps` gibt eine leere Liste zurueck.** Sie sieht aus wie "alles aus" und
+   heisst in Wahrheit "falsches Projekt gefragt". Wer daraufhin einen Ausfall
+   diagnostiziert, jagt ein Gespenst.
+2. **`up -d` startet einen zweiten, unvollstaendigen Stack daneben.** Der
+   Entwicklungs-Datei fehlen genau die drei Dienste, die im Betrieb tragen:
+   `celery_worker` (keine Engine-Auswertung, keine Downlinks), `celery_beat`
+   (kein Takt) und `caddy` (kein HTTPS). Dazu bekommen die beiden Stacks aus
+   ihrem Verzeichnisnamen verschiedene Projektnamen und damit **eigene
+   Volumes** — der zweite startet mit leerer Datenbank und streitet sich
+   zugleich mit dem laufenden um die Ports.
+
+Das ist die teure Variante von §5.32: dort meldete ein Mechanik-Check rot,
+waehrend die Wirkung in Ordnung war. Hier meldet er **gruen** (der zweite
+Stack laeuft ja), waehrend die Steuerung stillsteht.
+
+**Regel:** Jeder `docker compose`-Aufruf gegen heizung-test oder
+heizung-main traegt `-f`. Die Form, die aus jedem Verzeichnis funktioniert:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+Die Skripte im Repo machen es richtig (`deploy-pull.sh` setzt
+`COMPOSE_FILE` und uebergibt es bei jedem Aufruf). Die Gefahr liegt
+ausschliesslich bei **von Hand getippten** Befehlen — und damit bei jedem
+Befehl, den dieser Chat dem Hotelier zum Kopieren gibt.
+
+**Der Anlass, unbequem:** Am 20.09.2026 ging genau so ein Befehl ohne `-f`
+an heizung-test. Er blieb folgenlos — aber nicht, weil jemand aufgepasst
+haette. Im selben Aufruf war ein Dienstname falsch geschrieben
+(`worker` statt `celery_worker`), und Compose brach deshalb ab, bevor es
+etwas starten konnte. **Ein Tippfehler hat den zweiten Stack verhindert.**
+
+Das ist dasselbe Muster wie §5.76, nur eine Woche spaeter und diesmal ohne
+Schaden: eine Kette von Umstaenden, von denen niemand wusste, dass sie
+gerade als Schutz wirkt. Der Unterschied zwischen "ist gutgegangen" und
+"war abgesichert" ist genau die Sorte Unterschied, die man nach einem
+ruhigen Ausgang nicht mehr sieht — und deshalb aufschreiben muss, solange
+man ihn noch kennt.
+
+**Querverweise:** RUNBOOK §5.0 (die Begruendung fuer den Hotelier, mit
+beiden Fehlerbildern), §5.11 (`docker compose pull` ist nicht beweisend —
+dort ist der Aufruf ebenfalls serverseitig und braucht `-f`), §5.32
+(Mechanik-Check gruen bei kaputter Wirkung), §5.76 (zwei Fehler, die sich
+gegenseitig verdecken), §5.6 (Befehl-Trennung PowerShell / SSH — dieselbe
+Familie: ein Befehl im falschen Kontext).
 
 ---
 

@@ -114,6 +114,49 @@ Beide offen, aber SSH antwortet nicht → sshd-Problem. Nur 443 offen → UFW. B
 
 ## 5. Deploy-Fehler
 
+### 5.0 Jeder `docker compose`-Aufruf auf dem Server braucht `-f docker-compose.prod.yml`
+
+Es gibt **zwei** Compose-Dateien im Repo:
+
+| Datei | Beschreibt | Gilt für |
+|---|---|---|
+| `docker-compose.yml` (Wurzelverzeichnis) | Entwicklungs-Stack | die lokale Maschine, §10 |
+| `infra/deploy/docker-compose.prod.yml` | produktiver Stack | heizung-test, heizung-main |
+
+`docker compose` ohne `-f` sucht die **Standarddatei** — also die
+Entwicklungs-Datei. Auf dem Server, wo beide im Arbeitsverzeichnis liegen,
+heißt das:
+
+- `docker compose ps` im Repo-Wurzelverzeichnis lädt den Entwicklungs-Stack.
+  Der läuft dort nicht, also kommt eine **leere Liste** zurück. Sie sieht aus
+  wie „alles aus" und ist in Wahrheit „falsches Projekt gefragt".
+- `docker compose up -d` wäre der teure Fall: Compose startet daneben einen
+  **zweiten, unvollständigen Stack**. Der Entwicklungs-Datei fehlen genau die
+  drei Dienste, die im Betrieb tragen — `celery_worker`, `celery_beat` und
+  `caddy`. Kein Worker heißt: keine Engine-Auswertung, keine Downlinks. Kein
+  Beat heißt: kein Takt. Kein Caddy heißt: kein HTTPS.
+- Die beiden Stacks bekommen aus dem Verzeichnisnamen verschiedene
+  Projektnamen (`heizung-sonnblick` gegenüber `deploy`) und damit **eigene
+  Volumes**. Der zweite Stack startet also mit einer **leeren Datenbank** und
+  streitet sich zugleich mit dem laufenden um die Ports.
+
+Die verlässliche Form, die aus jedem Verzeichnis funktioniert:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+Wer vorher nach `infra/deploy` wechselt, darf `-f docker-compose.prod.yml`
+relativ schreiben. Ganz weglassen darf man es nie.
+
+> **Warum das hier so ausführlich steht:** am 20.09.2026 wurde genau dieser
+> Fehler gemacht — ein `docker compose` ohne `-f` auf heizung-test. Er blieb
+> folgenlos, weil im selben Aufruf ein Dienstname falsch geschrieben war
+> (`worker` statt `celery_worker`) und Compose deshalb vorher abbrach. Der
+> Tippfehler hat den zweiten Stack verhindert, nicht die Vorsicht. Siehe
+> CLAUDE.md §5.78.
+
+
 ### 5.1 Deploy-Timer-Status
 
 ```bash
@@ -131,10 +174,14 @@ cd /opt/heizung-sonnblick
 
 ### 5.3 Container-Status
 
+**Das `-f` ist nicht optional.** Ohne die explizite Datei sucht Compose die
+Standarddatei `docker-compose.yml` — die gibt es im Repo-Wurzelverzeichnis,
+und sie beschreibt den **Entwicklungs-Stack**. Siehe §5.0.
+
 ```bash
 cd /opt/heizung-sonnblick/infra/deploy
-docker compose ps
-docker compose logs -f api --tail 100
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f api --tail 100
 ```
 
 ### 5.4 Image-Pull schlägt fehl
@@ -144,10 +191,16 @@ docker login ghcr.io -u rexei123 --password-stdin   # PAT aus .env
 docker pull ghcr.io/rexei123/heizung-api:main       # bzw. :develop
 ```
 
+Danach den Pull über Compose wiederholen — auch hier mit expliziter Datei:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml pull api web
+```
+
 ### 5.5 Auto-Migration-Logs
 
 ```bash
-docker compose logs api 2>&1 | grep -E 'alembic|upgrade'
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs api 2>&1 | grep -E 'alembic|upgrade'
 ```
 
 ### 5.6 Deploy-Pull-Skript: Phasen + Sync-Branch
@@ -155,8 +208,8 @@ docker compose logs api 2>&1 | grep -E 'alembic|upgrade'
 Seit Sprint 6.6.2 macht `infra/deploy/deploy-pull.sh` drei Phasen:
 
 1. **Working-Tree-Sync** — `git fetch + checkout + reset --hard` auf den passenden Branch (Mapping: `STAGE=test → develop`, `STAGE=main → main`, override via `DEPLOY_BRANCH` in `.env`). Holt damit Compose-, Caddy-, Mosquitto- und ChirpStack-Konfig vom Repo.
-2. **Image-Pull** — `docker compose pull api web` aus GHCR.
-3. **Container-Up** — `docker compose up -d --remove-orphans` ohne `--no-deps`. Recreate erfolgt nur bei Config- oder Image-Drift, sonst keine Down-Time.
+2. **Image-Pull** — `docker compose -f docker-compose.prod.yml pull api web` aus GHCR.
+3. **Container-Up** — `docker compose -f docker-compose.prod.yml up -d --remove-orphans` ohne `--no-deps`. Recreate erfolgt nur bei Config- oder Image-Drift, sonst keine Down-Time.
 
 **Sicherheitsnetz:** Lokale Aenderungen am tracked Content (z.B. Hand-Hotfix per `vim` auf Server) brechen das Skript ab — kein silentes `reset --hard`. Untracked Files (`.env`) sind ok.
 
@@ -188,7 +241,7 @@ Schreibzugriffe (Push/Merge) passieren **nicht** auf dem Server. Produktiv-Deplo
 
 ### 6.1 GHCR-PAT rotieren (getestetes Verfahren, Sprint 1)
 
-**Zweck:** Der Pull-Deploy-Service `heizung-deploy-pull.service` macht `docker compose pull` und liest Credentials aus `/root/.docker/config.json`. Dieser Eintrag muss einen gültigen GHCR-Token enthalten.
+**Zweck:** Der Pull-Deploy-Service `heizung-deploy-pull.service` macht `docker compose -f docker-compose.prod.yml pull` und liest Credentials aus `/root/.docker/config.json`. Dieser Eintrag muss einen gültigen GHCR-Token enthalten.
 
 **Wichtig:**
 - **Classic PAT** zwingend (Fine-grained PATs unterstützen GHCR nicht).
@@ -415,6 +468,11 @@ Bei wiederholten Versuchen ohne propagiertes DNS → rate-limited. Deshalb: **im
 ## 10. LoRaWAN-Pipeline (lokale Entwicklung)
 
 **Stand 2026-04-28 (Sprint 5):** ChirpStack v4 + Mosquitto + FastAPI-MQTT-Subscriber lauffaehig auf `work02`. Test-/Main-Server haben den Stack noch NICHT - das ist Sprint 6 zusammen mit Hotel-LAN + echter Hardware.
+
+> **Zum `docker compose` ohne `-f` in diesem Abschnitt:** hier ist es
+> richtig. Dieser Abschnitt beschreibt die **lokale** Maschine, und dort ist
+> `docker-compose.yml` im Wurzelverzeichnis die gemeinte Datei. Auf
+> heizung-test und heizung-main gilt das Gegenteil — siehe §5.0.
 
 ### 10.1 Stack-Topologie lokal
 
@@ -1088,7 +1146,7 @@ Exit-Code 0 (kein Failure), 1 (mind. ein Failure).
 | Symptom | Ursache | Fix |
 |---|---|---|
 | Alle Devices `fw_version=(NULL)` nach Phase 3 | `--wait-secs` zu kurz, Vickis hatten noch keinen Periodic-Cycle | Re-Run mit `--wait-secs 1200` |
-| Exception in Phase 3 | MQTT-Connect-Fehler oder ChirpStack down | `docker compose ps` + `journalctl -u deploy-api` |
+| Exception in Phase 3 | MQTT-Connect-Fehler oder ChirpStack down | `docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps` + `journalctl -u deploy-api` |
 | `device.firmware_version` bleibt NULL trotz Wait | Codec emittiert `firmware_version` nicht (alter Codec-Stand) | RUNBOOK §10c Codec-Re-Paste |
 | Validation-Error `duration_min muss 5..1275 in 5-Min-Schritten sein` | Aufrufer-Bug: nicht-durch-5-teilbar | Wert korrigieren (Skript hat Defaults, sonst CLI prüfen) |
 | Validation-Error `delta_c muss Decimal sein, ist float` | Aufrufer-Bug: Float statt Decimal | `Decimal("1.5")` statt `1.5` |
