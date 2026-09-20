@@ -134,6 +134,7 @@ export default function HotelSettingsPage() {
                 onChange={setBatteryWarn}
                 min={1}
                 max={100}
+                hint="Wirkt auf die Batterie-Anzeige und die Dashboard-Kachel. Löst noch keine E-Mail aus."
               />
             </div>
           </Card>
@@ -210,7 +211,7 @@ interface NumFieldProps extends Omit<FieldProps, "type"> {
   max?: number;
 }
 
-function NumField({ id, label, value, onChange, min, max }: NumFieldProps) {
+function NumField({ id, label, value, onChange, min, max, hint }: NumFieldProps) {
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-text-primary mb-1">
@@ -225,6 +226,7 @@ function NumField({ id, label, value, onChange, min, max }: NumFieldProps) {
         onChange={(e) => onChange(e.target.value)}
         className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
       />
+      {hint ? <p className="mt-1 text-xs text-text-tertiary">{hint}</p> : null}
     </div>
   );
 }
