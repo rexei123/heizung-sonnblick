@@ -638,3 +638,39 @@ async def test_watchdog_versandfehler_bricht_den_lauf_nicht_ab(
 
     assert result["stale"] is True
     assert len(await _audits(session, ACTION_STALE)) == 1
+
+
+async def test_watchdog_haelt_den_versandversuch_fest(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T4: auch der Import-Alarm schreibt seinen Versandstatus.
+
+    Der zweite Alarmweg neben dem Health-Beat. Faellt hier die Verdrahtung
+    weg, zeigt die Oberflaeche den Stand eines *anderen* Alarms — und wer
+    nachsieht, warum keine Mail kam, liest den falschen Befund.
+    """
+    from heizung.models.global_config import GlobalConfig
+    from heizung.services import occupancy_import_service as svc
+    from heizung.services import redis_client
+    from heizung.services.mailer import MailResult
+
+    def _scheitert(**kwargs: Any) -> MailResult:
+        return MailResult(False, "SMTPAuthenticationError", "535 5.7.8 nicht akzeptiert")
+
+    monkeypatch.setattr(svc.mailer, "send_mail", _scheitert)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: _AlarmRedis())
+    await _set_alert_email(session, "chef@example.com")
+
+    gc = await session.get(GlobalConfig, 1)
+    assert gc is not None
+    gc.last_mail_attempt_at = None
+    gc.last_mail_error = None
+    await session.commit()
+
+    now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+
+    await session.refresh(gc)
+    assert gc.last_mail_attempt_at is not None
+    assert gc.last_mail_error is not None
+    assert gc.last_mail_error.startswith("SMTPAuthenticationError")

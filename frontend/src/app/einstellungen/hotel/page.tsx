@@ -8,8 +8,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import { formatDateTime } from "@/lib/format";
 import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-config";
-import type { ApiError, GlobalConfigUpdate } from "@/lib/api/types";
+import type { ApiError, GlobalConfig, GlobalConfigUpdate } from "@/lib/api/types";
 
 export default function HotelSettingsPage() {
   const cfg = useGlobalConfig();
@@ -118,6 +119,7 @@ export default function HotelSettingsPage() {
               type="email"
               placeholder="hotelsonnblick@gmail.com"
             />
+            <MailStatusLine config={cfg.data} />
             <div className="grid grid-cols-2 gap-3">
               <NumField
                 id="cfg-off"
@@ -161,6 +163,44 @@ export default function HotelSettingsPage() {
         </form>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Zustand des Mailversands, eine Zeile (Sprint 18, T4).
+ *
+ * Ohne diese Zeile ist der Alarmweg unbeobachtet: sind die SMTP-Werte in der
+ * .env leer, meldet der Versand "deaktiviert" und niemand sieht es — die
+ * Adresse oben steht dann da wie ein funktionierender Alarm (CLAUDE.md
+ * §5.76). Die Zeile beantwortet, was man an diesem Punkt wissen will:
+ * wurde es versucht, hat es geklappt, und woran haengt es.
+ */
+function MailStatusLine({ config }: { config: GlobalConfig }) {
+  const { last_mail_attempt_at, last_mail_ok_at, last_mail_error } = config;
+
+  if (!last_mail_attempt_at) {
+    return (
+      <p className="text-xs text-text-tertiary">
+        Versand: noch nicht versucht. Nach dem Eintragen der SMTP-Zugangsdaten mit{" "}
+        <code className="font-mono">send_test_mail</code> prüfen — siehe Runbook.
+      </p>
+    );
+  }
+
+  if (last_mail_error) {
+    return (
+      <p className="text-xs text-error">
+        Versand fehlgeschlagen am {formatDateTime(last_mail_attempt_at)}: {last_mail_error} ·
+        Zuletzt erfolgreich:{" "}
+        {last_mail_ok_at ? formatDateTime(last_mail_ok_at) : "noch nie"}
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-xs text-success">
+      Versand zuletzt erfolgreich am {formatDateTime(last_mail_ok_at ?? last_mail_attempt_at)}.
+    </p>
   );
 }
 

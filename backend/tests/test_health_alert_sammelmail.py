@@ -94,11 +94,11 @@ def _transitions(anzahl: int) -> list[dict[str, Any]]:
 
 
 def test_ein_geraet_eine_mail_mit_einzelheiten(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(1), recipient="chef@example.com"
     )
 
-    assert gemeldet == 1
+    assert ergebnis.gemeldet == 1
     assert len(postfach.mails) == 1
     mail = postfach.mails[0]
     # Einzelfall: Geraetename im Betreff, damit man ihn am Sperrbildschirm sieht.
@@ -109,11 +109,11 @@ def test_ein_geraet_eine_mail_mit_einzelheiten(postfach: _Postfach, fake_redis: 
 
 
 def test_sieben_geraete_eine_mail_mit_liste(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(7), recipient="chef@example.com"
     )
 
-    assert gemeldet == 7
+    assert ergebnis.gemeldet == 7
     assert len(postfach.mails) == 1, "genau eine Mail, nicht sieben"
     body = postfach.mails[0]["body"]
     assert "7 Thermostate" in postfach.mails[0]["subject"]
@@ -126,11 +126,11 @@ def test_sieben_geraete_eine_mail_mit_liste(postfach: _Postfach, fake_redis: _Fa
 def test_fuenfzehn_geraete_eine_mail_in_kurzform(
     postfach: _Postfach, fake_redis: _FakeRedis
 ) -> None:
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(15), recipient="chef@example.com"
     )
 
-    assert gemeldet == 15
+    assert ergebnis.gemeldet == 15
     assert len(postfach.mails) == 1
     body = postfach.mails[0]["body"]
     assert "15 Thermostate" in body
@@ -152,11 +152,11 @@ def test_zweiter_lauf_meldet_dieselben_geraete_nicht_erneut(
 ) -> None:
     """Die Bremse wirkt weiterhin pro Geraet, trotz Sammelversand."""
     health_alerts.handle_silent_transitions(_transitions(3), recipient="chef@example.com")
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(3), recipient="chef@example.com"
     )
 
-    assert gemeldet == 0
+    assert ergebnis.gemeldet == 0
     assert len(postfach.mails) == 1, "kein zweiter Versand"
 
 
@@ -165,11 +165,11 @@ def test_nur_das_neue_geraet_kommt_in_die_zweite_mail(
 ) -> None:
     """Ein frisches Geraet hebt die Sperre der anderen NICHT auf."""
     health_alerts.handle_silent_transitions(_transitions(3), recipient="chef@example.com")
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(4), recipient="chef@example.com"
     )
 
-    assert gemeldet == 1
+    assert ergebnis.gemeldet == 1
     assert len(postfach.mails) == 2
     zweite = postfach.mails[1]["body"]
     assert "70b3d57ed0000004" in zweite
@@ -177,17 +177,17 @@ def test_nur_das_neue_geraet_kommt_in_die_zweite_mail(
 
 
 def test_leere_liste_erzeugt_keine_mail(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
-    gemeldet = health_alerts.handle_silent_transitions([], recipient="chef@example.com")
+    ergebnis = health_alerts.handle_silent_transitions([], recipient="chef@example.com")
 
-    assert gemeldet == 0
+    assert ergebnis.gemeldet == 0
     assert postfach.mails == []
 
 
 def test_ohne_empfaenger_keine_mail(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
     """Keine Alarm-Adresse hinterlegt: Logger ja, Mail nein."""
-    gemeldet = health_alerts.handle_silent_transitions(_transitions(5), recipient=None)
+    ergebnis = health_alerts.handle_silent_transitions(_transitions(5), recipient=None)
 
-    assert gemeldet == 0
+    assert ergebnis.gemeldet == 0
     assert postfach.mails == []
 
 
@@ -200,9 +200,9 @@ def test_stufe_3_kommt_nicht_in_die_mail(postfach: _Postfach, fake_redis: _FakeR
         _transition(3, reason=health_alerts.REASON_IMPLAUSIBLE),
     ]
 
-    gemeldet = health_alerts.handle_silent_transitions(gemischt, recipient="chef@example.com")
+    ergebnis = health_alerts.handle_silent_transitions(gemischt, recipient="chef@example.com")
 
-    assert gemeldet == 1
+    assert ergebnis.gemeldet == 1
     body = postfach.mails[0]["body"]
     assert "70b3d57ed0000001" in body
     assert "70b3d57ed0000002" not in body
@@ -211,9 +211,9 @@ def test_stufe_3_kommt_nicht_in_die_mail(postfach: _Postfach, fake_redis: _FakeR
 def test_nur_stufe_3_erzeugt_gar_keine_mail(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
     nur_stufe3 = [_transition(i, reason=health_alerts.REASON_IMPLAUSIBLE) for i in (1, 2)]
 
-    gemeldet = health_alerts.handle_silent_transitions(nur_stufe3, recipient="chef@example.com")
+    ergebnis = health_alerts.handle_silent_transitions(nur_stufe3, recipient="chef@example.com")
 
-    assert gemeldet == 0
+    assert ergebnis.gemeldet == 0
     assert postfach.mails == []
 
 
@@ -227,11 +227,11 @@ def test_bei_redis_ausfall_trotzdem_nur_eine_mail(
     """
     monkeypatch.setattr(redis_client, "get_redis_client", lambda: _BrokenRedis())
 
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(104), recipient="chef@example.com"
     )
 
-    assert gemeldet == 104
+    assert ergebnis.gemeldet == 104
     assert len(postfach.mails) == 1
 
 
@@ -243,12 +243,12 @@ def test_versandfehler_wirft_nicht(fake_redis: _FakeRedis, monkeypatch: pytest.M
 
     monkeypatch.setattr(health_alerts.mailer, "send_mail", _scheitert)
 
-    gemeldet = health_alerts.handle_silent_transitions(
+    ergebnis = health_alerts.handle_silent_transitions(
         _transitions(2), recipient="chef@example.com"
     )
 
     # Gemeldet wurde trotzdem — die Bremse ist gesetzt, die Zahl stimmt.
-    assert gemeldet == 2
+    assert ergebnis.gemeldet == 2
 
 
 def test_geraet_ohne_zimmer_erscheint_als_pool(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
@@ -275,3 +275,42 @@ def test_kurzform_schwelle_greift_genau_ab_zehn(
 
     health_alerts.handle_silent_transitions(_transitions(10), recipient="chef@example.com")
     assert "Letzte Meldung" not in postfach.mails[1]["body"]
+
+
+# ---------------------------------------------------------------------------
+# T4: das Versand-Ergebnis muss den Aufrufer erreichen
+# ---------------------------------------------------------------------------
+
+
+def test_ergebnis_traegt_das_versandresultat(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
+    """``health_tasks`` schreibt daraus die Sichtbarkeits-Felder.
+
+    Ohne dieses Durchreichen waere der Versand wieder unbeobachtet — der
+    Aufrufer wuesste nur, *dass* etwas rausging, nicht *ob* es ankam.
+    """
+    ergebnis = health_alerts.handle_silent_transitions(
+        _transitions(2), recipient="chef@example.com"
+    )
+
+    assert ergebnis.result is not None
+    assert ergebnis.result.sent is True
+
+
+def test_ohne_versuch_bleibt_das_resultat_leer(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
+    """ "Nichts zu melden" ist kein Fehlversuch.
+
+    Wuerde hier ein Resultat zurueckkommen, ueberschriebe jeder ruhige
+    Beat-Tick die Anzeige — und ein echter Fehlschlag waere nach fuenf
+    Minuten aus der Oberflaeche verschwunden.
+    """
+    assert health_alerts.handle_silent_transitions([], recipient="chef@example.com").result is None
+    assert health_alerts.handle_silent_transitions(_transitions(1), recipient=None).result is None
+
+    # Zweiter Lauf: alle gebremst -> ebenfalls kein Versuch.
+    health_alerts.handle_silent_transitions(_transitions(1), recipient="chef@example.com")
+    assert (
+        health_alerts.handle_silent_transitions(
+            _transitions(1), recipient="chef@example.com"
+        ).result
+        is None
+    )

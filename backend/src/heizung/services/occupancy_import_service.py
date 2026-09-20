@@ -38,7 +38,7 @@ from heizung.schemas.occupancy_import import (
     OccupancyImportPayload,
     resolve_stay_dates,
 )
-from heizung.services import alert_throttle, mailer
+from heizung.services import alert_throttle, mail_status, mailer
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import (
     cancel_occupancy_record,
@@ -620,6 +620,13 @@ async def _send_stale_alert(session: AsyncSession, *, today_local: date, expecte
             "import_stale_mail_nicht_zugestellt",
             extra={"grund": result.reason, "detail": result.detail},
         )
+
+    # T4: Versuch festhalten. Hier wird ausnahmsweise selbst committet: der
+    # Aufrufer hat sein Audit schon abgeschlossen (siehe Aufrufstelle), diese
+    # Zeilen liegen hinter seinem commit(). Ohne eigenen commit() waere der
+    # Vermerk beim Sessionende wieder weg — genau der Fehler aus §5.61.
+    await mail_status.record_attempt(session, result)
+    await session.commit()
 
 
 async def run_freshness_check(

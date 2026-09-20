@@ -57,5 +57,13 @@ class GlobalConfigRead(BaseModel):
     alert_email: str | None
     alert_device_offline_minutes: int
     alert_battery_warn_percent: int
+
+    # Laufzeit-Felder zum Mailversand (Sprint 18, T4). Bewusst nur hier und
+    # NICHT in ``GlobalConfigUpdate``: sie sind Messwerte, keine Einstellung.
+    # Ein PATCH darauf waere das Faelschen eines Befunds.
+    last_mail_attempt_at: datetime | None
+    last_mail_ok_at: datetime | None
+    last_mail_error: str | None
+
     created_at: datetime
     updated_at: datetime

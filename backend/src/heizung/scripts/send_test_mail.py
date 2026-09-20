@@ -20,6 +20,14 @@ Auf dem Server::
 Der Befehl schreibt **kein** Audit und beruehrt keine Wiederholungsbremse.
 Er ist beliebig oft wiederholbar.
 
+Was er **doch** schreibt (seit T4): den Versandstatus auf der
+``global_config`` — dieselben drei Felder, die auch ein echter Alarm setzt.
+Das ist Absicht. Der Test ist der Weg, auf dem die Inbetriebnahme bestaetigt
+wird; wuerde er sie nicht setzen, zeigte die Oberflaeche nach einem
+erfolgreichen Test weiterhin "noch kein Versand" und der Hotelier haette
+zwei widersprechende Auskuenfte. Ein Audit-Eintrag ist das nicht — es ist
+derselbe Messwert, nur von Hand ausgeloest.
+
 Exit-Codes: 0 = Nachricht uebergeben · 1 = nicht versandt (Grund steht in
 der Ausgabe).
 """
@@ -45,7 +53,7 @@ os.environ.setdefault(
 from heizung.config import get_settings  # noqa: E402
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.global_config import GlobalConfig  # noqa: E402
-from heizung.services import mailer  # noqa: E402
+from heizung.services import mail_status, mailer  # noqa: E402
 
 SUBJECT = "Heizung Sonnblick: Testnachricht"
 
@@ -62,9 +70,16 @@ def _body(recipient: str) -> str:
             "Echte Alarme sehen anders aus: sie nennen im Betreff das betroffene",
             "Gerät und das Zimmer.",
             "",
-            "Es wurde nichts geändert und nichts protokolliert.",
+            "Es wurde nichts an der Steuerung geändert.",
         ]
     )
+
+
+async def _record(result: mailer.MailResult) -> None:
+    """Haelt den Versuch auf der ``global_config`` fest (siehe Modul-Kopf)."""
+    async with SessionLocal() as session:
+        await mail_status.record_attempt(session, result)
+        await session.commit()
 
 
 async def _resolve_recipient(explicit: str | None) -> tuple[str | None, str]:
@@ -115,6 +130,7 @@ async def _main_async(argv: Sequence[str] | None = None) -> int:
 
     print(f"Sende an {recipient} ({herkunft}) ...")
     result = mailer.send_mail(recipient=recipient, subject=SUBJECT, body=_body(recipient))
+    await _record(result)
 
     if result.sent:
         print(f"[OK] {result.detail}")
