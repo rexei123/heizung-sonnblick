@@ -585,6 +585,47 @@ normal — Drift in beide Richtungen gleichzeitig ist Refresh-Anlass.
 - Strategie-Refresh nach Cowork-Inventarisierung oder externer Bestätigung
 - Sprint-Plan und Backlog mindestens monatlich konsolidieren
 
+**Nachtrag 2026-09-20 — der Kopf altert unbemerkt, weil ihn niemand liest,
+der den Stand schon kennt.**
+
+Beim Abschluss von Sprint 18 standen Kopf und §1 von `STATUS.md` auf dem
+14.06. und Sprint 15g — **vier Sprints zurück**. In der Zwischenzeit sind
+16, 17 und 18 gelaufen und jedes Mal ordentlich als eigener §2-Abschnitt
+angehängt worden. Nur der Kopf nicht.
+
+Das ist kein Schlampigkeitsbefund, sondern ein struktureller: Der Kopf
+richtet sich an jemanden, der den Stand **nicht** kennt. Wer am Repo
+arbeitet, überspringt ihn — er weiß ja, wo er steht. Die einzige Person,
+die ihn wirklich liest, ist die nächste Session, die ohne Vorwissen
+anfängt. Genau die bekommt dann den Stand von vor vier Sprints als
+aktuellen serviert.
+
+**Warum das gefährlicher ist als eine veraltete Lesson:** Der Kopf von
+`STATUS.md` steht in der Pflicht-Lektüre (§2) und in der
+Source-of-Truth-Hierarchie auf Rang 4 (§0.2). Was dort steht, geht ohne
+weitere Prüfung in die nächste Brief-Verfassung ein — und damit ist es
+genau der Weg, auf dem eine falsche Behauptung über den Systemzustand in
+einen Sprint-Plan gelangt. §5.68 verlangt für operative Aussagen einen
+Diagnose-Output; eine veraltete Kopfzeile umgeht diese Pflicht, weil sie
+wie ein bereits geprüfter Befund aussieht. Verwandt mit §5.77: dort war
+ein überholter Vermerk das Problem, hier eine überholte Zusammenfassung.
+
+**Regel:** Der Kopf von `STATUS.md` (Stand-Zeile, Stichtag, „Aktueller
+Sprint") wird im **selben PR** aktualisiert, der einen Sprint abschließt.
+Nicht „bei Gelegenheit", nicht „alle fünf Sprints" — die Fünfer-Regel oben
+hat vier Sprints Drift zugelassen, ohne verletzt zu sein.
+
+**Automatisierbar, geschätzt:** Eine CI-Prüfung, die den im Kopf genannten
+SHA gegen `git rev-parse --short develop` hält und bei Abweichung rot
+meldet, ist ein Dutzend Zeilen in einem bestehenden Job und kostet
+Sekunden — die eigentliche Arbeit steckt nicht im Bauen, sondern in der
+Entscheidung, wie viele Commits Rückstand noch erlaubt sein sollen, damit
+der Check nicht bei jedem Merge rot wird und man ihn abschaltet.
+
+**Querverweise:** §5.68 (Behauptung vs. Befund — der Weg, den eine
+veraltete Kopfzeile öffnet), §5.77 (überholter Vermerk, gleiche Klasse),
+§0.2 (Source-of-Truth-Hierarchie, Rang 4), §2 (Pflicht-Lektüre).
+
 ### 5.27 Vicki-Hardware-Realität: Open-Window-Default + Algorithmus-Trägheit (Sprint 9.11 Lesson)
 
 **Befund 2026-05-09 (Sprint 9.11 Live-Test #2 + Hersteller-Doku-Recherche):**
