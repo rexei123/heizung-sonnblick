@@ -57,6 +57,12 @@ TARGET_TYPE = "occupancy_import"
 DEFAULT_CHECKIN_LOCAL = time(14, 0)
 DEFAULT_CHECKOUT_LOCAL = time(11, 0)
 
+# Fallback, wenn die Singleton-Row fehlt (frische DB ohne Seed). Spiegelt den
+# Spalten-Default aus Migration 0022. Casablanca versendet um 10:38 Ortszeit
+# (bestaetigt 26.09.2026) — 12:00 laesst gut 80 Minuten Puffer, und eine
+# fehlende Liste faellt noch am selben Vormittag auf.
+DEFAULT_EXPECTED_BY_LOCAL = time(12, 0)
+
 # Bounded Lookback fuer den Idempotenz-Scan: mailparser-Retries treffen
 # innerhalb von Minuten bis Stunden ein, nie Tage spaeter. 7 Tage ist
 # grosszuegig und haelt den Scan klein (kein JSONB-SQL noetig).
@@ -112,7 +118,13 @@ def parse_target_room(raw: str) -> str:
 
 
 def parse_hhmm(value: str) -> time:
-    """``"09:00"`` -> ``time(9, 0)``. Fallback auf 09:00 bei Murks."""
+    """``"09:00"`` -> ``time(9, 0)``. Fallback auf 09:00 bei Murks.
+
+    Seit dem Zeitzonen-Fix (26.09.2026) **nicht mehr im Produktionspfad**:
+    die Schwelle kommt als ``time`` direkt aus ``global_config``, es gibt
+    keinen String mehr zu parsen. Bleibt als Helfer fuer CLI-Eingaben und
+    fuer die Tests, die das Rundum-Verhalten pinnen.
+    """
     try:
         hh, mm = value.strip().split(":", 1)
         return time(int(hh), int(mm))
@@ -123,6 +135,28 @@ def parse_hhmm(value: str) -> time:
 
 def _fmt_hhmm(t: time) -> str:
     return f"{t.hour:02d}:{t.minute:02d}"
+
+
+def tz_abbrev(tz: ZoneInfo, at: datetime) -> str:
+    """Zeitzonen-Kuerzel zum Zeitpunkt ``at``, z. B. ``"MESZ"`` / ``"MEZ"``.
+
+    Warum das ueberhaupt gebraucht wird: eine Uhrzeit ohne Einheit ist eine
+    Einladung zum Missverstaendnis. Am 26.09.2026 stand in der Oberflaeche
+    "08:38" (UTC, ungekennzeichnet) direkt neben "Erwartet bis 09:00 Uhr"
+    (Ortszeit, ebenfalls ungekennzeichnet) — zwei Zahlen in verschiedenen
+    Einheiten, die wie ein Vergleich aussahen. Die Schwelle wurde daraufhin
+    falsch gesetzt, und der Waechter schlug 21 Tage lang zu frueh an.
+
+    ``%Z`` liefert je nach Plattform-Locale "MESZ" oder "CEST". Beides ist
+    eindeutig genug; entscheidend ist, dass **ueberhaupt** eine Einheit
+    dabeisteht.
+    """
+    return at.astimezone(tz).strftime("%Z")
+
+
+def fmt_local_time(t: time, tz: ZoneInfo, at: datetime) -> str:
+    """``"12:00 MESZ"`` — Uhrzeit mit Einheit, fuer Mail und API."""
+    return f"{_fmt_hhmm(t)} {tz_abbrev(tz, at)}"
 
 
 def compute_import_status(
@@ -172,6 +206,19 @@ async def _load_tz_and_times(session: AsyncSession) -> tuple[ZoneInfo, time, tim
             DEFAULT_CHECKOUT_LOCAL,
         )
     return ZoneInfo(gc.timezone), gc.default_checkin_time, gc.default_checkout_time
+
+
+async def _load_expected_by(session: AsyncSession) -> time:
+    """Erwartungszeit der Belegungsliste, **Ortszeit** (Migration 0022).
+
+    Einzige Quelle ist die ``global_config``-Singleton. Die frueher hier
+    zustaendige Umgebungsvariable ``OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL`` ist
+    entfallen — zwei Quellen fuer denselben Wert waeren ein Drift-Risiko
+    (§5.53), und eine Einstellung, die der Hotelier sehen soll, gehoert
+    nicht in eine Datei hinter SSH.
+    """
+    gc = await session.get(GlobalConfig, 1)
+    return gc.occupancy_import_expected_by_local if gc is not None else DEFAULT_EXPECTED_BY_LOCAL
 
 
 def _local_day_bounds_utc(list_date: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
@@ -317,8 +364,17 @@ async def reconcile_from_import(
     now_utc = now or datetime.now(tz=UTC)
     tz, checkin_t, checkout_t = await _load_tz_and_times(session)
 
-    list_date = payload.received_at.date()
-    received_at_utc = payload.received_at.replace(tzinfo=tz).astimezone(UTC)
+    # mailparser liefert den Zeitstempel in **UTC** (Befund 26.09.2026, siehe
+    # CLAUDE.md §5.79). Bis dahin stand hier ``.replace(tzinfo=tz)`` — das
+    # *behauptet* eine Zeitzone, statt umzurechnen, und hat den Eingang damit
+    # 21 Tage lang zwei Stunden zu frueh gespeichert.
+    #
+    # ``list_date`` kommt aus der **Ortszeit** desselben Augenblicks, nicht aus
+    # dem UTC-Datum: die Liste gehoert zu dem Kalendertag, den das Hotel
+    # gerade hat. Bei einem Versand um 23:30 Ortszeit im Winter waere das
+    # UTC-Datum der Vortag.
+    received_at_utc = payload.received_at.replace(tzinfo=UTC)
+    list_date = received_at_utc.astimezone(tz).date()
 
     if await _already_processed(session, payload.id, list_date, now_utc):
         return ImportOutcome(
@@ -511,13 +567,18 @@ def _audit_to_logrow(audit: BusinessAudit) -> OccupancyImportLogRow:
 async def get_import_log(
     session: AsyncSession,
     *,
-    expected_by_local_str: str,
+    expected_by_local: time | None = None,
     now: datetime | None = None,
 ) -> OccupancyImportLogResponse:
-    """Baut die Antwort fuer GET .../log inkl. Backend-berechnetem Status."""
+    """Baut die Antwort fuer GET .../log inkl. Backend-berechnetem Status.
+
+    :param expected_by_local: Schwelle als **Ortszeit**. ``None`` laedt sie
+        aus ``global_config`` — das ist der Produktionspfad; der Parameter
+        existiert fuer Tests.
+    """
     now_utc = now or datetime.now(tz=UTC)
     tz, _checkin, _checkout = await _load_tz_and_times(session)
-    expected_t = parse_hhmm(expected_by_local_str)
+    expected_t = expected_by_local or await _load_expected_by(session)
 
     imports = [_audit_to_logrow(a) for a in await _recent_import_audits(session, limit=30)]
     last_success_at = await _last_applied_received_at(session)
@@ -535,6 +596,7 @@ async def get_import_log(
         status=status,
         last_success_at=last_success_at,
         expected_by_local=_fmt_hhmm(expected_t),
+        expected_by_local_label=fmt_local_time(expected_t, tz, now_utc),
         today_received=today_received,
         imports=imports,
     )
@@ -565,7 +627,14 @@ async def _stale_exists_for_list_date(
     return False
 
 
-async def _send_stale_alert(session: AsyncSession, *, today_local: date, expected: time) -> None:
+async def _send_stale_alert(
+    session: AsyncSession,
+    *,
+    today_local: date,
+    expected: time,
+    tz: ZoneInfo,
+    now_utc: datetime,
+) -> None:
     """Alarm-Mail zur ausgebliebenen Belegungsliste (Sprint 18).
 
     Gebremst ueber ``alert_throttle`` mit dem Listendatum als Gegenstand:
@@ -588,9 +657,12 @@ async def _send_stale_alert(session: AsyncSession, *, today_local: date, expecte
         return
 
     tag = today_local.strftime("%d.%m.%Y")
+    # Faelligkeit MIT Kuerzel: die Mail wird im Postfach gelesen, ohne die
+    # Oberflaeche daneben. "bis 12:00 Uhr" waere dort nicht einzuordnen.
+    faellig = fmt_local_time(expected, tz, now_utc)
     body = "\n".join(
         [
-            f"Für den {tag} ist bis {_fmt_hhmm(expected)} Uhr keine Belegungsliste",
+            f"Für den {tag} ist bis {faellig} keine Belegungsliste",
             "eingetroffen.",
             "",
             "Was das System jetzt tut: nichts. Der letzte bekannte Belegungsstand",
@@ -632,7 +704,7 @@ async def _send_stale_alert(session: AsyncSession, *, today_local: date, expecte
 async def run_freshness_check(
     session: AsyncSession,
     *,
-    expected_by_local_str: str,
+    expected_by_local: time | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Prueft, ob heute (Lokal-Datum) bereits ein erfolgreicher Import vorliegt.
@@ -640,10 +712,18 @@ async def run_freshness_check(
     Kein Import nach ``expected_by_local`` -> Audit ``OCCUPANCY_IMPORT_STALE``.
     Gibt KEINE Zimmer frei — der letzte bekannte Stand bleibt eingefroren
     (S5: letzter guter Stand schlaegt Annahme). Idempotent pro Tag.
+
+    Der Vergleich laeuft in **Ortszeit** auf beiden Seiten: ``now_utc`` wird
+    ueber ``global_config.timezone`` gewandelt, die Schwelle ist als Wanduhr
+    gemeint (§5.65, AE-60). Ein Vergleich gegen ``now_utc.time()`` waere je
+    nach Jahreszeit eine oder zwei Stunden daneben.
+
+    :param expected_by_local: Schwelle als Ortszeit. ``None`` laedt sie aus
+        ``global_config`` — Produktionspfad; der Parameter ist fuer Tests.
     """
     now_utc = now or datetime.now(tz=UTC)
     tz, _checkin, _checkout = await _load_tz_and_times(session)
-    expected = parse_hhmm(expected_by_local_str)
+    expected = expected_by_local or await _load_expected_by(session)
     local_now = now_utc.astimezone(tz)
 
     if local_now.time() < expected:
@@ -670,7 +750,9 @@ async def run_freshness_check(
     # bewusst NACH dem commit() — nur ein persistiertes Audit loest eine Mail
     # aus. Andernfalls koennte ein Rollback eine Mail hinterlassen, zu der es
     # keinen Eintrag gibt.
-    await _send_stale_alert(session, today_local=today_local, expected=expected)
+    await _send_stale_alert(
+        session, today_local=today_local, expected=expected, tz=tz, now_utc=now_utc
+    )
 
     logger.warning(
         "occupancy-import STALE: kein erfolgreicher Import fuer %s bis %s lokal",

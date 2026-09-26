@@ -25,6 +25,9 @@ class GlobalConfigUpdate(BaseModel):
     alert_email: EmailStr | None = None
     alert_device_offline_minutes: int | None = Field(default=None, ge=1, le=1440)
     alert_battery_warn_percent: int | None = Field(default=None, ge=1, le=100)
+    # Ortszeit (§5.65). Der Watchdog vergleicht die in Ortszeit gewandelte
+    # Jetzt-Zeit dagegen — hier steht Wanduhr, nicht UTC.
+    occupancy_import_expected_by_local: time | None = None
 
     @model_validator(mode="after")
     def _v_summer_dates_consistency(self) -> GlobalConfigUpdate:
@@ -57,6 +60,7 @@ class GlobalConfigRead(BaseModel):
     alert_email: str | None
     alert_device_offline_minutes: int
     alert_battery_warn_percent: int
+    occupancy_import_expected_by_local: time
 
     # Laufzeit-Felder zum Mailversand (Sprint 18, T4). Bewusst nur hier und
     # NICHT in ``GlobalConfigUpdate``: sie sind Messwerte, keine Einstellung.

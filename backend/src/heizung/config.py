@@ -87,10 +87,13 @@ class Settings(BaseSettings):
     # (Endpoint lehnt jede Anfrage mit 401 ab). Server-spezifisch in .env
     # setzen, NIE committen.
     occupancy_import_token: str = ""
-    # Lokale Uhrzeit (Europe/Vienna, HH:MM), bis zu der die taegliche
-    # Belegungsliste erwartet wird. Steuert Ampel-Status (gelb ab hier ohne
-    # Import) + Staleness-Watchdog.
-    occupancy_import_expected_by_local: str = "09:00"
+    # Die Erwartungszeit der Belegungsliste stand hier bis zum 26.09.2026 als
+    # OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL="09:00". Sie ist nach
+    # ``global_config.occupancy_import_expected_by_local`` umgezogen
+    # (Migration 0022, Vorgabe 12:00 Ortszeit) und in der Oberflaeche
+    # editierbar: der Wert haengt am Versandzeitpunkt in fremder Software und
+    # muss ohne Deployment aenderbar sein. Zwei Quellen fuer denselben Wert
+    # waeren ein Drift-Risiko (§5.53).
 
     # --- SMTP (Sprint 18) -------------------------------------------------
     # Zugangsdaten kommen ausschliesslich aus der Umgebung, nie aus der

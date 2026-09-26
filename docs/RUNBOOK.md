@@ -938,12 +938,18 @@ docker exec -it heizung-redis redis-cli
 
 ```
 OCCUPANCY_IMPORT_TOKEN=<openssl rand -hex 32>
-OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL=09:00
 ```
 
 Leeres/fehlendes Token = der Endpoint lehnt **jede** Anfrage mit 401 ab
 (fail-closed). In mailparser.io denselben Wert als Custom-Header
 `X-Webhook-Token` hinterlegen.
+
+**`OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` gibt es hier nicht mehr.** Die
+Erwartungszeit steht seit dem 26.09.2026 in der Oberfläche unter
+*Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und wird dort
+geändert — sie hängt am Versandzeitpunkt in Casablanca, also in fremder
+Software, deren Einstellung sich ohne unser Wissen ändern kann. Ein in der
+`.env` verbliebener Eintrag hat keine Wirkung mehr.
 
 **Endpoint A — Import (Webhook):**
 
@@ -970,8 +976,19 @@ Body (mailparser „Nested - array of objects", „One request per email"):
   `Abreise` MIT Jahr (`TT.MM.JJJJ`). Der Server leitet das Anreise-Jahr aus der
   Abreise ab — Jahreswechsel inklusive (Anreise `29.12.` + Abreise `02.01.2027`
   → Anreise 29.12.2026). Beide Formen werden defensiv akzeptiert.
-- `received_at`-Datumsteil = `list_date` (Europe/Vienna). `id` = Idempotenz
-  (gleiche `id` + `list_date` zweimal → `{"status":"already_processed"}`).
+- **`received_at` ist UTC**, obwohl es keine Zeitzonen-Angabe trägt. Befund
+  vom 26.09.2026, belegt in der Produktion: `business_audit.ts` (echter
+  Eingang) stand auf `08:38+00`, das Feld daneben auf `06:38+00` — derselbe
+  Vorgang, zwei Stunden auseinander. Bis dahin las der Server den Wert als
+  Ortszeit und speicherte den Eingang 21 Tage lang zwei Stunden zu früh.
+  Das `list_date` kommt aus der **Ortszeit** desselben Augenblicks, nicht aus
+  dem UTC-Datum — sonst gehörte eine spät abends versandte Liste zum Vortag.
+  `id` = Idempotenz (gleiche `id` + `list_date` zweimal →
+  `{"status":"already_processed"}`).
+
+  **Wer den Wert nachprüfen will:** mailparser zeigt Import Date / Date
+  Parsed / Dispatch Date in **Ortszeit**. Steht dort 10:38 und im Feld
+  `08:38`, ist das Feld UTC — und die beiden gehören zusammen.
 - Zimmerwechsel (`⇒`): nur das Zielzimmer zählt.
 - Unbekannte Zimmernummer → **422, nichts geschrieben** (atomar).
 - Leere `liste` → alle aktiven pms-Belegungen des Tages werden geschlossen.
@@ -2888,7 +2905,7 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | Alarm | Auslöser | Frühestens wieder |
 |---|---|---|
 | **Thermostat meldet sich nicht** | Ein Gerät ist über 24 h stumm. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
-| **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit (Vorgabe 09:00) ist keine Liste eingetroffen. | am nächsten Tag |
+| **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 
 Beide gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als

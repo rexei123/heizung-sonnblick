@@ -2435,6 +2435,141 @@ hier Code-Zustand), §5.72 (die korrigierte Stelle), §5.73 (der Sprint, der
 sie überholt hat), B-15b-1 (der verbliebene offene Rest: Mailversand an der
 Schwelle).
 
+### 5.79 Ein abgeschlossenes Audit gilt nur fuer den Code-Stand, den es gesehen hat (Belegungs-Import-Zeitzonen-Fix)
+
+**Anlass, 26.09.2026:** Der Belegungs-Import-Waechter hat seinen ersten
+echten Alarm ausgeloest — 23 Minuten **bevor** die Liste faellig war. Sie kam
+puenktlich um 10:38 Ortszeit, wie an den 20 Tagen davor.
+
+Die Kette, von hinten:
+
+1. `payload.received_at` von mailparser traegt **keine** Zeitzonen-Angabe,
+   der Wert ist aber **UTC**. Der Service las ihn mit
+   `.replace(tzinfo=tz)` — das *behauptet* eine Zeitzone, statt umzurechnen.
+   Der gespeicherte Eingang lag damit zwei Stunden zu frueh.
+2. Die Oberflaeche zeigte diesen falschen Wert als `08:38`, **ohne Einheit**,
+   direkt neben `Erwartet bis 09:00 Uhr` — ebenfalls ohne Einheit, aber
+   Ortszeit. Zwei Zahlen in verschiedenen Einheiten, die wie ein Vergleich
+   aussahen.
+3. Aus dieser Ansicht wurde die Schwelle **09:00** abgeleitet. Sie haette
+   hinter 10:38 liegen muessen.
+4. Der Beat prueft um 08:15 UTC = 10:15 MESZ. Nach 09:00, vor 10:38 → Alarm,
+   jeden Tag.
+
+**Der Vergleich selbst war die ganze Zeit richtig.** Ortszeit gegen Ortszeit,
+genau nach AE-60. Wer nur dorthin gesehen haette, haette nichts gefunden.
+
+#### Warum AE-60 das nicht abgedeckt hat
+
+AE-60 (B-10-4) hat 2026-05-25 genau diese Fehlerklasse behoben: UTC-Wallclock
+gegen Lokal-Konfiguration, damals in der Nachtabsenkung. Das Audit dazu ist
+als abgeschlossen dokumentiert, mit dem Satz, es seien alle Stellen geprueft.
+
+Der Belegungs-Import war nicht dabei — **nicht weil er uebersehen wurde,
+sondern weil er noch nicht existierte.** Er kam mit Sprint 15e am
+2026-06-06, zwoelf Tage nach dem Audit.
+
+Das ist der eigentliche Punkt: Das Audit war zu seinem Zeitpunkt vollstaendig
+und ist heute unvollstaendig, **ohne dass sich an ihm etwas geaendert hat.**
+Ein Leser im September sieht "alle Stellen geprueft" und glaubt es — zu Recht
+sogar, nur bezog sich "alle" auf einen Code-Stand, der nicht mehr der
+aktuelle ist.
+
+**Regel:** Ein Audit, das eine Fehlerklasse ueber den ganzen Code sucht
+("alle `.time()`-Aufrufe", "alle Endpoints ohne Auth", "alle Device-Queries
+ohne Lifecycle-Filter"), dokumentiert **den Code-Stand, den es gesehen hat**
+— Commit-SHA oder Datum plus Umfang, zum Beispiel:
+
+> Geprueft am 2026-05-25 gegen `d2d5311`: `rules/`, `services/`, `tasks/`.
+> Neue Zeitvergleiche nach diesem Stand sind **nicht** abgedeckt.
+
+Und der Umkehrschluss, der in der Praxis mehr traegt: **wer eine neue
+Zeit-, Auth- oder Query-Stelle baut, prueft die zugehoerige Lesson gegen
+seinen eigenen Code, statt sich auf ein "abgeschlossen" zu verlassen.** Ein
+Audit ist eine Momentaufnahme, keine Garantie mit Zukunftswirkung. Sprint 15e
+haette §5.65 lesen und den eigenen Zeitvergleich pruefen muessen — und hat
+das fuer den Vergleich sogar getan, nur nicht fuer die **Eingangsdaten**.
+
+#### Zweiter Teil: ein Test aus dem beobachteten Verhalten bestaetigt den Fehler
+
+Die Fixtures in `test_occupancy_import_service.py` trugen
+`"received_at": "2026-06-06T05:14:15+00:00"` — also genau den um zwei Stunden
+verschobenen Wert, den der Code produzierte. Sie kamen nicht aus der
+Spezifikation ("mailparser liefert UTC, also muss der Eingang unveraendert
+gespeichert werden"), sondern aus dem Lauf des Codes.
+
+Damit war der Fehler **testseitig zementiert**. Jede Suite lief gruen, und
+ein Umbau, der den Wert korrigiert haette, waere als Regression aufgefallen.
+
+**Regel:** Ein Test, dessen Erwartungswert aus dem beobachteten Verhalten
+kopiert wurde, prueft nur, dass sich nichts geaendert hat. Das ist fuer
+Refactorings wertvoll und fuer die Frage "ist es richtig" wertlos. Bei jedem
+Erwartungswert, der eine **Umrechnung** betrifft (Zeitzone, Einheit, Skala,
+Waehrung), muss die Herkunft im Test stehen — woher der Sollwert kommt, nicht
+nur welcher es ist:
+
+```python
+# 08:38:27 UTC — NICHT 06:38:27. mailparser liefert UTC (RUNBOOK 10d.9),
+# der Augenblick wird unveraendert gespeichert.
+assert nv["received_at"] == "2026-09-26T08:38:27+00:00"
+```
+
+Die Probe: Wer den Erwartungswert **ohne** den Code herleiten kann, hat eine
+Spezifikation. Wer ihn nur durch Ausfuehren bekommt, hat eine Momentaufnahme.
+
+#### Dritter Teil: eine Uhrzeit ohne Einheit ist eine offene Falle
+
+Der Versatz allein haette nicht gereicht. Gefaehrlich wurde er erst dadurch,
+dass **beide** Zahlen ohne Einheit dastanden — sonst waere beim Setzen der
+Schwelle aufgefallen, dass da UTC neben Ortszeit steht.
+
+**Regel:** Jede Uhrzeit in der Oberflaeche, in einer Mail oder in einem Log,
+die neben einer anderen Uhrzeit steht oder mit einer Schwelle verglichen
+wird, traegt ihre Zeitzone sichtbar ("10:38 MESZ"). Das ist keine Kosmetik,
+sondern die einzige Stelle, an der ein Mensch den Einheitenfehler ueberhaupt
+sehen kann. Im Repo: `formatDateTimeTz` im Frontend, `fmt_local_time` im
+Backend; `Intl.DateTimeFormat` bekommt **immer** ein explizites `timeZone`,
+nie die Zone des Betrachters.
+
+#### Vierter Teil: die Schwelle gehoert nicht in eine Konstante
+
+Der richtige Wert haengt am Versandzeitpunkt in **Casablanca** — fremde
+Software, deren Einstellung sich aendern kann, ohne dass wir es erfahren.
+Eine hartkodierte Schwelle waere danach entweder blind (zu spaet) oder
+laermend (zu frueh), und beides fiele erst auf, wenn es zaehlt.
+
+Seit Migration 0022 steht sie in `global_config` und ist in der Oberflaeche
+editierbar, **auf derselben Seite wie der Eingang** — wer die Schwelle setzt,
+muss sehen, wann die Liste tatsaechlich kommt, sonst raet er.
+
+Der Beat-Slot lief dazu passend von `crontab(hour=8, minute=15)` auf
+**stuendlich**. Der alte Kommentar dort sagte ausdruecklich, man muesse den
+UTC-Slot nachziehen, wenn die Schwelle spaeter gestellt wird — genau die
+Kopplung, die man nicht haben will, sobald die Schwelle in der Oberflaeche
+liegt. Wer sie auf 14:00 stellt, haette sonst einen Waechter, der um 10:15
+prueft und **nie** etwas melden kann. Lautlos.
+
+#### Und die Einordnung, die die Prioritaet bestimmt hat
+
+Ein Waechter, der taeglich zu frueh anschlaegt, wird nach einer Woche
+ignoriert. Das ist derselbe Verlust wie ein stiller Ausfall — nur mit Laerm
+statt Schweigen. §5.76 sagt, dass man die Wirkung ueberwachen muss statt der
+Mechanik; hier kommt dazu: **ein Melder, dem niemand mehr glaubt, ueberwacht
+nichts.** Falsch-Alarme sind kein kosmetisches Problem.
+
+**Querverweise:** §5.65 / AE-60 (die Fehlerklasse, dort behoben — und das
+Audit, das diesen Code-Stand nicht sehen konnte), §5.74 (Kalendertag-Strings
+im Frontend — dieselbe Wurzel, andere Richtung), §5.76 (Alarme auf die
+Wirkung; hier der Gegenfall: ein Alarm, der zu oft kommt), §5.20 (Doku-Drift
+— hier war die Doku-Aussage bei ihrem Entstehen korrekt), §5.77 (ein
+veralteter Vermerk, der wie ein Befund gelesen wird — Schwesterfall zu Teil
+eins), AE-66 / AE-71 (Belegungs-Import), Migration 0022.
+
+**Hinweis zur Numerierung:** §5.78 ist zum Zeitpunkt dieses Eintrags durch
+den offenen PR #240 belegt (`docker compose` ohne `-f`). Bleibt der PR
+ungemergt, ist §5.78 eine Luecke — eine Luecke ist harmlos, eine doppelte
+Nummer nicht.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

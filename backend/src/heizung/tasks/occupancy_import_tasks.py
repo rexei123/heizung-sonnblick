@@ -47,12 +47,10 @@ async def _task_session() -> AsyncIterator[AsyncSession]:
 
 async def _run() -> dict[str, Any]:
     """Async-Koerper des Watchdog-Tasks. Public fuer Tests."""
-    settings = get_settings()
     async with _task_session() as session:
-        result = await run_freshness_check(
-            session,
-            expected_by_local_str=settings.occupancy_import_expected_by_local,
-        )
+        # Schwelle kommt aus global_config (Migration 0022) — der Service laedt
+        # sie selbst, damit es nur eine Quelle gibt.
+        result = await run_freshness_check(session)
     logger.info("check_occupancy_import_freshness result=%s", result)
     return result
 

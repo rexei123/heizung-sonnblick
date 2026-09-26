@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-06-08, develop-HEAD `0331fd0`. Letzter Sprint/Tag: 15f / `v0.1.19j-belegungs-import-front`. Danach Aufräum-Sprint abgeschlossen (Doku-Konsolidierung PR #219, node24-Actions-Bump PR #220), kein neues Feature offen. Sprint-Aufzählung siehe §1 für laufenden Stand.
+**Stand:** 2026-09-26, develop-HEAD `a0981d8` (Hotfix Belegungs-Import-Zeitzone offen, §2bo). Letzter Sprint/Tag: 15f / `v0.1.19j-belegungs-import-front`. Danach Aufräum-Sprint abgeschlossen (Doku-Konsolidierung PR #219, node24-Actions-Bump PR #220), kein neues Feature offen. Sprint-Aufzählung siehe §1 für laufenden Stand.
 
 ---
 
@@ -3714,6 +3714,113 @@ DoD erfüllt (Merge + Live-Verify); Tag steht.
 
 **Querverweise:** AE-68, AE-58 (Auto-Revoke), §5.53 (Status-Wahrheit),
 §5.61 (Script-Commit), §5.49/§5.59 (Test-Fixture-Hygiene), RUNBOOK §10k.
+
+---
+
+## 2bo. Belegungs-Import: Zeitzonen-Fehler im Eingang (2026-09-26, Hotfix)
+
+**Anlass:** Der erste echte Alarm des Systems, sachlich falsch. Der
+Import-Wächter meldete am 26.09. um 10:15 Ortszeit eine fehlende
+Belegungsliste — sie kam um 10:38, pünktlich wie an den 20 Tagen davor.
+
+**Befund (read-only, vor jeder Änderung geklärt):**
+
+Der **Vergleich** war korrekt. `run_freshness_check` wandelt UTC-now über
+`ZoneInfo(global_config.timezone)` in Ortszeit und prüft gegen die Schwelle —
+genau das AE-60-Muster. Wer nur dorthin gesehen hätte, hätte nichts gefunden.
+
+Der Fehler saß im **Eingang**, `occupancy_import_service.py:321`:
+
+```python
+received_at_utc = payload.received_at.replace(tzinfo=tz).astimezone(UTC)
+```
+
+`payload.received_at` von mailparser trägt keine Zeitzonen-Angabe, der Wert
+ist aber **UTC**. `.replace(tzinfo=tz)` *behauptet* eine Zeitzone, statt
+umzurechnen. Der gespeicherte Eingang lag damit zwei Stunden zu früh.
+
+**Beleg aus der Produktion** (Abfrage 26.09., derselbe Vorgang, zwei
+Zeitstempel in einer Zeile):
+
+```
+ ts                            | new_value.received_at     | list_date
+ 2026-09-26 08:38:28.373045+00 | 2026-09-26T06:38:27+00:00 | 2026-09-26
+ 2026-09-25 08:38:25.194472+00 | 2026-09-25T06:38:24+00:00 | 2026-09-25
+ 2026-09-24 08:38:25.272013+00 | 2026-09-24T06:38:24+00:00 | 2026-09-24
+```
+
+`business_audit.ts` ist der echte Eingang (08:38 UTC = 10:38 Ortszeit,
+deckungsgleich mit mailparser). Das Feld daneben liegt zwei Stunden davor.
+
+**Wie daraus ein Fehlalarm wurde:** Die Oberfläche zeigte den falschen Wert
+als `08:38` — ohne Einheit — direkt neben `Erwartet bis 09:00 Uhr`, ebenfalls
+ohne Einheit, aber Ortszeit. Zwei Zahlen in verschiedenen Einheiten, die wie
+ein Vergleich aussahen. Aus dieser Ansicht wurde die Schwelle 09:00
+abgeleitet; sie hätte hinter 10:38 liegen müssen. Der Beat prüft um 08:15 UTC
+= 10:15 MESZ — nach 09:00, vor 10:38.
+
+**Was geändert wurde:**
+
+- **Eingang:** `received_at` wird als UTC gelesen. `list_date` kommt aus der
+  **Ortszeit** desselben Augenblicks, nicht aus dem UTC-Datum — sonst gehörte
+  eine spät abends versandte Liste zum Vortag.
+- **Anzeige:** alle Uhrzeiten mit Zeitzonen-Kürzel (`formatDateTimeTz`),
+  `Intl.DateTimeFormat` mit explizitem `timeZone: "Europe/Vienna"` statt der
+  Zone des Betrachters. Auch der Alarmtext nennt die Fälligkeit mit Kürzel —
+  die Mail wird im Postfach gelesen, ohne die Oberfläche daneben.
+- **Schwelle:** 12:00 Ortszeit, **konfigurierbar** (Migration 0022,
+  `global_config.occupancy_import_expected_by_local`), editierbar unter
+  *Einstellungen / API & Webhooks* — auf derselben Seite wie der Eingang, denn
+  wer die Schwelle setzt, muss sehen, wann die Liste tatsächlich kommt. Die
+  Umgebungsvariable `OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` entfällt (eine
+  Quelle, §5.53).
+- **Beat-Slot:** von `crontab(hour=8, minute=15)` auf **stündlich**. Der alte
+  Kommentar verlangte, den UTC-Slot nachzuziehen, wenn die Schwelle später
+  gestellt wird — genau die Kopplung, die nicht bestehen darf, sobald die
+  Schwelle in der Oberfläche liegt. Wer sie auf 14:00 stellte, hätte sonst
+  einen Wächter, der um 10:15 prüft und nie etwas melden kann. Der Tages-Guard
+  (`_stale_exists_for_list_date`) begrenzt weiterhin auf eine Meldung je Tag.
+- **Tests:** die Fixtures trugen den verschobenen Wert als Sollwert — der
+  Fehler war testseitig zementiert. Korrigiert, plus neun neue Tests:
+  Eingang als UTC, `list_date` über die Datumsgrenze, Schwelle aus der
+  Konfiguration, Regressionsprobe auf den 26.09., DST in Sommer, Winter und
+  am Wechseltag 25.10., Kürzel im Alarmtext.
+
+**Die 21 bestehenden Zeilen bleiben unkorrigiert.** Read-only-Prüfung der
+Konsumenten: `new_value["received_at"]` wird an genau zwei Stellen gelesen —
+`_last_applied_received_at` (Ampel „letzter Erfolg > 24 h" plus Anzeige) und
+`_audit_to_logrow` (Tabelle). **Keine Steuerentscheidung** hängt daran;
+`Occupancy.check_in`/`check_out` kommen aus `resolve_stay_dates` und den
+Check-in-/Check-out-Zeiten, nicht aus `received_at`. Eine Rückrechnung wäre
+also Kosmetik an historischen Zeilen — mit dem Risiko, beim Umrechnen die
+korrekten neuen Zeilen mitzuerfassen. Die Ampel heilt sich innerhalb eines
+Tages selbst, weil sie nur die jüngste Zeile ansieht.
+
+> **Historische Einordnung:** Import-Zeitstempel **vor dem 26.09.2026** sind
+> in `business_audit.new_value.received_at` um zwei Stunden zu früh. Der echte
+> Eingang steht in derselben Zeile als `business_audit.ts`. Nicht nachträglich
+> korrigiert, weil keine Steuerentscheidung daran hängt.
+
+**Casablanca versendet die Liste JEDEN Tag, auch bei Belegung null**
+(bestätigt vom Hotelier, 26.09.2026). Damit ist die offene Frage zur
+Schließzeit 29.09.–01.11. beantwortet: der Wächter bleibt in dieser Zeit
+aussagekräftig, eine rote Ampel ist dann ein **echter** Befund und nicht
+„das Haus ist eben zu". Ein entsprechender Punkt war in STATUS nicht als
+eigener Eintrag geführt — deshalb steht die Antwort hier und nicht als
+Streichung.
+
+**Neue Lesson:** §5.79 — ein abgeschlossenes Audit gilt nur für den
+Code-Stand, den es gesehen hat. AE-60 hat diese Fehlerklasse am 25.05.
+behoben; der Belegungs-Import kam am 06.06. dazu, zwölf Tage später. Das
+Audit war zu seinem Zeitpunkt vollständig und ist heute unvollständig, ohne
+dass sich an ihm etwas geändert hat. Dazu: ein Test, dessen Erwartungswert aus
+dem beobachteten Verhalten kopiert wurde, bestätigt den Fehler statt ihn zu
+finden.
+
+**Querverweise:** §5.65 / AE-60 (die Fehlerklasse), §5.74 (dieselbe Wurzel im
+Frontend), §5.76 (Alarme auf die Wirkung — hier der Gegenfall: ein Melder, dem
+niemand mehr glaubt, überwacht nichts), §5.79, AE-66 / AE-71, Migration 0022,
+RUNBOOK §10d.9 / §10m.
 
 ---
 
