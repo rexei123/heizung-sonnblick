@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-26, develop-HEAD `a0981d8` (Hotfix Belegungs-Import-Zeitzone offen, §2bo). Letzter Sprint/Tag: 15f / `v0.1.19j-belegungs-import-front`. Danach Aufräum-Sprint abgeschlossen (Doku-Konsolidierung PR #219, node24-Actions-Bump PR #220), kein neues Feature offen. Sprint-Aufzählung siehe §1 für laufenden Stand.
+**Stand:** 2026-09-27, develop-HEAD `7159773`. Letzter abgeschlossener Sprint: **18 (Alarm-Versand)** — live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn. Danach Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Davor Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 29.09.). Sprint-Aufzählung siehe §1.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-06-14
+**Stichtag:** 2026-09-20
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3717,6 +3717,101 @@ DoD erfüllt (Merge + Live-Verify); Tag steht.
 
 ---
 
+## 2bn. Sprint 18 Alarm-Versand (2026-09-20, abgeschlossen + live bestätigt)
+
+**Ziel:** Alarme erreichen den Hotelier. Bis Sprint 17 gab es im gesamten
+Backend **keinen** Mailversand — `emit_health_alert` war ein Logger-Stub,
+das `OCCUPANCY_IMPORT_STALE`-Audit hatte als einzigen Leser seinen eigenen
+Idempotenz-Guard, `alert_email` war ein Schalter ohne Konsumenten.
+Go-Live-Blocker B-15b-1, Frist 25.10.2026.
+
+**Merges (alle auf develop):**
+
+| PR | Inhalt | Commit |
+|---|---|---|
+| #235 | Dead-Man-Pings: `engine`, `deploy`, `backup` | `97feb00` |
+| #236 | T2/T3 — SMTP-Versand, Sammelmail, Import-Watchdog, 30 Tests | `2add76c` |
+| #237 | T7 — Batterie-Schalter-Vermerk korrigiert, §5.77 | `ae37f85` |
+| #239 | T4/T5 — Versandstatus sichtbar, RUNBOOK §10m, B-18-3 | `a0981d8` |
+
+Image-Beleg nach §5.11 nach jedem Merge geführt: `heizung-api` und
+`heizung-web` tragen `develop-a0981d8`, das schwebende `develop`-Tag zeigt
+auf denselben Eintrag.
+
+**Was gebaut wurde:**
+
+- `services/mailer.py` — stdlib `smtplib`, kein neues Abhängigkeits-Glied
+  (§5.29). Drei Sicherheitsvarianten über `SMTP_SECURITY`. Wirft nie.
+  `_redact` entfernt das SMTP-Passwort aus Fehlertexten, bevor sie ins Log
+  oder in die Datenbank gelangen.
+- `services/alert_throttle.py` — Wiederholungsbremse über Redis `SET NX EX`.
+  Bewusst anders als `resync_flag`: bei Redis-Ausfall wird **durchgelassen**,
+  eine Mail zu viel kostet weniger als eine zu wenig.
+- Zwei Alarme: stumme Geräte (AE-53 Stufe 2) als **eine** Sammelmail je Lauf,
+  ab zehn Geräten in Kurzform mit der Prüfreihenfolge Gateway/Strom/Geschoss;
+  und die ausgebliebene Belegungsliste (AE-66/AE-71).
+- `services/mail_status.py` + Migration 0021 — drei Laufzeit-Felder auf der
+  `global_config`. Keine Konfiguration: das System schreibt sie, der Hotelier
+  liest sie. Deshalb in `GlobalConfigRead`, nicht in `GlobalConfigUpdate`.
+- `scripts/send_test_mail.py` — Verbindungstest ohne Alarm, RUNBOOK §10m.
+- Drei Dead-Man-Checks auf healthchecks.io, RUNBOOK §10l.
+
+**Abschlussbedingung erfüllt — Live-Beleg 20.09.2026:**
+
+`send_test_mail` auf heizung-test ausgeführt, Nachricht an
+`verwaltung@hotel-sonnblick.at` **im Posteingang angekommen, nicht im
+Junk-Ordner**. `SMTP_ENABLED=true`, alle Werte in der `.env` von
+heizung-test.
+
+**Versandweg: Gmail statt Exchange — und warum.**
+
+Gesendet wird über `hotelsonnblick@gmail.com` mit einem App-Passwort, die
+Zustellung geht an das Exchange-Postfach der Verwaltung.
+
+Zwei Gründe, beide tragend:
+
+1. **Exchange Online kann es nicht mehr.** Microsoft hat SMTP-Basic-Auth
+   abgeschaltet. Ein Versand über den Hotel-Mandanten würde eine
+   OAuth2-Anbindung mit App-Registrierung und Token-Erneuerung verlangen —
+   ein zweiter beweglicher Teil im Alarmweg, und einer, der still abläuft.
+2. **Ein Absender außerhalb des Mandanten stellt auch dann zu, wenn
+   Exchange ausfällt.** Das ist der eigentliche Punkt. Ein Alarmweg, der
+   über die Infrastruktur läuft, die er überwachen soll, schweigt genau
+   dann, wenn er gebraucht wird. Dieselbe Überlegung steht hinter den
+   Dead-Man-Checks (§10l): die Ausfälle von Engine, Deploy und Backup
+   laufen bewusst **nicht** über diesen Mailweg, sondern über einen
+   externen Monitor.
+
+Die Zustellung ins Postfach — nicht in den Junk — ist mitgeprüft worden und
+nicht selbstverständlich: ein Gmail-Absender an eine Exchange-Adresse ist
+genau die Konstellation, bei der eine Spam-Einstufung möglich wäre. Sollte
+sich das später ändern, ist der erste Handgriff eine Absender-Freigabe im
+Exchange-Regelwerk, nicht ein Wechsel des Versandwegs.
+
+**Was bewusst offen bleibt:**
+
+- Mailversand an der Batterie-Warnschwelle (B-15b-1, verengt). Der Schalter
+  `alert_battery_warn_percent` wirkt seit Sprint 15d auf Badge und
+  Dashboard-Kachel, löst aber keine Mail aus. In der Oberfläche so
+  ausgewiesen.
+- Implausible Messwerte (AE-53 Stufe 3) bleiben Logger-only. Ein Gerät, das
+  sendet aber Unsinn misst, ist ein anderer Vorgang als eines, das schweigt,
+  und braucht einen eigenen Text samt eigener Handlungsempfehlung.
+- Alarm auf die **Fehlerquote** der Engine-Auswertung. Der Dead-Man-Ping
+  belegt den Takt, nicht die Richtigkeit je Zimmer (§10l). Verlangt eine
+  Entscheidung über die Schwelle, die sich erst mit echten Zahlen aus der
+  Heizperiode treffen lässt.
+
+**Neue Lessons:** §5.76 (zwei Fehler, die sich gegenseitig verdecken —
+Alarme gehören auf die Wirkung), §5.77 (ein veralteter „wirkungslos"-Vermerk
+ist selbst ein Schalter ohne Wirkung), §5.78 (kein `docker compose` ohne
+`-f` auf dem Server).
+
+**Querverweise:** B-15b-1, B-18-2 (Secrets-Rotation, Frist 01.11.), B-18-3,
+AE-53, AE-66, AE-71, RUNBOOK §5.0/§10l/§10m, CLAUDE.md §5.29/§5.76/§5.77/§5.78.
+
+---
+
 ## 2bo. Belegungs-Import: Zeitzonen-Fehler im Eingang (2026-09-26, Hotfix)
 
 **Anlass:** Der erste echte Alarm des Systems, sachlich falsch. Der
@@ -4080,7 +4175,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 
 | ID | Inhalt | Priorität |
 |---|---|---|
-| **B-15b-1** | **Alarm-Versand (Email).** 🟡 **Verengt am 19.09.2026 — der beauftragte Teil ist geliefert.** Sprint 18 hat den Versandweg gebaut (`services/mailer.py`, stdlib `smtplib`, kein neues Abhängigkeits-Glied) und **beide** Alarme verdrahtet: stumme Geräte (AE-53 Stufe 2, als Sammelmail) und ausgebliebene Belegungsliste (AE-66/AE-71). `alert_email` hat damit erstmals einen Konsumenten. Wiederholungsbremse über Redis, Sichtbarkeit des Versands in der Oberfläche (T4), Einrichtung und Fehlerdeutung in RUNBOOK §10m. **Was offen bleibt:** (1) der Mailversand an der Batterie-Warnschwelle — `alert_battery_warn_percent` wirkt seit Sprint 15d auf Badge und Dashboard, löst aber keine Mail aus (CLAUDE.md §5.72, in der UI so ausgewiesen); (2) implausible Messwerte (Stufe 3) bleiben bewusst Logger-only — anderer Vorgang, eigener Text, eigene Handlungsempfehlung. **Der Sprint gilt erst als fertig, wenn SMTP auf heizung-test eingetragen ist und `send_test_mail` erfolgreich lief** (RUNBOOK §10m, verbindliche Abschlussbedingung). | 🟡 |
+| **B-15b-1** | **Alarm-Versand (Email).** 🟡 **Verengt am 19.09.2026 — der beauftragte Teil ist geliefert.** Sprint 18 hat den Versandweg gebaut (`services/mailer.py`, stdlib `smtplib`, kein neues Abhängigkeits-Glied) und **beide** Alarme verdrahtet: stumme Geräte (AE-53 Stufe 2, als Sammelmail) und ausgebliebene Belegungsliste (AE-66/AE-71). `alert_email` hat damit erstmals einen Konsumenten. Wiederholungsbremse über Redis, Sichtbarkeit des Versands in der Oberfläche (T4), Einrichtung und Fehlerdeutung in RUNBOOK §10m. **Was offen bleibt:** (1) der Mailversand an der Batterie-Warnschwelle — `alert_battery_warn_percent` wirkt seit Sprint 15d auf Badge und Dashboard, löst aber keine Mail aus (CLAUDE.md §5.72, in der UI so ausgewiesen); (2) implausible Messwerte (Stufe 3) bleiben bewusst Logger-only — anderer Vorgang, eigener Text, eigene Handlungsempfehlung. **Abschlussbedingung erfüllt am 20.09.2026:** SMTP eingetragen (`SMTP_ENABLED=true`), `send_test_mail` an `verwaltung@hotel-sonnblick.at` gelaufen, Nachricht im Posteingang — nicht im Junk. Versandweg Gmail → Exchange, Begründung in §2bn. | 🟡 |
 | B-17-1 | **`global_config.alert_device_offline_minutes` ist ein toter Schalter.** Default 120, in `/einstellungen/hotel` editierbar und persistiert, aber **kein Konsument im Backend**. AE-53 rechnet mit eigenen Konstanten (`HEALTHY_MAX_AGE` 2 h, `DEGRADED_MAX_AGE` 24 h). Der Hotelier kann hier einen Wert setzen, der aussieht, als steuere er die 2-Stunden-Schwelle, und nichts tut. Entweder verdrahten oder aus der UI nehmen — ein stiller Schalter ist schlimmer als ein fehlender. Gleiches gilt für `alert_email` (nur TODO-Kommentar als „Konsument"). | 🟡 |
 | B-17-2 | **`event_log`-Retention und Compression.** Befund 2026-09-18: `event_log` 4,45 GB ohne Retention- und ohne Compression-Policy (`sensor_reading` zum Vergleich 32 MB). Vorschlag: TimescaleDB-Compression ab 7 Tagen, Retention offen. **Keine Frist** — 53 GB sind frei. | 🟢 |
 | B-17-3 | **Docker-Aufräumen in den Deploy-Ablauf.** Befund 2026-09-18: 197 Images, davon 15 aktiv; 7,5 GB einmalig freigeräumt. Gedacht ist `docker image prune -f` plus Builder-Prune, **nur namenlose Reste, kein `-a`**. **Vorher zu klären und zu dokumentieren:** setzt das Rollback-Verfahren auf einem benannten Vorgänger-Image auf, und wenn ja, wie viele Versionen müssen stehenbleiben? Erst danach entscheiden, ob die Bereinigung ins Deploy-Skript gehört oder als wöchentlicher systemd-Timer läuft. Ohne diese Klärung droht ein Aufräumlauf, der den Rückweg wegräumt. | 🟢 |
@@ -4228,13 +4323,24 @@ Secrets liegen in:
 | `v0.1.17c-room-override-blocked` | Sprint 12c (Uebersteuerungs-Sperre pro Zimmer: `room.guest_override_blocked`, Single-Source-of-Truth in `override_service.create`, Auto-Revoke bei Toggle-On mit `revoked_reason="room_override_blocked"`, BusinessAudit `ROOM_OVERRIDE_BLOCK_TOGGLED`, Device-Adapter Pre-A-Gate, Frontend-Toggle + Panel-Banner, PR #166, Squash-Commit `e9b18af`) | 2026-05-20 |
 | `v0.1.17d-room-block-list-indicator` | Sprint 12c.a (Schloss-Symbol-Spalte in Zimmer-Uebersicht bei `guest_override_blocked=true`, Frontend-only, PR #168, Squash-Commit `81ed3dc`) | 2026-05-20 |
 
+| `v0.2.0-alarm-versand` | **Sprint 18** (Alarm-Versand: SMTP über stdlib `smtplib`, Sammelmail für stumme Geräte, Import-Watchdog, Wiederholungsbremse, Versandstatus sichtbar, drei Dead-Man-Checks; PRs #235/#236/#237/#239, Merge-Commit `a0981d8`). Der Sprung auf 0.2 markiert eine **Eigenschaft**, keine Funktionsliste: das System kann jetzt von sich aus melden, dass etwas nicht stimmt — die Voraussetzung, von der im Montagefenster ab 26.09. alles andere abhängt. Live bestätigt 20.09. | 2026-09-20 |
+
 *Sprint 9.8c (Hygiene) und Sprint 9.8d (shadcn-Migration): kein Tag während Lauf — Tag-Vergabe nach Sprint-9.8d-Abschluss (T3 + T4) bzw. mit Final-Tag `v0.1.9-engine` auf main.*
 
 *Sprints 9.11x, 9.11x.b, 9.11x.c: kein eigener Tag — Familie schließt mit `v0.1.9-rc6-live-test-2` auf 9.11y.*
 
-*`v0.2.0-architektur-refresh` war geplant, nicht vergeben — der Refresh
-wurde über mehrere kleine Tags `v0.1.9-rc4` bis `v0.1.9-rc6` ausgerollt.
-Tag-Slot `v0.2.0` bleibt frei für späteren Meilenstein.*
+*`v0.2.0-architektur-refresh` — **Korrektur 2026-09-20:** der Tag **existiert**,
+annotated auf `edeb5d9` (PR #106, 2026-05-08). Der Text hier behauptete bis heute
+„war geplant, nicht vergeben"; `git tag -l` sagt das Gegenteil. Der Refresh wurde
+inhaltlich zwar über `v0.1.9-rc4` bis `v0.1.9-rc6` ausgerollt, aber der Marker
+wurde trotzdem gesetzt. Die Aussage „Tag-Slot `v0.2.0` bleibt frei" war damit
+schon beim Schreiben falsch.*
+
+*Die Absicht dahinter — `v0.2.0` für einen echten Meilenstein aufzuheben — ist
+mit `v0.2.0-alarm-versand` (Sprint 18) eingelöst. Zwei Tags mit demselben
+Versions-Präfix sind kein Konflikt (Tag-Namen sind vollständig verschieden),
+aber wer die Reihe liest, sollte wissen, dass der erste ein Doku-Marker ist und
+der zweite der Meilenstein.*
 
 *`v0.1.10-frost-protection` war für Sprint 9.12 (Frostschutz pro Raumtyp)
 geplant. Sprint zurückgestellt 2026-05-11 (siehe §2aa, AE-42).
