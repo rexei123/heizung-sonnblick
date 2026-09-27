@@ -2570,6 +2570,94 @@ den offenen PR #240 belegt (`docker compose` ohne `-f`). Bleibt der PR
 ungemergt, ist §5.78 eine Luecke — eine Luecke ist harmlos, eine doppelte
 Nummer nicht.
 
+### 5.80 Ein gruener CI-Lauf von gestern beweist nichts ueber heute, solange eine Abhaengigkeit unfixiert ist
+
+**Anlass, 26.09.2026.** Zwei Laeufe desselben CI-Jobs (`backend-ci` /
+`lint-and-test`), fuenf Stunden auseinander, verschiedene Ergebnisse — ohne
+eine Zeile Code-Aenderung dazwischen:
+
+| Lauf | Zeit (UTC) | mypy | Ergebnis |
+|---|---|---|---|
+| PR #240 | 05:0x | 1.x | **gruen**, 2m56s |
+| PR #241 | 10:13 | **2.3.1** | **rot**, 1m12s |
+
+`backend/pyproject.toml` sagte `"mypy>=1.9"` — untere Grenze, keine obere.
+CI installiert damit bei jedem Lauf die neueste Version. Zwischen den beiden
+Laeufen ist mypy 2.x erschienen, und mypy 2 meldet vier Stellen in
+Bestandscode, die 1.x durchgelassen hat.
+
+**Die Fehlermeldung zeigte auf Dateien, die der PR nicht angefasst hat.** Das
+ist das verwirrende Teil: der Job wirkt, als haette die Aenderung etwas
+kaputt gemacht, und die naheliegende Reaktion ist, in den fremden Dateien
+herumzubauen — unter Zeitdruck, in einem Produktions-Hotfix-PR.
+
+**Die Lesson ist nicht "pinne deine Werkzeuge".** Sie ist: **die
+Reproduzierbarkeit ist selbst ein Pruefgegenstand.** Ein CI-Job, dessen
+Ergebnis von der Tageszeit abhaengt, ist kein Gate, sondern ein Wuerfel mit
+guten Quoten. Und er faellt genau dann um, wenn man ihn braucht — hier vier
+Tage vor dem Montagefenster, waehrend die Sichtprobe an der einzigen
+verfuegbaren Beweisstelle hing (Docker Desktop lief lokal nicht, siehe
+B-18-5).
+
+**Regel:** Jedes Werkzeug, das ein **Urteil** faellt — Linter, Typechecker,
+Testrunner, Formatter —, bekommt eine Obergrenze. Nicht weil neuere
+Versionen schlechter sind, sondern weil der Zeitpunkt des Versionssprungs
+sonst von aussen bestimmt wird und mit der eigenen Arbeit zusammenfaellt.
+Der Sprung kommt dann als eigener PR, der nichts anderes tut.
+
+Fuer **Laufzeit**-Abhaengigkeiten (fastapi, sqlalchemy, celery …) gilt das
+so pauschal nicht: dort ist eine Obergrenze pro Paket Pflegeaufwand, und das
+Bild ist ein anderes, weil ein Produktions-Image ohnehin gebaut und getestet
+wird, bevor es laeuft. Die scharfe Trennlinie: **wer das Gate stellt, wird
+gepinnt; was durch das Gate geht, nicht zwingend.**
+
+#### Was ein Lockfile daran aendert
+
+Im Frontend steht in `package.json` ueberall `^` — und das ist **kein**
+Problem derselben Klasse, weil `package-lock.json` im Repo liegt und CI
+`npm ci` benutzt. `npm ci` installiert exakt den Lockfile-Stand und ignoriert
+die Ranges. Ein Versionssprung braucht dort also einen Commit, und damit ist
+er sichtbar und datiert.
+
+Das Backend hat **kein** Lockfile (`pip install -e ".[dev]"` loest die Ranges
+bei jedem Lauf frisch auf). Deshalb tragen die Obergrenzen dort die ganze
+Last. Ein `constraints.txt` oder `uv.lock` waere die strukturelle Antwort —
+eigener Hygiene-Sprint, nicht unter Frist.
+
+#### Der Diagnose-Handgriff
+
+Wenn ein CI-Job rot ist und die Meldung auf Dateien zeigt, die der PR nicht
+beruehrt: **erst die Werkzeugversionen vergleichen, dann den Code lesen.**
+
+```bash
+# lokal
+cd backend && ./.venv/Scripts/python.exe -m mypy --version
+# in CI: im Log den "Install dependencies"-Schritt oeffnen, Zeile
+# "Successfully installed ... mypy-X.Y.Z ..."
+```
+
+Weichen sie ab, ist die Versionsdifferenz die erste Hypothese und nicht der
+Code. Ein zweiter Beleg ist ein **frueherer gruener Lauf desselben Jobs auf
+einem anderen PR** — findet man mit
+
+```bash
+gh api repos/<owner>/<repo>/commits/develop/check-runs \
+  --jq '.check_runs[] | "\(.name) \(.conclusion) \(.completed_at)"'
+```
+
+Zwei verschiedene Ergebnisse bei gleichem Code sind ein Umgebungsbefund,
+kein Codebefund.
+
+**Querverweise:** §5.29 (unmaintained Wrapper als verstecktes
+Stabilitaetsrisiko — Schwesterfall: dort eine Library, die *nicht* mehr
+bewegt wird, hier eine, die sich *ohne uns* bewegt), §5.68 (Behauptung vs.
+Befund — der fruehere gruene Lauf ist der Befund, der die Hypothese stuetzt),
+§5.24 (`ruff check` und `ruff format --check` sind verschiedene Gates — beide
+werden von derselben unfixierten `ruff>=0.3`-Zeile bedient), §5.79 (ein
+Audit gilt nur fuer den Stand, den es gesehen hat — hier gilt ein *Testlauf*
+nur fuer die Umgebung, in der er lief), B-18-4 (Anpassung an mypy 2),
+B-18-5 (Docker Desktop als einzelner Punkt des Versagens).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

@@ -30,7 +30,14 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "ruff>=0.3",
-    "mypy>=1.9",
+    # Obergrenze bewusst gesetzt (26.09.2026). mypy 2.x meldet vier Stellen
+    # in Bestandscode, die 1.x durchgelassen hat. Der eigentliche Mangel war
+    # aber nicht der Typfehler, sondern die fehlende Obergrenze: zwei Laeufe
+    # desselben CI-Jobs, fuenf Stunden auseinander, verschiedene Ergebnisse,
+    # ohne eine Zeile Code-Aenderung (PR #240 gruen um 05:0x UTC mit 1.x,
+    # PR #241 rot um 10:13 UTC mit 2.3.1). Siehe CLAUDE.md 5.80.
+    # Anpassung an mypy 2 als B-18-4 nach dem 29.09.
+    "mypy>=1.9,<2",
     "psycopg2-binary>=2.9",
 ]
 
