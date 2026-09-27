@@ -59,7 +59,8 @@ test.describe("Sprint 14c Dashboard", () => {
         body: JSON.stringify({
           status: "green",
           last_success_at: new Date(Date.now() - 3_600_000).toISOString(),
-          expected_by_local: "09:00",
+          expected_by_local: "12:00",
+          expected_by_local_label: "12:00 MESZ",
           today_received: true,
           imports: [],
         }),

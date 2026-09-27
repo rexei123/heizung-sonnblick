@@ -441,6 +441,8 @@ export interface GlobalConfig {
   alert_email: string | null;
   alert_device_offline_minutes: number;
   alert_battery_warn_percent: number;
+  // Ortszeit "HH:MM:SS" (§5.65). Schwelle des Belegungs-Import-Watchdogs.
+  occupancy_import_expected_by_local: string;
   // Laufzeit-Felder zum Mailversand (Sprint 18, T4). Read-only — sie stehen
   // NICHT in GlobalConfigUpdate, weil sie das System schreibt, nicht der
   // Hotelier. Spiegel zu schemas/global_config.py (§5.63).
@@ -565,6 +567,7 @@ export interface GlobalConfigUpdate {
   alert_email?: string | null;
   alert_device_offline_minutes?: number;
   alert_battery_warn_percent?: number;
+  occupancy_import_expected_by_local?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -730,7 +733,8 @@ export interface OccupancyImportLogRow {
 export interface OccupancyImportLog {
   status: OccupancyImportStatus;
   last_success_at: string | null; // UTC ISO-8601 oder null ("noch nie")
-  expected_by_local: string; // "HH:MM" (Lokal-Zeit)
+  expected_by_local: string; // "HH:MM" (Ortszeit, ohne Einheit — fuer Formulare)
+  expected_by_local_label: string; // "12:00 MESZ" — fuer die Anzeige
   today_received: boolean;
   imports: OccupancyImportLogRow[]; // letzte 30, neueste zuerst
 }

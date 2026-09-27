@@ -48,6 +48,17 @@ class GlobalConfig(Base):
     summer_mode_starts_on: Mapped[date | None] = mapped_column(Date)
     summer_mode_ends_on: Mapped[date | None] = mapped_column(Date)
 
+    # Erwartungszeit der taeglichen Belegungsliste (Migration 0022).
+    # **Ortszeit**, wie alle Zeitfelder hier (§5.65). Der Watchdog wandelt
+    # UTC-now in Ortszeit und vergleicht dagegen.
+    #
+    # Konfigurierbar, weil der Wert am Versandzeitpunkt in fremder Software
+    # haengt (Casablanca, 10:38 Ortszeit, bestaetigt 26.09.2026). Aendert
+    # jemand das dort, erfahren wir es nicht.
+    occupancy_import_expected_by_local: Mapped[time] = mapped_column(
+        Time, nullable=False, default=time(12, 0)
+    )
+
     # Alerts (Sprint 13 — Email-Service nutzt diese)
     alert_email: Mapped[str | None] = mapped_column(String(200))
     alert_device_offline_minutes: Mapped[int] = mapped_column(default=120, nullable=False)

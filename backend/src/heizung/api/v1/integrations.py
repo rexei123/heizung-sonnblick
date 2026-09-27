@@ -91,8 +91,6 @@ async def occupancy_import_log(
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> OccupancyImportLogResponse:
-    settings = get_settings()
-    return await get_import_log(
-        session,
-        expected_by_local_str=settings.occupancy_import_expected_by_local,
-    )
+    # Die Schwelle kommt aus global_config (Migration 0022), nicht mehr aus
+    # der Umgebung — der Service laedt sie selbst.
+    return await get_import_log(session)

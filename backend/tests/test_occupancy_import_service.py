@@ -11,7 +11,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -397,7 +397,7 @@ async def test_watchdog_stale_writes_audit_and_frees_no_rooms(session: AsyncSess
     await session.commit()
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)  # lokal 10:00, nach 09:00
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     assert result["stale"] is True
     stale = await _audits(session, ACTION_STALE)
@@ -420,7 +420,7 @@ async def test_watchdog_not_stale_when_import_present(session: AsyncSession) -> 
             new_value={
                 "external_id": "x",
                 "list_date": "2026-06-06",
-                "received_at": "2026-06-06T05:14:15+00:00",
+                "received_at": "2026-06-06T07:14:15+00:00",
                 "rooms_occupied": 3,
                 "rooms_closed": 0,
                 "conflicts": 0,
@@ -431,14 +431,14 @@ async def test_watchdog_not_stale_when_import_present(session: AsyncSession) -> 
     )
     await session.commit()
 
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
     assert result["stale"] is False
     assert await _audits(session, ACTION_STALE) == []
 
 
 async def test_watchdog_before_expected_is_noop(session: AsyncSession) -> None:
     now = datetime(2026, 6, 6, 5, 0, tzinfo=UTC)  # lokal 07:00, vor 09:00
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
     assert result == {"stale": False, "reason": "before_expected"}
     assert await _audits(session, ACTION_STALE) == []
 
@@ -460,7 +460,7 @@ async def test_get_import_log_shape_and_status(session: AsyncSession) -> None:
                 new_value={
                     "external_id": "rej-1",
                     "list_date": "2026-06-05",
-                    "received_at": "2026-06-05T05:14:15+00:00",
+                    "received_at": "2026-06-05T07:14:15+00:00",
                     "rooms_occupied": 0,
                     "rooms_closed": 0,
                     "conflicts": 0,
@@ -476,7 +476,7 @@ async def test_get_import_log_shape_and_status(session: AsyncSession) -> None:
                 new_value={
                     "external_id": "app-1",
                     "list_date": "2026-06-06",
-                    "received_at": "2026-06-06T05:14:15+00:00",
+                    "received_at": "2026-06-06T07:14:15+00:00",
                     "rooms_occupied": 4,
                     "rooms_closed": 1,
                     "conflicts": 0,
@@ -488,12 +488,12 @@ async def test_get_import_log_shape_and_status(session: AsyncSession) -> None:
     )
     await session.commit()
 
-    resp = await get_import_log(session, expected_by_local_str="09:00", now=now)
+    resp = await get_import_log(session, expected_by_local=time(9, 0), now=now)
 
     assert resp.status == "green"  # today_received
     assert resp.today_received is True
     assert resp.expected_by_local == "09:00"
-    assert resp.last_success_at == datetime(2026, 6, 6, 5, 14, 15, tzinfo=UTC)
+    assert resp.last_success_at == datetime(2026, 6, 6, 7, 14, 15, tzinfo=UTC)
     assert len(resp.imports) == 2
     # neueste zuerst
     assert resp.imports[0].external_id == "app-1"
@@ -557,7 +557,7 @@ async def test_watchdog_verschickt_alarm_mail(
     await _set_alert_email(session, "chef@example.com")
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     assert result["stale"] is True
     assert len(postfach.mails) == 1
@@ -580,7 +580,7 @@ async def test_watchdog_ohne_alarm_adresse_schreibt_nur_das_audit(
     await _set_alert_email(session, None)
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     assert result["stale"] is True
     assert len(await _audits(session, ACTION_STALE)) == 1
@@ -603,7 +603,7 @@ async def test_watchdog_alarm_wird_pro_tag_nur_einmal_verschickt(
     await _set_alert_email(session, "chef@example.com")
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
-    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     # Das Audit von Hand entfernen, damit der Guard NICHT greift — jetzt
     # ist die Bremse allein zustaendig.
@@ -611,7 +611,7 @@ async def test_watchdog_alarm_wird_pro_tag_nur_einmal_verschickt(
         await session.delete(a)
     await session.commit()
 
-    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     assert len(postfach.mails) == 1, "die Bremse haelt, auch ohne Audit-Guard"
     assert alert_throttle.KIND_IMPORT_STALE in " ".join(geteilt.store)
@@ -634,7 +634,7 @@ async def test_watchdog_versandfehler_bricht_den_lauf_nicht_ab(
     await _set_alert_email(session, "chef@example.com")
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
-    result = await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    result = await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     assert result["stale"] is True
     assert len(await _audits(session, ACTION_STALE)) == 1
@@ -668,9 +668,205 @@ async def test_watchdog_haelt_den_versandversuch_fest(
     await session.commit()
 
     now = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
-    await run_freshness_check(session, expected_by_local_str="09:00", now=now)
+    await run_freshness_check(session, expected_by_local=time(9, 0), now=now)
 
     await session.refresh(gc)
     assert gc.last_mail_attempt_at is not None
     assert gc.last_mail_error is not None
     assert gc.last_mail_error.startswith("SMTPAuthenticationError")
+
+
+# ---------------------------------------------------------------------------
+# Zeitzonen-Fix 26.09.2026 — Eingang, Schwelle, DST
+#
+# Anlass: Der Watchdog hat am 26.09. um 10:15 Ortszeit Alarm geschlagen. Die
+# Liste kam um 10:38, also 23 Minuten spaeter, puenktlich wie an den 20 Tagen
+# davor. Zwei Ursachen, die zusammen wirkten:
+#
+#   1. ``payload.received_at`` von mailparser ist UTC, wurde aber per
+#      ``.replace(tzinfo=tz)`` zur Ortszeit **erklaert**. Der gespeicherte
+#      Eingang lag damit zwei Stunden zu frueh (06:38 statt 08:38 UTC).
+#      Beleg aus der Produktion: ``business_audit.ts`` = 08:38+00 (echter
+#      Eingang) gegen ``new_value.received_at`` = 06:38+00 in derselben Zeile.
+#   2. Die Oberflaeche zeigte diesen falschen Wert als "08:38", ohne Einheit,
+#      direkt neben "Erwartet bis 09:00 Uhr". Daraus wurde die Schwelle 09:00
+#      abgeleitet — sie haette hinter 10:38 liegen muessen.
+#
+# Der **Vergleich** war die ganze Zeit korrekt (Ortszeit gegen Ortszeit,
+# AE-60). Deshalb pinnen diese Tests den Eingang und die Schwelle, nicht die
+# Vergleichslogik.
+# ---------------------------------------------------------------------------
+
+
+async def test_eingang_wird_als_utc_gelesen(session: AsyncSession) -> None:
+    """Der Kern des Fehlers vom 26.09.
+
+    mailparser sendet ``"2026-09-26 08:38:27"`` — das ist UTC. Gespeichert
+    werden muss genau dieser Augenblick, nicht der zwei Stunden fruehere.
+    """
+    num = _room_number("501")
+    await _seed_room(session, num)
+    payload = _payload(
+        entries=[_entry(num, "26.09.", "28.09.2026")],
+        received_at="2026-09-26 08:38:27",
+        ext_id="tz-utc-1",
+    )
+
+    await reconcile_from_import(
+        session, payload=payload, now=datetime(2026, 9, 26, 8, 40, tzinfo=UTC)
+    )
+
+    audits = await _audits(session, ACTION_APPLIED)
+    nv = audits[0].new_value
+    assert isinstance(nv, dict)
+    # 08:38:27 UTC — NICHT 06:38:27. Vor dem Fix stand hier der fruehere Wert.
+    assert nv["received_at"] == "2026-09-26T08:38:27+00:00"
+
+
+async def test_list_date_kommt_aus_der_ortszeit(session: AsyncSession) -> None:
+    """Der Kalendertag ist der des Hotels, nicht der von UTC.
+
+    Ein Versand um 23:30 UTC liegt im Winter bereits am Folgetag Ortszeit.
+    Wuerde ``list_date`` aus dem UTC-Datum kommen, gehoerte die Liste zum
+    Vortag — und der Watchdog suchte am naechsten Morgen eine Liste, die
+    unter dem falschen Tag abgelegt ist.
+    """
+    num = _room_number("502")
+    await _seed_room(session, num)
+    payload = _payload(
+        entries=[_entry(num, "03.01.", "05.01.2027")],
+        received_at="2027-01-02 23:30:00",  # UTC -> 03.01. 00:30 MEZ
+        ext_id="tz-utc-2",
+    )
+
+    out = await reconcile_from_import(
+        session, payload=payload, now=datetime(2027, 1, 2, 23, 35, tzinfo=UTC)
+    )
+
+    assert out.list_date == date(2027, 1, 3)
+
+
+# --- Schwelle aus der Konfiguration ----------------------------------------
+
+
+async def _set_expected_by(session: AsyncSession, value: time) -> None:
+    gc = await session.get(GlobalConfig, 1)
+    assert gc is not None
+    gc.occupancy_import_expected_by_local = value
+    await session.commit()
+
+
+async def test_schwelle_kommt_aus_global_config(session: AsyncSession) -> None:
+    """Ohne Parameter laedt der Watchdog die Schwelle selbst.
+
+    Das ist der Produktionspfad. Vor dem Fix stand der Wert in der
+    Umgebung — unsichtbar fuer den Hotelier und nur per SSH aenderbar.
+    """
+    await _set_expected_by(session, time(12, 0))
+
+    # 11:00 Ortszeit (09:00 UTC im Sommer): noch vor 12:00 -> kein Alarm.
+    frueh = await run_freshness_check(session, now=datetime(2026, 9, 26, 9, 0, tzinfo=UTC))
+    assert frueh == {"stale": False, "reason": "before_expected"}
+
+    # 13:00 Ortszeit: nach 12:00 -> Alarm.
+    spaet = await run_freshness_check(session, now=datetime(2026, 9, 26, 11, 0, tzinfo=UTC))
+    assert spaet["stale"] is True
+
+
+async def test_der_alarm_vom_26_09_faellt_mit_12_uhr_weg(session: AsyncSession) -> None:
+    """Die Regressionsprobe auf den konkreten Vorfall.
+
+    Genau der Zeitpunkt, an dem der Watchdog damals Alarm geschlagen hat:
+    08:15 UTC = 10:15 MESZ. Mit der Schwelle 12:00 ist das ein No-op, und die
+    Liste hat bis 10:38 Zeit.
+    """
+    await _set_expected_by(session, time(12, 0))
+
+    result = await run_freshness_check(session, now=datetime(2026, 9, 26, 8, 15, tzinfo=UTC))
+
+    assert result == {"stale": False, "reason": "before_expected"}
+    assert await _audits(session, ACTION_STALE) == []
+
+
+# --- DST: der teure Teil ---------------------------------------------------
+#
+# Ab 25.10.2026 gilt MEZ. Versendet Casablanca weiter um 10:38 Ortszeit,
+# wandert der UTC-Zeitstempel von 08:38 auf 09:38. Eine in UTC gerechnete
+# Schwelle laege dann still eine Stunde daneben — sechs Tage vor dem Go-Live.
+# Die drei Faelle analog AE-60: Sommer, Winter, Wechseltag.
+
+
+async def test_dst_sommer_11_uhr_ortszeit_ist_vor_zwoelf(session: AsyncSession) -> None:
+    await _set_expected_by(session, time(12, 0))
+    # MESZ = UTC+2. 09:00 UTC -> 11:00 Ortszeit.
+    result = await run_freshness_check(session, now=datetime(2026, 9, 26, 9, 0, tzinfo=UTC))
+    assert result == {"stale": False, "reason": "before_expected"}
+
+
+async def test_dst_winter_11_uhr_ortszeit_ist_vor_zwoelf(session: AsyncSession) -> None:
+    """Derselbe Ortszeit-Moment, andere UTC-Uhrzeit.
+
+    MEZ = UTC+1, also ist 11:00 Ortszeit hier 10:00 UTC. Ein in UTC
+    gerechneter Vergleich gegen 12:00 haette im Sommer *und* im Winter
+    dasselbe UTC-Fenster benutzt und damit einmal eine Stunde falsch
+    gelegen. Genau diesen Fehler schliessen die beiden Tests zusammen aus.
+    """
+    await _set_expected_by(session, time(12, 0))
+    result = await run_freshness_check(session, now=datetime(2026, 11, 3, 10, 0, tzinfo=UTC))
+    assert result == {"stale": False, "reason": "before_expected"}
+
+
+async def test_dst_winter_13_uhr_ortszeit_ist_nach_zwoelf(session: AsyncSession) -> None:
+    await _set_expected_by(session, time(12, 0))
+    # 12:00 UTC -> 13:00 MEZ.
+    result = await run_freshness_check(session, now=datetime(2026, 11, 3, 12, 0, tzinfo=UTC))
+    assert result["stale"] is True
+
+
+async def test_dst_wechseltag_25_10_beide_seiten(session: AsyncSession) -> None:
+    """Der Wechseltag selbst: 25.10.2026, Umstellung um 03:00 MESZ.
+
+    Vor der Umstellung gilt UTC+2, danach UTC+1. Ein Vergleich, der die
+    Verschiebung nicht kennt, kippt genau hier um eine Stunde. ``ZoneInfo``
+    behandelt das transparent — dieser Test belegt es, statt es anzunehmen.
+    """
+    await _set_expected_by(session, time(12, 0))
+
+    # 09:00 UTC am Wechseltag = 10:00 MEZ (Umstellung um 01:00 UTC bereits
+    # vorbei) -> vor 12:00.
+    vor = await run_freshness_check(session, now=datetime(2026, 10, 25, 9, 0, tzinfo=UTC))
+    assert vor == {"stale": False, "reason": "before_expected"}
+
+    # 12:00 UTC = 13:00 MEZ -> nach 12:00.
+    nach = await run_freshness_check(session, now=datetime(2026, 10, 25, 12, 0, tzinfo=UTC))
+    assert nach["stale"] is True
+
+
+# --- Alarmtext -------------------------------------------------------------
+
+
+async def test_alarmtext_nennt_die_faelligkeit_mit_kuerzel(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Mail wird im Postfach gelesen, ohne die Oberflaeche daneben.
+
+    "bis 12:00 Uhr" waere dort nicht einzuordnen — genau die Luecke, aus der
+    der Vorfall vom 26.09. entstanden ist.
+    """
+    from heizung.services import occupancy_import_service as svc
+    from heizung.services import redis_client
+
+    postfach = _Postfach()
+    monkeypatch.setattr(svc.mailer, "send_mail", postfach)
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: _AlarmRedis())
+    await _set_alert_email(session, "chef@example.com")
+    await _set_expected_by(session, time(12, 0))
+
+    # 13:00 Ortszeit im Sommer -> Sommerzeit-Kuerzel in der Mail.
+    await run_freshness_check(session, now=datetime(2026, 9, 26, 11, 0, tzinfo=UTC))
+
+    assert len(postfach.mails) == 1
+    body = postfach.mails[0]["body"]
+    assert "12:00" in body
+    # Kuerzel plattformabhaengig (MESZ unter deutschem Locale, sonst CEST).
+    assert ("MESZ" in body) or ("CEST" in body), body[:200]

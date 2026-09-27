@@ -7,8 +7,14 @@ unbekannte Top-Level-Felder werden ignoriert (``extra="ignore"``).
 Datums-Konvention der Liste (Sprint 15e-1): ``Anreise`` kommt real OHNE Jahr
 (``TT.MM.``), ``Abreise`` MIT Jahr (``TT.MM.JJJJ``). Beide Formen werden
 defensiv akzeptiert; das fehlende Jahr leitet ``resolve_stay_dates`` ab.
-``received_at`` ist die naive Lokal-Zeit (Europe/Vienna) aus mailparser; der
-Datumsteil ist das ``list_date``. UTC-Konversion erst im Service (§5.65).
+``received_at`` kommt von mailparser **ohne Zeitzonen-Angabe, der Wert ist
+aber UTC** (Befund 26.09.2026, CLAUDE.md §5.79). Der Service liest ihn als UTC
+und leitet das ``list_date`` aus der **Ortszeit** desselben Augenblicks ab.
+
+Bis zum 26.09.2026 stand hier "naive Lokal-Zeit (Europe/Vienna)". Das war
+falsch und hat die Eingangszeiten zwei Stunden zu frueh gespeichert. Wer den
+Wert kuenftig anders deutet, prueft das gegen ``business_audit.ts`` — der
+Zeitstempel der Audit-Zeile ist der echte Eingang und muss zum Feld passen.
 """
 
 from __future__ import annotations
@@ -95,7 +101,7 @@ class OccupancyImportPayload(BaseModel):
 
     id: str = Field(min_length=1, description="mailparser-Request-ID -> external_id / Idempotenz")
     received_at: datetime = Field(
-        description="Naive Lokal-Zeit Europe/Vienna; Datumsteil = list_date"
+        description="Zeitstempel ohne Zeitzonen-Angabe, Wert ist UTC; list_date = Ortszeit davon"
     )
     liste: list[OccupancyImportEntry] = Field(default_factory=list)
 
@@ -134,6 +140,11 @@ class OccupancyImportLogResponse(BaseModel):
 
     status: str  # "green" | "yellow" | "red"
     last_success_at: datetime | None
-    expected_by_local: str  # "HH:MM"
+    expected_by_local: str  # "HH:MM", Ortszeit — ohne Einheit, fuer Formulare
+    # Dieselbe Zeit MIT Kuerzel ("12:00 MESZ"), fuer die Anzeige. Bewusst
+    # zwei Felder: ein Eingabefeld braucht den nackten Wert, ein Satz fuer
+    # den Menschen braucht die Einheit. Am 26.09.2026 stand hier eine
+    # Ortszeit-Schwelle neben einem UTC-Eingang, beide ohne Kennzeichnung.
+    expected_by_local_label: str
     today_received: bool
     imports: list[OccupancyImportLogRow]

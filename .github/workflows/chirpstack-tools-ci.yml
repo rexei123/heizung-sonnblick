@@ -40,7 +40,15 @@ jobs:
         # einen Doppelgaenger des gRPC-Clients, nicht gegen chirpstack-api.
         # Das haelt die CI schnell und beweist nebenbei, dass der Import
         # wirklich lazy ist.
-        run: pip install "ruff>=0.3" "mypy>=1.9" "pytest>=8.0"
+        #
+        # Grenzen identisch zu backend/pyproject.toml. Dieser Schritt
+        # installiert die Werkzeuge INLINE, der Pin dort greift hier also
+        # nicht — am 26.09.2026 zog dieser Job weiterhin mypy 2, waehrend
+        # backend-ci schon gepinnt war. Er blieb gruen, weil die
+        # ChirpStack-Werkzeuge die betroffenen Stellen nicht haben: Glueck,
+        # keine Absicht. Genau diese Werkzeuge pruefen die Skripte, die im
+        # Montagefenster die Geraete anlegen (CLAUDE.md 5.80).
+        run: pip install "ruff>=0.3" "mypy>=1.9,<2" "pytest>=8.0"
 
       - name: Ruff (Lint)
         run: ruff check .

@@ -33,7 +33,11 @@ function logPayload(partial: Record<string, unknown>): string {
   return JSON.stringify({
     status: "green",
     last_success_at: new Date(Date.now() - 3_600_000).toISOString(),
-    expected_by_local: "09:00",
+    expected_by_local: "12:00",
+    // Pflichtfeld im Zod-Schema. Fehlt es, scheitert das Parsen und die
+    // Kachel rendert gar nicht — der Mock muss die Antwortform vollstaendig
+    // abbilden (§5.64).
+    expected_by_local_label: "12:00 MESZ",
     today_received: true,
     imports: [],
     ...partial,

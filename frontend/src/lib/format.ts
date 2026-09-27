@@ -5,12 +5,39 @@
  * Locale: de-AT (Hotel Sonnblick Kaprun).
  */
 
+/**
+ * Zeitzone des Hotels. Fest verdrahtet, NICHT die Zeitzone des Browsers.
+ *
+ * Bis zum 26.09.2026 fehlte diese Angabe. Intl nimmt dann die Zone des
+ * anzeigenden Geraets — was in Kaprun meist richtig aussieht und beim
+ * Zugriff aus einer anderen Zone (Reise, Server-Rendering, Monitoring von
+ * ausserhalb) still falsche Uhrzeiten zeigt. Ein Betriebszeitstempel
+ * bezieht sich auf die Uhr des Hotels, nicht auf die des Betrachters.
+ *
+ * Quelle der Wahrheit ist ``global_config.timezone``; hier steht sie als
+ * Konstante, weil Intl einen Wert zum Modul-Ladezeitpunkt braucht und das
+ * Hotel einen Standort hat. Zieht das Haus um, aendert sich beides.
+ */
+export const HOTEL_TIMEZONE = "Europe/Vienna";
+
 const DT = new Intl.DateTimeFormat("de-AT", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  timeZone: HOTEL_TIMEZONE,
+});
+
+/** Wie DT, zusaetzlich mit Zeitzonen-Kuerzel ("26.09.2026, 10:38 MESZ"). */
+const DT_TZ = new Intl.DateTimeFormat("de-AT", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: HOTEL_TIMEZONE,
+  timeZoneName: "short",
 });
 
 const RTF = new Intl.RelativeTimeFormat("de-AT", { numeric: "auto" });
@@ -20,6 +47,23 @@ export function formatDateTime(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "–";
   return DT.format(d);
+}
+
+/**
+ * Zeitstempel MIT Zeitzonen-Kuerzel.
+ *
+ * Fuer Stellen, an denen die Uhrzeit neben einer anderen Uhrzeit steht oder
+ * mit einer Schwelle verglichen wird. Dort ist die fehlende Einheit keine
+ * Kosmetik: am 26.09.2026 stand ein UTC-Eingang ("08:38") neben einer
+ * Ortszeit-Schwelle ("09:00 Uhr"), beide ohne Kennzeichnung — daraus wurde
+ * eine falsch gesetzte Schwelle und ein Waechter, der 21 Tage zu frueh
+ * anschlug.
+ */
+export function formatDateTimeTz(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "–";
+  return DT_TZ.format(d);
 }
 
 /**

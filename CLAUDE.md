@@ -2538,6 +2538,261 @@ dort ist der Aufruf ebenfalls serverseitig und braucht `-f`), §5.32
 gegenseitig verdecken), §5.6 (Befehl-Trennung PowerShell / SSH — dieselbe
 Familie: ein Befehl im falschen Kontext).
 
+### 5.79 Ein abgeschlossenes Audit gilt nur fuer den Code-Stand, den es gesehen hat (Belegungs-Import-Zeitzonen-Fix)
+
+**Anlass, 26.09.2026:** Der Belegungs-Import-Waechter hat seinen ersten
+echten Alarm ausgeloest — 23 Minuten **bevor** die Liste faellig war. Sie kam
+puenktlich um 10:38 Ortszeit, wie an den 20 Tagen davor.
+
+Die Kette, von hinten:
+
+1. `payload.received_at` von mailparser traegt **keine** Zeitzonen-Angabe,
+   der Wert ist aber **UTC**. Der Service las ihn mit
+   `.replace(tzinfo=tz)` — das *behauptet* eine Zeitzone, statt umzurechnen.
+   Der gespeicherte Eingang lag damit zwei Stunden zu frueh.
+2. Die Oberflaeche zeigte diesen falschen Wert als `08:38`, **ohne Einheit**,
+   direkt neben `Erwartet bis 09:00 Uhr` — ebenfalls ohne Einheit, aber
+   Ortszeit. Zwei Zahlen in verschiedenen Einheiten, die wie ein Vergleich
+   aussahen.
+3. Aus dieser Ansicht wurde die Schwelle **09:00** abgeleitet. Sie haette
+   hinter 10:38 liegen muessen.
+4. Der Beat prueft um 08:15 UTC = 10:15 MESZ. Nach 09:00, vor 10:38 → Alarm,
+   jeden Tag.
+
+**Der Vergleich selbst war die ganze Zeit richtig.** Ortszeit gegen Ortszeit,
+genau nach AE-60. Wer nur dorthin gesehen haette, haette nichts gefunden.
+
+#### Warum AE-60 das nicht abgedeckt hat
+
+AE-60 (B-10-4) hat 2026-05-25 genau diese Fehlerklasse behoben: UTC-Wallclock
+gegen Lokal-Konfiguration, damals in der Nachtabsenkung. Das Audit dazu ist
+als abgeschlossen dokumentiert, mit dem Satz, es seien alle Stellen geprueft.
+
+Der Belegungs-Import war nicht dabei — **nicht weil er uebersehen wurde,
+sondern weil er noch nicht existierte.** Er kam mit Sprint 15e am
+2026-06-06, zwoelf Tage nach dem Audit.
+
+Das ist der eigentliche Punkt: Das Audit war zu seinem Zeitpunkt vollstaendig
+und ist heute unvollstaendig, **ohne dass sich an ihm etwas geaendert hat.**
+Ein Leser im September sieht "alle Stellen geprueft" und glaubt es — zu Recht
+sogar, nur bezog sich "alle" auf einen Code-Stand, der nicht mehr der
+aktuelle ist.
+
+**Regel:** Ein Audit, das eine Fehlerklasse ueber den ganzen Code sucht
+("alle `.time()`-Aufrufe", "alle Endpoints ohne Auth", "alle Device-Queries
+ohne Lifecycle-Filter"), dokumentiert **den Code-Stand, den es gesehen hat**
+— Commit-SHA oder Datum plus Umfang, zum Beispiel:
+
+> Geprueft am 2026-05-25 gegen `d2d5311`: `rules/`, `services/`, `tasks/`.
+> Neue Zeitvergleiche nach diesem Stand sind **nicht** abgedeckt.
+
+Und der Umkehrschluss, der in der Praxis mehr traegt: **wer eine neue
+Zeit-, Auth- oder Query-Stelle baut, prueft die zugehoerige Lesson gegen
+seinen eigenen Code, statt sich auf ein "abgeschlossen" zu verlassen.** Ein
+Audit ist eine Momentaufnahme, keine Garantie mit Zukunftswirkung. Sprint 15e
+haette §5.65 lesen und den eigenen Zeitvergleich pruefen muessen — und hat
+das fuer den Vergleich sogar getan, nur nicht fuer die **Eingangsdaten**.
+
+#### Zweiter Teil: ein Test aus dem beobachteten Verhalten bestaetigt den Fehler
+
+Die Fixtures in `test_occupancy_import_service.py` trugen
+`"received_at": "2026-06-06T05:14:15+00:00"` — also genau den um zwei Stunden
+verschobenen Wert, den der Code produzierte. Sie kamen nicht aus der
+Spezifikation ("mailparser liefert UTC, also muss der Eingang unveraendert
+gespeichert werden"), sondern aus dem Lauf des Codes.
+
+Damit war der Fehler **testseitig zementiert**. Jede Suite lief gruen, und
+ein Umbau, der den Wert korrigiert haette, waere als Regression aufgefallen.
+
+**Regel:** Ein Test, dessen Erwartungswert aus dem beobachteten Verhalten
+kopiert wurde, prueft nur, dass sich nichts geaendert hat. Das ist fuer
+Refactorings wertvoll und fuer die Frage "ist es richtig" wertlos. Bei jedem
+Erwartungswert, der eine **Umrechnung** betrifft (Zeitzone, Einheit, Skala,
+Waehrung), muss die Herkunft im Test stehen — woher der Sollwert kommt, nicht
+nur welcher es ist:
+
+```python
+# 08:38:27 UTC — NICHT 06:38:27. mailparser liefert UTC (RUNBOOK 10d.9),
+# der Augenblick wird unveraendert gespeichert.
+assert nv["received_at"] == "2026-09-26T08:38:27+00:00"
+```
+
+Die Probe: Wer den Erwartungswert **ohne** den Code herleiten kann, hat eine
+Spezifikation. Wer ihn nur durch Ausfuehren bekommt, hat eine Momentaufnahme.
+
+#### Dritter Teil: eine Uhrzeit ohne Einheit ist eine offene Falle
+
+Der Versatz allein haette nicht gereicht. Gefaehrlich wurde er erst dadurch,
+dass **beide** Zahlen ohne Einheit dastanden — sonst waere beim Setzen der
+Schwelle aufgefallen, dass da UTC neben Ortszeit steht.
+
+**Regel:** Jede Uhrzeit in der Oberflaeche, in einer Mail oder in einem Log,
+die neben einer anderen Uhrzeit steht oder mit einer Schwelle verglichen
+wird, traegt ihre Zeitzone sichtbar ("10:38 MESZ"). Das ist keine Kosmetik,
+sondern die einzige Stelle, an der ein Mensch den Einheitenfehler ueberhaupt
+sehen kann. Im Repo: `formatDateTimeTz` im Frontend, `fmt_local_time` im
+Backend; `Intl.DateTimeFormat` bekommt **immer** ein explizites `timeZone`,
+nie die Zone des Betrachters.
+
+#### Vierter Teil: die Schwelle gehoert nicht in eine Konstante
+
+Der richtige Wert haengt am Versandzeitpunkt in **Casablanca** — fremde
+Software, deren Einstellung sich aendern kann, ohne dass wir es erfahren.
+Eine hartkodierte Schwelle waere danach entweder blind (zu spaet) oder
+laermend (zu frueh), und beides fiele erst auf, wenn es zaehlt.
+
+Seit Migration 0022 steht sie in `global_config` und ist in der Oberflaeche
+editierbar, **auf derselben Seite wie der Eingang** — wer die Schwelle setzt,
+muss sehen, wann die Liste tatsaechlich kommt, sonst raet er.
+
+Der Beat-Slot lief dazu passend von `crontab(hour=8, minute=15)` auf
+**stuendlich**. Der alte Kommentar dort sagte ausdruecklich, man muesse den
+UTC-Slot nachziehen, wenn die Schwelle spaeter gestellt wird — genau die
+Kopplung, die man nicht haben will, sobald die Schwelle in der Oberflaeche
+liegt. Wer sie auf 14:00 stellt, haette sonst einen Waechter, der um 10:15
+prueft und **nie** etwas melden kann. Lautlos.
+
+#### Und die Einordnung, die die Prioritaet bestimmt hat
+
+Ein Waechter, der taeglich zu frueh anschlaegt, wird nach einer Woche
+ignoriert. Das ist derselbe Verlust wie ein stiller Ausfall — nur mit Laerm
+statt Schweigen. §5.76 sagt, dass man die Wirkung ueberwachen muss statt der
+Mechanik; hier kommt dazu: **ein Melder, dem niemand mehr glaubt, ueberwacht
+nichts.** Falsch-Alarme sind kein kosmetisches Problem.
+
+**Querverweise:** §5.65 / AE-60 (die Fehlerklasse, dort behoben — und das
+Audit, das diesen Code-Stand nicht sehen konnte), §5.74 (Kalendertag-Strings
+im Frontend — dieselbe Wurzel, andere Richtung), §5.76 (Alarme auf die
+Wirkung; hier der Gegenfall: ein Alarm, der zu oft kommt), §5.20 (Doku-Drift
+— hier war die Doku-Aussage bei ihrem Entstehen korrekt), §5.77 (ein
+veralteter Vermerk, der wie ein Befund gelesen wird — Schwesterfall zu Teil
+eins), AE-66 / AE-71 (Belegungs-Import), Migration 0022.
+
+### 5.80 Ein gruener CI-Lauf von gestern beweist nichts ueber heute, solange eine Abhaengigkeit unfixiert ist
+
+**Anlass, 26.09.2026.** Zwei Laeufe desselben CI-Jobs (`backend-ci` /
+`lint-and-test`), fuenf Stunden auseinander, verschiedene Ergebnisse — ohne
+eine Zeile Code-Aenderung dazwischen:
+
+| Lauf | Zeit (UTC) | Ergebnis |
+|---|---|---|
+| PR #240 | 26.09. 05:0x | **gruen**, 2m56s |
+| PR #241 | 26.09. 10:13 | **rot**, 4 Fehler |
+| PR #241 nach dem mypy-Pin | 27.09. 16:03 | **rot**, 6 Fehler |
+
+`backend/pyproject.toml` sagte `"mypy>=1.9"` — untere Grenze, keine obere,
+und das Backend hat **kein Lockfile**. CI loest deshalb bei jedem Lauf
+*alle* Abhaengigkeiten frisch auf.
+
+**Meine erste Diagnose war falsch, und das gehoert hierher.** Ich habe die
+unterschiedlichen mypy-Versionen gesehen (lokal 1.20.2, CI 2.3.1) und daraus
+die Ursache geschlossen. Nach dem Pin auf `<2` installierte CI dieselbe
+mypy-Version wie lokal — und meldete **sechs** Fehler statt vier. Der
+Vergleich der uebrigen Pakete zeigte den wahren Grund:
+
+| | lokal | CI |
+|---|---|---|
+| mypy | 1.20.2 | 1.20.2 |
+| **SQLAlchemy** | **2.0.49** | **2.1.1** |
+
+SQLAlchemy 2.1 hat seine Typisierung geaendert: eine nullable Spalte kommt
+beim Row-Unpacking als `X | None` heraus, und in manchen Pfaden als `object`.
+Alle sechs Meldungen sind Folgen davon, keine mypy-Eigenheit. **mypy 2 hatte
+sogar weniger gemeldet als 1.20.2.**
+
+Das ist §5.68 in eigener Sache: Ich hatte eine korrelierte Beobachtung (die
+mypy-Versionen wichen ab) fuer den Befund genommen, ohne die anderen
+Variablen zu pruefen. Zwei Dinge hatten sich geaendert, ich habe nur eines
+gesehen und gemeldet. Der Pin auf `mypy<2` war deshalb nicht falsch, aber
+er hat das Problem nicht behoben — er hat nur eine von zwei beweglichen
+Teilen festgestellt.
+
+**Die Fehlermeldung zeigte auf Dateien, die der PR nicht angefasst hat.** Das
+ist das verwirrende Teil: der Job wirkt, als haette die Aenderung etwas
+kaputt gemacht, und die naheliegende Reaktion ist, in den fremden Dateien
+herumzubauen — unter Zeitdruck, in einem Produktions-Hotfix-PR.
+
+**Die Lesson ist nicht "pinne deine Werkzeuge".** Sie ist: **die
+Reproduzierbarkeit ist selbst ein Pruefgegenstand.** Ein CI-Job, dessen
+Ergebnis von der Tageszeit abhaengt, ist kein Gate, sondern ein Wuerfel mit
+guten Quoten. Und er faellt genau dann um, wenn man ihn braucht — hier vier
+Tage vor dem Montagefenster, waehrend die Sichtprobe an der einzigen
+verfuegbaren Beweisstelle hing (Docker Desktop lief lokal nicht, siehe
+B-18-5).
+
+**Regel:** Jedes Werkzeug, das ein **Urteil** faellt — Linter, Typechecker,
+Testrunner, Formatter —, bekommt eine Obergrenze. Nicht weil neuere
+Versionen schlechter sind, sondern weil der Zeitpunkt des Versionssprungs
+sonst von aussen bestimmt wird und mit der eigenen Arbeit zusammenfaellt.
+Der Sprung kommt dann als eigener PR, der nichts anderes tut.
+
+Aber — und das ist die Korrektur aus diesem Fall — **es reicht nicht, die
+Werkzeuge zu pinnen.** Ein Typechecker urteilt ueber Code *plus* die
+Typ-Informationen der Bibliotheken. SQLAlchemy, Pydantic und FastAPI sind
+damit Teil des Gates, auch wenn sie Laufzeit-Abhaengigkeiten sind. Wer nur
+den Checker festnagelt, hat die Haelfte der Eingabe fixiert.
+
+Die belastbare Form ist deshalb nicht "pinne die Werkzeuge", sondern
+**fixiere die Auflösung**: ein Lockfile oder eine `constraints.txt`, die CI
+mit `pip install -c` benutzt. Dann aendert sich eine Version nur durch einen
+Commit — sichtbar, datiert, und mit einem eigenen Testlauf.
+
+Bis es das gibt, gilt die Zwischenregel: **Obergrenze fuer alles, dessen
+Ausgabe ein Urteil ist** — Linter, Typechecker, Testrunner **und** die
+Bibliotheken, deren Typ-Stubs in dieses Urteil eingehen.
+
+#### Was ein Lockfile daran aendert
+
+Im Frontend steht in `package.json` ueberall `^` — und das ist **kein**
+Problem derselben Klasse, weil `package-lock.json` im Repo liegt und CI
+`npm ci` benutzt. `npm ci` installiert exakt den Lockfile-Stand und ignoriert
+die Ranges. Ein Versionssprung braucht dort also einen Commit, und damit ist
+er sichtbar und datiert.
+
+Das Backend hat **kein** Lockfile (`pip install -e ".[dev]"` loest die Ranges
+bei jedem Lauf frisch auf). Deshalb tragen die Obergrenzen dort die ganze
+Last. Ein `constraints.txt` oder `uv.lock` waere die strukturelle Antwort —
+eigener Hygiene-Sprint, nicht unter Frist.
+
+#### Der Diagnose-Handgriff
+
+Wenn ein CI-Job rot ist und die Meldung auf Dateien zeigt, die der PR nicht
+beruehrt: **erst die Werkzeugversionen vergleichen, dann den Code lesen.**
+
+```bash
+# lokal
+cd backend && ./.venv/Scripts/python.exe -m mypy --version
+# in CI: im Log den "Install dependencies"-Schritt oeffnen, Zeile
+# "Successfully installed ... mypy-X.Y.Z ..."
+```
+
+Weichen sie ab, ist die Versionsdifferenz die erste Hypothese und nicht der
+Code. **Und dann weiter, nicht aufhoeren:** stimmt die Werkzeugversion
+ueberein und der Job bleibt rot, ist die naechste Frage, welche *anderen*
+Pakete abweichen. `pip list` lokal gegen die Zeile `Successfully installed
+…` im CI-Log — vollstaendig, nicht nur das eine Paket, das man im Verdacht
+hat. Ein zweiter Beleg ist ein **frueherer gruener Lauf desselben Jobs auf
+einem anderen PR** — findet man mit
+
+```bash
+gh api repos/<owner>/<repo>/commits/develop/check-runs \
+  --jq '.check_runs[] | "\(.name) \(.conclusion) \(.completed_at)"'
+```
+
+Zwei verschiedene Ergebnisse bei gleichem Code sind ein Umgebungsbefund,
+kein Codebefund.
+
+**Querverweise:** §5.29 (unmaintained Wrapper als verstecktes
+Stabilitaetsrisiko — Schwesterfall: dort eine Library, die *nicht* mehr
+bewegt wird, hier eine, die sich *ohne uns* bewegt), §5.68 (Behauptung vs.
+Befund — der fruehere gruene Lauf ist der Befund, der die Hypothese stuetzt),
+§5.24 (`ruff check` und `ruff format --check` sind verschiedene Gates — beide
+werden von derselben unfixierten `ruff>=0.3`-Zeile bedient), §5.79 (ein
+Audit gilt nur fuer den Stand, den es gesehen hat — hier gilt ein *Testlauf*
+nur fuer die Umgebung, in der er lief), B-18-6 (Lockfile fuers Backend — der Zug, der
+skaliert), B-18-4 (Anpassung an SQLAlchemy 2.1 und mypy 2),
+B-18-5 (Docker Desktop als einzelner Punkt des Versagens).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

@@ -92,13 +92,25 @@ app.conf.update(
             "options": {"queue": "heizung_default"},
         },
         # Sprint 15e (AE-66): Belegungs-Import-Staleness-Watchdog.
-        # 08:15 UTC liegt ganzjaehrig NACH 09:00 Europe/Vienna
-        # (CET 09:15 / CEST 10:15 lokal). Default expected_by_local=09:00;
-        # wird das Setting deutlich spaeter gestellt, diesen UTC-Slot
-        # mit-nachziehen. Der Task selbst no-opt vor expected_by_local.
-        "occupancy-import-freshness-daily": {
+        # Stuendlich zur Minute 20, NICHT einmal taeglich zu einem festen
+        # UTC-Slot. Bis zum 26.09.2026 stand hier crontab(hour=8, minute=15)
+        # mit dem Kommentar "08:15 UTC liegt ganzjaehrig NACH 09:00
+        # Europe/Vienna" — und dem Zusatz, man muesse den Slot nachziehen,
+        # wenn die Schwelle spaeter gestellt wird.
+        #
+        # Genau das ist die Kopplung, die man nicht haben will: die Schwelle
+        # ist seit Migration 0022 in der Oberflaeche editierbar, der Beat-Slot
+        # nicht. Wer sie auf 14:00 stellt, haette einen Waechter, der um
+        # 10:15 Ortszeit prueft und nie etwas melden kann — lautlos.
+        #
+        # Stuendlich entkoppelt beides. Der Task no-opt vor der Schwelle, und
+        # nach dem ersten STALE-Audit greift der Tages-Guard
+        # (_stale_exists_for_list_date) — es gibt also hoechstens eine Mail
+        # je Tag, egal wie oft geprueft wird. Preis: 24 statt 1 Lauf pro Tag,
+        # jeder ein paar Queries.
+        "occupancy-import-freshness-hourly": {
             "task": "heizung.check_occupancy_import_freshness",
-            "schedule": crontab(hour=8, minute=15),
+            "schedule": crontab(minute=20),
             "options": {"queue": "heizung_default"},
         },
         # Sprint 15g (AE-68): Periodischer room.status-Sync. Trifft die

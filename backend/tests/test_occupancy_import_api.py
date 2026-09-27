@@ -245,6 +245,10 @@ async def test_log_endpoint_returns_shape(
         "status",
         "last_success_at",
         "expected_by_local",
+        # Dieselbe Zeit MIT Zeitzonen-Kuerzel ("12:00 MESZ"), fuer die
+        # Anzeige. Zwei Felder, weil ein Eingabefeld den nackten Wert
+        # braucht und ein Satz fuer den Menschen die Einheit.
+        "expected_by_local_label",
         "today_received",
         "imports",
     }

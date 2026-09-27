@@ -3,16 +3,30 @@
 /**
  * API & Webhooks — Belegungs-Import-Detailseite (Sprint 15f, AE-66).
  *
- * Liest NUR ``GET /api/v1/integrations/occupancy-import/log``. ``status`` ist
+ * Liest ``GET /api/v1/integrations/occupancy-import/log``. ``status`` ist
  * backend-berechnet; hier nur Anzeige (Ampel + letzte 30 Importe). Zeiten
  * UTC -> Europe/Vienna nur bei der Anzeige (§5.65); ``list_date`` ist ein
  * Kalendertag und läuft NICHT durch die UTC-Pipeline.
+ *
+ * Alle Uhrzeiten auf dieser Seite tragen ein Zeitzonen-Kürzel. Das ist hier
+ * keine Kosmetik: bis zum 26.09.2026 stand der Eingang in UTC ("08:38")
+ * direkt neben der Ortszeit-Schwelle ("09:00 Uhr"), beide ohne Einheit. Die
+ * Schwelle wurde daraufhin falsch gesetzt, und der Wächter schlug 21 Tage
+ * lang täglich zu früh an — 23 Minuten vor Eintreffen der Liste.
+ *
+ * Die Erwartungszeit ist seit Migration 0022 hier editierbar (Ortszeit). Sie
+ * hängt am Versandzeitpunkt in fremder Software und muss ohne Deployment
+ * änderbar sein.
  */
 
+import { useEffect, useState, type FormEvent } from "react";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-config";
 import { useOccupancyImportLog } from "@/lib/api/hooks-occupancy-import";
 import type { OccupancyImportStatus } from "@/lib/api/types";
-import { formatCalendarDate, formatDateTime, formatRelative } from "@/lib/format";
+import { formatCalendarDate, formatDateTimeTz, formatRelative } from "@/lib/format";
 
 const STATUS_META: Record<OccupancyImportStatus, { label: string; cls: string }> = {
   green: { label: "Aktuell", cls: "bg-success-soft text-success" },
@@ -55,15 +69,16 @@ export default function ApiWebhooksPage() {
                 Zuletzt eingegangen:{" "}
                 <span className="text-text-primary">
                   {q.data.last_success_at
-                    ? `${formatRelative(q.data.last_success_at)} (${formatDateTime(q.data.last_success_at)})`
+                    ? `${formatRelative(q.data.last_success_at)} (${formatDateTimeTz(q.data.last_success_at)})`
                     : "noch nie"}
                 </span>
               </span>
               <span className="text-sm text-text-secondary">
                 Erwartet bis{" "}
-                <span className="text-text-primary">{q.data.expected_by_local} Uhr</span>
+                <span className="text-text-primary">{q.data.expected_by_local_label}</span>
               </span>
             </div>
+            <ExpectedByForm />
           </section>
 
           {/* Liste der letzten Importe (neueste zuerst, Backend liefert max. 30). */}
@@ -102,7 +117,7 @@ export default function ApiWebhooksPage() {
                           }
                         >
                           <td className="px-6 py-2 text-text-secondary">
-                            {formatDateTime(row.received_at)}
+                            {formatDateTimeTz(row.received_at)}
                           </td>
                           <td className="px-6 py-2 text-text-secondary">
                             {formatCalendarDate(row.list_date)}
@@ -136,5 +151,75 @@ export default function ApiWebhooksPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Erwartungszeit der Belegungsliste, editierbar (Ortszeit).
+ *
+ * Warum das eine Einstellung ist und keine Konstante: der richtige Wert hängt
+ * am Versandzeitpunkt in Casablanca — fremde Software, deren Einstellung sich
+ * ändern kann, ohne dass wir es erfahren. Eine hartkodierte Schwelle wäre
+ * dann entweder blind (zu spät) oder lärmend (zu früh), und beides fällt erst
+ * auf, wenn es zählt.
+ *
+ * Bewusst auf dieser Seite und nicht unter Hotel-Stammdaten: hier steht der
+ * Eingang daneben. Wer die Schwelle setzen will, muss sehen, wann die Liste
+ * tatsächlich kommt — sonst rät er.
+ */
+function ExpectedByForm() {
+  const cfg = useGlobalConfig();
+  const updateMut = useUpdateGlobalConfig();
+  const [value, setValue] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!cfg.data) return;
+    setValue(cfg.data.occupancy_import_expected_by_local.slice(0, 5));
+  }, [cfg.data]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    setErr(null);
+    try {
+      await updateMut.mutateAsync({ occupancy_import_expected_by_local: `${value}:00` });
+      setMsg("Gespeichert.");
+    } catch {
+      setErr("Speichern fehlgeschlagen.");
+    }
+  };
+
+  if (!cfg.data) return null;
+
+  return (
+    <form onSubmit={submit} className="mt-4 pt-4 border-t border-border">
+      <label
+        htmlFor="expected-by"
+        className="block text-sm font-medium text-text-primary mb-1"
+      >
+        Erwartet bis (Ortszeit)
+      </label>
+      <div className="flex items-center gap-3">
+        <input
+          id="expected-by"
+          type="time"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
+        />
+        <Button type="submit" variant="secondary" loading={updateMut.isPending}>
+          Speichern
+        </Button>
+        {msg ? <span className="text-xs text-success">{msg}</span> : null}
+        {err ? <span className="text-xs text-error">{err}</span> : null}
+      </div>
+      <p className="mt-2 text-xs text-text-tertiary">
+        Ist bis zu dieser Uhrzeit keine Liste eingetroffen, geht eine Warnung an die
+        Alarm-Adresse. Die Liste kommt derzeit gegen 10:38 — der Wert sollte spürbar
+        dahinter liegen, sonst warnt das System, bevor die Liste fällig ist.
+      </p>
+    </form>
   );
 }

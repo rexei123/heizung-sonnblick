@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-20, develop-HEAD `a0981d8`. Letzter abgeschlossener Sprint: **18 (Alarm-Versand)** — live bestätigt am 20.09., §2bn. Kein Tag vergeben. Davor Sprint 17 (Mass-Pairing-Vorbereitung). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-09-27, develop-HEAD `7159773`. Letzter abgeschlossener Sprint: **18 (Alarm-Versand)** — live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn. Danach Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Davor Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 29.09.). Sprint-Aufzählung siehe §1.
 
 ---
 
@@ -3812,6 +3812,113 @@ AE-53, AE-66, AE-71, RUNBOOK §5.0/§10l/§10m, CLAUDE.md §5.29/§5.76/§5.77/�
 
 ---
 
+## 2bo. Belegungs-Import: Zeitzonen-Fehler im Eingang (2026-09-26, Hotfix)
+
+**Anlass:** Der erste echte Alarm des Systems, sachlich falsch. Der
+Import-Wächter meldete am 26.09. um 10:15 Ortszeit eine fehlende
+Belegungsliste — sie kam um 10:38, pünktlich wie an den 20 Tagen davor.
+
+**Befund (read-only, vor jeder Änderung geklärt):**
+
+Der **Vergleich** war korrekt. `run_freshness_check` wandelt UTC-now über
+`ZoneInfo(global_config.timezone)` in Ortszeit und prüft gegen die Schwelle —
+genau das AE-60-Muster. Wer nur dorthin gesehen hätte, hätte nichts gefunden.
+
+Der Fehler saß im **Eingang**, `occupancy_import_service.py:321`:
+
+```python
+received_at_utc = payload.received_at.replace(tzinfo=tz).astimezone(UTC)
+```
+
+`payload.received_at` von mailparser trägt keine Zeitzonen-Angabe, der Wert
+ist aber **UTC**. `.replace(tzinfo=tz)` *behauptet* eine Zeitzone, statt
+umzurechnen. Der gespeicherte Eingang lag damit zwei Stunden zu früh.
+
+**Beleg aus der Produktion** (Abfrage 26.09., derselbe Vorgang, zwei
+Zeitstempel in einer Zeile):
+
+```
+ ts                            | new_value.received_at     | list_date
+ 2026-09-26 08:38:28.373045+00 | 2026-09-26T06:38:27+00:00 | 2026-09-26
+ 2026-09-25 08:38:25.194472+00 | 2026-09-25T06:38:24+00:00 | 2026-09-25
+ 2026-09-24 08:38:25.272013+00 | 2026-09-24T06:38:24+00:00 | 2026-09-24
+```
+
+`business_audit.ts` ist der echte Eingang (08:38 UTC = 10:38 Ortszeit,
+deckungsgleich mit mailparser). Das Feld daneben liegt zwei Stunden davor.
+
+**Wie daraus ein Fehlalarm wurde:** Die Oberfläche zeigte den falschen Wert
+als `08:38` — ohne Einheit — direkt neben `Erwartet bis 09:00 Uhr`, ebenfalls
+ohne Einheit, aber Ortszeit. Zwei Zahlen in verschiedenen Einheiten, die wie
+ein Vergleich aussahen. Aus dieser Ansicht wurde die Schwelle 09:00
+abgeleitet; sie hätte hinter 10:38 liegen müssen. Der Beat prüft um 08:15 UTC
+= 10:15 MESZ — nach 09:00, vor 10:38.
+
+**Was geändert wurde:**
+
+- **Eingang:** `received_at` wird als UTC gelesen. `list_date` kommt aus der
+  **Ortszeit** desselben Augenblicks, nicht aus dem UTC-Datum — sonst gehörte
+  eine spät abends versandte Liste zum Vortag.
+- **Anzeige:** alle Uhrzeiten mit Zeitzonen-Kürzel (`formatDateTimeTz`),
+  `Intl.DateTimeFormat` mit explizitem `timeZone: "Europe/Vienna"` statt der
+  Zone des Betrachters. Auch der Alarmtext nennt die Fälligkeit mit Kürzel —
+  die Mail wird im Postfach gelesen, ohne die Oberfläche daneben.
+- **Schwelle:** 12:00 Ortszeit, **konfigurierbar** (Migration 0022,
+  `global_config.occupancy_import_expected_by_local`), editierbar unter
+  *Einstellungen / API & Webhooks* — auf derselben Seite wie der Eingang, denn
+  wer die Schwelle setzt, muss sehen, wann die Liste tatsächlich kommt. Die
+  Umgebungsvariable `OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` entfällt (eine
+  Quelle, §5.53).
+- **Beat-Slot:** von `crontab(hour=8, minute=15)` auf **stündlich**. Der alte
+  Kommentar verlangte, den UTC-Slot nachzuziehen, wenn die Schwelle später
+  gestellt wird — genau die Kopplung, die nicht bestehen darf, sobald die
+  Schwelle in der Oberfläche liegt. Wer sie auf 14:00 stellte, hätte sonst
+  einen Wächter, der um 10:15 prüft und nie etwas melden kann. Der Tages-Guard
+  (`_stale_exists_for_list_date`) begrenzt weiterhin auf eine Meldung je Tag.
+- **Tests:** die Fixtures trugen den verschobenen Wert als Sollwert — der
+  Fehler war testseitig zementiert. Korrigiert, plus neun neue Tests:
+  Eingang als UTC, `list_date` über die Datumsgrenze, Schwelle aus der
+  Konfiguration, Regressionsprobe auf den 26.09., DST in Sommer, Winter und
+  am Wechseltag 25.10., Kürzel im Alarmtext.
+
+**Die 21 bestehenden Zeilen bleiben unkorrigiert.** Read-only-Prüfung der
+Konsumenten: `new_value["received_at"]` wird an genau zwei Stellen gelesen —
+`_last_applied_received_at` (Ampel „letzter Erfolg > 24 h" plus Anzeige) und
+`_audit_to_logrow` (Tabelle). **Keine Steuerentscheidung** hängt daran;
+`Occupancy.check_in`/`check_out` kommen aus `resolve_stay_dates` und den
+Check-in-/Check-out-Zeiten, nicht aus `received_at`. Eine Rückrechnung wäre
+also Kosmetik an historischen Zeilen — mit dem Risiko, beim Umrechnen die
+korrekten neuen Zeilen mitzuerfassen. Die Ampel heilt sich innerhalb eines
+Tages selbst, weil sie nur die jüngste Zeile ansieht.
+
+> **Historische Einordnung:** Import-Zeitstempel **vor dem 26.09.2026** sind
+> in `business_audit.new_value.received_at` um zwei Stunden zu früh. Der echte
+> Eingang steht in derselben Zeile als `business_audit.ts`. Nicht nachträglich
+> korrigiert, weil keine Steuerentscheidung daran hängt.
+
+**Casablanca versendet die Liste JEDEN Tag, auch bei Belegung null**
+(bestätigt vom Hotelier, 26.09.2026). Damit ist die offene Frage zur
+Schließzeit 29.09.–01.11. beantwortet: der Wächter bleibt in dieser Zeit
+aussagekräftig, eine rote Ampel ist dann ein **echter** Befund und nicht
+„das Haus ist eben zu". Ein entsprechender Punkt war in STATUS nicht als
+eigener Eintrag geführt — deshalb steht die Antwort hier und nicht als
+Streichung.
+
+**Neue Lesson:** §5.79 — ein abgeschlossenes Audit gilt nur für den
+Code-Stand, den es gesehen hat. AE-60 hat diese Fehlerklasse am 25.05.
+behoben; der Belegungs-Import kam am 06.06. dazu, zwölf Tage später. Das
+Audit war zu seinem Zeitpunkt vollständig und ist heute unvollständig, ohne
+dass sich an ihm etwas geändert hat. Dazu: ein Test, dessen Erwartungswert aus
+dem beobachteten Verhalten kopiert wurde, bestätigt den Fehler statt ihn zu
+finden.
+
+**Querverweise:** §5.65 / AE-60 (die Fehlerklasse), §5.74 (dieselbe Wurzel im
+Frontend), §5.76 (Alarme auf die Wirkung — hier der Gegenfall: ein Melder, dem
+niemand mehr glaubt, überwacht nichts), §5.79, AE-66 / AE-71, Migration 0022,
+RUNBOOK §10d.9 / §10m.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -4078,6 +4185,9 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | B-17-8 | **Echter Online-Badge aus `device.last_seen_at` (Variante B).** Sprint 17 / C9 hat den `HardwareStatusBadge` auf die Montage-Semantik umbeschriftet — er sagt jetzt, was er misst. Was weiterhin **nirgends** sichtbar ist: ob ein Gerät überhaupt sendet. `device.last_seen_at` wird vom MQTT-Subscriber sauber gepflegt (inkl. monotonem Guard, `mqtt_subscriber.py:319`) und steht im Frontend-Type (`types.ts:93`), wird aber in **keiner** Ansicht gerendert. Eigener Badge neben dem Montage-Badge, Quelle `last_seen_at` bzw. `health_state`. Frontend + Type-Spiegel (§5.63) + Tests, geschätzt 2–3 h. Nicht dringend für die Montage — dort ist die Montage-Frage die richtige. | 🟢 |
 | **B-18-2** | **Secrets-Rotation vor Go-Live.** 🔴 **Frist 01.11.2026, vor der Inbetriebnahme.** Anlass: am 19.09. war der Inhalt der `.env` von heizung-test in einem Screenshot sichtbar — `SECRET_KEY` und `CHIRPSTACK_DB_PASSWORD` vollstaendig, `POSTGRES_PASSWORD` / `DATABASE_URL` / beide MQTT-Passwoerter / `CHIRPSTACK_API_SECRET` / Gateway-Passwoerter angeschnitten. Entscheidung des Hoteliers: **Rotation vor Go-Live, nicht sofort** — bis dahin liegen keine Gaestedaten im System und der Server ist nur ueber Tailscale und Basic-Auth erreichbar. Reihenfolge und Risiko je Wert stehen unten. Buendeln mit "Repo privat" (derselbe Wartungsblock nach dem 26.09.). | 🔴 |
 | **B-18-3** | **Feld-Komponenten lassen geerbte Props still fallen.** `NumFieldProps` erbt `hint` aus `FieldProps` (`einstellungen/hotel/page.tsx`), `NumField` hat es bis zum 20.09. nicht gerendert — typseitig erlaubt, wortlos verworfen. Betrifft **jedes** Zahlenfeld: ein Hinweis daran waere spurlos verschwunden. Aufgefallen bei T7, wo genau dieser Weg den Hinweis zu `alert_battery_warn_percent` verschluckt haette; dort im selben PR (#237) behoben, weil der Hinweis sonst gebaut und unsichtbar gewesen waere. **Offen:** pruefen, ob weitere Feld-/UI-Komponenten geerbte Props stillschweigend fallen lassen — `TimeField` nutzt `Omit<FieldProps, "type">` und reicht nur vier Props weiter, das gleiche Muster. Ein `Omit<>`-Erbe ohne Weiterreichen ist ein Typ, der mehr verspricht als die Komponente haelt; der Compiler kann das nicht melden. Kein Fix in Sprint 18. | 🟢 |
+| **B-18-6** | **Backend braucht ein Lockfile — vor B-18-4 einzuordnen.** Der Mangel hinter B-18-4 und CLAUDE.md §5.80: `pip install -e ".[dev]"` loest bei jedem CI-Lauf **alle** Versionen frisch auf, das Backend hat kein Lockfile. **Der Pin-Ansatz skaliert nicht** — 18 Laufzeit- plus 7 Dev-Abhaengigkeiten einzeln zu begrenzen ist Pflege, die niemand macht, und jede offene Grenze ist ein Build, der ohne Commit kippt. Zwei Beispiele aus einer Woche: mypy 2 (26.09.) und SQLAlchemy 2.1 (27.09.). **Ziel:** Lockfile (`constraints.txt` oder `uv.lock`) plus ein CI-Schritt, der exakt daraus installiert (`pip install -c` bzw. `uv sync`). Das Frontend macht es mit `package-lock.json` + `npm ci` bereits richtig und ist deshalb nicht betroffen, trotz `^`-Ranges; `infra/chirpstack/requirements-provision.txt` zeigt die Form (`==` mit Begruendung im Kopf). **Fuer das Gate relevant** — diese Erhebung muss der naechste Durchgang **nicht wiederholen** (Stand 27.09.2026, alle mit unterer Grenze ohne obere, ausser den beiden gesetzten Pins): `sqlalchemy` (gepinnt `<2.1`), `pydantic[email]>=2.6`, `fastapi>=0.110` — ihre Typ-Stubs gehen in das mypy-Urteil ein; `ruff>=0.3` — stellt zwei Gates (§5.24); `pytest>=8.0` und `pytest-asyncio>=0.23` — Testrunner-Verhalten; `mypy` (gepinnt `<2`). Zweite Fundstelle ausserhalb `pyproject.toml`: `.github/workflows/chirpstack-tools-ci.yml` installiert die Werkzeuge inline, am 27.09. auf dieselben Grenzen gebracht. **Nach dem 29.09., in Ruhe, mit vollem Testlauf.** | 🟡 |
+| **B-18-4** | **Anpassung an SQLAlchemy 2.1 (und mypy 2).** Befund 27.09.2026: die sechs Typ-Meldungen stammen aus **SQLAlchemy 2.1.1** (lokal 2.0.49), nicht aus mypy — nach dem Pin auf `mypy<2` lief CI mit derselben mypy-Version wie lokal und meldete *mehr* Fehler als vorher. SQLAlchemy 2.1 liefert nullable Spalten beim Row-Unpacking als `X | None` bzw. `object`. Die Stellen sind geprueft, der naechste Durchgang muss sie **nicht erneut untersuchen**: (1) `services/zone_aggregates.py:83`, (2) `services/dashboard_aggregates.py:149`, (3) `rules/engine.py:691` (zwei Meldungen) — der Wert kann dort nie `None`/`object` sein, weil die Query `heating_zone_id.in_(ids)` bzw. einen WHERE-Filter setzt und SQL-`IN` NULL ausschliesst; **kein latenter Defekt**, ein Narrowing mit Begruendung genuegt (in `engine.py:690` steht der passende Kommentar schon). (4) `scripts/pairing/csv_parser.py:273` und (5) `scripts/pairing/batch_inbound_test.py:461` — `type: ignore[arg-type]`, das die neuen Stubs korrekt inferieren; **je eine Zeile zum Loeschen**. Danach beide Pins heben. **Nach dem 29.09.** | 🟢 |
+| **B-18-5** | **Docker Desktop als einzelner Punkt des Versagens.** Am 26.09. liess sich Docker auf der Entwicklungsmaschine nicht starten — die WSL-Distribution `docker-desktop` blieb auf `Stopped`, jeder `docker`-Aufruf hing ohne Zeitlimit. Folge: die DB-Tests (§5.50) waren **nur** in CI ausfuehrbar, und zwar genau an dem Tag, an dem CI zusaetzlich durch den mypy-Sprung blockiert war (§5.80). Zwei Beweiswege, beide gleichzeitig zu. Zu klaeren: WSL-Ursache beheben **und** einen zweiten Weg schaffen, der nicht an Docker Desktop haengt (Postgres-Dienst direkt, WSL-Instanz, oder ein bewusst benutzbarer CI-Lauf auf einem Wegwerf-Branch). **Nach dem 29.09.** | 🟡 |
 | B-17-7 | **Ragged-CSV-Meldung ist irreführend.** Eine Datenzeile mit mehr Werten als der Header Spalten scheitert an `csv.Sniffer`, weil Spaltenzahl-Konsistenz Teil seiner Trennzeichen-Heuristik ist. Die Datei wird abgewiesen statt still gekürzt (richtig, S5), aber die Meldung nennt fälschlich das Trennzeichen als Ursache. Der praktische Excel-Fall ist nicht betroffen. Verhalten ist als Test festgehalten. | 🟢 |
 
 ---
