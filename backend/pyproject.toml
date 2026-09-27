@@ -8,7 +8,14 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "pydantic[email]>=2.6",
     "pydantic-settings>=2.2",
-    "sqlalchemy>=2.0",
+    # Obergrenze bewusst gesetzt (27.09.2026). SQLAlchemy 2.1 hat seine
+    # Typisierung geaendert: nullable Spalten kommen beim Row-Unpacking als
+    # ``X | None`` bzw. ``object`` heraus, was sechs Meldungen in
+    # Bestandscode erzeugt (CLAUDE.md 5.80, B-18-4). Der Sprung auf 2.1 ist
+    # ein ORM-Minor-Update in einer async-Anwendung — das gehoert in einen
+    # eigenen PR mit vollem Testlauf, nicht als Nebenwirkung eines Hotfix
+    # ins Produktions-Image.
+    "sqlalchemy>=2.0,<2.1",
     "asyncpg>=0.29",
     "alembic>=1.13",
     "httpx>=0.27",

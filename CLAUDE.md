@@ -2789,7 +2789,8 @@ Befund — der fruehere gruene Lauf ist der Befund, der die Hypothese stuetzt),
 §5.24 (`ruff check` und `ruff format --check` sind verschiedene Gates — beide
 werden von derselben unfixierten `ruff>=0.3`-Zeile bedient), §5.79 (ein
 Audit gilt nur fuer den Stand, den es gesehen hat — hier gilt ein *Testlauf*
-nur fuer die Umgebung, in der er lief), B-18-4 (Anpassung an mypy 2),
+nur fuer die Umgebung, in der er lief), B-18-6 (Lockfile fuers Backend — der Zug, der
+skaliert), B-18-4 (Anpassung an SQLAlchemy 2.1 und mypy 2),
 B-18-5 (Docker Desktop als einzelner Punkt des Versagens).
 
 ---
