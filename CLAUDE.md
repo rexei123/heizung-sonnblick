@@ -352,7 +352,7 @@ gh run watch $runId --exit-status
 
 Wenn das `:develop`-Tag im GHCR stale ist (siehe §5.10), zieht `docker compose pull` zwar ein Image, aber das ist das alte. Output `✔ Image ... Pulled` sagt NICHTS ueber Aktualitaet. Der Pull-Timer am Server schweigt dann ohne Hinweis stundenlang.
 
-**Pflicht-Check nach `docker compose pull`:**
+**Pflicht-Check nach `docker compose -f docker-compose.prod.yml pull`** (das `-f` ist auf dem Server nicht optional, siehe §5.78)**:**
 
 ```bash
 # SSH (Server, root)
@@ -584,6 +584,47 @@ normal — Drift in beide Richtungen gleichzeitig ist Refresh-Anlass.
 - STATUS.md §1 alle 5 Sprints aktualisieren (nicht nur §2 anhängen)
 - Strategie-Refresh nach Cowork-Inventarisierung oder externer Bestätigung
 - Sprint-Plan und Backlog mindestens monatlich konsolidieren
+
+**Nachtrag 2026-09-20 — der Kopf altert unbemerkt, weil ihn niemand liest,
+der den Stand schon kennt.**
+
+Beim Abschluss von Sprint 18 standen Kopf und §1 von `STATUS.md` auf dem
+14.06. und Sprint 15g — **vier Sprints zurück**. In der Zwischenzeit sind
+16, 17 und 18 gelaufen und jedes Mal ordentlich als eigener §2-Abschnitt
+angehängt worden. Nur der Kopf nicht.
+
+Das ist kein Schlampigkeitsbefund, sondern ein struktureller: Der Kopf
+richtet sich an jemanden, der den Stand **nicht** kennt. Wer am Repo
+arbeitet, überspringt ihn — er weiß ja, wo er steht. Die einzige Person,
+die ihn wirklich liest, ist die nächste Session, die ohne Vorwissen
+anfängt. Genau die bekommt dann den Stand von vor vier Sprints als
+aktuellen serviert.
+
+**Warum das gefährlicher ist als eine veraltete Lesson:** Der Kopf von
+`STATUS.md` steht in der Pflicht-Lektüre (§2) und in der
+Source-of-Truth-Hierarchie auf Rang 4 (§0.2). Was dort steht, geht ohne
+weitere Prüfung in die nächste Brief-Verfassung ein — und damit ist es
+genau der Weg, auf dem eine falsche Behauptung über den Systemzustand in
+einen Sprint-Plan gelangt. §5.68 verlangt für operative Aussagen einen
+Diagnose-Output; eine veraltete Kopfzeile umgeht diese Pflicht, weil sie
+wie ein bereits geprüfter Befund aussieht. Verwandt mit §5.77: dort war
+ein überholter Vermerk das Problem, hier eine überholte Zusammenfassung.
+
+**Regel:** Der Kopf von `STATUS.md` (Stand-Zeile, Stichtag, „Aktueller
+Sprint") wird im **selben PR** aktualisiert, der einen Sprint abschließt.
+Nicht „bei Gelegenheit", nicht „alle fünf Sprints" — die Fünfer-Regel oben
+hat vier Sprints Drift zugelassen, ohne verletzt zu sein.
+
+**Automatisierbar, geschätzt:** Eine CI-Prüfung, die den im Kopf genannten
+SHA gegen `git rev-parse --short develop` hält und bei Abweichung rot
+meldet, ist ein Dutzend Zeilen in einem bestehenden Job und kostet
+Sekunden — die eigentliche Arbeit steckt nicht im Bauen, sondern in der
+Entscheidung, wie viele Commits Rückstand noch erlaubt sein sollen, damit
+der Check nicht bei jedem Merge rot wird und man ihn abschaltet.
+
+**Querverweise:** §5.68 (Behauptung vs. Befund — der Weg, den eine
+veraltete Kopfzeile öffnet), §5.77 (überholter Vermerk, gleiche Klasse),
+§0.2 (Source-of-Truth-Hierarchie, Rang 4), §2 (Pflicht-Lektüre).
 
 ### 5.27 Vicki-Hardware-Realität: Open-Window-Default + Algorithmus-Trägheit (Sprint 9.11 Lesson)
 
@@ -2434,6 +2475,68 @@ niemand von sich aus, weil eine Verneinung wie eine erledigte Frage aussieht.
 hier Code-Zustand), §5.72 (die korrigierte Stelle), §5.73 (der Sprint, der
 sie überholt hat), B-15b-1 (der verbliebene offene Rest: Mailversand an der
 Schwelle).
+
+### 5.78 Auf dem Server gibt es kein `docker compose` ohne `-f` (Sprint 18, Abschluss)
+
+Das Repo enthaelt **zwei** Compose-Dateien:
+
+| Datei | Beschreibt | Dienste |
+|---|---|---|
+| `docker-compose.yml` (Wurzel) | Entwicklungs-Stack | db, redis, mosquitto, chirpstack*, api, web |
+| `infra/deploy/docker-compose.prod.yml` | produktiver Stack | dieselben **plus** `celery_worker`, `celery_beat`, `caddy` |
+
+`docker compose` ohne `-f` nimmt die Standarddatei — also die
+Entwicklungs-Datei. Auf dem Server liegt sie im selben Arbeitsverzeichnis
+wie alles andere, es kommt also keine Fehlermeldung.
+
+Die beiden Fehlerbilder, in aufsteigender Kostenordnung:
+
+1. **`ps` gibt eine leere Liste zurueck.** Sie sieht aus wie "alles aus" und
+   heisst in Wahrheit "falsches Projekt gefragt". Wer daraufhin einen Ausfall
+   diagnostiziert, jagt ein Gespenst.
+2. **`up -d` startet einen zweiten, unvollstaendigen Stack daneben.** Der
+   Entwicklungs-Datei fehlen genau die drei Dienste, die im Betrieb tragen:
+   `celery_worker` (keine Engine-Auswertung, keine Downlinks), `celery_beat`
+   (kein Takt) und `caddy` (kein HTTPS). Dazu bekommen die beiden Stacks aus
+   ihrem Verzeichnisnamen verschiedene Projektnamen und damit **eigene
+   Volumes** — der zweite startet mit leerer Datenbank und streitet sich
+   zugleich mit dem laufenden um die Ports.
+
+Das ist die teure Variante von §5.32: dort meldete ein Mechanik-Check rot,
+waehrend die Wirkung in Ordnung war. Hier meldet er **gruen** (der zweite
+Stack laeuft ja), waehrend die Steuerung stillsteht.
+
+**Regel:** Jeder `docker compose`-Aufruf gegen heizung-test oder
+heizung-main traegt `-f`. Die Form, die aus jedem Verzeichnis funktioniert:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+Die Skripte im Repo machen es richtig (`deploy-pull.sh` setzt
+`COMPOSE_FILE` und uebergibt es bei jedem Aufruf). Die Gefahr liegt
+ausschliesslich bei **von Hand getippten** Befehlen — und damit bei jedem
+Befehl, den dieser Chat dem Hotelier zum Kopieren gibt.
+
+**Der Anlass, unbequem:** Am 20.09.2026 ging genau so ein Befehl ohne `-f`
+an heizung-test. Er blieb folgenlos — aber nicht, weil jemand aufgepasst
+haette. Im selben Aufruf war ein Dienstname falsch geschrieben
+(`worker` statt `celery_worker`), und Compose brach deshalb ab, bevor es
+etwas starten konnte. **Ein Tippfehler hat den zweiten Stack verhindert.**
+
+Das ist dasselbe Muster wie §5.76, nur eine Woche spaeter und diesmal ohne
+Schaden: eine Kette von Umstaenden, von denen niemand wusste, dass sie
+gerade als Schutz wirkt. Der Unterschied zwischen "ist gutgegangen" und
+"war abgesichert" ist genau die Sorte Unterschied, die man nach einem
+ruhigen Ausgang nicht mehr sieht — und deshalb aufschreiben muss, solange
+man ihn noch kennt.
+
+**Querverweise:** RUNBOOK §5.0 (die Begruendung fuer den Hotelier, mit
+beiden Fehlerbildern), §5.11 (`docker compose pull` ist nicht beweisend —
+dort ist der Aufruf ebenfalls serverseitig und braucht `-f`), §5.32
+(Mechanik-Check gruen bei kaputter Wirkung), §5.76 (zwei Fehler, die sich
+gegenseitig verdecken), §5.6 (Befehl-Trennung PowerShell / SSH — dieselbe
+Familie: ein Befehl im falschen Kontext).
 
 ---
 
