@@ -25,7 +25,15 @@ den Wert direkt bekommt. Der Default bleibt auf der Spalte stehen (anders
 als bei 0017): es gibt genau eine Row, ein spaeteres INSERT gibt es nicht,
 und der Wert ist eine echte fachliche Vorgabe — kein Migrations-Hilfsmittel.
 
-Revision ID: 0022_occupancy_import_expected_by
+Die Revision-ID ist bewusst kurz: ``alembic_version.version_num`` ist
+``VARCHAR(32)``. Der erste Entwurf hiess
+``0022_occupancy_import_expected_by`` — 33 Zeichen, ein Zeichen zu viel.
+Lokal lief die Migration trotzdem durch (anderer Alembic-Stand), in CI
+scheiterte jeder DB-Test am ``UPDATE alembic_version``. Wer hier eine neue
+Revision anlegt: Name unter 32 Zeichen halten, sonst faellt es erst beim
+Upgrade auf und dort gleich in allen Tests gleichzeitig.
+
+Revision ID: 0022_occupancy_expected_by
 Revises: 0021_global_config_mail_status
 Create Date: 2026-09-26
 """
@@ -38,7 +46,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0022_occupancy_import_expected_by"
+revision: str = "0022_occupancy_expected_by"
 down_revision: str | None = "0021_global_config_mail_status"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
