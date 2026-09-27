@@ -2674,15 +2674,38 @@ eins), AE-66 / AE-71 (Belegungs-Import), Migration 0022.
 `lint-and-test`), fuenf Stunden auseinander, verschiedene Ergebnisse — ohne
 eine Zeile Code-Aenderung dazwischen:
 
-| Lauf | Zeit (UTC) | mypy | Ergebnis |
-|---|---|---|---|
-| PR #240 | 05:0x | 1.x | **gruen**, 2m56s |
-| PR #241 | 10:13 | **2.3.1** | **rot**, 1m12s |
+| Lauf | Zeit (UTC) | Ergebnis |
+|---|---|---|
+| PR #240 | 26.09. 05:0x | **gruen**, 2m56s |
+| PR #241 | 26.09. 10:13 | **rot**, 4 Fehler |
+| PR #241 nach dem mypy-Pin | 27.09. 16:03 | **rot**, 6 Fehler |
 
-`backend/pyproject.toml` sagte `"mypy>=1.9"` — untere Grenze, keine obere.
-CI installiert damit bei jedem Lauf die neueste Version. Zwischen den beiden
-Laeufen ist mypy 2.x erschienen, und mypy 2 meldet vier Stellen in
-Bestandscode, die 1.x durchgelassen hat.
+`backend/pyproject.toml` sagte `"mypy>=1.9"` — untere Grenze, keine obere,
+und das Backend hat **kein Lockfile**. CI loest deshalb bei jedem Lauf
+*alle* Abhaengigkeiten frisch auf.
+
+**Meine erste Diagnose war falsch, und das gehoert hierher.** Ich habe die
+unterschiedlichen mypy-Versionen gesehen (lokal 1.20.2, CI 2.3.1) und daraus
+die Ursache geschlossen. Nach dem Pin auf `<2` installierte CI dieselbe
+mypy-Version wie lokal — und meldete **sechs** Fehler statt vier. Der
+Vergleich der uebrigen Pakete zeigte den wahren Grund:
+
+| | lokal | CI |
+|---|---|---|
+| mypy | 1.20.2 | 1.20.2 |
+| **SQLAlchemy** | **2.0.49** | **2.1.1** |
+
+SQLAlchemy 2.1 hat seine Typisierung geaendert: eine nullable Spalte kommt
+beim Row-Unpacking als `X | None` heraus, und in manchen Pfaden als `object`.
+Alle sechs Meldungen sind Folgen davon, keine mypy-Eigenheit. **mypy 2 hatte
+sogar weniger gemeldet als 1.20.2.**
+
+Das ist §5.68 in eigener Sache: Ich hatte eine korrelierte Beobachtung (die
+mypy-Versionen wichen ab) fuer den Befund genommen, ohne die anderen
+Variablen zu pruefen. Zwei Dinge hatten sich geaendert, ich habe nur eines
+gesehen und gemeldet. Der Pin auf `mypy<2` war deshalb nicht falsch, aber
+er hat das Problem nicht behoben — er hat nur eine von zwei beweglichen
+Teilen festgestellt.
 
 **Die Fehlermeldung zeigte auf Dateien, die der PR nicht angefasst hat.** Das
 ist das verwirrende Teil: der Job wirkt, als haette die Aenderung etwas
@@ -2703,11 +2726,20 @@ Versionen schlechter sind, sondern weil der Zeitpunkt des Versionssprungs
 sonst von aussen bestimmt wird und mit der eigenen Arbeit zusammenfaellt.
 Der Sprung kommt dann als eigener PR, der nichts anderes tut.
 
-Fuer **Laufzeit**-Abhaengigkeiten (fastapi, sqlalchemy, celery …) gilt das
-so pauschal nicht: dort ist eine Obergrenze pro Paket Pflegeaufwand, und das
-Bild ist ein anderes, weil ein Produktions-Image ohnehin gebaut und getestet
-wird, bevor es laeuft. Die scharfe Trennlinie: **wer das Gate stellt, wird
-gepinnt; was durch das Gate geht, nicht zwingend.**
+Aber — und das ist die Korrektur aus diesem Fall — **es reicht nicht, die
+Werkzeuge zu pinnen.** Ein Typechecker urteilt ueber Code *plus* die
+Typ-Informationen der Bibliotheken. SQLAlchemy, Pydantic und FastAPI sind
+damit Teil des Gates, auch wenn sie Laufzeit-Abhaengigkeiten sind. Wer nur
+den Checker festnagelt, hat die Haelfte der Eingabe fixiert.
+
+Die belastbare Form ist deshalb nicht "pinne die Werkzeuge", sondern
+**fixiere die Auflösung**: ein Lockfile oder eine `constraints.txt`, die CI
+mit `pip install -c` benutzt. Dann aendert sich eine Version nur durch einen
+Commit — sichtbar, datiert, und mit einem eigenen Testlauf.
+
+Bis es das gibt, gilt die Zwischenregel: **Obergrenze fuer alles, dessen
+Ausgabe ein Urteil ist** — Linter, Typechecker, Testrunner **und** die
+Bibliotheken, deren Typ-Stubs in dieses Urteil eingehen.
 
 #### Was ein Lockfile daran aendert
 
@@ -2735,7 +2767,11 @@ cd backend && ./.venv/Scripts/python.exe -m mypy --version
 ```
 
 Weichen sie ab, ist die Versionsdifferenz die erste Hypothese und nicht der
-Code. Ein zweiter Beleg ist ein **frueherer gruener Lauf desselben Jobs auf
+Code. **Und dann weiter, nicht aufhoeren:** stimmt die Werkzeugversion
+ueberein und der Job bleibt rot, ist die naechste Frage, welche *anderen*
+Pakete abweichen. `pip list` lokal gegen die Zeile `Successfully installed
+…` im CI-Log — vollstaendig, nicht nur das eine Paket, das man im Verdacht
+hat. Ein zweiter Beleg ist ein **frueherer gruener Lauf desselben Jobs auf
 einem anderen PR** — findet man mit
 
 ```bash
