@@ -3089,6 +3089,70 @@ dieses System steht.
 
 ---
 
+## 10n. CI-Laufzeiten als Diagnose-Signal (Zeitzonen-Fix, 27.09.2026)
+
+Ein rotes Gate meldet, **was es gefunden hat, nicht was es geprüft hat.**
+Die Jobs brechen beim ersten Fehler ab — eine Meldung aus `mypy` bedeutet
+also, dass `pytest` gar nicht gelaufen ist.
+
+Deshalb gehört bei jedem roten Lauf die **Dauer** in die Diagnose. Die
+Normalwerte (Stand 27.09.2026):
+
+| Job | Normal (voll durchgelaufen) | Stufen in dieser Reihenfolge |
+|---|---|---|
+| `lint-and-test` (Backend) | **3–11 min** | ruff check → ruff format --check → mypy → **pytest mit DB** |
+| `lint-and-build` (Frontend) | 1–2 min | eslint → tsc → next build |
+| `e2e` (Playwright) | 2–5 min | Build + Browser-Tests |
+| `chirpstack-lint-and-test` | ~15 s | ruff → mypy → pytest (ohne DB) |
+
+**Die Schwelle, die zählt:** `lint-and-test` **unter 2 Minuten** heißt
+abgebrochen **vor** `pytest`. Die Datenbank-Tests, die Migrationen und
+damit der größte Teil der Absicherung sind dann **ungeprüft** — unabhängig
+davon, was in der Fehlermeldung steht.
+
+Der Spannbereich 3–11 min ist echt und kein Messfehler: die Dauer hängt
+daran, ob der Runner die Images aus dem Cache zieht und wie lange der
+Postgres-Service zum Start braucht. Beobachtete Werte an einem grünen
+Lauf: 2m56s, 3m12s, 10m30s — alle mit vollständig gelaufener Suite.
+
+### Der Handgriff
+
+```bash
+gh pr checks <nr>
+```
+
+Die Dauer steht in derselben Zeile wie der Status. Ist sie auffällig kurz:
+
+```bash
+gh run view --job <job-id> --log | grep -c "passed"
+```
+
+Keine Treffer heißt, `pytest` hat nie eine Zusammenfassung geschrieben.
+
+### Warum das hier steht
+
+Am 26.09. lief `lint-and-test` in **1m17s** rot — Abbruch in `mypy`, weil
+eine unfixierte Abhängigkeit gesprungen war. Nach dem Pin lief derselbe
+Job **10m30s** und fand zwei echte Fehler dahinter: eine Revision-ID mit
+33 Zeichen (`alembic_version.version_num` ist `VARCHAR(32)`), die die
+Migration und damit **804** DB-Tests abbrechen ließ, plus eine
+Shape-Zusicherung am neuen Antwortfeld.
+
+Hätte man nur den mypy-Fehler behoben und den nächsten roten Lauf als
+„derselbe Fehler, gleich behoben" gelesen, wäre die kaputte Migration auf
+`develop` gelandet — und beim **ersten Deploy mit Migration** aufgefallen,
+also am 29.09. mitten im Montagefenster.
+
+Umgekehrt gilt dasselbe: ein **grüner** Lauf, der auffällig kurz war, hat
+wahrscheinlich einen Schritt nicht ausgeführt. Das ist der Fall aus
+CLAUDE.md §5.55 (ein Vier-Sekunden-Echo anstelle eines Playwright-Laufs).
+
+**Querverweise:** CLAUDE.md §5.81 (die Regel), §5.80 (unfixierte
+Abhängigkeiten als Auslöser), §5.55 (grüner Kurzlauf), §5.25 (stale
+Checks), §5.50 (Lokal-DB-Verify), B-18-5 (Docker lokal), B-18-6 (Lockfile).
+
+---
+
 ## 11. Notfall-Links
 
 - Hetzner Cloud Console: https://console.hetzner.cloud

@@ -2741,6 +2741,25 @@ Bis es das gibt, gilt die Zwischenregel: **Obergrenze fuer alles, dessen
 Ausgabe ein Urteil ist** — Linter, Typechecker, Testrunner **und** die
 Bibliotheken, deren Typ-Stubs in dieses Urteil eingehen.
 
+#### Dritter Fall, einen Tag spaeter: Alembic
+
+| | lokal | CI |
+|---|---|---|
+| Alembic | 1.18.4 | 1.20.0 |
+
+Eine Revision-ID mit 33 Zeichen lief **lokal durch** und scheiterte in CI
+an `alembic_version.version_num VARCHAR(32)`. Folge: die Migration bricht
+ab, und mit ihr 804 DB-Tests.
+
+Dieser Fall ist der unangenehmste der drei. Die ersten beiden machten ein
+**Gate** rot — laut, an der richtigen Stelle, vor dem Merge. Der dritte
+traf die **Migration**, also den Pfad, der beim naechsten Deploy scharf
+wird. Waere er durchgerutscht, haette er beim ersten Deploy mit Migration
+zugeschlagen: am 29.09., im Montagefenster.
+
+Damit sind es drei Belege in acht Tagen — mypy, SQLAlchemy, Alembic. Der
+Punkt ist belegt und nur noch zu terminieren (B-18-6).
+
 #### Was ein Lockfile daran aendert
 
 Im Frontend steht in `package.json` ueberall `^` — und das ist **kein**
@@ -2792,6 +2811,64 @@ Audit gilt nur fuer den Stand, den es gesehen hat — hier gilt ein *Testlauf*
 nur fuer die Umgebung, in der er lief), B-18-6 (Lockfile fuers Backend — der Zug, der
 skaliert), B-18-4 (Anpassung an SQLAlchemy 2.1 und mypy 2),
 B-18-5 (Docker Desktop als einzelner Punkt des Versagens).
+
+### 5.81 Bei einem roten CI-Lauf ist die Laufzeit mitzulesen
+
+Ein Gate, das **deutlich frueher abbricht als sonst**, hat die spaeteren
+Stufen nicht geprueft. Wer danach einen Fehler behebt und den Lauf gruen
+sieht, hat zwei Dinge erfahren; wer ihn gruen *erwartet*, hat geraten.
+
+**Anlass, 26./27.09.2026.** Der Job `backend-ci` / `lint-and-test` fuehrt
+`ruff check`, `ruff format --check`, `mypy` und dann `pytest` gegen eine
+Postgres-Instanz aus — in dieser Reihenfolge, mit Abbruch beim ersten
+Fehler. Die Laufzeiten desselben Jobs am Zeitzonen-Fix:
+
+| Lauf | Dauer | Wie weit gekommen |
+|---|---|---|
+| mit mypy 2 (unfixiert) | **1m17s** | bis mypy, **pytest nie gestartet** |
+| nach dem SQLAlchemy-Pin | **10m30s** | durch mypy, pytest gelaufen |
+| nach den Korrekturen | 3m12s | gruen |
+
+Der Sprung von 1m17s auf 10m30s ist der eigentliche Fund. **Vorher hat
+pytest nie gelaufen.** Und dahinter warteten zwei echte Fehler: eine
+Revision-ID mit 33 Zeichen (`alembic_version.version_num` ist
+`VARCHAR(32)`), die die Migration abbrechen liess und damit **804**
+DB-Tests, plus eine Shape-Zusicherung, die am neuen Antwortfeld anschlug.
+
+**Ohne den Pin waere der rote mypy-Lauf der einzige sichtbare Mangel
+geblieben.** Man haette ihn behoben, den Lauf gruen gesehen — mit mypy 2
+gruen, aber pytest immer noch nicht erreicht, weil der Abbruch schon davor
+lag — und gemergt. Die kaputte Migration waere dann beim **ersten Deploy
+mit Migration** aufgefallen: am 29.09., mitten im Montagefenster.
+
+**Regel:** Ein rotes Gate meldet, was es gefunden hat, **nicht was es
+geprueft hat.** Bei jedem roten Lauf gehoert die Dauer in die Diagnose:
+
+- **deutlich kuerzer als der Normalwert** → frueh abgebrochen, die
+  spaeteren Stufen sind **ungeprueft**. Nach dem Fix ist der naechste Lauf
+  keine Bestaetigung, sondern der erste echte Test.
+- **im Normalbereich** → durchgelaufen, der Fehler steht am gemeldeten Ort.
+
+Und die Umkehrung, die genauso zaehlt: ein **gruener** Lauf, der auffaellig
+kurz war, ist ebenfalls verdaechtig — dann hat wahrscheinlich ein Schritt
+nichts getan (§5.55 ist genau dieser Fall, dort ein Vier-Sekunden-Echo
+anstelle eines Playwright-Laufs).
+
+Normalwerte stehen in RUNBOOK §10n, damit "deutlich kuerzer" nicht
+Bauchgefuehl bleibt.
+
+**Warum das nicht selbstverstaendlich ist:** Die Oberflaeche zeigt die
+Dauer klein neben dem Status, und der Status ist das, worauf man sieht.
+`gh pr checks` gibt sie sogar in derselben Zeile aus — man muss sie nur
+lesen. Der Fehler ist nicht, sie nicht zu finden, sondern nicht nach ihr
+zu fragen.
+
+**Querverweise:** §5.80 (unfixierte Abhaengigkeiten — der Grund, warum der
+Lauf ueberhaupt frueh abbrach; Alembic 1.18.4 gegen 1.20.0 ist dort der
+dritte Fall), §5.55 (gruener Kurzlauf, der nichts geprueft hat — das
+Gegenstueck), §5.25 (stale Checks: der angezeigte Lauf gehoert womoeglich
+zu einem anderen Commit), §5.50 (Lokal-DB-Verify — waere er moeglich
+gewesen, haette die Migration hier nie CI gebraucht; B-18-5).
 
 ### 5.82 Eine halb gefaelschte Zeitquelle ist schlimmer als keine
 
@@ -2890,7 +2967,9 @@ Befund ueberhaupt sichtbar gemacht hat), §5.59 (freezegun greift nicht in
 Fixtures — dieselbe Familie: Zeit, die nur teilweise kontrolliert ist),
 §5.79 (ein Melder, dem niemand glaubt; hier der Vergleichswert statt des
 Alarms), §5.68 (Behauptung vs. Befund — "neues Normal" war eine Behauptung
-ohne Messung), RUNBOOK §10n (die Vergleichswerte, unveraendert).
+ohne Messung), RUNBOOK §10n (der Beleg-Anker — von der Laufzeit-Schwelle
+auf die Testzahl umgestellt, weil die alte Schwelle nach diesem Fix einen
+gesunden Lauf als Abbruch gemeldet haette).
 
 ---
 
