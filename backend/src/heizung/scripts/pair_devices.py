@@ -638,9 +638,32 @@ _DISPATCH = {
 }
 
 
+def _reject_contradicting_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Widersprechende Schalter beim Start abweisen, vor dem ersten Downlink.
+
+    ``--no-valve-check`` schaltet das Ventilkriterium ab, ``--require-motor``
+    verlangt es. Zusammen ergeben sie keine Lesart, die der Aufrufer gemeint
+    haben kann.
+
+    Bewusst ``parser.error`` und damit Exit 2 statt einer stillen Vorrangregel:
+    eine Vorrangregel entscheidet fuer den Aufrufer und laesst ihn im Glauben,
+    der andere Schalter habe gewirkt. Bei einem Lauf, der 104 Geraete anfasst
+    und ueber eine Stunde braucht, faellt das erst am Ergebnis auf — und dann
+    ist die Batterie verbraucht. Der Abbruch kommt **vor** dem ersten
+    Downlink, weil argparse hier noch keinen Kontakt zur Hardware hatte.
+    """
+    if getattr(args, "no_valve_check", False) and getattr(args, "require_motor", False):
+        parser.error(
+            "Flags widersprechen sich: --no-valve-check schaltet das "
+            "Ventilkriterium ab, --require-motor verlangt es. Genau einen von "
+            "beiden angeben."
+        )
+
+
 async def main_async(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _reject_contradicting_flags(parser, args)
     handler = _DISPATCH[args.command]
     return await handler(args)
 

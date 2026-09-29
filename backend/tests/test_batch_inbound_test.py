@@ -339,22 +339,6 @@ def test_require_motor_does_not_touch_a_measured_result() -> None:
     assert "schliesst nicht" in schlecht.reason
 
 
-def test_require_motor_stays_out_when_valve_check_is_disabled() -> None:
-    """``--no-valve-check`` schaltet das Kriterium ab; dann gibt es nichts zu
-    verlangen. Die beiden Schalter widersprechen sich, und der spezifischere
-    (Kriterium aus) gewinnt — sonst waere die Kombination ein FAIL, das
-    niemand erklaeren kann."""
-    r = _evaluate(
-        _device(),
-        _ok(SETPOINT_HIGH_C, None),
-        _ok(SETPOINT_LOW_C, None),
-        "4.5",
-        valve_check=False,
-        require_motor=True,
-    )
-    assert r.status == "pass"
-
-
 def test_hardware_nummer_falls_back_to_dev_eui() -> None:
     dev = _device()
     dev.label = None

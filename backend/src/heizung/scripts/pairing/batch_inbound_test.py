@@ -580,6 +580,12 @@ def _evaluate(
         Fall, dass die Readings zwar da sind, aber **keine Ventilstellung**
         tragen — ohne Openness ist das Kriterium nicht pruefbar, und ein
         Montage-Lauf darf das nicht als Erfolg verbuchen.
+
+        Zusammen mit ``valve_check=False`` waere der Parameter sinnlos; die
+        CLI weist diese Kombination deshalb beim Start ab (Exit 2,
+        ``pair_devices._reject_contradicting_flags``). Hier wird sie nicht
+        abgefangen — eine zweite Pruefung an einer Stelle, die der Aufrufer
+        nicht erreichen kann, waere toter Code.
     """
     hardware_nummer = dev.label or dev.dev_eui
 
