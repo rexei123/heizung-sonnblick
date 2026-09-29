@@ -390,15 +390,25 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
             f"{args.poll_interval} s."
         )
         print(
-            "Class A: ein Downlink geht erst mit dem naechsten Uplink raus. "
-            "Der Lauf dauert im unguenstigen Fall zwei Zeitfenster.\n"
+            "Class A: ein Downlink geht erst mit dem naechsten Uplink raus, und "
+            "je Geraet ist immer nur ein Befehl unterwegs. Der Lauf braucht "
+            "deshalb bis zu fuenf Zeitfenster: Vor-Check, zwei Sollwerte mit je "
+            "einem Setzframe, FW-Abfrage."
         )
+        if args.require_motor:
+            print("--require-motor: ohne belegte Backplate gilt das Geraet als FAIL.\n")
+        else:
+            print(
+                "Ohne --require-motor: Geraete ohne Backplate werden als "
+                "'ohne Motor' gefuehrt, der Motor bleibt ungeprueft.\n"
+            )
         report = await run_batch_inbound_test(
             session,
             devices,
             timeout_s=args.timeout,
             poll_interval_s=args.poll_interval,
             valve_check=not args.no_valve_check,
+            require_motor=args.require_motor,
             user_id=user_id,
         )
         await session.commit()
@@ -566,6 +576,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-valve-check",
         action="store_true",
         help="Ventilkriterium abschalten. Dann zaehlt nur der Sollwert-Readback.",
+    )
+    p_batch.add_argument(
+        "--require-motor",
+        action="store_true",
+        help="Ohne belegte Backplate FAIL statt 'ohne Motor'. Pflicht fuer den "
+        "Montage-Lauf (RUNBOOK 10h.4): dort IST das Geraet montiert, eine "
+        "fehlende Backplate-Meldung ist also ein Befund und kein Tischzustand.",
     )
     p_batch.add_argument(
         "--user-email",

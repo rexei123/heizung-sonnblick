@@ -42,8 +42,11 @@ from heizung.models.sensor_reading import SensorReading
 from heizung.scripts.pairing import batch_inbound_test as bit
 from heizung.scripts.pairing.batch_inbound_test import (
     AUDIT_ACTION,
+    HEARTBEAT_WAIT_MAX_S,
     SETPOINT_HIGH_C,
     SETPOINT_LOW_C,
+    VALVE_CLOSED_MAX_PCT,
+    VALVE_OPEN_MIN_PCT,
     BatchReport,
     DeviceResult,
     StepResult,
@@ -127,27 +130,101 @@ def _ok(target: int, valve: int | None) -> StepResult:
 
 
 def test_evaluate_pass_with_moving_valve() -> None:
-    r = _evaluate(_device(), _ok(25, 80), _ok(10, 5), "4.5", valve_check=True)
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 80), _ok(10, 5), "4.5", valve_check=True)
     assert r.status == "pass"
-    assert "5 % -> 80 %" in r.reason
+    assert "5 %" in r.reason
+    assert "80 %" in r.reason
     assert r.hardware_nummer == "001"
     assert r.firmware_text == "4.5"
 
 
-def test_evaluate_fail_when_valve_stuck() -> None:
-    """Readback stimmt, Ventil bewegt sich nicht -> Hardware-Verdacht."""
-    r = _evaluate(_device(), _ok(25, 40), _ok(10, 40), "4.5", valve_check=True)
+def test_evaluate_fail_when_valve_stays_open() -> None:
+    """Der Befund an Geraet 001: 100 % offen bei Sollwert 10 °C.
+
+    Sollwert aus der Spezifikation: bei einem Sollwert unter der
+    Raumtemperatur muss das Ventil schliessen. Belegt an 101 und 002, die
+    beide 0 % erreichen. Alles ueber VALVE_CLOSED_MAX_PCT heizt durch.
+    """
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 100), _ok(10, 100), "4.5", valve_check=True)
     assert r.status == "fail"
-    assert "Ventil unbewegt" in r.reason
+    assert "schliesst nicht" in r.reason
+
+
+def test_evaluate_fail_when_valve_stuck_half_open() -> None:
+    """Beidseitig 40 % — schliesst nicht, obwohl es sich nie bewegt hat.
+
+    Das entscheidende Kriterium ist der niedrige Sollwert, nicht die
+    Differenz: 40 % bei 10 °C ist schon allein ein Fehler.
+    """
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 40), _ok(10, 40), "4.5", valve_check=True)
+    assert r.status == "fail"
+    assert "schliesst nicht" in r.reason
+
+
+def test_evaluate_fail_when_valve_does_not_open_enough() -> None:
+    """Schliesst korrekt, oeffnet aber nicht — halbseitiger Defekt."""
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 30), _ok(10, 0), "4.5", valve_check=True)
+    assert r.status == "fail"
+    assert "oeffnet nicht" in r.reason
+
+
+def test_evaluate_threshold_boundaries_pass() -> None:
+    """Die Grenzwerte selbst gelten als bestanden.
+
+    ``VALVE_CLOSED_MAX_PCT`` ist die hoechste erlaubte Stellung im
+    geschlossenen Zustand, ``VALVE_OPEN_MIN_PCT`` die niedrigste erlaubte im
+    offenen. Beide aus der Definition hergeleitet, nicht aus einem Lauf.
+    """
+    r = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, VALVE_OPEN_MIN_PCT),
+        _ok(SETPOINT_LOW_C, VALVE_CLOSED_MAX_PCT),
+        "4.5",
+        valve_check=True,
+    )
+    assert r.status == "pass", r.reason
+
+
+def test_evaluate_one_step_past_each_boundary_fails() -> None:
+    """Ein Punkt jenseits der Grenze ist ein Fehler — beide Richtungen."""
+    zu_offen = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, VALVE_CLOSED_MAX_PCT + 1),
+        "4.5",
+        valve_check=True,
+    )
+    assert zu_offen.status == "fail"
+    zu_zu = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, VALVE_OPEN_MIN_PCT - 1),
+        _ok(SETPOINT_LOW_C, 0),
+        "4.5",
+        valve_check=True,
+    )
+    assert zu_zu.status == "fail"
+
+
+def test_no_spread_criterion_because_it_cannot_trigger() -> None:
+    """Belegt, warum es keine dritte Schwelle auf die Spreizung gibt.
+
+    Wer beide absoluten Schwellen passiert, hat mindestens
+    ``VALVE_OPEN_MIN_PCT - VALVE_CLOSED_MAX_PCT`` Punkte Spreizung. Eine
+    Mindest-Spreizung darunter waere wirkungslos. Der Test haelt die
+    Begruendung fest, damit sie nicht spaeter als Luecke gelesen wird —
+    und schlaegt an, falls jemand die Schwellen so verschiebt, dass die
+    Ueberlegung nicht mehr traegt.
+    """
+    assert VALVE_OPEN_MIN_PCT - VALVE_CLOSED_MAX_PCT >= 25
 
 
 def test_evaluate_fail_when_valve_moves_wrong_way() -> None:
-    r = _evaluate(_device(), _ok(25, 10), _ok(10, 90), "4.5", valve_check=True)
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 10), _ok(10, 90), "4.5", valve_check=True)
     assert r.status == "fail"
 
 
 def test_evaluate_pass_when_valve_check_disabled() -> None:
-    r = _evaluate(_device(), _ok(25, 40), _ok(10, 40), "4.5", valve_check=False)
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, 40), _ok(10, 40), "4.5", valve_check=False)
     assert r.status == "pass"
     assert "abgeschaltet" in r.reason
 
@@ -155,7 +232,7 @@ def test_evaluate_pass_when_valve_check_disabled() -> None:
 def test_evaluate_pass_when_valve_data_missing() -> None:
     """Fehlende Ventildaten sind kein Verstoss — das Kriterium ist nur
     nicht pruefbar. Der Readback allein hat bestanden."""
-    r = _evaluate(_device(), _ok(25, None), _ok(10, None), "4.5", valve_check=True)
+    r = _evaluate(_device(), _ok(SETPOINT_HIGH_C, None), _ok(10, None), "4.5", valve_check=True)
     assert r.status == "pass"
     assert "nicht pruefbar" in r.reason
 
@@ -189,7 +266,7 @@ def test_evaluate_downlink_failure_is_fail() -> None:
 def test_hardware_nummer_falls_back_to_dev_eui() -> None:
     dev = _device()
     dev.label = None
-    r = _evaluate(dev, _ok(25, 80), _ok(10, 5), "4.5", valve_check=True)
+    r = _evaluate(dev, _ok(SETPOINT_HIGH_C, 80), _ok(10, 5), "4.5", valve_check=True)
     assert r.hardware_nummer == dev.dev_eui
 
 
@@ -219,7 +296,7 @@ def test_format_report_groups_firmware_and_names_devices() -> None:
         ]
     )
     text = format_report(report)
-    assert "2 PASS, 1 FAIL, 1 TIMEOUT von 4 Geraeten" in text
+    assert "2 PASS, 0 OHNE MOTOR, 1 FAIL, 1 TIMEOUT von 4 Geraeten" in text
     # FW-Inventar nennt die Nummern, damit der Hotelier sie abhaken kann.
     assert "004" in text
     assert "003" in text
@@ -302,6 +379,18 @@ class FakeRadio:
     ``script`` sagt pro ``dev_eui``, wie das Geraet auf einen Sollwert
     antwortet: der zurueckgemeldete Sollwert und die Ventilstellung, oder
     ``None`` fuer "antwortet gar nicht".
+
+    **Zwei Frames je Sollwert (Sprint 19 / T1).** Ein echter Vicki antwortet
+    auf einen Sollwert-Downlink mit einem Uplink, der den neuen Sollwert
+    zurueckmeldet — die Ventilstellung darin ist noch die **alte**, denn mit
+    genau diesem Uplink hat ChirpStack den Downlink erst ausgeliefert und der
+    Motor beginnt danach zu fahren. Erst der Folge-Uplink traegt die neue
+    Stellung.
+
+    Diese Reihenfolge ist hier absichtlich nachgebaut. Ein Test, der die
+    Openness schon im Readback-Frame liefert, wuerde den Fehler, den T1
+    behebt, gar nicht bemerken (§5.79: der Sollwert kommt aus der
+    Spezifikation, nicht aus dem Lauf des Codes).
     """
 
     def __init__(
@@ -314,11 +403,41 @@ class FakeRadio:
         self.now = T0
         self.sent: list[tuple[str, int]] = []
         self.fw_queries: list[str] = []
-        self._answered: set[tuple[str, int]] = set()
+        #: (dev_eui, target) -> Anzahl bereits gelieferter Frames (0, 1 oder 2)
+        self._frames: dict[tuple[str, int], int] = {}
         self._device_ids: dict[str, int] = {}
+        #: aktuell gemeldete Ventilstellung je Geraet
+        self._valve: dict[str, int | None] = {}
 
-    def register(self, dev: Device) -> None:
+    async def register(
+        self,
+        dev: Device,
+        *,
+        backplate: bool | None = True,
+        seed_uplink: bool = True,
+        valve_start: int | None = 0,
+    ) -> None:
+        """Meldet ein Geraet an und legt sein Ausgangs-Reading.
+
+        Das Ausgangs-Reading ist, was der Vor-Check sieht (Sprint 19 / T3, T4).
+        ``seed_uplink=False`` simuliert ein Geraet, das noch nie gefunkt hat.
+        """
         self._device_ids[dev.dev_eui] = dev.id
+        self._valve[dev.dev_eui] = valve_start
+        if not seed_uplink:
+            return
+        self.session.add(
+            SensorReading(
+                time=self.now,
+                device_id=dev.id,
+                fcnt=0,
+                temperature=Decimal("21.0"),
+                setpoint=Decimal(21),
+                valve_position=valve_start,
+                attached_backplate=backplate,
+            )
+        )
+        await self.session.flush()
 
     async def send_setpoint(self, dev_eui: str, setpoint_c: int) -> str:
         self.sent.append((dev_eui, setpoint_c))
@@ -336,30 +455,41 @@ class FakeRadio:
         return self.now
 
     async def _deliver(self) -> None:
-        """Spielt faellige Antworten ein — je gesendetem Sollwert genau eine."""
+        """Spielt je gesendetem Sollwert bis zu zwei Frames ein."""
         for dev_eui, target in list(self.sent):
             key = (dev_eui, target)
-            if key in self._answered:
+            done = self._frames.get(key, 0)
+            if done >= 2:
                 continue
             answer = self.script[dev_eui](target)
             if answer is None:
-                # Geraet schweigt: nie eine Antwort. Als beantwortet
-                # markieren, damit wir es nicht in jeder Runde neu pruefen.
-                self._answered.add(key)
+                # Geraet schweigt: nie eine Antwort.
+                self._frames[key] = 2
                 continue
-            setpoint, valve = answer
+            setpoint, valve_new = answer
+            if done == 0:
+                # Readback-Frame: neuer Sollwert, ALTE Ventilstellung.
+                valve = self._valve.get(dev_eui)
+            else:
+                # Setzframe: der Motor ist gefahren.
+                valve = valve_new
+                self._valve[dev_eui] = valve_new
             self.session.add(
                 SensorReading(
                     time=self.now,
                     device_id=self._device_ids[dev_eui],
-                    fcnt=len(self._answered) + 1,
+                    fcnt=sum(self._frames.values()) + 1,
                     temperature=Decimal("21.0"),
                     setpoint=Decimal(setpoint),
                     valve_position=valve,
+                    attached_backplate=True,
                 )
             )
             await self.session.flush()
-            self._answered.add(key)
+            # Genau EIN Frame je Warte-Runde und Sollwert. Laegen Readback und
+            # Setzframe in derselben Runde, waere die Unterscheidung, um die es
+            # in T1 geht, nicht pruefbar.
+            self._frames[key] = done + 1
 
 
 @pytest.fixture
@@ -373,8 +503,13 @@ def patch_radio(monkeypatch: pytest.MonkeyPatch) -> Callable[[FakeRadio], None]:
     return apply
 
 
-def _antwortet(setpoint_offset: int = 0, valve_high: int = 80, valve_low: int = 5):  # type: ignore[no-untyped-def]
-    """Geraet meldet den gesetzten Sollwert (ggf. verschoben) korrekt zurueck."""
+def _antwortet(setpoint_offset: int = 0, valve_high: int = 80, valve_low: int = 0):  # type: ignore[no-untyped-def]
+    """Geraet meldet den gesetzten Sollwert (ggf. verschoben) korrekt zurueck.
+
+    Vorgabewerte aus dem Feldtest 29.09.2026: 002 erreicht 59 % bei 28 °C und
+    0 % bei Sollwert unter Raumtemperatur. 80/0 liegt komfortabel innerhalb
+    der Schwellen und ist damit ein unstrittiger PASS.
+    """
 
     def responder(target: int) -> tuple[int, int | None]:
         valve = valve_high if target == SETPOINT_HIGH_C else valve_low
@@ -405,8 +540,10 @@ async def test_batch_pass_fail_timeout_and_firmware(
             silent.dev_eui: _schweigt,
         },
     )
-    for d in (good, wrong, silent):
-        radio.register(d)
+    for d in (good, wrong):
+        await radio.register(d)
+    # Das stumme Geraet hat nie gefunkt: kein Ausgangs-Reading.
+    await radio.register(silent, seed_uplink=False)
     patch_radio(radio)
 
     report = await run_batch_inbound_test(
@@ -426,8 +563,10 @@ async def test_batch_pass_fail_timeout_and_firmware(
     assert [r.hardware_nummer for r in groups["zu_alt"]] == ["002"]
     assert [r.hardware_nummer for r in groups["keine_antwort"]] == ["003"]
 
-    # FW-Abfrage ging an jedes Geraet, unabhaengig vom Testausgang.
-    assert set(radio.fw_queries) == {good.dev_eui, wrong.dev_eui, silent.dev_eui}
+    # FW-Abfrage ging an die erreichbaren Geraete, nicht an das stumme:
+    # einen Befehl an ein Geraet zu haengen, das nicht funkt, fuellt nur die
+    # Warteschlange (Sprint 19 / T5).
+    assert set(radio.fw_queries) == {good.dev_eui, wrong.dev_eui}
 
     text = format_report(report)
     assert "Erwartungswert fuer den OW-Rollout: 2 Geraet(e)" in text
@@ -441,8 +580,8 @@ async def test_batch_skips_second_step_for_failed_devices(
     good = await _make_pool_device(session, "010", fw="4.5")
     silent = await _make_pool_device(session, "011", fw="4.5")
     radio = FakeRadio(session, {good.dev_eui: _antwortet(), silent.dev_eui: _schweigt})
-    for d in (good, silent):
-        radio.register(d)
+    await radio.register(good)
+    await radio.register(silent)
     patch_radio(radio)
 
     await run_batch_inbound_test(session, [good, silent], timeout_s=60, poll_interval_s=10)
@@ -461,12 +600,12 @@ async def test_batch_valve_stuck_is_fail(
     """Readback beidseitig korrekt, Ventil bleibt stehen -> FAIL."""
     dev = await _make_pool_device(session, "020", fw="4.5")
     radio = FakeRadio(session, {dev.dev_eui: _antwortet(valve_high=42, valve_low=42)})
-    radio.register(dev)
+    await radio.register(dev)
     patch_radio(radio)
 
     report = await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
     assert report.results[0].status == "fail"
-    assert "Ventil unbewegt" in report.results[0].reason
+    assert "schliesst nicht" in report.results[0].reason
 
 
 async def test_batch_valve_check_can_be_disabled(
@@ -475,7 +614,7 @@ async def test_batch_valve_check_can_be_disabled(
 ) -> None:
     dev = await _make_pool_device(session, "021", fw="4.5")
     radio = FakeRadio(session, {dev.dev_eui: _antwortet(valve_high=42, valve_low=42)})
-    radio.register(dev)
+    await radio.register(dev)
     patch_radio(radio)
 
     report = await run_batch_inbound_test(
@@ -492,7 +631,7 @@ async def test_batch_persists_audit_per_device(
     nicht, weil room_id NOT NULL und Teil des PK ist)."""
     dev = await _make_pool_device(session, "030", fw="4.5")
     radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
-    radio.register(dev)
+    await radio.register(dev)
     patch_radio(radio)
 
     await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
@@ -506,8 +645,15 @@ async def test_batch_persists_audit_per_device(
     assert audit.new_value["hardware_nummer"] == "030"
     assert audit.new_value["firmware_version"] == "4.5"
     assert audit.new_value["firmware_class"] == "ow_faehig"
-    assert audit.new_value["setpoint_25"]["outcome"] == "ok"
-    assert audit.new_value["setpoint_10"]["outcome"] == "ok"
+    assert audit.new_value["setpoint_high"]["outcome"] == "ok"
+    assert audit.new_value["setpoint_high"]["target_c"] == SETPOINT_HIGH_C
+    assert audit.new_value["setpoint_low"]["outcome"] == "ok"
+    # Die gemessene Openness steht auch bei PASS im Audit (Sprint 19 / R3):
+    # ohne die Werte der bestandenen Laeufe kann niemand die Schwellen gegen
+    # echte Geraete nachziehen.
+    assert audit.new_value["setpoint_high"]["valve_position"] == 80
+    assert audit.new_value["setpoint_low"]["valve_position"] == 0
+    assert audit.new_value["setpoint_high"]["valve_reading_at"] is not None
 
 
 async def test_batch_timeout_device_audit_records_timeout(
@@ -516,7 +662,7 @@ async def test_batch_timeout_device_audit_records_timeout(
 ) -> None:
     dev = await _make_pool_device(session, "031", fw=None)
     radio = FakeRadio(session, {dev.dev_eui: _schweigt})
-    radio.register(dev)
+    await radio.register(dev, seed_uplink=False)
     patch_radio(radio)
 
     await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
@@ -536,7 +682,7 @@ async def test_batch_downlink_failure_is_fail_not_timeout(
     """Ein gescheiterter Downlink ist ein Fehler, kein Funk-Befund."""
     dev = await _make_pool_device(session, "040", fw="4.5")
     radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
-    radio.register(dev)
+    await radio.register(dev)
     patch_radio(radio)
 
     async def boom(dev_eui: str, setpoint_c: int) -> str:
@@ -553,3 +699,311 @@ async def test_batch_empty_device_list(session: AsyncSession) -> None:
     report = await run_batch_inbound_test(session, [], timeout_s=10, poll_interval_s=1)
     assert report.results == []
     assert report.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Sprint 19 — Setzframe, Backplate-Gate, Downlink-Disziplin
+# ---------------------------------------------------------------------------
+
+
+async def test_openness_comes_from_the_frame_after_the_readback(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T1 — der Kern des Sprints.
+
+    Das Geraet startet geschlossen (0 %), bekommt den hohen Sollwert und
+    oeffnet auf 80 %. Der Readback-Frame traegt noch die **alte** Stellung,
+    weil mit genau diesem Uplink der Downlink erst zugestellt wurde. Wer ihn
+    bewertet, liest 0 % beim hohen Sollwert und urteilt "oeffnet nicht" — an
+    einem Geraet, das einwandfrei arbeitet.
+
+    Sollwert aus der Spezifikation: bewertet wird der Folge-Uplink.
+    """
+    dev = await _make_pool_device(session, "050", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet(valve_high=80, valve_low=0)})
+    await radio.register(dev, valve_start=0)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10)
+
+    r = report.results[0]
+    assert r.status == "pass", r.reason
+    assert r.high is not None and r.low is not None
+    assert r.high.valve_position == 80
+    # Der Setzframe liegt NACH dem Readback-Frame, nicht gleichzeitig.
+    assert r.high.valve_reading_at is not None
+    assert r.high.reading_at is not None
+    assert r.high.valve_reading_at > r.high.reading_at
+
+
+async def test_missing_follow_up_frame_is_timeout_not_fail(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T1 — Readback ja, Folge-Uplink nein: Funk-Befund, kein Hardware-Verdacht.
+
+    Der Readback beweist, dass das Geraet funkt und den Befehl verarbeitet
+    hat. Bleibt der Folge-Uplink aus, ist die Ventilstellung ungeprueft — das
+    ist dieselbe Lage wie ein ausgebliebener Uplink und darf kein Geraet in
+    den Karton schicken.
+    """
+    dev = await _make_pool_device(session, "051", fw="4.5")
+
+    class NurReadback(FakeRadio):
+        """Liefert je Sollwert genau EINEN Frame: den Readback. Dann Stille."""
+
+        async def _deliver(self) -> None:
+            for dev_eui, target in list(self.sent):
+                key = (dev_eui, target)
+                if self._frames.get(key, 0) >= 1:
+                    continue
+                self.session.add(
+                    SensorReading(
+                        time=self.now,
+                        device_id=self._device_ids[dev_eui],
+                        fcnt=sum(self._frames.values()) + 1,
+                        temperature=Decimal("21.0"),
+                        setpoint=Decimal(target),
+                        valve_position=0,
+                        attached_backplate=True,
+                    )
+                )
+                await self.session.flush()
+                self._frames[key] = 1
+
+    radio = NurReadback(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
+    r = report.results[0]
+    assert r.status == "timeout", r.reason
+    assert "kein weiterer Uplink" in r.reason
+    assert r.high is not None
+    assert r.high.outcome == "valve_timeout"
+
+
+async def test_no_backplate_is_passed_ohne_motor_and_sends_no_setpoint(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T3 — ohne Backplate wird der Motor nicht geprueft, statt zu scheitern.
+
+    Ohne Backplate meldet die Vicki ``motorRange 0``; das Ventil bewegt sich
+    nie. Ein Sollwert-Test kann dort nichts belegen. Entscheidend ist, dass
+    **kein Downlink** rausgeht — sonst kostet der Lauf Batterie und Wartezeit
+    fuer eine Pruefung, die nicht stattfinden kann.
+    """
+    dev = await _make_pool_device(session, "060", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, backplate=False)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
+
+    r = report.results[0]
+    assert r.status == "passed_ohne_motor", r.reason
+    assert "Backplate" in r.reason
+    assert radio.sent == []
+    assert report.exit_code == 0
+    assert report.passed_without_motor == [r]
+
+    text = format_report(report)
+    assert "[OHNE MOTOR]" in text
+    assert "1 OHNE MOTOR" in text
+    assert "--require-motor" in text
+
+
+async def test_unknown_backplate_counts_as_not_attached(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T3 — NULL ist nicht False, belegt aber auch keine Montage.
+
+    Ein Reading ohne das Feld (alter Codec) ist kein Beleg dafuer, dass das
+    Geraet auf der Backplate sitzt. Dieselbe Regel wie in Layer 4, wo NULL
+    das Geraet aus dem Detached-Trigger heraushaelt statt es hineinzuziehen.
+    """
+    dev = await _make_pool_device(session, "061", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, backplate=None)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10)
+    assert report.results[0].status == "passed_ohne_motor"
+    assert "alter Codec" in report.results[0].reason
+    assert radio.sent == []
+
+
+async def test_require_motor_turns_missing_backplate_into_fail(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T3 — ``--require-motor``: der Montage-Lauf duldet kein "ungeprueft".
+
+    Nach der Montage IST das Geraet auf der Backplate. Meldet es das nicht,
+    ist das ein Befund und kein Tischzustand.
+    """
+    ohne = await _make_pool_device(session, "070", fw="4.5")
+    unklar = await _make_pool_device(session, "071", fw="4.5")
+    radio = FakeRadio(
+        session,
+        {ohne.dev_eui: _antwortet(), unklar.dev_eui: _antwortet()},
+    )
+    await radio.register(ohne, backplate=False)
+    await radio.register(unklar, backplate=None)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session, [ohne, unklar], timeout_s=60, poll_interval_s=10, require_motor=True
+    )
+
+    assert {r.status for r in report.results} == {"fail"}
+    assert all("--require-motor" in r.reason for r in report.results)
+    assert report.passed_without_motor == []
+    assert report.exit_code == 1
+    assert radio.sent == []
+
+
+async def test_require_motor_leaves_a_mounted_device_alone(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T3 — mit belegter Backplate aendert das Flag nichts."""
+    dev = await _make_pool_device(session, "072", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, backplate=True)
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session, [dev], timeout_s=600, poll_interval_s=10, require_motor=True
+    )
+    assert report.results[0].status == "pass", report.results[0].reason
+
+
+async def test_only_one_downlink_per_device_is_outstanding(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T5 — S4: zwischen zwei Befehlen an dasselbe Geraet liegt ein Uplink.
+
+    Class A liefert einen Downlink je Uplink aus. Bis Sprint 18 lagen
+    FW-Abfrage und Sollwert hintereinander in der Queue; der Sollwert wurde
+    dadurch eine ganze Periode spaeter zugestellt und war bis dahin nicht von
+    "nicht angekommen" zu unterscheiden.
+
+    Der Test protokolliert Sende- und Empfangszeitpunkte und verlangt, dass
+    zwischen zwei Sendungen mindestens ein Uplink liegt.
+    """
+    dev = await _make_pool_device(session, "080", fw="4.5")
+
+    ereignisse: list[tuple[datetime, str]] = []
+
+    class Protokoll(FakeRadio):
+        async def send_setpoint(self, dev_eui: str, setpoint_c: int) -> str:
+            ereignisse.append((self.now, f"send:{setpoint_c}"))
+            return await super().send_setpoint(dev_eui, setpoint_c)
+
+        async def query_firmware_version(self, dev_eui: str) -> str:
+            ereignisse.append((self.now, "send:fw"))
+            return await super().query_firmware_version(dev_eui)
+
+        async def _deliver(self) -> None:
+            vorher = sum(self._frames.values())
+            await super()._deliver()
+            if sum(self._frames.values()) > vorher:
+                ereignisse.append((self.now, "uplink"))
+
+    radio = Protokoll(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    patch_radio(radio)
+
+    await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10)
+
+    sendungen = [i for i, (_, art) in enumerate(ereignisse) if art.startswith("send:")]
+    assert len(sendungen) == 3, ereignisse
+    for links, rechts in zip(sendungen, sendungen[1:], strict=False):
+        dazwischen = [art for _, art in ereignisse[links + 1 : rechts] if art == "uplink"]
+        assert dazwischen, f"kein Uplink zwischen {ereignisse[links]} und {ereignisse[rechts]}"
+
+
+async def test_firmware_query_comes_last(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T5 — die FW-Abfrage steht hinter den Sollwerten, nicht davor."""
+    dev = await _make_pool_device(session, "081", fw="4.5")
+
+    reihenfolge: list[str] = []
+
+    class Protokoll(FakeRadio):
+        async def send_setpoint(self, dev_eui: str, setpoint_c: int) -> str:
+            reihenfolge.append(f"setpoint:{setpoint_c}")
+            return await super().send_setpoint(dev_eui, setpoint_c)
+
+        async def query_firmware_version(self, dev_eui: str) -> str:
+            reihenfolge.append("fw")
+            return await super().query_firmware_version(dev_eui)
+
+    radio = Protokoll(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    patch_radio(radio)
+
+    await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10)
+    assert reihenfolge == [f"setpoint:{SETPOINT_HIGH_C}", f"setpoint:{SETPOINT_LOW_C}", "fw"]
+
+
+async def test_stale_reading_is_waited_out_not_failed(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], None],
+) -> None:
+    """T4 — ein Reading jenseits der Frische fuehrt nicht sofort zum Urteil.
+
+    Das Ausgangs-Reading liegt jenseits von ``HEARTBEAT_WAIT_MAX_S``. Der
+    Vor-Check wartet, das Geraet meldet sich, der Lauf geht weiter. Vor
+    Sprint 19 waere hier sofort abgebrochen worden — bei 10 Minuten Keepalive
+    traf das im Mittel jedes zweite gesunde Geraet.
+    """
+    dev = await _make_pool_device(session, "090", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, seed_uplink=False)
+    session.add(
+        SensorReading(
+            time=T0 - timedelta(seconds=HEARTBEAT_WAIT_MAX_S + 300),
+            device_id=dev.id,
+            fcnt=0,
+            temperature=Decimal("21.0"),
+            setpoint=Decimal(21),
+            valve_position=0,
+            attached_backplate=True,
+        )
+    )
+    await session.flush()
+
+    gemeldet = False
+    original_sleep = radio.sleep
+
+    async def sleep_and_report(seconds: float) -> None:
+        nonlocal gemeldet
+        await original_sleep(seconds)
+        if not gemeldet:
+            gemeldet = True
+            session.add(
+                SensorReading(
+                    time=radio.now,
+                    device_id=dev.id,
+                    fcnt=1,
+                    temperature=Decimal("21.0"),
+                    setpoint=Decimal(21),
+                    valve_position=0,
+                    attached_backplate=True,
+                )
+            )
+            await session.flush()
+
+    radio.sleep = sleep_and_report  # type: ignore[method-assign]
+    patch_radio(radio)
+
+    report = await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10)
+    assert report.results[0].status == "pass", report.results[0].reason
