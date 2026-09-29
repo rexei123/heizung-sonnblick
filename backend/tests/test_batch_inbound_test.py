@@ -66,6 +66,13 @@ SKIP_REASON = "DATABASE_URL nicht gesetzt - DB-Tests brauchen Test-DB"
 
 T0 = datetime(2026, 9, 26, 8, 0, 0, tzinfo=UTC)
 
+# Simulierte Keepalive-Periode des FakeRadio: ein Geraet sendet hoechstens
+# EINEN Uplink je Periode. Ohne diese Bremse liefert die Attrappe Frames im
+# Takt der Warte-Schleife, und der Setzframe waere schon da, bevor
+# ``_await_readbacks`` den Readback ueberhaupt gesehen hat — dann sieht der
+# Test einen Ablauf, den es auf echter Hardware nicht gibt.
+FRAME_PERIOD_S = 20
+
 
 # ---------------------------------------------------------------------------
 # Firmware — reine Funktionen
@@ -403,6 +410,248 @@ def test_format_report_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Warte-Logik ohne DB
+#
+# Diese Tests ersetzen ``_latest_readings`` durch eine Liste vorgegebener
+# Frames und pruefen damit genau das, was T1 aendert — ohne Postgres. Sie
+# laufen also auch dann, wenn die DB-Tests skippen (B-18-5), und sie sind der
+# Grund, warum der Setzframe-Mechanismus nicht ausschliesslich in CI belegt
+# ist.
+# ---------------------------------------------------------------------------
+
+
+class _FrameStub:
+    """Minimal-Ersatz fuer ``SensorReading`` — nur die drei Felder."""
+
+    def __init__(
+        self,
+        time: datetime,
+        setpoint: int | None,
+        valve_position: int | None,
+        attached_backplate: bool | None = True,
+    ) -> None:
+        self.time = time
+        self.setpoint = None if setpoint is None else Decimal(setpoint)
+        self.valve_position = valve_position
+        self.attached_backplate = attached_backplate
+
+
+@pytest.fixture
+def frame_feed(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """Steuert Uhr und ``_latest_readings`` ohne Datenbank.
+
+    ``feed(plan)`` erwartet je Geraet eine Liste von Frames mit dem
+    Zeitpunkt, an dem sie *sichtbar* werden. ``_latest_readings`` liefert
+    jeweils das jüngste bereits sichtbare Frame — genau wie ``DISTINCT ON``
+    in der echten Abfrage.
+    """
+    uhr = {"now": T0}
+
+    def clock() -> datetime:
+        return uhr["now"]
+
+    async def sleep(seconds: float) -> None:
+        uhr["now"] += timedelta(seconds=max(seconds, 0.001))
+
+    def feed(plan: dict[int, list[_FrameStub]]) -> dict[str, object]:
+        async def latest(_session: object, device_ids: object) -> dict[int, _FrameStub]:
+            out: dict[int, _FrameStub] = {}
+            for device_id in device_ids:  # type: ignore[attr-defined]
+                sichtbar = [f for f in plan.get(device_id, []) if f.time <= uhr["now"]]
+                if sichtbar:
+                    out[device_id] = max(sichtbar, key=lambda f: f.time)
+            return out
+
+        monkeypatch.setattr(bit, "_latest_readings", latest)
+        monkeypatch.setattr(bit, "_sleep", sleep)
+        monkeypatch.setattr(bit, "_now", clock)
+        return uhr
+
+    return feed
+
+
+async def test_await_valve_frames_takes_the_frame_after_the_readback(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """T1 ohne DB — die Openness kommt aus dem Folge-Uplink.
+
+    Readback bei T0+20 mit der alten Stellung 0 %, Setzframe bei T0+40 mit
+    80 %. Bewertet werden muss die 80.
+    """
+    readback_at = T0 + timedelta(seconds=20)
+    frame_feed(
+        {
+            7: [
+                _FrameStub(readback_at, SETPOINT_HIGH_C, 0),
+                _FrameStub(T0 + timedelta(seconds=40), SETPOINT_HIGH_C, 80),
+            ]
+        }
+    )
+    steps = {
+        7: StepResult(
+            target_c=SETPOINT_HIGH_C,
+            outcome="ok",
+            observed_setpoint=Decimal(SETPOINT_HIGH_C),
+            reading_at=readback_at,
+        )
+    }
+
+    out = await bit._await_valve_frames(
+        object(),  # type: ignore[arg-type]
+        steps,
+        timeout_s=600,
+        poll_interval_s=10,
+    )
+
+    assert out[7].outcome == "ok"
+    assert out[7].valve_position == 80
+    assert out[7].valve_reading_at == T0 + timedelta(seconds=40)
+    # Der Readback-Zeitpunkt bleibt unangetastet — beide Zeiten sind getrennt
+    # nachvollziehbar.
+    assert out[7].reading_at == readback_at
+
+
+async def test_await_valve_frames_ignores_the_readback_frame_itself(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """T1 ohne DB — der Readback-Frame allein genuegt NICHT.
+
+    Es gibt nur das Readback-Frame. Sein Zeitstempel ist nicht *nach* sich
+    selbst, also darf seine Openness nicht als Messwert durchgehen. Das ist
+    der Fehler, den Sprint 19 behebt: bis dahin haette hier 0 % als
+    gemessene Stellung beim hohen Sollwert gegolten und "oeffnet nicht"
+    ergeben.
+    """
+    readback_at = T0 + timedelta(seconds=20)
+    frame_feed({7: [_FrameStub(readback_at, SETPOINT_HIGH_C, 0)]})
+    steps = {
+        7: StepResult(
+            target_c=SETPOINT_HIGH_C,
+            outcome="ok",
+            observed_setpoint=Decimal(SETPOINT_HIGH_C),
+            reading_at=readback_at,
+        )
+    }
+
+    out = await bit._await_valve_frames(
+        object(),  # type: ignore[arg-type]
+        steps,
+        timeout_s=60,
+        poll_interval_s=10,
+    )
+
+    assert out[7].outcome == "valve_timeout"
+    assert out[7].valve_position is None
+    assert "kein weiterer Uplink" in out[7].detail
+
+
+async def test_await_valve_frames_leaves_other_outcomes_alone(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """Nur ``ok``-Schritte werden weiterverfolgt; ein Timeout bleibt Timeout."""
+    frame_feed({})
+    steps = {
+        7: StepResult(target_c=SETPOINT_HIGH_C, outcome="timeout", detail="kein Uplink"),
+        8: StepResult(target_c=SETPOINT_HIGH_C, outcome="wrong_readback", detail="18 statt 28"),
+    }
+    out = await bit._await_valve_frames(
+        object(),  # type: ignore[arg-type]
+        steps,
+        timeout_s=60,
+        poll_interval_s=10,
+    )
+    assert out[7].outcome == "timeout"
+    assert out[8].outcome == "wrong_readback"
+
+
+async def test_readback_does_not_carry_the_valve_position(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """``_await_readbacks`` liefert den Sollwert-Beleg, nicht die Openness.
+
+    Der Frame traegt 0 % — der Stand vor der Bewegung. Genau deshalb darf
+    ``valve_position`` hier leer bleiben, sonst waere die Trennung in T1
+    wirkungslos.
+    """
+    frame_feed({7: [_FrameStub(T0 + timedelta(seconds=20), SETPOINT_HIGH_C, 0)]})
+    out = await bit._await_readbacks(
+        object(),  # type: ignore[arg-type]
+        {7: T0},
+        SETPOINT_HIGH_C,
+        timeout_s=600,
+        poll_interval_s=10,
+    )
+    assert out[7].outcome == "ok"
+    assert out[7].valve_position is None
+    assert out[7].reading_at == T0 + timedelta(seconds=20)
+
+
+async def test_precheck_waits_for_a_fresh_frame_before_judging(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """T4 ohne DB — ein altes Frame fuehrt nicht sofort zum Urteil.
+
+    Sichtbar ist zunaechst nur ein Frame, das aelter ist als das
+    Frische-Fenster. Erst spaeter kommt ein neues. Der Vor-Check muss warten
+    und danach ``ready`` melden, nicht ``no_uplink``.
+    """
+    dev = _device(device_id=7, label="001")
+    frame_feed(
+        {
+            7: [
+                _FrameStub(T0 - timedelta(seconds=HEARTBEAT_WAIT_MAX_S + 300), 21, 0),
+                _FrameStub(T0 + timedelta(seconds=120), 21, 0),
+            ]
+        }
+    )
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        poll_interval_s=10,
+    )
+    assert verdicts[7][0] == "ready"
+
+
+async def test_precheck_reports_no_uplink_after_the_window(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """T4 ohne DB — bleibt der Uplink aus, ist das ein Funk-Befund."""
+    dev = _device(device_id=7, label="001")
+    frame_feed({})
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        poll_interval_s=10,
+    )
+    assert verdicts[7][0] == "no_uplink"
+    assert "kein Downlink gesendet" in verdicts[7][1]
+
+
+async def test_precheck_reads_the_backplate_from_the_fresh_frame(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """T3 ohne DB — false und NULL fuehren beide zum Ausschluss."""
+    ohne = _device(device_id=7, label="070")
+    unklar = _device(device_id=8, label="071")
+    montiert = _device(device_id=9, label="072")
+    frame_feed(
+        {
+            7: [_FrameStub(T0, 21, 0, attached_backplate=False)],
+            8: [_FrameStub(T0, 21, 0, attached_backplate=None)],
+            9: [_FrameStub(T0, 21, 0, attached_backplate=True)],
+        }
+    )
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [ohne, unklar, montiert],
+        poll_interval_s=10,
+    )
+    assert verdicts[7][0] == "not_attached"
+    assert verdicts[8][0] == "backplate_unknown"
+    assert verdicts[9][0] == "ready"
+
+
+# ---------------------------------------------------------------------------
 # DB-Ablauf
 # ---------------------------------------------------------------------------
 
@@ -493,6 +742,8 @@ class FakeRadio:
         self._device_ids: dict[str, int] = {}
         #: aktuell gemeldete Ventilstellung je Geraet
         self._valve: dict[str, int | None] = {}
+        #: Zeitpunkt des letzten Uplinks je Geraet — Class-A-Bremse
+        self._last_frame_at: dict[str, datetime] = {}
 
     async def register(
         self,
@@ -511,6 +762,7 @@ class FakeRadio:
         self._valve[dev.dev_eui] = valve_start
         if not seed_uplink:
             return
+        self._last_frame_at[dev.dev_eui] = self.now
         self.session.add(
             SensorReading(
                 time=self.now,
@@ -546,6 +798,10 @@ class FakeRadio:
             done = self._frames.get(key, 0)
             if done >= 2:
                 continue
+            # Class-A-Bremse: hoechstens ein Uplink je Periode und Geraet.
+            letzter = self._last_frame_at.get(dev_eui)
+            if letzter is not None and self.now - letzter < timedelta(seconds=FRAME_PERIOD_S):
+                continue
             answer = self.script[dev_eui](target)
             if answer is None:
                 # Geraet schweigt: nie eine Antwort.
@@ -571,10 +827,8 @@ class FakeRadio:
                 )
             )
             await self.session.flush()
-            # Genau EIN Frame je Warte-Runde und Sollwert. Laegen Readback und
-            # Setzframe in derselben Runde, waere die Unterscheidung, um die es
-            # in T1 geht, nicht pruefbar.
             self._frames[key] = done + 1
+            self._last_frame_at[dev_eui] = self.now
 
 
 @pytest.fixture

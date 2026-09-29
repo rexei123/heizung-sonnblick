@@ -249,8 +249,8 @@ async def test_inbound_test_backplate_false_fails(
     result = await run_inbound_test(device_id, session, interactive=False)
     assert result.overall_status == "failed"
     assert result.failed_step == STEP_BACKPLATE
-    # Alle 6 Schritte im result.steps.
-    assert len(result.steps) == 6
+    # Alle 5 Schritte im result.steps (Sprint 19 / T5: Schritt 0 entfaellt).
+    assert len(result.steps) == 5
     # Backplate-Step ist failed mit klarem Detail.
     backplate_step = result.steps[-1]
     assert backplate_step.step == STEP_BACKPLATE

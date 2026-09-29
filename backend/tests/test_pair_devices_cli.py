@@ -4,8 +4,9 @@ DB-Tests gegen ``TEST_DATABASE_URL`` (analog T3-T5). ``SessionLocal``
 wird via ``monkeypatch`` durch eine Test-Session-Factory ersetzt, damit
 der CLI denselben Session-Context nutzt wie die Test-Fixtures.
 
-Downlinks des Eingangstests (``set_open_window_detection`` + ``send_setpoint``) werden
-ueber den jeweiligen Modul-Pfad gemockt — kein echter MQTT-Call.
+Der Downlink des Eingangstests (``send_setpoint``) wird ueber den Modul-Pfad
+gemockt — kein echter MQTT-Call. ``set_open_window_detection`` ist seit
+Sprint 19 (T5) nicht mehr Teil des Eingangstests.
 """
 
 from __future__ import annotations
@@ -103,17 +104,17 @@ def patched_session_local(session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 
 @pytest_asyncio.fixture
 def mock_all_downlinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    """Mockt set_open_window_detection + send_setpoint im Eingangstest.
+    """Mockt ``send_setpoint`` im Eingangstest.
 
     Sprint 17 (E3/C3): ``pairing_service`` hat keinen Downlink-Pfad mehr,
     daher patcht die Fixture nur noch ``inbound_test``. ``counters`` bleibt
     als Negativ-Beleg fuer die import-Tests ("es wurde nichts gesendet").
-    """
-    counters = {"set_ow": 0, "send_setpoint": 0}
 
-    async def fake_set_ow(*args: object, **kwargs: object) -> str:
-        counters["set_ow"] += 1
-        return "topic"
+    Sprint 19 (T5): ``set_open_window_detection`` ist weg — der Eingangstest
+    sendet kein 0x45 mehr. Class A liefert einen Downlink je Uplink; drei
+    Befehle hintereinander in der Queue kosten Wartezeit ohne Erkenntnis (S4).
+    """
+    counters = {"send_setpoint": 0}
 
     async def fake_send_setpoint(*args: object, **kwargs: object) -> str:
         counters["send_setpoint"] += 1
@@ -122,7 +123,6 @@ def mock_all_downlinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     async def no_sleep(seconds: int) -> None:
         return None
 
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
     return counters
@@ -218,7 +218,6 @@ async def test_cmd_import_dry_run_db_unchanged(
     after = await patched_session_local.scalar(select(func.count(Device.id)))
     assert before == after  # Rollback hat geklappt
     # Sprint 17 (E3/C3): der Import ist rein transaktional.
-    assert mock_all_downlinks["set_ow"] == 0
     captured = capsys.readouterr()
     # Die frueher noetige "[WARN] --dry-run aktiv: Downlinks gehen trotzdem
     # raus"-Warnung ist mit Sprint 17 (E3/C3) entfallen — es gibt nichts
@@ -297,7 +296,6 @@ async def test_cmd_import_invalid_user_email_aborts(
     assert "kein Konto mit der Adresse 'nonexistent@example.com'" in err
     assert "Tippfehler" in err
     # Kein Downlink — weder durch den Abbruch noch durch pair_batch.
-    assert mock_all_downlinks["set_ow"] == 0
 
 
 async def test_cmd_test_via_device_id(
@@ -324,8 +322,8 @@ async def test_cmd_test_via_device_id(
     await patched_session_local.flush()
     exit_code = await pair_devices.main_async(["test", str(device.id), "--non-interactive"])
     assert exit_code == 0
-    assert mock_all_downlinks["set_ow"] >= 1  # OW-Resend Schritt 0
-    assert mock_all_downlinks["send_setpoint"] == 2  # Setpoint 25 + 10
+    # Genau zwei Downlinks, beide Sollwerte. Kein 0x45 mehr (Sprint 19 / T5).
+    assert mock_all_downlinks["send_setpoint"] == 2
 
 
 async def test_cmd_test_via_dev_eui(
@@ -625,4 +623,3 @@ async def test_import_bricht_bei_mitarbeiter_konto_ab_ohne_zu_schreiben(
     )
     assert count == 0
     # Kein Downlink durch den Abbruch.
-    assert mock_all_downlinks["set_ow"] == 0
