@@ -396,7 +396,10 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
             "einem Setzframe, FW-Abfrage."
         )
         if args.require_motor:
-            print("--require-motor: ohne belegte Backplate gilt das Geraet als FAIL.\n")
+            print(
+                "--require-motor: FAIL, wenn die Backplate fehlt oder kein "
+                "Reading eine Ventilstellung traegt.\n"
+            )
         else:
             print(
                 "Ohne --require-motor: Geraete ohne Backplate werden als "
@@ -580,9 +583,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument(
         "--require-motor",
         action="store_true",
-        help="Ohne belegte Backplate FAIL statt 'ohne Motor'. Pflicht fuer den "
-        "Montage-Lauf (RUNBOOK 10h.4): dort IST das Geraet montiert, eine "
-        "fehlende Backplate-Meldung ist also ein Befund und kein Tischzustand.",
+        help="Verlangt einen belegten Motortest: FAIL statt 'ohne Motor', wenn "
+        "die Backplate fehlt, UND FAIL statt PASS, wenn kein Reading eine "
+        "Ventilstellung traegt. Pflicht fuer den Montage-Lauf (RUNBOOK 10h.4): "
+        "dort IST das Geraet montiert, beides ist dann ein Befund und kein "
+        "Tischzustand.",
     )
     p_batch.add_argument(
         "--user-email",

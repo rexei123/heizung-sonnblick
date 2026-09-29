@@ -263,6 +263,91 @@ def test_evaluate_downlink_failure_is_fail() -> None:
     assert r.status == "fail"
 
 
+def test_require_motor_fails_when_valve_data_is_missing() -> None:
+    """T3-Nachtrag — die zweite stille Tuer zu einem gruenen Bericht.
+
+    Readback beidseitig korrekt, aber kein Reading traegt eine
+    Ventilstellung (alter Codec in ChirpStack, §5.22). Ohne
+    ``require_motor`` bleibt das ein PASS mit Vermerk — das Kriterium ist
+    nicht pruefbar, nicht verletzt. Mit ``require_motor`` ist es ein
+    Fehler: der Montage-Lauf verlangt einen belegten Motortest, und
+    "nicht pruefbar" ist kein Beleg.
+    """
+    ohne_flag = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, None),
+        _ok(SETPOINT_LOW_C, None),
+        "4.5",
+        valve_check=True,
+    )
+    assert ohne_flag.status == "pass"
+
+    mit_flag = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, None),
+        _ok(SETPOINT_LOW_C, None),
+        "4.5",
+        valve_check=True,
+        require_motor=True,
+    )
+    assert mit_flag.status == "fail"
+    assert "Ventildaten fehlen (Codec?)" in mit_flag.reason
+
+
+def test_require_motor_fails_when_only_one_step_has_valve_data() -> None:
+    """Eine Haelfte genuegt nicht — der Vergleich braucht beide Stellungen."""
+    r = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, None),
+        "4.5",
+        valve_check=True,
+        require_motor=True,
+    )
+    assert r.status == "fail"
+    assert "Ventildaten fehlen (Codec?)" in r.reason
+
+
+def test_require_motor_does_not_touch_a_measured_result() -> None:
+    """Liegen beide Stellungen vor, aendert das Flag nichts am Urteil."""
+    gut = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, 0),
+        "4.5",
+        valve_check=True,
+        require_motor=True,
+    )
+    assert gut.status == "pass"
+
+    schlecht = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 100),
+        _ok(SETPOINT_LOW_C, 100),
+        "4.5",
+        valve_check=True,
+        require_motor=True,
+    )
+    assert schlecht.status == "fail"
+    assert "schliesst nicht" in schlecht.reason
+
+
+def test_require_motor_stays_out_when_valve_check_is_disabled() -> None:
+    """``--no-valve-check`` schaltet das Kriterium ab; dann gibt es nichts zu
+    verlangen. Die beiden Schalter widersprechen sich, und der spezifischere
+    (Kriterium aus) gewinnt — sonst waere die Kombination ein FAIL, das
+    niemand erklaeren kann."""
+    r = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, None),
+        _ok(SETPOINT_LOW_C, None),
+        "4.5",
+        valve_check=False,
+        require_motor=True,
+    )
+    assert r.status == "pass"
+
+
 def test_hardware_nummer_falls_back_to_dev_eui() -> None:
     dev = _device()
     dev.label = None

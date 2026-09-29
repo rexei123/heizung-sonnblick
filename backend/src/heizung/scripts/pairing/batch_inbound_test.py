@@ -572,8 +572,15 @@ def _evaluate(
     firmware: str | None,
     *,
     valve_check: bool,
+    require_motor: bool = False,
 ) -> DeviceResult:
-    """Fasst beide Schritte zu einem Geraete-Urteil zusammen."""
+    """Fasst beide Schritte zu einem Geraete-Urteil zusammen.
+
+    :param require_motor: verlangt einen belegten Motortest. Trifft hier den
+        Fall, dass die Readings zwar da sind, aber **keine Ventilstellung**
+        tragen — ohne Openness ist das Kriterium nicht pruefbar, und ein
+        Montage-Lauf darf das nicht als Erfolg verbuchen.
+    """
     hardware_nummer = dev.label or dev.dev_eui
 
     def result(status: DeviceStatus, reason: str) -> DeviceResult:
@@ -606,8 +613,23 @@ def _evaluate(
 
     if valve_check:
         if high.valve_position is None or low.valve_position is None:
-            # Kein FAIL: ohne Ventildaten ist das Kriterium nicht pruefbar,
-            # nicht verletzt. Der Readback allein hat bestanden.
+            # Ohne Ventildaten ist das Kriterium nicht pruefbar, nicht
+            # verletzt. Ohne ``require_motor`` bleibt das ein PASS mit
+            # Vermerk — der Readback allein hat bestanden.
+            #
+            # Mit ``require_motor`` ist es ein Fehler (Sprint 19 / T3,
+            # Nachtrag): das war die **zweite** stille Tuer zu einem gruenen
+            # Bericht ohne Motorpruefung. Die erste ist die fehlende
+            # Backplate; beide fuehren zu "bestanden, Motor ungeprueft", und
+            # ein Montage-Lauf darf keine davon offenlassen.
+            if require_motor:
+                return result(
+                    "fail",
+                    "Ventildaten fehlen (Codec?). Readback beidseitig korrekt, "
+                    "aber kein Reading traegt eine Ventilstellung — der "
+                    "Motortest ist damit unbelegt, und --require-motor "
+                    "verlangt ihn. Codec-Stand in ChirpStack pruefen (§5.22).",
+                )
             return result(
                 "pass",
                 "Readback beidseitig korrekt. Ventilkriterium nicht pruefbar "
@@ -764,10 +786,12 @@ async def run_batch_inbound_test(
     :param timeout_s: Wartefenster je Sollwert-Schritt.
     :param poll_interval_s: Abstand zwischen zwei DB-Abfragen.
     :param valve_check: Ventilkriterium mitpruefen.
-    :param require_motor: ohne belegte Backplate ``fail`` statt
-        ``passed_ohne_motor``. Pflicht fuer den Montage-Lauf: dort IST das
-        Geraet montiert, eine fehlende Backplate-Meldung ist also ein Befund
-        und kein Tischzustand.
+    :param require_motor: verlangt einen **belegten** Motortest. Schliesst
+        beide Wege zu einem gruenen Bericht ohne Motorpruefung: fehlende
+        Backplate (``passed_ohne_motor`` -> ``fail``) und fehlende
+        Ventilstellung im Reading (``pass`` mit Vermerk -> ``fail``). Pflicht
+        fuer den Montage-Lauf: dort IST das Geraet montiert, beides ist dann
+        ein Befund und kein Tischzustand.
     :param user_id: fuer den Audit-Eintrag.
     """
     report = BatchReport()
@@ -848,6 +872,7 @@ async def run_batch_inbound_test(
                     low.get(dev.id),
                     firmware.get(dev.id),
                     valve_check=valve_check,
+                    require_motor=require_motor,
                 )
             )
             continue
