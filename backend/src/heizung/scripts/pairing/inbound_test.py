@@ -1,14 +1,10 @@
 """Vicki-Eingangstest gemaess RUNBOOK §10h.4 (Sprint 13a T5).
 
-5 Schritte pro Vicki am Office-Laptop-Tisch (plus Schritt 0 idempotenter
-OW-Resend, T4-Variante-A-Mitigation):
+5 Schritte pro Vicki am Office-Laptop-Tisch:
 
-0. ``resend_open_window``: ``set_open_window_detection`` (AE-48) erneut
-   senden — billig, idempotent, schliesst den Pairing-Service-Vergessen-
-   Pfad. Bei Exception bleibt der Test laufend (Vicki koennte trotzdem
-   heartbeaten).
-1. ``heartbeat``: letzter Uplink innerhalb 5 Min (Defensive: kein Reading
-   = nicht im Funknetz, manuelle Diagnose noetig).
+1. ``heartbeat``: es kommt ein Uplink innerhalb von
+   ``HEARTBEAT_MAX_AGE_MIN`` Minuten — **wartend**, nicht sofort urteilend
+   (Sprint 19 / T4).
 2. ``temp_plausi``: letzte Reading-Temperatur in [15, 30] °C (Raumtemp-
    Sanity, nicht Plausi-Filter aus AE-53 [-20, 60]).
 3. ``setpoint_25``: ``send_setpoint(25)`` + 30 Sek Wartezeit + optional
@@ -46,10 +42,7 @@ from sqlalchemy import select
 
 from heizung.models.device import Device
 from heizung.models.sensor_reading import SensorReading
-from heizung.services.downlink_adapter import (
-    send_setpoint,
-    set_open_window_detection,
-)
+from heizung.services.downlink_adapter import send_setpoint
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +50,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 StepName = Literal[
-    "resend_open_window",
     "heartbeat",
     "temp_plausi",
     "setpoint_25",
@@ -67,10 +59,7 @@ StepName = Literal[
 StepStatus = Literal["ok", "skipped", "failed", "user_aborted"]
 OverallStatus = Literal["passed", "failed", "user_aborted"]
 
-# Schritt-Konstanten — aus RUNBOOK §10h.4 abgeleitet, plus Schritt 0
-# (T4-Variante-A-Mitigation: idempotenter OW-Resend bevor wir vertrauen
-# dass der Pairing-Service den ersten Downlink wirklich abgesetzt hat).
-STEP_RESEND_OW: StepName = "resend_open_window"
+# Schritt-Konstanten — aus RUNBOOK §10h.4 abgeleitet.
 STEP_HEARTBEAT: StepName = "heartbeat"
 STEP_TEMP_PLAUSI: StepName = "temp_plausi"
 STEP_SETPOINT_25: StepName = "setpoint_25"
@@ -78,17 +67,23 @@ STEP_SETPOINT_10: StepName = "setpoint_10"
 STEP_BACKPLATE: StepName = "backplate"
 
 # Schwellenwerte.
-HEARTBEAT_MAX_AGE_MIN = 5
+# Sprint 19 (T4): 15 statt 5 Minuten, und es wird **gewartet**. Das
+# Keepalive-Intervall der Vicki liegt bei rund 10 Minuten; eine Schwelle von
+# 5 Minuten trifft damit im Mittel jedes zweite gesunde Geraet. Die Pruefung
+# war ein Muenzwurf mit dem Anschein eines Kriteriums.
+HEARTBEAT_MAX_AGE_MIN = 15
+HEARTBEAT_POLL_INTERVAL_S = 30
 TEMP_PLAUSI_MIN_C = Decimal("15.0")
 TEMP_PLAUSI_MAX_C = Decimal("30.0")
+# Bleibt bei 25, waehrend der Batch-Pfad auf 28 gegangen ist
+# (``batch_inbound_test.SETPOINT_HIGH_C``, Sprint 19 / T2). Kein Widerspruch:
+# hier urteilt das Auge des Mitarbeiters, nicht eine Openness-Schwelle — und
+# die 28 sind genau fuer die Schwelle belegt. Dieser Pfad wird in Sprint 19
+# T11 auf den Batch-Mechanismus umgeleitet; bis dahin ist die verbindliche
+# Zahl die im Batch.
 SETPOINT_TEST_HIGH_C = 25
 SETPOINT_TEST_LOW_C = 10
 SETPOINT_WAIT_SECONDS = 30
-
-# OW-Resend nutzt dieselben Defaults wie Pairing-Service T4.
-OW_DEFAULT_ENABLED: bool = True
-OW_DEFAULT_DURATION_MIN: int = 10
-OW_DEFAULT_DELTA_C: Decimal = Decimal("1.5")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +101,7 @@ class TestResult:
 
     ``overall_status``:
     - ``passed``: alle Schritte ``ok``.
-    - ``failed``: mindestens ein Schritt ``failed`` (resend_open_window
-      ist NON-blocking, aber zaehlt fuer overall_status).
+    - ``failed``: mindestens ein Schritt ``failed``.
     - ``user_aborted``: Mitarbeiter hat einen Setpoint-Prompt verneint.
     """
 
@@ -115,6 +109,11 @@ class TestResult:
     steps: list[TestStepResult] = field(default_factory=list)
     overall_status: OverallStatus = "passed"
     failed_step: StepName | None = None
+
+
+def _now() -> datetime:
+    """Testbarer Zeit-Einhaengepunkt, analog ``_sleep``."""
+    return datetime.now(tz=UTC)
 
 
 async def _sleep(seconds: int) -> None:
@@ -145,35 +144,32 @@ async def _get_latest_reading(session: AsyncSession, device_id: int) -> SensorRe
     return result.scalar_one_or_none()
 
 
-async def _step_resend_ow(dev_eui: str) -> TestStepResult:
-    """Schritt 0: idempotenter Open-Window-Detection-Resend (AE-48).
+async def _await_fresh_reading(session: AsyncSession, device_id: int) -> SensorReading | None:
+    """Wartet bis ``HEARTBEAT_MAX_AGE_MIN`` auf einen aktuellen Uplink.
 
-    NON-blocking — bei Exception laeuft der Test weiter (Vicki koennte
-    trotzdem heartbeaten und der Backplate-Check funktionieren).
+    Sprint 19 (T4). Vorher urteilte Schritt 1 sofort: war das juengste
+    Reading aelter als 5 Minuten, galt das Geraet als nicht im Funknetz. Bei
+    einem Keepalive von 10 Minuten ist das kein Kriterium, sondern ein
+    Muenzwurf — rund die Haelfte der gesunden Geraete fiel zufaellig durch.
+
+    Gibt das juengste bekannte Reading zurueck, sobald es frisch genug ist,
+    sonst nach Ablauf des Fensters den letzten Stand (auch ``None``). Das
+    Urteil faellt weiterhin ``_step_heartbeat``.
     """
-    try:
-        await set_open_window_detection(
-            dev_eui,
-            enabled=OW_DEFAULT_ENABLED,
-            duration_min=OW_DEFAULT_DURATION_MIN,
-            delta_c=OW_DEFAULT_DELTA_C,
-        )
-    except Exception as exc:  # noqa: BLE001 — Soft-Fail, Test laeuft weiter
-        logger.warning("inbound_test: OW-Resend failed dev_eui=%s exc=%s", dev_eui, exc)
-        return TestStepResult(
-            step=STEP_RESEND_OW,
-            status="failed",
-            detail=f"DOWNLINK_FAILED: {type(exc).__name__}: {exc}",
-        )
-    return TestStepResult(
-        step=STEP_RESEND_OW,
-        status="ok",
-        detail="OW-Detection erneut aktiviert (idempotent).",
-    )
+    limit = timedelta(minutes=HEARTBEAT_MAX_AGE_MIN)
+    deadline = _now() + limit
+    latest = await _get_latest_reading(session, device_id)
+    while True:
+        if latest is not None and _now() - latest.time <= limit:
+            return latest
+        if _now() >= deadline:
+            return latest
+        await _sleep(HEARTBEAT_POLL_INTERVAL_S)
+        latest = await _get_latest_reading(session, device_id)
 
 
 def _step_heartbeat(latest: SensorReading | None, now: datetime) -> TestStepResult:
-    """Schritt 1: letzter Uplink innerhalb HEARTBEAT_MAX_AGE_MIN Min."""
+    """Schritt 1: es kam ein Uplink innerhalb HEARTBEAT_MAX_AGE_MIN Min."""
     if latest is None:
         return TestStepResult(
             step=STEP_HEARTBEAT,
@@ -337,15 +333,10 @@ async def run_inbound_test(
         raise ValueError(f"Device id={device_id} existiert nicht.")
 
     result = TestResult(device_id=device_id)
-    now = datetime.now(tz=UTC)
 
-    # Schritt 0: idempotenter OW-Resend (non-blocking).
-    step0 = await _step_resend_ow(device.dev_eui)
-    result.steps.append(step0)
-
-    # Schritt 1: Heartbeat.
-    latest = await _get_latest_reading(session, device_id)
-    step1 = _step_heartbeat(latest, now)
+    # Schritt 1: Heartbeat — wartend (Sprint 19 / T4).
+    latest = await _await_fresh_reading(session, device_id)
+    step1 = _step_heartbeat(latest, _now())
     result.steps.append(step1)
     if step1.status == "failed":
         _finalize(result)

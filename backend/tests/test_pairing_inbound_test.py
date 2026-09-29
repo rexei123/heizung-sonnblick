@@ -32,7 +32,6 @@ from heizung.scripts.pairing import inbound_test
 from heizung.scripts.pairing.inbound_test import (
     STEP_BACKPLATE,
     STEP_HEARTBEAT,
-    STEP_RESEND_OW,
     STEP_SETPOINT_10,
     STEP_SETPOINT_25,
     STEP_TEMP_PLAUSI,
@@ -122,17 +121,18 @@ async def _add_reading(
 def mock_downlinks_ok(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, list[tuple[str, ...]]]:
-    """Mockt ``set_open_window_detection`` + ``send_setpoint`` + ``_sleep``
-    + ``_user_confirm``. Recorded Calls pro Funktion."""
+    """Mockt ``send_setpoint`` + ``_sleep``. Recorded Calls pro Funktion.
+
+    Sprint 19 (T5): ``set_open_window_detection`` ist nicht mehr dabei — der
+    Eingangstest sendet kein 0x45 mehr. Grund: Class A liefert einen Downlink
+    je Uplink aus, drei Befehle hintereinander in der Queue heissen also
+    Wartezeit ohne Erkenntnis (S4). Die OW-Aktivierung hat ihren eigenen Lauf
+    (``activate_open_window_detection``, RUNBOOK 10h.5).
+    """
     calls: dict[str, list[tuple[str, ...]]] = {
-        "set_ow": [],
         "send_setpoint": [],
         "sleep": [],
     }
-
-    async def fake_set_ow(dev_eui: str, enabled: bool, duration_min: int, delta_c: Decimal) -> str:
-        calls["set_ow"].append((dev_eui, str(enabled), str(duration_min), str(delta_c)))
-        return "topic"
 
     async def fake_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
         calls["send_setpoint"].append((dev_eui, str(setpoint_c)))
@@ -141,7 +141,6 @@ def mock_downlinks_ok(
     async def fake_sleep(seconds: int) -> None:
         calls["sleep"].append((str(seconds),))
 
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", fake_sleep)
     return calls
@@ -163,59 +162,19 @@ async def test_inbound_test_happy_path_non_interactive(
     assert result.overall_status == "passed"
     assert result.failed_step is None
     statuses = [s.status for s in result.steps]
-    assert statuses == ["ok"] * 6
+    assert statuses == ["ok"] * 5
     steps = [s.step for s in result.steps]
     assert steps == [
-        STEP_RESEND_OW,
         STEP_HEARTBEAT,
         STEP_TEMP_PLAUSI,
         STEP_SETPOINT_25,
         STEP_SETPOINT_10,
         STEP_BACKPLATE,
     ]
-    # Downlink-Calls: 1 OW-Resend + 2 Setpoints.
-    assert len(mock_downlinks_ok["set_ow"]) == 1
+    # Sprint 19 (T5): genau 2 Downlinks, beide Sollwerte. Kein 0x45.
     assert len(mock_downlinks_ok["send_setpoint"]) == 2
     # 2 Sleep-Calls (zwischen Setpoint und naechstem Schritt).
     assert mock_downlinks_ok["sleep"] == [("30",), ("30",)]
-
-
-async def test_inbound_test_ow_resend_failure_continues(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Schritt 0 wirft -> failed (non-blocking), andere Schritte laufen weiter."""
-    calls: dict[str, list[tuple[str, ...]]] = {"send_setpoint": []}
-
-    async def raise_ow(*args: object, **kwargs: object) -> str:
-        raise RuntimeError("MQTT down")
-
-    async def fake_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
-        calls["send_setpoint"].append((dev_eui, str(setpoint_c)))
-        return "topic"
-
-    async def no_sleep(seconds: int) -> None:
-        return None
-
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", raise_ow)
-    monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
-    monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
-
-    device_id = await _seed_device(session)
-    await _add_reading(session, device_id, age_min=1)
-    result = await run_inbound_test(device_id, session, interactive=False)
-    # OW-Resend failed, aber andere Schritte ausgefuehrt.
-    assert result.steps[0].step == STEP_RESEND_OW
-    assert result.steps[0].status == "failed"
-    assert "DOWNLINK_FAILED" in result.steps[0].detail
-    # Heartbeat + Temp + Setpoints + Backplate alle ok.
-    for step in result.steps[1:]:
-        assert step.status == "ok"
-    # overall=failed wegen Schritt 0.
-    assert result.overall_status == "failed"
-    assert result.failed_step == STEP_RESEND_OW
-    # Setpoints wurden trotzdem gesendet.
-    assert len(calls["send_setpoint"]) == 2
 
 
 async def test_inbound_test_no_heartbeat_aborts(
@@ -228,10 +187,10 @@ async def test_inbound_test_no_heartbeat_aborts(
     result = await run_inbound_test(device_id, session, interactive=False)
     assert result.overall_status == "failed"
     assert result.failed_step == STEP_HEARTBEAT
-    # Nur Schritt 0 + 1 im result.steps.
-    assert [s.step for s in result.steps] == [STEP_RESEND_OW, STEP_HEARTBEAT]
-    assert result.steps[1].status == "failed"
-    assert "Kein SensorReading" in result.steps[1].detail
+    # Nur Schritt 1 im result.steps.
+    assert [s.step for s in result.steps] == [STEP_HEARTBEAT]
+    assert result.steps[0].status == "failed"
+    assert "Kein SensorReading" in result.steps[0].detail
     # Keine Setpoint-Downlinks (Schritte 3-4 nicht erreicht).
     assert mock_downlinks_ok["send_setpoint"] == []
 
@@ -246,8 +205,8 @@ async def test_inbound_test_temperature_out_of_range(
     result = await run_inbound_test(device_id, session, interactive=False)
     assert result.overall_status == "failed"
     assert result.failed_step == STEP_TEMP_PLAUSI
-    assert [s.step for s in result.steps] == [STEP_RESEND_OW, STEP_HEARTBEAT, STEP_TEMP_PLAUSI]
-    assert "35.0" in result.steps[2].detail
+    assert [s.step for s in result.steps] == [STEP_HEARTBEAT, STEP_TEMP_PLAUSI]
+    assert "35.0" in result.steps[1].detail
     # Setpoints nicht ausgefuehrt.
     assert mock_downlinks_ok["send_setpoint"] == []
 
@@ -258,9 +217,6 @@ async def test_inbound_test_setpoint_25_downlink_exception(
 ) -> None:
     """send_setpoint(25) wirft -> setpoint_25-failed, Abbruch vor Schritt 4."""
 
-    async def fake_set_ow(*args: object, **kwargs: object) -> str:
-        return "topic"
-
     async def raising_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
         if setpoint_c == 25:
             raise RuntimeError("simulated MQTT failure on setpoint=25")
@@ -269,7 +225,6 @@ async def test_inbound_test_setpoint_25_downlink_exception(
     async def no_sleep(seconds: int) -> None:
         return None
 
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", raising_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
 
@@ -294,8 +249,8 @@ async def test_inbound_test_backplate_false_fails(
     result = await run_inbound_test(device_id, session, interactive=False)
     assert result.overall_status == "failed"
     assert result.failed_step == STEP_BACKPLATE
-    # Alle 6 Schritte im result.steps.
-    assert len(result.steps) == 6
+    # Alle 5 Schritte im result.steps (Sprint 19 / T5: Schritt 0 entfaellt).
+    assert len(result.steps) == 5
     # Backplate-Step ist failed mit klarem Detail.
     backplate_step = result.steps[-1]
     assert backplate_step.step == STEP_BACKPLATE
@@ -310,9 +265,6 @@ async def test_inbound_test_user_aborts_at_setpoint_25(
     """Mitarbeiter antwortet 'n' beim Setpoint-25-Prompt -> user_aborted,
     Schritte 4 + 5 nicht ausgefuehrt."""
 
-    async def fake_set_ow(*args: object, **kwargs: object) -> str:
-        return "topic"
-
     async def fake_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
         return "topic"
 
@@ -325,7 +277,6 @@ async def test_inbound_test_user_aborts_at_setpoint_25(
         confirm_calls[0] += 1
         return False  # Mitarbeiter antwortet 'n'
 
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
     monkeypatch.setattr(inbound_test, "_user_confirm", fake_user_confirm)
@@ -372,9 +323,6 @@ async def test_backplate_step_reads_a_fresh_reading(
     device_id = await _seed_device(session)
     await _add_reading(session, device_id, age_min=1, attached_backplate=False)
 
-    async def fake_set_ow(dev_eui: str, enabled: bool, duration_min: int, delta_c: Decimal) -> str:
-        return "topic"
-
     async def fake_send_setpoint(dev_eui: str, setpoint_c: int) -> str:
         return "topic"
 
@@ -389,7 +337,6 @@ async def test_backplate_step_reads_a_fresh_reading(
         geliefert = True
         await _add_reading(session, device_id, age_min=0, attached_backplate=True)
 
-    monkeypatch.setattr(inbound_test, "set_open_window_detection", fake_set_ow)
     monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
     monkeypatch.setattr(inbound_test, "_sleep", sleep_and_deliver)
 

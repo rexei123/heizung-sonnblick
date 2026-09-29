@@ -390,15 +390,28 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
             f"{args.poll_interval} s."
         )
         print(
-            "Class A: ein Downlink geht erst mit dem naechsten Uplink raus. "
-            "Der Lauf dauert im unguenstigen Fall zwei Zeitfenster.\n"
+            "Class A: ein Downlink geht erst mit dem naechsten Uplink raus, und "
+            "je Geraet ist immer nur ein Befehl unterwegs. Der Lauf braucht "
+            "deshalb bis zu fuenf Zeitfenster: Vor-Check, zwei Sollwerte mit je "
+            "einem Setzframe, FW-Abfrage."
         )
+        if args.require_motor:
+            print(
+                "--require-motor: FAIL, wenn die Backplate fehlt oder kein "
+                "Reading eine Ventilstellung traegt.\n"
+            )
+        else:
+            print(
+                "Ohne --require-motor: Geraete ohne Backplate werden als "
+                "'ohne Motor' gefuehrt, der Motor bleibt ungeprueft.\n"
+            )
         report = await run_batch_inbound_test(
             session,
             devices,
             timeout_s=args.timeout,
             poll_interval_s=args.poll_interval,
             valve_check=not args.no_valve_check,
+            require_motor=args.require_motor,
             user_id=user_id,
         )
         await session.commit()
@@ -568,6 +581,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Ventilkriterium abschalten. Dann zaehlt nur der Sollwert-Readback.",
     )
     p_batch.add_argument(
+        "--require-motor",
+        action="store_true",
+        help="Verlangt einen belegten Motortest: FAIL statt 'ohne Motor', wenn "
+        "die Backplate fehlt, UND FAIL statt PASS, wenn kein Reading eine "
+        "Ventilstellung traegt. Pflicht fuer den Montage-Lauf (RUNBOOK 10h.4): "
+        "dort IST das Geraet montiert, beides ist dann ein Befund und kein "
+        "Tischzustand.",
+    )
+    p_batch.add_argument(
         "--user-email",
         default=None,
         help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
@@ -616,9 +638,32 @@ _DISPATCH = {
 }
 
 
+def _reject_contradicting_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Widersprechende Schalter beim Start abweisen, vor dem ersten Downlink.
+
+    ``--no-valve-check`` schaltet das Ventilkriterium ab, ``--require-motor``
+    verlangt es. Zusammen ergeben sie keine Lesart, die der Aufrufer gemeint
+    haben kann.
+
+    Bewusst ``parser.error`` und damit Exit 2 statt einer stillen Vorrangregel:
+    eine Vorrangregel entscheidet fuer den Aufrufer und laesst ihn im Glauben,
+    der andere Schalter habe gewirkt. Bei einem Lauf, der 104 Geraete anfasst
+    und ueber eine Stunde braucht, faellt das erst am Ergebnis auf — und dann
+    ist die Batterie verbraucht. Der Abbruch kommt **vor** dem ersten
+    Downlink, weil argparse hier noch keinen Kontakt zur Hardware hatte.
+    """
+    if getattr(args, "no_valve_check", False) and getattr(args, "require_motor", False):
+        parser.error(
+            "Flags widersprechen sich: --no-valve-check schaltet das "
+            "Ventilkriterium ab, --require-motor verlangt es. Genau einen von "
+            "beiden angeben."
+        )
+
+
 async def main_async(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _reject_contradicting_flags(parser, args)
     handler = _DISPATCH[args.command]
     return await handler(args)
 
