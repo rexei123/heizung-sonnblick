@@ -59,10 +59,9 @@ Geraet durchfallen zu lassen. Er gehoert nach der Montage.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -70,6 +69,7 @@ from sqlalchemy import select
 
 from heizung.models.device import Device
 from heizung.models.sensor_reading import SensorReading
+from heizung.scripts.pairing.clock import REAL_CLOCK, Clock
 from heizung.scripts.pairing.firmware import classify_firmware, min_fw_text
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.downlink_adapter import query_firmware_version, send_setpoint
@@ -226,20 +226,6 @@ class BatchReport:
 
 
 # ---------------------------------------------------------------------------
-# Test-Einhaengepunkte: Tests ersetzen diese Namen per monkeypatch, analog
-# ``inbound_test._sleep`` (Sprint 13a T5).
-# ---------------------------------------------------------------------------
-
-
-async def _sleep(seconds: float) -> None:
-    await asyncio.sleep(seconds)
-
-
-def _now() -> datetime:
-    return datetime.now(tz=UTC)
-
-
-# ---------------------------------------------------------------------------
 # Bausteine
 # ---------------------------------------------------------------------------
 
@@ -267,7 +253,7 @@ async def _latest_readings(
 
 
 async def _send_round(
-    devices: Sequence[Device], target_c: int
+    devices: Sequence[Device], target_c: int, *, clock: Clock
 ) -> tuple[dict[int, datetime], dict[int, str]]:
     """Sendet einen Sollwert an alle Geraete. Returns (Sendezeit, Fehler)."""
     sent_at: dict[int, datetime] = {}
@@ -284,8 +270,8 @@ async def _send_round(
                 exc,
             )
             continue
-        sent_at[dev.id] = _now()
-        await _sleep(SEND_SPACING_S)
+        sent_at[dev.id] = clock.now()
+        await clock.sleep(SEND_SPACING_S)
     return sent_at, failures
 
 
@@ -296,6 +282,7 @@ async def _await_readbacks(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, StepResult]:
     """Wartet gemeinsam auf den Readback aller Geraete.
 
@@ -310,10 +297,10 @@ async def _await_readbacks(
     pending = dict(sent_at)
     results: dict[int, StepResult] = {}
     saw_fresh: dict[int, SensorReading] = {}
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
 
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             reading = latest.get(device_id)
@@ -333,7 +320,7 @@ async def _await_readbacks(
                     detail=f"Readback {target_c} °C bestaetigt.",
                 )
                 del pending[device_id]
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
 
     for device_id in pending:
@@ -366,6 +353,7 @@ async def _await_fresh_readings(
     max_age_s: int,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, SensorReading]:
     """Ein aktuelles Reading je Geraet — wartend, nicht sofort urteilend.
 
@@ -379,7 +367,7 @@ async def _await_fresh_readings(
     gesunde Geraet — die Pruefung war ein Muenzwurf mit dem Anschein eines
     Kriteriums.
     """
-    start = _now()
+    start = clock.now()
     cutoff = start - timedelta(seconds=max_age_s)
     found: dict[int, SensorReading] = {}
     pending = set(device_ids)
@@ -395,14 +383,14 @@ async def _await_fresh_readings(
 
     deadline = start.timestamp() + timeout_s
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             reading = latest.get(device_id)
             if reading is not None and reading.time > start:
                 found[device_id] = reading
                 pending.discard(device_id)
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
     return found
 
@@ -411,7 +399,9 @@ async def _precheck(
     session: AsyncSession,
     devices: Sequence[Device],
     *,
+    wait_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, tuple[PrecheckVerdict, str]]:
     """Funk und Backplate **vor** dem ersten Downlink (Sprint 19 / T3, T4).
 
@@ -428,9 +418,10 @@ async def _precheck(
     fresh = await _await_fresh_readings(
         session,
         [d.id for d in devices],
-        max_age_s=HEARTBEAT_WAIT_MAX_S,
-        timeout_s=HEARTBEAT_WAIT_MAX_S,
+        max_age_s=wait_s,
+        timeout_s=wait_s,
         poll_interval_s=poll_interval_s,
+        clock=clock,
     )
     verdicts: dict[int, tuple[PrecheckVerdict, str]] = {}
     for dev in devices:
@@ -438,7 +429,7 @@ async def _precheck(
         if reading is None:
             verdicts[dev.id] = (
                 "no_uplink",
-                f"Kein Uplink innerhalb von {HEARTBEAT_WAIT_MAX_S} s. Funk, "
+                f"Kein Uplink innerhalb von {wait_s} s. Funk, "
                 "Duty-Cycle oder Batterie — kein Hardware-Verdacht. Es wurde "
                 "kein Downlink gesendet.",
             )
@@ -467,6 +458,7 @@ async def _await_firmware(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, str | None]:
     """Wartet auf die Antworten der FW-Abfrage und liest sie aus ``device``.
 
@@ -484,13 +476,13 @@ async def _await_firmware(
         return known
 
     stmt = select(Device.id, Device.firmware_version).where(Device.id.in_(list(known)))
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
     while True:
         for device_id, fw in (await session.execute(stmt)).all():
             known[device_id] = fw
-        if all(fw is not None for fw in known.values()) or _now().timestamp() >= deadline:
+        if all(fw is not None for fw in known.values()) or clock.now().timestamp() >= deadline:
             return known
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
 
 
 async def _await_valve_frames(
@@ -499,6 +491,7 @@ async def _await_valve_frames(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, StepResult]:
     """Wartet je Geraet auf den **Setzframe** — den Uplink nach dem Readback.
 
@@ -529,9 +522,9 @@ async def _await_valve_frames(
     if not pending:
         return out
 
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             step = pending[device_id]
@@ -549,7 +542,7 @@ async def _await_valve_frames(
                 ),
             )
             del pending[device_id]
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
 
     for device_id, step in pending.items():
@@ -767,7 +760,9 @@ async def run_batch_inbound_test(
     poll_interval_s: int = DEFAULT_POLL_INTERVAL_S,
     valve_check: bool = True,
     require_motor: bool = False,
+    heartbeat_wait_s: int = HEARTBEAT_WAIT_MAX_S,
     user_id: int | None = None,
+    clock: Clock = REAL_CLOCK,
 ) -> BatchReport:
     """Fuehrt den Batch-Eingangstest aus. Caller committet.
 
@@ -798,14 +793,29 @@ async def run_batch_inbound_test(
         Ventilstellung im Reading (``pass`` mit Vermerk -> ``fail``). Pflicht
         fuer den Montage-Lauf: dort IST das Geraet montiert, beides ist dann
         ein Befund und kein Tischzustand.
+    :param heartbeat_wait_s: Wartefenster des Vor-Checks auf den ersten
+        frischen Uplink. War bis PR A eine Konstante, waehrend jedes andere
+        Fenster ein Parameter ist — ein stummes Geraet hat damit 15 Minuten
+        blockiert, bevor ueberhaupt etwas gesendet wurde, und in Tests war
+        es gar nicht erreichbar.
     :param user_id: fuer den Audit-Eintrag.
+    :param clock: Zeitquelle der Warte-Schleifen. Default ist die echte Uhr;
+        Tests geben ``virtual_clock(...)`` und warten damit nicht wirklich.
+        Uhr und Warten sind **ein** Wert, damit sie nicht getrennt ersetzt
+        werden koennen — siehe ``clock.py`` (Sprint 19 / T14).
     """
     report = BatchReport()
     if not devices:
         return report
 
     # Schritt 1: Vor-Check. Sendet nichts.
-    verdicts = await _precheck(session, devices, poll_interval_s=poll_interval_s)
+    verdicts = await _precheck(
+        session,
+        devices,
+        wait_s=heartbeat_wait_s,
+        poll_interval_s=poll_interval_s,
+        clock=clock,
+    )
     ready = [d for d in devices if verdicts[d.id][0] == "ready"]
 
     high: dict[int, StepResult] = {}
@@ -813,16 +823,21 @@ async def run_batch_inbound_test(
 
     if ready:
         # Schritt 2: hoher Sollwert -> Readback -> Setzframe.
-        sent_high, fail_high = await _send_round(ready, SETPOINT_HIGH_C)
+        sent_high, fail_high = await _send_round(ready, SETPOINT_HIGH_C, clock=clock)
         high = await _await_readbacks(
             session,
             sent_high,
             SETPOINT_HIGH_C,
             timeout_s=timeout_s,
             poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         high = await _await_valve_frames(
-            session, high, timeout_s=timeout_s, poll_interval_s=poll_interval_s
+            session,
+            high,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         for device_id, detail in fail_high.items():
             high[device_id] = StepResult(
@@ -835,16 +850,21 @@ async def run_batch_inbound_test(
         # aendern kann — und bekaeme einen zweiten Befehl in die Queue,
         # bevor der erste belegt zugestellt ist.
         second = [d for d in ready if high.get(d.id) is not None and high[d.id].outcome == "ok"]
-        sent_low, fail_low = await _send_round(second, SETPOINT_LOW_C)
+        sent_low, fail_low = await _send_round(second, SETPOINT_LOW_C, clock=clock)
         low = await _await_readbacks(
             session,
             sent_low,
             SETPOINT_LOW_C,
             timeout_s=timeout_s,
             poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         low = await _await_valve_frames(
-            session, low, timeout_s=timeout_s, poll_interval_s=poll_interval_s
+            session,
+            low,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         for device_id, detail in fail_low.items():
             low[device_id] = StepResult(
@@ -860,12 +880,13 @@ async def run_batch_inbound_test(
             await query_firmware_version(dev.dev_eui)
         except Exception as exc:  # noqa: BLE001 — FW ist kein Fehlerkriterium
             logger.warning("batch: FW-Query fehlgeschlagen dev_eui=%s exc=%s", dev.dev_eui, exc)
-        await _sleep(SEND_SPACING_S)
+        await clock.sleep(SEND_SPACING_S)
     firmware = await _await_firmware(
         session,
         [d.id for d in devices],
         timeout_s=timeout_s if fw_targets else 0,
         poll_interval_s=poll_interval_s,
+        clock=clock,
     )
 
     for dev in devices:
