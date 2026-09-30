@@ -61,8 +61,10 @@ import asyncio
 import logging
 import os
 import re
+import signal
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 # Stellen sicher, dass die App-Settings geladen werden koennen.
@@ -120,6 +122,11 @@ from heizung.scripts.pairing.csv_parser import (  # noqa: E402
 )
 from heizung.scripts.pairing.exceptions import ParseError  # noqa: E402
 from heizung.scripts.pairing.pairing_service import pair_batch  # noqa: E402
+from heizung.services import deploy_lock  # noqa: E402
+from heizung.services.deploy_lock import (  # noqa: E402
+    DEPLOY_LOCK_KEY,
+    LOCK_TTL_MARGIN_S,
+)
 from heizung.services.device_service import get_pool_devices  # noqa: E402
 
 logger = logging.getLogger("pair_devices")
@@ -361,6 +368,75 @@ def _melde_geraet(result: DeviceResult) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Deploy-Sperre (Sprint 20a)
+# ---------------------------------------------------------------------------
+
+
+def _lock_ttl_s(args: argparse.Namespace) -> int:
+    """TTL der Deploy-Sperre: laengstes Warte-Fenster plus Reserve.
+
+    Der laengste Abstand zwischen zwei Verlaengerungen ist ein Warte-Fenster
+    des Laufs — entweder ``--timeout`` (Ventil-Frames) oder
+    ``--heartbeat-wait`` (Vor-Check, Standard 15 min). Es zaehlt das
+    groessere, plus ``LOCK_TTL_MARGIN_S``.
+
+    Die TTL ist die eigentliche Sicherung, nicht das Loeschen: stirbt der
+    Prozess hart, laeuft kein ``finally``, und dann muss die Sperre von
+    selbst verfallen — sonst blockiert ein abgestuerzter Lauf jeden Deploy.
+    """
+    # ``argparse.Namespace`` ist untypisiert; ``int(...)`` engt hier ein statt
+    # ein ``cast`` zu setzen — die Werte kommen aus ``type=int``-Argumenten.
+    fenster = max(int(args.timeout), int(getattr(args, "heartbeat_wait", 0)))
+    return fenster + LOCK_TTL_MARGIN_S
+
+
+def _phase_mit_verlaengerung(ttl_s: int) -> Callable[[str], None]:
+    """``_melde_phase`` plus TTL-Verlaengerung.
+
+    Verlaengert wird dort, wo der Lauf nachweislich noch lebt — an derselben
+    Stelle, an der er auch etwas ausgibt. Ein eigener Hintergrund-Task waere
+    die Alternative und die schlechtere: er wuerde die Sperre auch dann
+    verlaengern, wenn der Lauf haengt, und genau das soll die TTL abfangen.
+    """
+
+    def melden(text: str) -> None:
+        deploy_lock.refresh(ttl_s=ttl_s)
+        _melde_phase(text)
+
+    return melden
+
+
+def _geraet_mit_verlaengerung(ttl_s: int) -> Callable[[DeviceResult], None]:
+    """``_melde_geraet`` plus TTL-Verlaengerung."""
+
+    def melden(result: DeviceResult) -> None:
+        deploy_lock.refresh(ttl_s=ttl_s)
+        _melde_geraet(result)
+
+    return melden
+
+
+@contextmanager
+def _deploy_sperre(args: argparse.Namespace) -> Iterator[int]:
+    """Haelt die Deploy-Sperre fuer den Lauf und nennt die TTL.
+
+    Yieldet die TTL in Sekunden, damit die Melder sie zum Verlaengern kennen.
+
+    Es gibt **keinen** Weg, den Lauf ohne Sperre zu fahren — die Begruendung
+    steht in ``deploy_lock.held``. Kann sie nicht gesetzt werden, bricht der
+    Lauf mit einer Meldung ab, die sagt, wie Redis zurueckkommt.
+    """
+    ttl_s = _lock_ttl_s(args)
+    with deploy_lock.held(ttl_s=ttl_s):
+        print(
+            f"Deploy-Sperre gesetzt ({DEPLOY_LOCK_KEY}, TTL {ttl_s} s). Der "
+            "Deploy-Timer ueberspringt seinen Lauf, solange sie steht.\n",
+            flush=True,
+        )
+        yield ttl_s
+
+
 async def _cmd_test(args: argparse.Namespace) -> int:
     """``test <device>``: der Batch-Eingangstest fuer genau ein Geraet.
 
@@ -396,21 +472,22 @@ async def _cmd_test(args: argparse.Namespace) -> int:
             "Geraet ist immer nur ein Befehl unterwegs, der Lauf braucht "
             "deshalb bis zu fuenf Wartefenster.\n"
         )
-        report = await run_batch_inbound_test(
-            session,
-            [device],
-            timeout_s=args.timeout,
-            poll_interval_s=args.poll_interval,
-            valve_check=not args.no_valve_check,
-            require_motor=args.require_motor,
-            heartbeat_wait_s=args.heartbeat_wait,
-            reset_setpoint=not args.no_reset,
-            resume=args.resume,
-            user_id=user_id,
-            on_phase=_melde_phase,
-            on_device=_melde_geraet,
-        )
-        await session.commit()
+        with _deploy_sperre(args) as ttl_s:
+            report = await run_batch_inbound_test(
+                session,
+                [device],
+                timeout_s=args.timeout,
+                poll_interval_s=args.poll_interval,
+                valve_check=not args.no_valve_check,
+                require_motor=args.require_motor,
+                heartbeat_wait_s=args.heartbeat_wait,
+                reset_setpoint=not args.no_reset,
+                resume=args.resume,
+                user_id=user_id,
+                on_phase=_phase_mit_verlaengerung(ttl_s),
+                on_device=_geraet_mit_verlaengerung(ttl_s),
+            )
+            await session.commit()
 
     print(format_report(report))
     return report.exit_code
@@ -471,21 +548,22 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
                 "Ohne --require-motor: Geraete ohne Backplate werden als "
                 "'ohne Motor' gefuehrt, der Motor bleibt ungeprueft.\n"
             )
-        report = await run_batch_inbound_test(
-            session,
-            devices,
-            timeout_s=args.timeout,
-            poll_interval_s=args.poll_interval,
-            valve_check=not args.no_valve_check,
-            require_motor=args.require_motor,
-            heartbeat_wait_s=args.heartbeat_wait,
-            reset_setpoint=not args.no_reset,
-            resume=args.resume,
-            user_id=user_id,
-            on_phase=_melde_phase,
-            on_device=_melde_geraet,
-        )
-        await session.commit()
+        with _deploy_sperre(args) as ttl_s:
+            report = await run_batch_inbound_test(
+                session,
+                devices,
+                timeout_s=args.timeout,
+                poll_interval_s=args.poll_interval,
+                valve_check=not args.no_valve_check,
+                require_motor=args.require_motor,
+                heartbeat_wait_s=args.heartbeat_wait,
+                reset_setpoint=not args.no_reset,
+                resume=args.resume,
+                user_id=user_id,
+                on_phase=_phase_mit_verlaengerung(ttl_s),
+                on_device=_geraet_mit_verlaengerung(ttl_s),
+            )
+            await session.commit()
 
     print(format_report(report))
     return report.exit_code
@@ -799,11 +877,28 @@ async def main_async(argv: list[str] | None = None) -> int:
     return await handler(args)
 
 
+def _sigterm_als_ausnahme(signum: int, _frame: object) -> None:
+    """SIGTERM in ``SystemExit`` wandeln, damit ``finally`` laeuft.
+
+    SIGINT (Strg-C) loest in Python von sich aus ``KeyboardInterrupt`` aus,
+    und die Sperre wird im ``finally`` von ``deploy_lock.held`` freigegeben.
+    SIGTERM tut das **nicht** — der Default-Handler beendet den Prozess
+    sofort, ohne Stack-Unwinding. Ohne diesen Handler bliebe die Sperre
+    liegen und der Deploy waere bis zum Ablauf der TTL blockiert.
+
+    Der Fall ist real: ``docker stop`` und ``docker compose up -d`` schicken
+    SIGTERM. Dass die TTL das am Ende auch loest, ist das Sicherheitsnetz —
+    aber bis zu einer Stunde unnoetig gesperrt ist kein guter Zustand.
+    """
+    raise SystemExit(130 if signum == signal.SIGINT else 143)
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    signal.signal(signal.SIGTERM, _sigterm_als_ausnahme)
     return asyncio.run(main_async())
 
 

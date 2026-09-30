@@ -113,3 +113,87 @@ def test_require_motor_defaults_to_off() -> None:
     args = _build_parser().parse_args(["inbound-test", "--all-pool"])
     assert args.require_motor is False
     assert args.no_valve_check is False
+
+
+# ---------------------------------------------------------------------------
+# Deploy-Sperre (Sprint 20a)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["inbound-test", "--all-pool", "--no-deploy-lock"],
+        ["test", "42", "--no-deploy-lock"],
+    ],
+)
+def test_es_gibt_keinen_schalter_gegen_die_sperre(argv: list[str]) -> None:
+    """``--no-deploy-lock`` ist entfernt — der Parser weist es ab (Exit 2).
+
+    Der Schalter war fuer "Redis nicht erreichbar, Test muss trotzdem
+    laufen" gedacht. Der Fall traegt nicht: Redis ist ein Container im
+    selben Stack, ein Neustart behebt ihn in Sekunden, und in genau diesem
+    Zustand ist das Gate ohnehin unwirksam (die Abfrage in
+    ``deploy-pull.sh`` scheitert dann auch). Vor allem aber stand der
+    Schaltername in der Fehlermeldung des Abbruchs — eine Einladung, die
+    Absicherung zu umgehen statt die Ursache zu beheben.
+
+    Der Test haelt die Entscheidung fest: kommt der Schalter zurueck, muss
+    die Begruendung in ``deploy_lock.held`` mit zurueckgenommen werden.
+    """
+    from heizung.scripts import pair_devices
+
+    with pytest.raises(SystemExit) as exc:
+        pair_devices._build_parser().parse_args(argv)
+    assert exc.value.code == 2
+
+
+def test_ttl_nimmt_das_groessere_warte_fenster() -> None:
+    """Die TTL muss den laengsten Abstand zwischen zwei Verlaengerungen decken.
+
+    Verlaengert wird an den Fortschritts-Meldungen. Zwischen zwei Meldungen
+    liegt im schlimmsten Fall ein ganzes Warte-Fenster — entweder der
+    Sollwert-Timeout oder die Heartbeat-Wartezeit. Waere die TTL vom
+    kleineren abgeleitet, verfiele die Sperre mitten im Lauf, und der
+    naechste Deploy-Tick wuerde ihn abbrechen.
+
+    Erwartungswerte aus der Vorgabe (Timeout bzw. Wartefenster plus 15 min),
+    nicht aus einem Lauf (§5.79).
+    """
+    from heizung.scripts import pair_devices
+    from heizung.services.deploy_lock import LOCK_TTL_MARGIN_S
+
+    # Timeout groesser als die Heartbeat-Wartezeit.
+    args = pair_devices._build_parser().parse_args(
+        ["inbound-test", "--all-pool", "--timeout", "7200", "--heartbeat-wait", "900"]
+    )
+    assert pair_devices._lock_ttl_s(args) == 7200 + LOCK_TTL_MARGIN_S
+
+    # Heartbeat-Wartezeit groesser als der Timeout.
+    args = pair_devices._build_parser().parse_args(
+        ["inbound-test", "--all-pool", "--timeout", "600", "--heartbeat-wait", "1800"]
+    )
+    assert pair_devices._lock_ttl_s(args) == 1800 + LOCK_TTL_MARGIN_S
+
+
+def test_verlaengerung_haengt_an_der_fortschritts_meldung() -> None:
+    """Die Melder verlaengern die Sperre und geben trotzdem aus.
+
+    Beides muss passieren: die Ausgabe ist das, was einen Lauf ueber Stunden
+    nicht fuer haengend halten laesst (Sprint 19 / T10), und die
+    Verlaengerung ist das, was den Deploy fernhaelt. Wer den Melder
+    austauscht, darf keines von beiden verlieren.
+    """
+    from heizung.scripts import pair_devices
+    from heizung.services import deploy_lock
+
+    gerufen: list[int] = []
+    original = deploy_lock.refresh
+    try:
+        deploy_lock.refresh = lambda *, ttl_s: gerufen.append(ttl_s) or True  # type: ignore[assignment]
+        melder = pair_devices._phase_mit_verlaengerung(4200)
+        melder("Vor-Check")
+    finally:
+        deploy_lock.refresh = original  # type: ignore[assignment]
+
+    assert gerufen == [4200]

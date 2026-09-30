@@ -4127,6 +4127,78 @@ Tooltip nur per Regex auf die Zahl.
 
 ---
 
+## 2br. Deploy-Sperre während des Eingangstests (2026-09-30, Sprint 20a)
+
+**Anlass:** Beim Merge von Sprint 20 / PR A stand zum ersten Mal die Frage
+„läuft gerade ein Montage- oder Eingangstest?" — und dahinter der Befund,
+dass ein Merge nach `develop` ein Deploy auf heizung-test ist: der Timer
+zieht alle fünf Minuten und ruft `docker compose up -d`, was den
+api-Container erneuert. Der Batch-Eingangstest läuft in genau diesem
+Container.
+
+**Was ein Deploy mitten im Lauf kostet:** nicht die bisherige Arbeit — die
+Urteile werden je Gerät festgeschrieben, `--resume` setzt auf. Verloren ist
+das Gerät, das gerade auf seine Bestätigung wartete: es hat Downlinks
+bekommen, aber kein Urteil, und der Resume-Lauf schickt sie erneut. Doppelte
+Befehle an ein Gerät, dessen erste Runde niemand mehr zuordnen kann — S4.
+
+Zuerst war das eine **Regel** (CLAUDE.md §0.3, auf Anweisung des Hoteliers
+festgeschrieben): vor jedem Merge nach develop wird gefragt. Eine Regel
+trägt nur, solange sie gestellt wird — deshalb dieser PR.
+
+### Was drin ist
+
+| Teil | Inhalt |
+|---|---|
+| `services/deploy_lock.py` | Redis-Key `heizung:lock:inbound_test` mit TTL, `acquire`/`refresh`/`release`/`held_until` plus Kontextmanager `held` |
+| `pair_devices` | Setzt die Sperre bei `test` und `inbound-test`, verlängert sie an jeder Fortschritts-Meldung, gibt sie im `finally` frei. SIGTERM wird in `SystemExit` gewandelt, damit `docker stop` denselben Weg nimmt. **Kein Schalter, der ohne Sperre läuft** — Begründung in `deploy_lock.held` |
+| `deploy-pull.sh` | Neue **Phase 0**: TTL abfragen, bei gesetzter Sperre den **ganzen** Lauf überspringen (kein halber Deploy), Log-Zeile mit Grund, Ping mit `skipped: inbound_test lock (TTL bis …)` |
+| Tests | 22 für das Modul (Fake-Redis, darunter vier mit echtem TTL-Ablauf gegen eine virtuelle Uhr: ein Lauf über dreifache Start-TTL behält seine Sperre), 4 für die CLI-Schalter, 6 gegen das **echte** Skript mit Attrappen für `docker`/`git`/`curl` |
+| Doku | RUNBOOK §10p (Handgriffe), §10l (Besonderheit beim Deploy-Check), §10h.4 (Hinweis für den Montage-Lauf), CLAUDE.md §0.3 nachgezogen |
+
+### Drei Entscheidungen, die erklärt werden müssen
+
+**Die TTL ist die Sicherung, nicht das Löschen.** Stirbt der Prozess hart,
+läuft kein `finally`. Dann muss die Sperre von selbst verfallen, sonst
+blockiert ein abgestürzter Testlauf jeden Deploy auf Dauer — der teurere
+Fehler, weil ihn niemand als solchen erkennt (§5.7: drei Monate stiller
+Stillstand). TTL = längstes Wartefenster des Laufs + 15 min.
+
+**Der übersprungene Lauf pingt trotzdem** — mit dem Grund im Text. Ohne
+Ping schlägt der Deploy-Monitor nach 20 Minuten Karenz an, und ein
+Montage-Lauf dauert ein bis drei Stunden: ein Falsch-Alarm bei jedem Lauf,
+und ein Melder mit regelmäßigen Falsch-Alarmen meldet nach einer Woche
+nichts mehr (§5.79). Der Preis steht in §10l und §10p: während einer
+Sperre sagt der Monitor „in Ordnung", obwohl kein Deploy läuft. Vertretbar
+nur, weil die Sperre eine TTL hat.
+
+**Bei nicht abfragbarem Redis wird nicht gesperrt.** Steht der Stack nicht,
+läuft auch kein Eingangstest — der braucht denselben Container. Eine Sperre
+bei unbekanntem Zustand würde den Deploy bei jedem Redis-Ausfall lahmlegen,
+und das ist der Fall, in dem man deployen will.
+
+### Nebenbefund
+
+`deploy-pull.sh` war nicht testbar: `LOG` und `REPO_DIR` standen als
+Literale im Skript. Beide sind jetzt über `DEPLOY_LOG` und
+`DEPLOY_REPO_DIR` überschreibbar (im Betrieb setzt sie niemand). Damit
+läuft der Test gegen das **echte** Skript — ein nachgebautes im Test würde
+nur sich selbst prüfen.
+
+### Offen
+
+- **Der Test der Skript-Seite läuft nur auf POSIX.** Auf dem
+  Arbeitsrechner findet `which("bash")` WSL-bash, die die Windows-Umgebung
+  nicht erbt. In CI (ubuntu) läuft er; die vier Fälle sind zusätzlich von
+  Hand unter Git Bash belegt.
+- **Das Gate hat drei Lücken**, in CLAUDE.md §0.3 benannt: ein nicht
+  erreichbarer Redis (dann bricht der Test ab, aber der Timer fährt fort),
+  ein von Hand getipptes `docker compose up -d` (§5.78), und andere
+  langlaufende Handgriffe am Gerät. Deshalb bleibt die Frage vor dem Merge
+  Pflicht.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening

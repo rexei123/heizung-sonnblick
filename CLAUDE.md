@@ -119,18 +119,43 @@ gehört in dieselbe Nachricht wie die Bitte um Merge-Freigabe, damit
 sie nicht als Formalie durchgeht. Bei `main` gilt sie ohnehin
 (Pflicht-Stop 8).
 
-Was die Regel **nicht** ist: ein Ersatz für ein technisches Gate.
-Ein Timer, der einen laufenden Eingangstest erkennt und den Pull
-aufschiebt, wäre die belastbare Lösung — die Regel ist die
-Zwischenlösung, die heute nichts kostet. Anlass war der Merge von
-Sprint 20 / PR A am 30.09.2026, bei dem die Frage zum ersten Mal
-gestellt wurde (Antwort: kein Lauf offen).
+**Nachtrag vom selben Tag — das technische Gate steht.** Hier stand
+zunächst, ein Timer, der einen laufenden Eingangstest erkennt und
+den Pull aufschiebt, „wäre die belastbare Lösung", und die Frage sei
+die Zwischenlösung. Das Gate ist inzwischen gebaut (Sprint 20a):
+`services/deploy_lock.py` setzt einen Redis-Key mit TTL, und
+`deploy-pull.sh` überspringt seinen ganzen Lauf, solange er steht.
+
+**Die Frage bleibt trotzdem Pflicht**, und zwar nicht aus
+Gewohnheit, sondern weil das Gate drei Lücken hat:
+
+1. Es schützt nur, wenn die Sperre wirklich gesetzt wurde — also
+   wenn der Lauf über die CLI kam. Ist Redis nicht erreichbar,
+   bricht der Test ab (es gibt bewusst keinen Schalter dagegen) —
+   aber dann kann auch der Timer den Key nicht abfragen und fährt
+   fort. Wer in diesem Zustand am Gerät arbeitet, ist ungeschützt.
+2. Es greift nur am Timer. Ein von Hand getipptes
+   `docker compose up -d` geht daran vorbei (§5.78 ist die
+   Schwesterlesson: die Gefahr liegt bei den Befehlen, die jemand
+   selbst eingibt).
+3. Es weiß nichts von anderen langlaufenden Handgriffen am Gerät —
+   einem Downlink-Versuch aus RUNBOOK §10e etwa, oder einem
+   Montage-Gang, bei dem gerade jemand an der Wand steht.
+
+Ein Gate ersetzt also die Frage nicht, es fängt den Fall ab, in dem
+sie vergessen wurde. Beides zusammen ist der Schutz; keines allein.
+
+Anlass war der Merge von Sprint 20 / PR A am 30.09.2026, bei dem die
+Frage zum ersten Mal gestellt wurde (Antwort: kein Lauf offen).
 
 **Querverweise:** §5.78 (`docker compose` ohne `-f` auf dem
 Server — dieselbe Familie: ein Eingriff, dessen Nebenwirkung man
-nicht sieht), §0 S4 (Hardware-Schutz, keine doppelten Downlinks),
-RUNBOOK §10h.4 (Laufzeit des Eingangstests: 1-3 h — so lange ist
-das Fenster, in dem die Frage nötig ist).
+nicht sieht, und gleichzeitig Lücke 2 des Gates), §0 S4
+(Hardware-Schutz, keine doppelten Downlinks), §5.76 (Wirkung
+überwachen statt Mechanik — der übersprungene Lauf pingt deshalb
+mit Grund, statt zu schweigen), RUNBOOK §10h.4 (Laufzeit des
+Eingangstests: 1-3 h — so lange ist das Fenster), RUNBOOK §10p
+(Sperre im Betrieb: prüfen, lesen, notfalls löschen).
 
 ### Auto-Continue (autonom)
 
