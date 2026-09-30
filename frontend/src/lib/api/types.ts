@@ -17,8 +17,9 @@ export type DeviceVendor = "mclimate" | "milesight" | "manual";
 export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious";
 
 // Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
-// DeviceHealthState (offline/implausible). Abgeleitet aus battery_percent +
-// alert_battery_warn_percent; Spiegel zu DeviceRead.battery_state.
+// DeviceHealthState (offline/implausible). Seit Sprint 20 (AE-69) abgeleitet
+// aus dem 24-h-Median der Geraete-Spannung, nicht mehr aus einem Prozentwert;
+// Spiegel zu DeviceRead.battery_state.
 export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
 
 /** Zone-Health (AE-53): aus den Devices der Zone aggregiert (no_device statt suspicious). */
@@ -66,9 +67,12 @@ export interface DeviceLatestReading {
   open_window: boolean | null;
   attached_backplate: boolean | null;
   // Sprint 14b: temperature (Backend field_serializer Decimal->float => number)
-  // + battery_percent fuer Thermostat-Bubbles (Ist-Temp + Batterie).
+  // fuer Thermostat-Bubbles.
   temperature: number | null;
-  battery_percent: number | null;
+  // Sprint 20 (AE-69): die Spannung des LETZTEN Frames, in Volt. Nicht die
+  // Grundlage des Badges — dafuer ist Device.battery_voltage_median da. Hier
+  // steht ein Einzelwert, der unter Motorlast einbrechen kann.
+  battery_voltage: number | null;
   recorded_at: string;
 }
 
@@ -97,9 +101,26 @@ export interface Device {
   health_state: DeviceHealthState;
   /**
    * Sprint 15d (AE-65): Batterie-Health-Achse, orthogonal zu health_state.
-   * Read-time abgeleitet aus latest_reading.battery_percent + Config-Schwelle.
+   * Sprint 20 (AE-69): read-time abgeleitet aus dem 24-h-Median der
+   * Geraete-Spannung. Schwellen OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V.
    */
   battery_state: BatteryHealthState;
+  /**
+   * Der Median, aus dem battery_state entstanden ist — in Volt. Die Zahl, die
+   * neben die Stufe gehoert („OK · 3,1 V"). NICHT
+   * latest_reading.battery_voltage nehmen: ein einzelner Frame kann unter
+   * Motorlast einbrechen, dann widerspricht der Badge sich selbst.
+   * null, wenn die Mindest-Stichprobe im Fenster nicht erreicht ist.
+   */
+  battery_voltage_median: number | null;
+  /**
+   * Gesetzt, wenn im Fenster ein Batteriewechsel erkannt wurde (Sprung
+   * >= 0,3 V nach oben). Dann zaehlen nur Messwerte ab diesem Zeitpunkt, und
+   * solange es davon weniger als drei gibt, ist battery_state "unbekannt" —
+   * rund eine halbe Stunde. Mit diesem Feld kann die Oberflaeche den Grund
+   * nennen statt einen Fehler zu suggerieren.
+   */
+  battery_jump_at: string | null;
   created_at: string;
   updated_at: string;
   // Sprint 14a (D1/D2): Cross-Sicht-Felder.
@@ -136,7 +157,9 @@ export interface SensorReading {
   temperature: number | null;
   setpoint: number | null;
   valve_position: number | null;
-  battery_percent: number | null;
+  // Sprint 20 (AE-69): Spannung statt Prozent. Bestandszeilen von vor
+  // Migration 0024 haben null — die Tabelle zeigt dort einen Strich.
+  battery_voltage: number | null;
   rssi_dbm: number | null;
   snr_db: number | null;
   // Sprint 14a (D9): Codec-Felder, vom Backend in SensorReadingRead
@@ -440,7 +463,6 @@ export interface GlobalConfig {
   summer_mode_ends_on: string | null;
   alert_email: string | null;
   alert_device_offline_minutes: number;
-  alert_battery_warn_percent: number;
   // Ortszeit "HH:MM:SS" (§5.65). Schwelle des Belegungs-Import-Watchdogs.
   occupancy_import_expected_by_local: string;
   // Laufzeit-Felder zum Mailversand (Sprint 18, T4). Read-only — sie stehen
@@ -566,7 +588,6 @@ export interface GlobalConfigUpdate {
   summer_mode_ends_on?: string | null;
   alert_email?: string | null;
   alert_device_offline_minutes?: number;
-  alert_battery_warn_percent?: number;
   occupancy_import_expected_by_local?: string;
 }
 

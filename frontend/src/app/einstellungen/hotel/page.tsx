@@ -22,7 +22,6 @@ export default function HotelSettingsPage() {
   const [checkOut, setCheckOut] = useState("");
   const [alertEmail, setAlertEmail] = useState("");
   const [offlineMin, setOfflineMin] = useState("");
-  const [batteryWarn, setBatteryWarn] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -35,7 +34,6 @@ export default function HotelSettingsPage() {
     setCheckOut(cfg.data.default_checkout_time.slice(0, 5));
     setAlertEmail(cfg.data.alert_email ?? "");
     setOfflineMin(String(cfg.data.alert_device_offline_minutes));
-    setBatteryWarn(String(cfg.data.alert_battery_warn_percent));
   }, [cfg.data]);
 
   const handle = async (e: FormEvent) => {
@@ -59,9 +57,6 @@ export default function HotelSettingsPage() {
     }
     if (parseInt(offlineMin, 10) !== cfg.data.alert_device_offline_minutes) {
       payload.alert_device_offline_minutes = parseInt(offlineMin, 10);
-    }
-    if (parseInt(batteryWarn, 10) !== cfg.data.alert_battery_warn_percent) {
-      payload.alert_battery_warn_percent = parseInt(batteryWarn, 10);
     }
 
     if (Object.keys(payload).length === 0) {
@@ -120,25 +115,23 @@ export default function HotelSettingsPage() {
               placeholder="hotelsonnblick@gmail.com"
             />
             <MailStatusLine config={cfg.data} />
-            <div className="grid grid-cols-2 gap-3">
-              <NumField
-                id="cfg-off"
-                label="Gerät offline nach (Min)"
-                value={offlineMin}
-                onChange={setOfflineMin}
-                min={1}
-                max={1440}
-              />
-              <NumField
-                id="cfg-bat"
-                label="Batterie-Warnung unter (%)"
-                value={batteryWarn}
-                onChange={setBatteryWarn}
-                min={1}
-                max={100}
-                hint="Wirkt auf die Batterie-Anzeige und die Dashboard-Kachel. Löst noch keine E-Mail aus."
-              />
-            </div>
+            {/*
+              Sprint 20 (AE-69): Das Feld „Batterie-Warnung unter (%)" ist hier
+              entfernt. Die Batterie-Stufen rechnen jetzt gegen feste
+              Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch
+              <= 2,8 V) — eine Prozent-Schwelle hätte keine Wirkung mehr, und
+              ein Schalter ohne Wirkung ist schlimmer als kein Schalter
+              (CLAUDE.md §5.77). Die Spalte bleibt in `global_config`, wird
+              aber nicht mehr ausgeliefert; Eintrag in STATUS.md B-18-7.
+            */}
+            <NumField
+              id="cfg-off"
+              label="Gerät offline nach (Min)"
+              value={offlineMin}
+              onChange={setOfflineMin}
+              min={1}
+              max={1440}
+            />
           </Card>
 
           {error ? (

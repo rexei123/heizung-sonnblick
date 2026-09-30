@@ -77,7 +77,7 @@ const SAMPLE_READINGS = [
     temperature: 22.4,
     setpoint: 21.0,
     valve_position: 80,
-    battery_percent: 75,
+    battery_voltage: 3.1,
     rssi_dbm: -82,
     snr_db: 8.0,
     open_window: false,
@@ -235,11 +235,17 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     await expect(page.getByTestId("override-card")).toContainText("Kein Override aktiv");
   });
 
-  test("Sprint 15d PR3: Batterie-Kachel zeigt Badge, Prozent nur im Tooltip", async ({ page }) => {
-    // battery_state kommt aus dem Device (DeviceRead, PR1); der Prozentwert im
-    // Tooltip aus dem jüngsten Reading (SAMPLE_READINGS.battery_percent = 75),
-    // konsistent zu den Schwester-Kacheln (Temperatur/Signal nutzen `latest`).
-    const withBattery = { ...ASSIGNED_DEVICE, battery_state: "warn" };
+  test("Sprint 15d PR3: Batterie-Kachel zeigt Badge, Zahl nur im Tooltip", async ({ page }) => {
+    // battery_state kommt aus dem Device (DeviceRead, PR1). Sprint 20 (AE-69):
+    // die Zahl im Tooltip ist der 24-h-Median der Spannung aus demselben
+    // Device-Objekt — NICHT der letzte Frame. Dass beide Werte hier
+    // auseinanderliegen (Median 2,9 V, letzter Frame 3,1 V), ist Absicht: so
+    // faellt auf, wenn jemand wieder den Einzelwert an den Badge haengt.
+    const withBattery = {
+      ...ASSIGNED_DEVICE,
+      battery_state: "warn",
+      battery_voltage_median: 2.9,
+    };
     await mockDetail(page, withBattery);
     await page.goto("/devices/42");
 
@@ -247,10 +253,9 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     const badge = card.getByTestId("battery-badge");
     // Badge (3+1) mit Zustand aus battery_state — konsistent zu Liste/Bubble.
     await expect(badge).toHaveAttribute("data-battery", "warn");
-    // Prozent NUR im title-Tooltip, NICHT im sichtbaren Kachel-Text.
-    await expect(badge).toHaveAttribute("title", "Batterie: 75 %");
-    // formatPercent rendert immer „N %" — kein „%" im Haupttext beweist, dass
-    // kein Prozentwert mehr gerendert wird (Badge + Tooltip statt Zahl).
+    // Zahl NUR im title-Tooltip, NICHT im sichtbaren Kachel-Text.
+    await expect(badge).toHaveAttribute("title", "Batterie: 2,9 V (Median 24 h)");
+    // Kein „%" im Haupttext: die Prozent-Anzeige ist mit Sprint 20 ganz weg.
     // (Die „75" im Icon-Ligatur-Namen `battery_horiz_075` ist aria-hidden-
     // Glyph-Text, kein sichtbarer Wert — daher gezielt auf „%" geprüft.)
     await expect(card).not.toContainText("%");

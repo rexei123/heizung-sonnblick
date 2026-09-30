@@ -105,6 +105,19 @@ export function formatPercent(v: number | null | undefined): string {
   return `${Math.round(v)} %`;
 }
 
+/**
+ * Geräte-Spannung in Volt, eine Dezimalstelle, Komma als Trennzeichen
+ * (Sprint 20, AE-69).
+ *
+ * Eine Stelle, nicht zwei: der Codec liefert die Spannung in einem
+ * 4-Bit-Nibble, also in 0,1-V-Schritten. Eine zweite Stelle wäre erfunden —
+ * derselbe Fehler, den die Prozent-Anzeige gemacht hat.
+ */
+export function formatVolts(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "–";
+  return `${v.toFixed(1).replace(".", ",")} V`;
+}
+
 export function formatRssi(v: number | null | undefined): string {
   if (v === null || v === undefined) return "–";
   return `${v} dBm`;

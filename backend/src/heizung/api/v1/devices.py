@@ -27,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
 from heizung.models.device import Device
-from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.models.user import User
@@ -46,7 +45,7 @@ from heizung.schemas.device import (
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service
-from heizung.services.battery_health import DEFAULT_BATTERY_WARN_PCT, battery_health_state
+from heizung.services.battery_health import BatteryVerdict, battery_verdicts
 from heizung.services.device_service import (
     assign_zone,
     get_device_with_relations,
@@ -100,19 +99,9 @@ async def _ensure_zone_exists(session: AsyncSession, zone_id: int | None) -> Non
         )
 
 
-async def _battery_warn_threshold(session: AsyncSession) -> int:
-    """Liest ``alert_battery_warn_percent`` aus der GlobalConfig-Singleton (id=1).
-
-    Defensiver Fallback ``DEFAULT_BATTERY_WARN_PCT`` wenn die Row fehlt
-    (frische DB ohne Seed, S5). ``session.get`` nutzt die Identity-Map — der
-    Aufruf je Geraet in der Listen-Schleife loest nur einen DB-Roundtrip pro
-    Request aus (Folge-Aufrufe treffen den Cache), kein N+1.
-    """
-    gc = await session.get(GlobalConfig, 1)
-    return gc.alert_battery_warn_percent if gc is not None else DEFAULT_BATTERY_WARN_PCT
-
-
-async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRead:
+async def _build_device_read(
+    session: AsyncSession, device: Device, verdict: BatteryVerdict
+) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
     + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
 
@@ -125,6 +114,14 @@ async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRea
 
     Hinweis (D3): pro Device je eine Override- + eine Reading-Query (N+1).
     Bewusst akzeptiert bei < 200 Geraeten; Optimierung im Backlog falls noetig.
+
+    ``verdict`` ist ein **Pflicht-Argument** und kein Default (Sprint 20,
+    AE-69): die Batterie-Bewertung laeuft ueber ein 24-h-Fenster und wird
+    fuer alle Geraete des Requests in **einer** Query geholt
+    (``battery_verdicts``). Ein Default wie ``UNBEKANNT`` waere bequem und
+    wuerde genau den Fehler zulassen, den er verdeckt — eine Liste, die
+    stillschweigend "unbekannt" fuer jedes Geraet ausgibt, weil jemand das
+    Argument vergessen hat.
     """
     read = DeviceRead.model_validate(device)
 
@@ -151,24 +148,32 @@ async def _build_device_read(session: AsyncSession, device: Device) -> DeviceRea
             open_window=reading.open_window,
             attached_backplate=reading.attached_backplate,
             temperature=reading.temperature,
-            battery_percent=reading.battery_percent,
+            battery_voltage=reading.battery_voltage,
             recorded_at=reading.time,
         )
-
-    # Sprint 15d (AE-65): Batterie-Health-Achse aus dem juengsten Reading +
-    # konfigurierter Warn-Schwelle ableiten. ``None`` (kein Reading) -> wird
-    # in ``battery_health_state`` zu "unbekannt".
-    battery_pct = reading.battery_percent if reading is not None else None
-    threshold = await _battery_warn_threshold(session)
-    battery_state = battery_health_state(battery_pct, threshold)
 
     return read.model_copy(
         update={
             "active_override": override_read,
             "latest_reading": reading_read,
-            "battery_state": battery_state,
+            # Sprint 20 (AE-69): Stufe und Zahl kommen aus demselben Verdict,
+            # damit sie nicht auseinanderlaufen koennen.
+            "battery_state": verdict.stage,
+            "battery_voltage_median": verdict.median_v,
+            "battery_jump_at": verdict.jump_at,
         }
     )
+
+
+async def _verdict_fuer(session: AsyncSession, device_id: int) -> BatteryVerdict:
+    """Batterie-Verdict fuer ein einzelnes Geraet (Einzel-Endpoints).
+
+    ``battery_verdicts`` liefert garantiert einen Eintrag je angefragter ID,
+    der Zugriff ist also nicht optional — ein ``.get(...)`` mit Default waere
+    hier eine Absicherung gegen etwas, das nicht vorkommt, und wuerde einen
+    echten Fehler verdecken.
+    """
+    return (await battery_verdicts(session, [device_id]))[device_id]
 
 
 async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRead:
@@ -185,7 +190,7 @@ async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRe
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
-    return await _build_device_read(session, device)
+    return await _build_device_read(session, device, await _verdict_fuer(session, device_id))
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +258,11 @@ async def list_devices(
         limit=limit,
         offset=offset,
     )
-    return [await _build_device_read(session, d) for d in devices]
+    # Sprint 20 (AE-69): EINE Aggregat-Query fuer die Batterie-Stufen aller
+    # Geraete der Seite, vor der Schleife. Ein Aufruf je Geraet waere bei
+    # 104 Geraeten ein dritter N+1-Pfad neben Override und Reading.
+    verdicts = await battery_verdicts(session, [d.id for d in devices])
+    return [await _build_device_read(session, d, verdicts[d.id]) for d in devices]
 
 
 @router.get(
@@ -277,7 +286,8 @@ async def list_pool_devices(
     ``active_override`` sind null; ``latest_reading`` kann gesetzt sein.
     """
     pool = await get_pool_devices(session)
-    return [await _build_device_read(session, d) for d in pool]
+    verdicts = await battery_verdicts(session, [d.id for d in pool])
+    return [await _build_device_read(session, d, verdicts[d.id]) for d in pool]
 
 
 @router.get(
@@ -298,7 +308,7 @@ async def get_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
-    return await _build_device_read(session, device)
+    return await _build_device_read(session, device, await _verdict_fuer(session, device_id))
 
 
 @router.patch(

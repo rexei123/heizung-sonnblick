@@ -132,6 +132,17 @@ BATTERY_CURVE_2XAA: tuple[tuple[Decimal, int], ...] = (
 def _battery_pct_from_volts(volts: float | None) -> int | None:
     """Vicki-2xAA-Alkaline Batterie-Prozent aus Codec-Geraete-Spannung.
 
+    **Ohne Konsumenten seit Sprint 20 (AE-69).** Die drei Batterie-Stufen
+    rechnen seit Migration 0024 direkt auf ``sensor_reading.battery_voltage``
+    (``services/battery_health.py``); Prozent wird weiter geschrieben, aber
+    nirgends mehr gelesen. Grund fuer das Weiterschreiben: Rueckfallpfad,
+    falls die Stufen-Umstellung zurueckgedreht werden muss — ein Rollback
+    braucht die Spalte befuellt, nicht nachtraeglich rekonstruiert.
+
+    Dieser Vermerk ist eine Aussage ueber den heutigen Code, keine dauerhafte
+    Eigenschaft (CLAUDE.md §5.77): wer Prozent wieder an einen Konsumenten
+    haengt, streicht ihn hier und in CLAUDE.md §5.72 im selben PR.
+
     Stuetzstellen-Interpolation nach ``BATTERY_CURVE_2XAA``. Linear
     zwischen zwei umfassenden Anchors, geclampt 0..100 ausserhalb der
     Endpunkte (``volts <= 2.80`` -> 0, ``volts >= 3.00`` -> 100).
@@ -208,6 +219,11 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         "temperature": _to_decimal(obj.get("temperature")),
         "setpoint": _to_decimal(obj.get("target_temperature")),
         "valve_position": valve_pct,
+        # Sprint 20 (AE-69): die Spannung selbst, Raster 0.1 V. Quelle der
+        # drei Batterie-Stufen seit Migration 0024. NULL wenn das Feld fehlt.
+        "battery_voltage": _to_decimal(obj.get("battery_voltage")),
+        # Rueckfallpfad, ohne Konsumenten — siehe Docstring von
+        # ``_battery_pct_from_volts``.
         "battery_percent": _battery_pct_from_volts(obj.get("battery_voltage")),
         "rssi_dbm": rx.rssi if rx else None,
         "snr_db": _to_decimal(rx.snr) if rx else None,

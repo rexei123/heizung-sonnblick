@@ -39,14 +39,13 @@ from heizung.models.enums import (
     RoomStatus,
 )
 from heizung.models.event_log import EventLog
-from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.services import dashboard_aggregates as agg
-from heizung.services.battery_health import battery_health_state
+from heizung.services.battery_health import battery_verdicts
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt — DB-Tests brauchen Postgres"
@@ -141,7 +140,7 @@ async def _mk_reading(
     *,
     temperature: Decimal | None = None,
     open_window: bool | None = None,
-    battery_percent: int | None = None,
+    battery_voltage: Decimal | None = None,
     when: datetime,
 ) -> None:
     session.add(
@@ -150,10 +149,34 @@ async def _mk_reading(
             device_id=device_id,
             temperature=temperature,
             open_window=open_window,
-            battery_percent=battery_percent,
+            battery_voltage=battery_voltage,
         )
     )
     await session.flush()
+
+
+async def _mk_battery_series(
+    session: AsyncSession,
+    device_id: int,
+    volts: str | None,
+    *,
+    when: datetime,
+    anzahl: int = 3,
+) -> None:
+    """Legt ``anzahl`` Spannungs-Messwerte im 10-Minuten-Raster an.
+
+    Die Batterie-Stufe braucht seit Sprint 20 (AE-69) eine Mindest-Stichprobe
+    von drei Messwerten im 24-h-Fenster — ein einzelner Frame kann ein
+    Lastabfall unter Motorbewegung sein. Ein Test, der nur einen Messwert
+    anlegt, bekommt deshalb "unbekannt" und nicht die erwartete Stufe.
+    """
+    for i in range(anzahl):
+        await _mk_reading(
+            session,
+            device_id,
+            battery_voltage=None if volts is None else Decimal(volts),
+            when=when - timedelta(minutes=10 * i),
+        )
 
 
 async def test_count_rooms_occupied_delta(db_session: AsyncSession) -> None:
@@ -292,18 +315,23 @@ async def test_count_zones_window_open_delta(db_session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 15d (AE-65) — battery_low_count
+# battery_low_count (AE-65, ab Sprint 20 ueber die Spannung / AE-69)
 # ---------------------------------------------------------------------------
 #
-# Seed-Schwelle ``alert_battery_warn_percent`` = 20 (Migration 0003a). Tests
-# sind delta-basiert (Wert vor/nach), robust gegen Leftover-Bestand (§5.39).
+# Die Kachel zaehlt Geraete mit Stufe ``warn`` oder ``kritisch``. Schwellen
+# sind fest (OK >= 3.0 V / schwach 2.9 V / kritisch <= 2.8 V), es gibt keine
+# konfigurierbare Prozent-Schwelle und damit auch keine Klemmung mehr.
+#
+# Tests sind delta-basiert (Wert vor/nach), robust gegen Leftover-Bestand
+# (§5.39). Jedes Geraet braucht drei Messwerte, sonst ist die Stufe
+# "unbekannt" (Mindest-Stichprobe).
 
 
 async def test_count_battery_low_counts_active_below_threshold(db_session: AsyncSession) -> None:
-    """Zaehlt nur aktive Geraete unter der Schwelle; ignoriert retired + None.
+    """Zaehlt aktive Geraete mit warn oder kritisch; ignoriert retired + NULL.
 
-    Default-Schwelle 20: warn (15) + kritisch (5) zaehlen, ok (50) nicht,
-    None nicht, retired (3) nicht.
+    warn (2.9 V) + kritisch (2.8 V) zaehlen, ok (3.1 V) nicht, ohne Spannung
+    nicht, retired (2.0 V) nicht.
     """
     base = await agg.count_battery_low(db_session)
     s = uuid.uuid4().hex[:8]
@@ -312,25 +340,33 @@ async def test_count_battery_low_counts_active_below_threshold(db_session: Async
     now = datetime.now(tz=UTC)
 
     d_warn = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
-    await _mk_reading(db_session, d_warn.id, battery_percent=15, when=now)  # 15 < 20 -> zaehlt
+    await _mk_battery_series(db_session, d_warn.id, "2.9", when=now)
     d_crit = await _mk_device(db_session, f"{s}2", zone_id=zone.id, health_state="silent")
-    await _mk_reading(db_session, d_crit.id, battery_percent=5, when=now)  # 5 < 20 -> zaehlt
+    await _mk_battery_series(db_session, d_crit.id, "2.8", when=now)
     d_ok = await _mk_device(db_session, f"{s}3", zone_id=zone.id, health_state="healthy")
-    await _mk_reading(db_session, d_ok.id, battery_percent=50, when=now)  # 50 >= 20 -> nein
+    await _mk_battery_series(db_session, d_ok.id, "3.1", when=now)
     d_none = await _mk_device(db_session, f"{s}4", zone_id=zone.id, health_state="healthy")
-    await _mk_reading(db_session, d_none.id, battery_percent=None, when=now)  # NULL -> nein
+    await _mk_battery_series(db_session, d_none.id, None, when=now)
     d_retired = await _mk_device(
         db_session, f"{s}5", zone_id=zone.id, health_state="healthy", retired=True
     )
-    await _mk_reading(db_session, d_retired.id, battery_percent=3, when=now)  # retired -> nein
+    await _mk_battery_series(db_session, d_retired.id, "2.0", when=now)
 
-    assert await agg.count_battery_low(db_session) - base == 2, "nur warn(15) + kritisch(5)"
+    assert await agg.count_battery_low(db_session) - base == 2, "nur warn(2.9) + kritisch(2.8)"
 
 
-async def test_count_battery_low_uses_latest_reading_per_device(db_session: AsyncSession) -> None:
-    """Nur das juengste Reading je Geraet zaehlt (DISTINCT ON device_id).
+async def test_count_battery_low_folgt_dem_median_nicht_dem_letzten_frame(
+    db_session: AsyncSession,
+) -> None:
+    """Der Lastabfall aendert die Kachel nicht (Sprint 20, AE-69).
 
-    Geraet mit altem low-Reading (5) und neuerem ok-Reading (60) zaehlt NICHT.
+    Bis Sprint 19 entschied hier der **juengste** Messwert (DISTINCT ON
+    device_id). Genau daran lag der Befund zu Geraet 001: ein Einbruch unter
+    Motorlast hat das Geraet als "kritisch" gezeigt, obwohl die Batterie in
+    Ordnung war.
+
+    Hier: 23 Messwerte 3.1 V, der juengste 2.6 V. Der Median bleibt 3.1, die
+    Kachel zaehlt das Geraet nicht. Mit der alten Logik waere es eins.
     """
     base = await agg.count_battery_low(db_session)
     s = uuid.uuid4().hex[:8]
@@ -339,63 +375,63 @@ async def test_count_battery_low_uses_latest_reading_per_device(db_session: Asyn
     now = datetime.now(tz=UTC)
 
     d = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
-    await _mk_reading(db_session, d.id, battery_percent=5, when=now - timedelta(hours=6))  # alt
-    await _mk_reading(db_session, d.id, battery_percent=60, when=now)  # juengstes -> ok
+    await _mk_battery_series(db_session, d.id, "3.1", when=now - timedelta(minutes=10), anzahl=23)
+    await _mk_reading(db_session, d.id, battery_voltage=Decimal("2.6"), when=now)
 
     assert await agg.count_battery_low(db_session) - base == 0
 
 
 async def test_count_battery_low_real_four_vicki_fixture_zero(db_session: AsyncSession) -> None:
-    """Reale 4-Vicki-Werte aus 15b-Verify (50/93/100/100) -> alle ueber 20.
+    """Reale 4-Vicki-Werte aus dem 15b-Verify, in Spannung: 3.0/3.4/3.5/3.5 V.
 
-    battery_low_count-Delta = 0 (kein Vicki unter der Warn-Schwelle).
+    Das sind dieselben Geraete, die damals 50/93/100/100 % zeigten. Alle
+    liegen auf oder ueber 3.0 V — Delta = 0.
     """
     base = await agg.count_battery_low(db_session)
     s = uuid.uuid4().hex[:8]
     room = await _mk_room(db_session, s, RoomStatus.OCCUPIED)
     zone = await _mk_zone(db_session, room.id, s)
     now = datetime.now(tz=UTC)
-    for i, pct in enumerate((50, 93, 100, 100)):
+    for i, volts in enumerate(("3.0", "3.4", "3.5", "3.5")):
         d = await _mk_device(db_session, f"{s}{i}", zone_id=zone.id, health_state="healthy")
-        await _mk_reading(db_session, d.id, battery_percent=pct, when=now)
+        await _mk_battery_series(db_session, d.id, volts, when=now)
 
     assert await agg.count_battery_low(db_session) - base == 0
 
 
-async def test_count_battery_low_clamps_to_critical_in_degenerate_config(
+async def test_count_battery_low_ist_deckungsgleich_mit_dem_badge(
     db_session: AsyncSession,
 ) -> None:
-    """Invariante "Kachel == warn∪kritisch" auch bei warn-Schwelle < 10 (AE-65).
+    """Die Invariante, die die alte Klemmung erzwingen musste — jetzt gratis.
 
-    Degenerierte Konfig: warn-Schwelle 5 (CHECK erlaubt 1..100). Ein Geraet mit
-    pct=7 ist battery_state="kritisch" (7 < 10), wuerde aber ohne Klemmung NICHT
-    gezaehlt (7 nicht < 5). Mit der Klemmung auf BATTERY_CRITICAL_PCT (10) zaehlt
-    es -> Kachel deckungsgleich mit dem kritisch-Badge.
+    Bis Sprint 19 war die Warn-Schwelle konfigurierbar (1..100) und die
+    Kritisch-Grenze fix bei 10 %. Eine Schwelle unter 10 haette ein
+    kritisch-Badge ohne Kachel-Zaehlung erzeugt; dagegen stand eine Klemmung
+    auf ``BATTERY_CRITICAL_PCT``. Mit festen Spannungs-Schwellen gibt es
+    diesen Fall nicht mehr — Badge und Kachel lesen dieselbe Funktion.
 
-    Die GlobalConfig-Mutation laeuft nur im Session-Scope (flush, kein commit);
-    die db_session-Fixture rollt am Testende zurueck. Restore zusaetzlich
-    defensiv im finally.
+    Der Test prueft die Invariante direkt: die Kachel-Zahl ist die Anzahl der
+    Geraete, deren Stufe warn oder kritisch ist. Ein Geraet mit nur zwei
+    Messwerten ("unbekannt") zaehlt nicht — unbekannt ist keine Warnung.
     """
-    gc = await db_session.get(GlobalConfig, 1)
-    assert gc is not None, "Singleton-Row muss durch Migration 0003a existieren"
-    original = gc.alert_battery_warn_percent
-    gc.alert_battery_warn_percent = 5  # warn-Schwelle absichtlich unter Kritisch-Grenze
-    await db_session.flush()
-    try:
-        # Badge-Seite: pct=7 ist kritisch (absolut, < 10) trotz threshold=5.
-        assert battery_health_state(7, 5) == "kritisch"
+    base = await agg.count_battery_low(db_session)
+    s = uuid.uuid4().hex[:8]
+    room = await _mk_room(db_session, s, RoomStatus.VACANT)
+    zone = await _mk_zone(db_session, room.id, s)
+    now = datetime.now(tz=UTC)
 
-        base = await agg.count_battery_low(db_session)
-        s = uuid.uuid4().hex[:8]
-        room = await _mk_room(db_session, s, RoomStatus.VACANT)
-        zone = await _mk_zone(db_session, room.id, s)
-        d = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="silent")
-        await _mk_reading(db_session, d.id, battery_percent=7, when=datetime.now(tz=UTC))
+    eigene: list[int] = []
+    for i, (volts, anzahl) in enumerate(
+        [("2.8", 3), ("2.9", 3), ("3.0", 3), ("3.5", 3), ("2.8", 2)]
+    ):
+        d = await _mk_device(db_session, f"{s}{i}", zone_id=zone.id, health_state="healthy")
+        await _mk_battery_series(db_session, d.id, volts, when=now, anzahl=anzahl)
+        eigene.append(d.id)
 
-        # Kachel-Seite: trotz threshold=5 wird das kritisch-Geraet gezaehlt.
-        assert await agg.count_battery_low(db_session) - base == 1, (
-            "Klemmung auf BATTERY_CRITICAL_PCT: kritisch-Badge muss in der Kachel landen"
-        )
-    finally:
-        gc.alert_battery_warn_percent = original
-        await db_session.flush()
+    verdicts = await battery_verdicts(db_session, eigene, now=now)
+    stufen = [verdicts[d].stage for d in eigene]
+    assert stufen == ["kritisch", "warn", "ok", "ok", "unbekannt"], stufen
+
+    erwartet = sum(1 for st in stufen if st in ("warn", "kritisch"))
+    assert erwartet == 2
+    assert await agg.count_battery_low(db_session) - base == erwartet

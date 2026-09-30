@@ -271,7 +271,7 @@ async def test_latest_reading_with_valve_position(
                 temperature=Decimal("21.0"),
                 setpoint=Decimal("21.0"),
                 valve_position=42,
-                battery_percent=80,
+                battery_voltage=Decimal("3.2"),
                 rssi_dbm=-90,
                 open_window=False,
                 attached_backplate=True,
@@ -285,14 +285,40 @@ async def test_latest_reading_with_valve_position(
     assert latest["valve_position"] == 42
     assert latest["open_window"] is False
     assert latest["attached_backplate"] is True
-    # Sprint 14b: temperature (Decimal->float) + battery_percent additiv.
+    # Sprint 14b: temperature (Decimal->float). Sprint 20 (AE-69): statt
+    # battery_percent die Spannung, ebenfalls als float serialisiert.
     assert latest["temperature"] == 21.0
-    assert latest["battery_percent"] == 80
+    assert latest["battery_voltage"] == 3.2
+    assert "battery_percent" not in latest
 
 
 # ---------------------------------------------------------------------------
-# battery_state (Sprint 15d, AE-65) — orthogonale Health-Achse
+# battery_state (AE-65) — orthogonale Health-Achse, ab Sprint 20 ueber Volt
 # ---------------------------------------------------------------------------
+#
+# Die Stufe kommt aus dem Median der letzten 24 h und braucht mindestens
+# drei Messwerte (AE-69). Die Tests legen deshalb je drei Frames an; mit
+# einem einzigen waere die Stufe korrekt "unbekannt".
+
+
+async def _seed_spannungen(
+    setup_engine: AsyncEngine, device_id: int, volts: str, *, anzahl: int = 3
+) -> None:
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    jetzt = datetime.now(tz=UTC)
+    async with sessionmaker() as session:
+        for i in range(anzahl):
+            session.add(
+                SensorReading(
+                    time=jetzt - timedelta(minutes=10 * i),
+                    device_id=device_id,
+                    fcnt=100 + i,
+                    temperature=Decimal("21.0"),
+                    battery_voltage=Decimal(volts),
+                    open_window=False,
+                )
+            )
+        await session.commit()
 
 
 async def test_battery_state_warn_without_touching_health_state(
@@ -300,52 +326,71 @@ async def test_battery_state_warn_without_touching_health_state(
     setup: dict[str, int | str],
     setup_engine: AsyncEngine,
 ) -> None:
-    """Gerät mit pct=15 erscheint als battery_state="warn" (Schwelle 20),
-    während health_state unveraendert "healthy" bleibt (Regression: Batterie
-    ist eine eigene Achse, faltet NICHT in offline/implausible).
+    """2,9 V erscheint als battery_state="warn", health_state bleibt healthy.
+
+    Regression zu AE-65: Batterie ist eine eigene Achse und faltet NICHT in
+    offline/implausible.
     """
-    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
-    async with sessionmaker() as session:
-        session.add(
-            SensorReading(
-                time=datetime.now(tz=UTC),
-                device_id=int(setup["device_id"]),
-                fcnt=1,
-                temperature=Decimal("21.0"),
-                battery_percent=15,
-                open_window=False,
-            )
-        )
-        await session.commit()
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.9")
 
     resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
     dev = resp.json()
     assert dev["battery_state"] == "warn", dev
     assert dev["health_state"] == "healthy", "Batterie-Achse darf health_state nicht aendern"
-    assert dev["latest_reading"]["battery_percent"] == 15
+    # Die Zahl am Badge ist der Median, nicht der letzte Frame.
+    assert dev["battery_voltage_median"] == 2.9
+    assert dev["battery_jump_at"] is None
 
 
-async def test_battery_state_kritisch_below_ten(
+async def test_battery_state_kritisch_at_or_below_2_8(
     http_client: httpx.AsyncClient,
     setup: dict[str, int | str],
     setup_engine: AsyncEngine,
 ) -> None:
-    """pct=5 -> battery_state="kritisch" (absolute Schwelle 10)."""
-    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
-    async with sessionmaker() as session:
-        session.add(
-            SensorReading(
-                time=datetime.now(tz=UTC),
-                device_id=int(setup["device_id"]),
-                fcnt=2,
-                battery_percent=5,
-                open_window=False,
-            )
-        )
-        await session.commit()
+    """2,8 V -> kritisch. Die Grenze ist inklusiv (Hersteller: "< 2.8 V wechseln")."""
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.8")
 
     resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
-    assert resp.json()["battery_state"] == "kritisch", resp.text
+    dev = resp.json()
+    assert dev["battery_state"] == "kritisch", resp.text
+    assert dev["battery_voltage_median"] == 2.8
+
+
+async def test_battery_state_ok_ab_3_0(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+    setup_engine: AsyncEngine,
+) -> None:
+    """3,0 V ist OK — die Untergrenze der OK-Stufe, ebenfalls inklusiv.
+
+    Das ist der Wert, mit dem Geraet 001 gemeldet wurde. Es stand trotzdem
+    auf "kritisch": die Anzeige kam aus dem letzten Frame, und unter
+    Motorlast war der eingebrochen.
+    """
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "3.0")
+
+    resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
+    assert resp.json()["battery_state"] == "ok", resp.text
+
+
+async def test_battery_state_unbekannt_bei_zu_kleiner_stichprobe(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+    setup_engine: AsyncEngine,
+) -> None:
+    """Zwei Messwerte sind kein Median — auch wenn beide kritisch waeren.
+
+    "kritisch" aus zwei Frames waere eine Aussage, die die Daten nicht
+    tragen. Das Geraet meldet sich gerade erst.
+    """
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.6", anzahl=2)
+
+    resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
+    dev = resp.json()
+    assert dev["battery_state"] == "unbekannt", dev
+    # Der Median wird mitgegeben, ist aber nicht belastbar; die Oberflaeche
+    # zeigt bei "unbekannt" keine Spannung.
+    assert dev["battery_voltage_median"] == 2.6
 
 
 async def test_battery_state_unbekannt_without_reading(
@@ -354,7 +399,52 @@ async def test_battery_state_unbekannt_without_reading(
     """Pool-Device ohne Reading -> battery_state="unbekannt"."""
     resp = await http_client.get(f"/api/v1/devices/{setup['pool_device_id']}")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["battery_state"] == "unbekannt"
+    dev = resp.json()
+    assert dev["battery_state"] == "unbekannt"
+    assert dev["battery_voltage_median"] is None
+
+
+async def test_battery_jump_at_nach_batteriewechsel(
+    http_client: httpx.AsyncClient,
+    setup: dict[str, int | str],
+    setup_engine: AsyncEngine,
+) -> None:
+    """Nach einem Wechsel traegt die Antwort den Zeitpunkt des Sprungs.
+
+    Ohne dieses Feld haette die Oberflaeche eine halbe Stunde lang
+    "unbekannt" zu zeigen, ohne den Grund nennen zu koennen — das sieht wie
+    ein Fehler aus und ist keiner.
+    """
+    device_id = int(setup["device_id"])
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    jetzt = datetime.now(tz=UTC)
+    async with sessionmaker() as session:
+        # Zehn alte Messwerte auf 2.8 V, dann vier frische auf 3.5 V.
+        for i in range(10):
+            session.add(
+                SensorReading(
+                    time=jetzt - timedelta(minutes=10 * (i + 4)),
+                    device_id=device_id,
+                    fcnt=200 + i,
+                    battery_voltage=Decimal("2.8"),
+                )
+            )
+        for i in range(4):
+            session.add(
+                SensorReading(
+                    time=jetzt - timedelta(minutes=10 * i),
+                    device_id=device_id,
+                    fcnt=300 + i,
+                    battery_voltage=Decimal("3.5"),
+                )
+            )
+        await session.commit()
+
+    resp = await http_client.get(f"/api/v1/devices/{device_id}")
+    dev = resp.json()
+    assert dev["battery_state"] == "ok", dev
+    assert dev["battery_voltage_median"] == 3.5
+    assert dev["battery_jump_at"] is not None
 
 
 # ---------------------------------------------------------------------------

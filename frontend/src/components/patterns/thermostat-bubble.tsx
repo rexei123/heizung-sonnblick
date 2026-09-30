@@ -40,11 +40,12 @@ export function ThermostatBubble({ device }: { device: Device }) {
             </span>{" "}
             {formatTemperature(reading?.temperature ?? null)}
           </span>
-          {/* Sprint 15d (AE-65): Batterie als Badge (battery_state-Achse),
-              Prozent nur im Tooltip — ersetzt die frühere formatPercent-Zahl. */}
+          {/* Sprint 15d (AE-65): Batterie als Badge (battery_state-Achse).
+              Sprint 20 (AE-69): die Zahl im Tooltip ist die Spannung in Volt,
+              und zwar der 24-h-Median — nicht der letzte Frame. */}
           <BatteryBadge
             batteryState={device.battery_state}
-            batteryPercent={reading?.battery_percent ?? null}
+            batteryVolts={device.battery_voltage_median}
             variant="compact"
           />
         </div>
