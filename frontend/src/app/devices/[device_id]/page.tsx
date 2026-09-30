@@ -13,6 +13,7 @@ import { useDevice, useSensorReadings, useUpdateDevice } from "@/lib/api/hooks";
 import {
   formatDateTime,
   formatPercent,
+  formatVolts,
   formatRssi,
   formatSnr,
   formatTemperature,
@@ -192,7 +193,7 @@ export default function DeviceDetailPage() {
               <div className="mt-2">
                 <BatteryBadge
                   batteryState={device.battery_state}
-                  batteryPercent={latest?.battery_percent ?? null}
+                  batteryVolts={device.battery_voltage_median}
                   variant="detailed"
                 />
               </div>
@@ -270,7 +271,7 @@ export default function DeviceDetailPage() {
                         {formatPercent(r.valve_position)}
                       </td>
                       <td className="px-6 py-2 text-text-secondary">
-                        {formatPercent(r.battery_percent)}
+                        {formatVolts(r.battery_voltage)}
                       </td>
                       <td className="px-6 py-2 text-text-secondary">
                         {formatRssi(r.rssi_dbm)}

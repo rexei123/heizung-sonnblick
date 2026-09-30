@@ -86,6 +86,10 @@ function makeDevice(activeOverride: unknown = null) {
     firmware_version: "4.2",
     health_state: "healthy" as const,
     battery_state: "ok" as const,
+    // Sprint 20 (AE-69): der Badge liest den Median vom Device, nicht den
+    // Einzelwert aus latest_reading.
+    battery_voltage_median: 3.2,
+    battery_jump_at: null,
     created_at: NOW,
     updated_at: NOW,
     hardware_number: null,
@@ -101,7 +105,7 @@ function makeDevice(activeOverride: unknown = null) {
       open_window: false,
       attached_backplate: true,
       temperature: 21.0,
-      battery_percent: 80,
+      battery_voltage: 3.2,
       recorded_at: NOW,
     },
   };
@@ -194,11 +198,12 @@ test.describe("Sprint 14b — Zone-Karten Heizzonen-Tab", () => {
     const bubble = page.getByTestId("thermostat-bubble-42");
     await expect(bubble).toBeVisible();
     await expect(bubble).toContainText("21.0 °C");
-    // Sprint 15d (AE-65): Batterie als Badge (battery_state="ok"), Prozent (80)
+    // Sprint 15d (AE-65): Batterie als Badge (battery_state="ok"), die Zahl
     // wandert in den title-Tooltip — kein sichtbarer Zahl-Text mehr.
+    // Sprint 20 (AE-69): die Zahl ist der 24-h-Median in Volt.
     const badge = bubble.getByTestId("battery-badge");
     await expect(badge).toHaveAttribute("data-battery", "ok");
-    await expect(badge).toHaveAttribute("title", "Batterie: 80 %");
+    await expect(badge).toHaveAttribute("title", "Batterie: 3,2 V (Median 24 h)");
   });
 
   test("4 Read-only Override-Banner bei aktivem Override (FU-5)", async ({ page }) => {

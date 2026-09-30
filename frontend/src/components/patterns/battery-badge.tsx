@@ -11,9 +11,12 @@
  * 3+1 Zustaende aus ``battery_state`` (AE-65): ok (gruen) · warn (gelb) ·
  * kritisch (rot) · unbekannt (grau). KEINE 5-Stufen-Skala — der Badge ist an
  * die Achse gekoppelt, nicht an eine zweite Schwelle (B-15b-2 abgeschlossen).
- * Die exakte Prozentzahl steht NUR im ``title``-Tooltip (``batteryPercent``),
- * weil der Codec saettigt und 2-stellige Prozente Scheinpraezision sind
- * (AE-64 / §5.72).
+ *
+ * Sprint 20 (AE-69): die Zahl im Tooltip ist die **Spannung in Volt**, nicht
+ * mehr ein Prozentwert — und zwar der 24-h-Median, aus dem die Stufe
+ * entstanden ist (``device.battery_voltage_median``). Nicht der letzte Frame:
+ * ein einzelner Messwert kann unter Motorlast einbrechen, dann widerspricht
+ * der Badge sich selbst.
  *
  * - ``compact``: Pille (Icon + Label), Tooltip als ``title``.
  * - ``detailed``: Pille plus erklaerende Hint-Zeile.
@@ -22,13 +25,14 @@
  */
 
 import type { BatteryHealthState } from "@/lib/api/types";
+import { formatVolts } from "@/lib/format";
 
 type Variant = "compact" | "detailed";
 
 interface BatteryBadgeProps {
   batteryState: BatteryHealthState;
-  /** Jüngster battery_percent — NUR für den Tooltip (einzige Zahl-Stelle). */
-  batteryPercent?: number | null;
+  /** 24-h-Median der Spannung in Volt — die Zahl, die zur Stufe gehört. */
+  batteryVolts?: number | null;
   variant?: Variant;
   className?: string;
 }
@@ -69,15 +73,20 @@ const CONFIG: Record<BatteryHealthState, StateConfig> = {
 
 export function BatteryBadge({
   batteryState,
-  batteryPercent = null,
+  batteryVolts = null,
   variant = "compact",
   className,
 }: BatteryBadgeProps) {
   // Defensive: unbekannter/fehlender State (z. B. Altdaten) -> "unbekannt"
   // statt Crash (S5). Backend garantiert das Feld, Mocks evtl. nicht.
   const cfg = CONFIG[batteryState] ?? CONFIG.unbekannt;
-  // Prozent ist die EINZIGE Stelle mit der Zahl (Tooltip), sonst der Hint.
-  const title = batteryPercent != null ? `Batterie: ${batteryPercent} %` : cfg.hint;
+  // Die Spannung ist die EINZIGE Stelle mit einer Zahl (Tooltip), sonst der
+  // Hint. Bei "unbekannt" gibt es bewusst keine Zahl: der Median ist dann
+  // nicht belastbar (Mindest-Stichprobe nicht erreicht).
+  const title =
+    batteryVolts != null && batteryState !== "unbekannt"
+      ? `Batterie: ${formatVolts(batteryVolts)} (Median 24 h)`
+      : cfg.hint;
 
   const pill = (
     <span

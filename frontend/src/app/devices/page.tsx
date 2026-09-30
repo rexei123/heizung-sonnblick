@@ -193,7 +193,7 @@ function DeviceRow({ device: d }: { device: Device }) {
       <td className="px-4 py-3" data-testid="device-battery-cell">
         <BatteryBadge
           batteryState={d.battery_state}
-          batteryPercent={d.latest_reading?.battery_percent ?? null}
+          batteryVolts={d.battery_voltage_median}
           variant="compact"
         />
       </td>

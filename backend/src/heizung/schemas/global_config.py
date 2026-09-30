@@ -24,7 +24,6 @@ class GlobalConfigUpdate(BaseModel):
     summer_mode_ends_on: date | None = None
     alert_email: EmailStr | None = None
     alert_device_offline_minutes: int | None = Field(default=None, ge=1, le=1440)
-    alert_battery_warn_percent: int | None = Field(default=None, ge=1, le=100)
     # Ortszeit (§5.65). Der Watchdog vergleicht die in Ortszeit gewandelte
     # Jetzt-Zeit dagegen — hier steht Wanduhr, nicht UTC.
     occupancy_import_expected_by_local: time | None = None
@@ -46,7 +45,16 @@ class GlobalConfigUpdate(BaseModel):
 
 
 class GlobalConfigRead(BaseModel):
-    """Ausgabe fuer GET /api/v1/global-config."""
+    """Ausgabe fuer GET /api/v1/global-config.
+
+    **Nicht enthalten: ``alert_battery_warn_percent``** (Sprint 20, AE-69).
+    Die Batterie-Stufen rechnen seit Migration 0024 gegen feste
+    Spannungs-Schwellen; eine konfigurierbare Prozent-Schwelle hat keinen
+    Konsumenten mehr. Die Spalte bleibt in ``global_config`` (kein
+    destruktives Schema), ist aber weder lesbar noch setzbar — ein Feld in
+    der Oberflaeche, das nichts bewirkt, ist schlimmer als kein Feld
+    (CLAUDE.md §5.77). Eintrag in STATUS.md B-18-7.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -59,7 +67,6 @@ class GlobalConfigRead(BaseModel):
     summer_mode_ends_on: date | None
     alert_email: str | None
     alert_device_offline_minutes: int
-    alert_battery_warn_percent: int
     occupancy_import_expected_by_local: time
 
     # Laufzeit-Felder zum Mailversand (Sprint 18, T4). Bewusst nur hier und

@@ -581,7 +581,7 @@ def _aggregat_query(device_ids: Sequence[int]) -> Select[Any]:
 
 
 async def test_geraeteliste_braucht_eine_query_fuer_alle_104(
-    db_session: AsyncSession,
+    db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Struktur-Zusicherung: EIN Statement, unabhaengig von der Geraetezahl.
 
@@ -606,7 +606,11 @@ async def test_geraeteliste_braucht_eine_query_fuer_alle_104(
     assert {v.samples for v in verdicts.values()} == {FRAMES_IM_FENSTER}
     assert all(v.jump_at is None for v in verdicts.values())
 
-    print(f"\n[T4] battery_verdicts({GERAETE} Geraete): {dauer * 1000:.0f} ms")
+    # capsys.disabled(): pytest verwirft die Ausgabe bestehender Tests. Der
+    # Messwert soll aber im CI-Log desselben Laufs stehen, der ihn erzeugt hat
+    # — dieselbe Begruendung wie fuer --durations=15 (§5.82).
+    with capsys.disabled():
+        print(f"\n[T4] battery_verdicts({GERAETE} Geraete): {dauer * 1000:.0f} ms")
     assert dauer < REISSLEINE_S, (
         f"{dauer:.2f}s fuer {GERAETE} Geraete — Reissleine bei {REISSLEINE_S}s. "
         "Das ist kein Zielwert, sondern der Verdacht auf einen strukturellen "
@@ -647,7 +651,9 @@ async def test_zweiter_durchgang_nur_fuer_getauschte_geraete(
     assert all(verdicts[d].jump_at is None for d in device_ids[1:])
 
 
-async def test_explain_plan_der_aggregat_query(db_session: AsyncSession) -> None:
+async def test_explain_plan_der_aggregat_query(
+    db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Gibt ``EXPLAIN (ANALYZE, BUFFERS)`` ins Log — der Beleg zum Mitlesen.
 
     Ohne Zusicherung auf den Plan-Text (§5.79). Der Test faellt nur, wenn
@@ -663,5 +669,6 @@ async def test_explain_plan_der_aggregat_query(db_session: AsyncSession) -> None
     plan_rows = (await db_session.execute(text(f"EXPLAIN (ANALYZE, BUFFERS) {compiled}"))).all()
 
     plan = "\n".join(str(row[0]) for row in plan_rows)
-    print(f"\n[T4] EXPLAIN der Aggregat-Query ueber {GERAETE} Geraete:\n{plan}")
+    with capsys.disabled():
+        print(f"\n[T4] EXPLAIN der Aggregat-Query ueber {GERAETE} Geraete:\n{plan}")
     assert plan

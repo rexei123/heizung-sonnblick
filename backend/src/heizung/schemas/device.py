@@ -149,21 +149,27 @@ class DeviceLatestReadingRead(BaseModel):
     "nicht verfuegbar", D7). ``open_window`` / ``attached_backplate`` sind
     NULL wenn das Codec-Feld im Frame fehlte (alter Codec / Recovery).
 
-    Sprint 14b: ``temperature`` + ``battery_percent`` additiv ergaenzt
-    (Thermostat-Bubbles Ist-Temp + Batterie). ``temperature`` als
-    field_serializer->float (Konvention wie SensorReadingRead /
-    DeviceActiveOverrideRead).
+    Sprint 14b: ``temperature`` additiv ergaenzt (Thermostat-Bubbles
+    Ist-Temp). ``temperature`` als field_serializer->float (Konvention wie
+    SensorReadingRead / DeviceActiveOverrideRead).
+
+    Sprint 20 (AE-69): ``battery_percent`` ist hier **ersetzt** durch
+    ``battery_voltage`` — die Groesse, die der Codec liefert. Prozent war an
+    dieser Stelle Scheinpraezision (0.1-V-Raster, Saettigung oberhalb
+    ~3.4 V). Die **Stufe** kommt nicht von hier, sondern aus dem 24-h-Median
+    (``DeviceRead.battery_state``); dieser Wert ist der letzte Frame und
+    gehoert in die Messwert-Historie, nicht an den Badge.
     """
 
     valve_position: int | None
     open_window: bool | None
     attached_backplate: bool | None
     temperature: Decimal | None = None
-    battery_percent: int | None = None
+    battery_voltage: Decimal | None = None
     recorded_at: datetime
 
-    @field_serializer("temperature")
-    def _temp_to_float(self, v: Decimal | None) -> float | None:
+    @field_serializer("temperature", "battery_voltage")
+    def _decimal_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 
 
@@ -195,12 +201,30 @@ class DeviceRead(BaseModel):
     updated_at: datetime
 
     # Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
-    # ``health_state`` (offline/implausible). Abgeleitet aus
-    # ``latest_reading.battery_percent`` + ``alert_battery_warn_percent``, vom
-    # Endpoint via model_copy gesetzt (kein ORM-Attribut, kein persistentes
-    # Feld). Default "unbekannt", damit ``model_validate(device)`` greift, wenn
-    # kein Reading vorliegt. PR2 kombiniert beide Achsen fuer die Sortierung.
+    # ``health_state`` (offline/implausible). Vom Endpoint via model_copy
+    # gesetzt (kein ORM-Attribut, kein persistentes Feld). Default
+    # "unbekannt", damit ``model_validate(device)`` greift, wenn kein Reading
+    # vorliegt. Die Sortierung der Geraeteliste kombiniert beide Achsen.
+    #
+    # Sprint 20 (AE-69): Quelle ist der **Median der Geraete-Spannung ueber
+    # 24 h**, nicht mehr ein Prozentwert aus dem letzten Frame. Schwellen
+    # OK >= 3.0 V / schwach 2.9 V / kritisch <= 2.8 V.
     battery_state: Literal["ok", "warn", "kritisch", "unbekannt"] = "unbekannt"
+
+    # Sprint 20 (AE-69): die Zahl, die zur Stufe gehoert. Wer sie in der
+    # Oberflaeche neben die Stufe stellt ("OK · 3,1 V"), nimmt diese und
+    # nicht ``latest_reading.battery_voltage`` — sonst widerspricht der Badge
+    # sich selbst, sobald ein einzelner Frame unter Motorlast einbricht.
+    # ``None`` wenn die Mindest-Stichprobe im Fenster nicht erreicht ist.
+    battery_voltage_median: Decimal | None = None
+
+    # Gesetzt, wenn im Fenster ein Batteriewechsel erkannt wurde (Sprung
+    # >= 0.3 V nach oben). Dann zaehlen nur die Messwerte ab diesem
+    # Zeitpunkt, und solange es davon weniger als drei gibt, ist
+    # ``battery_state`` "unbekannt". Mit diesem Feld kann die Oberflaeche
+    # den Grund nennen ("Batteriewechsel erkannt") statt einen Fehler zu
+    # suggerieren — das ist rund eine halbe Stunde nach dem Wechsel.
+    battery_jump_at: datetime | None = None
 
     # Sprint 14a (D1/D2): additive Cross-Sicht-Felder. Defaults None, damit
     # ``model_validate(device)`` (from_attributes) bei fehlenden ORM-
@@ -210,6 +234,10 @@ class DeviceRead(BaseModel):
     heating_zone: DeviceZoneRead | None = None
     active_override: DeviceActiveOverrideRead | None = None
     latest_reading: DeviceLatestReadingRead | None = None
+
+    @field_serializer("battery_voltage_median")
+    def _median_to_float(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 class DeviceAssignZoneRequest(BaseModel):

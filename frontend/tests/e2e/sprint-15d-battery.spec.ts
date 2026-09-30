@@ -22,7 +22,7 @@ function makeDevice(
   label: string,
   healthState: HealthState,
   batteryState: BatteryState,
-  batteryPercent: number | null,
+  batteryVolts: number | null,
 ) {
   return {
     id,
@@ -40,20 +40,23 @@ function makeDevice(
     firmware_version: "4.2",
     health_state: healthState,
     battery_state: batteryState,
+    // Sprint 20 (AE-69): der 24-h-Median ist die Quelle der Zahl am Badge.
+    battery_voltage_median: batteryVolts,
+    battery_jump_at: null,
     created_at: iso(86400 * 1000),
     updated_at: iso(),
     hardware_number: null,
     heating_zone: null,
     active_override: null,
     latest_reading:
-      batteryPercent === null
+      batteryVolts === null
         ? null
         : {
             valve_position: 40,
             open_window: false,
             attached_backplate: true,
             temperature: 21.0,
-            battery_percent: batteryPercent,
+            battery_voltage: batteryVolts,
             recorded_at: iso(5 * 60 * 1000),
           },
   };
@@ -85,9 +88,9 @@ async function mockDevices(page: Page, devices: unknown[]) {
 test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
   test("BatteryBadge zeigt 3+1 Zustände aus battery_state, Prozent im title", async ({ page }) => {
     await mockDevices(page, [
-      makeDevice(1, "Batt-OK", "healthy", "ok", 80),
-      makeDevice(2, "Batt-Warn", "healthy", "warn", 15),
-      makeDevice(3, "Batt-Kritisch", "healthy", "kritisch", 5),
+      makeDevice(1, "Batt-OK", "healthy", "ok", 3.2),
+      makeDevice(2, "Batt-Warn", "healthy", "warn", 2.9),
+      makeDevice(3, "Batt-Kritisch", "healthy", "kritisch", 2.8),
       makeDevice(4, "Batt-Unbekannt", "healthy", "unbekannt", null),
     ]);
     await page.goto("/devices?sort=label");
@@ -99,10 +102,11 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
       "data-battery",
       "kritisch",
     );
-    // Prozent nur im title-Tooltip (5 % für das kritische Gerät).
+    // Spannung nur im title-Tooltip (2,8 V für das kritische Gerät), und
+    // zwar der Median — nicht der letzte Frame (Sprint 20, AE-69).
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toHaveAttribute(
       "title",
-      "Batterie: 5 %",
+      "Batterie: 2,8 V (Median 24 h)",
     );
     // unbekannt ohne Reading -> Hint-title, keine Zahl.
     const unknownBadge = page
@@ -117,10 +121,10 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
   }) => {
     // Scores: Offline-OK=4 (silent), Online-Kritisch=2, Online-Warn=1, Online-OK=0.
     await mockDevices(page, [
-      makeDevice(10, "Online-OK", "healthy", "ok", 90),
-      makeDevice(11, "Online-Warn", "healthy", "warn", 15),
-      makeDevice(12, "Online-Kritisch", "healthy", "kritisch", 5),
-      makeDevice(13, "Offline-OK", "silent", "ok", 90),
+      makeDevice(10, "Online-OK", "healthy", "ok", 3.4),
+      makeDevice(11, "Online-Warn", "healthy", "warn", 2.9),
+      makeDevice(12, "Online-Kritisch", "healthy", "kritisch", 2.8),
+      makeDevice(13, "Offline-OK", "silent", "ok", 3.4),
     ]);
     // Default-Sortierung = Fehlerstatus (kein ?sort).
     await page.goto("/devices");
