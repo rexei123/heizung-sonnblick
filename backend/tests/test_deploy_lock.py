@@ -192,12 +192,31 @@ def test_held_bricht_ab_wenn_die_sperre_nicht_gesetzt_werden_kann(
         pytest.fail("Der Block darf nicht ausgefuehrt werden")
 
 
-def test_held_ohne_pflicht_laeuft_trotzdem(kaputt: _KaputterRedis) -> None:
-    """``pflicht=False`` ist der Weg fuer ``--no-deploy-lock``-artige Faelle."""
-    gelaufen = False
-    with deploy_lock.held(ttl_s=100, pflicht=False):
-        gelaufen = True
-    assert gelaufen
+def test_es_gibt_keinen_weg_ohne_sperre(kaputt: _KaputterRedis) -> None:
+    """``held`` hat keinen Schalter, der den Block trotzdem ausfuehrt.
+
+    Ein erster Entwurf hatte einen (``pflicht=False``, fuer ein
+    ``--no-deploy-lock``). Beides ist entfernt: Redis ist ein Container im
+    selben Stack, ein Neustart behebt den Ausfall in Sekunden — und in genau
+    diesem Zustand ist das Gate ohnehin unwirksam, weil die Abfrage in
+    ``deploy-pull.sh`` dann auch scheitert und das Skript fortfaehrt. Der
+    Schalter haette nicht geschuetzt, sondern nur erlaubt, ungeschuetzt zu
+    fahren.
+
+    Dieser Test ist die Klammer dagegen: wer einen Ausweg einbaut, faellt
+    hier auf.
+    """
+    import inspect
+
+    signatur = inspect.signature(deploy_lock.held)
+    assert list(signatur.parameters) == ["ttl_s"], (
+        "held() hat einen zusaetzlichen Parameter bekommen — falls das ein "
+        "Ausweg ohne Sperre ist: die Begruendung gegen einen solchen steht "
+        "im Docstring von held()."
+    )
+
+    with pytest.raises(RuntimeError, match="Redis starten"), deploy_lock.held(ttl_s=100):
+        pytest.fail("Der Block darf ohne Sperre nicht laufen")
 
 
 # ---------------------------------------------------------------------------
@@ -259,3 +278,144 @@ def test_acquire_ueberschreibt_bestehende_sperre(fake: _FakeRedis) -> None:
 def test_margin_konstante(fake: Any) -> None:
     """15 min Reserve oberhalb des laengsten Warte-Fensters (Vorgabe 30.09.)."""
     assert deploy_lock.LOCK_TTL_MARGIN_S == 15 * 60
+
+
+# ---------------------------------------------------------------------------
+# Haelt die Verlaengerung die Sperre wirklich am Leben?
+# ---------------------------------------------------------------------------
+#
+# Die Tests oben zeigen, dass `refresh` eine TTL setzt, und
+# `test_verlaengerung_haengt_an_der_fortschritts_meldung` (in
+# test_pair_devices_flags.py) zeigt, dass der Melder sie aufruft. Keiner von
+# beiden zeigt, dass ein Lauf, der LAENGER dauert als die Start-TTL, seine
+# Sperre behaelt — dafuer braucht die Attrappe einen echten Ablauf.
+#
+# Ohne diesen Nachweis waere die Verlaengerung eine Behauptung: ein
+# `refresh`, das einen Key anlegt, den Redis eine Minute spaeter wegwirft,
+# sieht in allen Tests oben richtig aus.
+
+
+class _AblaufRedis:
+    """Stand-in mit echtem TTL-Ablauf gegen eine virtuelle Uhr.
+
+    ``vorspulen`` bewegt die Zeit; abgelaufene Keys verschwinden dabei, wie
+    Redis sie wegwerfen wuerde. Kein Warten, kein `sleep` — dieselbe Linie
+    wie ``scripts/pairing/clock.py`` (CLAUDE.md §5.82).
+    """
+
+    def __init__(self) -> None:
+        self.jetzt = 0.0
+        self._ablauf: dict[str, float] = {}
+        self._werte: dict[str, str] = {}
+
+    def vorspulen(self, sekunden: float) -> None:
+        self.jetzt += sekunden
+
+    def _lebt(self, key: str) -> bool:
+        ablauf = self._ablauf.get(key)
+        if ablauf is None:
+            return False
+        if ablauf <= self.jetzt:
+            self._ablauf.pop(key, None)
+            self._werte.pop(key, None)
+            return False
+        return True
+
+    def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
+        self._werte[key] = value
+        self._ablauf[key] = self.jetzt + (ex if ex is not None else 10**9)
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self._werte.get(key) if self._lebt(key) else None
+
+    def delete(self, key: str) -> int:
+        self._ablauf.pop(key, None)
+        return 1 if self._werte.pop(key, None) is not None else 0
+
+    def ttl(self, key: str) -> int:
+        if not self._lebt(key):
+            return -2
+        return int(self._ablauf[key] - self.jetzt)
+
+
+@pytest.fixture
+def ablauf(monkeypatch: pytest.MonkeyPatch) -> _AblaufRedis:
+    r = _AblaufRedis()
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: r)
+    return r
+
+
+def test_ohne_verlaengerung_verfaellt_die_sperre(ablauf: _AblaufRedis) -> None:
+    """Die Gegenprobe. Ohne sie zeigt der Test darunter nichts.
+
+    Ein Lauf, der laenger dauert als die TTL und nichts meldet, verliert
+    seine Sperre — und genau das soll die TTL leisten: ein abgestuerzter
+    Prozess blockiert den Deploy nicht auf Dauer.
+    """
+    deploy_lock.acquire(ttl_s=100)
+    ablauf.vorspulen(150)
+    assert deploy_lock.held_until() is None
+
+
+def test_lauf_laenger_als_die_start_ttl_behaelt_den_key(
+    ablauf: _AblaufRedis,
+) -> None:
+    """Der Nachweis: 300 s Lauf mit 100 s TTL, Sperre steht durchgehend.
+
+    Verlaengert wird alle 60 s — so, wie die Fortschritts-Melder es im Lauf
+    tun. Nach jedem Schritt wird geprueft, nicht nur am Ende: ein Loch in
+    der Mitte wuerde am Ende nicht mehr auffallen, weil das naechste
+    ``refresh`` den Key wieder anlegt.
+    """
+    deploy_lock.acquire(ttl_s=100)
+
+    for schritt in range(5):  # 5 x 60 s = 300 s, also 3x die Start-TTL
+        ablauf.vorspulen(60)
+        assert deploy_lock.held_until() is not None, (
+            f"Sperre bei Sekunde {(schritt + 1) * 60} verfallen — die Verlaengerung greift nicht"
+        )
+        deploy_lock.refresh(ttl_s=100)
+
+    assert deploy_lock.held_until() is not None
+    # Und sie verfaellt danach, wenn nichts mehr kommt.
+    ablauf.vorspulen(150)
+    assert deploy_lock.held_until() is None
+
+
+def test_verlaengerung_ueber_die_melder_des_laufs(ablauf: _AblaufRedis) -> None:
+    """Dieselbe Strecke, aber ueber die echten Melder aus ``pair_devices``.
+
+    Damit haengt der Nachweis nicht an einem Test, der ``refresh`` von Hand
+    ruft: geprueft wird der Weg, den der Lauf wirklich nimmt
+    (``on_phase`` -> ``_phase_mit_verlaengerung`` -> ``refresh``).
+    """
+    from heizung.scripts import pair_devices
+
+    deploy_lock.acquire(ttl_s=100)
+    melder = pair_devices._phase_mit_verlaengerung(100)
+
+    for _ in range(5):
+        ablauf.vorspulen(60)
+        assert deploy_lock.held_until() is not None
+        melder("Warte auf Setzframe")
+
+    assert deploy_lock.held_until() is not None
+
+
+def test_verlaengerung_stellt_eine_verfallene_sperre_wieder_her(
+    ablauf: _AblaufRedis,
+) -> None:
+    """``refresh`` nutzt ``set``, nicht ``expire`` — hier zahlt sich das aus.
+
+    Kam eine Meldung zu spaet (haengende Abfrage, Redis-Neustart), ist der
+    Key weg. ``set`` legt ihn wieder an; ``expire`` haette auf einen
+    fehlenden Key nichts getan, und der Lauf waere ab da ungeschuetzt
+    weitergelaufen, ohne dass es jemand merkt.
+    """
+    deploy_lock.acquire(ttl_s=100)
+    ablauf.vorspulen(150)
+    assert deploy_lock.held_until() is None
+
+    assert deploy_lock.refresh(ttl_s=100) is True
+    assert deploy_lock.held_until() is not None

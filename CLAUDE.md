@@ -130,8 +130,10 @@ die Zwischenlösung. Das Gate ist inzwischen gebaut (Sprint 20a):
 Gewohnheit, sondern weil das Gate drei Lücken hat:
 
 1. Es schützt nur, wenn die Sperre wirklich gesetzt wurde — also
-   wenn der Lauf über die CLI kam und Redis erreichbar war. Mit
-   `--no-deploy-lock` läuft der Test ohne Sperre.
+   wenn der Lauf über die CLI kam. Ist Redis nicht erreichbar,
+   bricht der Test ab (es gibt bewusst keinen Schalter dagegen) —
+   aber dann kann auch der Timer den Key nicht abfragen und fährt
+   fort. Wer in diesem Zustand am Gerät arbeitet, ist ungeschützt.
 2. Es greift nur am Timer. Ein von Hand getipptes
    `docker compose up -d` geht daran vorbei (§5.78 ist die
    Schwesterlesson: die Gefahr liegt bei den Befehlen, die jemand

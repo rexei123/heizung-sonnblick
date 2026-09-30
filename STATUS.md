@@ -4151,9 +4151,9 @@ trägt nur, solange sie gestellt wird — deshalb dieser PR.
 | Teil | Inhalt |
 |---|---|
 | `services/deploy_lock.py` | Redis-Key `heizung:lock:inbound_test` mit TTL, `acquire`/`refresh`/`release`/`held_until` plus Kontextmanager `held` |
-| `pair_devices` | Setzt die Sperre bei `test` und `inbound-test`, verlängert sie an jeder Fortschritts-Meldung, gibt sie im `finally` frei. SIGTERM wird in `SystemExit` gewandelt, damit `docker stop` denselben Weg nimmt. Neu: `--no-deploy-lock` |
+| `pair_devices` | Setzt die Sperre bei `test` und `inbound-test`, verlängert sie an jeder Fortschritts-Meldung, gibt sie im `finally` frei. SIGTERM wird in `SystemExit` gewandelt, damit `docker stop` denselben Weg nimmt. **Kein Schalter, der ohne Sperre läuft** — Begründung in `deploy_lock.held` |
 | `deploy-pull.sh` | Neue **Phase 0**: TTL abfragen, bei gesetzter Sperre den **ganzen** Lauf überspringen (kein halber Deploy), Log-Zeile mit Grund, Ping mit `skipped: inbound_test lock (TTL bis …)` |
-| Tests | 18 für das Modul (Fake-Redis), 4 für die CLI-Schalter, 6 gegen das **echte** Skript mit Attrappen für `docker`/`git`/`curl` |
+| Tests | 22 für das Modul (Fake-Redis, darunter vier mit echtem TTL-Ablauf gegen eine virtuelle Uhr: ein Lauf über dreifache Start-TTL behält seine Sperre), 4 für die CLI-Schalter, 6 gegen das **echte** Skript mit Attrappen für `docker`/`git`/`curl` |
 | Doku | RUNBOOK §10p (Handgriffe), §10l (Besonderheit beim Deploy-Check), §10h.4 (Hinweis für den Montage-Lauf), CLAUDE.md §0.3 nachgezogen |
 
 ### Drei Entscheidungen, die erklärt werden müssen
@@ -4191,10 +4191,11 @@ nur sich selbst prüfen.
   Arbeitsrechner findet `which("bash")` WSL-bash, die die Windows-Umgebung
   nicht erbt. In CI (ubuntu) läuft er; die vier Fälle sind zusätzlich von
   Hand unter Git Bash belegt.
-- **Das Gate hat drei Lücken**, in CLAUDE.md §0.3 benannt:
-  `--no-deploy-lock`, ein von Hand getipptes `docker compose up -d`
-  (§5.78), und andere langlaufende Handgriffe am Gerät. Deshalb bleibt die
-  Frage vor dem Merge Pflicht.
+- **Das Gate hat drei Lücken**, in CLAUDE.md §0.3 benannt: ein nicht
+  erreichbarer Redis (dann bricht der Test ab, aber der Timer fährt fort),
+  ein von Hand getipptes `docker compose up -d` (§5.78), und andere
+  langlaufende Handgriffe am Gerät. Deshalb bleibt die Frage vor dem Merge
+  Pflicht.
 
 ---
 

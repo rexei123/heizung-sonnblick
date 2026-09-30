@@ -3411,16 +3411,32 @@ setzt immer eine TTL. Steht sie trotzdem so da, hat jemand den Key von Hand
 geschrieben. Das Deploy-Skript sperrt dann und sagt es deutlich im Log,
 statt still zu deployen oder still zu blockieren. Löschen wie oben.
 
-### Test ohne Sperre fahren
+### Wenn die Sperre nicht gesetzt werden kann
 
-`--no-deploy-lock` lässt den Eingangstest ohne Sperre laufen. Gedacht ist
-das für den einen Fall, dass Redis nicht erreichbar ist und trotzdem geprüft
-werden muss. Ohne Sperre kann ein Deploy den Lauf treffen — also vorher
-sicherstellen, dass niemand mergt.
+Dann **bricht der Eingangstest ab**, mit dieser Meldung:
 
-Ohne diesen Schalter **bricht der Test ab**, wenn die Sperre nicht gesetzt
-werden kann. Das ist Absicht: ein Lauf ohne Sperre, den niemand als solchen
-erkennt, ist der schlechteste der drei Zustände.
+```
+Deploy-Sperre konnte nicht gesetzt werden (Redis nicht erreichbar).
+Ohne sie koennte ein Deploy den Lauf mitten in einer Bestaetigungs-Kette
+abbrechen und ein Geraet mit ausstehendem Downlink zuruecklassen.
+Redis starten, dann erneut versuchen:
+  docker compose -f infra/deploy/docker-compose.prod.yml up -d redis
+```
+
+Es gibt **keinen Schalter**, der den Lauf trotzdem startet. Das ist eine
+bewusste Entscheidung und keine Unterlassung:
+
+* Redis ist ein Container im selben Stack wie der api-Container, in dem der
+  Test läuft. Der Neustart oben behebt den Ausfall in Sekunden — schneller,
+  als die Überlegung dauert, ob man einen Schalter setzen darf.
+* In genau diesem Zustand wäre die Sperre ohnehin wirkungslos: auch das
+  Deploy-Skript kann den Key nicht abfragen und fährt fort (siehe oben,
+  „nicht abfragbar"). Ein Schalter hätte also nicht geschützt, sondern nur
+  erlaubt, ungeschützt zu fahren.
+
+Ein erster Entwurf hatte den Schalter, und sein Name stand in genau dieser
+Fehlermeldung. Wer eine Meldung liest, in der die Umgehung mitsteht, kopiert
+eher die Umgehung als die Ursachenbehebung.
 
 **Querverweise:** CLAUDE.md §0.3 (die Regel, und was das Gate nicht
 abdeckt), §10h.4 (Laufzeit des Eingangstests), §10l (Dead-Man-Checks),

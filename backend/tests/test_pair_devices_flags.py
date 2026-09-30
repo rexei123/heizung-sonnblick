@@ -127,37 +127,25 @@ def test_require_motor_defaults_to_off() -> None:
         ["test", "42", "--no-deploy-lock"],
     ],
 )
-def test_no_deploy_lock_wird_auf_beiden_kommandos_akzeptiert(argv: list[str]) -> None:
-    """Der Schalter muss an beiden Stellen existieren.
+def test_es_gibt_keinen_schalter_gegen_die_sperre(argv: list[str]) -> None:
+    """``--no-deploy-lock`` ist entfernt — der Parser weist es ab (Exit 2).
 
-    ``inbound-test`` ist der Montage-Lauf, ``test`` der Einzelfall am Tisch.
-    Beide senden Downlinks und warten auf Bestaetigung — beide brauchen die
-    Sperre, und damit auch den Weg, sie abzuschalten.
+    Der Schalter war fuer "Redis nicht erreichbar, Test muss trotzdem
+    laufen" gedacht. Der Fall traegt nicht: Redis ist ein Container im
+    selben Stack, ein Neustart behebt ihn in Sekunden, und in genau diesem
+    Zustand ist das Gate ohnehin unwirksam (die Abfrage in
+    ``deploy-pull.sh`` scheitert dann auch). Vor allem aber stand der
+    Schaltername in der Fehlermeldung des Abbruchs — eine Einladung, die
+    Absicherung zu umgehen statt die Ursache zu beheben.
+
+    Der Test haelt die Entscheidung fest: kommt der Schalter zurueck, muss
+    die Begruendung in ``deploy_lock.held`` mit zurueckgenommen werden.
     """
     from heizung.scripts import pair_devices
 
-    args = pair_devices._build_parser().parse_args(argv)
-    assert args.no_deploy_lock is True
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["inbound-test", "--all-pool"],
-        ["test", "42"],
-    ],
-)
-def test_deploy_sperre_ist_der_standard(argv: list[str]) -> None:
-    """Ohne Schalter laeuft der Test MIT Sperre.
-
-    Die Voreinstellung ist die sichere: wer nichts angibt, bekommt Schutz.
-    Ein Standard ohne Sperre waere derselbe Fehler wie eine Sperre ohne
-    TTL — er wirkt, bis es darauf ankommt.
-    """
-    from heizung.scripts import pair_devices
-
-    args = pair_devices._build_parser().parse_args(argv)
-    assert args.no_deploy_lock is False
+    with pytest.raises(SystemExit) as exc:
+        pair_devices._build_parser().parse_args(argv)
+    assert exc.value.code == 2
 
 
 def test_ttl_nimmt_das_groessere_warte_fenster() -> None:

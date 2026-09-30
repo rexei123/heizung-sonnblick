@@ -140,31 +140,41 @@ def _stamp() -> str:
 
 
 @contextmanager
-def held(*, ttl_s: int, pflicht: bool = True) -> Iterator[None]:
+def held(*, ttl_s: int) -> Iterator[None]:
     """Haelt die Sperre fuer die Dauer des Blocks.
 
     ``release`` laeuft im ``finally`` und damit auch bei ``KeyboardInterrupt``
     (Strg-C) und bei ``SystemExit`` — die CLI wandelt SIGTERM in Letzteres,
     damit ein ``docker stop`` denselben Weg nimmt.
 
-    Args:
-        ttl_s: TTL je ``acquire``/``refresh``.
-        pflicht: ``True`` (Standard) laesst einen Redis-Fehler beim Setzen
-            durchschlagen. Ein Lauf ohne Sperre ist genau das Risiko, das
-            hier ausgeschlossen werden soll — er darf nicht stillschweigend
-            stattfinden.
+    **Ohne Ausweg.** Es gibt keinen Schalter, der den Lauf ohne Sperre
+    erlaubt. Ein erster Entwurf hatte einen (``--no-deploy-lock``, gedacht
+    fuer "Redis nicht erreichbar, Test muss trotzdem laufen"); er ist
+    entfernt, weil der Anwendungsfall nicht traegt:
+
+    * Redis ist ein Container im selben Stack wie der api-Container, in dem
+      der Test laeuft. Ein ``docker compose up -d redis`` behebt den Ausfall
+      in Sekunden — das ist schneller als die Ueberlegung, ob man den
+      Schalter setzen darf.
+    * In genau diesem Zustand ist das Gate ohnehin unwirksam: die Abfrage in
+      ``deploy-pull.sh`` scheitert dann auch, das Skript fuehrt fort. Der
+      Schalter haette also nicht geschuetzt, sondern nur erlaubt, ungeschuetzt
+      zu fahren.
+    * Und er stand in dieser Fehlermeldung. Wer sie liest, kopiert eher den
+      Schalter als den Redis-Neustart — eine Einladung, die Absicherung zu
+      umgehen, statt die Ursache zu beheben.
 
     Raises:
-        RuntimeError: wenn ``pflicht`` und die Sperre nicht gesetzt werden
-            konnte.
+        RuntimeError: wenn die Sperre nicht gesetzt werden konnte.
     """
-    ok = acquire(ttl_s=ttl_s)
-    if not ok and pflicht:
+    if not acquire(ttl_s=ttl_s):
         raise RuntimeError(
             "Deploy-Sperre konnte nicht gesetzt werden (Redis nicht erreichbar). "
-            "Der Lauf wuerde ungeschuetzt laufen: ein Deploy koennte ihn mitten "
-            "in einer Bestaetigungs-Kette abbrechen. Redis pruefen, dann erneut "
-            "starten — oder mit --no-deploy-lock bewusst ohne Sperre fahren."
+            "Ohne sie koennte ein Deploy den Lauf mitten in einer "
+            "Bestaetigungs-Kette abbrechen und ein Geraet mit ausstehendem "
+            "Downlink zuruecklassen.\n"
+            "Redis starten, dann erneut versuchen:\n"
+            "  docker compose -f infra/deploy/docker-compose.prod.yml up -d redis"
         )
     try:
         yield

@@ -421,22 +421,13 @@ def _geraet_mit_verlaengerung(ttl_s: int) -> Callable[[DeviceResult], None]:
 def _deploy_sperre(args: argparse.Namespace) -> Iterator[int]:
     """Haelt die Deploy-Sperre fuer den Lauf und nennt die TTL.
 
-    Yieldet die TTL in Sekunden, damit die Melder sie zum Verlaengern
-    kennen. Bei ``--no-deploy-lock`` wird keine Sperre gesetzt und die TTL
-    nur berechnet — die Melder verlaengern dann einen Key, der nicht da ist,
-    und ``refresh`` wuerde ihn anlegen. Deshalb bekommen sie in dem Fall die
-    unveraenderten Melder.
+    Yieldet die TTL in Sekunden, damit die Melder sie zum Verlaengern kennen.
+
+    Es gibt **keinen** Weg, den Lauf ohne Sperre zu fahren — die Begruendung
+    steht in ``deploy_lock.held``. Kann sie nicht gesetzt werden, bricht der
+    Lauf mit einer Meldung ab, die sagt, wie Redis zurueckkommt.
     """
     ttl_s = _lock_ttl_s(args)
-    if args.no_deploy_lock:
-        print(
-            "[WARN] --no-deploy-lock: kein Schutz gegen einen Deploy mitten im "
-            "Lauf. Ein Container-Neustart kann ein Geraet mit ausstehendem "
-            "Downlink zuruecklassen; der Resume-Lauf schickt ihn erneut.\n",
-            flush=True,
-        )
-        yield ttl_s
-        return
     with deploy_lock.held(ttl_s=ttl_s):
         print(
             f"Deploy-Sperre gesetzt ({DEPLOY_LOCK_KEY}, TTL {ttl_s} s). Der "
@@ -733,15 +724,6 @@ def _build_parser() -> argparse.ArgumentParser:
         f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
     )
     p_test.add_argument(
-        "--no-deploy-lock",
-        action="store_true",
-        help="Ohne Deploy-Sperre laufen. Standard ist MIT: der Lauf setzt "
-        "einen Redis-Key, und der Deploy-Timer ueberspringt seinen Lauf, "
-        "solange er steht. Nur setzen, wenn Redis nicht erreichbar ist und "
-        "der Test trotzdem laufen muss — ein Deploy kann ihn dann mitten in "
-        "einer Bestaetigungs-Kette abbrechen.",
-    )
-    p_test.add_argument(
         "--user-email",
         default=None,
         help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
@@ -815,15 +797,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Sollwert danach NICHT auf {SETPOINT_RESET_C} Grad zuruecksetzen. "
         f"Ohne diesen Schalter endet jedes gepruefte Geraet auf "
         f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
-    )
-    p_batch.add_argument(
-        "--no-deploy-lock",
-        action="store_true",
-        help="Ohne Deploy-Sperre laufen. Standard ist MIT: der Lauf setzt "
-        "einen Redis-Key, und der Deploy-Timer ueberspringt seinen Lauf, "
-        "solange er steht. Nur setzen, wenn Redis nicht erreichbar ist und "
-        "der Test trotzdem laufen muss — ein Deploy kann ihn dann mitten in "
-        "einer Bestaetigungs-Kette abbrechen.",
     )
     p_batch.add_argument(
         "--user-email",
