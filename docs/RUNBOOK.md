@@ -2869,7 +2869,7 @@ und damit genau den Ausfall verdecken, den er melden soll.
 
 | Meldung | Bedeutung | Erster Handgriff |
 |---|---|---|
-| **engine** | Seit über 15 Minuten kein Beat-Tick. Die Heizung regelt **nicht** mehr nach — sie hält den letzten Sollwert. | `docker compose -f docker-compose.prod.yml ps celery_beat celery_worker redis` — und beachten: `celery_beat` meldet dauerhaft `unhealthy`, das ist akzeptiert (§5.32) und **nicht** die Ursache. |
+| **engine** | Seit über 15 Minuten kein Beat-Tick. Die Heizung regelt **nicht** mehr nach — sie hält den letzten Sollwert. | `docker compose -f docker-compose.prod.yml ps celery_beat celery_worker redis`. **Ab 30.09.2026 ist der Status von `celery_beat` aussagekräftig:** `unhealthy` heißt dort jetzt, dass Beat seit über zehn Minuten nichts geschrieben hat — das ist dann die Ursache und nicht mehr zu ignorieren. Bis dahin war dieses `unhealthy` dauerhaft und akzeptiert (§5.32); wer eine ältere Fassung dieses Handgriffs im Kopf hat, liest hier neu. |
 | **deploy** | Seit über 20 Minuten kein erfolgreicher Deploy-Lauf. Neuer Code kommt nicht auf den Server; die Steuerung läuft unverändert weiter. | `journalctl -u heizung-deploy-pull -n 30 --no-pager`. Häufigste Ursachen: abgelaufener ghcr-Login, `safe.directory` (§5.7), lokale Änderungen am Working-Tree. |
 | **backup** | Seit über 30 Stunden kein vollständiges Backup. Kein akutes Betriebsproblem — aber ab jetzt ist ein Datenverlust nicht mehr abgedeckt. | `journalctl -u heizung-backup -n 30 --no-pager` und `tail -40 /var/log/heizung-backup.log`. Steht dort `OFFSITE_PUSH_FAILED`, ist das lokale Backup in Ordnung und nur die Spiegelung hängt. |
 
