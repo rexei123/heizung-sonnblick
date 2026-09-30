@@ -2842,20 +2842,37 @@ lag — und gemergt. Die kaputte Migration waere dann beim **ersten Deploy
 mit Migration** aufgefallen: am 29.09., mitten im Montagefenster.
 
 **Regel:** Ein rotes Gate meldet, was es gefunden hat, **nicht was es
-geprueft hat.** Bei jedem roten Lauf gehoert die Dauer in die Diagnose:
+geprueft hat.** Bei jedem roten Lauf gehoert die Frage "wie weit ist er
+gekommen" in die Diagnose.
 
-- **deutlich kuerzer als der Normalwert** → frueh abgebrochen, die
-  spaeteren Stufen sind **ungeprueft**. Nach dem Fix ist der naechste Lauf
-  keine Bestaetigung, sondern der erste echte Test.
-- **im Normalbereich** → durchgelaufen, der Fehler steht am gemeldeten Ort.
+**Nachtrag 30.09.2026 — der Beleg ist die Testzahl, nicht die Dauer.**
+Diese Lesson stand zuerst auf einer Laufzeit-Schwelle: "unter 2 Minuten
+heisst abgebrochen vor pytest". Die Zahl stammte aus einer Suite, die
+10 Minuten brauchte. Nach dem Sprint-19-Fix (§5.82) laeuft dieselbe Suite
+in 80 Sekunden, der Job in 2m35s — **unter** der alten Schwelle, bei
+vollstaendig gelaufener Suite. Die Schwelle haette einen gesunden Lauf als
+Abbruch gemeldet.
 
-Und die Umkehrung, die genauso zaehlt: ein **gruener** Lauf, der auffaellig
-kurz war, ist ebenfalls verdaechtig — dann hat wahrscheinlich ein Schritt
-nichts getan (§5.55 ist genau dieser Fall, dort ein Vier-Sekunden-Echo
-anstelle eines Playwright-Laufs).
+Der Anker ist deshalb:
 
-Normalwerte stehen in RUNBOOK §10n, damit "deutlich kuerzer" nicht
-Bauchgefuehl bleibt.
+> **`collected N` gleich `passed + xfailed`, und `skipped` gleich 0.**
+
+Das misst die Sache selbst statt den Runner mit (Image-Cache,
+Postgres-Startzeit, Warteschlange) — und bleibt richtig, wenn die Suite
+schneller oder langsamer wird. Fehlt die `collected`-Zeile ganz, ist
+`pytest` nie gestartet; steht dort ein `skipped`, haben sich Tests wegen
+einer fehlenden Datenbank selbst uebersprungen, und genau das sieht man an
+der Statusfarbe nicht.
+
+Die Dauer bleibt ein **Hinweis**: weicht sie stark ab, sieht man nach — und
+zwar mit `--durations=15`, das im Job fest eingeschaltet ist. Sie ist nur
+kein Beleg mehr.
+
+Und die Umkehrung, die genauso zaehlt: ein **gruener** Lauf ohne
+`collected`-Zeile hat nichts geprueft (§5.55 ist genau dieser Fall, dort
+ein Vier-Sekunden-Echo anstelle eines Playwright-Laufs).
+
+Vergleichswerte und der Handgriff stehen in RUNBOOK §10n.
 
 **Warum das nicht selbstverstaendlich ist:** Die Oberflaeche zeigt die
 Dauer klein neben dem Status, und der Status ist das, worauf man sieht.

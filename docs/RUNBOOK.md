@@ -3089,47 +3089,81 @@ dieses System steht.
 
 ---
 
-## 10n. CI-Laufzeiten als Diagnose-Signal (Zeitzonen-Fix, 27.09.2026)
+## 10n. Hat der Lauf wirklich geprüft? Der Anker ist die Testzahl, nicht die Dauer
 
 Ein rotes Gate meldet, **was es gefunden hat, nicht was es geprüft hat.**
 Die Jobs brechen beim ersten Fehler ab — eine Meldung aus `mypy` bedeutet
 also, dass `pytest` gar nicht gelaufen ist.
 
-Deshalb gehört bei jedem roten Lauf die **Dauer** in die Diagnose. Die
-Normalwerte (Stand 27.09.2026):
+**Der belastbare Beleg ist die Testzahl, nicht die Laufzeit:**
 
-| Job | Normal (voll durchgelaufen) | Stufen in dieser Reihenfolge |
+```
+collected N items
+...
+N-1 passed, 1 xfailed, ... in 80.55s
+```
+
+Die Prüfung, die zählt:
+
+> **`collected N` muss gleich `passed + xfailed` sein, und `skipped` muss
+> `0` sein.**
+
+Beides gleichzeitig heißt: jeder gesammelte Test ist gelaufen, und keiner
+hat sich wegen einer fehlenden Datenbank selbst übersprungen. Die DB-Tests
+sind genau die, die bei fehlender `TEST_DATABASE_URL` still auf `skipped`
+gehen — und damit die, deren Ausbleiben man an der Statusfarbe nicht sieht.
+
+```bash
+gh run view --job <job-id> --log | grep -E "collected|passed"
+```
+
+**Erwartung** (Stand 30.09.2026, `develop` = `f9b4244`):
+`collected 885 items` und `884 passed, 1 xfailed`. Ein `skipped` in dieser
+Zeile ist ein Befund, auch wenn der Job grün ist.
+
+Die absolute Zahl wächst mit jedem Sprint und ist deshalb **kein**
+Kriterium — sie steht hier als Größenordnung. Geprüft wird die **Gleichung**
+`collected = passed + xfailed` und `skipped = 0`; die gilt unabhängig davon,
+wie viele Tests es sind. Wer stattdessen die Zahl vergleicht, hat in einem
+Monat einen Vermerk, der bei jedem grünen Lauf anschlägt (§5.77).
+
+### Warum nicht mehr die Laufzeit
+
+Bis zum 30.09. stand hier eine Schwelle: `lint-and-test` unter 2 Minuten
+heiße „abgebrochen vor `pytest`". Die Zahl stammte aus einer Suite, die
+10 Minuten brauchte. Nach dem Sprint-19-Fix läuft dieselbe Suite in
+**80 Sekunden** — der Job in 2m35s, also **unter** der alten Schwelle, bei
+vollständig gelaufener Suite.
+
+Eine Schwelle auf der Gesamtdauer misst den Runner mit: Image-Cache,
+Postgres-Startzeit, Warteschlange. Die Testzahl misst die Sache selbst. Sie
+ist damit nicht nur genauer, sondern **stabil gegen jede
+Geschwindigkeitsänderung** — und muss nicht nachgezogen werden, wenn die
+Suite schneller oder langsamer wird.
+
+### Die Dauer bleibt ein Hinweis, nur kein Beleg
+
+Grobe Vergleichswerte, damit „auffällig anders" nicht Bauchgefühl bleibt:
+
+| Job | beobachtet (voll durchgelaufen) | Stufen in dieser Reihenfolge |
 |---|---|---|
-| `lint-and-test` (Backend) | **3–11 min** | ruff check → ruff format --check → mypy → **pytest mit DB** |
+| `lint-and-test` (Backend) | 2–4 min, `pytest` darin ~80 s | ruff check → ruff format --check → mypy → **pytest mit DB** |
 | `lint-and-build` (Frontend) | 1–2 min | eslint → tsc → next build |
 | `e2e` (Playwright) | 2–5 min | Build + Browser-Tests |
 | `chirpstack-lint-and-test` | ~15 s | ruff → mypy → pytest (ohne DB) |
 
-**Die Schwelle, die zählt:** `lint-and-test` **unter 2 Minuten** heißt
-abgebrochen **vor** `pytest`. Die Datenbank-Tests, die Migrationen und
-damit der größte Teil der Absicherung sind dann **ungeprüft** — unabhängig
-davon, was in der Fehlermeldung steht.
-
-Der Spannbereich 3–11 min ist echt und kein Messfehler: die Dauer hängt
-daran, ob der Runner die Images aus dem Cache zieht und wie lange der
-Postgres-Service zum Start braucht. Beobachtete Werte an einem grünen
-Lauf: 2m56s, 3m12s, 10m30s — alle mit vollständig gelaufener Suite.
-
-### Der Handgriff
+Weicht eine Dauer stark ab, ist das ein Anlass nachzusehen — **und zwar
+mit `--durations=15`**, das im Job fest eingeschaltet ist:
 
 ```bash
-gh pr checks <nr>
+gh run view --job <job-id> --log | grep -A 16 "slowest 15 durations"
 ```
 
-Die Dauer steht in derselben Zeile wie der Status. Ist sie auffällig kurz:
+Ein einzelner Test, der Minuten braucht, steht dort namentlich. Genau so
+wurde am 30.09. der Leerlauf gefunden, der die Suite von 80 s auf 995 s
+getrieben hatte (CLAUDE.md §5.82).
 
-```bash
-gh run view --job <job-id> --log | grep -c "passed"
-```
-
-Keine Treffer heißt, `pytest` hat nie eine Zusammenfassung geschrieben.
-
-### Warum das hier steht
+### Der Anlass für diesen Abschnitt
 
 Am 26.09. lief `lint-and-test` in **1m17s** rot — Abbruch in `mypy`, weil
 eine unfixierte Abhängigkeit gesprungen war. Nach dem Pin lief derselbe
@@ -3143,13 +3177,21 @@ Hätte man nur den mypy-Fehler behoben und den nächsten roten Lauf als
 `develop` gelandet — und beim **ersten Deploy mit Migration** aufgefallen,
 also am 29.09. mitten im Montagefenster.
 
-Umgekehrt gilt dasselbe: ein **grüner** Lauf, der auffällig kurz war, hat
-wahrscheinlich einen Schritt nicht ausgeführt. Das ist der Fall aus
-CLAUDE.md §5.55 (ein Vier-Sekunden-Echo anstelle eines Playwright-Laufs).
+Mit dem Testzahl-Anker wäre derselbe Befund direkt sichtbar gewesen: der
+1m17s-Lauf hatte **kein** `collected`, also gar keine Suite.
 
-**Querverweise:** CLAUDE.md §5.81 (die Regel), §5.80 (unfixierte
-Abhängigkeiten als Auslöser), §5.55 (grüner Kurzlauf), §5.25 (stale
-Checks), §5.50 (Lokal-DB-Verify), B-18-5 (Docker lokal), B-18-6 (Lockfile).
+Umgekehrt gilt dasselbe: ein **grüner** Lauf ohne `collected`-Zeile hat
+nichts geprüft. Das ist der Fall aus CLAUDE.md §5.55 (ein
+Vier-Sekunden-Echo anstelle eines Playwright-Laufs) — dort war es ein
+Workflow, der nur so hieß wie der echte.
+
+**Querverweise:** CLAUDE.md §5.81 (die Regel „Laufzeit mitlesen" — gilt
+weiter als *Hinweis*, der Beleg ist seit 30.09. die Testzahl), §5.82 (die
+halb gefälschte Zeitquelle, die die alte Schwelle unbrauchbar machte),
+§5.80 (unfixierte Abhängigkeiten als Auslöser), §5.55 (grüner Kurzlauf),
+§5.25 (stale Checks: der angezeigte Lauf gehört womöglich zu einem anderen
+Commit — `head_sha` prüfen), §5.50 (Lokal-DB-Verify), B-18-5 (Docker
+lokal), B-18-6 (Lockfile).
 
 ---
 
