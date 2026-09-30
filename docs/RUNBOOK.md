@@ -1898,6 +1898,14 @@ nicht nur die auf dem Server.
 
 ### 10h.4 Batch-Eingangstest und Firmware-Inventar
 
+> **Der Lauf sperrt den Deploy** (ab 30.09.2026, Sprint 20a). Beim Start
+> setzt er einen Redis-Key; der Deploy-Timer überspringt seinen Lauf,
+> solange er steht, und holt ihn nach, sobald der Test fertig ist. Sie
+> müssen dafür nichts tun und nichts beachten — die Erklärung samt
+> Handgriffen steht in §10p. Wichtig ist nur: **bricht der Test ab, weil
+> die Sperre nicht gesetzt werden kann, ist Redis das Problem**, nicht das
+> Gerät.
+
 Prüft **alle Pool-Geräte gleichzeitig** und erstellt dabei das
 Firmware-Inventar. Das Inventar muss **vor** dem Open-Window-Rollout
 vorliegen, nicht erst dabei — die Firmware der 100 neuen Geräte ist unbekannt.
@@ -2865,6 +2873,20 @@ und damit genau den Ausfall verdecken, den er melden soll.
 | **deploy** | Seit über 20 Minuten kein erfolgreicher Deploy-Lauf. Neuer Code kommt nicht auf den Server; die Steuerung läuft unverändert weiter. | `journalctl -u heizung-deploy-pull -n 30 --no-pager`. Häufigste Ursachen: abgelaufener ghcr-Login, `safe.directory` (§5.7), lokale Änderungen am Working-Tree. |
 | **backup** | Seit über 30 Stunden kein vollständiges Backup. Kein akutes Betriebsproblem — aber ab jetzt ist ein Datenverlust nicht mehr abgedeckt. | `journalctl -u heizung-backup -n 30 --no-pager` und `tail -40 /var/log/heizung-backup.log`. Steht dort `OFFSITE_PUSH_FAILED`, ist das lokale Backup in Ordnung und nur die Spiegelung hängt. |
 
+### Eine Besonderheit beim Deploy-Check (Sprint 20a)
+
+Läuft ein Batch-Eingangstest, überspringt der Deploy-Timer seinen Lauf
+(§10p) — und **pingt trotzdem**, mit `skipped: inbound_test lock (TTL bis …)`
+als Text. Sonst schlüge der Monitor bei jedem Montage-Lauf nach 20 Minuten
+an, und ein Melder mit regelmäßigen Falsch-Alarmen meldet nach einer Woche
+nichts mehr.
+
+Im Monitor steht der Grund also mit. Wer dort mehrfach hintereinander
+`skipped: inbound_test lock` sieht, **ohne** dass jemand testet, sieht auf
+dem Server nach: die Sperre hat eine TTL und kann nicht hängen bleiben, aber
+ein von Hand geschriebener Key ohne Ablauf könnte es (§10p, letzter
+Abschnitt).
+
 ### Eine Besonderheit beim Backup-Check
 
 Gepingt wird **nur**, wenn der lokale Dump *und* der Off-Site-Push
@@ -3299,3 +3321,107 @@ zurückgesetztem Frame-Counter zurück (CLAUDE.md §5.71, AE-63). Das Backend
 erkennt das und schickt den richtigen Sollwert nach — es ist kein
 Drehring-Akt des Gastes und wird nicht als solcher übernommen. Kein
 Eingriff nötig.
+
+## 10p. Deploy-Sperre während des Eingangstests (Sprint 20a)
+
+Der Deploy-Timer zieht alle fünf Minuten `origin/develop` und ruft
+`docker compose up -d`. Das erneuert den api-Container, sobald ein neues
+Image da ist — und der Batch-Eingangstest läuft in genau diesem Container.
+
+**Was ein Deploy mitten im Lauf anrichtet:** Die schon beurteilten Geräte
+sind sicher, die werden einzeln festgeschrieben. Verloren ist das Gerät, das
+gerade auf seine Bestätigung wartete. Es hat den Befehl bekommen, aber kein
+Urteil — und der Wiederaufsetz-Lauf (`--resume`) schickt ihn **erneut**.
+Zwei Befehle an ein Gerät, dessen erste Runde niemand mehr zuordnen kann.
+
+Seit Sprint 20a verhindert das eine Sperre, ohne dass jemand daran denken
+muss.
+
+### Wie es abläuft
+
+Der Eingangstest setzt beim Start einen Redis-Key, verlängert ihn während
+des Laufs und löscht ihn am Ende — auch bei Strg-C und bei `docker stop`.
+Der Deploy-Timer fragt den Key **vor** allem anderen ab und überspringt
+seinen ganzen Lauf, solange er steht. Nicht nur den Container-Neustart: ein
+halber Deploy (Dateien neu, Container alt) wäre ein Zustand, den der nächste
+Lauf auch nicht als solchen erkennt.
+
+Im Log auf dem Server steht dann:
+
+```
+UEBERSPRUNGEN: Eingangstest laeuft (Sperre heizung:lock:inbound_test, TTL 7845s).
+               Naechster Versuch beim naechsten Timer-Lauf.
+Dead-Man-Ping deploy: ok (skipped: inbound_test lock (TTL bis 2026-10-05T14:21:00+02:00)).
+```
+
+Der Deploy geht also nicht verloren — er kommt beim nächsten Timer-Lauf,
+sobald die Sperre weg ist. Bei einem Montage-Lauf sind das ein bis drei
+Stunden Verzögerung.
+
+### Warum der Monitor trotzdem grün bleibt
+
+Der übersprungene Lauf **pingt healthchecks.io** — mit dem Grund im Text.
+Ohne Ping würde der Deploy-Monitor nach 20 Minuten Karenz anschlagen, und
+das bei jedem Montage-Lauf. Ein Melder, der regelmäßig ohne Anlass
+anschlägt, wird nach einer Woche ignoriert, und dann meldet er auch den
+echten Ausfall nicht mehr.
+
+Der Preis, und der soll hier stehen: während einer gesetzten Sperre sagt der
+Monitor „Deploy in Ordnung", obwohl keiner läuft. Vertretbar ist das nur,
+weil die Sperre eine **TTL** hat und von selbst verfällt — hängen bleiben
+kann sie nicht. Im Monitor steht der Grund samt Ablaufzeit; wer dort
+mehrfach hintereinander `skipped: inbound_test lock` sieht, ohne dass jemand
+testet, sieht auf dem Server nach.
+
+### Handgriffe
+
+**Steht gerade eine Sperre?**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+  exec -T redis redis-cli TTL heizung:lock:inbound_test
+```
+
+| Antwort | Bedeutung |
+|---|---|
+| `-2` | keine Sperre, Deploys laufen normal |
+| eine Zahl | Sperre steht, so viele Sekunden noch |
+| `-1` | Sperre **ohne Ablauf** — das darf nicht vorkommen, siehe unten |
+
+**Wann wurde sie gesetzt?** Der Wert des Keys ist der Setz-Zeitpunkt:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+  exec -T redis redis-cli GET heizung:lock:inbound_test
+```
+
+**Sperre von Hand löschen.** Nur, wenn nachweislich kein Test läuft — ein
+abgebrochener Lauf, dessen Prozess hart gestorben ist:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+  exec -T redis redis-cli DEL heizung:lock:inbound_test
+```
+
+Nötig ist das im Normalfall **nicht**: die TTL räumt selbst auf, spätestens
+eine Viertelstunde nach dem längsten Wartefenster des Laufs.
+
+**Eine Sperre mit `-1` (kein Ablauf)** legt der Eingangstest nie an — er
+setzt immer eine TTL. Steht sie trotzdem so da, hat jemand den Key von Hand
+geschrieben. Das Deploy-Skript sperrt dann und sagt es deutlich im Log,
+statt still zu deployen oder still zu blockieren. Löschen wie oben.
+
+### Test ohne Sperre fahren
+
+`--no-deploy-lock` lässt den Eingangstest ohne Sperre laufen. Gedacht ist
+das für den einen Fall, dass Redis nicht erreichbar ist und trotzdem geprüft
+werden muss. Ohne Sperre kann ein Deploy den Lauf treffen — also vorher
+sicherstellen, dass niemand mergt.
+
+Ohne diesen Schalter **bricht der Test ab**, wenn die Sperre nicht gesetzt
+werden kann. Das ist Absicht: ein Lauf ohne Sperre, den niemand als solchen
+erkennt, ist der schlechteste der drei Zustände.
+
+**Querverweise:** CLAUDE.md §0.3 (die Regel, und was das Gate nicht
+abdeckt), §10h.4 (Laufzeit des Eingangstests), §10l (Dead-Man-Checks),
+§5.78 (`docker compose` von Hand — daran geht die Sperre vorbei).
