@@ -88,6 +88,49 @@ Claude Code stoppt und wartet auf Freigabe bei:
 7. Vor Tag-Vergabe
 8. Vor Live-Deploy auf heizung-test oder heizung-main
 9. S1-S6-Verstoß-Verdacht (siehe §0)
+10. **Vor jedem Merge nach `develop`: fragen, ob gerade ein
+    Montage- oder Eingangstest läuft** (siehe §0.3)
+
+### §0.3 — Ein Merge nach develop ist ein Deploy auf heizung-test
+
+Der Timer auf heizung-test zieht `origin/develop` und das gleitende
+`develop`-Image alle fünf Minuten und ruft danach
+`docker compose up -d`. Das rekreiert den api-Container, sobald das
+Image neu ist.
+
+**Folge:** Ein Batch-Eingangstest, der über
+`docker compose exec` im Container läuft, stirbt dabei mitten im
+Lauf — und zwar in dem Moment, in dem Downlinks in der
+ChirpStack-Queue stehen, auf deren Bestätigung der Test wartet. Die
+Geräte bekommen den Setpoint, der Lauf weiß es nicht mehr.
+
+Was dabei **nicht** verloren geht: die bereits beurteilten Geräte.
+`_finalize_device` schreibt und committet seit Sprint 19 (T6) je
+Gerät, `--resume` setzt also korrekt auf. Verloren ist genau das
+Gerät, das gerade in der Bestätigungs-Kette hing — es hat Downlinks
+bekommen, aber kein Urteil, und der Resume-Lauf schickt sie
+**erneut**. Das ist der S4-Punkt: nicht der Merge ist das Risiko,
+sondern doppelte Befehle an ein Gerät, dessen erste Runde niemand
+mehr zuordnen kann.
+
+**Regel, ab 30.09.2026:** Vor jedem Merge nach `develop` wird
+gefragt, ob ein Montage- oder Eingangstest offen ist. Die Frage
+gehört in dieselbe Nachricht wie die Bitte um Merge-Freigabe, damit
+sie nicht als Formalie durchgeht. Bei `main` gilt sie ohnehin
+(Pflicht-Stop 8).
+
+Was die Regel **nicht** ist: ein Ersatz für ein technisches Gate.
+Ein Timer, der einen laufenden Eingangstest erkennt und den Pull
+aufschiebt, wäre die belastbare Lösung — die Regel ist die
+Zwischenlösung, die heute nichts kostet. Anlass war der Merge von
+Sprint 20 / PR A am 30.09.2026, bei dem die Frage zum ersten Mal
+gestellt wurde (Antwort: kein Lauf offen).
+
+**Querverweise:** §5.78 (`docker compose` ohne `-f` auf dem
+Server — dieselbe Familie: ein Eingriff, dessen Nebenwirkung man
+nicht sieht), §0 S4 (Hardware-Schutz, keine doppelten Downlinks),
+RUNBOOK §10h.4 (Laufzeit des Eingangstests: 1-3 h — so lange ist
+das Fenster, in dem die Frage nötig ist).
 
 ### Auto-Continue (autonom)
 
