@@ -241,6 +241,9 @@ def test_map_to_reading_full() -> None:
     assert row["temperature"] == Decimal("24")
     assert row["setpoint"] == Decimal("21.0")
     assert row["valve_position"] == 100
+    # Sprint 20 (AE-69): die Spannung selbst, unveraendert aus dem Codec.
+    # 3.0 V ist nach der neuen Skala "schwach"-Grenzbereich -> OK (>= 3.0).
+    assert row["battery_voltage"] == Decimal("3.0")
     assert row["battery_percent"] == 50  # AE-64: 3.0 V = Mitte der Kennlinie
     assert row["rssi_dbm"] == -85
     assert row["snr_db"] == Decimal("7.5")
@@ -258,6 +261,7 @@ def test_map_to_reading_object_missing_uses_now() -> None:
     assert row["temperature"] is None
     assert row["setpoint"] is None
     assert row["battery_percent"] is None
+    assert row["battery_voltage"] is None
 
 
 def test_map_to_reading_partial_object() -> None:
@@ -269,6 +273,46 @@ def test_map_to_reading_partial_object() -> None:
     assert row["setpoint"] is None
     assert row["valve_position"] is None
     assert row["battery_percent"] is None
+    # NULL heisst "kein Spannungswert", nicht 0.0 V (Migration 0024).
+    assert row["battery_voltage"] is None
+
+
+def test_map_to_reading_battery_voltage_every_codec_step_unveraendert() -> None:
+    """Jeder der 16 Nibble-Schritte landet exakt als Decimal in der Zeile.
+
+    Der Codec rechnet ``V = 2 + nibble * 0.1`` und rundet auf zwei Stellen
+    (``mclimate-vicki.js:121`` + ``:142`` mit ``toFixed(2)``). Das Raster ist
+    damit 0.1 V und der Wertebereich 2.0-3.5 V.
+
+    Erwartungswert aus der Spezifikation, nicht aus einem Lauf (§5.79): die
+    Spannung wird **durchgereicht**, nicht umgerechnet. Deshalb ist der
+    Sollwert die Eingabe selbst — und der Test faellt, sobald jemand hier
+    eine Kennlinie, eine Rundung oder einen Clamp einzieht.
+    """
+    for nibble in range(16):
+        volts = round(2 + nibble * 0.1, 2)
+        payload = _valid_payload()
+        payload["object"]["battery_voltage"] = volts
+        uplink = ChirpStackUplink.model_validate(payload)
+        row = _map_to_reading(uplink, device_id=1)
+        assert row["battery_voltage"] == Decimal(str(volts)), (
+            f"nibble={nibble} volts={volts}: {row['battery_voltage']}"
+        )
+
+
+def test_map_to_reading_battery_voltage_ist_nicht_prozent() -> None:
+    """Spannung und Prozent sind zwei Spalten mit zwei Werten.
+
+    Schutz gegen ein Copy-Paste, das ``battery_voltage`` versehentlich mit
+    dem Kennlinien-Ergebnis befuellt. Bei 3.5 V waere das 100 — ein Wert,
+    den ``Numeric(3, 1)`` sogar annehmen wuerde, ohne zu klagen.
+    """
+    payload = _valid_payload()
+    payload["object"]["battery_voltage"] = 3.5
+    uplink = ChirpStackUplink.model_validate(payload)
+    row = _map_to_reading(uplink, device_id=1)
+    assert row["battery_voltage"] == Decimal("3.5")
+    assert row["battery_percent"] == 100
 
 
 def test_map_to_reading_no_rxinfo() -> None:
@@ -363,6 +407,10 @@ def test_map_to_reading_live_codec_output_fport2_periodic() -> None:
     # oberer Kennlinien-Anchor = 100 % — frische 2xAA Alkaline. Alte
     # LiPo-Formel ergab 42 % bei intakter Batterie (Cowork-Befund 15a).
     assert row["battery_percent"] == 100
+    # Sprint 20 (AE-69): dieselbe Saettigung, jetzt als Spannung. 3.5 V ist
+    # das 4-Bit-Maximum, NICHT "genau 3.5 V" — oberhalb ~3.4 V hat der Codec
+    # keine Aufloesung mehr. Nach der neuen Skala eindeutig OK (>= 3.0).
+    assert row["battery_voltage"] == Decimal("3.5")
     assert row["open_window"] is False
     assert row["rssi_dbm"] == -90
     assert row["snr_db"] == Decimal("9.8")

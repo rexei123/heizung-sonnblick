@@ -50,6 +50,19 @@ class SensorReading(Base):
     setpoint: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     valve_position: Mapped[int | None] = mapped_column(SmallInteger)  # 0..100 %
     battery_percent: Mapped[int | None] = mapped_column(SmallInteger)
+
+    # Sprint 20 (AE-69): Geraete-Spannung aus dem Codec-Feld
+    # ``battery_voltage`` (mclimate-vicki.js:142), Raster 0.1 V. Seit
+    # Migration 0024 die Quelle der drei Batterie-Stufen — ``battery_percent``
+    # bleibt als Rueckfallpfad bestehen, hat aber keinen Konsumenten mehr.
+    #
+    # NULL = kein Spannungswert fuer diese Zeile (Bestandsdaten vor 0024,
+    # Frame ohne das Feld), NICHT 0.0 V. Die Bewertung zaehlt NULL nicht mit.
+    #
+    # Decimal, nicht Float: der Schwellen-Vergleich laeuft exakt auf dem
+    # 0.1-V-Raster, und 2.9 hat in IEEE-754 keine exakte Darstellung.
+    battery_voltage: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
+
     rssi_dbm: Mapped[int | None] = mapped_column(SmallInteger)
     snr_db: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
 
