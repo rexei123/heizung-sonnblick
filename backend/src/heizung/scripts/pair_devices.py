@@ -67,12 +67,27 @@ from pathlib import Path
 
 # Stellen sicher, dass die App-Settings geladen werden koennen.
 # Pattern aus backend/scripts/activate_open_window_detection.py.
-os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("ALLOW_DEFAULT_SECRETS", "1")
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+asyncpg://heizung:heizung_dev@localhost:5432/heizung",
-)
+# Nur im direkten CLI-Aufruf, NICHT beim Import (Sprint 19 / PR B, T16).
+#
+# ``python -m heizung.scripts.<name>`` setzt ``__name__`` auf ``"__main__"``;
+# ein ``import`` durch die Tests tut das nicht. Der Guard trennt damit genau
+# die beiden Faelle.
+#
+# Anlass: die Zeile ``os.environ.setdefault("DATABASE_URL", ...)`` lief bei
+# JEDEM Import mit. Sobald irgendein gesammeltes Testmodul dieses Skript
+# importierte, hielt ``conftest._ensure_test_admin`` eine Datenbank fuer
+# konfiguriert und versuchte zu migrieren — auch bei reinen
+# Funktionstests. Lokal ohne Postgres wurden daraus 817 Verbindungsfehler
+# statt 45 ehrlicher Skips, und die Skip-Logik der Tests war damit
+# ausgehebelt, ohne dass es jemand sah.
+#
+# Die DATABASE_URL-Zeile ist **ganz** entfallen, nicht nur verschoben: sie
+# setzte genau den Wert, den ``Settings.database_url`` ohnehin als Default
+# traegt (``config.py``). Sie hatte also keine Wirkung ausser der
+# Nebenwirkung.
+if __name__ == "__main__":  # pragma: no cover - Einstiegspunkt
+    os.environ.setdefault("ENVIRONMENT", "test")
+    os.environ.setdefault("ALLOW_DEFAULT_SECRETS", "1")
 
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
@@ -90,8 +105,12 @@ from heizung.scripts.pairing.assign import (  # noqa: E402
 from heizung.scripts.pairing.batch_inbound_test import (  # noqa: E402
     DEFAULT_POLL_INTERVAL_S,
     DEFAULT_TIMEOUT_S,
+    HEARTBEAT_WAIT_MAX_S,
+    SETPOINT_RESET_C,
+    DeviceResult,
     format_report,
     run_batch_inbound_test,
+    status_tag,
 )
 from heizung.scripts.pairing.csv_parser import (  # noqa: E402
     check_dev_eui_duplicates_in_csv,
@@ -100,10 +119,6 @@ from heizung.scripts.pairing.csv_parser import (  # noqa: E402
     validate_against_db,
 )
 from heizung.scripts.pairing.exceptions import ParseError  # noqa: E402
-from heizung.scripts.pairing.inbound_test import (  # noqa: E402
-    format_test_result,
-    run_inbound_test,
-)
 from heizung.scripts.pairing.pairing_service import pair_batch  # noqa: E402
 from heizung.services.device_service import get_pool_devices  # noqa: E402
 
@@ -325,8 +340,36 @@ async def _cmd_import(args: argparse.Namespace) -> int:
     return 0 if counts["error"] == 0 else 1
 
 
+def _melde_phase(text: str) -> None:
+    """Fortschritts-Meldung fuer einen Abschnitt (Sprint 19 / T10).
+
+    Ein Lauf ueber 104 Geraete braucht bis zu sieben Wartefenster und damit
+    ueber eine Stunde. Ohne Zwischenmeldung steht die Konsole stumm da, und
+    ein stummer Lauf wird fuer haengend gehalten und abgebrochen — womit die
+    Arbeit weg ist, die er gerade tut.
+    """
+    print(f"  * {text}", flush=True)
+
+
+def _melde_geraet(result: DeviceResult) -> None:
+    """Meldung, sobald EIN Geraete-Urteil feststeht und festgeschrieben ist."""
+    zusatz = [t for t in (result.reset_note,) if t]
+    schwanz = f" | {' | '.join(zusatz)}" if zusatz else ""
+    print(
+        f"  {status_tag(result.status):<12} {result.hardware_nummer}: {result.reason}{schwanz}",
+        flush=True,
+    )
+
+
 async def _cmd_test(args: argparse.Namespace) -> int:
-    """``test <device> [--non-interactive]``: 6-Schritt-Eingangstest.
+    """``test <device>``: der Batch-Eingangstest fuer genau ein Geraet.
+
+    Sprint 19 (T11): bis hierher lief ein **zweiter**, eigener Ablauf mit
+    Mitarbeiter-Rueckfragen (``inbound_test.run_inbound_test``). Zwei
+    Mechanismen fuer dieselbe Pruefung heissen zwei Urteilslogiken, zwei
+    Schwellensaetze und zwei Stellen, an denen eine Korrektur vergessen
+    werden kann — die Sollwert-Schwelle ist in PR A genau deshalb
+    auseinandergelaufen (25 gegen 28 Grad).
 
     ``device`` ist entweder ``device.id`` (Integer) oder ``dev_eui``
     (16 Hex-Zeichen). Auto-Detect via ``_resolve_device``.
@@ -340,14 +383,37 @@ async def _cmd_test(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        result = await run_inbound_test(
-            device.id,
-            session,
-            interactive=not args.non_interactive,
-            skip_backplate=args.skip_backplate,
+
+        user_id: int | None = None
+        if args.user_email:
+            user_id, reason = await _lookup_user_id(session, args.user_email)
+            if user_id is None:
+                print(f"[FAIL] {reason}", file=sys.stderr)
+                return 1
+
+        print(
+            f"Eingangstest fuer {device.label or device.dev_eui}. Class A: je "
+            "Geraet ist immer nur ein Befehl unterwegs, der Lauf braucht "
+            "deshalb bis zu fuenf Wartefenster.\n"
         )
-    print(format_test_result(result))
-    return 0 if result.overall_status == "passed" else 1
+        report = await run_batch_inbound_test(
+            session,
+            [device],
+            timeout_s=args.timeout,
+            poll_interval_s=args.poll_interval,
+            valve_check=not args.no_valve_check,
+            require_motor=args.require_motor,
+            heartbeat_wait_s=args.heartbeat_wait,
+            reset_setpoint=not args.no_reset,
+            resume=args.resume,
+            user_id=user_id,
+            on_phase=_melde_phase,
+            on_device=_melde_geraet,
+        )
+        await session.commit()
+
+    print(format_report(report))
+    return report.exit_code
 
 
 async def _cmd_inbound_test(args: argparse.Namespace) -> int:
@@ -412,7 +478,12 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
             poll_interval_s=args.poll_interval,
             valve_check=not args.no_valve_check,
             require_motor=args.require_motor,
+            heartbeat_wait_s=args.heartbeat_wait,
+            reset_setpoint=not args.no_reset,
+            resume=args.resume,
             user_id=user_id,
+            on_phase=_melde_phase,
+            on_device=_melde_geraet,
         )
         await session.commit()
 
@@ -524,22 +595,60 @@ def _build_parser() -> argparse.ArgumentParser:
     # test
     p_test = sub.add_parser(
         "test",
-        help="6-Schritt-Eingangstest pro Vicki (RUNBOOK §10h.4).",
+        help="Eingangstest fuer EIN Geraet — derselbe Ablauf wie inbound-test.",
     )
     p_test.add_argument(
         "device",
         help="device.id (Integer) oder dev_eui (16 Hex-Zeichen). Auto-Detect.",
     )
     p_test.add_argument(
-        "--non-interactive",
-        action="store_true",
-        help="Setpoint-Schritte ohne User-Prompt (fuer CI/Smoke).",
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_S,
+        help=f"Wartefenster je Schritt in Sekunden. Default {DEFAULT_TIMEOUT_S}.",
     )
     p_test.add_argument(
-        "--skip-backplate",
+        "--poll-interval",
+        type=int,
+        default=DEFAULT_POLL_INTERVAL_S,
+        help=f"Abstand zwischen zwei DB-Abfragen. Default {DEFAULT_POLL_INTERVAL_S}.",
+    )
+    p_test.add_argument(
+        "--no-valve-check",
         action="store_true",
-        help="Schritt 5 auslassen. Am Tisch ist attached_backplate=false "
-        "erwartet (RUNBOOK 10h.4) — dort ist die Pruefung sinnlos.",
+        help="Ventilkriterium abschalten. Dann zaehlt nur der Sollwert-Readback.",
+    )
+    p_test.add_argument(
+        "--require-motor",
+        action="store_true",
+        help="Verlangt einen belegten Motortest — siehe inbound-test.",
+    )
+    p_test.add_argument(
+        "--heartbeat-wait",
+        type=int,
+        default=HEARTBEAT_WAIT_MAX_S,
+        help=f"Wartefenster des Vor-Checks auf den ersten frischen Uplink in "
+        f"Sekunden. Default {HEARTBEAT_WAIT_MAX_S}. Kleiner setzen, wenn ein "
+        "stummes Geraet den Lauf nicht aufhalten soll.",
+    )
+    p_test.add_argument(
+        "--resume",
+        action="store_true",
+        help="Geraete mit endgueltigem Ergebnis aus einem frueheren Lauf "
+        "ueberspringen. TIMEOUT gilt als offen und wird wiederholt. Fuer den "
+        "zweiten Durchlauf nach einem Abbruch — jeder Downlink kostet Batterie.",
+    )
+    p_test.add_argument(
+        "--no-reset",
+        action="store_true",
+        help=f"Sollwert danach NICHT auf {SETPOINT_RESET_C} Grad zuruecksetzen. "
+        f"Ohne diesen Schalter endet jedes gepruefte Geraet auf "
+        f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
+    )
+    p_test.add_argument(
+        "--user-email",
+        default=None,
+        help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
     )
 
     # inbound-test (Batch)
@@ -588,6 +697,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "Ventilstellung traegt. Pflicht fuer den Montage-Lauf (RUNBOOK 10h.4): "
         "dort IST das Geraet montiert, beides ist dann ein Befund und kein "
         "Tischzustand.",
+    )
+    p_batch.add_argument(
+        "--heartbeat-wait",
+        type=int,
+        default=HEARTBEAT_WAIT_MAX_S,
+        help=f"Wartefenster des Vor-Checks auf den ersten frischen Uplink in "
+        f"Sekunden. Default {HEARTBEAT_WAIT_MAX_S}. Kleiner setzen, wenn ein "
+        "stummes Geraet den Lauf nicht aufhalten soll.",
+    )
+    p_batch.add_argument(
+        "--resume",
+        action="store_true",
+        help="Geraete mit endgueltigem Ergebnis aus einem frueheren Lauf "
+        "ueberspringen. TIMEOUT gilt als offen und wird wiederholt. Fuer den "
+        "zweiten Durchlauf nach einem Abbruch — jeder Downlink kostet Batterie.",
+    )
+    p_batch.add_argument(
+        "--no-reset",
+        action="store_true",
+        help=f"Sollwert danach NICHT auf {SETPOINT_RESET_C} Grad zuruecksetzen. "
+        f"Ohne diesen Schalter endet jedes gepruefte Geraet auf "
+        f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
     )
     p_batch.add_argument(
         "--user-email",

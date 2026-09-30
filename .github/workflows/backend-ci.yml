@@ -93,4 +93,11 @@ jobs:
           TEST_DATABASE_URL: postgresql+asyncpg://heizung:heizung_test@localhost:5432/heizung_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci-only-32chars
-        run: pytest --cov=heizung --cov-report=term-missing
+        # --durations=15 (Sprint 19 / PR B, T13): nennt die 15 langsamsten
+        # Tests im Log. Anlass ist der Sprung von 3 auf 18 Minuten am
+        # 29.09.2026 — verursacht von EINEM Test, der wegen einer halb
+        # gefaelschten Zeitquelle 15 Minuten leer lief (CLAUDE.md §5.81,
+        # scripts/pairing/clock.py). Ohne diese Zeile kostet die Suche nach
+        # dem Verursacher einen eigenen CI-Lauf; mit ihr steht er im Log des
+        # Laufs, der die Laufzeit gemeldet hat.
+        run: pytest --cov=heizung --cov-report=term-missing --durations=15

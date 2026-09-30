@@ -1896,13 +1896,64 @@ nicht nur die auf dem Server.
 
 ---
 
-### 10h.4 Batch-Eingangstest und Firmware-Inventar (26.09.)
+### 10h.4 Batch-Eingangstest und Firmware-Inventar
 
 Prüft **alle Pool-Geräte gleichzeitig** und erstellt dabei das
 Firmware-Inventar. Das Inventar muss **vor** dem Open-Window-Rollout
 vorliegen, nicht erst dabei — die Firmware der 100 neuen Geräte ist unbekannt.
 
-**In zwei Durchläufen**, nicht in einem. Der Grund steht unter Lauf 2.
+> **Stand 30.09.2026 (Sprint 19):** Der Ablauf hat sich gegenüber der
+> Fassung vom 26.09. geändert. Was hier steht, gilt; die alte Reihenfolge
+> (Firmware zuerst, Urteil aus dem Readback-Frame, Rückfragen am Gerät)
+> ist überholt.
+
+#### Was der Lauf tut, in dieser Reihenfolge
+
+| # | Schritt | Downlink | Warum in dieser Reihenfolge |
+|---|---|---|---|
+| 1 | **Vor-Check**: frischer Uplink + Backplate | **keiner** | Ohne Backplate ist `motorRange 0`, das Ventil bewegt sich nie. Ein Sollwert-Test kann dort nichts belegen — also wird auch keiner gesendet |
+| 2 | Sollwert **28 °C** → Readback → **Setzframe** | `0x51` | Der Readback-Uplink ist der, mit dem der Downlink erst zugestellt wurde. Der Motor fährt **danach**. Bewertet wird der **Folge**-Uplink |
+| 3 | Sollwert **10 °C** → Readback → Setzframe | `0x51` | dito |
+| 4 | Rückstellen auf **21 °C** → Readback | `0x51` | Ohne diesen Schritt bleibt jedes geprüfte Gerät auf 10 °C stehen und heizt nicht |
+| 5 | Firmware-Abfrage → Antwort abwarten | `0x04` | **zuletzt**, weil je Gerät immer nur **ein** Befehl unterwegs sein darf |
+
+**Die Regel hinter der Reihenfolge:** Class A liefert einen Downlink pro
+Uplink aus. Zwei Befehle in der Warteschlange heißen, dass der zweite eine
+ganze Periode später zugestellt wird — und bis dahin nicht von „nicht
+angekommen" zu unterscheiden ist. Bis Sprint 18 lagen Firmware-Abfrage und
+Sollwert hintereinander in der Queue.
+
+#### Laufzeit — bitte vorher lesen
+
+**Rechnen Sie mit einer bis drei Stunden für einen Batch.** Je Gerät sind es
+bis zu **sieben Wartefenster** (Vor-Check, zwei Sollwerte mit je Readback und
+Setzframe, Rückstellung, Firmware). Bei 10 Minuten Keepalive sind das 60–90
+Minuten pro Gerät — parallel über alle Geräte bleibt es bei der Summe der
+Fenster, nicht bei der Summe der Geräte.
+
+**Der Lauf meldet jeden Abschnitt und jedes fertige Gerät**, damit er nicht
+für hängend gehalten wird:
+
+```
+  * Vor-Check: Funk und Backplate fuer 104 Geraet(e), ohne Downlink.
+  * Sollwert 28 °C an 98 Geraet(e), dann warten.
+  * Readback 28 °C da, warte auf den Setzframe.
+  [PASS]       001: Readback beidseitig korrekt, Ventil 0 % bei 10 °C -> 80 % bei 28 °C.
+  [OHNE MOTOR] 017: Vicki nicht auf der Backplate ...
+```
+
+**Ein Abbruch ist nicht mehr teuer.** Jedes fertige Geräte-Urteil wird sofort
+festgeschrieben. Fortsetzen:
+
+```bash
+# SSH (Prod-Server, root)
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  inbound-test --all-pool --resume --user-email admin@hotel-sonnblick.at
+```
+
+`--resume` überspringt Geräte mit **endgültigem** Ergebnis (`PASS`,
+`OHNE MOTOR`, `FAIL`). `TIMEOUT` gilt als **offen** und wird wiederholt —
+dort ist kein Urteil gefallen, das Gerät hat nur nicht geantwortet.
 
 #### Lauf 1 — alle Geräte, Standardfenster
 
@@ -1916,99 +1967,107 @@ docker exec <api-container> python -m heizung.scripts.pair_devices \
 
 > `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
 
-Ablauf: Firmware-Abfrage an alle → Sollwert 25 °C an alle → gemeinsames
-Warten auf den Readback → Sollwert 10 °C → Warten → Urteil.
-
-**Rechnen Sie mit zwei bis drei Stunden.** Class A heißt: ein Downlink
-verlässt die Warteschlange erst beim nächsten Uplink des Geräts. Bis der
-neue Sollwert zurückgemeldet wird, können zwei Periodic-Intervalle vergehen.
-
 #### Lauf 2 — nur die TIMEOUT-Geräte, verlängertes Fenster
 
-Aus dem Report von Lauf 1 die Nummern aller `[TIMEOUT]`-Zeilen abschreiben —
-**nicht** die `[FAIL]`-Zeilen, die sind bereits beurteilt. Dann:
+Mit `--resume` brauchen Sie die Nummern nicht mehr abzuschreiben:
 
 ```bash
 # SSH (Prod-Server, root)
 docker exec <api-container> python -m heizung.scripts.pair_devices \
-  inbound-test --devices 017,042,088 --timeout 14400 \
+  inbound-test --all-pool --resume --timeout 14400 \
   --user-email admin@hotel-sonnblick.at
 ```
 
-> `--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein, sonst bricht der Aufruf vor dem ersten Schreibvorgang ab und nennt den Grund. Die Adresse steht als Urheber im Audit (§10h.0.2).
+**Erwartung:** eine erste Zeile wie
+`--resume: 99 von 104 Geraet(en) haben schon ein endgueltiges Ergebnis`,
+danach der gewohnte Ablauf für die restlichen.
 
-**Erwartung:** `Auswahl: 3 von 104 Pool-Geraeten.` als erste Zeile, dann der
-gewohnte Ablauf.
-
-**Warum nicht gleich alle mit 14400 s:** das Zeitfenster gilt **je
-Sollwert-Schritt**, und es gibt zwei. Ein Lauf über alle 104 Geräte mit vier
-Stunden Fenster belegt im ungünstigen Fall **acht Stunden** — ein ganzer
-Arbeitstag, für ein Ergebnis, das für die meisten Geräte schon nach 45
-Minuten feststand. Der zweite Durchlauf betrifft erfahrungsgemäß eine
-Handvoll Geräte.
+**Warum nicht gleich alle mit 14400 s:** das Zeitfenster gilt **je Schritt**,
+und es gibt bis zu sieben. Ein Lauf über alle 104 Geräte mit vier Stunden
+Fenster belegt im ungünstigen Fall mehrere Tage — für ein Ergebnis, das für
+die meisten Geräte schon nach einer Stunde feststand.
 
 > **Anlass:** Gerät 101 zeigte am 17./18.09. Uplink-Lücken von 1 bis 4
 > Stunden. Mit dem Standardfenster (2700 s) erscheint es als TIMEOUT, obwohl
 > es in Ordnung ist. Genau dafür ist Lauf 2 da.
 
-Ein Tippfehler in der Liste bricht ab, statt das Gerät still zu überspringen:
+Die Auswahl per `--devices 017,042` gibt es weiterhin; ein Tippfehler bricht
+ab, statt das Gerät still zu überspringen:
 
 ```
 [FAIL] Nicht im Pool gefunden: 0177. Erwartet werden Hardware-Nummern
        wie im Report oder DevEUIs.
 ```
 
-Geräte ohne `hardware_nummer` stehen im Report mit ihrer DevEUI — dann diese
-angeben.
+#### Der Montage-Lauf braucht `--require-motor`
 
-#### Ergebnis lesen
+Am Tisch ist `attached_backplate=false` der **erwartete** Zustand — dort
+heißt „ohne Motor" nur, dass der Test nicht durchführbar war. **Nach der
+Montage ist dasselbe ein Befund**, denn dort ist das Gerät montiert.
 
-```
-Nummer  Status     Firmware       Befund
-------  ---------  -------------  ---------------------------------
-001     [PASS]     4.5            Readback beidseitig korrekt, Ventil 5 % -> 80 %.
-017     [TIMEOUT]  keine Antwort  25 °C: Kein Uplink innerhalb von 2700 s. …
-042     [FAIL]     4.5            25 °C: Uplink kam, meldet aber 18 statt 25 °C.
-104     [PASS]     4.1            Readback beidseitig korrekt, Ventil 8 % -> 75 %.
+```bash
+# SSH (Prod-Server, root) — nach der Montage, NICHT am Tisch
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  inbound-test --all-pool --require-motor --user-email admin@hotel-sonnblick.at
 ```
 
-| Status | Bedeutung | Was tun |
+`--require-motor` macht aus zwei stillen Erfolgen einen Fehler:
+
+| Lage | ohne `--require-motor` | mit `--require-motor` |
 |---|---|---|
-| **PASS** | Sollwert beidseitig bestätigt, Ventil hat sich bewegt | montieren |
-| **FAIL** | Uplink kam, aber Sollwert falsch oder Ventil unbewegt | **Hardware-Verdacht** — Gerät zurück in den Karton, Zone auf die Nachrüstliste |
-| **TIMEOUT** | gar kein Uplink im Fenster | **Kein** Hardware-Verdacht. Funk, Duty-Cycle oder Batterie. Mit größerem `--timeout` wiederholen |
+| `attached_backplate` false **oder** NULL | `OHNE MOTOR` | `FAIL` |
+| kein Reading trägt eine Ventilstellung | `PASS` mit Vermerk | `FAIL` — *„Ventildaten fehlen (Codec?)"* |
 
-**Nur FAIL ist ein Hardware-Verdacht.** Ein TIMEOUT kann ein tadelloses Gerät
-an einem schlechten Platz sein.
+Der zweite Fall entsteht, wenn in ChirpStack noch der alte Codec läuft
+(§10c, CLAUDE.md §5.22). `--no-valve-check` **und** `--require-motor`
+zusammen sind ein Widerspruch und brechen beim Start ab (Exit 2).
 
-Hinweis: Fehlen im Reading die Ventildaten, steht das im Befund („Ventil­kriterium
-nicht prüfbar"). Das ist **kein** FAIL — das Kriterium ist dann nicht
-verletzt, sondern nicht bewertbar. Mit `--no-valve-check` lässt es sich ganz
-abschalten; dann zählt nur der Sollwert-Readback.
+#### Die Status im Report
 
-#### Firmware-Inventar
+| Status | Bedeutung | Exit trägt bei |
+|---|---|---|
+| `[PASS]` | Readback beidseitig korrekt, Ventil bewegt sich in beide Richtungen | 0 |
+| `[OHNE MOTOR]` | Gerät funkt und antwortet, aber keine Backplate — **Motor ungeprüft** | 0 |
+| `[FAIL]` | Hardware-Verdacht: Sollwert falsch, Ventil klemmt, Sensor defekt, Downlink gescheitert | 1 |
+| `[TIMEOUT]` | kein Uplink im Fenster. Funk, Duty-Cycle oder Batterie — **kein** Hardware-Verdacht | 1 |
+
+**Nur `FAIL` gehört zurück in den Karton.**
+
+#### Die Schwellen des Ventilkriteriums
+
+| Kriterium | Wert | Beleg |
+|---|---|---|
+| Bei 10 °C (Sollwert unter Raumtemperatur) | Openness **≤ 10 %** | Geräte 101 und 002 erreichen 0 % (Feldtest 29.09.) |
+| Bei 28 °C | Openness **≥ 40 %** | Gerät 002 erreicht 59 % bei 28 °C |
+
+Der **niedrige** Sollwert trägt das Urteil und wird zuerst geprüft: sein
+Erwartungswert ist an zwei Geräten scharf belegt, und er trifft den
+gefährlichen Fehler — ein klemmend offenes Ventil heizt ein leeres Zimmer
+durch, ein klemmend geschlossenes lässt es nur kalt.
+
+> **Keine Batteriewarnung in diesem Lauf.** Eine Schwelle auf drei
+> Feldwerten, die zwischen zwei benachbarten Quantisierungsstufen des Codecs
+> liegt (4 Bit, `2 + nibble * 0.1`), trägt kein Kriterium. Der Batteriestand
+> steht weiterhin je Uplink in `sensor_reading.battery_percent`; die
+> Auswertung mit **Spannungsstufen** kommt als eigener Vorgang.
+
+#### Wenn das Rückstellen nicht bestätigt wird
 
 ```
-Firmware-Inventar (kein Fehlerkriterium, steuert nur den OW-Rollout):
-   98  FW >= 4.2 — wird beim OW-Rollout beschickt
-       001, 002, 003, …
-    1  FW < 4.2 — wird uebersprungen (B-9.11x.b-2)
-       104
-    5  keine FW-Antwort — wird uebersprungen
-       017, 042, 063, 088, 103
-  Erwartungswert fuer den OW-Rollout: 6 Geraet(e) werden uebersprungen.
+  ACHTUNG: Ruecksetzen auf 21 °C nicht bestaetigt — diese Geraete stehen
+  moeglicherweise noch auf 10 °C und heizen nicht: 042, 088
 ```
 
-**Diese Zahl notieren.** Sie ist der Erwartungswert für §10h.5 — dort muss
-genau diese Menge übersprungen werden. Weicht es ab, stimmt etwas nicht.
+Diese Geräte einzeln nachfahren:
 
-**Eine fehlende Firmware-Antwort macht ein Gerät nicht defekt.** Es regelt
-normal; nur die Fenstererkennung lässt sich nicht setzen. Bekannt sind
-bereits: **104** (FW 4.1) und **103** (FW-Abfrage ohne Antwort, Stand
-2026-09-17 unverändert).
+```bash
+# SSH (Prod-Server, root)
+docker exec <api-container> python -m heizung.scripts.pair_devices \
+  inbound-test --devices 042,088 --no-valve-check \
+  --user-email admin@hotel-sonnblick.at
+```
 
-Das Ergebnis wird je Gerät als `DEVICE_INBOUND_TEST` in `business_audit`
-festgehalten — es ist später nachlesbar, nicht nur Konsolen-Ausgabe.
+`--no-valve-check` genügt hier, weil es nur um die Rückstellung geht.
 
 ---
 
@@ -2067,6 +2126,53 @@ Gateway.
 > Beachten Sie die unterschiedlichen Zonennamen: 54 und 102 haben
 > `Schlafzimmer L` / `Schlafzimmer R`, 207 und 310 dagegen `Schlafzimmer` /
 > `Kinderzimmer`. In der Montage-CSV muss die Schreibweise exakt stimmen.
+
+#### Die Reihenfolge je Gerät: montieren → prüfen → zuordnen
+
+**Verbindlich. Der Eingangstest läuft, solange das Gerät noch im Pool ist —
+also nach der Montage und vor `assign`.**
+
+```
+1. Vicki am Heizkörper montieren, einschalten
+2. Eingangstest mit --require-motor        (Gerät ist noch Pool: heating_zone_id IS NULL)
+3. erst dann assign                        (Gerät bekommt seine Zone)
+```
+
+**Warum in dieser Reihenfolge und nicht anders:**
+
+Der Eingangstest fährt das Ventil absichtlich auf 28 °C und dann auf 10 °C.
+Wäre das Gerät zu diesem Zeitpunkt schon einer Zone zugeordnet, würde die
+Regel-Engine im selben Zeitraum ihre eigenen Sollwerte an dasselbe Gerät
+schicken — zwei Quellen für einen Sollwert, widersprüchliche Befehle in der
+ChirpStack-Queue, und ein Testergebnis, das nicht mehr dem Test gehört
+(S4 Hardware-Schutz).
+
+**Belegt, nicht angenommen:** Die Engine erreicht ein Pool-Gerät nicht. Die
+Kette ist
+
+- `backend/src/heizung/tasks/engine_tasks.py:442` —
+  `devices = await _get_zone_devices(session, zone.id)`, aufgerufen in der
+  Schleife über die Zonen eines Raums;
+- `backend/src/heizung/tasks/engine_tasks.py:379` — `_get_zone_devices`
+  delegiert an `get_active_devices_for_zone`;
+- `backend/src/heizung/services/device_service.py:68` —
+  `.where(Device.heating_zone_id == zone_id)`.
+
+Ein Pool-Gerät hat `heating_zone_id IS NULL`. In SQL ist `NULL = <zahl>`
+niemals wahr — das Gerät kann also in **keiner** Zonen-Abfrage auftauchen,
+unabhängig davon, wie viele Zonen es gibt. Es gibt keinen zweiten Pfad: die
+Engine liest Geräte ausschließlich über diese Funktion.
+
+**Der Test nach `assign` wäre also nicht nur unsauber, sondern messbar
+anders** — und der Fehler fiele als „Ventil bewegt sich nicht wie erwartet"
+auf, an einem Gerät, das in Ordnung ist.
+
+**Die Rückstellung deckt den Übergang ab:** Schritt 4 des Eingangstests
+stellt auf 21 °C zurück (§10h.4). Das Gerät steht danach auf einem
+vernünftigen Wert, bis die Engine es nach `assign` übernimmt — es gibt keine
+Lücke, in der ein montiertes Gerät auf 10 °C hängt.
+
+---
 
 #### Abends: Zuordnung eintragen
 

@@ -40,7 +40,7 @@ from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.models.user import User
 from heizung.scripts import pair_devices
-from heizung.scripts.pairing import inbound_test
+from heizung.scripts.pairing import batch_inbound_test as bit
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -104,27 +104,28 @@ def patched_session_local(session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 
 @pytest_asyncio.fixture
 def mock_all_downlinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    """Mockt ``send_setpoint`` im Eingangstest.
+    """Faengt die Downlinks des Eingangstests ab.
 
-    Sprint 17 (E3/C3): ``pairing_service`` hat keinen Downlink-Pfad mehr,
-    daher patcht die Fixture nur noch ``inbound_test``. ``counters`` bleibt
-    als Negativ-Beleg fuer die import-Tests ("es wurde nichts gesendet").
+    Sprint 17 (E3/C3): ``pairing_service`` hat keinen Downlink-Pfad mehr.
+    ``counters`` bleibt als Negativ-Beleg fuer die import-Tests ("es wurde
+    nichts gesendet").
 
-    Sprint 19 (T5): ``set_open_window_detection`` ist weg — der Eingangstest
-    sendet kein 0x45 mehr. Class A liefert einen Downlink je Uplink; drei
-    Befehle hintereinander in der Queue kosten Wartezeit ohne Erkenntnis (S4).
+    Sprint 19 (T11): der Eingangstest ist der Batch-Pfad, auch fuer ein
+    einzelnes Geraet — gepatcht wird deshalb ``batch_inbound_test``. Das
+    frueher hier gepatchte ``inbound_test`` existiert nicht mehr.
     """
-    counters = {"send_setpoint": 0}
+    counters = {"send_setpoint": 0, "fw_query": 0}
 
     async def fake_send_setpoint(*args: object, **kwargs: object) -> str:
         counters["send_setpoint"] += 1
         return "topic"
 
-    async def no_sleep(seconds: int) -> None:
-        return None
+    async def fake_fw_query(*args: object, **kwargs: object) -> str:
+        counters["fw_query"] += 1
+        return "topic"
 
-    monkeypatch.setattr(inbound_test, "send_setpoint", fake_send_setpoint)
-    monkeypatch.setattr(inbound_test, "_sleep", no_sleep)
+    monkeypatch.setattr(bit, "send_setpoint", fake_send_setpoint)
+    monkeypatch.setattr(bit, "query_firmware_version", fake_fw_query)
     return counters
 
 
@@ -302,7 +303,17 @@ async def test_cmd_test_via_device_id(
     patched_session_local: AsyncSession,
     mock_all_downlinks: dict[str, int],
 ) -> None:
-    """test <device.id>: Auto-Detect Integer-Pfad -> Eingangstest laeuft."""
+    """test <device.id>: Auto-Detect Integer-Pfad -> der Lauf startet.
+
+    Gegenstand ist die **Aufloesung** des Arguments, nicht das Urteil: die
+    Attrappe antwortet nicht, der Readback bleibt also aus und das Geraet
+    endet als TIMEOUT (Exit 1). Belegt ist damit, dass die Integer-Form zum
+    richtigen Geraet fuehrt und der Ablauf bis zum Senden kommt.
+
+    Die Fenster stehen auf 1 s, damit der Test nicht wirklich wartet — die
+    Wartelogik selbst ist in ``test_batch_inbound_test.py`` mit virtueller
+    Uhr geprueft (Sprint 19 / T14).
+    """
     device = Device(
         dev_eui=_eui(),
         kind=DeviceKind.THERMOSTAT,
@@ -320,17 +331,32 @@ async def test_cmd_test_via_device_id(
         )
     )
     await patched_session_local.flush()
-    exit_code = await pair_devices.main_async(["test", str(device.id), "--non-interactive"])
-    assert exit_code == 0
-    # Genau zwei Downlinks, beide Sollwerte. Kein 0x45 mehr (Sprint 19 / T5).
-    assert mock_all_downlinks["send_setpoint"] == 2
+    exit_code = await pair_devices.main_async(
+        [
+            "test",
+            str(device.id),
+            "--timeout",
+            "1",
+            "--poll-interval",
+            "1",
+            "--heartbeat-wait",
+            "120",
+        ]
+    )
+    assert exit_code == 1  # TIMEOUT: die Attrappe antwortet nicht
+    # Genau EIN Sollwert-Downlink: ohne Readback gibt es keinen zweiten
+    # Schritt, und je Geraet ist immer nur ein Befehl unterwegs (S4).
+    assert mock_all_downlinks["send_setpoint"] == 1
 
 
 async def test_cmd_test_via_dev_eui(
     patched_session_local: AsyncSession,
     mock_all_downlinks: dict[str, int],
 ) -> None:
-    """test <dev_eui>: Auto-Detect Hex-Pfad -> Eingangstest laeuft."""
+    """test <dev_eui>: Auto-Detect Hex-Pfad -> der Lauf startet.
+
+    Wie der Integer-Fall; hier zaehlt die Gross-/Kleinschreibung.
+    """
     dev_eui = _eui()
     device = Device(
         dev_eui=dev_eui,
@@ -350,8 +376,20 @@ async def test_cmd_test_via_dev_eui(
     )
     await patched_session_local.flush()
     # dev_eui in uppercase angeben — Auto-Detect lowercased intern.
-    exit_code = await pair_devices.main_async(["test", dev_eui.upper(), "--non-interactive"])
-    assert exit_code == 0
+    exit_code = await pair_devices.main_async(
+        [
+            "test",
+            dev_eui.upper(),
+            "--timeout",
+            "1",
+            "--poll-interval",
+            "1",
+            "--heartbeat-wait",
+            "120",
+        ]
+    )
+    assert exit_code == 1  # TIMEOUT, siehe Integer-Fall
+    assert mock_all_downlinks["send_setpoint"] == 1
 
 
 async def test_cmd_test_invalid_arg_returns_1(
@@ -360,10 +398,12 @@ async def test_cmd_test_invalid_arg_returns_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """test <invalid>: weder int noch 16-Hex -> [FAIL] Device nicht gefunden."""
-    exit_code = await pair_devices.main_async(["test", "xyz_not_an_id_or_eui", "--non-interactive"])
+    exit_code = await pair_devices.main_async(["test", "xyz_not_an_id_or_eui"])
     assert exit_code == 1
     err = capsys.readouterr().err
     assert "[FAIL] Device 'xyz_not_an_id_or_eui' nicht gefunden" in err
+    # Abbruch VOR dem ersten Downlink.
+    assert mock_all_downlinks["send_setpoint"] == 0
 
 
 async def test_cmd_list_pool_shows_pool_devices(

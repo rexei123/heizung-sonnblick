@@ -59,23 +59,24 @@ Geraet durchfallen zu lassen. Er gehoert nach der Montage.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
 
+from heizung.models.business_audit import BusinessAudit
 from heizung.models.device import Device
 from heizung.models.sensor_reading import SensorReading
+from heizung.scripts.pairing.clock import REAL_CLOCK, Clock
 from heizung.scripts.pairing.firmware import classify_firmware, min_fw_text
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.downlink_adapter import query_firmware_version, send_setpoint
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -89,6 +90,13 @@ logger = logging.getLogger(__name__)
 # CLAUDE.md §5.79. 28 liegt innerhalb ``MAX_SETPOINT_C`` (30).
 SETPOINT_HIGH_C = 28
 SETPOINT_LOW_C = 10
+
+# Werkswert der Vicki. Nach dem Test wird darauf zurueckgestellt (Sprint 19 /
+# T9): ohne das bleibt jedes geprueftes Geraet auf SETPOINT_LOW_C stehen und
+# heizt nicht. Bei Frostschutz 10 °C ist das nicht gefaehrlich, aber ein
+# kaltes Zimmer, bis die Engine das naechste Mal greift.
+SETPOINT_RESET_C = 21
+
 
 # Absolute Ventil-Schwellen (Sprint 19 / T2). Belegt am Feldtest 28./29.09.2026:
 #
@@ -139,6 +147,11 @@ StepOutcome = Literal[
 DeviceStatus = Literal["pass", "passed_ohne_motor", "fail", "timeout"]
 PrecheckVerdict = Literal["ready", "no_uplink", "not_attached", "backplate_unknown"]
 
+# Endgueltige Ergebnisse — ``--resume`` fasst sie nicht mehr an (T7).
+# ``timeout`` fehlt bewusst: dort ist kein Urteil gefallen, das Geraet hat nur
+# nicht geantwortet. Genau diese Geraete sind der Grund fuer den zweiten Lauf.
+TERMINAL_STATUSES: frozenset[str] = frozenset({"pass", "passed_ohne_motor", "fail"})
+
 AUDIT_ACTION = "DEVICE_INBOUND_TEST"
 
 
@@ -159,6 +172,8 @@ class StepResult:
     reading_at: datetime | None = None
     #: Zeitpunkt des Setzframes, aus dem ``valve_position`` stammt.
     valve_reading_at: datetime | None = None
+    #: ``brokenSensor`` aus dem Setzframe. NULL = Feld nicht im Payload.
+    broken_sensor: bool | None = None
     detail: str = ""
 
 
@@ -174,10 +189,23 @@ class DeviceResult:
     firmware_version: str | None
     high: StepResult | None = None
     low: StepResult | None = None
+    #: ``True`` = Ruecksetzen auf SETPOINT_RESET_C bestaetigt, ``False`` =
+    #: gesendet aber nicht bestaetigt, ``None`` = nicht versucht (T9).
+    reset_confirmed: bool | None = None
 
     @property
     def firmware_text(self) -> str:
         return self.firmware_version or "keine Antwort"
+
+    @property
+    def reset_note(self) -> str | None:
+        """Hinweis, wenn das Ruecksetzen nicht bestaetigt ist (T9)."""
+        if self.reset_confirmed is not False:
+            return None
+        return (
+            f"Ruecksetzen auf {SETPOINT_RESET_C} °C NICHT bestaetigt — das "
+            f"Geraet steht moeglicherweise noch auf {SETPOINT_LOW_C} °C."
+        )
 
 
 @dataclass
@@ -185,6 +213,8 @@ class BatchReport:
     """Sammelergebnis. ``exit_code`` ist 1, sobald ein Geraet nicht besteht."""
 
     results: list[DeviceResult] = field(default_factory=list)
+    #: Wie viele Geraete ``--resume`` uebersprungen hat (T7).
+    skipped_resume: int = 0
 
     @property
     def passed(self) -> list[DeviceResult]:
@@ -226,20 +256,6 @@ class BatchReport:
 
 
 # ---------------------------------------------------------------------------
-# Test-Einhaengepunkte: Tests ersetzen diese Namen per monkeypatch, analog
-# ``inbound_test._sleep`` (Sprint 13a T5).
-# ---------------------------------------------------------------------------
-
-
-async def _sleep(seconds: float) -> None:
-    await asyncio.sleep(seconds)
-
-
-def _now() -> datetime:
-    return datetime.now(tz=UTC)
-
-
-# ---------------------------------------------------------------------------
 # Bausteine
 # ---------------------------------------------------------------------------
 
@@ -267,7 +283,7 @@ async def _latest_readings(
 
 
 async def _send_round(
-    devices: Sequence[Device], target_c: int
+    devices: Sequence[Device], target_c: int, *, clock: Clock
 ) -> tuple[dict[int, datetime], dict[int, str]]:
     """Sendet einen Sollwert an alle Geraete. Returns (Sendezeit, Fehler)."""
     sent_at: dict[int, datetime] = {}
@@ -284,8 +300,8 @@ async def _send_round(
                 exc,
             )
             continue
-        sent_at[dev.id] = _now()
-        await _sleep(SEND_SPACING_S)
+        sent_at[dev.id] = clock.now()
+        await clock.sleep(SEND_SPACING_S)
     return sent_at, failures
 
 
@@ -296,6 +312,7 @@ async def _await_readbacks(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, StepResult]:
     """Wartet gemeinsam auf den Readback aller Geraete.
 
@@ -310,10 +327,10 @@ async def _await_readbacks(
     pending = dict(sent_at)
     results: dict[int, StepResult] = {}
     saw_fresh: dict[int, SensorReading] = {}
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
 
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             reading = latest.get(device_id)
@@ -333,7 +350,7 @@ async def _await_readbacks(
                     detail=f"Readback {target_c} °C bestaetigt.",
                 )
                 del pending[device_id]
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
 
     for device_id in pending:
@@ -366,6 +383,7 @@ async def _await_fresh_readings(
     max_age_s: int,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, SensorReading]:
     """Ein aktuelles Reading je Geraet — wartend, nicht sofort urteilend.
 
@@ -379,7 +397,7 @@ async def _await_fresh_readings(
     gesunde Geraet — die Pruefung war ein Muenzwurf mit dem Anschein eines
     Kriteriums.
     """
-    start = _now()
+    start = clock.now()
     cutoff = start - timedelta(seconds=max_age_s)
     found: dict[int, SensorReading] = {}
     pending = set(device_ids)
@@ -395,14 +413,14 @@ async def _await_fresh_readings(
 
     deadline = start.timestamp() + timeout_s
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             reading = latest.get(device_id)
             if reading is not None and reading.time > start:
                 found[device_id] = reading
                 pending.discard(device_id)
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
     return found
 
@@ -411,7 +429,9 @@ async def _precheck(
     session: AsyncSession,
     devices: Sequence[Device],
     *,
+    wait_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, tuple[PrecheckVerdict, str]]:
     """Funk und Backplate **vor** dem ersten Downlink (Sprint 19 / T3, T4).
 
@@ -428,9 +448,10 @@ async def _precheck(
     fresh = await _await_fresh_readings(
         session,
         [d.id for d in devices],
-        max_age_s=HEARTBEAT_WAIT_MAX_S,
-        timeout_s=HEARTBEAT_WAIT_MAX_S,
+        max_age_s=wait_s,
+        timeout_s=wait_s,
         poll_interval_s=poll_interval_s,
+        clock=clock,
     )
     verdicts: dict[int, tuple[PrecheckVerdict, str]] = {}
     for dev in devices:
@@ -438,7 +459,7 @@ async def _precheck(
         if reading is None:
             verdicts[dev.id] = (
                 "no_uplink",
-                f"Kein Uplink innerhalb von {HEARTBEAT_WAIT_MAX_S} s. Funk, "
+                f"Kein Uplink innerhalb von {wait_s} s. Funk, "
                 "Duty-Cycle oder Batterie — kein Hardware-Verdacht. Es wurde "
                 "kein Downlink gesendet.",
             )
@@ -467,6 +488,7 @@ async def _await_firmware(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, str | None]:
     """Wartet auf die Antworten der FW-Abfrage und liest sie aus ``device``.
 
@@ -484,13 +506,13 @@ async def _await_firmware(
         return known
 
     stmt = select(Device.id, Device.firmware_version).where(Device.id.in_(list(known)))
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
     while True:
         for device_id, fw in (await session.execute(stmt)).all():
             known[device_id] = fw
-        if all(fw is not None for fw in known.values()) or _now().timestamp() >= deadline:
+        if all(fw is not None for fw in known.values()) or clock.now().timestamp() >= deadline:
             return known
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
 
 
 async def _await_valve_frames(
@@ -499,6 +521,7 @@ async def _await_valve_frames(
     *,
     timeout_s: int,
     poll_interval_s: int,
+    clock: Clock,
 ) -> dict[int, StepResult]:
     """Wartet je Geraet auf den **Setzframe** — den Uplink nach dem Readback.
 
@@ -529,9 +552,9 @@ async def _await_valve_frames(
     if not pending:
         return out
 
-    deadline = _now().timestamp() + timeout_s
+    deadline = clock.now().timestamp() + timeout_s
     while pending:
-        await _sleep(poll_interval_s)
+        await clock.sleep(poll_interval_s)
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             step = pending[device_id]
@@ -543,13 +566,14 @@ async def _await_valve_frames(
                 step,
                 valve_position=reading.valve_position,
                 valve_reading_at=reading.time,
+                broken_sensor=reading.broken_sensor,
                 detail=(
                     f"Readback {step.target_c} °C bestaetigt, Ventil im "
                     f"Folge-Uplink {reading.valve_position} %."
                 ),
             )
             del pending[device_id]
-        if _now().timestamp() >= deadline:
+        if clock.now().timestamp() >= deadline:
             break
 
     for device_id, step in pending.items():
@@ -573,6 +597,7 @@ def _evaluate(
     *,
     valve_check: bool,
     require_motor: bool = False,
+    reset_confirmed: bool | None = None,
 ) -> DeviceResult:
     """Fasst beide Schritte zu einem Geraete-Urteil zusammen.
 
@@ -599,6 +624,7 @@ def _evaluate(
             firmware_version=firmware,
             high=high,
             low=low,
+            reset_confirmed=reset_confirmed,
         )
 
     for step in (high, low):
@@ -616,6 +642,24 @@ def _evaluate(
 
     if high is None or low is None or high.outcome != "ok" or low.outcome != "ok":
         return result("fail", "Unvollstaendiger Ablauf.")
+
+    # Vor jedem Ventilurteil: traut das Geraet seinem eigenen Messwert?
+    # Die Vicki regelt gegen ihren internen Temperatursensor. Meldet der
+    # einen Defekt, ist jede Aussage ueber die Ventilstellung wertlos — das
+    # Geraet regelt dann gegen eine Zahl, der es selbst nicht traut.
+    #
+    # Nur ``True`` zaehlt. ``None`` heisst "Feld nicht im Payload" (alter
+    # Codec) und ist kein Befund. Geprueft wird der **Setzframe**, also der
+    # Uplink, aus dem auch die Openness kommt — nicht der Vor-Check.
+    for step in (high, low):
+        if step is not None and step.broken_sensor is True:
+            return result(
+                "fail",
+                "Temperatursensor meldet Defekt (brokenSensor) im Uplink bei "
+                f"{step.target_c} °C. Die Vicki regelt gegen ihren internen "
+                "Fuehler; ein Ventilurteil ist damit wertlos. Geraet zurueck "
+                "in den Karton.",
+            )
 
     if valve_check:
         if high.valve_position is None or low.valve_position is None:
@@ -723,6 +767,9 @@ async def _persist(
             "reason": r.reason,
             "firmware_version": r.firmware_version,
             "firmware_class": classify_firmware(r.firmware_version),
+            # Der Ruecksetz-Beleg gehoert ins Audit, nicht nur in die
+            # Konsole: der Bericht scrollt weg, das Audit bleibt.
+            "reset_confirmed": r.reset_confirmed,
         }
         # Schluessel ohne Gradzahl im Namen: der hohe Sollwert ist in Sprint 19
         # von 25 auf 28 °C gewandert, und ein Audit-Feld ``setpoint_25`` mit
@@ -742,6 +789,7 @@ async def _persist(
                 "valve_position": step.valve_position,
                 "readback_at": step.reading_at,
                 "valve_reading_at": step.valve_reading_at,
+                "broken_sensor": step.broken_sensor,
             }
         await record_business_action(
             session,
@@ -759,6 +807,80 @@ async def _persist(
 # ---------------------------------------------------------------------------
 
 
+async def _already_settled(session: AsyncSession, device_ids: Sequence[int]) -> dict[int, str]:
+    """Geraete mit einem **endgueltigen** Ergebnis aus einem frueheren Lauf.
+
+    Sprint 19 (T7). Grundlage von ``--resume``: ein abgebrochener Lauf soll
+    fortgesetzt werden koennen, ohne die bereits geprueften Geraete erneut
+    anzufassen — jeder Downlink kostet Batterie, und ein Lauf ueber 104
+    Geraete dauert Stunden.
+
+    Endgueltig sind ``pass``, ``passed_ohne_motor`` und ``fail``. **Nicht**
+    endgueltig ist ``timeout``: dort ist ueberhaupt kein Urteil gefallen, das
+    Geraet hat nur nicht geantwortet. Genau diese Geraete sind der Grund,
+    warum man einen zweiten Durchlauf macht.
+
+    Gelesen wird der **juengste** Audit-Eintrag je Geraet. Gibt es mehrere
+    Laeufe, gilt der letzte — ein Geraet, das gestern ``pass`` war und heute
+    ``timeout``, ist heute offen.
+    """
+    if not device_ids:
+        return {}
+
+    # DISTINCT ON (target_id) ueber ts DESC: ein Roundtrip, juengster Eintrag
+    # je Geraet. Analog zu ``_latest_readings``.
+    stmt = (
+        select(BusinessAudit.target_id, BusinessAudit.new_value)
+        .where(
+            BusinessAudit.action == AUDIT_ACTION,
+            BusinessAudit.target_type == "device",
+            BusinessAudit.target_id.in_(list(device_ids)),
+        )
+        .order_by(BusinessAudit.target_id, BusinessAudit.ts.desc())
+        .distinct(BusinessAudit.target_id)
+    )
+    settled: dict[int, str] = {}
+    for target_id, new_value in (await session.execute(stmt)).all():
+        if target_id is None or not isinstance(new_value, dict):
+            continue
+        status = new_value.get("status")
+        if isinstance(status, str) and status in TERMINAL_STATUSES:
+            settled[target_id] = status
+    return settled
+
+
+async def _finalize_device(
+    session: AsyncSession,
+    result: DeviceResult,
+    *,
+    user_id: int | None,
+    on_device: Callable[[DeviceResult], None] | None,
+) -> None:
+    """Schreibt EIN Geraete-Ergebnis fest und meldet es nach aussen.
+
+    Sprint 19 (T6). ``_persist`` lief bis PR A erst nach dem letzten Geraet;
+    ein Abbruch verlor damit alles — bei einem Lauf von ueber einer Stunde
+    die gesamte Arbeit.
+
+    **Dieser Aufruf committet**, und das weicht bewusst von der
+    Repo-Konvention ab (§5.61: Services committen nicht, der Endpoint tut
+    es). Begruendung: das hier ist kein Request-Handler, sondern ein
+    langlaufender Vorgang mit Aussenwirkung — jeder Downlink ist passiert,
+    ob die Transaktion spaeter committet oder nicht. Ein Urteil, das
+    nachweislich gefallen ist, darf nicht an einem Ctrl-C haengen. Dieselbe
+    Linie wie ``pair_devices._cmd_import``, das ebenfalls selbst committet.
+
+    Was ein Abbruch weiterhin verliert: die Geraete, deren Urteil noch
+    **nicht** gefallen ist. Das ist keine Luecke, sondern die Sache selbst —
+    ein Urteil, das es nicht gibt, kann man nicht festschreiben. Genau diese
+    Geraete holt ``--resume`` im zweiten Durchlauf.
+    """
+    await _persist(session, [result], user_id=user_id)
+    await session.commit()
+    if on_device is not None:
+        on_device(result)
+
+
 async def run_batch_inbound_test(
     session: AsyncSession,
     devices: Sequence[Device],
@@ -767,9 +889,15 @@ async def run_batch_inbound_test(
     poll_interval_s: int = DEFAULT_POLL_INTERVAL_S,
     valve_check: bool = True,
     require_motor: bool = False,
+    heartbeat_wait_s: int = HEARTBEAT_WAIT_MAX_S,
+    reset_setpoint: bool = True,
+    resume: bool = False,
     user_id: int | None = None,
+    clock: Clock = REAL_CLOCK,
+    on_phase: Callable[[str], None] | None = None,
+    on_device: Callable[[DeviceResult], None] | None = None,
 ) -> BatchReport:
-    """Fuehrt den Batch-Eingangstest aus. Caller committet.
+    """Fuehrt den Batch-Eingangstest aus. Committet je Geraete-Urteil selbst.
 
     Ablauf (Sprint 19). Die Reihenfolge ist nicht beliebig: **je Geraet darf
     immer nur EIN Downlink ausstehen.** Class A liefert einen Downlink pro
@@ -781,7 +909,8 @@ async def run_batch_inbound_test(
     1. **Vor-Check**, ohne Downlink: frischer Uplink (T4) und Backplate (T3).
     2. Sollwert ``SETPOINT_HIGH_C`` -> Readback -> Setzframe.
     3. Sollwert ``SETPOINT_LOW_C`` -> Readback -> Setzframe.
-    4. FW-Abfrage (0x04) **zuletzt**, danach die Antwort abwarten.
+    4. Ruecksetzen auf ``SETPOINT_RESET_C`` -> Readback (T9).
+    5. FW-Abfrage (0x04) **zuletzt**, danach die Antwort abwarten.
 
     Nach jedem beobachteten Uplink ist die Warteschlange des Geraets leer —
     der vorige Befehl wurde damit zugestellt. Das ist der Beleg, auf den die
@@ -798,31 +927,93 @@ async def run_batch_inbound_test(
         Ventilstellung im Reading (``pass`` mit Vermerk -> ``fail``). Pflicht
         fuer den Montage-Lauf: dort IST das Geraet montiert, beides ist dann
         ein Befund und kein Tischzustand.
+    :param heartbeat_wait_s: Wartefenster des Vor-Checks auf den ersten
+        frischen Uplink. War bis PR A eine Konstante, waehrend jedes andere
+        Fenster ein Parameter ist — ein stummes Geraet hat damit 15 Minuten
+        blockiert, bevor ueberhaupt etwas gesendet wurde, und in Tests war
+        es gar nicht erreichbar.
+    :param reset_setpoint: nach dem Test auf ``SETPOINT_RESET_C`` zurueck
+        (T9). Ohne das bleibt jedes gepruefte Geraet auf 10 °C stehen.
+    :param resume: Geraete mit endgueltigem Ergebnis aus einem frueheren Lauf
+        ueberspringen (T7). ``timeout`` gilt als offen und wird wiederholt.
     :param user_id: fuer den Audit-Eintrag.
+    :param clock: Zeitquelle der Warte-Schleifen. Default ist die echte Uhr;
+        Tests geben ``virtual_clock(...)`` und warten damit nicht wirklich.
+        Uhr und Warten sind **ein** Wert, damit sie nicht getrennt ersetzt
+        werden koennen — siehe ``clock.py`` (Sprint 19 / T14).
+    :param on_phase: wird zu Beginn jedes Abschnitts mit einer fertigen
+        Meldezeile gerufen (T10). Ohne das steht der Lauf ueber eine Stunde
+        stumm da und wird fuer haengend gehalten.
+    :param on_device: wird gerufen, sobald **ein** Geraete-Urteil feststeht
+        und festgeschrieben ist.
     """
     report = BatchReport()
     if not devices:
         return report
 
+    def phase(text: str) -> None:
+        if on_phase is not None:
+            on_phase(text)
+
+    todo = list(devices)
+    if resume:
+        settled = await _already_settled(session, [d.id for d in devices])
+        if settled:
+            todo = [d for d in devices if d.id not in settled]
+            phase(
+                f"--resume: {len(settled)} von {len(devices)} Geraet(en) haben "
+                "schon ein endgueltiges Ergebnis und werden nicht erneut "
+                "angefasst. TIMEOUT gilt als offen."
+            )
+    report.skipped_resume = len(devices) - len(todo)
+    if not todo:
+        phase("Nichts offen — alle Geraete haben ein endgueltiges Ergebnis.")
+        return report
+
     # Schritt 1: Vor-Check. Sendet nichts.
-    verdicts = await _precheck(session, devices, poll_interval_s=poll_interval_s)
-    ready = [d for d in devices if verdicts[d.id][0] == "ready"]
+    phase(f"Vor-Check: Funk und Backplate fuer {len(todo)} Geraet(e), ohne Downlink.")
+    verdicts = await _precheck(
+        session,
+        todo,
+        wait_s=heartbeat_wait_s,
+        poll_interval_s=poll_interval_s,
+        clock=clock,
+    )
+    ready = [d for d in todo if verdicts[d.id][0] == "ready"]
+
+    # Geraete, die der Vor-Check ausschliesst, haben ihr Urteil JETZT. Sie
+    # werden sofort festgeschrieben (T6) — nicht erst nach den Wartefenstern
+    # der anderen, die ueber eine Stunde dauern koennen.
+    for dev in todo:
+        verdict, reason = verdicts[dev.id]
+        if verdict == "ready":
+            continue
+        result = _precheck_result(dev, verdict, reason, None, require_motor=require_motor)
+        report.results.append(result)
+        await _finalize_device(session, result, user_id=user_id, on_device=on_device)
 
     high: dict[int, StepResult] = {}
     low: dict[int, StepResult] = {}
 
     if ready:
         # Schritt 2: hoher Sollwert -> Readback -> Setzframe.
-        sent_high, fail_high = await _send_round(ready, SETPOINT_HIGH_C)
+        phase(f"Sollwert {SETPOINT_HIGH_C} °C an {len(ready)} Geraet(e), dann warten.")
+        sent_high, fail_high = await _send_round(ready, SETPOINT_HIGH_C, clock=clock)
         high = await _await_readbacks(
             session,
             sent_high,
             SETPOINT_HIGH_C,
             timeout_s=timeout_s,
             poll_interval_s=poll_interval_s,
+            clock=clock,
         )
+        phase(f"Readback {SETPOINT_HIGH_C} °C da, warte auf den Setzframe.")
         high = await _await_valve_frames(
-            session, high, timeout_s=timeout_s, poll_interval_s=poll_interval_s
+            session,
+            high,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         for device_id, detail in fail_high.items():
             high[device_id] = StepResult(
@@ -835,64 +1026,99 @@ async def run_batch_inbound_test(
         # aendern kann — und bekaeme einen zweiten Befehl in die Queue,
         # bevor der erste belegt zugestellt ist.
         second = [d for d in ready if high.get(d.id) is not None and high[d.id].outcome == "ok"]
-        sent_low, fail_low = await _send_round(second, SETPOINT_LOW_C)
+        phase(f"Sollwert {SETPOINT_LOW_C} °C an {len(second)} Geraet(e), dann warten.")
+        sent_low, fail_low = await _send_round(second, SETPOINT_LOW_C, clock=clock)
         low = await _await_readbacks(
             session,
             sent_low,
             SETPOINT_LOW_C,
             timeout_s=timeout_s,
             poll_interval_s=poll_interval_s,
+            clock=clock,
         )
+        phase(f"Readback {SETPOINT_LOW_C} °C da, warte auf den Setzframe.")
         low = await _await_valve_frames(
-            session, low, timeout_s=timeout_s, poll_interval_s=poll_interval_s
+            session,
+            low,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            clock=clock,
         )
         for device_id, detail in fail_low.items():
             low[device_id] = StepResult(
                 target_c=SETPOINT_LOW_C, outcome="downlink_failed", detail=detail
             )
 
-    # Schritt 4: FW-Abfrage zuletzt. Geraete ohne jeden Uplink werden
+    # Schritt 4: Ruecksetzen (T9). Nur an Geraete, die tatsaechlich einen
+    # Sollwert bekommen haben — wer nie einen bekam, steht noch auf seinem
+    # alten Wert und braucht keinen Downlink.
+    #
+    # Der Readback wird abgewartet, nicht weil das Ruecksetzen ein
+    # Pruefkriterium waere, sondern weil "gesendet" bei Class A nichts
+    # beweist. Ein Geraet, das auf 10 °C stehenbleibt, heizt nicht — das
+    # muss im Bericht stehen und nicht geraten werden.
+    reset_ok: dict[int, bool] = {}
+    # NUR an Geraete, deren letzter Befehl **belegt zugestellt** ist, also
+    # deren niedriger Sollwert mit einem Readback bestaetigt wurde. Bei allen
+    # anderen kann der vorige Befehl noch in der Queue liegen; ein weiterer
+    # waere der zweite ausstehende und damit ein S4-Verstoss.
+    beschickt = [d for d in ready if (st := low.get(d.id)) is not None and st.outcome == "ok"]
+    # Geraete, die den niedrigen Sollwert bekamen, ihn aber nicht
+    # zurueckgemeldet haben, stehen **moeglicherweise auf 10 °C** — und
+    # bekommen bewusst KEINEN Ruecksetz-Befehl, weil ihre Queue nicht
+    # nachweislich leer ist. Das muss im Bericht stehen, statt still zu
+    # bleiben: ein Geraet auf 10 °C heizt nicht.
+    if reset_setpoint:
+        for dev in ready:
+            st = low.get(dev.id)
+            if st is not None and st.outcome != "ok":
+                reset_ok[dev.id] = False
+    if reset_setpoint and beschickt:
+        phase(f"Ruecksetzen auf {SETPOINT_RESET_C} °C an {len(beschickt)} Geraet(e).")
+        sent_reset, _fail_reset = await _send_round(beschickt, SETPOINT_RESET_C, clock=clock)
+        zurueck = await _await_readbacks(
+            session,
+            sent_reset,
+            SETPOINT_RESET_C,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            clock=clock,
+        )
+        reset_ok.update({device_id: step.outcome == "ok" for device_id, step in zurueck.items()})
+
+    # Schritt 5: FW-Abfrage zuletzt. Geraete ohne jeden Uplink werden
     # uebersprungen — an ein Geraet, das nicht funkt, einen Befehl zu haengen,
     # fuellt nur die Warteschlange.
-    fw_targets = [d for d in devices if verdicts[d.id][0] != "no_uplink"]
+    fw_targets = [d for d in todo if verdicts[d.id][0] != "no_uplink"]
+    if fw_targets:
+        phase(f"Firmware-Abfrage an {len(fw_targets)} Geraet(e).")
     for dev in fw_targets:
         try:
             await query_firmware_version(dev.dev_eui)
         except Exception as exc:  # noqa: BLE001 — FW ist kein Fehlerkriterium
             logger.warning("batch: FW-Query fehlgeschlagen dev_eui=%s exc=%s", dev.dev_eui, exc)
-        await _sleep(SEND_SPACING_S)
+        await clock.sleep(SEND_SPACING_S)
     firmware = await _await_firmware(
         session,
-        [d.id for d in devices],
+        [d.id for d in todo],
         timeout_s=timeout_s if fw_targets else 0,
         poll_interval_s=poll_interval_s,
+        clock=clock,
     )
 
-    for dev in devices:
-        verdict, reason = verdicts[dev.id]
-        if verdict == "ready":
-            report.results.append(
-                _evaluate(
-                    dev,
-                    high.get(dev.id),
-                    low.get(dev.id),
-                    firmware.get(dev.id),
-                    valve_check=valve_check,
-                    require_motor=require_motor,
-                )
-            )
-            continue
-        report.results.append(
-            _precheck_result(
-                dev,
-                verdict,
-                reason,
-                firmware.get(dev.id),
-                require_motor=require_motor,
-            )
+    for dev in ready:
+        result = _evaluate(
+            dev,
+            high.get(dev.id),
+            low.get(dev.id),
+            firmware.get(dev.id),
+            valve_check=valve_check,
+            require_motor=require_motor,
+            reset_confirmed=reset_ok.get(dev.id) if reset_setpoint else None,
         )
+        report.results.append(result)
+        await _finalize_device(session, result, user_id=user_id, on_device=on_device)
 
-    await _persist(session, report.results, user_id=user_id)
     return report
 
 
@@ -906,6 +1132,11 @@ _STATUS_TAG = {
     "fail": "[FAIL]",
     "timeout": "[TIMEOUT]",
 }
+
+
+def status_tag(status: DeviceStatus) -> str:
+    """Kurzmarke eines Status fuer die Konsole — eine Quelle fuer alle Ausgaben."""
+    return _STATUS_TAG[status]
 
 
 def format_report(report: BatchReport) -> str:
@@ -922,9 +1153,16 @@ def format_report(report: BatchReport) -> str:
         f"{'-' * nr_w}  {'-' * 9}  {'-' * fw_w}  {'-' * 40}",
     ]
     for r in rows:
+        befund = r.reason
+        # Batterie und Ruecksetz-Beleg haengen hinten an, statt eigene
+        # Spalten zu bekommen: sie sind Hinweise, nicht das Urteil, und eine
+        # Spalte mit variabler Breite verschiebt die Tabelle (§5.66).
+        for hinweis in (r.reset_note,):
+            if hinweis:
+                befund = f"{befund} | {hinweis}"
         lines.append(
             f"{r.hardware_nummer.ljust(nr_w)}  {_STATUS_TAG[r.status].ljust(9)}  "
-            f"{r.firmware_text.ljust(fw_w)}  {r.reason}"
+            f"{r.firmware_text.ljust(fw_w)}  {befund}"
         )
 
     lines.append("")
@@ -933,6 +1171,21 @@ def format_report(report: BatchReport) -> str:
         f"{len(report.passed_without_motor)} OHNE MOTOR, {len(report.failed)} FAIL, "
         f"{len(report.timed_out)} TIMEOUT von {len(report.results)} Geraeten."
     )
+    if report.skipped_resume:
+        lines.append(
+            f"  {report.skipped_resume} Geraet(e) uebersprungen (--resume, "
+            "endgueltiges Ergebnis aus einem frueheren Lauf)."
+        )
+    ohne_reset = sorted(
+        (r for r in report.results if r.reset_confirmed is False),
+        key=lambda x: x.hardware_nummer,
+    )
+    if ohne_reset:
+        lines.append(
+            f"  ACHTUNG: Ruecksetzen auf {SETPOINT_RESET_C} °C nicht bestaetigt — "
+            f"diese Geraete stehen moeglicherweise noch auf {SETPOINT_LOW_C} °C "
+            "und heizen nicht: " + ", ".join(r.hardware_nummer for r in ohne_reset)
+        )
     if report.passed_without_motor:
         lines.append(
             "  OHNE MOTOR = Geraet funkt und antwortet, aber es meldet keine "

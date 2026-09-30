@@ -218,6 +218,9 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         # NULL wenn Feld fehlt (alter Codec) — Layer 4 Detached behandelt
         # NULL als "Device unklar", nicht als detached.
         "attached_backplate": obj.get("attachedBackplate"),
+        # Sprint 19 (PR B): brokenSensor durchreichen (Migration 0023).
+        # NULL wenn das Feld fehlt — nur True ist ein Defekt.
+        "broken_sensor": obj.get("brokenSensor"),
         "raw_payload": uplink.data,
     }
 

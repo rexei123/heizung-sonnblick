@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-27, develop-HEAD `7159773`. Letzter abgeschlossener Sprint: **18 (Alarm-Versand)** — live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn. Danach Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Davor Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 29.09.). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-09-30, develop-HEAD `e0cfc35` (PR #243). Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)** — PR A gemergt, **PR B #244 offen**, §2bp. Kein Tag gesetzt; er folgt nach dem Merge von PR B. Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-09-20
+**Stichtag:** 2026-09-30
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** **Sprint 19 Eingangstest ohne Rückfragen** (§2bp) — PR A #243 gemergt (`e0cfc35`, 876 Tests grün, 0 skipped), PR B #244 offen. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -3918,6 +3918,96 @@ niemand mehr glaubt, überwacht nichts), §5.79, AE-66 / AE-71, Migration 0022,
 RUNBOOK §10d.9 / §10m.
 
 ---
+
+## 2bp. Sprint 19 Eingangstest ohne Rückfragen (2026-29./30.09.)
+
+**Anlass:** Der Feldtest am 28./29.09. hat drei Mängel gleichzeitig gezeigt.
+
+1. `pair_devices test` stellte die Frage „Hat sich das Ventil geoeffnet?" in
+   dem Moment, in dem `0x51` in die Queue ging. Class A liefert einen
+   Downlink pro Uplink — das Gerät hatte den Befehl frühestens 10–20 Minuten
+   später. Die Antwort des Mitarbeiters konnte nichts belegen.
+2. Der Schritt `backplate` lief als **letzter**, nach beiden Sollwerten.
+   Ohne Backplate ist `motorRange 0` und das Ventil bewegt sich nie — die
+   Prüfung, die den Abbruch erklärt hätte, kam nach dem Abbruch.
+3. Die `heartbeat`-Schwelle stand auf 5 Minuten bei 10 Minuten Keepalive.
+   Das trifft im Mittel jedes zweite gesunde Gerät.
+
+Dazu kam ein Befund, der erst beim Bauen sichtbar wurde und der eigentliche
+Kern des Sprints ist: **die Openness wurde aus dem Readback-Frame gelesen** —
+also aus genau dem Uplink, mit dem ChirpStack den Downlink erst ausgeliefert
+hat. Der Motor fährt danach. Der Test bewertete die Stellung *vor* der
+Bewegung, die er prüfen soll, und hätte das auch ohne jede Rückfrage getan.
+
+### PR A (#243, gemergt `e0cfc35`)
+
+| Task | Inhalt |
+|---|---|
+| T1 | Openness aus dem **Setzframe** (Uplink nach dem Readback). Fehlt er: `valve_timeout`, gewertet als `timeout` — der Readback beweist, dass das Gerät funkt |
+| T2 | Absolute Schwellen statt Relativvergleich: ≤ 10 % bei 10 °C, ≥ 40 % bei 28 °C. Hoher Sollwert 25 → 28 °C |
+| T3 | Backplate-Gate **vor** den Motor-Schritten, Status `passed_ohne_motor`, `--require-motor` macht daraus `fail`. Keine Migration |
+| T4 | `heartbeat` wartet bis 15 min statt sofort zu urteilen |
+| T5 | Je Gerät nur **ein** ausstehender Downlink (S4). FW-Abfrage hinter die Sollwerte, `0x45` aus dem Eingangstest |
+
+**Belege:** Feldtest 29.09. — 101 und 002 schließen auf 0 % bei Sollwert
+unter Raumtemperatur, 002 öffnet 59 % bei 28 °C, 001 bleibt bei 100 %.
+
+**Gestrichen:** Die geplante dritte Schwelle auf die Spreizung. Wer beide
+absoluten Schwellen passiert, hat mindestens 40 − 10 = 30 Punkte — jede
+Mindest-Spreizung darunter ist wirkungslos, und ein Kriterium, das nie
+greift, ist ein Schalter ohne Wirkung (§5.77).
+
+**CI-Beleg:** 876 passed, 0 skipped, 17m52s
+([Run 36538886495](https://github.com/rexei123/heizung-sonnblick/actions/runs/36538886495)).
+Die DB-Tests sind gelaufen, nicht übersprungen.
+
+### PR B (#244)
+
+| Task | Inhalt |
+|---|---|
+| T6 | Persistenz **je Gerät** statt am Ende. Ein Abbruch verliert nur die Geräte ohne Urteil |
+| T7 | `--resume` — endgültige Ergebnisse überspringen, `timeout` gilt als offen |
+| T9 | Rückstellung auf 21 °C mit Readback-Beleg. Nur an Geräte mit geleerter Queue |
+| T10 | Fortschritt je Abschnitt und je fertigem Gerät |
+| ~~T8~~ | **Entfallen.** Eine Batteriewarnung auf drei Feldwerten, deren Schwelle zwischen zwei benachbarten Quantisierungsstufen liegt, trägt kein Kriterium. Kommt im Batterie-Vorgang mit Spannungsstufen |
+| T11 | Interaktiver Pfad stillgelegt, `inbound_test.py` gelöscht |
+| T12 | RUNBOOK §10h.4 neu, Montage-Reihenfolge in §10h.6, CLAUDE.md §5.82 |
+| T13 | `pytest --durations=15` im CI-Job |
+| T14 | Uhr und Warten als **ein** injizierbarer Wert (`clock.py`) |
+| T16 | `os.environ.setdefault("DATABASE_URL", …)` beim Import entfernt |
+
+**Der Laufzeit-Befund (T13/T14):** Der Sprung auf 18 Minuten war kein neues
+Normal, sondern ein Leerlauf. Eine Test-Fixture ersetzte `_sleep`, ließ aber
+`_now` auf der echten Wanduhr — 900 000 Schleifendurchläufe statt 30, Faktor
+30 000, 15 Minuten in **einem** Test. Nach dem Fix: **90,6 s** für 866 Tests
+gegen 995 s vorher. Lesson §5.82.
+
+**Die Montage-Reihenfolge ist jetzt verbindlich dokumentiert**
+(RUNBOOK §10h.6): montieren → Eingangstest mit `--require-motor` → `assign`.
+Der Test läuft, solange das Gerät im Pool ist. Belegt, dass die Engine ein
+Pool-Gerät nicht erreicht: `engine_tasks.py:442` → `engine_tasks.py:379` →
+`device_service.py:68` (`heating_zone_id == zone_id`); ein Pool-Gerät hat
+`NULL`, und `NULL = <zahl>` ist in SQL niemals wahr.
+
+**Migration 0023** (`sensor_reading.broken_sensor`): der Codec liefert
+`brokenSensor` als Bit 0 des Low-Nibbles von Byte 7
+(`mclimate-vicki.js:161`), persistiert war es nie. Die Vicki regelt gegen
+ihren internen Fühler — meldet der einen Defekt, ist jedes Ventilurteil
+wertlos. Dieselbe Begründung, mit der `attached_backplate` in Sprint 9.11x
+aufgenommen wurde (§5.27).
+
+**Was `--require-motor` schließt:** beide Wege zu einem grünen Bericht ohne
+Motorprüfung — fehlende Backplate **und** fehlende Ventilstellung im Reading
+(alter Codec, §5.22). `--no-valve-check` zusammen mit `--require-motor`
+bricht beim Start ab (Exit 2): eine stille Vorrangregel würde für den
+Aufrufer entscheiden und ihn im Glauben lassen, der andere Schalter habe
+gewirkt.
+
+**Laufzeit im Betrieb, nicht in CI:** ein Batch braucht jetzt bis zu **sieben
+Wartefenster** je Gerät (Vor-Check, zwei Sollwerte mit je Readback und
+Setzframe, Rückstellung, Firmware) — 1 bis 3 Stunden. Das ist der Preis der
+Downlink-Disziplin und steht im RUNBOOK als Erwartung, damit der Lauf nicht
+für hängend gehalten und abgebrochen wird.
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 

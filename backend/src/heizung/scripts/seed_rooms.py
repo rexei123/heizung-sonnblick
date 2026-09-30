@@ -66,12 +66,27 @@ from decimal import Decimal
 from pathlib import Path
 
 # App-Settings ladbar machen (Pattern aus pair_devices.py).
-os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("ALLOW_DEFAULT_SECRETS", "1")
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+asyncpg://heizung:heizung_dev@localhost:5432/heizung",
-)
+# Nur im direkten CLI-Aufruf, NICHT beim Import (Sprint 19 / PR B, T16).
+#
+# ``python -m heizung.scripts.<name>`` setzt ``__name__`` auf ``"__main__"``;
+# ein ``import`` durch die Tests tut das nicht. Der Guard trennt damit genau
+# die beiden Faelle.
+#
+# Anlass: die Zeile ``os.environ.setdefault("DATABASE_URL", ...)`` lief bei
+# JEDEM Import mit. Sobald irgendein gesammeltes Testmodul dieses Skript
+# importierte, hielt ``conftest._ensure_test_admin`` eine Datenbank fuer
+# konfiguriert und versuchte zu migrieren — auch bei reinen
+# Funktionstests. Lokal ohne Postgres wurden daraus 817 Verbindungsfehler
+# statt 45 ehrlicher Skips, und die Skip-Logik der Tests war damit
+# ausgehebelt, ohne dass es jemand sah.
+#
+# Die DATABASE_URL-Zeile ist **ganz** entfallen, nicht nur verschoben: sie
+# setzte genau den Wert, den ``Settings.database_url`` ohnehin als Default
+# traegt (``config.py``). Sie hatte also keine Wirkung ausser der
+# Nebenwirkung.
+if __name__ == "__main__":  # pragma: no cover - Einstiegspunkt
+    os.environ.setdefault("ENVIRONMENT", "test")
+    os.environ.setdefault("ALLOW_DEFAULT_SECRETS", "1")
 
 from sqlalchemy import delete, func, select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
