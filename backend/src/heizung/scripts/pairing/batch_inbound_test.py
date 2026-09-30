@@ -97,18 +97,6 @@ SETPOINT_LOW_C = 10
 # kaltes Zimmer, bis die Engine das naechste Mal greift.
 SETPOINT_RESET_C = 21
 
-# Batteriewarnung (Sprint 19 / T8). 50 % entspricht 3,0 V auf der
-# 2xAA-Alkaline-Kennlinie (BATTERY_CURVE_2XAA, CLAUDE.md §5.72/AE-64).
-#
-# Beleg aus dem Feldtest 29.09.2026: Geraet 001 (defekt) 3,0 V = 50 %,
-# Geraet 101 3,1 V = 65 % und Geraet 002 3,5 V = 100 % in Ordnung.
-#
-# **Als Annahme gekennzeichnet:** ein einzelnes defektes Geraet bei 3,0 V
-# belegt keinen Zusammenhang, und 3,0 gegen 3,1 V sind im Codec zwei
-# BENACHBARTE Quantisierungsstufen (4 Bit, ``2 + nibble * 0.1``). Die
-# Schwelle liegt damit auf der feinsten aufloesbaren Differenz. Deshalb ist
-# das eine **Warnung** und aendert den Status nicht.
-BATTERY_WARN_PCT = 50
 
 # Absolute Ventil-Schwellen (Sprint 19 / T2). Belegt am Feldtest 28./29.09.2026:
 #
@@ -186,8 +174,6 @@ class StepResult:
     valve_reading_at: datetime | None = None
     #: ``brokenSensor`` aus dem Setzframe. NULL = Feld nicht im Payload.
     broken_sensor: bool | None = None
-    #: Batteriestand aus dem Setzframe, in Prozent (T8).
-    battery_percent: int | None = None
     detail: str = ""
 
 
@@ -210,28 +196,6 @@ class DeviceResult:
     @property
     def firmware_text(self) -> str:
         return self.firmware_version or "keine Antwort"
-
-    @property
-    def battery_percent(self) -> int | None:
-        """Batteriestand aus dem Setzframe — der niedrigere der beiden."""
-        werte = [
-            s.battery_percent
-            for s in (self.high, self.low)
-            if s is not None and s.battery_percent is not None
-        ]
-        return min(werte) if werte else None
-
-    @property
-    def battery_note(self) -> str | None:
-        """Warntext, wenn die Batterie unter der Schwelle liegt (T8).
-
-        Aendert den Status **nicht** — die Schwelle ruht auf drei Geraeten
-        und einer Quantisierungsstufe (siehe ``BATTERY_WARN_PCT``).
-        """
-        pct = self.battery_percent
-        if pct is None or pct > BATTERY_WARN_PCT:
-            return None
-        return f"Batterie {pct} % (Warnschwelle {BATTERY_WARN_PCT} %)"
 
     @property
     def reset_note(self) -> str | None:
@@ -603,7 +567,6 @@ async def _await_valve_frames(
                 valve_position=reading.valve_position,
                 valve_reading_at=reading.time,
                 broken_sensor=reading.broken_sensor,
-                battery_percent=reading.battery_percent,
                 detail=(
                     f"Readback {step.target_c} °C bestaetigt, Ventil im "
                     f"Folge-Uplink {reading.valve_position} %."
@@ -804,9 +767,8 @@ async def _persist(
             "reason": r.reason,
             "firmware_version": r.firmware_version,
             "firmware_class": classify_firmware(r.firmware_version),
-            # Batterie und Ruecksetz-Beleg gehoeren ins Audit, nicht nur in
-            # die Konsole: der Bericht scrollt weg, das Audit bleibt.
-            "battery_percent": r.battery_percent,
+            # Der Ruecksetz-Beleg gehoert ins Audit, nicht nur in die
+            # Konsole: der Bericht scrollt weg, das Audit bleibt.
             "reset_confirmed": r.reset_confirmed,
         }
         # Schluessel ohne Gradzahl im Namen: der hohe Sollwert ist in Sprint 19
@@ -828,7 +790,6 @@ async def _persist(
                 "readback_at": step.reading_at,
                 "valve_reading_at": step.valve_reading_at,
                 "broken_sensor": step.broken_sensor,
-                "battery_percent": step.battery_percent,
             }
         await record_business_action(
             session,
@@ -1196,7 +1157,7 @@ def format_report(report: BatchReport) -> str:
         # Batterie und Ruecksetz-Beleg haengen hinten an, statt eigene
         # Spalten zu bekommen: sie sind Hinweise, nicht das Urteil, und eine
         # Spalte mit variabler Breite verschiebt die Tabelle (§5.66).
-        for hinweis in (r.battery_note, r.reset_note):
+        for hinweis in (r.reset_note,):
             if hinweis:
                 befund = f"{befund} | {hinweis}"
         lines.append(
@@ -1214,13 +1175,6 @@ def format_report(report: BatchReport) -> str:
         lines.append(
             f"  {report.skipped_resume} Geraet(e) uebersprungen (--resume, "
             "endgueltiges Ergebnis aus einem frueheren Lauf)."
-        )
-    schwach = sorted((r for r in report.results if r.battery_note), key=lambda x: x.hardware_nummer)
-    if schwach:
-        lines.append(
-            f"  Batterie unter {BATTERY_WARN_PCT} % — kein Fehler, aber vor der "
-            "Montage tauschen: "
-            + ", ".join(f"{r.hardware_nummer} ({r.battery_percent} %)" for r in schwach)
         )
     ohne_reset = sorted(
         (r for r in report.results if r.reset_confirmed is False),

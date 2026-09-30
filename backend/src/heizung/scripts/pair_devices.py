@@ -353,7 +353,7 @@ def _melde_phase(text: str) -> None:
 
 def _melde_geraet(result: DeviceResult) -> None:
     """Meldung, sobald EIN Geraete-Urteil feststeht und festgeschrieben ist."""
-    zusatz = [t for t in (result.battery_note, result.reset_note) if t]
+    zusatz = [t for t in (result.reset_note,) if t]
     schwanz = f" | {' | '.join(zusatz)}" if zusatz else ""
     print(
         f"  {status_tag(result.status):<12} {result.hardware_nummer}: {result.reason}{schwanz}",

@@ -2045,13 +2045,11 @@ Erwartungswert ist an zwei Geräten scharf belegt, und er trifft den
 gefährlichen Fehler — ein klemmend offenes Ventil heizt ein leeres Zimmer
 durch, ein klemmend geschlossenes lässt es nur kalt.
 
-#### Batteriewarnung
-
-Unter **50 %** (= 3,0 V) erscheint ein Hinweis hinter dem Befund und in der
-Zusammenfassung. **Er ändert den Status nicht.** Grund: die Schwelle ruht auf
-drei Feldwerten, und 3,0 gegen 3,1 V sind im Codec zwei benachbarte
-Quantisierungsstufen (4 Bit). Als Kriterium wäre das zu wenig, als Hinweis
-genug — Batterien vor der Montage tauschen ist billiger als danach.
+> **Keine Batteriewarnung in diesem Lauf.** Eine Schwelle auf drei
+> Feldwerten, die zwischen zwei benachbarten Quantisierungsstufen des Codecs
+> liegt (4 Bit, `2 + nibble * 0.1`), trägt kein Kriterium. Der Batteriestand
+> steht weiterhin je Uplink in `sensor_reading.battery_percent`; die
+> Auswertung mit **Spannungsstufen** kommt als eigener Vorgang.
 
 #### Wenn das Rückstellen nicht bestätigt wird
 

@@ -36,7 +36,17 @@ moeglich, aber der Wert hat nur fuer **frische** Frames Bedeutung — der
 Eingangstest liest den Setzframe, nicht die Historie.
 
 Revision-ID unter 32 Zeichen (``alembic_version.version_num`` ist
-``VARCHAR(32)``, siehe 0022): ``0023_sensor_reading_broken`` = 26.
+``VARCHAR(32)``, siehe 0022). Gemessen, nicht gezaehlt:
+
+    revision      = '0023_sensor_reading_broken'  -> 26 Zeichen
+    down_revision = '0022_occupancy_expected_by'  -> 26 Zeichen
+    Reserve: 6 Zeichen
+
+Der erste Entwurf von 0022 hiess ``0022_occupancy_import_expected_by`` — 33
+Zeichen, eines zu viel. Lokal lief die Migration durch (anderer
+Alembic-Stand), in CI scheiterte jeder DB-Test am ``UPDATE
+alembic_version``. Die Zahl steht hier, damit sie nicht erneut geschaetzt
+wird.
 
 Revision ID: 0023_sensor_reading_broken
 Revises: 0022_occupancy_expected_by

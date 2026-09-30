@@ -43,7 +43,6 @@ from heizung.models.sensor_reading import SensorReading
 from heizung.scripts.pairing import batch_inbound_test as bit
 from heizung.scripts.pairing.batch_inbound_test import (
     AUDIT_ACTION,
-    BATTERY_WARN_PCT,
     HEARTBEAT_WAIT_MAX_S,
     SETPOINT_HIGH_C,
     SETPOINT_LOW_C,
@@ -409,53 +408,6 @@ def test_broken_sensor_beats_the_valve_criterion() -> None:
     assert "schliesst nicht" not in r.reason
 
 
-def test_battery_warning_does_not_change_the_status() -> None:
-    """T8 — die Batterie warnt, sie urteilt nicht.
-
-    Schwelle 50 % = 3,0 V auf der 2xAA-Kennlinie. Sie ruht auf drei
-    Geraeten und liegt zwischen zwei benachbarten Quantisierungsstufen des
-    Codecs — als Kriterium waere das zu wenig, als Hinweis genug.
-    """
-    schwach = _evaluate(
-        _device(),
-        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=BATTERY_WARN_PCT),
-        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=BATTERY_WARN_PCT),
-        "4.5",
-        valve_check=True,
-    )
-    assert schwach.status == "pass"
-    assert schwach.battery_note is not None
-    assert f"{BATTERY_WARN_PCT} %" in schwach.battery_note
-
-    gut = _evaluate(
-        _device(),
-        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=BATTERY_WARN_PCT + 1),
-        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=BATTERY_WARN_PCT + 1),
-        "4.5",
-        valve_check=True,
-    )
-    assert gut.status == "pass"
-    assert gut.battery_note is None
-
-
-def test_battery_takes_the_lower_of_both_frames() -> None:
-    """Der niedrigere Wert zaehlt — unter Motorlast bricht die Spannung ein.
-
-    Die beiden Setzframes liegen Minuten auseinander und einer davon liegt
-    hinter einer Motorfahrt. Wer den letzten nimmt, sieht je nach
-    Reihenfolge einen anderen Wert; der niedrigere ist der ehrlichere.
-    """
-    r = _evaluate(
-        _device(),
-        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=80),
-        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=30),
-        "4.5",
-        valve_check=True,
-    )
-    assert r.battery_percent == 30
-    assert r.battery_note is not None
-
-
 def test_unconfirmed_reset_is_a_note_not_a_failure() -> None:
     """T9 — ein unbestaetigtes Ruecksetzen aendert das Urteil nicht.
 
@@ -506,23 +458,22 @@ def test_terminal_statuses_exclude_timeout() -> None:
     assert {"pass", "passed_ohne_motor", "fail"} == TERMINAL_STATUSES
 
 
-def test_report_names_weak_batteries_and_unconfirmed_resets() -> None:
-    """Beide Hinweise stehen in der Zusammenfassung, mit Nummern."""
-    schwach = DeviceResult(
+def test_report_names_unconfirmed_resets() -> None:
+    """Der Ruecksetz-Hinweis steht in der Zusammenfassung, mit Nummer."""
+    offen = DeviceResult(
         device_id=1,
         dev_eui="a" * 16,
         hardware_nummer="001",
         status="pass",
         reason="ok",
         firmware_version="4.5",
-        high=replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=20),
-        low=replace(_ok(SETPOINT_LOW_C, 0), battery_percent=20),
+        high=_ok(SETPOINT_HIGH_C, 80),
+        low=_ok(SETPOINT_LOW_C, 0),
         reset_confirmed=False,
     )
-    text = format_report(BatchReport(results=[schwach]))
-    assert "Batterie unter" in text
-    assert "001 (20 %)" in text
+    text = format_report(BatchReport(results=[offen]))
     assert "nicht bestaetigt" in text
+    assert "001" in text
 
 
 def test_report_names_the_resume_count() -> None:
@@ -1010,7 +961,6 @@ class FakeRadio:
         self._last_frame_at: dict[str, datetime] = {}
         #: Was die Attrappe in jedem Frame mitsendet (Sprint 19 / PR B).
         self.broken_sensor: bool | None = None
-        self.battery_percent: int | None = 100
 
     async def register(
         self,
@@ -1040,7 +990,7 @@ class FakeRadio:
                 valve_position=valve_start,
                 attached_backplate=backplate,
                 broken_sensor=self.broken_sensor,
-                battery_percent=self.battery_percent,
+                battery_percent=100,
             )
         )
         await self.session.flush()
@@ -1094,7 +1044,7 @@ class FakeRadio:
                     valve_position=valve,
                     attached_backplate=True,
                     broken_sensor=self.broken_sensor,
-                    battery_percent=self.battery_percent,
+                    battery_percent=100,
                 )
             )
             await self.session.flush()

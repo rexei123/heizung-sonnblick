@@ -3967,9 +3967,9 @@ Die DB-Tests sind gelaufen, nicht übersprungen.
 |---|---|
 | T6 | Persistenz **je Gerät** statt am Ende. Ein Abbruch verliert nur die Geräte ohne Urteil |
 | T7 | `--resume` — endgültige Ergebnisse überspringen, `timeout` gilt als offen |
-| T8 | Batteriewarnung ≤ 50 % (= 3,0 V). **Ändert den Status nicht** |
 | T9 | Rückstellung auf 21 °C mit Readback-Beleg. Nur an Geräte mit geleerter Queue |
 | T10 | Fortschritt je Abschnitt und je fertigem Gerät |
+| ~~T8~~ | **Entfallen.** Eine Batteriewarnung auf drei Feldwerten, deren Schwelle zwischen zwei benachbarten Quantisierungsstufen liegt, trägt kein Kriterium. Kommt im Batterie-Vorgang mit Spannungsstufen |
 | T11 | Interaktiver Pfad stillgelegt, `inbound_test.py` gelöscht |
 | T12 | RUNBOOK §10h.4 neu, Montage-Reihenfolge in §10h.6, CLAUDE.md §5.82 |
 | T13 | `pytest --durations=15` im CI-Job |
