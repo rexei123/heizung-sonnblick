@@ -51,6 +51,8 @@ export function ThermostatBubble({ device }: { device: Device }) {
             batteryState={device.battery_state}
             batteryVolts={device.battery_voltage_median}
             batteryJumpAt={device.battery_jump_at}
+            batteryLastVolts={device.battery_last_voltage}
+            batteryLastAt={device.battery_last_at}
             variant="compact"
           />
         </div>

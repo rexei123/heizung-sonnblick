@@ -121,6 +121,16 @@ export interface Device {
    * nennen statt einen Fehler zu suggerieren.
    */
   battery_jump_at: string | null;
+  /**
+   * Letzter bekannter Spannungswert in Volt und sein Zeitpunkt —
+   * unabhängig vom Bewertungs-Fenster und davon, ob eine Stufe zustande kam.
+   *
+   * Regel aus dem Befund vom 30.09.2026: nie ein Badge ohne Spannung, wenn
+   * irgendeine bekannt ist. Beide null heißt: nie eine gemeldet (oder die
+   * letzte liegt länger als 30 Tage zurück).
+   */
+  battery_last_voltage: number | null;
+  battery_last_at: string | null;
   created_at: string;
   updated_at: string;
   // Sprint 14a (D1/D2): Cross-Sicht-Felder.
