@@ -285,7 +285,7 @@ async def test_latest_reading_with_valve_position(
     assert latest["valve_position"] == 42
     assert latest["open_window"] is False
     assert latest["attached_backplate"] is True
-    # Sprint 14b: temperature (Decimal->float). Sprint 20 (AE-69): statt
+    # Sprint 14b: temperature (Decimal->float). Sprint 20 (AE-72): statt
     # battery_percent die Spannung, ebenfalls als float serialisiert.
     assert latest["temperature"] == 21.0
     assert latest["battery_voltage"] == 3.2
@@ -297,7 +297,7 @@ async def test_latest_reading_with_valve_position(
 # ---------------------------------------------------------------------------
 #
 # Die Stufe kommt aus dem Median der letzten 24 h und braucht mindestens
-# drei Messwerte (AE-69). Die Tests legen deshalb je drei Frames an; mit
+# drei Messwerte (AE-72). Die Tests legen deshalb je drei Frames an; mit
 # einem einzigen waere die Stufe korrekt "unbekannt".
 
 

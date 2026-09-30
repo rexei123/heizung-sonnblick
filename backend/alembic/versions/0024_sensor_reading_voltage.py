@@ -16,7 +16,7 @@ Zeilen von vor dem 02.06.2026 — davor stand die lineare LiPo-Skala im
 Subscriber (AE-64). Ein Backfill braeuchte also einen Stichtag und traegt
 sein Ergebnis als Behauptung; er entfaellt (siehe unten).
 
-Warum jetzt (Sprint 20, AE-69): Die drei Stufen der Oberflaeche
+Warum jetzt (Sprint 20, AE-72): Die drei Stufen der Oberflaeche
 (OK/schwach/kritisch) rechnen heute ueber Prozent, und Prozent ist an
 dieser Stelle Scheinpraezision — der Codec saettigt oberhalb ~3.4 V am
 4-Bit-Anschlag, es gibt effektiv neun unterscheidbare Werte (AE-64,

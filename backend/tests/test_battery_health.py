@@ -1,4 +1,4 @@
-"""Pure-Function-Tests fuer ``services/battery_health.py`` (AE-65 / AE-69).
+"""Pure-Function-Tests fuer ``services/battery_health.py`` (AE-65 / AE-72).
 
 Kein DB / kein I/O — reine Schwellen-Logik und die Median-Auswahl. Die
 Bewertung ueber das 24-h-Fenster braucht Postgres und steht in
@@ -24,12 +24,12 @@ from heizung.services.battery_health import (
 )
 
 # ---------------------------------------------------------------------------
-# Sprint 20 (AE-69): Stufen ueber die Spannung
+# Sprint 20 (AE-72): Stufen ueber die Spannung
 # ---------------------------------------------------------------------------
 
 
 def test_spannungs_konstanten_entsprechen_ae_69() -> None:
-    """Schutz gegen versehentliches Verschieben der AE-69-Schwellen.
+    """Schutz gegen versehentliches Verschieben der AE-72-Schwellen.
 
     Die Werte stammen aus der Freigabe vom 30.09.2026 und sind gegen die
     MClimate-Spec geprueft (Betriebsbereich 2.7-3.6 VDC, Wechselempfehlung
@@ -104,7 +104,7 @@ def test_schwach_ist_genau_ein_rasterschritt_breit() -> None:
 
     Der Test ist eine Rechnung, keine Beobachtung: er faellt, sobald die
     Grenzen so verschoben werden, dass "schwach" mehr oder weniger als
-    einen Schritt umfasst — dann ist die Begruendung in AE-69 nachzuziehen.
+    einen Schritt umfasst — dann ist die Begruendung in AE-72 nachzuziehen.
     """
     raster = [Decimal("2.0") + Decimal(n) / 10 for n in range(16)]
     schwach = [v for v in raster if battery_stage_from_volts(v) == "warn"]
@@ -129,7 +129,7 @@ def test_kritisch_braucht_2_8_volt_oder_weniger() -> None:
 
     Gemeldet wurde "001 mit Alkaline stand auf kritisch" bei 3.0 V. Das ist
     mit keiner der beiden Skalen vereinbar: 3.0 V war unter der Prozent-
-    Kennlinie 50 % und damit "ok", und ist nach AE-69 ebenfalls "ok". Die
+    Kennlinie 50 % und damit "ok", und ist nach AE-72 ebenfalls "ok". Die
     Stufe "kritisch" setzt <= 2.8 V voraus.
 
     Die Erklaerung ist der Lastabfall: 001 hatte ein klemmendes Ventil mit

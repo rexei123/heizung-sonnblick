@@ -326,7 +326,11 @@ function DevicesInRoom({
                     <span className="font-medium text-text-primary text-sm">
                       {d.label ?? d.dev_eui}
                     </span>
-                    <HardwareStatusBadge deviceId={d.id} variant="compact" />
+                    <HardwareStatusBadge
+                      deviceId={d.id}
+                      isPool={d.heating_zone_id === null}
+                      variant="compact"
+                    />
                   </div>
                   <div className="text-xs text-text-tertiary">
                     {d.vendor} {d.model} · Zone {zone?.name ?? "?"}

@@ -165,7 +165,7 @@ async def _mk_battery_series(
 ) -> None:
     """Legt ``anzahl`` Spannungs-Messwerte im 10-Minuten-Raster an.
 
-    Die Batterie-Stufe braucht seit Sprint 20 (AE-69) eine Mindest-Stichprobe
+    Die Batterie-Stufe braucht seit Sprint 20 (AE-72) eine Mindest-Stichprobe
     von drei Messwerten im 24-h-Fenster — ein einzelner Frame kann ein
     Lastabfall unter Motorbewegung sein. Ein Test, der nur einen Messwert
     anlegt, bekommt deshalb "unbekannt" und nicht die erwartete Stufe.
@@ -315,7 +315,7 @@ async def test_count_zones_window_open_delta(db_session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
-# battery_low_count (AE-65, ab Sprint 20 ueber die Spannung / AE-69)
+# battery_low_count (AE-65, ab Sprint 20 ueber die Spannung / AE-72)
 # ---------------------------------------------------------------------------
 #
 # Die Kachel zaehlt Geraete mit Stufe ``warn`` oder ``kritisch``. Schwellen
@@ -358,7 +358,7 @@ async def test_count_battery_low_counts_active_below_threshold(db_session: Async
 async def test_count_battery_low_folgt_dem_median_nicht_dem_letzten_frame(
     db_session: AsyncSession,
 ) -> None:
-    """Der Lastabfall aendert die Kachel nicht (Sprint 20, AE-69).
+    """Der Lastabfall aendert die Kachel nicht (Sprint 20, AE-72).
 
     Bis Sprint 19 entschied hier der **juengste** Messwert (DISTINCT ON
     device_id). Genau daran lag der Befund zu Geraet 001: ein Einbruch unter

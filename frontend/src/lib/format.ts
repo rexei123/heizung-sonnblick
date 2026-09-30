@@ -107,7 +107,7 @@ export function formatPercent(v: number | null | undefined): string {
 
 /**
  * Geräte-Spannung in Volt, eine Dezimalstelle, Komma als Trennzeichen
- * (Sprint 20, AE-69).
+ * (Sprint 20, AE-72).
  *
  * Eine Stelle, nicht zwei: der Codec liefert die Spannung in einem
  * 4-Bit-Nibble, also in 0,1-V-Schritten. Eine zweite Stelle wäre erfunden —

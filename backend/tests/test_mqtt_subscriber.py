@@ -241,7 +241,7 @@ def test_map_to_reading_full() -> None:
     assert row["temperature"] == Decimal("24")
     assert row["setpoint"] == Decimal("21.0")
     assert row["valve_position"] == 100
-    # Sprint 20 (AE-69): die Spannung selbst, unveraendert aus dem Codec.
+    # Sprint 20 (AE-72): die Spannung selbst, unveraendert aus dem Codec.
     # 3.0 V ist nach der neuen Skala "schwach"-Grenzbereich -> OK (>= 3.0).
     assert row["battery_voltage"] == Decimal("3.0")
     assert row["battery_percent"] == 50  # AE-64: 3.0 V = Mitte der Kennlinie
@@ -407,7 +407,7 @@ def test_map_to_reading_live_codec_output_fport2_periodic() -> None:
     # oberer Kennlinien-Anchor = 100 % — frische 2xAA Alkaline. Alte
     # LiPo-Formel ergab 42 % bei intakter Batterie (Cowork-Befund 15a).
     assert row["battery_percent"] == 100
-    # Sprint 20 (AE-69): dieselbe Saettigung, jetzt als Spannung. 3.5 V ist
+    # Sprint 20 (AE-72): dieselbe Saettigung, jetzt als Spannung. 3.5 V ist
     # das 4-Bit-Maximum, NICHT "genau 3.5 V" — oberhalb ~3.4 V hat der Codec
     # keine Aufloesung mehr. Nach der neuen Skala eindeutig OK (>= 3.0).
     assert row["battery_voltage"] == Decimal("3.5")

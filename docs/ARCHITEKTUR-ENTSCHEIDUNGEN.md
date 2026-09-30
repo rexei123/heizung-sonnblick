@@ -2662,6 +2662,17 @@ Config-UI (eigener Folge-Sprint B-15b-1 angelegt).
 
 ---
 
+
+**Nachtrag 2026-09-30 (AE-72):** Die Kennlinie steht weiter im Subscriber
+und füllt `sensor_reading.battery_percent` — aber **kein Konsument liest
+den Wert mehr.** Die Batteriestufen rechnen seit Migration 0024 direkt auf
+`sensor_reading.battery_voltage` gegen feste Schwellen (OK ≥ 3,0 V /
+schwach 2,9 V / kritisch ≤ 2,8 V). Der in den Konsequenzen angekündigte
+„separate Sprint, falls relevant" für Lithium ist damit gelaufen; die
+Schwellen gelten für beide Zelltypen. Der Folge-Backlog **B-15b-2**
+(Stufen-Badge statt Prozentzahl) ist erledigt. Prozent wird nur noch als
+Rückfallpfad für ein Rollback geschrieben.
+
 # AE-65 — Batterie als additive Health-Dimension (Sprint 15d, PR1 Backend)
 
 **Datum:** 2026-06-04
@@ -2813,6 +2824,20 @@ gekoppelt, keine zweite Schwelle**:
 Kachel `undefined`, §5.64). `devices.ts` ohne Zod (raw fetch) — nur TS-Typ.
 
 ---
+
+
+**Nachtrag 2026-09-30 (AE-72):** Die Achse bleibt genau wie hier
+beschrieben — orthogonal, read-time abgeleitet, nicht in `health_state`
+gefaltet. **Ihre Eingangsgröße hat gewechselt:** statt
+`battery_percent` + `alert_battery_warn_percent` ist es der 24-h-Median von
+`sensor_reading.battery_voltage` gegen feste Schwellen. Damit entfallen
+`battery_health_state`, `BATTERY_CRITICAL_PCT`, `DEFAULT_BATTERY_WARN_PCT`
+und die Klemmung in `count_battery_low` — die Klemmung war nur nötig, weil
+die Warn-Schwelle konfigurierbar war und unter die fixe Kritisch-Grenze
+gestellt werden konnte. Der Satz „15d hängt `alert_battery_warn_percent`
+erstmals an einen Konsumenten" gilt für den Zeitraum 2026-06 bis
+2026-09-30; das Feld ist seither aus Schema und Oberfläche entfernt
+(B-18-7 Eintrag 3).
 
 # AE-66 — Belegungs-Import via mailparser-Webhook als source=pms-Schreibquelle (Sprint 15e, Backend)
 
@@ -3319,3 +3344,266 @@ ergänzt, Sprint 15g den periodischen Status-Sync.
   25.10.2026.**
 - `STRATEGIE-THERMOSTAT-ZUORDNUNG.md` §13 und die Phasen-Logik im
   Strategie-Refresh verweisen auf diesen Eintrag.
+
+---
+
+# AE-72 — Batteriestufen über die Spannung, bewertet über den 24-h-Median (Sprint 20)
+
+**Datum:** 2026-09-30
+**Status:** Akzeptiert
+**Bezug:** AE-64 (2xAA-Kennlinie — **dies ersetzt deren Prozent-Achse als
+Bewertungsgrundlage**), AE-65 (Batterie als orthogonale Health-Achse — die
+Achse bleibt, ihre Eingangsgröße wechselt), CLAUDE.md §5.72 / §5.73 / §5.77,
+Migration 0024, B-18-7 Eintrag (3).
+
+**Nummern-Korrektur:** Die Commits von PR A (`b0374e2`, `252cc46`, gemergt
+als `9493bd9`) verweisen im Text irrtümlich auf „AE-69". AE-69 ist das
+ChirpStack-gRPC-Provisioning (Sprint 17). Der Fehler ist in allen Quell- und
+Testdateien korrigiert; die Commit-Nachrichten bleiben falsch, weil Historie
+nicht umgeschrieben wird. Wer dort „AE-69" liest, meint diesen Eintrag.
+
+## Kontext / Problem
+
+Die Oberfläche zeigt drei Batteriestufen (OK / schwach / kritisch) plus
+„unbekannt". Bis Sprint 19 entstanden sie so:
+
+```
+Codec-Nibble (4 bit) → Spannung → BATTERY_CURVE_2XAA → Prozent → Stufe
+```
+
+Drei Mängel, in aufsteigender Bedeutung:
+
+**1. Prozent ist an dieser Stelle Scheinpräzision.** Der Codec liefert die
+Gerätespannung als 4-Bit-Nibble, `V = 2.0 + nibble * 0.1`
+(`mclimate-vicki.js:119-121`). Es gibt genau 16 mögliche Eingaben und damit
+neun mögliche Prozent-Ausgaben: 0 / 10 / 30 / 50 / 65 / 80 / 87 / 93 / 100.
+Eine zweistellige Prozentzahl behauptet eine Auflösung, die nicht existiert —
+AE-64 hat das selbst festgehalten und als B-15b-2 notiert.
+
+**2. Die Kennlinie gilt für einen Zelltyp.** Sie ist gegen 2xAA-Alkaline
+kalibriert. Das Hotel bestückt ab Werk mit Lithium; beim späteren Tausch
+durch den Hausmeister kommen Alkaline hinein. Eine Prozentzahl, die für den
+einen Typ stimmt, ist für den anderen falsch — AE-64 nennt das in den
+Konsequenzen und stellt einen „separaten Sprint, falls relevant" in
+Aussicht. Das ist dieser.
+
+**3. Die Stufe kam aus einem einzelnen Frame.** `battery_state` wurde aus
+dem **jüngsten** `sensor_reading` abgeleitet. Ein Alkaline-Paar bricht unter
+Motorlast ein, und genau dann wird ein Uplink gesendet.
+
+Punkt 3 ist der Anlass. Gerät 001 stand am 29.09.2026 auf „kritisch",
+gemeldet wurde es mit 3,0 V. Das ist mit der alten Logik **nicht**
+vereinbar: `kritisch` heißt `pct < 10`, geprüft vor `warn` gegen die fixe
+Grenze `BATTERY_CRITICAL_PCT = 10`; im 0,1-V-Raster ist der einzige
+erreichbare Wert darunter 0, und 0 % gibt es nur bei ≤ 2,7 V. 3,0 V ergab
+50 % und damit „OK". Kein Wert von `alert_battery_warn_percent` (1..100)
+hätte das ändern können.
+
+001 muss in dem gezeigten Moment also ≤ 2,7 V gemeldet haben. Das Gerät
+hatte ein klemmendes Ventil mit `lowMotorConsumption` — der Einbruch unter
+Last ist die Erklärung, und die Anzeige hat ihn als Zustand der Batterie
+gelesen.
+
+## Entscheidung
+
+### 1. Die Schwellen liegen auf der Spannung
+
+Benannte Konstanten in `services/battery_health.py`:
+
+| Stufe | Bedingung | Begründung |
+|---|---|---|
+| OK | ≥ **3,0 V** | frische Alkaline liegt bei 3,1 V, frische Lithium am Codec-Anschlag 3,5 V — beide mit Reserve |
+| schwach | 2,9 V | genau **ein** Rasterschritt; mehr gibt das 0,1-V-Raster zwischen den Grenzen nicht her |
+| kritisch | ≤ **2,8 V** | Hersteller-Wechselempfehlung ist „< 2,8 V"; wir warnen eine Quantisierungsstufe früher |
+| unbekannt | Stichprobe < 3 | keine Aussage ist besser als eine ungedeckte |
+
+Gegen die Spec geprüft (`ARCHITEKTUR-ENTSCHEIDUNGEN.md:2539`,
+Hersteller-Hauptdoku): Betriebsbereich 2,7–3,6 VDC, Wechsel-Empfehlung
+< 2,8 V, Lithium-AA optional bis 3,6 V. Die Kritisch-Grenze liegt 0,1 V über
+dem Gerätminimum — wer bei „kritisch" wechselt, kommt dem Ausfall zuvor
+statt ihn zu bestätigen.
+
+`Decimal`, nicht `float`: 2,9 hat in IEEE-754 keine exakte Darstellung, und
+der Vergleich läuft genau auf diesem Rasterpunkt. Dieselbe Begründung wie
+für die Anker von `BATTERY_CURVE_2XAA` (AE-64 Punkt 2).
+
+**Verworfen: OK ≥ 3,1 / schwach 3,0 / kritisch ≤ 2,9** (erster Vorschlag,
+30.09. vormittags). **3,1 V ist der frische Alkaline-Zustand.** Eine Grenze
+genau dort lässt jedes Alkaline-Gerät ab dem ersten Rasterschritt dauerhaft
+„schwach" melden — das nutzbare Alkaline-Fenster ist 3,1 → 2,7 V, also vier
+Schritte, davon wäre einer OK gewesen. Ein Melder, dem niemand mehr glaubt,
+überwacht nichts (CLAUDE.md §5.79). Der zweite Grund ist der Median: er
+filtert den Lastabfall heraus, gegen den die höhere Grenze schützen sollte,
+also gibt es für die Vorsicht keinen Anlass mehr.
+
+### 2. Die Spannung wird persistiert (Migration 0024)
+
+`sensor_reading.battery_voltage NUMERIC(3,1) NULL`. Der Codec liefert den
+Wert seit je her, persistiert wurde nur der abgeleitete Prozentwert.
+
+Drei Stellen Präzision, weil die Spec bis 3,6 VDC reicht. `NULL` heißt „kein
+Spannungswert für diese Zeile" und ist nicht 0,0 V.
+
+**Kein Backfill.** Die Umkehrung der Kennlinie ist im 0,1-V-Raster
+rechnerisch eindeutig, gilt aber nur für Zeilen **nach** dem 15b-Deploy
+(2026-06-02) — davor stand die lineare LiPo-Skala im Subscriber. Ein
+Backfill bräuchte also einen Stichtag, hätte bei einem 24-h-Fenster für
+genau einen Tag Wirkung, und die Geräte im Montage-Bestand sind neu
+bestückt. Gleiche Entscheidung wie AE-64 Punkt 3 und Migration 0023.
+
+`battery_percent` wird **weiter geschrieben**, hat aber keinen Lesepfad mehr.
+Begründung: Rückfallpfad für ein Rollback — Code kommt aus git zurück, Daten
+nicht. Der Vermerk steht im Docstring von
+`mqtt_subscriber._battery_pct_from_volts`, zusammen mit der Pflicht aus
+§5.77: wer Prozent wieder verdrahtet, streicht ihn dort und in CLAUDE.md
+§5.72 im selben PR.
+
+### 3. Bewertet wird der 24-h-Median, read-time
+
+`battery_verdicts(session, device_ids, now=...)` liefert je Gerät Stufe,
+Median, Stichprobengröße und optional `jump_at`. **Nicht persistiert, kein
+Beat-Task** (§5.73: was deterministisch aus vorhandenen Daten ableitbar ist,
+wird read-time abgeleitet). Damit gibt es keine zweite Wahrheit und keinen
+Zustand, der bei Ausfall eines Taktgebers plausibel einfriert.
+
+**Oberer Median.** `percentile_disc(0.5) WITHIN GROUP (ORDER BY
+battery_voltage DESC)` — die absteigende Ordnung macht daraus bei gerader
+Stichprobe den **höheren** der beiden mittleren Werte. Bei 2,8 / 2,9 / 3,0 /
+3,1 ist der übliche Median 2,95, ein Wert, den das Raster nicht kennt und
+der zwischen zwei Stufen liegt; genommen wird 3,0. Das ist die Vorgabe
+„volle Batterie nie als leer" an der einzigen Stelle, an der sie überhaupt
+wirksam wird. Der Pfad nach einem Batteriewechsel rechnet in Python
+(`oberer_median`); ein DB-Test hält beide Wege gegeneinander, sonst springt
+die Stufe beim Wechsel zwischen den Pfaden.
+
+**Mindest-Stichprobe 3.** Ein einzelner Frame kann der Lastabfall von 001
+sein.
+
+**Sprung-Regel.** Ist der jüngste Wert um ≥ 0,3 V höher als der Median, gilt
+die Batterie als getauscht, und bewertet wird nur die zusammenhängende Reihe
+ab dem Sprung. Verglichen wird gegen den **Median**, nicht Median gegen
+Median: ein 24-h-Median bewegt sich nach einem Wechsel erst, wenn die neuen
+Werte in der Mehrheit sind — das dauert einen halben Tag, und „sofort" wäre
+bis dahin eine Behauptung. 0,2 V wären noch als Rauschen zwischen zwei
+Nibble-Stufen erklärbar, 0,3 V nicht; Entladung geht nie nach oben.
+
+**Sichtbare Folge, bewusst in Kauf genommen:** nach einem Batteriewechsel
+steht die Stufe rund 30 Minuten auf „unbekannt", bis drei Messwerte ab dem
+Sprung vorliegen. Deshalb trägt die Antwort `battery_jump_at` — die
+Oberfläche sagt „Batteriewechsel erkannt — Messwerte sammeln sich" statt zu
+schweigen und einen Fehler zu suggerieren.
+
+**Verworfen: persistierte Stufe mit Streak-Regel** (Planungsstand vom
+30.09. vormittags: sechs Spalten auf `device`, stündlicher Beat-Task,
+Abstufung nach unten erst nach drei Auswertungen in Folge). Der Median
+bremst schon; eine zweite Bremse hätte drei Stunden Verzögerung gekostet und
+dafür einen Beat, sechs Spalten und einen Zustand eingeführt, der bei
+Ausfall des Taktgebers plausibel einfriert — genau das Fehlerbild, gegen das
+§5.76 argumentiert. Die read-time-Variante kostet dieselbe Entwicklungszeit
+bei kleinerer Angriffsfläche.
+
+### 4. Eine Aggregat-Query für die ganze Liste
+
+Die Geräteliste rendert 104 Zeilen, und `_build_device_read` läuft dort in
+einer Schleife mit zwei Queries je Gerät (dort als N+1 bewusst akzeptiert,
+`api/v1/devices.py`). Ein dritter Aufruf je Gerät wären 312 Roundtrips. Die
+Stufen kommen deshalb in **einer** Query für alle Geräte der Seite; ein
+zweiter, kleiner Durchgang folgt nur für die Geräte, bei denen ein Wechsel
+erkannt wurde — im Normalbetrieb die leere Menge.
+
+`_build_device_read` nimmt das Verdict als **Pflicht-Argument**. Ein Default
+wäre bequem und würde genau den Fehler zulassen, den er verdeckt: eine
+Liste, die stillschweigend „unbekannt" ausgibt, weil jemand das Argument
+vergessen hat.
+
+Gemessen in CI (104 Geräte, 144 Messwerte je Gerät im Fenster plus 10 je
+Gerät 30 Tage alt): **22 ms** für den Aufruf, davon 15,8 ms Query. Der Plan
+fasst per `Append` genau **zwei** Chunks — die alten Zeilen werden zur
+Planungszeit ausgeschlossen, nicht zur Laufzeit gefiltert. Daraus folgt, als
+Schluss und nicht als Messung: die Kosten hängen am **Fenster**, nicht am
+Archiv.
+
+Der Zeit-Index wird genutzt, `ix_sensor_reading_device_time` nicht — bei 104
+von 104 angefragten Geräten ist `device_id` nicht selektiv und steht als
+Filter. Das ist richtig so und kein Optimierungsanlass.
+
+### 5. Prozent verschwindet aus der Anzeige, nicht nur aus der Rechnung
+
+Badge, Geräteliste, Detail-Karte, Thermostat-Bubble und die
+Messwert-Tabelle zeigen Stufe **und** Spannung: „Batterie OK · 3,1 V". Die
+Zahl ist der **Median**, nicht der letzte Frame — sonst widerspricht der
+Badge sich selbst, sobald ein einzelner Messwert einbricht. Bei „unbekannt"
+steht bewusst keine Zahl: der Median ist dort nicht belastbar, und eine Zahl
+daneben würde ihn glaubwürdiger machen als er ist.
+
+`formatVolts` rundet auf **eine** Dezimalstelle. Eine zweite wäre erfunden —
+genau der Fehler, den die Prozent-Anzeige gemacht hat.
+
+### 6. `alert_battery_warn_percent` ist entwertet
+
+Mit festen Schwellen hat die konfigurierbare Prozent-Schwelle keinen
+Konsumenten mehr. Sie ist aus `GlobalConfigRead`, `GlobalConfigUpdate` und
+der Einstellungsseite entfernt; die Spalte bleibt in `global_config` (kein
+destruktives Schema). Eintrag (3) in STATUS.md B-18-7, im selben PR — das
+ist die Regel dieser Liste.
+
+Ein Schalter ohne Wirkung ist schlimmer als kein Schalter (§5.77). Deshalb
+ist die Oberfläche im **selben** PR angepasst wie das Schema: der Merge nach
+`develop` deployt heizung-test innerhalb von fünf Minuten, ein Eingabefeld
+mit „undefined" wäre derselbe Fehler eine Ebene tiefer.
+
+Mit entfallen sind `battery_health_state`, `BATTERY_CRITICAL_PCT` und
+`DEFAULT_BATTERY_WARN_PCT`. Nach der Umstellung hatte die Prozent-Achse
+keinen Aufrufer mehr, und totes Urteilsvermögen mit gepflegter Testsuite ist
+die Sorte Code, die beim nächsten Mal wieder verdrahtet wird — dann steht
+eine zweite Schwelle neben der ersten.
+
+## Konsequenzen
+
+- **Die Stufen sind unabhängig vom Batterietyp.** Lithium ab Werk, Alkaline
+  beim Tausch: dieselben Schwellen, kein zweiter Kalibrierungslauf.
+- **Alkaline hat zwei Rasterschritte Reserve** über der Warnung (3,1 und
+  3,0 V). Das Hotel hat häufigeren Tausch ausdrücklich akzeptiert; mit den
+  gewählten Schwellen ist er nicht nötig, solange die Zellen frisch sind.
+- **Lithium sättigt am Codec-Anschlag.** Oberhalb ~3,4 V tatsächlicher
+  Spannung hat der Codec keine Auflösung; Lithium steht deshalb monatelang
+  auf „OK · 3,5 V" und fällt dann relativ zügig. Nicht behebbar — das Feld
+  ist 4 Bit breit. Wer Lithium fährt, verlässt sich auf die Stufe erst im
+  unteren Bereich.
+- **Der Lastabfall ist kein Befund mehr.** Ein Einbruch in einem einzelnen
+  Frame verschiebt einen 24-h-Median nicht. Der Fall von Gerät 001 ist als
+  Test festgehalten (`test_lastabfall_bewegt_die_stufe_nicht`: 23 × 3,0 V
+  plus ein Wert 2,6 V ergibt Median 3,0 und Stufe OK).
+- **Die Kachel „Schwache Batterie" ist deckungsgleich mit den Badges.**
+  Beide lesen dieselbe Funktion. Die Klemmung gegen die Kritisch-Grenze, die
+  AE-65 brauchte, weil die Warn-Schwelle konfigurierbar war und darunter
+  gestellt werden konnte, entfällt mitsamt dem Fall.
+- **Kein Codec-Deploy nötig** (§5.22): `battery_voltage` liefert der Codec
+  bereits, es wurde nur weggeworfen.
+- **Bestandsdaten sind nicht bewertbar.** Zeilen vor Migration 0024 haben
+  `NULL` und zählen nicht in die Stichprobe. Nach dem Deploy steht jedes
+  Gerät auf „unbekannt", bis drei Messwerte da sind — bei einem Uplink alle
+  zehn Minuten also eine halbe Stunde. Die Messwert-Tabelle zeigt für alte
+  Zeilen einen Strich.
+- **B-15b-1 bleibt offen und ist neu zu fassen:** der Mailversand an der
+  Batterie-Schwelle bezog sich auf `alert_battery_warn_percent`. Der
+  Schwellwert ist jetzt fest; ein Alarm würde an der Stufe hängen, nicht an
+  einer Konfiguration. Das ist eine andere Aufgabe als die notierte.
+
+## Verworfen
+
+- **Prozent behalten und nur die Kennlinie nachkalibrieren.** Hätte Mangel 1
+  (Scheinpräzision) und 2 (Zelltyp-Bindung) nicht berührt und für jeden
+  Batterietyp eine eigene Kurve gebraucht.
+- **Fünf Stufen statt drei.** Das 0,1-V-Raster gibt zwischen 3,0 und 2,8 V
+  genau einen Zwischenwert her. Mehr Stufen brauchen mehr Auflösung, und die
+  liefert die Hardware nicht.
+- **Median über 7 Tage statt 24 h.** Träger gegen Lastabfall, aber ein
+  Batteriewechsel bräuchte dann drei Tage, bis er in der Mehrheit ist — die
+  Sprung-Regel müsste die eigentliche Arbeit machen, und das Fenster wäre
+  Zierde.
+- **Arithmetisches Mittel statt Median.** Ein einziger Einbruch auf 2,0 V
+  zieht ein Mittel über 144 Werte um 0,007 V — klingt harmlos, ist es bei
+  mehreren Einbrüchen pro Tag aber nicht, und die Stufengrenzen liegen
+  0,1 V auseinander. Der Median ist gegen Ausreißer unempfindlich, und genau
+  darum geht es hier.

@@ -51,6 +51,16 @@ const SAMPLE_DEVICE = {
   battery_state: "ok",
 };
 
+/**
+ * Dasselbe Gerät ohne Zuordnung — Reserve-Pool (Sprint 20).
+ * ``heating_zone_id === null`` ist die Quelle des ``isPool``-Props.
+ */
+const POOL_DEVICE = {
+  ...SAMPLE_DEVICE,
+  heating_zone_id: null,
+  heating_zone: null,
+};
+
 /** Antwort des hardware-status-Endpoints für den jeweiligen Zustand. */
 const HW = {
   montiert: {
@@ -83,7 +93,11 @@ type HwStatus = (typeof HW)[keyof typeof HW];
  * §5.54: Regex statt Glob, weil die Folge-URLs Query-Strings tragen
  * (`?limit=…`) und Globs darüber nicht zuverlässig matchen.
  */
-async function mockDetailPage(page: import("@playwright/test").Page, hw: HwStatus) {
+async function mockDetailPage(
+  page: import("@playwright/test").Page,
+  hw: HwStatus,
+  device: unknown = SAMPLE_DEVICE,
+) {
   await page.route(/.*\/api\/v1\/devices\/\d+\/hardware-status(\?.*)?$/, (route) =>
     route.fulfill({
       status: 200,
@@ -98,12 +112,12 @@ async function mockDetailPage(page: import("@playwright/test").Page, hw: HwStatu
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(SAMPLE_DEVICE),
+      body: JSON.stringify(device),
     }),
   );
 }
 
-test.describe("Sprint 17 C9 — drei Montage-Zustände", () => {
+test.describe("Sprint 17 C9 / Sprint 20 — vier Montage-Zustände", () => {
   test("TRUE-Frame im Fenster -> Montiert, mit Zeitangabe", async ({ page }) => {
     await mockDetailPage(page, HW.montiert);
     await page.goto(`/devices/${DEVICE_ID}`);
@@ -122,8 +136,43 @@ test.describe("Sprint 17 C9 — drei Montage-Zustände", () => {
 
     const badge = page.getByTestId("hardware-status").first();
     await expect(badge).toContainText("Nicht montiert");
-    await expect(badge).toContainText("noch nicht gemeldet");
+    // Sprint 20: „noch nicht gemeldet" war hier falsch — das Geraet meldet
+    // sich (frames_in_window = 3), nur kein Frame sagt „montiert".
+    await expect(badge).toContainText("meldet sich, nicht montiert");
+    await expect(badge).not.toContainText("noch nicht gemeldet");
     await expect(badge).not.toContainText("Keine Daten");
+  });
+
+  test("Sprint 20: Pool-Geraet, das sich meldet -> Im Lager, grau", async ({ page }) => {
+    // Derselbe Endpoint-Zustand wie im Test darueber (Frames da, kein
+    // True-Frame) — nur ohne Zuordnung. Bis Sprint 19 stand hier rot
+    // „Nicht montiert / noch nicht gemeldet": zwei Fehlaussagen in einer
+    // Zeile, obwohl das Geraet genau das tut, was es im Lager tun soll.
+    await mockDetailPage(page, HW.nichtMontiert, POOL_DEVICE);
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const badge = page.getByTestId("hardware-status").first();
+    const pille = badge.locator("span").first();
+    await expect(pille).toContainText("Im Lager");
+    await expect(badge).toContainText("meldet sich, nicht montiert");
+    // Neutral, nicht rot: die Farbe ist die eigentliche Aussage. Geprueft an
+    // der Pille, nicht am Text — „nicht montiert" steht in der Unterzeile
+    // weiter und ist dort richtig.
+    await expect(pille).not.toHaveClass(/text-danger/);
+  });
+
+  test("Sprint 20: montiertes Pool-Geraet bleibt Montiert (Zustand im Eingangstest)", async ({
+    page,
+  }) => {
+    // Die Montage-Reihenfolge aus RUNBOOK §10h.6 fuehrt durch genau diesen
+    // Zustand: montieren -> Eingangstest, Geraet noch Pool -> assign. Waere
+    // „Im Lager" an die Zuordnung allein gekoppelt, stuende hier das Falsche.
+    await mockDetailPage(page, HW.montiert, POOL_DEVICE);
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const badge = page.getByTestId("hardware-status").first();
+    await expect(badge).toContainText("Montiert");
+    await expect(badge).not.toContainText("Im Lager");
   });
 
   test("kein verwertbarer Frame -> Keine Daten (30 Min)", async ({ page }) => {
@@ -201,6 +250,7 @@ test.describe("Sprint 17 C9 — drei Montage-Zustände", () => {
     const badge = page.getByTestId("hardware-status").first();
     await expect(badge).toContainText("Nicht montiert");
     // compact traegt die Unterzeile als Tooltip, nicht als sichtbaren Text.
-    await expect(badge).toHaveAttribute("title", "noch nicht gemeldet");
+    // Sprint 20: die Zeile sagt jetzt, was zutrifft — das Geraet meldet sich.
+    await expect(badge).toHaveAttribute("title", "meldet sich, nicht montiert");
   });
 });

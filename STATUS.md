@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-30, develop-HEAD `e0cfc35` (PR #243). Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)** — PR A gemergt, **PR B #244 offen**, §2bp. Kein Tag gesetzt; er folgt nach dem Merge von PR B. Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-09-30, develop-HEAD `9493bd9` (PR #245). Laufender Sprint: **20 (Batteriestufen über die Spannung)** — PR A gemergt, PR B offen, §2bq. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-09-30
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 19 Eingangstest ohne Rückfragen** (§2bp) — PR A #243 gemergt (`e0cfc35`, 876 Tests grün, 0 skipped), PR B #244 offen. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B offen. Migration 0024 (`sensor_reading.battery_voltage`). Stufen: OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V, bewertet über den 24-h-Median, read-time. `alert_battery_warn_percent` aus Schema und Oberfläche entfernt (B-18-7 Eintrag 3). **Neue Regel CLAUDE.md §0.3:** vor jedem Merge nach `develop` wird gefragt, ob ein Montage- oder Eingangstest läuft — der Merge ist ein Deploy auf heizung-test. Davor: **Sprint 19 Eingangstest ohne Rückfragen abgeschlossen** (§2bp) — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest`. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -4009,6 +4009,124 @@ Setzframe, Rückstellung, Firmware) — 1 bis 3 Stunden. Das ist der Preis der
 Downlink-Disziplin und steht im RUNBOOK als Erwartung, damit der Lauf nicht
 für hängend gehalten und abgebrochen wird.
 
+## 2bq. Sprint 20 Batteriestufen über die Spannung (2026-09-30)
+
+**Anlass:** Gerät 001 stand am 29.09. auf „Batterie kritisch", gemeldet
+wurde es mit 3,0 V. Das ist mit der alten Logik nicht vereinbar — und die
+Prüfung dieser Prämisse war der eigentliche Fund.
+
+`kritisch` hieß `battery_percent < 10`, geprüft vor `warn` gegen die fixe
+Grenze `BATTERY_CRITICAL_PCT = 10`. Die Kennlinie `BATTERY_CURVE_2XAA`
+kennt im 0,1-V-Raster des Codecs nur neun Prozentwerte
+(0/10/30/50/65/80/87/93/100); der einzige unter 10 ist **0**, und 0 % gibt
+es nur bei ≤ 2,7 V. **3,0 V ergab 50 % und damit „OK"** — kein Wert von
+`alert_battery_warn_percent` (1..100) hätte daran etwas geändert.
+
+001 muss im gezeigten Moment also ≤ 2,7 V gemeldet haben. Das Gerät hatte
+ein klemmendes Ventil mit `lowMotorConsumption`; ein schwaches Zellenpaar
+bricht unter Motorlast ein, und genau dann sendet die Vicki. **Die Anzeige
+kam immer aus dem letzten Frame** und hat den Lastabfall als Zustand der
+Batterie gelesen.
+
+Dazu zwei Mängel, die AE-64 selbst notiert hatte: Prozent ist bei 4-Bit-
+Auflösung Scheinpräzision (B-15b-2), und die Kennlinie ist für **einen**
+Zelltyp kalibriert — das Hotel bestückt ab Werk mit Lithium, beim Tausch
+kommen Alkaline hinein.
+
+### Entscheidung (AE-72)
+
+Schwellen auf der Spannung, Bewertung über den **Median der letzten
+24 Stunden**, read-time abgeleitet:
+
+| Stufe | Spannung |
+|---|---|
+| OK | ≥ 3,0 V |
+| schwach | 2,9 V (genau ein Rasterschritt) |
+| kritisch | ≤ 2,8 V (Hersteller-Empfehlung: „< 2,8 V wechseln") |
+| unbekannt | Stichprobe < 3 Messwerte |
+
+Verworfen wurde die erste Variante `OK ≥ 3,1 / kritisch ≤ 2,9`: **3,1 V ist
+der frische Alkaline-Zustand.** Eine Grenze genau dort hätte jedes
+Alkaline-Gerät ab dem ersten Rasterschritt dauerhaft „schwach" melden
+lassen — ein Melder, dem niemand mehr glaubt (§5.79).
+
+Ebenfalls verworfen: **persistierte Stufe mit Streak-Regel** (sechs Spalten
+auf `device`, stündlicher Beat-Task, Abstufung erst nach drei Auswertungen
+in Folge). Der Median bremst schon; die zweite Bremse hätte einen Zustand
+eingeführt, der bei Ausfall des Taktgebers plausibel einfriert (§5.76).
+Read-time kostet dieselbe Entwicklungszeit bei kleinerer Angriffsfläche.
+
+### PR A (#245, gemergt `9493bd9`)
+
+| Task | Inhalt |
+|---|---|
+| T1 | Migration **0024** `sensor_reading.battery_voltage NUMERIC(3,1) NULL` + Subscriber. Revisions-ID 27 Zeichen (Limit 32). Kein Backfill. |
+| T2 | `battery_stage_from_volts` mit `BATTERY_OK_MIN_V = 3.0` / `BATTERY_CRITICAL_MAX_V = 2.8`, Test über alle 16 Nibble-Schritte |
+| T3 | `battery_verdicts` — 24-h-Median read-time, oberer Median via `percentile_disc(0.5) ... DESC`, Mindest-Stichprobe 3, Sprung-Regel 0,3 V |
+| T4 | Performance-Beleg: **eine** Aggregat-Query für 104 Geräte, `EXPLAIN (ANALYZE, BUFFERS)` ins CI-Log |
+| T5 | `DeviceRead.battery_state` aus dem Verdict, neu `battery_voltage_median` + `battery_jump_at`, `battery_percent` aus allen Read-Schemas, `count_battery_low` über Stufen |
+| T6 | `alert_battery_warn_percent` entwertet — aus Schema und Oberfläche, Spalte bleibt. B-18-7 Eintrag (3) |
+
+**Gemessen in CI** (104 Geräte, 144 Messwerte je Gerät im Fenster plus 10 je
+Gerät 30 Tage alt): **22 ms** für den Aufruf, 15,8 ms für die Query. Der
+Plan fasst per `Append` genau **zwei** Chunks — die alten Zeilen werden zur
+Planungszeit ausgeschlossen. Daraus folgt (Schluss, keine Messung): die
+Kosten hängen am Fenster, nicht am Archiv. Freigabe-Grenze war 200 ms.
+
+Mit entfallen: `battery_health_state`, `BATTERY_CRITICAL_PCT`,
+`DEFAULT_BATTERY_WARN_PCT` und zwölf Tests. Nach T5 hatte die Prozent-Achse
+keinen Aufrufer mehr. Die Spalte `battery_percent` wird weiter geschrieben —
+Rückfallpfad für ein Rollback, Code kommt aus git zurück, Daten nicht.
+
+Anker: `collected 922` = `921 passed + 1 xfailed`, **0 skipped**. Images
+`develop-9493bd9` + `develop` im GHCR für `heizung-api` und `heizung-web`
+belegt (§5.11).
+
+### PR B (#…)
+
+| Task | Inhalt |
+|---|---|
+| T7 | Badge zeigt Stufe **und** Spannung sichtbar: „Batterie OK · 3,1 V". Quelle ist der Median, nicht der letzte Frame. `battery_jump_at` erklärt ein „unbekannt" nach dem Wechsel |
+| T8 | Messwert-Tabelle, Liste, Detail-Karte, Bubble — `formatVolts`, eine Dezimalstelle |
+| T9 | **Pool + nicht montiert = „Im Lager" (grau)** statt „Nicht montiert" (rot), Unterzeile „meldet sich, nicht montiert" statt „noch nicht gemeldet" |
+| T10 | AE-72, RUNBOOK §10o (Batteriewechsel für den Hotelier), CLAUDE.md §0.3 + §5.72/§5.73 nachgezogen, dieser Abschnitt |
+
+### Zwei Fehler von mir, für die Akte
+
+**1. Falsche ADR-Nummer.** Ich habe durchgehend „AE-69" geschrieben. AE-69
+ist das ChirpStack-gRPC-Provisioning (Sprint 17); frei war **AE-72**. In 48
+Stellen über 22 Dateien korrigiert — die Commit-Nachrichten von PR A
+bleiben falsch, weil Historie nicht umgeschrieben wird. Der ADR-Kopf von
+AE-72 nennt das ausdrücklich, damit niemand dem Verweis folgt und im
+falschen Eintrag landet.
+
+**2. Vier rote e2e-Tests durch eigene stale Erwartungen.** Ich habe in T7
+den Tooltip-Text geändert und nicht nach allen Tests gegrept, die den alten
+String festnageln. **Das ist dasselbe Muster, das in Sprint 19 dreimal
+aufgetreten ist** (STATUS §2bp). Diesmal lokal gefangen, nicht in CI — die
+vollständige Playwright-Suite lief vor dem Push (113 passed). Der Fix war
+zugleich die bessere Zusicherung: geprüft wird jetzt der **sichtbare**
+Pillen-Text („Batterie schwach · 2,9 V"), also die Anforderung, und der
+Tooltip nur per Regex auf die Zahl.
+
+### Was offen bleibt
+
+- **B-15b-1 ist neu zu fassen.** Der offene Rest war „Mail an der
+  Batterie-Schwelle". Diese Schwelle gibt es nicht mehr; ein Alarm würde an
+  der Stufe hängen. Andere Aufgabe als die notierte.
+- **Bestandsdaten sind nicht bewertbar.** Zeilen vor Migration 0024 tragen
+  keine Spannung. Nach dem Deploy steht jedes Gerät eine halbe Stunde auf
+  „unbekannt", bis drei neue Messwerte da sind.
+- **Lithium sättigt am Codec-Anschlag** (4 Bit, oberhalb ~3,4 V keine
+  Auflösung). Bei Lithium ist die Stufe erst im unteren Bereich
+  aussagekräftig. Nicht behebbar, in RUNBOOK §10o für den Hotelier
+  erklärt.
+- **Kein Live-Verify.** DB-Tests laufen lokal nicht (Docker Desktop startet
+  nicht, B-18-5); Migration 0024 ist nur in CI verifiziert. Der §5.50-Verify
+  fehlt.
+
+---
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -4276,7 +4394,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | **B-18-2** | **Secrets-Rotation vor Go-Live.** 🔴 **Frist 01.11.2026, vor der Inbetriebnahme.** Anlass: am 19.09. war der Inhalt der `.env` von heizung-test in einem Screenshot sichtbar — `SECRET_KEY` und `CHIRPSTACK_DB_PASSWORD` vollstaendig, `POSTGRES_PASSWORD` / `DATABASE_URL` / beide MQTT-Passwoerter / `CHIRPSTACK_API_SECRET` / Gateway-Passwoerter angeschnitten. Entscheidung des Hoteliers: **Rotation vor Go-Live, nicht sofort** — bis dahin liegen keine Gaestedaten im System und der Server ist nur ueber Tailscale und Basic-Auth erreichbar. Reihenfolge und Risiko je Wert stehen unten. Buendeln mit "Repo privat" (derselbe Wartungsblock nach dem 26.09.). | 🔴 |
 | **B-18-3** | **Feld-Komponenten lassen geerbte Props still fallen.** `NumFieldProps` erbt `hint` aus `FieldProps` (`einstellungen/hotel/page.tsx`), `NumField` hat es bis zum 20.09. nicht gerendert — typseitig erlaubt, wortlos verworfen. Betrifft **jedes** Zahlenfeld: ein Hinweis daran waere spurlos verschwunden. Aufgefallen bei T7, wo genau dieser Weg den Hinweis zu `alert_battery_warn_percent` verschluckt haette; dort im selben PR (#237) behoben, weil der Hinweis sonst gebaut und unsichtbar gewesen waere. **Offen:** pruefen, ob weitere Feld-/UI-Komponenten geerbte Props stillschweigend fallen lassen — `TimeField` nutzt `Omit<FieldProps, "type">` und reicht nur vier Props weiter, das gleiche Muster. Ein `Omit<>`-Erbe ohne Weiterreichen ist ein Typ, der mehr verspricht als die Komponente haelt; der Compiler kann das nicht melden. Kein Fix in Sprint 18. | 🟢 |
 | **B-18-6** | **Backend braucht ein Lockfile — vor B-18-4 einzuordnen.** Der Mangel hinter B-18-4 und CLAUDE.md §5.80: `pip install -e ".[dev]"` loest bei jedem CI-Lauf **alle** Versionen frisch auf, das Backend hat kein Lockfile. **Der Pin-Ansatz skaliert nicht** — 18 Laufzeit- plus 7 Dev-Abhaengigkeiten einzeln zu begrenzen ist Pflege, die niemand macht, und jede offene Grenze ist ein Build, der ohne Commit kippt. **Drei** Belege in einer Woche, der Punkt ist damit belegt und nur noch zu terminieren: mypy 2.3.1 (26.09., lokal 1.20.2 — rotes mypy-Gate), SQLAlchemy 2.1.1 (27.09., lokal 2.0.49 — sechs Typ-Meldungen aus geaenderten Row-Stubs), **Alembic 1.20.0** (27.09., lokal 1.18.4 — eine 33-Zeichen-Revision-ID lief lokal durch und scheiterte in CI an `version_num VARCHAR(32)`, Folge: 804 abgebrochene DB-Tests). Der dritte Fall ist der unangenehmste, weil er nicht das Gate rot machte, sondern die **Migration** — also den Pfad, der beim naechsten Deploy scharf wird. **Ziel:** Lockfile (`constraints.txt` oder `uv.lock`) plus ein CI-Schritt, der exakt daraus installiert (`pip install -c` bzw. `uv sync`). Das Frontend macht es mit `package-lock.json` + `npm ci` bereits richtig und ist deshalb nicht betroffen, trotz `^`-Ranges; `infra/chirpstack/requirements-provision.txt` zeigt die Form (`==` mit Begruendung im Kopf). **Fuer das Gate relevant** — diese Erhebung muss der naechste Durchgang **nicht wiederholen** (Stand 27.09.2026, alle mit unterer Grenze ohne obere, ausser den beiden gesetzten Pins): `sqlalchemy` (gepinnt `<2.1`), `pydantic[email]>=2.6`, `fastapi>=0.110` — ihre Typ-Stubs gehen in das mypy-Urteil ein; `ruff>=0.3` — stellt zwei Gates (§5.24); `pytest>=8.0` und `pytest-asyncio>=0.23` — Testrunner-Verhalten; `mypy` (gepinnt `<2`). Zweite Fundstelle ausserhalb `pyproject.toml`: `.github/workflows/chirpstack-tools-ci.yml` installiert die Werkzeuge inline, am 27.09. auf dieselben Grenzen gebracht. **Nach dem 29.09., in Ruhe, mit vollem Testlauf.** | 🟡 |
-| **B-18-7** | **Bestand der verwaisten Schalter.** Ein wirkungsloser Eintrag, der aussieht, als stelle er etwas ein, ist derselbe Fehlertyp wie `alert_email` vor Sprint 18 — nur in der Konfigurationsdatei statt in der Oberflaeche (CLAUDE.md §5.77). Gefuehrter Bestand, Stand 28.09.2026: **(1) `OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` in der `.env` von heizung-test** — seit dem Zeitzonen-Fix (27.09., §2bo) ohne Wirkung, die Schwelle steht in `global_config` und in der Oberflaeche. Bewusst **nicht** sofort entfernt: der Eintrag richtet keinen Schaden an, und ein `.env`-Eingriff zwei Tage vor der Montage ist das groessere Risiko. Streichung beim naechsten `.env`-Durchgang, **gebuendelt mit B-18-2** (Secrets-Rotation, Frist 01.11.) — derselbe Wartungsblock, dieselbe Datei, ein Container-Neustart statt zwei. `.env.example` traegt den Hinweis bereits, RUNBOOK §10d.9 ebenfalls. **(2) `global_config.alert_device_offline_minutes`** — siehe B-17-1, in der UI editierbar, kein Konsument im Backend (AE-53 rechnet mit eigenen Konstanten). Entscheidung vom 19.09.: aus der UI entfernen, zurueckgestellt auf nach dem 26.09. **(3) `global_config.alert_battery_warn_percent`** — mit Sprint 20 (AE-69) entwertet: die Batterie-Stufen rechnen gegen feste Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V), eine konfigurierbare Prozent-Schwelle hat keinen Konsumenten mehr. **Anders als (1) und (2) ist dieser Fall im selben PR erledigt:** das Feld ist aus `GlobalConfigRead` und `GlobalConfigUpdate` entfernt und in der Einstellungsseite geloescht, die Spalte bleibt in `global_config` (kein destruktives Schema). Der Eintrag steht hier nicht als offene Aufgabe, sondern als Nachweis der Regel — und als Hinweis fuer den Fall, dass jemand die Spalte in der Datenbank findet und sie fuer eine Einstellung haelt. **Regel fuer den Zugang zu dieser Liste:** wer einen Wert entwertet — durch Umzug, Ersatz oder Wegfall seines Konsumenten — traegt ihn hier ein, im selben PR. Sonst bleibt er als stiller Schalter liegen und wird beim naechsten Mal als Einstellung gelesen. | 🟢 |
+| **B-18-7** | **Bestand der verwaisten Schalter.** Ein wirkungsloser Eintrag, der aussieht, als stelle er etwas ein, ist derselbe Fehlertyp wie `alert_email` vor Sprint 18 — nur in der Konfigurationsdatei statt in der Oberflaeche (CLAUDE.md §5.77). Gefuehrter Bestand, Stand 28.09.2026: **(1) `OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` in der `.env` von heizung-test** — seit dem Zeitzonen-Fix (27.09., §2bo) ohne Wirkung, die Schwelle steht in `global_config` und in der Oberflaeche. Bewusst **nicht** sofort entfernt: der Eintrag richtet keinen Schaden an, und ein `.env`-Eingriff zwei Tage vor der Montage ist das groessere Risiko. Streichung beim naechsten `.env`-Durchgang, **gebuendelt mit B-18-2** (Secrets-Rotation, Frist 01.11.) — derselbe Wartungsblock, dieselbe Datei, ein Container-Neustart statt zwei. `.env.example` traegt den Hinweis bereits, RUNBOOK §10d.9 ebenfalls. **(2) `global_config.alert_device_offline_minutes`** — siehe B-17-1, in der UI editierbar, kein Konsument im Backend (AE-53 rechnet mit eigenen Konstanten). Entscheidung vom 19.09.: aus der UI entfernen, zurueckgestellt auf nach dem 26.09. **(3) `global_config.alert_battery_warn_percent`** — mit Sprint 20 (AE-72) entwertet: die Batterie-Stufen rechnen gegen feste Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V), eine konfigurierbare Prozent-Schwelle hat keinen Konsumenten mehr. **Anders als (1) und (2) ist dieser Fall im selben PR erledigt:** das Feld ist aus `GlobalConfigRead` und `GlobalConfigUpdate` entfernt und in der Einstellungsseite geloescht, die Spalte bleibt in `global_config` (kein destruktives Schema). Der Eintrag steht hier nicht als offene Aufgabe, sondern als Nachweis der Regel — und als Hinweis fuer den Fall, dass jemand die Spalte in der Datenbank findet und sie fuer eine Einstellung haelt. **Regel fuer den Zugang zu dieser Liste:** wer einen Wert entwertet — durch Umzug, Ersatz oder Wegfall seines Konsumenten — traegt ihn hier ein, im selben PR. Sonst bleibt er als stiller Schalter liegen und wird beim naechsten Mal als Einstellung gelesen. | 🟢 |
 | **B-18-4** | **Anpassung an SQLAlchemy 2.1 (und mypy 2).** Befund 27.09.2026: die sechs Typ-Meldungen stammen aus **SQLAlchemy 2.1.1** (lokal 2.0.49), nicht aus mypy — nach dem Pin auf `mypy<2` lief CI mit derselben mypy-Version wie lokal und meldete *mehr* Fehler als vorher. SQLAlchemy 2.1 liefert nullable Spalten beim Row-Unpacking als `X | None` bzw. `object`. Die Stellen sind geprueft, der naechste Durchgang muss sie **nicht erneut untersuchen**: (1) `services/zone_aggregates.py:83`, (2) `services/dashboard_aggregates.py:149`, (3) `rules/engine.py:691` (zwei Meldungen) — der Wert kann dort nie `None`/`object` sein, weil die Query `heating_zone_id.in_(ids)` bzw. einen WHERE-Filter setzt und SQL-`IN` NULL ausschliesst; **kein latenter Defekt**, ein Narrowing mit Begruendung genuegt (in `engine.py:690` steht der passende Kommentar schon). (4) `scripts/pairing/csv_parser.py:273` und (5) `scripts/pairing/batch_inbound_test.py:461` — `type: ignore[arg-type]`, das die neuen Stubs korrekt inferieren; **je eine Zeile zum Loeschen**. Danach beide Pins heben. **Nach dem 29.09.** | 🟢 |
 | **B-18-5** | **Docker Desktop als einzelner Punkt des Versagens.** Am 26.09. liess sich Docker auf der Entwicklungsmaschine nicht starten — die WSL-Distribution `docker-desktop` blieb auf `Stopped`, jeder `docker`-Aufruf hing ohne Zeitlimit. Folge: die DB-Tests (§5.50) waren **nur** in CI ausfuehrbar, und zwar genau an dem Tag, an dem CI zusaetzlich durch den mypy-Sprung blockiert war (§5.80). Zwei Beweiswege, beide gleichzeitig zu. Zu klaeren: WSL-Ursache beheben **und** einen zweiten Weg schaffen, der nicht an Docker Desktop haengt (Postgres-Dienst direkt, WSL-Instanz, oder ein bewusst benutzbarer CI-Lauf auf einem Wegwerf-Branch). **Nach dem 29.09.** | 🟡 |
 | B-17-7 | **Ragged-CSV-Meldung ist irreführend.** Eine Datenzeile mit mehr Werten als der Header Spalten scheitert an `csv.Sniffer`, weil Spaltenzahl-Konsistenz Teil seiner Trennzeichen-Heuristik ist. Die Datei wird abgewiesen statt still gekürzt (richtig, S5), aber die Meldung nennt fälschlich das Trennzeichen als Ursache. Der praktische Excel-Fall ist nicht betroffen. Verhalten ist als Test festgehalten. | 🟢 |

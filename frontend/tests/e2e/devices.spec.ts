@@ -236,7 +236,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
   });
 
   test("Sprint 15d PR3: Batterie-Kachel zeigt Badge, Zahl nur im Tooltip", async ({ page }) => {
-    // battery_state kommt aus dem Device (DeviceRead, PR1). Sprint 20 (AE-69):
+    // battery_state kommt aus dem Device (DeviceRead, PR1). Sprint 20 (AE-72):
     // die Zahl im Tooltip ist der 24-h-Median der Spannung aus demselben
     // Device-Objekt — NICHT der letzte Frame. Dass beide Werte hier
     // auseinanderliegen (Median 2,9 V, letzter Frame 3,1 V), ist Absicht: so
@@ -253,8 +253,12 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     const badge = card.getByTestId("battery-badge");
     // Badge (3+1) mit Zustand aus battery_state — konsistent zu Liste/Bubble.
     await expect(badge).toHaveAttribute("data-battery", "warn");
-    // Zahl NUR im title-Tooltip, NICHT im sichtbaren Kachel-Text.
-    await expect(badge).toHaveAttribute("title", "Batterie: 2,9 V (Median 24 h)");
+    // Sprint 20 (AE-72): die Spannung steht SICHTBAR neben der Stufe. Das ist
+    // die Anforderung („Stufe + Spannung"), nicht der Tooltip — deshalb wird
+    // hier der Pillen-Text geprueft und der Tooltip nur auf die Zahl.
+    await expect(badge).toContainText("Batterie schwach · 2,9 V");
+    await expect(badge).toHaveAttribute("title", /2,9 V/);
+    await expect(badge).toHaveAttribute("title", /Median der letzten 24 Stunden/);
     // Kein „%" im Haupttext: die Prozent-Anzeige ist mit Sprint 20 ganz weg.
     // (Die „75" im Icon-Ligatur-Namen `battery_horiz_075` ist aria-hidden-
     // Glyph-Text, kein sichtbarer Wert — daher gezielt auf „%" geprüft.)

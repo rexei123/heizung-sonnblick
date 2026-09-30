@@ -12,7 +12,7 @@
  * kritisch (rot) · unbekannt (grau). KEINE 5-Stufen-Skala — der Badge ist an
  * die Achse gekoppelt, nicht an eine zweite Schwelle (B-15b-2 abgeschlossen).
  *
- * Sprint 20 (AE-69): die Zahl im Tooltip ist die **Spannung in Volt**, nicht
+ * Sprint 20 (AE-72): die Zahl im Tooltip ist die **Spannung in Volt**, nicht
  * mehr ein Prozentwert — und zwar der 24-h-Median, aus dem die Stufe
  * entstanden ist (``device.battery_voltage_median``). Nicht der letzte Frame:
  * ein einzelner Messwert kann unter Motorlast einbrechen, dann widerspricht
@@ -33,6 +33,13 @@ interface BatteryBadgeProps {
   batteryState: BatteryHealthState;
   /** 24-h-Median der Spannung in Volt — die Zahl, die zur Stufe gehört. */
   batteryVolts?: number | null;
+  /**
+   * ISO-Zeitstempel, wenn im Fenster ein Batteriewechsel erkannt wurde
+   * (`device.battery_jump_at`). Erklärt ein „unbekannt", das keins ist:
+   * nach einem Wechsel zählt nur das Fenster ab dem Sprung, und bis drei
+   * Messwerte darin sind, gibt es keinen belastbaren Median.
+   */
+  batteryJumpAt?: string | null;
   variant?: Variant;
   className?: string;
 }
@@ -55,38 +62,51 @@ const CONFIG: Record<BatteryHealthState, StateConfig> = {
     label: "Batterie schwach",
     icon: "battery_low",
     badgeClass: "bg-warning-soft text-warning",
-    hint: "Batterie unter der Warnschwelle — Wechsel einplanen.",
+    hint: "Wechsel einplanen — ab 2,8 V wird es dringend.",
   },
   kritisch: {
     label: "Batterie kritisch",
     icon: "battery_alert",
     badgeClass: "bg-danger-soft text-danger",
-    hint: "Batterie fast leer — baldiger Wechsel nötig.",
+    hint: "Jetzt wechseln: zwei Mignon-Zellen (AA), unter 2,7 V steht das Gerät.",
   },
   unbekannt: {
     label: "Batterie unbekannt",
     icon: "battery_unknown",
     badgeClass: "bg-surface-alt text-text-tertiary",
-    hint: "Kein aktueller Batterie-Messwert.",
+    hint: "Noch zu wenige Messwerte für eine Aussage.",
   },
 };
+
+/** Hinweis nach einem erkannten Batteriewechsel (ersetzt den Hint). */
+const HINT_NACH_WECHSEL = "Batteriewechsel erkannt — Messwerte sammeln sich.";
 
 export function BatteryBadge({
   batteryState,
   batteryVolts = null,
+  batteryJumpAt = null,
   variant = "compact",
   className,
 }: BatteryBadgeProps) {
   // Defensive: unbekannter/fehlender State (z. B. Altdaten) -> "unbekannt"
   // statt Crash (S5). Backend garantiert das Feld, Mocks evtl. nicht.
   const cfg = CONFIG[batteryState] ?? CONFIG.unbekannt;
-  // Die Spannung ist die EINZIGE Stelle mit einer Zahl (Tooltip), sonst der
-  // Hint. Bei "unbekannt" gibt es bewusst keine Zahl: der Median ist dann
-  // nicht belastbar (Mindest-Stichprobe nicht erreicht).
-  const title =
-    batteryVolts != null && batteryState !== "unbekannt"
-      ? `Batterie: ${formatVolts(batteryVolts)} (Median 24 h)`
-      : cfg.hint;
+
+  // Die Spannung steht NEBEN der Stufe: „Batterie OK · 3,1 V". Bei
+  // "unbekannt" bewusst ohne Zahl — der Median ist dort nicht belastbar
+  // (Mindest-Stichprobe nicht erreicht), und eine Zahl neben „unbekannt"
+  // würde sie glaubwürdiger machen als sie ist.
+  const zeigeZahl = batteryVolts != null && batteryState !== "unbekannt";
+  const label = zeigeZahl ? `${cfg.label} · ${formatVolts(batteryVolts)}` : cfg.label;
+
+  // Ein „unbekannt" direkt nach einem Wechsel ist kein Mangel, sondern eine
+  // Wartezeit. Ohne diesen Hinweis sucht der Hotelier einen Fehler.
+  const hint =
+    batteryState === "unbekannt" && batteryJumpAt != null ? HINT_NACH_WECHSEL : cfg.hint;
+
+  const title = zeigeZahl
+    ? `${formatVolts(batteryVolts)} — Median der letzten 24 Stunden. ${cfg.hint}`
+    : hint;
 
   const pill = (
     <span
@@ -95,7 +115,7 @@ export function BatteryBadge({
       <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 14 }}>
         {cfg.icon}
       </span>
-      {cfg.label}
+      {label}
     </span>
   );
 
@@ -109,7 +129,7 @@ export function BatteryBadge({
         data-battery={batteryState}
       >
         {pill}
-        <span className="text-xs text-text-tertiary">{cfg.hint}</span>
+        <span className="text-xs text-text-tertiary">{hint}</span>
       </div>
     );
   }
@@ -125,7 +145,7 @@ export function BatteryBadge({
       <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 14 }}>
         {cfg.icon}
       </span>
-      {cfg.label}
+      {label}
     </span>
   );
 }

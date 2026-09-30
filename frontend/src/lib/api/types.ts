@@ -17,7 +17,7 @@ export type DeviceVendor = "mclimate" | "milesight" | "manual";
 export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious";
 
 // Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
-// DeviceHealthState (offline/implausible). Seit Sprint 20 (AE-69) abgeleitet
+// DeviceHealthState (offline/implausible). Seit Sprint 20 (AE-72) abgeleitet
 // aus dem 24-h-Median der Geraete-Spannung, nicht mehr aus einem Prozentwert;
 // Spiegel zu DeviceRead.battery_state.
 export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
@@ -69,7 +69,7 @@ export interface DeviceLatestReading {
   // Sprint 14b: temperature (Backend field_serializer Decimal->float => number)
   // fuer Thermostat-Bubbles.
   temperature: number | null;
-  // Sprint 20 (AE-69): die Spannung des LETZTEN Frames, in Volt. Nicht die
+  // Sprint 20 (AE-72): die Spannung des LETZTEN Frames, in Volt. Nicht die
   // Grundlage des Badges — dafuer ist Device.battery_voltage_median da. Hier
   // steht ein Einzelwert, der unter Motorlast einbrechen kann.
   battery_voltage: number | null;
@@ -101,7 +101,7 @@ export interface Device {
   health_state: DeviceHealthState;
   /**
    * Sprint 15d (AE-65): Batterie-Health-Achse, orthogonal zu health_state.
-   * Sprint 20 (AE-69): read-time abgeleitet aus dem 24-h-Median der
+   * Sprint 20 (AE-72): read-time abgeleitet aus dem 24-h-Median der
    * Geraete-Spannung. Schwellen OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V.
    */
   battery_state: BatteryHealthState;
@@ -157,7 +157,7 @@ export interface SensorReading {
   temperature: number | null;
   setpoint: number | null;
   valve_position: number | null;
-  // Sprint 20 (AE-69): Spannung statt Prozent. Bestandszeilen von vor
+  // Sprint 20 (AE-72): Spannung statt Prozent. Bestandszeilen von vor
   // Migration 0024 haben null — die Tabelle zeigt dort einen Strich.
   battery_voltage: number | null;
   rssi_dbm: number | null;

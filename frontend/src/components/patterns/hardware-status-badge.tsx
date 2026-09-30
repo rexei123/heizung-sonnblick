@@ -15,17 +15,28 @@
  * Gerät als „Inaktiv — noch nie" erscheinen, während daneben „Batterie OK"
  * stand. Zwei Achsen, eine irreführende Beschriftung.
  *
- * Drei Zustände aus denselben Antwortfeldern, ohne Backend-Änderung:
+ * Vier Zustände aus denselben Antwortfeldern plus der Zuordnung, ohne
+ * Backend-Änderung:
  *
- * | ``frames_in_window`` | ``status`` | Anzeige |
- * |---|---|---|
- * | 0 | inactive | **Keine Daten (30 Min)** — kein verwertbarer Frame |
- * | > 0 | inactive | **Nicht montiert** — Gerät meldet sich, sitzt aber nicht |
- * | ≥ 0 | active | **Montiert** |
+ * | ``frames_in_window`` | ``status`` | Pool | Anzeige |
+ * |---|---|---|---|
+ * | 0 | inactive | — | **Keine Daten (30 Min)** — kein verwertbarer Frame |
+ * | > 0 | inactive | ja | **Im Lager** (grau) — gemeldet, noch nicht montiert |
+ * | > 0 | inactive | nein | **Nicht montiert** (rot) — sitzt nicht, obwohl zugeordnet |
+ * | ≥ 0 | active | — | **Montiert** |
  *
  * Der erste Fall war bisher nicht vom zweiten zu unterscheiden, obwohl er
  * etwas anderes bedeutet: kein Frame mit dem Feld heißt alter Codec, FW < 4.1
  * oder gar kein Uplink — nicht „hängt nicht".
+ *
+ * **Sprint 20:** Ein Pool-Gerät, das sich meldet und nicht montiert ist, war
+ * rot mit der Unterzeile „noch nicht gemeldet" — zwei Fehlaussagen in einer
+ * Zeile. Rot, weil der erwartete Zustand als Mangel gelesen wurde: im Lager
+ * ist „nicht montiert" richtig. Und „noch nicht gemeldet", weil ``last_seen``
+ * nur True-Frames zählt — ein Gerät, das sich alle zehn Minuten meldet, stand
+ * da als hätte es nie gefunkt. Die Montage-Reihenfolge (RUNBOOK §10h.6) führt
+ * genau durch diesen Zustand: montieren → Eingangstest, Gerät noch Pool →
+ * ``assign``.
  *
  * - ``compact``: nur die Pille, Unterzeile als ``title``-Tooltip.
  * - ``detailed``: Pille plus Unterzeile.
@@ -42,10 +53,17 @@ type Variant = "compact" | "detailed";
 
 interface Props {
   deviceId: number;
+  /**
+   * Gerät liegt im Reserve-Pool (``heating_zone_id === null``). Pflicht-Prop,
+   * kein Default: „nicht montiert" ist beim Pool-Gerät der erwartete Zustand
+   * und beim zugeordneten ein Mangel. Ein Default würde die Unterscheidung
+   * genau dort verschlucken, wo sie gebraucht wird.
+   */
+  isPool: boolean;
   variant?: Variant;
 }
 
-type MountState = "montiert" | "nicht_montiert" | "keine_daten";
+type MountState = "montiert" | "nicht_montiert" | "im_lager" | "keine_daten";
 
 interface StateConfig {
   label: string;
@@ -64,6 +82,12 @@ const CONFIG: Record<MountState, StateConfig> = {
     icon: "link_off",
     badgeClass: "bg-danger-soft text-danger",
   },
+  im_lager: {
+    // Neutral, nicht rot: das Gerät tut, was es soll — es liegt und meldet.
+    label: "Im Lager",
+    icon: "inventory_2",
+    badgeClass: "bg-surface-alt text-text-tertiary",
+  },
   keine_daten: {
     // Kein Fehler, sondern Unwissen: im Fenster kam kein Frame, der das
     // Backplate-Feld ueberhaupt getragen haette.
@@ -73,7 +97,7 @@ const CONFIG: Record<MountState, StateConfig> = {
   },
 };
 
-export function HardwareStatusBadge({ deviceId, variant = "compact" }: Props) {
+export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: Props) {
   const { data, isLoading, error } = useHardwareStatus(deviceId);
 
   if (isLoading) {
@@ -105,12 +129,20 @@ export function HardwareStatusBadge({ deviceId, variant = "compact" }: Props) {
       ? "montiert"
       : data.frames_in_window === 0
         ? "keine_daten"
-        : "nicht_montiert";
+        : isPool
+          ? "im_lager"
+          : "nicht_montiert";
 
   const config = CONFIG[state];
+  // „noch nicht gemeldet" gilt nur, wenn im Fenster gar kein Frame kam.
+  // ``last_seen`` zählt ausschliesslich True-Frames — ein Gerät, das sich
+  // meldet und nicht montiert ist, hat hier NULL und ist trotzdem nicht
+  // stumm. Das war die zweite Fehlaussage in der alten Zeile.
   const subline = data.last_seen
     ? `Montiert zuletzt: ${formatRelative(data.last_seen)}`
-    : "noch nicht gemeldet";
+    : data.frames_in_window > 0
+      ? "meldet sich, nicht montiert"
+      : "noch nicht gemeldet";
 
   const pill = (
     <span
