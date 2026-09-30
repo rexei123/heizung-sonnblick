@@ -116,7 +116,7 @@ export default function HotelSettingsPage() {
             />
             <MailStatusLine config={cfg.data} />
             {/*
-              Sprint 20 (AE-69): Das Feld „Batterie-Warnung unter (%)" ist hier
+              Sprint 20 (AE-72): Das Feld „Batterie-Warnung unter (%)" ist hier
               entfernt. Die Batterie-Stufen rechnen jetzt gegen feste
               Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch
               <= 2,8 V) — eine Prozent-Schwelle hätte keine Wirkung mehr, und

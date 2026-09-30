@@ -40,7 +40,7 @@ function makeDevice(
     firmware_version: "4.2",
     health_state: healthState,
     battery_state: batteryState,
-    // Sprint 20 (AE-69): der 24-h-Median ist die Quelle der Zahl am Badge.
+    // Sprint 20 (AE-72): der 24-h-Median ist die Quelle der Zahl am Badge.
     battery_voltage_median: batteryVolts,
     battery_jump_at: null,
     created_at: iso(86400 * 1000),
@@ -102,11 +102,14 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
       "data-battery",
       "kritisch",
     );
-    // Spannung nur im title-Tooltip (2,8 V für das kritische Gerät), und
-    // zwar der Median — nicht der letzte Frame (Sprint 20, AE-69).
+    // Sprint 20 (AE-72): Spannung SICHTBAR neben der Stufe, und zwar der
+    // Median — nicht der letzte Frame.
+    await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toContainText(
+      "Batterie kritisch · 2,8 V",
+    );
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toHaveAttribute(
       "title",
-      "Batterie: 2,8 V (Median 24 h)",
+      /2,8 V/,
     );
     // unbekannt ohne Reading -> Hint-title, keine Zahl.
     const unknownBadge = page

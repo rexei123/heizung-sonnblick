@@ -132,7 +132,7 @@ BATTERY_CURVE_2XAA: tuple[tuple[Decimal, int], ...] = (
 def _battery_pct_from_volts(volts: float | None) -> int | None:
     """Vicki-2xAA-Alkaline Batterie-Prozent aus Codec-Geraete-Spannung.
 
-    **Ohne Konsumenten seit Sprint 20 (AE-69).** Die drei Batterie-Stufen
+    **Ohne Konsumenten seit Sprint 20 (AE-72).** Die drei Batterie-Stufen
     rechnen seit Migration 0024 direkt auf ``sensor_reading.battery_voltage``
     (``services/battery_health.py``); Prozent wird weiter geschrieben, aber
     nirgends mehr gelesen. Grund fuer das Weiterschreiben: Rueckfallpfad,
@@ -219,7 +219,7 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         "temperature": _to_decimal(obj.get("temperature")),
         "setpoint": _to_decimal(obj.get("target_temperature")),
         "valve_position": valve_pct,
-        # Sprint 20 (AE-69): die Spannung selbst, Raster 0.1 V. Quelle der
+        # Sprint 20 (AE-72): die Spannung selbst, Raster 0.1 V. Quelle der
         # drei Batterie-Stufen seit Migration 0024. NULL wenn das Feld fehlt.
         "battery_voltage": _to_decimal(obj.get("battery_voltage")),
         # Rueckfallpfad, ohne Konsumenten — siehe Docstring von

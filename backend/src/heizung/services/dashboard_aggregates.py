@@ -178,7 +178,7 @@ async def count_zones_window_open(session: AsyncSession) -> int:
 async def count_battery_low(session: AsyncSession) -> int:
     """Anzahl aktiver Geraete (``retired_at IS NULL``) mit schwacher Batterie.
 
-    Schwach = Batterie-Stufe ``warn`` oder ``kritisch`` (Sprint 20, AE-69).
+    Schwach = Batterie-Stufe ``warn`` oder ``kritisch`` (Sprint 20, AE-72).
     Die Kachel zaehlt damit **genau** die Geraete, die auch ein gelbes oder
     rotes Badge tragen — beides kommt aus ``battery_verdicts``, es gibt keine
     zweite Schwelle mehr, die davon abdriften koennte.

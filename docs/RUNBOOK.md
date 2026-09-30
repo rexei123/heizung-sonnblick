@@ -3212,3 +3212,90 @@ lokal), B-18-6 (Lockfile).
 - Hetzner Cloud Firewall ist für diesen Account NICHT konfiguriert — Blockaden kommen server-seitig (UFW).
 - Rescue-Modus ist nach einem Reboot verbraucht, Server bootet normal zurück.
 - `ssh-heizung`-Key in Hetzner gilt sowohl für Rescue-Auth als auch produktiven SSH-Zugang.
+
+## 10o. Batterie wechseln — was die Anzeige sagt und was sie nicht sagt
+
+Seit Sprint 20 (AE-72) zeigt jedes Gerät eine Stufe **und** die Spannung:
+„Batterie OK · 3,1 V". Kein Prozent mehr.
+
+### Die drei Stufen
+
+| Anzeige | Spannung | Was zu tun ist |
+|---|---|---|
+| **Batterie OK** (grün) | ab 3,0 V | nichts |
+| **Batterie schwach** (gelb) | 2,9 V | Wechsel einplanen — beim nächsten Zimmergang mitnehmen |
+| **Batterie kritisch** (rot) | 2,8 V und darunter | jetzt wechseln |
+| **Batterie unbekannt** (grau) | — | keine Aussage möglich, siehe unten |
+
+Gewechselt werden **zwei Mignon-Zellen (AA)** je Gerät. Der Hersteller gibt
+den Betriebsbereich mit 2,7–3,6 V an und empfiehlt den Wechsel unter 2,8 V —
+„kritisch" liegt also eine Stufe davor, nicht danach. Unter 2,7 V stellt das
+Gerät den Betrieb ein.
+
+**Lithium oder Alkaline ist gleichgültig.** Die Schwellen liegen auf der
+Spannung und gelten für beide. Ab Werk sind Lithium-Zellen drin; Alkaline
+beim Tausch ist in Ordnung.
+
+### Die Zahl ist ein Mittelwert über 24 Stunden, kein Momentwert
+
+Das ist wichtig für die Erwartung: **die Anzeige reagiert langsam, und das
+ist gewollt.** Die Spannung eines Zellenpaars bricht ein, während der Motor
+läuft — und genau dann sendet das Gerät. Ein Momentwert hätte deshalb
+regelmäßig „kritisch" gezeigt, wo nichts zu tun war. Genau das ist am
+29.09.2026 bei Gerät 001 passiert.
+
+Gerechnet wird der Median (der mittlere Wert) über die letzten 24 Stunden.
+Bei Gleichstand nach oben gerundet — eine vollere Batterie wird nie als
+leerer angezeigt.
+
+### „Unbekannt" ist keine Störung
+
+Drei Gründe, alle harmlos:
+
+1. **Das Gerät meldet sich noch nicht lange.** Für eine Aussage braucht es
+   mindestens drei Messwerte in 24 Stunden. Bei einem Uplink alle zehn
+   Minuten ist das eine halbe Stunde.
+2. **Die Batterie wurde gerade gewechselt.** Dann steht unter dem Badge
+   „Batteriewechsel erkannt — Messwerte sammeln sich." Das System erkennt
+   einen Sprung von 0,3 V oder mehr nach oben und rechnet ab diesem Moment
+   neu, statt eine halbe Woche den alten Wert mitzuschleppen. Auch hier:
+   rund eine halbe Stunde.
+3. **Das Gerät ist alt bestückt und hat noch keinen neuen Frame gesendet.**
+   Messwerte von vor dem 30.09.2026 tragen keine Spannung — sie zählen
+   nicht mit. In der Messwert-Tabelle der Geräteseite steht dort ein Strich.
+
+Was „unbekannt" **nicht** heißt: leer. Es heißt, dass niemand es weiß.
+
+### Nach dem Wechsel: prüfen, ohne zu warten
+
+Die Stufe braucht eine halbe Stunde. Wer sofort sehen will, ob die neuen
+Zellen sitzen, schaut auf die **Geräteseite → Messwerte**, Spalte „Batt":
+dort steht der letzte Einzelwert. Frische Alkaline zeigt 3,1 V, frische
+Lithium 3,5 V.
+
+**3,5 V ist der Anschlag, nicht die Wahrheit.** Das Codec-Feld ist vier Bit
+breit; oberhalb von etwa 3,4 V tatsächlicher Spannung kann das Gerät nicht
+feiner melden. Eine frische Lithium-Zelle steht deshalb monatelang auf
+3,5 V, ohne dass man den Verbrauch sieht — und fällt dann relativ zügig.
+Bei Lithium ist die Stufe also erst im unteren Bereich aussagekräftig.
+
+### Was die Anzeige nicht kann
+
+- **Sie schickt keine Mail.** Es gibt heute keinen Alarm an der
+  Batterie-Schwelle (Backlog B-15b-1). Wer den Bestand im Blick behalten
+  will, sieht auf die Dashboard-Kachel „Schwache Batterie" — sie zählt
+  gelbe und rote Geräte zusammen.
+- **Sie unterscheidet nicht zwischen „schwach" und „bald schwach".** Bei
+  0,1-V-Auflösung liegt zwischen OK und kritisch genau ein Schritt. Mehr
+  Stufen würden mehr Auflösung brauchen, als die Hardware liefert.
+- **Sie sagt nichts über die Restlaufzeit.** Die Entladekurve von Alkaline
+  ist am Ende steil; von 2,9 V auf 2,7 V kann es Wochen oder Tage sein.
+  Deshalb heißt „kritisch" jetzt und nicht demnächst.
+
+### Einbau-Hinweis
+
+Nach dem Zellentausch kommt das Gerät mit **gedriftetem Sollwert** und
+zurückgesetztem Frame-Counter zurück (CLAUDE.md §5.71, AE-63). Das Backend
+erkennt das und schickt den richtigen Sollwert nach — es ist kein
+Drehring-Akt des Gastes und wird nicht als solcher übernommen. Kein
+Eingriff nötig.

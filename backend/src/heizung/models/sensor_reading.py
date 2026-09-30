@@ -51,7 +51,7 @@ class SensorReading(Base):
     valve_position: Mapped[int | None] = mapped_column(SmallInteger)  # 0..100 %
     battery_percent: Mapped[int | None] = mapped_column(SmallInteger)
 
-    # Sprint 20 (AE-69): Geraete-Spannung aus dem Codec-Feld
+    # Sprint 20 (AE-72): Geraete-Spannung aus dem Codec-Feld
     # ``battery_voltage`` (mclimate-vicki.js:142), Raster 0.1 V. Seit
     # Migration 0024 die Quelle der drei Batterie-Stufen — ``battery_percent``
     # bleibt als Rueckfallpfad bestehen, hat aber keinen Konsumenten mehr.

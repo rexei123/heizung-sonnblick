@@ -1,9 +1,9 @@
-"""Batterie als additive Health-Dimension (AE-65, ab Sprint 20 AE-69).
+"""Batterie als additive Health-Dimension (AE-65, ab Sprint 20 AE-72).
 
 Zwei Teile in einer Datei, weil es ein Begriff ist:
 
 1. **Reine Schwellen-Logik** — Konstanten plus ``battery_stage_from_volts``
-   (AE-69). Kein I/O, direkt testbar.
+   (AE-72). Kein I/O, direkt testbar.
 2. **Die Bewertung ueber das Fenster** — ``battery_verdicts`` liest
    ``sensor_reading.battery_voltage`` der letzten 24 h und bildet den
    Median. Session-gebunden, eine Aggregat-Query fuer alle Geraete.
@@ -20,7 +20,7 @@ gefaltet, sondern als eigenes Read-Feld in ``DeviceRead`` exponiert
 (``services/dashboard_aggregates.py``) konsumiert. Die offline/implausible-
 Pfade in ``tasks/health_tasks.py`` bleiben unangetastet.
 
-Schwellen (AE-69), Eingangsgroesse ist der 24-h-Median der Spannung:
+Schwellen (AE-72), Eingangsgroesse ist der 24-h-Median der Spannung:
   ok        : >= BATTERY_OK_MIN_V (3.0 V)
   warn      : dazwischen — genau ein Rasterschritt (2.9 V)
   kritisch  : <= BATTERY_CRITICAL_MAX_V (2.8 V)
@@ -52,7 +52,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.sensor_reading import SensorReading
 
 # ---------------------------------------------------------------------------
-# Sprint 20 (AE-69): die Stufen rechnen auf der Spannung, nicht auf Prozent
+# Sprint 20 (AE-72): die Stufen rechnen auf der Spannung, nicht auf Prozent
 # ---------------------------------------------------------------------------
 #
 # Warum die Umstellung: Der Codec liefert die Geraete-Spannung in einem
@@ -113,7 +113,7 @@ BatteryHealthState = Literal["ok", "warn", "kritisch", "unbekannt"]
 
 
 def battery_stage_from_volts(volts: Decimal | None) -> BatteryHealthState:
-    """Reine Abbildung Geraete-Spannung -> Batterie-Stufe (AE-69).
+    """Reine Abbildung Geraete-Spannung -> Batterie-Stufe (AE-72).
 
     Die Reihenfolge ist verbindlich: ``unbekannt`` vor ``kritisch`` vor
     ``warn`` vor ``ok``. Beide Grenzen sind **inklusiv auf ihrer Seite** —
@@ -143,7 +143,7 @@ def battery_stage_from_volts(volts: Decimal | None) -> BatteryHealthState:
 
 
 # ---------------------------------------------------------------------------
-# Bewertungs-Fenster (AE-69)
+# Bewertungs-Fenster (AE-72)
 # ---------------------------------------------------------------------------
 #
 # 24 Stunden. Der regulaere Vicki-Uplink kommt alle ~10 min, das Fenster
@@ -206,7 +206,7 @@ async def battery_verdicts(
     *,
     now: datetime | None = None,
 ) -> dict[int, BatteryVerdict]:
-    """Batterie-Stufe je Geraet aus dem 24-h-Median (AE-69).
+    """Batterie-Stufe je Geraet aus dem 24-h-Median (AE-72).
 
     Eine Aggregat-Query fuer **alle** uebergebenen Geraete, nicht eine pro
     Geraet: die Geraeteliste rendert 104 Zeilen, und ``_build_device_read``

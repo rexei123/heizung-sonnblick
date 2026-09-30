@@ -188,12 +188,17 @@ function DeviceRow({ device: d }: { device: Device }) {
         <ZuordnungCell device={d} />
       </td>
       <td className="px-4 py-3" data-testid="device-hardware-cell">
-        <HardwareStatusBadge deviceId={d.id} variant="detailed" />
+        <HardwareStatusBadge
+          deviceId={d.id}
+          isPool={d.heating_zone_id === null}
+          variant="detailed"
+        />
       </td>
       <td className="px-4 py-3" data-testid="device-battery-cell">
         <BatteryBadge
           batteryState={d.battery_state}
           batteryVolts={d.battery_voltage_median}
+          batteryJumpAt={d.battery_jump_at}
           variant="compact"
         />
       </td>

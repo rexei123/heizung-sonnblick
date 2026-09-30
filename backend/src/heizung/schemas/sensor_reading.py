@@ -18,7 +18,7 @@ class SensorReadingRead(BaseModel):
     temperature: Decimal | None = None
     setpoint: Decimal | None = None
     valve_position: int | None = None
-    # Sprint 20 (AE-69): ``battery_percent`` ersetzt durch die Spannung. Die
+    # Sprint 20 (AE-72): ``battery_percent`` ersetzt durch die Spannung. Die
     # Messwert-Tabelle der Geraeteseite zeigt damit "3,1 V" statt "65 %" —
     # der Prozentwert war aus einem 0.1-V-Raster interpoliert und im oberen
     # Bereich vom Codec gesaettigt (AE-64, §5.72). Bestandszeilen von vor

@@ -153,7 +153,7 @@ class DeviceLatestReadingRead(BaseModel):
     Ist-Temp). ``temperature`` als field_serializer->float (Konvention wie
     SensorReadingRead / DeviceActiveOverrideRead).
 
-    Sprint 20 (AE-69): ``battery_percent`` ist hier **ersetzt** durch
+    Sprint 20 (AE-72): ``battery_percent`` ist hier **ersetzt** durch
     ``battery_voltage`` — die Groesse, die der Codec liefert. Prozent war an
     dieser Stelle Scheinpraezision (0.1-V-Raster, Saettigung oberhalb
     ~3.4 V). Die **Stufe** kommt nicht von hier, sondern aus dem 24-h-Median
@@ -206,12 +206,12 @@ class DeviceRead(BaseModel):
     # "unbekannt", damit ``model_validate(device)`` greift, wenn kein Reading
     # vorliegt. Die Sortierung der Geraeteliste kombiniert beide Achsen.
     #
-    # Sprint 20 (AE-69): Quelle ist der **Median der Geraete-Spannung ueber
+    # Sprint 20 (AE-72): Quelle ist der **Median der Geraete-Spannung ueber
     # 24 h**, nicht mehr ein Prozentwert aus dem letzten Frame. Schwellen
     # OK >= 3.0 V / schwach 2.9 V / kritisch <= 2.8 V.
     battery_state: Literal["ok", "warn", "kritisch", "unbekannt"] = "unbekannt"
 
-    # Sprint 20 (AE-69): die Zahl, die zur Stufe gehoert. Wer sie in der
+    # Sprint 20 (AE-72): die Zahl, die zur Stufe gehoert. Wer sie in der
     # Oberflaeche neben die Stufe stellt ("OK · 3,1 V"), nimmt diese und
     # nicht ``latest_reading.battery_voltage`` — sonst widerspricht der Badge
     # sich selbst, sobald ein einzelner Frame unter Motorlast einbricht.

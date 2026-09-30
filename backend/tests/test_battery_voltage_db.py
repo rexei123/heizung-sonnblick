@@ -1,4 +1,4 @@
-"""Sprint 20 T1+T3 — DB-Tests zur Batterie-Spannung und ihrer Bewertung (AE-69).
+"""Sprint 20 T1+T3 — DB-Tests zur Batterie-Spannung und ihrer Bewertung (AE-72).
 
 Zwei Teile:
 
@@ -208,7 +208,7 @@ async def test_battery_voltage_zweite_stelle_wird_gerundet(
 
 
 # ---------------------------------------------------------------------------
-# Sprint 20 T3 — Bewertung ueber den 24-h-Median (AE-69)
+# Sprint 20 T3 — Bewertung ueber den 24-h-Median (AE-72)
 # ---------------------------------------------------------------------------
 
 JETZT = datetime(2026, 9, 30, 12, 0, 0, tzinfo=UTC)

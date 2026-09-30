@@ -47,7 +47,7 @@ class GlobalConfigUpdate(BaseModel):
 class GlobalConfigRead(BaseModel):
     """Ausgabe fuer GET /api/v1/global-config.
 
-    **Nicht enthalten: ``alert_battery_warn_percent``** (Sprint 20, AE-69).
+    **Nicht enthalten: ``alert_battery_warn_percent``** (Sprint 20, AE-72).
     Die Batterie-Stufen rechnen seit Migration 0024 gegen feste
     Spannungs-Schwellen; eine konfigurierbare Prozent-Schwelle hat keinen
     Konsumenten mehr. Die Spalte bleibt in ``global_config`` (kein

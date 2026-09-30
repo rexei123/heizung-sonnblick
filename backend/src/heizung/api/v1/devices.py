@@ -116,7 +116,7 @@ async def _build_device_read(
     Bewusst akzeptiert bei < 200 Geraeten; Optimierung im Backlog falls noetig.
 
     ``verdict`` ist ein **Pflicht-Argument** und kein Default (Sprint 20,
-    AE-69): die Batterie-Bewertung laeuft ueber ein 24-h-Fenster und wird
+    AE-72): die Batterie-Bewertung laeuft ueber ein 24-h-Fenster und wird
     fuer alle Geraete des Requests in **einer** Query geholt
     (``battery_verdicts``). Ein Default wie ``UNBEKANNT`` waere bequem und
     wuerde genau den Fehler zulassen, den er verdeckt — eine Liste, die
@@ -156,7 +156,7 @@ async def _build_device_read(
         update={
             "active_override": override_read,
             "latest_reading": reading_read,
-            # Sprint 20 (AE-69): Stufe und Zahl kommen aus demselben Verdict,
+            # Sprint 20 (AE-72): Stufe und Zahl kommen aus demselben Verdict,
             # damit sie nicht auseinanderlaufen koennen.
             "battery_state": verdict.stage,
             "battery_voltage_median": verdict.median_v,
@@ -258,7 +258,7 @@ async def list_devices(
         limit=limit,
         offset=offset,
     )
-    # Sprint 20 (AE-69): EINE Aggregat-Query fuer die Batterie-Stufen aller
+    # Sprint 20 (AE-72): EINE Aggregat-Query fuer die Batterie-Stufen aller
     # Geraete der Seite, vor der Schleife. Ein Aufruf je Geraet waere bei
     # 104 Geraeten ein dritter N+1-Pfad neben Override und Reading.
     verdicts = await battery_verdicts(session, [d.id for d in devices])

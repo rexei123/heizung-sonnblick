@@ -88,6 +88,49 @@ Claude Code stoppt und wartet auf Freigabe bei:
 7. Vor Tag-Vergabe
 8. Vor Live-Deploy auf heizung-test oder heizung-main
 9. S1-S6-Verstoß-Verdacht (siehe §0)
+10. **Vor jedem Merge nach `develop`: fragen, ob gerade ein
+    Montage- oder Eingangstest läuft** (siehe §0.3)
+
+### §0.3 — Ein Merge nach develop ist ein Deploy auf heizung-test
+
+Der Timer auf heizung-test zieht `origin/develop` und das gleitende
+`develop`-Image alle fünf Minuten und ruft danach
+`docker compose up -d`. Das rekreiert den api-Container, sobald das
+Image neu ist.
+
+**Folge:** Ein Batch-Eingangstest, der über
+`docker compose exec` im Container läuft, stirbt dabei mitten im
+Lauf — und zwar in dem Moment, in dem Downlinks in der
+ChirpStack-Queue stehen, auf deren Bestätigung der Test wartet. Die
+Geräte bekommen den Setpoint, der Lauf weiß es nicht mehr.
+
+Was dabei **nicht** verloren geht: die bereits beurteilten Geräte.
+`_finalize_device` schreibt und committet seit Sprint 19 (T6) je
+Gerät, `--resume` setzt also korrekt auf. Verloren ist genau das
+Gerät, das gerade in der Bestätigungs-Kette hing — es hat Downlinks
+bekommen, aber kein Urteil, und der Resume-Lauf schickt sie
+**erneut**. Das ist der S4-Punkt: nicht der Merge ist das Risiko,
+sondern doppelte Befehle an ein Gerät, dessen erste Runde niemand
+mehr zuordnen kann.
+
+**Regel, ab 30.09.2026:** Vor jedem Merge nach `develop` wird
+gefragt, ob ein Montage- oder Eingangstest offen ist. Die Frage
+gehört in dieselbe Nachricht wie die Bitte um Merge-Freigabe, damit
+sie nicht als Formalie durchgeht. Bei `main` gilt sie ohnehin
+(Pflicht-Stop 8).
+
+Was die Regel **nicht** ist: ein Ersatz für ein technisches Gate.
+Ein Timer, der einen laufenden Eingangstest erkennt und den Pull
+aufschiebt, wäre die belastbare Lösung — die Regel ist die
+Zwischenlösung, die heute nichts kostet. Anlass war der Merge von
+Sprint 20 / PR A am 30.09.2026, bei dem die Frage zum ersten Mal
+gestellt wurde (Antwort: kein Lauf offen).
+
+**Querverweise:** §5.78 (`docker compose` ohne `-f` auf dem
+Server — dieselbe Familie: ein Eingriff, dessen Nebenwirkung man
+nicht sieht), §0 S4 (Hardware-Schutz, keine doppelten Downlinks),
+RUNBOOK §10h.4 (Laufzeit des Eingangstests: 1-3 h — so lange ist
+das Fenster, in dem die Frage nötig ist).
 
 ### Auto-Continue (autonom)
 
@@ -2176,17 +2219,29 @@ umrechnete. Doppelter Fehler:
 - **Kein Konsument auf `battery_percent` in der Engine.** `services/`
   und `tasks/` reagieren nicht auf den Wert — die Steuerlogik ist von der
   Batterie unabhängig, das gilt weiterhin.
-- **`global_config.alert_battery_warn_percent` ist seit Sprint 15d
-  verdrahtet** (Stand 2026-09-19, geprüft). Zwei Konsumenten:
-  `api/v1/devices.py:112` speist die Schwelle in `battery_health_state`
-  und damit in das Badge an jedem Gerät, `services/dashboard_aggregates.py:201`
-  nutzt dieselbe Schwelle für die Kachel `battery_low_count`. Wer den Wert
-  von 20 auf 35 stellt, sieht sofort mehr gelbe Badges und eine höhere Zahl
-  auf dem Dashboard.
+- **`global_config.alert_battery_warn_percent` existiert nicht mehr in
+  Schema und Oberfläche** (Stand 2026-09-30, Sprint 20 / AE-72). Die Spalte
+  bleibt in `global_config`, wird aber nicht ausgeliefert und nicht
+  gesetzt. Grund: die Batteriestufen rechnen gegen **feste
+  Spannungs-Schwellen** (OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V), eine
+  konfigurierbare Prozent-Schwelle hat keinen Konsumenten mehr. Mit ihr
+  entfallen `battery_health_state`, `BATTERY_CRITICAL_PCT` und
+  `DEFAULT_BATTERY_WARN_PCT`. Eintrag (3) in STATUS.md B-18-7.
 
-  Der Satz an dieser Stelle lautete bis 2026-09-19 „**toter Schalter** —
-  kein Konsument" und stammte aus Sprint 15b. Sprint 15d (AE-65, §5.73) hat
-  ihn überholt, die Lesson wurde nicht nachgezogen. Siehe §5.77.
+  Die Geschichte dieser Zeile ist selbst die Lesson §5.77: Bis 2026-06 war
+  der Schalter tot, bis 2026-09-19 stand hier trotzdem „toter Schalter",
+  obwohl Sprint 15d ihn verdrahtet hatte; dann war er vier Monate lang
+  verdrahtet und die Lesson sagte das Gegenteil; seit 2026-09-30 ist er
+  weg. **Drei Zustände, zwei Korrekturen im Nachhinein.** Wer hier etwas
+  liest, prüft es gegen den Code, bevor er darauf aufsetzt.
+
+- **Prozent hat keinen Lesepfad mehr** (Sprint 20 / AE-72).
+  `_battery_pct_from_volts` und `BATTERY_CURVE_2XAA` stehen weiter im
+  Subscriber und füllen `sensor_reading.battery_percent` — als
+  **Rückfallpfad** für ein Rollback, nicht als Grundlage einer Anzeige. Die
+  Stufen lesen `sensor_reading.battery_voltage` (Migration 0024). Wer
+  Prozent wieder an einen Konsumenten hängt, streicht diesen Absatz und den
+  Vermerk im Docstring von `_battery_pct_from_volts` im selben PR.
 
 - **B-15b-1 bleibt offen, aber verengt:** was fehlt, ist allein der
   **Mailversand an der Schwelle**. Sprint 18 hat den Versandweg gebaut
@@ -2242,32 +2297,63 @@ genau diese Orthogonalität: das Gerät verliert entweder seinen
 online-Status oder seinen Batterie-Status. **Eigene Achse ist die
 einzige verlustfreie Form.**
 
-**Schwellen (AE-65, benannte Konstanten in `services/battery_health.py`):**
+**Schwellen — seit Sprint 20 (AE-72) auf der Spannung**, benannte
+Konstanten in `services/battery_health.py`:
 
-- `BATTERY_CRITICAL_PCT = 10` — **fix, nicht konfigurierbar**. Hardware-
-  Untergrenze am steilen Alkaline-Knie (§5.72), keine Hotelier-Präferenz.
-- warn-Schwelle aus `global_config.alert_battery_warn_percent` (Default
-  20, `DEFAULT_BATTERY_WARN_PCT` als Fallback wenn Singleton-Row fehlt).
-  Reihenfolge im Mapping verbindlich: `unbekannt` → `kritisch` → `warn`
-  → `ok`; `kritisch` ist absolut und schlägt `warn` auch bei kleiner
-  Schwelle.
+- `BATTERY_OK_MIN_V = 3.0`, `BATTERY_CRITICAL_MAX_V = 2.8`, beide Grenzen
+  inklusiv auf ihrer Seite. Dazwischen liegt bei 0,1-V-Raster genau **ein**
+  Schritt (2,9 V), und der ist `warn`. Eingangsgröße ist der **24-h-Median**,
+  nicht der letzte Frame.
+- Reihenfolge im Mapping verbindlich: `unbekannt` → `kritisch` → `warn`
+  → `ok`.
+- `BATTERY_MIN_SAMPLES = 3`: unter drei Messwerten im Fenster gibt es keine
+  Stufe, sondern „unbekannt". Ein einzelner Frame kann ein Lastabfall
+  während einer Motorbewegung sein — genau daran lag der Fehlbefund zu
+  Gerät 001 am 29.09.2026.
+- `BATTERY_JUMP_V = 0.3`: springt der jüngste Wert um so viel über den
+  Median, gilt die Batterie als getauscht und nur die Reihe ab dem Sprung
+  wird bewertet.
 
-**Verdrahtung B-15b-1:** 15d hängt `alert_battery_warn_percent` erstmals
-an einen Konsumenten (Health-Status + Dashboard-`battery_low_count`),
-aber **ohne** Email-/Alarm-Versand. Der war vorher toter Schalter (§5.72,
-AE-64). Aktiver Versand bleibt offen als B-15b-1.
+Die vorherige Fassung stand auf Prozent (`BATTERY_CRITICAL_PCT = 10` fix,
+warn-Schwelle aus `alert_battery_warn_percent`). Beides ist entfallen;
+AE-72 §1 begründet, warum Prozent an dieser Stelle Scheinpräzision war.
+
+**B-15b-1 ist neu zu fassen** (Stand 2026-09-30): Der offene Rest war „Mail
+an der Batterie-Schwelle". Diese Schwelle ist mit AE-72 entfallen — ein
+Alarm würde jetzt an der **Stufe** hängen, nicht an einer Konfiguration.
+Das ist eine andere Aufgabe als die notierte, und wer den Backlog-Eintrag
+liest, findet dort eine Schwelle, die es nicht mehr gibt.
 
 **Regel für neue abgeleitete Status-Felder:** Wenn ein Wert deterministisch
-aus vorhandenen Daten (hier `battery_percent` + Config) ableitbar ist,
-**read-time im Schema-Assembler ableiten** statt persistieren —
-keine Migration, kein zweiter Schreibpfad, keine zwei Wahrheiten. Schwelle
-aus Config laden via `session.get(GlobalConfig, 1)` (Identity-Map ⇒ ein
-Roundtrip pro Request, kein N+1) mit defensivem Fallback wenn Row fehlt.
+aus vorhandenen Daten ableitbar ist, **read-time im Schema-Assembler
+ableiten** statt persistieren — keine Migration, kein zweiter Schreibpfad,
+keine zwei Wahrheiten.
 
-**Frontend (PR2):** Das `BatteryBadge` ist an die `battery_state`-Achse
+Sprint 20 hat diese Regel gegen die naheliegende Versuchung verteidigt: der
+Planungsstand sah sechs Spalten auf `device`, einen stündlichen Beat-Task
+und einen Streak-Zähler vor, um „Abstufung erst nach drei Meldungen in
+Folge" umzusetzen. Der 24-h-Median bremst schon; die zweite Bremse hätte
+einen Zustand eingeführt, der bei Ausfall des Taktgebers **plausibel
+einfriert** — das Fehlerbild aus §5.76. Verworfen, read-time geblieben.
+Kosten: eine Aggregat-Query je Request statt einer je Stunde, 22 ms bei 104
+Geräten (gemessen in CI, AE-72 §4).
+
+**Wenn read-time, dann gehoben, nicht je Zeile:** Die Bewertung braucht
+ein Fenster über `sensor_reading`, und die Geräteliste rendert 104 Zeilen.
+Eine Aggregat-Query für alle Geräte des Requests, **vor** der Schleife; das
+Ergebnis wird als Pflicht-Argument durchgereicht, nicht mit Default. Ein
+Default würde eine Liste erlauben, die stillschweigend „unbekannt" ausgibt,
+weil jemand das Argument vergessen hat.
+
+**Frontend:** Das `BatteryBadge` ist an die `battery_state`-Achse
 gekoppelt — **keine eigene Skala, keine zweite Schwelle**. 3+1 Zustände
-direkt aus `device.battery_state`, exakte Prozentzahl NUR im `title`-Tooltip
-(Codec-Sättigung, §5.72/AE-64). Jede UI-Stelle, die zuvor eine eigene
+direkt aus `device.battery_state`. Seit Sprint 20 (AE-72) steht die Zahl
+**sichtbar** neben der Stufe („Batterie OK · 3,1 V") und ist die
+**Spannung in Volt**, nämlich `device.battery_voltage_median` — nicht
+`latest_reading.battery_voltage`. Wer den Einzelwert an den Badge hängt,
+baut einen Badge, der sich selbst widerspricht, sobald ein Frame unter
+Motorlast einbricht. Bei „unbekannt" steht bewusst keine Zahl. Jede
+UI-Stelle, die zuvor eine eigene
 Batterie-Schwelle hartkodierte (Detail-Kachel war `battery_percent < 20`),
 zieht ihren Tone aus `battery_state` — sonst entsteht ein zweiter
 Schwellwert, der vom Config-Wert driftet. `statusScore` (Geräte-Sortierung)
@@ -2276,10 +2362,13 @@ nimmt das **Maximum über beide Health-Achsen** (`health_state` schlägt
 EINER Fehlerstatus-Rangfolge. Visuelle Invariante: Badge gelb/rot ⇔ Gerät in
 `battery_low_count` (Dashboard-Kachel) — dieselbe Achse.
 
-**Querverweise:** AE-65 (Master-ADR, inkl. Frontend-Teil), AE-53
-(offline/implausible-Achse), §5.72 (2xAA-Kennlinie liefert
-`battery_percent`), §5.58 (Lifecycle-Filter im Aggregat), §5.63/§5.64
-(Frontend-Type-Spiegel + Zod-Strip-Falle, in PR2 umgesetzt).
+**Querverweise:** AE-65 (Master-ADR, inkl. Frontend-Teil), **AE-72
+(Umstellung auf die Spannung — was hier steht, gilt mit dieser
+Eingangsgröße)**, AE-53 (offline/implausible-Achse), §5.72 (Kennlinie und
+Codec-Sättigung), §5.58 (Lifecycle-Filter im Aggregat), §5.63/§5.64
+(Frontend-Type-Spiegel + Zod-Strip-Falle), §5.76 (Wirkung überwachen statt
+Mechanik — der Grund gegen den Beat-Task), §5.77 (der Schalter, der hier
+dreimal seinen Zustand gewechselt hat).
 
 ### 5.74 Kalendertag-Strings (`YYYY-MM-DD`) nie durch `new Date()` (Sprint 15f)
 

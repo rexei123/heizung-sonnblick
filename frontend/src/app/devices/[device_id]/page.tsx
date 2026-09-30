@@ -120,7 +120,11 @@ export default function DeviceDetailPage() {
               <div className="flex flex-col items-end gap-2 text-sm">
                 <div className="text-text-secondary text-right">
                   <div className="mb-1">Status</div>
-                  <HardwareStatusBadge deviceId={device.id} variant="detailed" />
+                  <HardwareStatusBadge
+                    deviceId={device.id}
+                    isPool={device.heating_zone_id === null}
+                    variant="detailed"
+                  />
                 </div>
                 {device.heating_zone ? (
                   <ZoneHealthBadge
@@ -194,6 +198,7 @@ export default function DeviceDetailPage() {
                 <BatteryBadge
                   batteryState={device.battery_state}
                   batteryVolts={device.battery_voltage_median}
+                  batteryJumpAt={device.battery_jump_at}
                   variant="detailed"
                 />
               </div>

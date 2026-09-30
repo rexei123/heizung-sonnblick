@@ -31,7 +31,11 @@ export function ThermostatBubble({ device }: { device: Device }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-text-primary text-sm truncate">{name}</span>
-          <HardwareStatusBadge deviceId={device.id} variant="compact" />
+          <HardwareStatusBadge
+            deviceId={device.id}
+            isPool={device.heating_zone_id === null}
+            variant="compact"
+          />
         </div>
         <div className="mt-1 flex items-center gap-4 text-xs text-text-tertiary">
           <span title="Ist-Temperatur (letzte Messung)">
@@ -41,11 +45,12 @@ export function ThermostatBubble({ device }: { device: Device }) {
             {formatTemperature(reading?.temperature ?? null)}
           </span>
           {/* Sprint 15d (AE-65): Batterie als Badge (battery_state-Achse).
-              Sprint 20 (AE-69): die Zahl im Tooltip ist die Spannung in Volt,
+              Sprint 20 (AE-72): die Zahl im Tooltip ist die Spannung in Volt,
               und zwar der 24-h-Median — nicht der letzte Frame. */}
           <BatteryBadge
             batteryState={device.battery_state}
             batteryVolts={device.battery_voltage_median}
+            batteryJumpAt={device.battery_jump_at}
             variant="compact"
           />
         </div>
