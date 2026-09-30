@@ -2793,6 +2793,105 @@ nur fuer die Umgebung, in der er lief), B-18-6 (Lockfile fuers Backend — der Z
 skaliert), B-18-4 (Anpassung an SQLAlchemy 2.1 und mypy 2),
 B-18-5 (Docker Desktop als einzelner Punkt des Versagens).
 
+### 5.82 Eine halb gefaelschte Zeitquelle ist schlimmer als keine
+
+**Anlass, 29./30.09.2026.** Der CI-Job `lint-and-test` sprang von rund 3 auf
+**18 Minuten**. Ich habe das zunaechst als "neues Normal" eingeordnet — mehr
+Tests, laengere Laufzeit — und vorgeschlagen, den Vergleichswert in RUNBOOK
+§10n aufzuweiten. Der Hotelier hat widersprochen und eine Ursachenanalyse
+verlangt. Er hatte recht.
+
+Gemessen mit einer Uhr, die pro Aufruf eine Millisekunde weiterlaeuft:
+
+```
+Fenster: 15 min = 900 s
+Schleifen-Durchlaeufe bis Ablauf: 900 000
+Vorgesehen waren 30 (alle 30 s).
+Faktor: 30 000x
+```
+
+Die Ursache steht in zwei Zeilen einer Test-Fixture:
+
+```python
+async def fake_sleep(seconds): return None      # ersetzt
+# _now bleibt die echte Wanduhr                 # NICHT ersetzt
+```
+
+Die Warte-Schleife rechnet `deadline = _now() + timeout` und wartet dann in
+Runden `await _sleep(poll_interval)`. Faelscht man **nur** `_sleep`, laeuft
+sie so schnell, wie die Datenbank antwortet — bis das Fenster in *echter*
+Zeit abgelaufen ist. Ein einziger Test (`test_inbound_test_no_heartbeat_
+aborts`, ohne Reading, also volles Fenster) trug damit **15 Minuten** der
+18-Minuten-Laufzeit.
+
+**Warum das schlimmer ist als gar keine Attrappe:** Eine Schleife ohne Fake
+wartet 15 Minuten und ist offensichtlich zu langsam — das faellt beim ersten
+Lauf auf. Eine halb gefaelschte sieht aus wie eine Attrappe, verhaelt sich
+wie die Wirklichkeit und versteckt sich hinter einer Gesamtlaufzeit, die
+niemand einem einzelnen Test zuordnet. Sie hat zwei Sprints ueberlebt.
+
+#### Die Regel: Zeit ist EIN Wert, nicht zwei Funktionen
+
+Getrennte Einhaengepunkte fuer "jetzt" und "warten" lassen sich einzeln
+ersetzen — und genau das ist der Fehler, den man nicht sehen kann. Im Repo
+seit Sprint 19:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Clock:
+    now: Callable[[], datetime]
+    sleep: Callable[[float], Awaitable[None]]
+
+REAL_CLOCK = Clock(now=_real_now, sleep=_real_sleep)   # Produktions-Default
+def virtual_clock(start): ...                          # Tests, springt beim sleep
+```
+
+`scripts/pairing/clock.py`. Wer die Uhr ersetzt, ersetzt beides; die Haelfte
+gibt es nicht mehr. Der Default ist die **echte** Uhr — sonst wuerde ein
+vergessener Parameter im Betrieb nicht warten.
+
+**Regel:** Jede Warte-Schleife, die eine Frist gegen eine Uhr haelt, bekommt
+Uhr und Warten als **einen** injizierten Wert. Zwei getrennte
+`monkeypatch`-Ziele sind ein Konstruktionsfehler, keine Bequemlichkeit.
+
+**Und die Gegenprobe gehoert in die Suite:** ein Test, der die
+Schleifen-Durchlaeufe **zaehlt** und gegen `Fenster / Abstand` haelt. Ohne
+ihn kommt derselbe Fehler beim naechsten Fake zurueck, und wieder sieht man
+nur eine Gesamtlaufzeit.
+
+#### Zweiter Teil: `--durations` gehoert in den CI-Job, nicht in die Diagnose
+
+§5.81 sagt, bei einem roten Lauf ist die Laufzeit mitzulesen. Das hat hier
+funktioniert — aber es sagt nur, **dass** es langsam ist, nicht **wo**. Die
+Suche nach dem Verursacher kostete einen eigenen Lauf.
+
+`pytest --durations=15` steht seither fest im Job. Es kostet nichts und
+liefert die Antwort im Log desselben Laufs, der die Laufzeit gemeldet hat.
+
+**Regel:** Ein Diagnose-Schalter, der nichts kostet, gehoert eingeschaltet
+und nicht in eine Anleitung. Eine Anleitung braucht jemanden, der sie im
+richtigen Moment liest.
+
+#### Dritter Teil, in eigener Sache
+
+Ich habe eine Laufzeit-Verschlechterung um den Faktor sechs als Normalwert
+eingeordnet und vorgeschlagen, den Vergleichswert nachzuziehen. Das ist
+dieselbe Bewegung wie ein aufgeweiteter Schwellwert an einem Alarm, der zu
+oft anschlaegt: der Melder wird leiser gestellt, statt die Ursache zu
+suchen. §5.79 sagt, ein Melder, dem niemand mehr glaubt, ueberwacht nichts —
+ein Vergleichswert, der jeder Messung nachgibt, vergleicht nichts.
+
+**Regel:** Ein Normalwert wird nicht an eine neue Messung angepasst, solange
+die Abweichung nicht erklaert ist. Erst die Ursache, dann die Zahl — und
+wenn die Ursache ein Fehler ist, bleibt die Zahl.
+
+**Querverweise:** §5.81 (Laufzeit als Diagnose-Signal — die Regel, die den
+Befund ueberhaupt sichtbar gemacht hat), §5.59 (freezegun greift nicht in
+Fixtures — dieselbe Familie: Zeit, die nur teilweise kontrolliert ist),
+§5.79 (ein Melder, dem niemand glaubt; hier der Vergleichswert statt des
+Alarms), §5.68 (Behauptung vs. Befund — "neues Normal" war eine Behauptung
+ohne Messung), RUNBOOK §10n (die Vergleichswerte, unveraendert).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

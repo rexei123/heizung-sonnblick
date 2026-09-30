@@ -332,7 +332,16 @@ async def test_cmd_test_via_device_id(
     )
     await patched_session_local.flush()
     exit_code = await pair_devices.main_async(
-        ["test", str(device.id), "--timeout", "1", "--poll-interval", "1", "--heartbeat-wait", "1"]
+        [
+            "test",
+            str(device.id),
+            "--timeout",
+            "1",
+            "--poll-interval",
+            "1",
+            "--heartbeat-wait",
+            "120",
+        ]
     )
     assert exit_code == 1  # TIMEOUT: die Attrappe antwortet nicht
     # Genau EIN Sollwert-Downlink: ohne Readback gibt es keinen zweiten
@@ -368,7 +377,16 @@ async def test_cmd_test_via_dev_eui(
     await patched_session_local.flush()
     # dev_eui in uppercase angeben — Auto-Detect lowercased intern.
     exit_code = await pair_devices.main_async(
-        ["test", dev_eui.upper(), "--timeout", "1", "--poll-interval", "1", "--heartbeat-wait", "1"]
+        [
+            "test",
+            dev_eui.upper(),
+            "--timeout",
+            "1",
+            "--poll-interval",
+            "1",
+            "--heartbeat-wait",
+            "120",
+        ]
     )
     assert exit_code == 1  # TIMEOUT, siehe Integer-Fall
     assert mock_all_downlinks["send_setpoint"] == 1

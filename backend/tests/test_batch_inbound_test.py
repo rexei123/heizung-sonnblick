@@ -19,6 +19,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -42,9 +43,12 @@ from heizung.models.sensor_reading import SensorReading
 from heizung.scripts.pairing import batch_inbound_test as bit
 from heizung.scripts.pairing.batch_inbound_test import (
     AUDIT_ACTION,
+    BATTERY_WARN_PCT,
     HEARTBEAT_WAIT_MAX_S,
     SETPOINT_HIGH_C,
     SETPOINT_LOW_C,
+    SETPOINT_RESET_C,
+    TERMINAL_STATUSES,
     VALVE_CLOSED_MAX_PCT,
     VALVE_OPEN_MIN_PCT,
     BatchReport,
@@ -340,6 +344,193 @@ def test_require_motor_does_not_touch_a_measured_result() -> None:
     assert "schliesst nicht" in schlecht.reason
 
 
+def test_broken_sensor_in_the_settle_frame_is_fail() -> None:
+    """brokenSensor == True im Bewertungs-Frame ⇒ fail.
+
+    Die Vicki regelt gegen ihren internen Temperaturfuehler. Meldet der
+    einen Defekt, ist jede Aussage ueber die Ventilstellung wertlos — das
+    Geraet regelt gegen eine Zahl, der es selbst nicht traut. Das Bit ist
+    ``(bytes[7] & 0x0f) & 0x01`` (mclimate-vicki.js:161), persistiert seit
+    Migration 0023.
+
+    Die Ventilwerte sind hier absichtlich einwandfrei: der Defekt schlaegt
+    das Ventilurteil, nicht umgekehrt.
+    """
+    hoch = replace(_ok(SETPOINT_HIGH_C, 80), broken_sensor=True)
+    r = _evaluate(_device(), hoch, _ok(SETPOINT_LOW_C, 0), "4.5", valve_check=True)
+    assert r.status == "fail"
+    assert "Temperatursensor meldet Defekt" in r.reason
+
+
+def test_broken_sensor_none_is_not_a_finding() -> None:
+    """``None`` heisst "Feld nicht im Payload", nicht "Sensor defekt".
+
+    Ein alter Codec liefert das Bit nicht. Wer ``None`` als Defekt liest,
+    stempelt jedes Geraet an einem nicht aktualisierten ChirpStack ab
+    (§5.22) — dieselbe Drei-Zustands-Regel wie bei ``attached_backplate``.
+    """
+    r = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 80), broken_sensor=None),
+        replace(_ok(SETPOINT_LOW_C, 0), broken_sensor=None),
+        "4.5",
+        valve_check=True,
+    )
+    assert r.status == "pass", r.reason
+
+
+def test_broken_sensor_false_is_not_a_finding() -> None:
+    """Explizites ``False`` ist der gute Fall."""
+    r = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 80), broken_sensor=False),
+        replace(_ok(SETPOINT_LOW_C, 0), broken_sensor=False),
+        "4.5",
+        valve_check=True,
+    )
+    assert r.status == "pass", r.reason
+
+
+def test_broken_sensor_beats_the_valve_criterion() -> None:
+    """Der Defekt wird vor dem Ventil geprueft — die Meldung nennt ihn.
+
+    Sonst bekaeme der Hotelier "Ventil schliesst nicht" und tauscht ein
+    Geraet wegen eines Symptoms, dessen Ursache daneben steht.
+    """
+    r = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 100), broken_sensor=True),
+        replace(_ok(SETPOINT_LOW_C, 100), broken_sensor=True),
+        "4.5",
+        valve_check=True,
+    )
+    assert r.status == "fail"
+    assert "Temperatursensor meldet Defekt" in r.reason
+    assert "schliesst nicht" not in r.reason
+
+
+def test_battery_warning_does_not_change_the_status() -> None:
+    """T8 — die Batterie warnt, sie urteilt nicht.
+
+    Schwelle 50 % = 3,0 V auf der 2xAA-Kennlinie. Sie ruht auf drei
+    Geraeten und liegt zwischen zwei benachbarten Quantisierungsstufen des
+    Codecs — als Kriterium waere das zu wenig, als Hinweis genug.
+    """
+    schwach = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=BATTERY_WARN_PCT),
+        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=BATTERY_WARN_PCT),
+        "4.5",
+        valve_check=True,
+    )
+    assert schwach.status == "pass"
+    assert schwach.battery_note is not None
+    assert f"{BATTERY_WARN_PCT} %" in schwach.battery_note
+
+    gut = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=BATTERY_WARN_PCT + 1),
+        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=BATTERY_WARN_PCT + 1),
+        "4.5",
+        valve_check=True,
+    )
+    assert gut.status == "pass"
+    assert gut.battery_note is None
+
+
+def test_battery_takes_the_lower_of_both_frames() -> None:
+    """Der niedrigere Wert zaehlt — unter Motorlast bricht die Spannung ein.
+
+    Die beiden Setzframes liegen Minuten auseinander und einer davon liegt
+    hinter einer Motorfahrt. Wer den letzten nimmt, sieht je nach
+    Reihenfolge einen anderen Wert; der niedrigere ist der ehrlichere.
+    """
+    r = _evaluate(
+        _device(),
+        replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=80),
+        replace(_ok(SETPOINT_LOW_C, 0), battery_percent=30),
+        "4.5",
+        valve_check=True,
+    )
+    assert r.battery_percent == 30
+    assert r.battery_note is not None
+
+
+def test_unconfirmed_reset_is_a_note_not_a_failure() -> None:
+    """T9 — ein unbestaetigtes Ruecksetzen aendert das Urteil nicht.
+
+    Es ist trotzdem sichtbar: ein Geraet, das auf 10 °C stehenbleibt,
+    heizt nicht. Das darf man nicht raten muessen.
+    """
+    offen = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, 0),
+        "4.5",
+        valve_check=True,
+        reset_confirmed=False,
+    )
+    assert offen.status == "pass"
+    assert offen.reset_note is not None
+    assert str(SETPOINT_LOW_C) in offen.reset_note
+
+    bestaetigt = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, 0),
+        "4.5",
+        valve_check=True,
+        reset_confirmed=True,
+    )
+    assert bestaetigt.reset_note is None
+
+    nicht_versucht = _evaluate(
+        _device(),
+        _ok(SETPOINT_HIGH_C, 80),
+        _ok(SETPOINT_LOW_C, 0),
+        "4.5",
+        valve_check=True,
+        reset_confirmed=None,
+    )
+    assert nicht_versucht.reset_note is None
+
+
+def test_terminal_statuses_exclude_timeout() -> None:
+    """T7 — ``timeout`` ist nicht endgueltig, und das ist der ganze Punkt.
+
+    Ein Geraet ohne Uplink hat kein Urteil, sondern keine Antwort. Waere
+    ``timeout`` endgueltig, wuerde ``--resume`` genau die Geraete
+    ueberspringen, fuer die man den zweiten Durchlauf macht.
+    """
+    assert "timeout" not in TERMINAL_STATUSES
+    assert {"pass", "passed_ohne_motor", "fail"} == TERMINAL_STATUSES
+
+
+def test_report_names_weak_batteries_and_unconfirmed_resets() -> None:
+    """Beide Hinweise stehen in der Zusammenfassung, mit Nummern."""
+    schwach = DeviceResult(
+        device_id=1,
+        dev_eui="a" * 16,
+        hardware_nummer="001",
+        status="pass",
+        reason="ok",
+        firmware_version="4.5",
+        high=replace(_ok(SETPOINT_HIGH_C, 80), battery_percent=20),
+        low=replace(_ok(SETPOINT_LOW_C, 0), battery_percent=20),
+        reset_confirmed=False,
+    )
+    text = format_report(BatchReport(results=[schwach]))
+    assert "Batterie unter" in text
+    assert "001 (20 %)" in text
+    assert "nicht bestaetigt" in text
+
+
+def test_report_names_the_resume_count() -> None:
+    report = BatchReport(results=[_result("001", "pass", "4.5")], skipped_resume=7)
+    text = format_report(report)
+    assert "7 Geraet(e) uebersprungen (--resume" in text
+
+
 def test_hardware_nummer_falls_back_to_dev_eui() -> None:
     dev = _device()
     dev.label = None
@@ -414,11 +605,15 @@ class _FrameStub:
         setpoint: int | None,
         valve_position: int | None,
         attached_backplate: bool | None = True,
+        broken_sensor: bool | None = None,
+        battery_percent: int | None = 100,
     ) -> None:
         self.time = time
         self.setpoint = None if setpoint is None else Decimal(setpoint)
         self.valve_position = valve_position
         self.attached_backplate = attached_backplate
+        self.broken_sensor = broken_sensor
+        self.battery_percent = battery_percent
 
 
 @pytest.fixture
@@ -813,6 +1008,9 @@ class FakeRadio:
         self._valve: dict[str, int | None] = {}
         #: Zeitpunkt des letzten Uplinks je Geraet — Class-A-Bremse
         self._last_frame_at: dict[str, datetime] = {}
+        #: Was die Attrappe in jedem Frame mitsendet (Sprint 19 / PR B).
+        self.broken_sensor: bool | None = None
+        self.battery_percent: int | None = 100
 
     async def register(
         self,
@@ -841,6 +1039,8 @@ class FakeRadio:
                 setpoint=Decimal(21),
                 valve_position=valve_start,
                 attached_backplate=backplate,
+                broken_sensor=self.broken_sensor,
+                battery_percent=self.battery_percent,
             )
         )
         await self.session.flush()
@@ -893,6 +1093,8 @@ class FakeRadio:
                     setpoint=Decimal(setpoint),
                     valve_position=valve,
                     attached_backplate=True,
+                    broken_sensor=self.broken_sensor,
+                    battery_percent=self.battery_percent,
                 )
             )
             await self.session.flush()
@@ -1445,3 +1647,239 @@ async def test_stale_reading_is_waited_out_not_failed(
         session, [dev], timeout_s=600, poll_interval_s=10, clock=clock
     )
     assert report.results[0].status == "pass", report.results[0].reason
+
+
+async def test_resume_does_not_touch_a_settled_device(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T7 — ``--resume`` schickt keinen Downlink an ein fertiges Geraet.
+
+    Erster Lauf: das Geraet hat keine Backplate und endet als
+    ``passed_ohne_motor`` — ein endgueltiges Ergebnis. Zweiter Lauf mit
+    ``resume=True`` darf es nicht erneut anfassen; jeder Downlink kostet
+    Batterie, und der zweite Durchlauf ist fuer die TIMEOUT-Geraete gedacht.
+    """
+    dev = await _make_pool_device(session, "100", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, backplate=False)
+    clock = patch_radio(radio)
+
+    erst = await run_batch_inbound_test(
+        session, [dev], timeout_s=60, poll_interval_s=10, clock=clock
+    )
+    assert erst.results[0].status == "passed_ohne_motor"
+    assert erst.skipped_resume == 0
+    fw_nach_erst = len(radio.fw_queries)
+
+    zweit = await run_batch_inbound_test(
+        session, [dev], timeout_s=60, poll_interval_s=10, resume=True, clock=clock
+    )
+    assert zweit.results == []
+    assert zweit.skipped_resume == 1
+    assert zweit.exit_code == 0
+    # Kein Sollwert UND keine FW-Abfrage — das Geraet wurde gar nicht beruehrt.
+    assert radio.sent == []
+    assert len(radio.fw_queries) == fw_nach_erst
+
+
+async def test_resume_repeats_a_timeout_device(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T7 — ein TIMEOUT-Geraet wird wiederholt, nicht uebersprungen.
+
+    Sollwert aus der Definition von ``TERMINAL_STATUSES``: ``timeout`` ist
+    kein Urteil, sondern eine fehlende Antwort.
+    """
+    dev = await _make_pool_device(session, "101", fw=None)
+    radio = FakeRadio(session, {dev.dev_eui: _schweigt})
+    await radio.register(dev, seed_uplink=False)
+    clock = patch_radio(radio)
+
+    erst = await run_batch_inbound_test(
+        session, [dev], timeout_s=60, poll_interval_s=10, clock=clock
+    )
+    assert erst.results[0].status == "timeout"
+
+    zweit = await run_batch_inbound_test(
+        session, [dev], timeout_s=60, poll_interval_s=10, resume=True, clock=clock
+    )
+    assert zweit.skipped_resume == 0
+    assert len(zweit.results) == 1
+    assert zweit.results[0].status == "timeout"
+
+
+async def test_verdict_is_committed_before_the_run_ends(
+    session: AsyncSession,
+    engine: AsyncEngine,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T6 — ein fertiges Urteil ist festgeschrieben, nicht nur in der Session.
+
+    Geprueft aus einer **zweiten** Session: nur was committet ist, ist
+    dort sichtbar. Vor PR B lief ``_persist`` erst nach dem letzten Geraet,
+    ein Abbruch verlor damit die ganze Arbeit eines Laufs von ueber einer
+    Stunde.
+    """
+    dev = await _make_pool_device(session, "110", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev, backplate=False)
+    clock = patch_radio(radio)
+
+    await run_batch_inbound_test(session, [dev], timeout_s=60, poll_interval_s=10, clock=clock)
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as fremd:
+        stmt = select(BusinessAudit).where(
+            BusinessAudit.action == AUDIT_ACTION, BusinessAudit.target_id == dev.id
+        )
+        audit = (await fremd.execute(stmt)).scalar_one()
+        assert audit.new_value["status"] == "passed_ohne_motor"
+
+
+async def test_setpoint_is_reset_after_the_test(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T9 — nach dem Test steht der Ruecksetz-Sollwert an.
+
+    Reihenfolge ist Teil der Zusicherung: hoch, niedrig, zurueck. Ohne den
+    letzten Schritt bliebe das Geraet auf dem Testwert stehen.
+    """
+    dev = await _make_pool_device(session, "120", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    clock = patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session, [dev], timeout_s=600, poll_interval_s=10, clock=clock
+    )
+
+    gesendet = [t for eui, t in radio.sent if eui == dev.dev_eui]
+    assert gesendet == [SETPOINT_HIGH_C, SETPOINT_LOW_C, SETPOINT_RESET_C]
+    assert report.results[0].reset_confirmed is True
+    assert report.results[0].reset_note is None
+
+
+async def test_no_reset_leaves_the_device_on_the_test_value(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T9 — ``--no-reset`` schickt den dritten Sollwert nicht."""
+    dev = await _make_pool_device(session, "121", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    clock = patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session,
+        [dev],
+        timeout_s=600,
+        poll_interval_s=10,
+        reset_setpoint=False,
+        clock=clock,
+    )
+    gesendet = [t for eui, t in radio.sent if eui == dev.dev_eui]
+    assert gesendet == [SETPOINT_HIGH_C, SETPOINT_LOW_C]
+    assert report.results[0].reset_confirmed is None
+
+
+async def test_broken_sensor_from_a_real_frame_is_fail(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """Der Defekt kommt aus dem Reading, nicht aus einem Konstruktor.
+
+    Belegt den ganzen Weg: Attrappe setzt das Bit im Frame, der Subscriber-
+    Pfad ist dieselbe Spalte (Migration 0023), und die Bewertung liest es
+    aus dem Setzframe.
+    """
+    dev = await _make_pool_device(session, "130", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    radio.broken_sensor = True
+    await radio.register(dev)
+    clock = patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session, [dev], timeout_s=600, poll_interval_s=10, clock=clock
+    )
+    assert report.results[0].status == "fail", report.results[0].reason
+    assert "Temperatursensor meldet Defekt" in report.results[0].reason
+
+
+async def test_progress_callbacks_report_phases_and_devices(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T10 — der Lauf meldet Abschnitte und fertige Geraete.
+
+    Ohne das steht die Konsole ueber eine Stunde stumm, und ein stummer
+    Lauf wird fuer haengend gehalten und abgebrochen.
+    """
+    dev = await _make_pool_device(session, "140", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _antwortet()})
+    await radio.register(dev)
+    clock = patch_radio(radio)
+
+    phasen: list[str] = []
+    geraete: list[str] = []
+    await run_batch_inbound_test(
+        session,
+        [dev],
+        timeout_s=600,
+        poll_interval_s=10,
+        clock=clock,
+        on_phase=phasen.append,
+        on_device=lambda r: geraete.append(r.hardware_nummer),
+    )
+
+    assert any("Vor-Check" in p for p in phasen)
+    assert any(str(SETPOINT_HIGH_C) in p for p in phasen)
+    assert any(str(SETPOINT_LOW_C) in p for p in phasen)
+    assert any("Ruecksetzen" in p for p in phasen)
+    assert any("Firmware" in p for p in phasen)
+    assert geraete == ["140"]
+
+
+def _nur_hoher_sollwert(target: int) -> tuple[int, int | None] | None:
+    """Antwortet auf den hohen Sollwert, schweigt beim niedrigen."""
+    if target == SETPOINT_HIGH_C:
+        return target, 80
+    return None
+
+
+async def test_no_reset_when_the_queue_is_not_proven_empty(
+    session: AsyncSession,
+    patch_radio: Callable[[FakeRadio], Clock],
+) -> None:
+    """T9 / S4 — kein Ruecksetz-Befehl, solange der vorige nicht belegt ist.
+
+    Das Geraet bestaetigt den hohen Sollwert, danach schweigt es. Der
+    niedrige Sollwert liegt damit **moeglicherweise noch in der Queue**; ein
+    Ruecksetz-Befehl waere der zweite ausstehende und genau der Fall, den die
+    Downlink-Disziplin verbietet.
+
+    Trotzdem darf das nicht still bleiben: das Geraet steht vielleicht auf
+    10 Grad und heizt nicht. Der Bericht sagt das.
+    """
+    dev = await _make_pool_device(session, "150", fw="4.5")
+    radio = FakeRadio(session, {dev.dev_eui: _nur_hoher_sollwert})
+    await radio.register(dev)
+    clock = patch_radio(radio)
+
+    report = await run_batch_inbound_test(
+        session, [dev], timeout_s=120, poll_interval_s=10, clock=clock
+    )
+
+    gesendet = [t for eui, t in radio.sent if eui == dev.dev_eui]
+    assert SETPOINT_HIGH_C in gesendet
+    assert SETPOINT_LOW_C in gesendet
+    assert SETPOINT_RESET_C not in gesendet, gesendet
+
+    r = report.results[0]
+    assert r.status == "timeout"
+    assert r.reset_confirmed is False
+    assert r.reset_note is not None
+    assert str(SETPOINT_LOW_C) in r.reset_note
+    assert "nicht bestaetigt" in format_report(report)

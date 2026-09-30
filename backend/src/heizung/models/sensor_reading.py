@@ -66,6 +66,19 @@ class SensorReading(Base):
     # reicht nicht — beide letzten frischen Frames muessen False sein.
     attached_backplate: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Sprint 19 (PR B): Vicki-Codec-Feld ``brokenSensor`` — Bit 0 des
+    # Low-Nibbles von Byte 7 (mclimate-vicki.js:161). Der Codec liefert es
+    # seit je her, persistiert wurde es bis Migration 0023 nicht.
+    #
+    # Der Eingangstest urteilt ueber die Ventilstellung, und die Vicki regelt
+    # gegen ihren internen Temperatursensor. Meldet der einen Defekt, ist die
+    # Aussage ueber das Ventil wertlos — das Geraet regelt gegen einen
+    # Messwert, dem es selbst nicht traut.
+    #
+    # NULL = Feld nicht im Payload (alter Codec), NICHT identisch mit False.
+    # Nur True ist ein Defekt-Befund.
+    broken_sensor: Mapped[bool | None] = mapped_column(Boolean)
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)

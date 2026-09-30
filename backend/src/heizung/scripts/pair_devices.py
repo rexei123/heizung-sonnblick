@@ -106,8 +106,11 @@ from heizung.scripts.pairing.batch_inbound_test import (  # noqa: E402
     DEFAULT_POLL_INTERVAL_S,
     DEFAULT_TIMEOUT_S,
     HEARTBEAT_WAIT_MAX_S,
+    SETPOINT_RESET_C,
+    DeviceResult,
     format_report,
     run_batch_inbound_test,
+    status_tag,
 )
 from heizung.scripts.pairing.csv_parser import (  # noqa: E402
     check_dev_eui_duplicates_in_csv,
@@ -337,6 +340,27 @@ async def _cmd_import(args: argparse.Namespace) -> int:
     return 0 if counts["error"] == 0 else 1
 
 
+def _melde_phase(text: str) -> None:
+    """Fortschritts-Meldung fuer einen Abschnitt (Sprint 19 / T10).
+
+    Ein Lauf ueber 104 Geraete braucht bis zu sieben Wartefenster und damit
+    ueber eine Stunde. Ohne Zwischenmeldung steht die Konsole stumm da, und
+    ein stummer Lauf wird fuer haengend gehalten und abgebrochen — womit die
+    Arbeit weg ist, die er gerade tut.
+    """
+    print(f"  * {text}", flush=True)
+
+
+def _melde_geraet(result: DeviceResult) -> None:
+    """Meldung, sobald EIN Geraete-Urteil feststeht und festgeschrieben ist."""
+    zusatz = [t for t in (result.battery_note, result.reset_note) if t]
+    schwanz = f" | {' | '.join(zusatz)}" if zusatz else ""
+    print(
+        f"  {status_tag(result.status):<12} {result.hardware_nummer}: {result.reason}{schwanz}",
+        flush=True,
+    )
+
+
 async def _cmd_test(args: argparse.Namespace) -> int:
     """``test <device>``: der Batch-Eingangstest fuer genau ein Geraet.
 
@@ -380,7 +404,11 @@ async def _cmd_test(args: argparse.Namespace) -> int:
             valve_check=not args.no_valve_check,
             require_motor=args.require_motor,
             heartbeat_wait_s=args.heartbeat_wait,
+            reset_setpoint=not args.no_reset,
+            resume=args.resume,
             user_id=user_id,
+            on_phase=_melde_phase,
+            on_device=_melde_geraet,
         )
         await session.commit()
 
@@ -451,7 +479,11 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
             valve_check=not args.no_valve_check,
             require_motor=args.require_motor,
             heartbeat_wait_s=args.heartbeat_wait,
+            reset_setpoint=not args.no_reset,
+            resume=args.resume,
             user_id=user_id,
+            on_phase=_melde_phase,
+            on_device=_melde_geraet,
         )
         await session.commit()
 
@@ -600,6 +632,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "stummes Geraet den Lauf nicht aufhalten soll.",
     )
     p_test.add_argument(
+        "--resume",
+        action="store_true",
+        help="Geraete mit endgueltigem Ergebnis aus einem frueheren Lauf "
+        "ueberspringen. TIMEOUT gilt als offen und wird wiederholt. Fuer den "
+        "zweiten Durchlauf nach einem Abbruch — jeder Downlink kostet Batterie.",
+    )
+    p_test.add_argument(
+        "--no-reset",
+        action="store_true",
+        help=f"Sollwert danach NICHT auf {SETPOINT_RESET_C} Grad zuruecksetzen. "
+        f"Ohne diesen Schalter endet jedes gepruefte Geraet auf "
+        f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
+    )
+    p_test.add_argument(
         "--user-email",
         default=None,
         help="Email des Aufrufers fuer den BusinessAudit-Eintrag.",
@@ -659,6 +705,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Wartefenster des Vor-Checks auf den ersten frischen Uplink in "
         f"Sekunden. Default {HEARTBEAT_WAIT_MAX_S}. Kleiner setzen, wenn ein "
         "stummes Geraet den Lauf nicht aufhalten soll.",
+    )
+    p_batch.add_argument(
+        "--resume",
+        action="store_true",
+        help="Geraete mit endgueltigem Ergebnis aus einem frueheren Lauf "
+        "ueberspringen. TIMEOUT gilt als offen und wird wiederholt. Fuer den "
+        "zweiten Durchlauf nach einem Abbruch — jeder Downlink kostet Batterie.",
+    )
+    p_batch.add_argument(
+        "--no-reset",
+        action="store_true",
+        help=f"Sollwert danach NICHT auf {SETPOINT_RESET_C} Grad zuruecksetzen. "
+        f"Ohne diesen Schalter endet jedes gepruefte Geraet auf "
+        f"{SETPOINT_RESET_C} Grad statt auf dem Testwert.",
     )
     p_batch.add_argument(
         "--user-email",
