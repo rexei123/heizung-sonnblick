@@ -161,6 +161,8 @@ async def _build_device_read(
             "battery_state": verdict.stage,
             "battery_voltage_median": verdict.median_v,
             "battery_jump_at": verdict.jump_at,
+            "battery_last_voltage": verdict.last_v,
+            "battery_last_at": verdict.last_at,
         }
     )
 

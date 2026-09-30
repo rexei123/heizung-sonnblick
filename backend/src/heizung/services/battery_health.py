@@ -40,7 +40,7 @@ Vermerk dazu steht im Docstring von ``mqtt_subscriber._battery_pct_from_volts``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -153,6 +153,21 @@ def battery_stage_from_volts(volts: Decimal | None) -> BatteryHealthState:
 # Median ueber einen Tag laesst den Einbruch nicht durch.
 BATTERY_WINDOW_H = 24
 
+# Wie weit zurueck nach dem letzten bekannten Spannungswert gesucht wird,
+# wenn im Bewertungs-Fenster keiner liegt.
+#
+# 30 Tage, aus zwei Gruenden. Erstens sagt ein aelterer Wert nichts ueber die
+# Batterie von heute — "3,5 V · vor drei Monaten" ist keine Auskunft, sondern
+# eine Zahl, die falsche Sicherheit gibt. Zweitens waere eine unbegrenzte
+# Suche ein ``DISTINCT ON`` ueber die ganze Hypertable: keine
+# Chunk-Exclusion, also genau die Kosten, die AE-72 §4 vermieden hat.
+#
+# Folge, die man kennen muss: ein Geraet, dessen letzte Meldung laenger als
+# 30 Tage zurueckliegt, zeigt "unbekannt" — obwohl irgendwann einmal eine
+# Spannung bekannt war. Das ist bewusst; ein Geraet, das einen Monat nicht
+# gemeldet hat, ist ein Fall fuer die Offline-Achse, nicht fuer die Batterie.
+BATTERY_LAST_LOOKBACK_D = 30
+
 
 @dataclass(frozen=True, slots=True)
 class BatteryVerdict:
@@ -168,12 +183,26 @@ class BatteryVerdict:
     entsprechend klein. Solange die Mindest-Stichprobe darin nicht erreicht
     ist, steht die Stufe auf ``unbekannt`` — mit ``jump_at`` kann die
     Oberflaeche den Grund nennen statt einen Fehler zu suggerieren.
+
+    ``last_v`` / ``last_at`` sind der **juengste bekannte Spannungswert** und
+    sein Zeitpunkt, unabhaengig vom Bewertungs-Fenster und unabhaengig davon,
+    ob eine Stufe zustande kam.
+
+    Warum das ein eigenes Feldpaar ist und nicht ``median_v`` genuegt: ein
+    Badge, der "Batterie unbekannt" ohne Zahl zeigt, ist fuer den Hotelier
+    wertlos — er weiss danach so viel wie vorher. Eine Spannung von vor zwei
+    Stunden ist keine Stufe, aber sie ist eine Auskunft. Die Regel lautet
+    deshalb: **nie ein Badge ohne Spannung, wenn irgendeine Spannung bekannt
+    ist** (Befund heizung-test 30.09.2026). "unbekannt" bleibt fuer den einen
+    Fall, in dem es zutrifft: es wurde nie eine gemeldet.
     """
 
     stage: BatteryHealthState
     median_v: Decimal | None
     samples: int
     jump_at: datetime | None = None
+    last_v: Decimal | None = None
+    last_at: datetime | None = None
 
 
 UNBEKANNT = BatteryVerdict(stage="unbekannt", median_v=None, samples=0)
@@ -298,7 +327,54 @@ async def battery_verdicts(
             session, device_id, seit=seit, alter_median=alter_median
         )
 
+    # Zweite Query: der juengste bekannte Spannungswert, unabhaengig vom
+    # Bewertungs-Fenster. Er wird an JEDES Verdict gehaengt, auch an eines
+    # mit Stufe — die Oberflaeche zeigt dann bei fehlender Stufe die Zahl
+    # statt "unbekannt" ohne Zahl (Befund heizung-test 30.09.2026).
+    #
+    # Eine Query fuer alle Geraete, wie die erste. Damit sind es zwei pro
+    # Request statt einer; das Skalierungs-Argument aus AE-72 §4 bleibt, weil
+    # keine davon mit der Geraetezahl waechst.
+    letzte = await _letzte_spannungen(session, ids, jetzt=jetzt)
+    for device_id, (volts, zeitpunkt) in letzte.items():
+        ergebnis[device_id] = replace(ergebnis[device_id], last_v=volts, last_at=zeitpunkt)
+
     return ergebnis
+
+
+async def _letzte_spannungen(
+    session: AsyncSession, ids: Sequence[int], *, jetzt: datetime
+) -> dict[int, tuple[Decimal, datetime]]:
+    """Juengster Spannungswert je Geraet innerhalb des Rueckblick-Fensters.
+
+    ``DISTINCT ON (device_id)`` mit ``ORDER BY device_id, time DESC`` ueber
+    ``ix_sensor_reading_device_time`` — dasselbe Muster wie in
+    ``dashboard_aggregates._collect_zone_aggregates``.
+
+    Geraete ohne Treffer fehlen im Ergebnis. Fuer sie bleibt es bei
+    ``last_v = None``, und das heisst dann wirklich: es ist keine Spannung
+    bekannt.
+    """
+    seit = jetzt - timedelta(days=BATTERY_LAST_LOOKBACK_D)
+    stmt = (
+        select(
+            SensorReading.device_id,
+            SensorReading.battery_voltage,
+            SensorReading.time,
+        )
+        .where(SensorReading.device_id.in_(list(ids)))
+        .where(SensorReading.time >= seit)
+        .where(SensorReading.battery_voltage.is_not(None))
+        .order_by(SensorReading.device_id, SensorReading.time.desc())
+        .distinct(SensorReading.device_id)
+    )
+    treffer: dict[int, tuple[Decimal, datetime]] = {}
+    for row in (await session.execute(stmt)).all():
+        volts = row.battery_voltage
+        if volts is None:
+            continue
+        treffer[int(row.device_id)] = (volts, row.time)
+    return treffer
 
 
 async def _verdict_nach_sprung(

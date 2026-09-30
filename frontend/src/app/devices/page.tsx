@@ -199,6 +199,8 @@ function DeviceRow({ device: d }: { device: Device }) {
           batteryState={d.battery_state}
           batteryVolts={d.battery_voltage_median}
           batteryJumpAt={d.battery_jump_at}
+          batteryLastVolts={d.battery_last_voltage}
+          batteryLastAt={d.battery_last_at}
           variant="compact"
         />
       </td>

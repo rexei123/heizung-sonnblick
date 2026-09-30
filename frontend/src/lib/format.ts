@@ -106,6 +106,31 @@ export function formatPercent(v: number | null | undefined): string {
 }
 
 /**
+ * Kurzes Alter für Badges: „gerade", „vor 35 min", „vor 2 h", „vor 3 d".
+ *
+ * Nicht `formatRelative`: das liefert über `Intl.RelativeTimeFormat` „vor
+ * 2 Stunden", und das sprengt eine Pille in einer Tabellenzelle. Hier zählt
+ * Kürze — die genaue Zeit steht im Tooltip.
+ *
+ * Die Stufen sind grob mit Absicht. „vor 2 h" statt „vor 127 min": bei einem
+ * Wert, der ohnehin nur alle zehn Minuten kommt, ist die Minute keine
+ * Information, sondern Scheinpräzision — derselbe Fehler wie zweistellige
+ * Prozentzahlen bei 0,1-V-Auflösung (AE-72 §1).
+ */
+export function formatAgeShort(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "–";
+  const sek = Math.round((Date.now() - d.getTime()) / 1000);
+  // Negativ = in der Zukunft. Kommt bei Uhr-Drift zwischen Server und
+  // Browser vor; „gerade" ist dort die harmlose Antwort.
+  if (sek < 90) return "gerade";
+  if (sek < 3600) return `vor ${Math.round(sek / 60)} min`;
+  if (sek < 86400) return `vor ${Math.round(sek / 3600)} h`;
+  return `vor ${Math.round(sek / 86400)} d`;
+}
+
+/**
  * Geräte-Spannung in Volt, eine Dezimalstelle, Komma als Trennzeichen
  * (Sprint 20, AE-72).
  *
