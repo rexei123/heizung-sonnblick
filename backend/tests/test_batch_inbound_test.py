@@ -1209,7 +1209,8 @@ async def test_batch_skips_second_step_for_failed_devices(
     silent_sends = [t for eui, t in radio.sent if eui == silent.dev_eui]
     good_sends = [t for eui, t in radio.sent if eui == good.dev_eui]
     assert silent_sends == [SETPOINT_HIGH_C]
-    assert good_sends == [SETPOINT_HIGH_C, SETPOINT_LOW_C]
+    # Das gesunde Geraet bekommt zusaetzlich die Ruecksetzung (Sprint 19 / T9).
+    assert good_sends == [SETPOINT_HIGH_C, SETPOINT_LOW_C, SETPOINT_RESET_C]
 
 
 async def test_batch_valve_stuck_is_fail(
@@ -1560,7 +1561,8 @@ async def test_only_one_downlink_per_device_is_outstanding(
     await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10, clock=clock)
 
     sendungen = [i for i, (_, art) in enumerate(ereignisse) if art.startswith("send:")]
-    assert len(sendungen) == 3, ereignisse
+    # 28 °C, 10 °C, Ruecksetzung auf 21 °C, FW-Abfrage (Sprint 19 / T9).
+    assert len(sendungen) == 4, ereignisse
     for links, rechts in zip(sendungen, sendungen[1:], strict=False):
         dazwischen = [art for _, art in ereignisse[links + 1 : rechts] if art == "uplink"]
         assert dazwischen, f"kein Uplink zwischen {ereignisse[links]} und {ereignisse[rechts]}"
@@ -1589,7 +1591,14 @@ async def test_firmware_query_comes_last(
     clock = patch_radio(radio)
 
     await run_batch_inbound_test(session, [dev], timeout_s=600, poll_interval_s=10, clock=clock)
-    assert reihenfolge == [f"setpoint:{SETPOINT_HIGH_C}", f"setpoint:{SETPOINT_LOW_C}", "fw"]
+    # Die Ruecksetzung steht vor der FW-Abfrage: sie ist der letzte Befehl,
+    # dessen Zustellung noch belegt wird (Sprint 19 / T9).
+    assert reihenfolge == [
+        f"setpoint:{SETPOINT_HIGH_C}",
+        f"setpoint:{SETPOINT_LOW_C}",
+        f"setpoint:{SETPOINT_RESET_C}",
+        "fw",
+    ]
 
 
 async def test_stale_reading_is_waited_out_not_failed(
