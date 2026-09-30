@@ -470,6 +470,139 @@ async def test_kein_sprung_bei_zwei_rasterschritten(db_session: AsyncSession) ->
 
 
 # ---------------------------------------------------------------------------
+# Nie ein Badge ohne Spannung (Befund heizung-test 30.09.2026)
+# ---------------------------------------------------------------------------
+#
+# "Batterie unbekannt" ohne Zahl ist fuer den Hotelier wertlos — er weiss
+# danach so viel wie vorher. Die Regel lautet deshalb: eine Stufe braucht
+# drei Messwerte, aber **eine Zahl gibt es immer, wenn irgendeine bekannt
+# ist.** "unbekannt" bleibt fuer den einen Fall, in dem es zutrifft.
+
+
+async def test_letzter_wert_auch_ohne_stufe(db_session: AsyncSession) -> None:
+    """Zwei Messwerte: keine Stufe, aber der letzte Wert steht im Verdict.
+
+    Genau der Fall, der auf heizung-test als nutzloses "Batterie unbekannt"
+    erschien. Die Stufe bleibt "unbekannt" — sie ist wirklich nicht
+    berechenbar —, aber ``last_v`` und ``last_at`` tragen die Auskunft.
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, ["3.4", "3.5"])
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.stage == "unbekannt"
+    assert verdict.last_v == Decimal("3.5")
+    assert verdict.last_at == JETZT
+
+
+async def test_letzter_wert_auch_bei_vorhandener_stufe(
+    db_session: AsyncSession,
+) -> None:
+    """Das Feldpaar wird immer gefuellt, nicht nur im Ausnahmefall.
+
+    Sonst muesste die Oberflaeche zwei Quellen unterscheiden, und der
+    naechste, der eine Anzeige baut, greift zur falschen.
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, ["3.1", "3.1", "3.1"])
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.stage == "ok"
+    assert verdict.median_v == Decimal("3.1")
+    assert verdict.last_v == Decimal("3.1")
+    assert verdict.last_at == JETZT
+
+
+async def test_letzter_wert_auch_ausserhalb_des_bewertungs_fensters(
+    db_session: AsyncSession,
+) -> None:
+    """Der letzte Wert wird auch gefunden, wenn er aelter als 24 h ist.
+
+    Ein Geraet, das seit drei Tagen schweigt, hat keine Stufe — aber seine
+    letzte gemeldete Spannung ist eine Auskunft, und zwar eine, aus der man
+    etwas ableiten kann ("voll und stumm" ist ein anderer Fall als "leer").
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, ["3.5"] * 5, bis=JETZT - timedelta(days=3))
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    # Im 24-h-Fenster liegt nichts -> keine Stufe, kein Median.
+    assert verdict.stage == "unbekannt"
+    assert verdict.median_v is None
+    assert verdict.samples == 0
+    # Aber der letzte bekannte Wert steht da, mit seinem Alter.
+    assert verdict.last_v == Decimal("3.5")
+    assert verdict.last_at == JETZT - timedelta(days=3)
+
+
+async def test_nie_gemeldet_bleibt_ohne_zahl(db_session: AsyncSession) -> None:
+    """Der einzige Fall, in dem "unbekannt" ohne Zahl richtig ist."""
+    device_id = await _make_device(db_session)
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.stage == "unbekannt"
+    assert verdict.last_v is None
+    assert verdict.last_at is None
+
+
+async def test_nur_null_spannungen_bleibt_ohne_zahl(db_session: AsyncSession) -> None:
+    """Bestandszeilen ohne Spannung sind keine gemeldete Spannung.
+
+    Ein Geraet, das seit Monaten meldet, aber dessen Zeilen alle von vor
+    Migration 0024 stammen, hat **nie** eine Spannung gemeldet. "unbekannt"
+    ohne Zahl ist dort die Wahrheit.
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, [None] * 6)
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.stage == "unbekannt"
+    assert verdict.last_v is None
+
+
+async def test_werte_jenseits_des_rueckblicks_zaehlen_nicht(
+    db_session: AsyncSession,
+) -> None:
+    """Aelter als 30 Tage -> "unbekannt" ohne Zahl, bewusst.
+
+    Eine Spannung von vor drei Monaten sagt nichts ueber die Batterie von
+    heute; sie waere eine Zahl, die falsche Sicherheit gibt. Und eine
+    unbegrenzte Suche waere ein ``DISTINCT ON`` ohne Chunk-Exclusion — genau
+    die Kosten, die AE-72 §4 vermieden hat.
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, ["3.5"] * 3, bis=JETZT - timedelta(days=45))
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.stage == "unbekannt"
+    assert verdict.last_v is None
+
+
+async def test_letzter_wert_ist_der_juengste_nicht_der_hoechste(
+    db_session: AsyncSession,
+) -> None:
+    """Ordnung nach Zeit, nicht nach Wert.
+
+    Bei einem entladenden Geraet ist der juengste Wert der niedrigste. Wer
+    hier nach Wert sortiert, zeigt dem Hotelier dauerhaft die hoechste je
+    gemessene Spannung — und der Badge wuerde nie schlechter.
+    """
+    device_id = await _make_device(db_session)
+    await _seed(db_session, device_id, ["3.5", "3.2", "2.8"])
+
+    verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
+
+    assert verdict.last_v == Decimal("2.8")
+    assert verdict.last_at == JETZT
+
+
+# ---------------------------------------------------------------------------
 # Sprint 20 T4 — Performance-Beleg fuer die Geraeteliste (104 Geraete)
 # ---------------------------------------------------------------------------
 #
@@ -598,7 +731,12 @@ async def test_geraeteliste_braucht_eine_query_fuer_alle_104(
         dauer = time.perf_counter() - start
 
     assert len(verdicts) == GERAETE
-    assert len(statements) == 1, f"{len(statements)} Statements:\n" + "\n".join(statements)
+    # Zwei Statements: das Aggregat ueber das 24-h-Fenster und die Abfrage des
+    # juengsten bekannten Spannungswerts. Beide sind EINE Query fuer alle
+    # Geraete — das ist die Eigenschaft, die mit dem Bestand skaliert. Stuende
+    # hier eine Zahl in der Groessenordnung von GERAETE, waere die Bewertung
+    # ein dritter N+1-Pfad in der Geraeteliste.
+    assert len(statements) == 2, f"{len(statements)} Statements:\n" + "\n".join(statements)
 
     # Das Fenster hat gegriffen: die 30 Tage alten Zeilen sind nicht in der
     # Stichprobe. Das ist gleichzeitig der Korrektheits-Beleg dafuer, dass
@@ -623,9 +761,10 @@ async def test_zweiter_durchgang_nur_fuer_getauschte_geraete(
 ) -> None:
     """Der Sprung-Pfad kostet nur dort, wo wirklich getauscht wurde.
 
-    Bei 104 Geraeten und einem frischen Batteriewechsel sind es zwei
-    Statements, nicht 105: die Aggregat-Query plus ein Nachschlag fuer das
-    eine betroffene Geraet. Im Normalbetrieb bleibt es bei einem.
+    Bei 104 Geraeten und einem frischen Batteriewechsel sind es drei
+    Statements, nicht 106: das Aggregat, ein Nachschlag fuer das eine
+    betroffene Geraet, und die Abfrage der letzten Spannungen. Im
+    Normalbetrieb bleibt es bei zwei.
     """
     device_ids = await _seed_bestand(db_session)
     getauscht = device_ids[0]
@@ -645,10 +784,12 @@ async def test_zweiter_durchgang_nur_fuer_getauschte_geraete(
     with _zaehle_statements(db_session) as statements:
         verdicts = await battery_verdicts(db_session, device_ids, now=spaeter)
 
-    assert len(statements) == 2, f"{len(statements)} Statements:\n" + "\n".join(statements)
+    assert len(statements) == 3, f"{len(statements)} Statements:\n" + "\n".join(statements)
     assert verdicts[getauscht].jump_at is not None
     assert verdicts[getauscht].samples == 4
     assert all(verdicts[d].jump_at is None for d in device_ids[1:])
+    # Auch das getauschte Geraet traegt den letzten bekannten Wert.
+    assert verdicts[getauscht].last_v == Decimal("3.5")
 
 
 async def test_explain_plan_der_aggregat_query(

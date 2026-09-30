@@ -226,6 +226,22 @@ class DeviceRead(BaseModel):
     # suggerieren — das ist rund eine halbe Stunde nach dem Wechsel.
     battery_jump_at: datetime | None = None
 
+    # Der juengste bekannte Spannungswert und sein Zeitpunkt — unabhaengig
+    # vom Bewertungs-Fenster und davon, ob eine Stufe zustande kam.
+    #
+    # Regel aus dem Befund vom 30.09.2026: **nie ein Badge ohne Spannung,
+    # wenn irgendeine Spannung bekannt ist.** "Batterie unbekannt" ohne Zahl
+    # sagt dem Hotelier nichts; "3,5 V · vor 2 h" sagt ihm, dass die Zelle
+    # voll ist und das Geraet seit zwei Stunden schweigt — zwei Auskuenfte
+    # statt keiner. ``battery_state`` bleibt dabei "unbekannt", weil eine
+    # Stufe wirklich nicht berechenbar ist; die Oberflaeche unterscheidet
+    # anhand dieser Felder, was sie zeigt.
+    #
+    # Beide ``None`` heisst: es wurde nie eine Spannung gemeldet (oder die
+    # letzte liegt laenger zurueck als das Rueckblick-Fenster von 30 Tagen).
+    battery_last_voltage: Decimal | None = None
+    battery_last_at: datetime | None = None
+
     # Sprint 14a (D1/D2): additive Cross-Sicht-Felder. Defaults None, damit
     # ``model_validate(device)`` (from_attributes) bei fehlenden ORM-
     # Attributen (active_override, latest_reading) den Default nimmt; der
@@ -235,8 +251,8 @@ class DeviceRead(BaseModel):
     active_override: DeviceActiveOverrideRead | None = None
     latest_reading: DeviceLatestReadingRead | None = None
 
-    @field_serializer("battery_voltage_median")
-    def _median_to_float(self, v: Decimal | None) -> float | None:
+    @field_serializer("battery_voltage_median", "battery_last_voltage")
+    def _volt_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 
 
