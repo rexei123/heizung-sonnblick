@@ -36,6 +36,15 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
+    # Nur fuer Tests, die Infrastruktur-Dateien lesen statt sie nachzubauen
+    # (tests/test_celery_beat_healthcheck.py liest den Healthcheck-Befehl aus
+    # docker-compose.prod.yml und fuehrt ihn aus).
+    #
+    # Ausdruecklich deklariert, obwohl es heute transitiv schon da ist: ein
+    # Test, der auf einer Abhaengigkeit sitzt, die niemand angefordert hat,
+    # bricht, sobald ein anderes Paket sie fallen laesst — und zwar mit einem
+    # ImportError, der nach einem Testfehler aussieht (CLAUDE.md §5.80).
+    "pyyaml>=6.0",
     "ruff>=0.3",
     # Obergrenze bewusst gesetzt (26.09.2026). mypy 2.x meldet vier Stellen
     # in Bestandscode, die 1.x durchgelassen hat. Der eigentliche Mangel war
