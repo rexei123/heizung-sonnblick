@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-01, develop-HEAD `55dd8f0` (PR #247). Laufender Sprint: **20b (Batterie-Schwellen in die Settings, AE-73)** — §2bt, PR offen. Davor abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248 gemergt; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247 gemergt. Offen daneben: `celery_beat`-Healthcheck, §2bs, PR #249. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-10-01, develop-HEAD `8ba8f91` (PR #249). Laufender Sprint: **20b (Batterie-Schwellen in die Settings, AE-73)** — §2bt, PR #250 offen. Davor abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248 gemergt; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247 gemergt; **`celery_beat`-Healthcheck**, §2bs — PR #249 gemergt (`docker ps`-Beleg beim Hotelier offen). Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
 
 ---
 
@@ -4199,6 +4199,100 @@ nur sich selbst prüfen.
 
 ---
 
+## 2bs. celery_beat-Healthcheck: vom akzeptierten Drift zum echten Melder (2026-09-30)
+
+**Befund (heizung-test, nach dem Reboot vom 30.09.):** `celery_beat` steht
+dauerhaft auf `unhealthy`, während das Log zeigt, dass Beat normal arbeitet
+(Tasks jede Minute). Ursache: der Container erbt den HEALTHCHECK aus dem
+api-Image — `curl -f http://localhost:8000/health`
+([backend/Dockerfile:44-45](backend/Dockerfile:44)) — und Beat führt keinen
+uvicorn. Der Check konnte nur scheitern.
+
+Das war seit Mai bekannt und als **akzeptierter Drift** eingeordnet
+(B-9.11-4, CLAUDE.md §5.32): kein Service hängt an diesem Status, Docker
+startet bei `unhealthy` nicht neu, Beat tickte verlässlich.
+
+**Was die Akzeptanz übersah:** RUNBOOK §10l musste dem Hotelier im
+Engine-Alarm-Handgriff ausdrücklich sagen, dieses eine `unhealthy` zu
+**ignorieren** und es sei „nicht die Ursache". Damit war der Status genau in
+dem Moment wertlos, in dem man ihn gebraucht hätte — beim Engine-Alarm. Ein
+Melder, den man ignorieren muss, überwacht nichts (§5.79).
+
+### Die Prüfungen aus dem Auftrag
+
+| Frage | Befund |
+|---|---|
+| Hängt etwas am Health-Status von `celery_beat`? | **Nichts.** Kein Service nennt ihn unter `depends_on`; die Richtung ist umgekehrt (Beat hängt an `redis: service_healthy`). `deploy-pull.sh` liest keinen Container-Health (das `ping_healthcheck` dort ist healthchecks.io), `deploy.sh:47` curlt `/health` der **API**, und die Dead-Man-Checks (§10l) pingen aus der **Task-Ausführung** — nach §5.76, nicht aus Container-Health. |
+| Ist `celery_worker`s Healthcheck echt oder geerbt? | **Echt**, explizit gesetzt (`celery inspect ping -t 5`). Bleibt unverändert. Einschränkung, die dazugehört: der Check läuft über den Broker — fällt Redis aus, meldet der Worker `unhealthy`, obwohl der Prozess lebt. Vertretbar (ein Worker ohne Broker arbeitet nicht), aber kein reiner Prozess-Check. Ein Test hält die Entscheidung fest. |
+
+### Der neue Check
+
+```yaml
+test: ["CMD", "python", "-c", "…glob('/tmp/celerybeat-schedule*')… > time.time()-600…"]
+interval: 60s · timeout: 5s · retries: 3 · start_period: 120s
+```
+
+Geprüft wird die **Wirkung** (§5.76): hat Beat seinen Schedule in den
+letzten zehn Minuten geschrieben? Der `PersistentScheduler` synchronisiert
+seine shelve-Datei beim Ticken, und der 60-s-Task garantiert, dass getickt
+wird. Ein Prozess-Check (`pgrep`) wäre die Mechanik — ein hängender
+Beat-Prozess wäre damit `healthy`. Ein `celery inspect ping` geht nicht:
+Beat ist kein Worker und antwortet darauf nicht.
+
+**Drei Entscheidungen, die nicht offensichtlich sind:**
+
+1. **Muster statt Pfad.** `--schedule` gibt den Pfad an `shelve.open()`, und
+   welche Datei daraus wird, entscheidet die zur Laufzeit verfügbare
+   dbm-Implementierung: `.db` bei gdbm, `.dir`/`.dat`/`.bak` bei `dbm.dumb`,
+   oder der Name unverändert. Ein Check auf den exakten Pfad kann dauerhaft
+   rot stehen, weil die Datei so nie heißt — dasselbe Symptom wie vorher,
+   nur mit neuer Ursache. Ein Test prüft alle vier Varianten.
+2. **Zehn Minuten, nicht fünf** (der Hotelier hatte fünf vorgeschlagen). Die
+   Sync-Kadenz von rund drei Minuten ist ein Celery-interner Default, also
+   genau die Sorte Zahl, die sich unter einer unfixierten Abhängigkeit
+   verschiebt (§5.80 — mypy, SQLAlchemy und Alembic in acht Tagen dreimal).
+   Zehn Minuten vertragen zwei ausgefallene Syncs und erkennen einen toten
+   Beat trotzdem binnen zehn Minuten.
+3. **`python` statt `find`/`grep`.** Die naheliegende Fassung setzt voraus,
+   dass findutils und grep im Image sind. Sie sind es sehr wahrscheinlich
+   (Debian-Priority `required`) — aber das ist Gedächtnis und kein Befund
+   (§5.68), und ein Healthcheck, der an einer fehlenden Binary scheitert,
+   meldet `unhealthy` und sieht aus wie ein kaputter Beat. Python ist
+   garantiert da: es **ist** das Image.
+
+### Der Check ist geprüft, nicht nur geschrieben
+
+`tests/test_celery_beat_healthcheck.py` liest den Befehl **aus der
+Compose-Datei** und führt ihn gegen ein Wegwerf-Verzeichnis aus — ein
+nachgebauter Ausdruck im Test würde nur sich selbst prüfen. Elf Tests:
+frische Datei healthy, 20 Minuten alt unhealthy, keine Datei unhealthy,
+alle vier dbm-Namensvarianten, die neueste Datei entscheidet, die Grenze
+liegt zwischen 9 und 11 Minuten, kein `curl` im Beat-Check, und der
+Worker-Check ist unverändert.
+
+`pyyaml` ist dafür ausdrücklich in die dev-Abhängigkeiten aufgenommen —
+transitiv war es schon da, aber ein Test, der auf einer Abhängigkeit sitzt,
+die niemand angefordert hat, bricht mit einem ImportError, der nach einem
+Testfehler aussieht (§5.80).
+
+### Nachgezogen (§5.77)
+
+- **RUNBOOK §10l**: der Engine-Alarm-Handgriff sagte „`celery_beat` meldet
+  dauerhaft `unhealthy`, das ist akzeptiert und **nicht** die Ursache". Ab
+  jetzt ist es aussagekräftig — und damit eine mögliche Ursache.
+- **CLAUDE.md §5.32**: Vorspann „Erledigt am 30.09.2026". Der beschriebene
+  Zustand ist Geschichte, die Diagnose-Anleitung („welcher HEALTHCHECK ist
+  effektiv, Compose ≻ Dockerfile") gilt weiter.
+- **B-9.11-4** geschlossen, mit ihm die Duplikate B-9.11x-3 und B-9.17-3.
+
+### Offen
+
+**Kein Live-Verify von mir** — der `docker ps`-Beleg mit `healthy` kommt vom
+Hotelier nach dem Deploy. Der Ausfall-Fall ist mein Risiko und er ist
+harmlos: scheitert der Check aus einem Grund, den ich nicht bedacht habe,
+steht der Container auf `unhealthy` wie vorher, und es fällt sofort auf.
+
+---
 ## 2bt. Sprint 20b Batterie-Schwellen in die Settings (2026-10-01, AE-73)
 
 **Anlass:** AE-72 hat die Schwellen zwei Tage vorher aus der Hersteller-Spec
@@ -4429,7 +4523,7 @@ Werden im Hygiene-Sprint 10 abgearbeitet.
 | B-9.11-1 | Engine-Decision-Panel: `setpoint_in` zusätzlich zu `setpoint_out` anzeigen | 🟡 |
 | B-9.11-2 | „Vorherige Evaluationen" zeigt `base_target`-Reason statt finalem Layer-Reason | 🟡 |
 | B-9.11-3 | Layer 3 manual_override Sub-Reasons (`manual_frontend` / `manual_device`) im Trace | 🟡 |
-| B-9.11-4 | celery_beat-Healthcheck (akzeptierter Drift ohne Engine-Auswirkung) — Dockerfile-HEALTHCHECK greift Port 8000, beat hat keinen uvicorn; Compose-Override fehlt. Per Diagnose Sprint 10 T3 (2026-05-15): kein Service hat celery_beat in `depends_on: condition: service_healthy`, beat schedulet weiterhin verlässlich (60-s-Tick im Log), Engine-Eval läuft in celery_worker (healthy). Akzeptiert per CLAUDE.md §5.32. Fix nur falls Engine-Latenz oder Status-Dashboard-Wunsch. Master-ID für B-9.11x-3 + B-9.17-3. | 🟢 akzeptiert |
+| B-9.11-4 | celery_beat-Healthcheck. **✅ Behoben am 30.09.2026**, §2bs: eigener Healthcheck in `docker-compose.prod.yml`, geprüft wird die Wirkung (Schedule-Datei in den letzten 10 Minuten geschrieben) statt der Mechanik. Beleg-Test `tests/test_celery_beat_healthcheck.py` liest den Befehl aus der Compose-Datei und führt ihn aus. Vorgeschichte: Dockerfile-HEALTHCHECK greift Port 8000, beat hat keinen uvicorn; die Diagnose von Sprint 10 T3 (2026-05-15) hatte den Drift als folgenlos eingeordnet und akzeptiert (CLAUDE.md §5.32) — kein Service hat celery_beat in `depends_on: condition: service_healthy`, beat tickte verlässlich. Was die Akzeptanz übersah: RUNBOOK §10l musste dem Hotelier im Engine-Alarm-Handgriff sagen, dieses `unhealthy` zu **ignorieren**, womit der Status im einzigen Moment wertlos war, in dem man ihn braucht. Master-ID für B-9.11x-3 + B-9.17-3, beide damit geschlossen. | ✅ |
 | B-9.11x  | Sprint 9.11x — Vicki-001 `open_window`-Hardware-Diagnose | 🔴 |
 | B-9.11x-1 | `psycopg2-binary` in `pyproject.toml [dev]`-extras aufnehmen ODER `test_manual_override_model.py` + `test_migrations_roundtrip.py` auf asyncpg umstellen | ✅ erledigt 2026-05-15 (Sprint 10 T1, PR Sprint-10). Pyproject-Variante gewählt, asyncpg-Umstellung als zu invasiv aus dem Sprint-Scope ausgeschlossen. |
 | B-9.11x-2 | heizung-main-Sanierung: alter Sprint-9.8a-Stand auf aktuellen develop-Stand bringen, `safe.directory`-Block fixen (CLAUDE.md §5.7), `:main`-Image neu bauen, Migrations 0005-0010 anwenden. Eigener Sprint, vor v0.2.0. | 🔴 |

@@ -887,8 +887,24 @@ akzeptabel, für Multi-Mandant nicht. B-9.17b-1 (info).
 
 ### 5.32 Akzeptierter Container-Healthcheck-Drift ohne Engine-Auswirkung (Sprint 10 T3 Lesson)
 
+> **Erledigt am 30.09.2026.** `celery_beat` hat einen eigenen Healthcheck
+> bekommen (`docker-compose.prod.yml`, Beleg-Test
+> `tests/test_celery_beat_healthcheck.py`): geprüft wird, ob Beat seinen
+> Schedule in den letzten zehn Minuten geschrieben hat. Der Status ist damit
+> aussagekräftig — `unhealthy` heißt dort jetzt wirklich, dass Beat nicht
+> mehr tickt. **Der Absatz unten beschreibt den Zustand bis dahin**; die
+> Diagnose-Anleitung („welcher HEALTHCHECK ist effektiv") gilt weiter, der
+> konkrete Befund zu `celery_beat` nicht mehr.
+>
+> Die eigentliche Lesson war nicht „akzeptierter Drift", sondern dass ein
+> Melder, den man ignorieren muss, nichts überwacht: RUNBOOK §10l musste dem
+> Hotelier im Engine-Alarm-Handgriff ausdrücklich sagen, dieses eine
+> `unhealthy` zu übergehen. Damit war der Status im einzigen Moment
+> wertlos, in dem man ihn gebraucht hätte. Vgl. §5.76 (Wirkung statt
+> Mechanik) und §5.79 (ein Melder, dem niemand glaubt).
+
 Nicht jeder unhealthy-State im Container-Stack ist ein Stabilitätsrisiko.
-Der celery_beat-Container auf heizung-test ist seit Wochen unhealthy
+Der celery_beat-Container auf heizung-test war seit Wochen unhealthy
 (435 FailingStreak im Snapshot 2026-05-15), aber Engine-Eval läuft
 ungebremst.
 
