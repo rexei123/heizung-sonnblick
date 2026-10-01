@@ -117,12 +117,21 @@ export default function HotelSettingsPage() {
             <MailStatusLine config={cfg.data} />
             {/*
               Sprint 20 (AE-72): Das Feld „Batterie-Warnung unter (%)" ist hier
-              entfernt. Die Batterie-Stufen rechnen jetzt gegen feste
-              Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch
-              <= 2,8 V) — eine Prozent-Schwelle hätte keine Wirkung mehr, und
-              ein Schalter ohne Wirkung ist schlimmer als kein Schalter
+              entfernt. Die Batterie-Stufen rechnen auf der Spannung, nicht auf
+              Prozent — eine Prozent-Schwelle hätte keine Wirkung mehr, und ein
+              Schalter ohne Wirkung ist schlimmer als kein Schalter
               (CLAUDE.md §5.77). Die Spalte bleibt in `global_config`, wird
               aber nicht mehr ausgeliefert; Eintrag in STATUS.md B-18-7.
+
+              Sprint 20b (AE-73): Die Spannungs-Schwellen sind seit diesem
+              Sprint konfigurierbar — aber in den Backend-Settings
+              (BATTERY_OK_MIN_V / BATTERY_CRITICAL_MAX_V), NICHT hier. Das ist
+              Absicht: wer sie verschiebt, muss wissen, was das 0,1-V-Raster
+              des Codecs hergibt und wo die Spec-Untergrenze liegt. Ein Feld
+              an dieser Stelle wäre ein Schalter, dessen Wirkung der Hotelier
+              nicht vorhersagen kann — der Gegenfall zum Belegungs-Zeitpunkt
+              (AE-66), der aus gutem Grund in der Oberfläche steht.
+              Handgriff zum Ändern: RUNBOOK §10q.
             */}
             <NumField
               id="cfg-off"

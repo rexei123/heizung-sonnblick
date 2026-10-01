@@ -107,11 +107,16 @@ async function mockDevices(page: Page, devices: unknown[]) {
 }
 
 test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
-  test("BatteryBadge zeigt 3+1 Zustände aus battery_state, Prozent im title", async ({ page }) => {
+  test("BatteryBadge zeigt 3+1 Zustände aus battery_state, Spannung sichtbar", async ({
+    page,
+  }) => {
+    // Die Spannungen sind die AE-73-Spannen (ok >= 2,9 · warn 2,7-2,8 ·
+    // kritisch <= 2,6), damit jedes Fixture ein Paar ist, das das Backend
+    // auch liefern kann.
     await mockDevices(page, [
       makeDevice(1, "Batt-OK", "healthy", "ok", 3.2),
-      makeDevice(2, "Batt-Warn", "healthy", "warn", 2.9),
-      makeDevice(3, "Batt-Kritisch", "healthy", "kritisch", 2.8),
+      makeDevice(2, "Batt-Warn", "healthy", "warn", 2.8),
+      makeDevice(3, "Batt-Kritisch", "healthy", "kritisch", 2.6),
       makeDevice(4, "Batt-Unbekannt", "healthy", "unbekannt", null),
     ]);
     await page.goto("/devices?sort=label");
@@ -125,12 +130,14 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
     );
     // Sprint 20 (AE-72): Spannung SICHTBAR neben der Stufe, und zwar der
     // Median — nicht der letzte Frame.
+    // Sprint 20b (AE-73): das Label sagt die Handlung, nicht den Zustand —
+    // „Tauschen" statt „Batterie kritisch". Die Farbe bleibt rot.
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toContainText(
-      "Batterie kritisch · 2,8 V",
+      "Tauschen · 2,6 V",
     );
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toHaveAttribute(
       "title",
-      /2,8 V/,
+      /2,6 V/,
     );
     // unbekannt ohne Reading -> Hint-title, keine Zahl.
     const unknownBadge = page
@@ -146,8 +153,8 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
     // Scores: Offline-OK=4 (silent), Online-Kritisch=2, Online-Warn=1, Online-OK=0.
     await mockDevices(page, [
       makeDevice(10, "Online-OK", "healthy", "ok", 3.4),
-      makeDevice(11, "Online-Warn", "healthy", "warn", 2.9),
-      makeDevice(12, "Online-Kritisch", "healthy", "kritisch", 2.8),
+      makeDevice(11, "Online-Warn", "healthy", "warn", 2.8),
+      makeDevice(12, "Online-Kritisch", "healthy", "kritisch", 2.6),
       makeDevice(13, "Offline-OK", "silent", "ok", 3.4),
     ]);
     // Default-Sortierung = Fehlerstatus (kein ?sort).

@@ -20,11 +20,19 @@ gefaltet, sondern als eigenes Read-Feld in ``DeviceRead`` exponiert
 (``services/dashboard_aggregates.py``) konsumiert. Die offline/implausible-
 Pfade in ``tasks/health_tasks.py`` bleiben unangetastet.
 
-Schwellen (AE-72), Eingangsgroesse ist der 24-h-Median der Spannung:
-  ok        : >= BATTERY_OK_MIN_V (3.0 V)
-  warn      : dazwischen — genau ein Rasterschritt (2.9 V)
-  kritisch  : <= BATTERY_CRITICAL_MAX_V (2.8 V)
+Schwellen (AE-72, ab Sprint 20b AE-73 konfigurierbar), Eingangsgroesse ist
+der 24-h-Median der Spannung:
+  ok        : >= ``settings.battery_ok_min_v`` (Vorgabe 2.9 V)
+  warn      : dazwischen (Vorgabe 2.7 und 2.8 V)
+  kritisch  : <= ``settings.battery_critical_max_v`` (Vorgabe 2.6 V)
   unbekannt : Mindest-Stichprobe im Fenster nicht erreicht
+
+Die beiden Grenzen stehen seit Sprint 20b in den Settings und nicht mehr als
+Konstante hier (AE-73). Sie sind eine Einschaetzung darueber, wie weit man
+eine Zelle ausnutzen will, keine Eigenschaft der Hardware — und sie werden
+nach der Montage nachjustiert. Gelesen werden sie **einmal pro Bewertung**
+(``battery_schwellen()``) und dann durchgereicht; ``battery_stage_from_volts``
+bleibt eine reine Funktion ohne Zugriff auf globalen Zustand.
 
 **Was Sprint 20 entfernt hat:** ``battery_health_state`` (Prozent) und mit
 ihm die konfigurierbare Schwelle ``global_config.alert_battery_warn_percent``
@@ -49,6 +57,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.config import get_settings
 from heizung.models.sensor_reading import SensorReading
 
 # ---------------------------------------------------------------------------
@@ -68,33 +77,71 @@ from heizung.models.sensor_reading import SensorReading
 # Eine Prozent-Kennlinie ist immer fuer genau einen Zelltyp kalibriert —
 # die unsere fuer 2xAA-Alkaline.
 #
-# Herleitung der Werte (Anforderung Hotel: volle Batterie nie als leer,
-# haeufigerer Tausch akzeptiert):
+# Herleitung der Vorgabewerte (Anforderung Hotel: volle Batterie nie als
+# leer, haeufigerer Tausch akzeptiert; die Werte stehen in den Settings,
+# siehe ``config.Settings.battery_ok_min_v``):
 #
-#   OK        >= 3.0 V   frische Alkaline liegt bei 3.1 V, frische Lithium
+#   OK        >= 2.9 V   frische Alkaline liegt bei 3.1 V, frische Lithium
 #                        am Codec-Anschlag 3.5 V — beide mit Reserve
-#   schwach    = 2.9 V   genau EIN Rasterschritt breit; mehr gibt das
-#                        0.1-V-Raster zwischen den beiden Grenzen nicht her
-#   kritisch  <= 2.8 V   Hersteller-Wechselempfehlung ist "< 2.8 V"
-#                        (docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md:2539); wir
-#                        warnen eine Quantisierungsstufe frueher
+#   schwach   2.7-2.8 V  zwei Rasterschritte Vorlauf, in denen das Geraet
+#                        innerhalb seines Spec-Bereichs weiterregelt
+#   kritisch  <= 2.6 V   unterhalb der Spec-Untergrenze von 2.7 VDC: die
+#                        Zelle wird bis an den Ausfall ausgenutzt (AE-73)
 #
-# Der Betriebsbereich der Spec ist 2.7-3.6 VDC. Die Kritisch-Grenze liegt
-# also 0.1 V ueber dem Geraete-Minimum: wer bei "kritisch" wechselt, kommt
-# dem Ausfall zuvor statt ihn zu bestaetigen.
+# **Das ist eine Verschiebung nach unten gegenueber AE-72** (dort 3.0 /
+# 2.8, hergeleitet aus der Hersteller-Wechselempfehlung "< 2.8 V"). AE-73
+# setzt die Grenzen bewusst darunter: in einem thermisch sanierten Haus
+# kostet ein Ventil, das einen Tag nicht regelt, kaum Komfort, und jeder
+# Wechsel kostet den Hausmeister einen Gang. Die Begruendung samt dem, was
+# man dafuer in Kauf nimmt, steht in AE-73.
+#
+# Zweite Folge der Verschiebung: "schwach" ist nicht mehr ein einzelner
+# Rasterschritt, sondern zwei (2.7 und 2.8 V). Bei einem Uplink alle zehn
+# Minuten ist das ein echtes Vorwarnfenster statt einer Durchgangsstufe.
+#
+# ``Decimal``, nicht ``float``: 2.9 und 2.6 haben in IEEE-754 keine exakte
+# Darstellung, und der Vergleich laeuft genau auf diesen Rasterpunkten.
+# Gleiche Begruendung wie bei ``BATTERY_CURVE_2XAA``.
 #
 # Verworfen wurde OK >= 3.1 / schwach 3.0 / kritisch <= 2.9 (erster
-# Vorschlag): 3.1 V **ist** der frische Alkaline-Zustand. Eine Grenze
-# genau dort laesst jedes Alkaline-Geraet ab dem ersten Rasterschritt
+# Vorschlag aus Sprint 20): 3.1 V **ist** der frische Alkaline-Zustand. Eine
+# Grenze genau dort laesst jedes Alkaline-Geraet ab dem ersten Rasterschritt
 # dauerhaft "schwach" melden — und ein Melder, dem niemand mehr glaubt,
-# ueberwacht nichts (CLAUDE.md §5.79). Der 24-h-Median filtert zudem den
-# Lastabfall heraus, gegen den die hoehere Grenze schuetzen sollte.
-#
-# ``Decimal``, nicht ``float``: 2.9 hat in IEEE-754 keine exakte
-# Darstellung, und der Vergleich laeuft genau auf diesem Rasterpunkt.
-# Gleiche Begruendung wie bei ``BATTERY_CURVE_2XAA``.
-BATTERY_OK_MIN_V = Decimal("3.0")
-BATTERY_CRITICAL_MAX_V = Decimal("2.8")
+# ueberwacht nichts (CLAUDE.md §5.79).
+
+
+@dataclass(frozen=True, slots=True)
+class BatterySchwellen:
+    """Die zwei Grenzen einer Bewertung, als ein Wert (AE-73).
+
+    Zusammen gelesen und zusammen durchgereicht, damit innerhalb einer
+    Bewertung nicht die eine Grenze aus den Settings und die andere aus
+    einem Cache kommen kann.
+
+    Der Konstruktor prueft die Ordnung **nicht** — das tut der
+    Settings-Validator beim Start (``config._battery_schwellen_sind_geordnet``),
+    und zwar an der einen Stelle, an der die Werte von aussen kommen. Eine
+    zweite Pruefung hier waere eine zweite Wahrheit darueber, was gueltig
+    ist.
+    """
+
+    ok_min_v: Decimal
+    critical_max_v: Decimal
+
+
+def battery_schwellen() -> BatterySchwellen:
+    """Die konfigurierten Schwellen aus den Settings (AE-73).
+
+    Einmal pro Bewertung aufrufen, nicht pro Geraet: ``get_settings`` ist
+    ``lru_cache``-gestuetzt, aber ein Aufruf je Zeile der Geraeteliste waere
+    104 Aufrufe fuer einen Wert, der sich im Request nicht aendert.
+    """
+    settings = get_settings()
+    return BatterySchwellen(
+        ok_min_v=settings.battery_ok_min_v,
+        critical_max_v=settings.battery_critical_max_v,
+    )
+
 
 # Mindest-Stichprobe im Bewertungs-Fenster. Unter drei Messwerten gibt es
 # keinen belastbaren Median — ein einzelner Frame kann ein Lastabfall waehrend
@@ -112,13 +159,15 @@ BATTERY_JUMP_V = Decimal("0.3")
 BatteryHealthState = Literal["ok", "warn", "kritisch", "unbekannt"]
 
 
-def battery_stage_from_volts(volts: Decimal | None) -> BatteryHealthState:
-    """Reine Abbildung Geraete-Spannung -> Batterie-Stufe (AE-72).
+def battery_stage_from_volts(
+    volts: Decimal | None, schwellen: BatterySchwellen
+) -> BatteryHealthState:
+    """Reine Abbildung Geraete-Spannung -> Batterie-Stufe (AE-72/AE-73).
 
     Die Reihenfolge ist verbindlich: ``unbekannt`` vor ``kritisch`` vor
     ``warn`` vor ``ok``. Beide Grenzen sind **inklusiv auf ihrer Seite** —
-    2.8 V ist kritisch, 3.0 V ist ok. Dazwischen liegt genau ein
-    Rasterschritt (2.9 V) und der ist ``warn``.
+    bei den Vorgabewerten ist 2.6 V kritisch und 2.9 V ok, dazwischen
+    liegen die zwei Rasterschritte 2.7 und 2.8 V als ``warn``.
 
     Die vier Zustaende sind dieselben wie in AE-65; nur die Eingangsgroesse
     wechselt von Prozent auf Volt (die Prozent-Variante ist mit Sprint 20
@@ -126,18 +175,25 @@ def battery_stage_from_volts(volts: Decimal | None) -> BatteryHealthState:
     (``BatteryHealthState`` in ``lib/api/types.ts``) bleibt damit
     unveraendert.
 
+    ``schwellen`` ist **Pflicht-Argument**, kein Default (AE-73). Ein
+    Default waere bequem und falsch: er wuerde hier eine zweite Wahrheit
+    ueber die geltenden Grenzen einfuehren, die beim naechsten
+    Settings-Wechsel stumm auseinanderlaeuft. Dieselbe Begruendung wie beim
+    ``verdict``-Argument von ``_build_device_read``.
+
     Args:
         volts: Median der Geraete-Spannung im Bewertungs-Fenster, oder
             ``None`` wenn die Mindest-Stichprobe nicht erreicht ist.
+        schwellen: Die geltenden Grenzen, aus ``battery_schwellen()``.
 
     Returns:
         ``"unbekannt"`` bei ``None``, sonst ``"kritisch"``/``"warn"``/``"ok"``.
     """
     if volts is None:
         return "unbekannt"
-    if volts <= BATTERY_CRITICAL_MAX_V:
+    if volts <= schwellen.critical_max_v:
         return "kritisch"
-    if volts < BATTERY_OK_MIN_V:
+    if volts < schwellen.ok_min_v:
         return "warn"
     return "ok"
 
@@ -266,6 +322,7 @@ async def battery_verdicts(
     jetzt = now or datetime.now(tz=UTC)
     seit = jetzt - timedelta(hours=BATTERY_WINDOW_H)
     ids = list(device_ids)
+    schwellen = battery_schwellen()
 
     # percentile_disc(0.5) mit ABSTEIGENDER Ordnung ist der obere Median:
     # die Funktion nimmt den ersten Wert, dessen kumulierter Anteil >= 0.5
@@ -314,7 +371,7 @@ async def battery_verdicts(
 
         ergebnis[device_id] = BatteryVerdict(
             stage=(
-                battery_stage_from_volts(median_v)
+                battery_stage_from_volts(median_v, schwellen)
                 if samples >= BATTERY_MIN_SAMPLES
                 else "unbekannt"
             ),
@@ -324,7 +381,7 @@ async def battery_verdicts(
 
     for device_id, alter_median in sprung_kandidaten.items():
         ergebnis[device_id] = await _verdict_nach_sprung(
-            session, device_id, seit=seit, alter_median=alter_median
+            session, device_id, seit=seit, alter_median=alter_median, schwellen=schwellen
         )
 
     # Zweite Query: der juengste bekannte Spannungswert, unabhaengig vom
@@ -383,6 +440,7 @@ async def _verdict_nach_sprung(
     *,
     seit: datetime,
     alter_median: Decimal,
+    schwellen: BatterySchwellen,
 ) -> BatteryVerdict:
     """Bewertung nur ueber die Messwerte ab dem Sprung.
 
@@ -427,7 +485,9 @@ async def _verdict_nach_sprung(
     median = oberer_median(werte)
     return BatteryVerdict(
         stage=(
-            battery_stage_from_volts(median) if len(werte) >= BATTERY_MIN_SAMPLES else "unbekannt"
+            battery_stage_from_volts(median, schwellen)
+            if len(werte) >= BATTERY_MIN_SAMPLES
+            else "unbekannt"
         ),
         median_v=median,
         samples=len(werte),

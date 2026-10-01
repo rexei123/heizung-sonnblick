@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-30, develop-HEAD `9493bd9` (PR #245). Laufender Sprint: **20 (Batteriestufen über die Spannung)** — PR A gemergt, PR B offen, §2bq. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-10-01, develop-HEAD `55dd8f0` (PR #247). Laufender Sprint: **20b (Batterie-Schwellen in die Settings, AE-73)** — §2bt, PR offen. Davor abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248 gemergt; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247 gemergt. Offen daneben: `celery_beat`-Healthcheck, §2bs, PR #249. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-09-30
+**Stichtag:** 2026-10-01
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B offen. Migration 0024 (`sensor_reading.battery_voltage`). Stufen: OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V, bewertet über den 24-h-Median, read-time. `alert_battery_warn_percent` aus Schema und Oberfläche entfernt (B-18-7 Eintrag 3). **Neue Regel CLAUDE.md §0.3:** vor jedem Merge nach `develop` wird gefragt, ob ein Montage- oder Eingangstest läuft — der Merge ist ein Deploy auf heizung-test. Davor: **Sprint 19 Eingangstest ohne Rückfragen abgeschlossen** (§2bp) — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest`. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** **Sprint 20b Batterie-Schwellen in die Settings** (§2bt, AE-73) — die zwei Grenzen stehen in `config.Settings` (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`, Vorgabe **2,9 / 2,6 V**) und sind ohne Image änderbar (RUNBOOK §10q); Startup-Validator weist `critical_max >= ok_min` ab. Badge-Labels „Batterie OK" / „Beobachten" / „Tauschen", Farben unverändert. Davor: **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) **abgeschlossen** — PR A #245 (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B #246, Nachbesserung „nie ein Badge ohne Zahl" #248. Migration 0024 (`sensor_reading.battery_voltage`). Stufen über den 24-h-Median, read-time; die **Zahlen** aus AE-72 (3,0 / 2,8) sind durch AE-73 ersetzt. Dazu **Sprint 20a Deploy-Sperre** (§2br) — PR #247 gemergt (`55dd8f0`, `collected 961 = 960 passed + 1 xfailed`, 0 skipped): `services/deploy_lock.py` setzt einen Redis-Key, `deploy-pull.sh` überspringt seinen Lauf, solange er steht. `alert_battery_warn_percent` aus Schema und Oberfläche entfernt (B-18-7 Eintrag 3). **Neue Regel CLAUDE.md §0.3:** vor jedem Merge nach `develop` wird gefragt, ob ein Montage- oder Eingangstest läuft — der Merge ist ein Deploy auf heizung-test. Davor: **Sprint 19 Eingangstest ohne Rückfragen abgeschlossen** (§2bp) — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest`. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -4198,6 +4198,94 @@ nur sich selbst prüfen.
   Pflicht.
 
 ---
+
+## 2bt. Sprint 20b Batterie-Schwellen in die Settings (2026-10-01, AE-73)
+
+**Anlass:** AE-72 hat die Schwellen zwei Tage vorher aus der Hersteller-Spec
+hergeleitet — Betriebsbereich 2,7–3,6 VDC, Wechselempfehlung „< 2,8 V", also
+OK ≥ 3,0 V und kritisch ≤ 2,8 V. Die Herleitung ist richtig und beantwortet
+die falsche Frage: die Spec sagt, ab wann der **Hersteller** einen Wechsel
+empfiehlt, nicht, ab wann einer für **dieses Haus** wirtschaftlich ist.
+
+Zwei Umstände, die in AE-72 nicht eingegangen sind: das Haus ist thermisch
+saniert (ein Ventil, das einen Tag nicht regelt, kostet kaum Komfort), und
+jeder Wechsel ist ein Gang des Hausmeisters — bei 104 Geräten. Dazu der
+konstruktive Mangel, dass die Grenzen als Konstanten im Code standen, obwohl
+absehbar war, dass sie nach der Montage nachjustiert werden.
+
+### Was drin ist
+
+1. **Die zwei Grenzen stehen in `config.Settings`**, Typ `Decimal`, gelesen
+   aus der Umgebung: `BATTERY_OK_MIN_V` (Vorgabe `2.9`),
+   `BATTERY_CRITICAL_MAX_V` (Vorgabe `2.6`). Ein Startup-Validator weist
+   `critical_max >= ok_min` ab — bei Gleichheit wäre der Grenzwert selbst
+   gleichzeitig `kritisch` (≤) und `ok` (≥), und die Reihenfolge der
+   Vergleiche im Code entschiede statt der Konfiguration. Bewusst ein
+   Start-Fehler: eine Anzeige, die nach einem Tippfehler stumm das Gegenteil
+   meldet, ist schlimmer als ein Container, der nicht hochkommt.
+2. **Die Grenzen liegen tiefer** als die Hersteller-Empfehlung:
+   ok ≥ 2,9 V · warn 2,7–2,8 V · kritisch ≤ 2,6 V. „schwach" ist damit nicht
+   mehr ein einzelner Rasterschritt, sondern zwei — unter AE-72 konnte ein
+   Gerät die Stufe in einem Schritt durchlaufen.
+3. **Badge-Labels sagen die Handlung:** „Batterie OK" · „Beobachten" ·
+   „Tauschen" · „Batterie unbekannt". Farben, Icons und die vier API-Werte
+   (`ok`/`warn`/`kritisch`/`unbekannt`) sind unverändert. Die Hint-Texte
+   nennen **keine Schwellenwerte** mehr — die Grenzen sind verstellbar, eine
+   Zahl im Text wäre eine zweite Wahrheit (§5.77).
+4. **Ein Lesepfad.** Die Schwellen werden einmal pro Bewertung über
+   `battery_schwellen()` gelesen und als `BatterySchwellen` durchgereicht;
+   `battery_stage_from_volts(volts, schwellen)` nimmt sie als
+   **Pflicht**-Argument, nicht mit Default — dieselbe Entscheidung wie beim
+   `verdict`-Argument von `_build_device_read`.
+5. **Doku:** AE-73 (ersetzt die Zahlen aus AE-72 §1, mit Vermerk dort),
+   RUNBOOK §10q (Handgriff zum Ändern, mit Hinweis auf sinnvolle Werte und
+   auf den 0,1-V-Raster), §10o auf die neuen Stufen und Labels gezogen,
+   CLAUDE.md §5.72 / §5.73 nachgeführt.
+
+### Was NICHT drin ist
+
+Median-Logik, Sprung-Regel, Mindest-Stichprobe, „Im Lager", die
+Badge-Regel „nie ohne Zahl" — alles unverändert. Keine Migration, kein
+Schema-Touch. `BATTERY_MIN_SAMPLES`, `BATTERY_JUMP_V`, `BATTERY_WINDOW_H`
+und `BATTERY_LAST_LOOKBACK_D` bleiben Konstanten: sie sind Eigenschaften der
+Messung, nicht der Abwägung.
+
+### Zwei Befunde aus der Umsetzung
+
+**Punkt 3 des Auftrags war bereits erfüllt.** „Alle bestehenden Stellen, die
+schwach/kritisch auswerten, lesen die neuen Settings — keine Zahl doppelt im
+Code": es gibt keinen zweiten Auswertungsort. Dashboard-Kachel
+(`count_battery_low`), Sortierung der Geräteliste und alle drei Badge-Orte
+lesen `verdict.stage` und nie eine Spannung; ein Mail-Alarm an der Batterie
+existiert nicht (B-15b-1). Zu tun war, die **Texte** von den Zahlen zu lösen
+— in `battery-badge.tsx`, `types.ts`, der Hotel-Einstellungsseite und
+RUNBOOK §10o.
+
+**Zwei e2e-Fixtures waren nach der Verschiebung unmöglich:**
+`battery_state: "warn"` mit 2,9 V und `kritisch` mit 2,8 V — Paare, die das
+Backend nie liefern kann. Auf 2,8 bzw. 2,6 V gesetzt. Ein Test, der eine
+unmögliche Lage prüft, ist grün und lehrt das Falsche.
+
+### Offen / bekannt
+
+- **Wortkollision „Tauschen".** Auf der Zimmerseite heißt der Knopf zum
+  Austausch des **ganzen Thermostats** ebenfalls „Tauschen"
+  (`app/zimmer/[id]/page.tsx:391`). Er liegt im Reiter „Geräte", der Badge im
+  Reiter „Zonen" — nicht gleichzeitig sichtbar, aber einen Klick voneinander
+  entfernt und im selben Gerätekontext. Die Vorgabe lautete „Tauschen";
+  „Batterie tauschen · 2,5 V" wäre die Ein-Wort-Änderung, wenn die Montage
+  zeigt, dass es verwirrt.
+- **Die Dashboard-Kachel heißt weiter „Schwache Batterie"** und zählt
+  `warn` ∪ `kritisch`. Sie ist damit das einzige Element mit der alten
+  Wortwahl; ein Umbenennen stand nicht im Auftrag („Beobachten oder
+  tauschen" ist für eine Kachel zu lang).
+- **B-15b-1 bleibt offen und weiter neu zu fassen.** AE-72 notierte, der
+  Alarm hänge jetzt an der Stufe und nicht an einer Konfiguration. Mit AE-73
+  ist eine Konfiguration zurück — aber eine andere: sie bestimmt, *wann* eine
+  Stufe erreicht wird, nicht *ob* gemailt wird.
+- **Lokale DB-Tests weiter nicht ausführbar** (B-18-5, Docker Desktop
+  startet nicht). Die drei geänderten DB-Erwartungen sind durch Rechnung
+  gesetzt, nicht durch einen Lauf, und hängen an CI.
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 

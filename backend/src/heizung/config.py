@@ -9,6 +9,7 @@ Lokale Entwickler koennen die Validierung gezielt deaktivieren:
 """
 
 import os
+from decimal import Decimal
 from functools import lru_cache
 from typing import Final, Literal
 
@@ -137,6 +138,38 @@ class Settings(BaseSettings):
     healthcheck_deploy_url: str = ""
     healthcheck_backup_url: str = ""
 
+    # --- Batterie-Schwellen (Sprint 20b, AE-73) ---------------------------
+    # Die zwei Grenzen der Batterie-Stufen, in Volt, auf dem 24-h-Median der
+    # Geraete-Spannung. ``ok`` ab ``battery_ok_min_v``, ``kritisch`` bis
+    # einschliesslich ``battery_critical_max_v``, dazwischen ``warn``.
+    #
+    # Warum sie hier stehen und nicht als Konstante im Code: die Werte sind
+    # eine **Einschaetzung**, nicht eine Eigenschaft der Hardware. Wie weit
+    # man eine Zelle ausnutzen will, haengt am Haus — Hotel Sonnblick ist
+    # thermisch saniert, ein Ventil, das einen Tag nicht regelt, kostet dort
+    # kaum Komfort. Nach der Montage wird nachjustiert, und das soll ohne
+    # Code-Aenderung gehen (AE-73).
+    #
+    # Warum NICHT in ``global_config`` (also in die Oberflaeche): die Stufen
+    # sind keine Hotelier-Einstellung wie die Alarm-Mail oder die
+    # Offline-Minuten. Wer sie verschiebt, muss wissen, was der 0.1-V-Raster
+    # des Codecs hergibt und wo die Spec-Untergrenze liegt — sonst entsteht
+    # ein Feld, dessen Wirkung niemand vorhersagen kann. Umgekehrt zum
+    # Belegungs-Zeitpunkt (AE-66), der aus genau dem Grund in die DB umgezogen
+    # ist: der haengt an fremder Software und aendert sich ohne Vorwarnung.
+    #
+    # ``Decimal``, nicht ``float``: 2.9 und 2.6 haben in IEEE-754 keine exakte
+    # Darstellung, und der Vergleich laeuft genau auf diesen Rasterpunkten.
+    # Pydantic parst den env-String direkt nach ``Decimal`` — exakt, solange
+    # der Wert als Dezimalzahl notiert ist.
+    #
+    # **Bewusst ohne Plausibilitaets-Grenze gegen den Spec-Betriebsbereich**
+    # (2.7-3.6 VDC). Der Default 2.6 liegt selbst darunter: das ist die
+    # Entscheidung von AE-73, die Zelle bis an den Ausfall auszunutzen. Eine
+    # Schranke, die das verbietet, haette diesen Sprint blockiert.
+    battery_ok_min_v: Decimal = Decimal("2.9")
+    battery_critical_max_v: Decimal = Decimal("2.6")
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.
@@ -152,6 +185,31 @@ class Settings(BaseSettings):
                 "SECRET_KEY ist auf Default-Wert. Echtes Secret setzen "
                 "(`openssl rand -hex 32`) oder ALLOW_DEFAULT_SECRETS=1 "
                 "fuer lokale Dev-Maschine."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _battery_schwellen_sind_geordnet(self) -> "Settings":
+        """AE-73: ``kritisch``-Grenze muss unter der ``ok``-Grenze liegen.
+
+        Bei ``critical_max >= ok_min`` gibt es keinen ``warn``-Bereich mehr,
+        und ``battery_stage_from_volts`` wuerde je nach Reihenfolge der
+        Vergleiche ein Ergebnis liefern, das niemand erwartet: bei
+        ``critical_max = ok_min`` ist der Grenzwert selbst gleichzeitig
+        ``kritisch`` (<=) und ``ok`` (>=) — die Reihenfolge im Code
+        entscheidet, nicht die Konfiguration.
+
+        Das ist ein Start-Fehler und keine Warnung: ein Haus, dessen
+        Batterie-Anzeige nach einem Tippfehler in der ``.env`` stumm das
+        Gegenteil meldet, ist schlimmer bedient als eines, dessen API nicht
+        startet. Der Fehler steht beim Hochfahren im Container-Log.
+        """
+        if self.battery_critical_max_v >= self.battery_ok_min_v:
+            raise ValueError(
+                "BATTERY_CRITICAL_MAX_V muss kleiner als BATTERY_OK_MIN_V sein "
+                f"(ist: {self.battery_critical_max_v} >= {self.battery_ok_min_v}). "
+                "Sonst gibt es keine Stufe 'schwach', und der Grenzwert selbst "
+                "waere gleichzeitig kritisch und ok."
             )
         return self
 
