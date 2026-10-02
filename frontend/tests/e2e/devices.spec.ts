@@ -239,12 +239,18 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     // battery_state kommt aus dem Device (DeviceRead, PR1). Sprint 20 (AE-72):
     // die Zahl im Tooltip ist der 24-h-Median der Spannung aus demselben
     // Device-Objekt — NICHT der letzte Frame. Dass beide Werte hier
-    // auseinanderliegen (Median 2,9 V, letzter Frame 3,1 V), ist Absicht: so
+    // auseinanderliegen (Median 2,8 V, letzter Frame 3,1 V), ist Absicht: so
     // faellt auf, wenn jemand wieder den Einzelwert an den Badge haengt.
+    //
+    // Sprint 20b (AE-73): der Median liegt auf 2,8 V statt 2,9 V, weil die
+    // warn-Spanne dorthin verschoben ist (2,7-2,8 V). Ein Fixture mit
+    // battery_state="warn" und 2,9 V waere ein Paar, das das Backend nie
+    // liefern kann — ein Test, der eine unmoegliche Lage prueft, lehrt das
+    // Falsche.
     const withBattery = {
       ...ASSIGNED_DEVICE,
       battery_state: "warn",
-      battery_voltage_median: 2.9,
+      battery_voltage_median: 2.8,
     };
     await mockDetail(page, withBattery);
     await page.goto("/devices/42");
@@ -256,8 +262,8 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     // Sprint 20 (AE-72): die Spannung steht SICHTBAR neben der Stufe. Das ist
     // die Anforderung („Stufe + Spannung"), nicht der Tooltip — deshalb wird
     // hier der Pillen-Text geprueft und der Tooltip nur auf die Zahl.
-    await expect(badge).toContainText("Batterie schwach · 2,9 V");
-    await expect(badge).toHaveAttribute("title", /2,9 V/);
+    await expect(badge).toContainText("Beobachten · 2,8 V");
+    await expect(badge).toHaveAttribute("title", /2,8 V/);
     await expect(badge).toHaveAttribute("title", /Median der letzten 24 Stunden/);
     // Kein „%" im Haupttext: die Prozent-Anzeige ist mit Sprint 20 ganz weg.
     // (Die „75" im Icon-Ligatur-Namen `battery_horiz_075` ist aria-hidden-

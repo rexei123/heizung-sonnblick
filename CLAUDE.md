@@ -2263,11 +2263,18 @@ umrechnete. Doppelter Fehler:
 - **`global_config.alert_battery_warn_percent` existiert nicht mehr in
   Schema und Oberfläche** (Stand 2026-09-30, Sprint 20 / AE-72). Die Spalte
   bleibt in `global_config`, wird aber nicht ausgeliefert und nicht
-  gesetzt. Grund: die Batteriestufen rechnen gegen **feste
-  Spannungs-Schwellen** (OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V), eine
-  konfigurierbare Prozent-Schwelle hat keinen Konsumenten mehr. Mit ihr
-  entfallen `battery_health_state`, `BATTERY_CRITICAL_PCT` und
+  gesetzt. Grund: die Batteriestufen rechnen auf der
+  **Spannung**, eine konfigurierbare Prozent-Schwelle hat keinen Konsumenten
+  mehr. Mit ihr entfallen `battery_health_state`, `BATTERY_CRITICAL_PCT` und
   `DEFAULT_BATTERY_WARN_PCT`. Eintrag (3) in STATUS.md B-18-7.
+
+  **Seit 2026-10-01 (AE-73) sind die Spannungs-Schwellen selbst wieder
+  konfigurierbar** — aber in den Backend-Settings (`BATTERY_OK_MIN_V` /
+  `BATTERY_CRITICAL_MAX_V`, Vorgabe 2,9 / 2,6 V), nicht in `global_config`
+  und nicht in der Oberfläche. Der Unterschied ist der Grund für die
+  Änderung: eine Prozent-Schwelle hatte keinen Konsumenten, eine
+  Spannungs-Schwelle hat einen. Wer diese Zeile liest, prüft sie gegen
+  `config.Settings`, bevor er darauf aufsetzt.
 
   Die Geschichte dieser Zeile ist selbst die Lesson §5.77: Bis 2026-06 war
   der Schalter tot, bis 2026-09-19 stand hier trotzdem „toter Schalter",
@@ -2338,16 +2345,30 @@ genau diese Orthogonalität: das Gerät verliert entweder seinen
 online-Status oder seinen Batterie-Status. **Eigene Achse ist die
 einzige verlustfreie Form.**
 
-**Schwellen — seit Sprint 20 (AE-72) auf der Spannung**, benannte
-Konstanten in `services/battery_health.py`:
+**Schwellen — seit Sprint 20 (AE-72) auf der Spannung, seit Sprint 20b
+(AE-73) in den Settings** (`config.Settings`, nicht mehr als Konstante in
+`services/battery_health.py`):
 
-- `BATTERY_OK_MIN_V = 3.0`, `BATTERY_CRITICAL_MAX_V = 2.8`, beide Grenzen
-  inklusiv auf ihrer Seite. Dazwischen liegt bei 0,1-V-Raster genau **ein**
-  Schritt (2,9 V), und der ist `warn`. Eingangsgröße ist der **24-h-Median**,
-  nicht der letzte Frame.
+- `BATTERY_OK_MIN_V` (Vorgabe **2.9**), `BATTERY_CRITICAL_MAX_V` (Vorgabe
+  **2.6**), beide Grenzen inklusiv auf ihrer Seite. Dazwischen liegen bei
+  0,1-V-Raster **zwei** Schritte (2,7 und 2,8 V), und die sind `warn`.
+  Eingangsgröße ist der **24-h-Median**, nicht der letzte Frame.
+- Die Vorgabe liegt **unter** der Hersteller-Wechselempfehlung („< 2,8 V")
+  und `kritisch` sogar unter der Spec-Untergrenze von 2,7 VDC. Das ist eine
+  Abwägung zwischen Ausfallrisiko und Gangzahl des Hausmeisters, keine
+  Herleitung aus der Spec (AE-73) — wer sie wieder herleiten will, bekommt
+  die AE-72-Werte 3,0 / 2,8.
+- `battery_stage_from_volts(volts, schwellen)` nimmt die Grenzen als
+  **Pflicht-Argument**. Gelesen werden sie einmal pro Bewertung über
+  `battery_schwellen()`, nicht pro Gerät. Ein Default wäre eine zweite
+  Wahrheit, die beim ersten Nachjustieren stumm auseinanderläuft.
+- Ein Startup-Validator weist `critical_max >= ok_min` ab. Sonst wäre der
+  Grenzwert selbst gleichzeitig `kritisch` und `ok`, und die Reihenfolge der
+  Vergleiche im Code entschiede — nicht die Konfiguration.
 - Reihenfolge im Mapping verbindlich: `unbekannt` → `kritisch` → `warn`
   → `ok`.
-- `BATTERY_MIN_SAMPLES = 3`: unter drei Messwerten im Fenster gibt es keine
+- `BATTERY_MIN_SAMPLES = 3` (Konstante, nicht konfigurierbar — eine
+  Eigenschaft der Messung, nicht der Abwägung): unter drei Messwerten im Fenster gibt es keine
   Stufe, sondern „unbekannt". Ein einzelner Frame kann ein Lastabfall
   während einer Motorbewegung sein — genau daran lag der Fehlbefund zu
   Gerät 001 am 29.09.2026.
@@ -2388,7 +2409,13 @@ weil jemand das Argument vergessen hat.
 
 **Frontend:** Das `BatteryBadge` ist an die `battery_state`-Achse
 gekoppelt — **keine eigene Skala, keine zweite Schwelle**. 3+1 Zustände
-direkt aus `device.battery_state`. Seit Sprint 20 (AE-72) steht die Zahl
+direkt aus `device.battery_state`. Seit Sprint 20b (AE-73) sagen die Labels
+die **Handlung** statt des Zustands: „Batterie OK" · „Beobachten" ·
+„Tauschen" · „Batterie unbekannt". Farben, Icons und die vier API-Werte sind
+unverändert. Die Hint-Texte nennen **keine Schwellenwerte** mehr — die
+Grenzen sind pro Haus verstellbar, eine Zahl im Text wäre eine zweite
+Wahrheit (§5.77). Was dort an Zahlen steht, sind Hardware-Eigenschaften
+(Spec-Untergrenze 2,7 V), und die ändert keine Konfiguration. Seit Sprint 20 (AE-72) steht die Zahl
 **sichtbar** neben der Stufe („Batterie OK · 3,1 V") und ist die
 **Spannung in Volt**, nämlich `device.battery_voltage_median` — nicht
 `latest_reading.battery_voltage`. Wer den Einzelwert an den Badge hängt,
@@ -2405,7 +2432,8 @@ EINER Fehlerstatus-Rangfolge. Visuelle Invariante: Badge gelb/rot ⇔ Gerät in
 
 **Querverweise:** AE-65 (Master-ADR, inkl. Frontend-Teil), **AE-72
 (Umstellung auf die Spannung — was hier steht, gilt mit dieser
-Eingangsgröße)**, AE-53 (offline/implausible-Achse), §5.72 (Kennlinie und
+Eingangsgröße)**, **AE-73 (die Grenzen selbst: in den Settings und tiefer
+gelegt; die Zahlen in AE-72 §1 gelten nicht mehr)**, AE-53 (offline/implausible-Achse), §5.72 (Kennlinie und
 Codec-Sättigung), §5.58 (Lifecycle-Filter im Aggregat), §5.63/§5.64
 (Frontend-Type-Spiegel + Zod-Strip-Falle), §5.76 (Wirkung überwachen statt
 Mechanik — der Grund gegen den Beat-Task), §5.77 (der Schalter, der hier

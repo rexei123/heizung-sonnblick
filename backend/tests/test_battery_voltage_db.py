@@ -365,7 +365,10 @@ async def test_zwei_messwerte_sind_keine_stichprobe(db_session: AsyncSession) ->
     assert verdict.stage == "unbekannt"
     assert verdict.samples == 2
     # Der Median wird trotzdem mitgegeben — die Zahl ist da, nur nicht
-    # belastbar. Die Oberflaeche zeigt bei "unbekannt" keine Spannung.
+    # belastbar. Die Oberflaeche zeigt sie bei fehlender Stufe NICHT als
+    # Median, sondern den letzten Messwert mit seinem Alter ("2,6 V ·
+    # vor 10 min", Nachbesserung 30.09.2026). Ohne Stufe keine
+    # Median-Aussage, aber nie ein Badge ohne Zahl.
     assert verdict.median_v == Decimal("2.6")
 
 
@@ -395,6 +398,10 @@ async def test_null_spannungen_zaehlen_nicht_mit(db_session: AsyncSession) -> No
 
     Vier NULL-Zeilen plus drei mit 2.9 V: die Stichprobe ist 3, nicht 7,
     und der Median 2.9 — nicht 0.0 V und damit nicht "kritisch".
+
+    Die Stufe ist seit AE-73 "ok" (2.9 V ist die untere ok-Grenze); vorher
+    war sie "warn". Beides belegt dieselbe Sache: NULL hat nicht als 0.0 V
+    mitgerechnet, sonst waere der Median 0.0 und die Stufe "kritisch".
     """
     device_id = await _make_device(db_session)
     await _seed(db_session, device_id, [None, None, "2.9", None, "2.9", None, "2.9"])
@@ -403,7 +410,7 @@ async def test_null_spannungen_zaehlen_nicht_mit(db_session: AsyncSession) -> No
 
     assert verdict.samples == 3
     assert verdict.median_v == Decimal("2.9")
-    assert verdict.stage == "warn"
+    assert verdict.stage == "ok"
 
 
 async def test_jede_angefragte_id_kommt_zurueck(db_session: AsyncSession) -> None:
@@ -440,14 +447,19 @@ async def test_entladung_nach_unten_wirkt_ohne_verzoegerung(
     Die Streak-Regel aus dem ersten Entwurf (drei Meldungen in Folge) ist
     entfallen: sie braeuchte persistierten Zustand, und ein 24-h-Median
     bewegt sich ohnehin nur, wenn die Mehrheit der Messwerte gekippt ist.
-    Hier: 20 Werte auf 2.8 V, vier auf 3.0 -> Median 2.8, kritisch.
+    Hier: 20 Werte auf 2.6 V, vier auf 3.0 -> Median 2.6, kritisch.
+
+    Die Messwerte liegen seit AE-73 auf 2.6 statt 2.8 V, weil die
+    Kritisch-Grenze dorthin verschoben ist. Geprueft wird nach wie vor die
+    **Bewegung nach unten ohne Hysterese** — nicht die Grenze selbst, die
+    steht in ``test_battery_health.py``.
     """
     device_id = await _make_device(db_session)
-    await _seed(db_session, device_id, ["3.0"] * 4 + ["2.8"] * 20)
+    await _seed(db_session, device_id, ["3.0"] * 4 + ["2.6"] * 20)
 
     verdict = (await battery_verdicts(db_session, [device_id], now=JETZT))[device_id]
 
-    assert verdict.median_v == Decimal("2.8")
+    assert verdict.median_v == Decimal("2.6")
     assert verdict.stage == "kritisch"
 
 
@@ -466,7 +478,7 @@ async def test_kein_sprung_bei_zwei_rasterschritten(db_session: AsyncSession) ->
     assert verdict.jump_at is None
     assert verdict.samples == 12
     assert verdict.median_v == Decimal("2.9")
-    assert verdict.stage == "warn"
+    assert verdict.stage == "ok"
 
 
 # ---------------------------------------------------------------------------

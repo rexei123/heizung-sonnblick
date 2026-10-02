@@ -326,46 +326,61 @@ async def test_battery_state_warn_without_touching_health_state(
     setup: dict[str, int | str],
     setup_engine: AsyncEngine,
 ) -> None:
-    """2,9 V erscheint als battery_state="warn", health_state bleibt healthy.
+    """2,8 V erscheint als battery_state="warn", health_state bleibt healthy.
 
     Regression zu AE-65: Batterie ist eine eigene Achse und faltet NICHT in
     offline/implausible.
+
+    Der Messwert liegt seit AE-73 auf 2,8 V statt 2,9 V — die warn-Spanne ist
+    dorthin verschoben (2,7-2,8 V), 2,9 V ist jetzt die untere ok-Grenze.
+    Geprueft wird weiter die Orthogonalitaet der beiden Achsen, nicht die
+    Lage der Grenze; die steht in ``test_battery_health.py``.
     """
-    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.9")
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.8")
 
     resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
     dev = resp.json()
     assert dev["battery_state"] == "warn", dev
     assert dev["health_state"] == "healthy", "Batterie-Achse darf health_state nicht aendern"
     # Die Zahl am Badge ist der Median, nicht der letzte Frame.
-    assert dev["battery_voltage_median"] == 2.9
+    assert dev["battery_voltage_median"] == 2.8
     assert dev["battery_jump_at"] is None
 
 
-async def test_battery_state_kritisch_at_or_below_2_8(
+async def test_battery_state_kritisch_at_or_below_2_6(
     http_client: httpx.AsyncClient,
     setup: dict[str, int | str],
     setup_engine: AsyncEngine,
 ) -> None:
-    """2,8 V -> kritisch. Die Grenze ist inklusiv (Hersteller: "< 2.8 V wechseln")."""
-    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.8")
+    """2,6 V -> kritisch. Die Grenze ist inklusiv (AE-73).
+
+    Sie liegt damit **unter** der Spec-Untergrenze von 2,7 VDC und unter der
+    Hersteller-Wechselempfehlung "< 2,8 V". Das ist die Entscheidung von
+    AE-73 — die Zelle wird bis an den Ausfall ausgenutzt, und die Vorwarnung
+    ist die gelbe Stufe, nicht diese.
+    """
+    await _seed_spannungen(setup_engine, int(setup["device_id"]), "2.6")
 
     resp = await http_client.get(f"/api/v1/devices/{setup['device_id']}")
     dev = resp.json()
     assert dev["battery_state"] == "kritisch", resp.text
-    assert dev["battery_voltage_median"] == 2.8
+    assert dev["battery_voltage_median"] == 2.6
 
 
-async def test_battery_state_ok_ab_3_0(
+async def test_battery_state_ok_bei_geraet_001_wert(
     http_client: httpx.AsyncClient,
     setup: dict[str, int | str],
     setup_engine: AsyncEngine,
 ) -> None:
-    """3,0 V ist OK — die Untergrenze der OK-Stufe, ebenfalls inklusiv.
+    """3,0 V ist OK.
 
     Das ist der Wert, mit dem Geraet 001 gemeldet wurde. Es stand trotzdem
     auf "kritisch": die Anzeige kam aus dem letzten Frame, und unter
     Motorlast war der eingebrochen.
+
+    3,0 V ist seit AE-73 **nicht** mehr die Untergrenze der OK-Stufe (das ist
+    2,9 V), sondern liegt einen Rasterschritt darueber. Der Test prueft den
+    gemeldeten Wert, nicht die Grenze.
     """
     await _seed_spannungen(setup_engine, int(setup["device_id"]), "3.0")
 
@@ -389,7 +404,8 @@ async def test_battery_state_unbekannt_bei_zu_kleiner_stichprobe(
     dev = resp.json()
     assert dev["battery_state"] == "unbekannt", dev
     # Der Median wird mitgegeben, ist aber nicht belastbar; die Oberflaeche
-    # zeigt bei "unbekannt" keine Spannung.
+    # zeigt ihn ohne Stufe NICHT als Median, sondern den letzten Messwert mit
+    # seinem Alter (Nachbesserung 30.09.2026) — nie ein Badge ohne Zahl.
     assert dev["battery_voltage_median"] == 2.6
 
 
