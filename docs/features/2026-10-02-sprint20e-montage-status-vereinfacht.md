@@ -9,7 +9,9 @@ ein Ventil, das nicht reagiert.
 **Autonomie-Stufe:** **1** — Engine-Schicht mit Hardware-Schutz-Bezug (Layer 4
 Detached). Volle Stop-Points.
 **Geschätzte Dauer:** 8–11 h.
-**Status:** Brief, Phase 1. **Nicht gebaut.** Das Gate kommt vor der Umsetzung.
+**Status:** Brief, Phase 1. **Nicht gebaut.** Gate-Beschluss vom 02.10.2026
+ist in §12 eingearbeitet — dort stehen auch die zwei Zusätze und zwei
+Befunde, die sie nötig gemacht haben.
 
 ---
 
@@ -344,3 +346,197 @@ wiederherstellen und belegen, dass die neuen Tests fallen.
   **ohne** Nachweis müssen ohne Anpassung grün bleiben.
 - **B-20c-4** — fehlende Isolation im Health-Task; betrifft Regel 2, weil sie
   auf genau diesem Task aufsitzt. Sollte vor oder mit 20e erledigt werden.
+
+---
+
+## 12. Gate-Beschluss vom 02.10.2026
+
+| Punkt | Beschluss |
+|---|---|
+| Regel 1 (Detached-Frostschutz aus) | **freigegeben**, AE-74 dokumentiert beide Seiten (§0) |
+| Montage-Nachweis | `valve_position > 0`, kein `sensor_reading.motor_range` — Weg A aus §2 |
+| Regel 2 | `silent` von 24 h auf **3 h** |
+| Regel 3 + 3b | Hinweis in Oberfläche und Dashboard, **keine Mail** |
+| `detach` / `retire` | löschen den Montage-Nachweis |
+| **Neu: Regel 3b** | Ist ≥ Soll + 3 K über 2 h → „Zimmer zu warm – Gerät abgenommen oder Ventil klemmt offen?“ |
+| **Neu: Montage-Drehung** | Handverstellung in den ersten 15 min nach Montage/Zuordnung nicht als Override werten |
+
+### 12.1 Regel 3b schließt die Lücke aus §0 — teilweise
+
+Der Gedanke dahinter ist richtig und er war mir nicht gekommen: **ein Ventil
+ohne Kopf steht voll offen.** Der Stift wird von der Feder herausgedrückt,
+sobald der Thermostatkopf ab ist. Ein abgenommenes Gerät führt also
+nicht zu einem kalten, sondern zu einem **heißen** Zimmer — und das
+ist messbar, ohne den Backplate-Taster.
+
+Damit ersetzt 3b den Melder, den Regel 1 abschaltet, auf der Wirkungsseite
+(§5.76) statt auf der Mechanikseite. Das ist die bessere Konstruktion.
+
+**Was 3b nicht abdeckt, ausdrücklich:** die Außentemperatur. Ein
+abgenommener Kopf im Sommer oder in einer Übergangszeit, in der die
+Vorlauftemperatur niedrig ist, heizt das Zimmer nicht über Soll + 3 K.
+In der Heizperiode greift 3b; im Juni nicht. Das ist kein Einwand — im
+Juni ist ein offenes Ventil auch kein Problem — aber es heißt, dass
+der Melder **saisonal** ist, und das gehört in AE-74.
+
+### 12.2 Der Vicki-Sensor wirkt bei 3b in die gefährliche Richtung
+
+Bei Regel 3 war die Verzerrung harmlos: der interne Sensor liest wegen der
+Heizkörperwärme zu warm, `setpoint >= temp + 3` trifft damit
+**seltener** zu, der Hinweis kommt eher zu selten (§5).
+
+**Bei 3b ist es genau umgekehrt.** Die Bedingung ist `temp >= setpoint + 3`,
+und ein zu warm lesender Sensor erfüllt sie **früher**. Ein normal
+heizender Heizkörper mit Sollwert 22 °C, dessen Vicki auf dem warmen
+Ventil 25 °C liest, löst den Hinweis aus, obwohl das Zimmer bei 22 steht.
+
+Das ist derselbe Mechanismus, der §5.27 zugrunde liegt (Hersteller:
+„not 100% reliable, can be affected by ... position of the device on the
+radiator“) — nur diesmal auf der Seite, auf der er Störung
+erzeugt.
+
+**Was dagegen hilft, in dieser Reihenfolge:**
+
+1. **Kein Mailversand** — im Gate schon entschieden. Ein Hinweis in der
+   Oberfläche, der manchmal zu viel zeigt, kostet einen Blick; eine Mail,
+   die manchmal zu viel zeigt, kostet die Glaubwürdigkeit aller Mails
+   (§5.79).
+2. **Δ für 3b höher ansetzen als für Regel 3.** Vorschlag:
+   Vorgabe **5 K** statt 3 K, eigene Einstellung, nicht dieselbe wie Regel 3.
+   Begründung: die Verzerrung geht nur in diese Richtung, also braucht
+   diese Richtung mehr Abstand. Nach zwei Wochen Heizperiode nachjustieren —
+   die Schwellen sind dafür konfigurierbar.
+3. **Das 2-h-Fenster vollständig verlangen**, nicht im Mittel: jeder
+   Messwert im Fenster muss die Bedingung erfüllen. Ein Aufheiz-Peak
+   fällt damit heraus.
+
+**Was NICHT hilft und deshalb verworfen ist:** `valve_position` als
+Zusatzbedingung. Naheliegend wäre „Hinweis nur, wenn das Ventil auch
+offen gemeldet wird“ — das würde aber genau den Hauptfall
+verlieren. Ein abgenommener Kopf meldet die **Motorposition, die er zuletzt
+angefahren hat**; stand der Sollwert niedrig, meldet er „geschlossen“,
+während das Ventil mechanisch voll offen ist. Die Zusatzbedingung
+hätte den Melder gegen seinen eigenen Zweck abgedichtet.
+
+### 12.3 Montage-Drehung: `0x28` erreicht die Override-Erkennung nicht
+
+**Die Annahme im Auftrag trifft nicht zu, und das macht die Umsetzung
+einfacher.**
+
+`0x28` ist belegt — „Manual target temp change (Gast dreht am
+Vicki-Drehrad)“, FW ≥ 3.5, laut
+[Hersteller-Cheat-Sheet Zeile 11](docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md:11).
+Aber:
+
+1. **Der Codec dekodiert `0x28` nicht.** Das Routing kennt `0x52`, `0x04`,
+   `0x46` als Command-Replies und `0x01`/`0x81` als Periodic Report
+   ([mclimate-vicki.js:79-82](infra/chirpstack/codecs/mclimate-vicki.js:79)).
+   Alles andere fällt in `decodePeriodicReport` und wird dort mit
+   `warnings: ['unknown periodic report command 0x28']` und einem Datenobjekt
+   verlassen, das **nur** `{ command: 0x28 }` enthält
+   ([:96-102](infra/chirpstack/codecs/mclimate-vicki.js:96)).
+2. **Ohne `target_temperature` erreicht der Frame den Override-Pfad nicht.**
+   Der Subscriber steigt vorher aus — die Adoption braucht einen
+   Zielwert ([mqtt_subscriber.py:489-498](backend/src/heizung/services/mqtt_subscriber.py:489)).
+
+**Was tatsächlich passiert:** der Gast (oder der Monteur) dreht, der Vicki
+übernimmt den Wert intern, und der **nächste Periodic Report
+(`0x81`)** trägt ihn als `target_temperature`. Erst dort vergleicht
+`detect_user_override` gegen den letzten Engine-Befehl
+([device_adapter.py:149-193](backend/src/heizung/services/device_adapter.py:149))
+und erkennt die Abweichung.
+
+**Folge für die Umsetzung:** die 15-Minuten-Sperre hängt **nicht** an
+einem Command-Byte, sondern an einem neuen Gate in
+`handle_uplink_for_override` — an derselben Stelle wie das Reboot-Gate
+(AE-63) und die OCCUPIED-/Window-Gates. Ein Gate, nicht drei.
+
+### 12.4 Der Zeitpunkt, ab dem die 15 Minuten laufen — und warum keine Spalte
+
+**Nicht die Montage, sondern die Zuordnung.** Vor dem `assign` ist das
+Gerät Pool, `_device_room_id` liefert `None`, und der Override-Pfad
+steigt aus ([device_adapter.py:336-343](backend/src/heizung/services/device_adapter.py:336)).
+Eine Drehung am noch nicht zugeordneten Gerät kann also **heute schon**
+keinen Override erzeugen. Das Fenster, das zählt, beginnt mit dem
+`assign`.
+
+Dazu braucht es **keine neue Spalte**: der Zeitpunkt steht im Audit.
+`device_service.assign_zone` schreibt `DEVICE_ZONE_ASSIGNED` mit
+`target_type="device"`, `target_id=device.id` und `ts`
+([device_service.py:372-384](backend/src/heizung/services/device_service.py:372)) —
+und beide Wege gehen durch diese Funktion, CLI wie Oberfläche
+(ausdrücklich vermerkt in [devices.py:374](backend/src/heizung/api/v1/devices.py:374)).
+
+**Warum das kein Hot-Path-Problem ist:** die Audit-Abfrage steht **hinter**
+`detect_user_override`. Sie läuft also nur, wenn ohnehin ein Override
+angelegt würde — bei übereinstimmendem Sollwert ist der Pfad
+nach einer Query zu Ende. Ein Uplink im Normalbetrieb kostet nichts
+zusätzlich.
+
+### 12.5 Eine Frage zurück: „keine neue Spalte“ — wofür genau?
+
+Der Beschluss sagt „Montage-Nachweis: `valve_position > 0`, keine neue
+Spalte“. Zwei Lesarten, und sie unterscheiden sich um einen Sprint-Teil:
+
+1. **Kein `sensor_reading.motor_range`** (also Weg A aus §2) — der
+   **Nachweis selbst** bleibt eine Spalte `device.mounted_confirmed_at` wie in
+   §3 vorgeschlagen.
+2. **Überhaupt keine neue Spalte** — der Nachweis wird read-time
+   abgeleitet.
+
+**Ich setze Lesart 1 um**, weil §2 genau diese Wahl zur Entscheidung
+gestellt hat („Weg A: Kriterium / Weg B: Spalte“) und der Beschluss
+deren Wortlaut aufnimmt. Falls Lesart 2 gemeint war, bitte ein Wort — die
+Umsetzung wäre anders, und sie hätte einen Preis, den ich jetzt
+beziffern kann:
+
+**Layer 4 läuft je Raum jede Minute** (`evaluate-due-rooms-every-60s`).
+Ein read-time abgeleiteter Nachweis wäre dort eine Abfrage über die
+**ganze** Historie des Geräts — billig, solange sie einen Treffer
+findet, und teuer genau bei den Geräten ohne Treffer. Bei 45 Zimmern
+sind das 45 solche Abfragen pro Minute, dauerhaft. Die Spalte ist **ein**
+Schreibvorgang je Gerät, je Lebenszeit.
+
+Heute wäre beides tragbar (`sensor_reading` ist 32 MB). Bei 104
+Geräten und ~144 Uplinks am Tag sind es rund 5,5 Mio. Zeilen im Jahr —
+dann nicht mehr.
+
+### 12.6 Neue Tasks aus dem Gate
+
+| # | Inhalt | Dauer |
+|---|---|---|
+| **T10** | Regel 3b: zweites read-time Urteil im selben Fensterlauf wie Regel 3 (eine Query, zwei Bedingungen — nicht zwei Queries). Eigene Schwelle `ROOM_TOO_WARM_DELTA_K`, Vorgabe 5 K (§12.2), eigenes Badge und eigener Dashboard-Zähler | 1,5 h |
+| **T11** | Montage-Drehung: Gate in `handle_uplink_for_override` nach `detect_user_override`, Fenster aus dem `DEVICE_ZONE_ASSIGNED`-Audit, Schwelle `ASSIGN_GRACE_MIN` in den Settings (Vorgabe 15). Skip wird auditiert wie die anderen Gates (§5.52: Off-Pipeline-Eintrag mit Grund) — ein stiller Skip wäre genau das, was man später sucht | 1,5 h |
+| **T12** | `detach` / `retire` löschen `mounted_confirmed_at`. Beide Pfade gehen durch `device_service`, also eine Stelle je Vorgang; Test, dass ein Pool-Rückläufer keinen Nachweis mehr trägt | 0,5 h |
+| **T13** | Tests zu T10–T12: 3b an den Grenzen (4,9 K / 5,0 K / Fenster unvollständig), Montage-Drehung (14 min → kein Override, 16 min → Override), Nachweis-Löschung | 1,5 h |
+
+### 12.7 Neue Gesamtschätzung
+
+| Block | Dauer |
+|---|---|
+| T1–T9 (Brief §8) | 11,5 h |
+| **minus T1** (Migration für `motor_range` entfällt — Weg A) | −0,5 h |
+| T10–T13 (Gate-Zusätze) | +5,0 h |
+| **Summe** | **16,0 h** |
+
+Das ist nicht mehr ein kleiner Sprint. Zwei Schnitte sind möglich, und ich
+empfehle den ersten:
+
+1. **Regel 3 und 3b abtrennen** (T7, T10, Teile von T8/T13) — rund 5,5 h.
+   Sie sind reine Hinweise ohne Steuerwirkung und hängen an nichts
+   anderem. Übrig bleiben 10,5 h für Regel 1, Regel 2 und die
+   Montage-Drehung — also genau das, was zusammengehört: Regel 2
+   ersetzt den Melder, den Regel 1 abschaltet.
+   **Aber:** damit fällt auch 3b heraus, und 3b ist nach §12.1 der
+   bessere Ersatz für diesen Melder. Wer so schneidet, sollte 3b im
+   **ersten** Teil behalten und nur Regel 3 (das klemmende, geschlossene
+   Ventil) verschieben — dann 12,0 h / 4,0 h.
+2. **Montage-Drehung abtrennen** (T11, 1,5 h + Test). Unabhängig von
+   allem anderen, aber sie ist der Teil mit dem größten Nutzen je
+   Stunde: ein falsch übernommener Override hält bis zum
+   nächsten Check-out.
+
+**Empfehlung:** Regel 1 + Regel 2 + 3b + Montage-Drehung in 20e (12,0 h),
+Regel 3 als 20f (4,0 h). Begründung: alles, was den abgeschalteten Melder
+ersetzt, geht zusammen; das klemmende geschlossene Ventil ist ein
+Komfortthema und kann warten.
