@@ -189,10 +189,17 @@ export interface SensorReadingsQuery {
   limit?: number;
 }
 
+/**
+ * Filter für die Geräteliste.
+ *
+ * `limit` und `offset` stehen hier **nicht** (Sprint 20c, B-20c-1):
+ * `devicesApi.list` holt immer alle Seiten und setzt beide selbst. Ein Feld,
+ * das der Aufrufer setzen kann und das dann überschrieben wird, wäre ein
+ * Schalter ohne Wirkung — und genau die Sorte, die jemand für eine
+ * Begrenzung hält, die es nicht gibt.
+ */
 export interface DeviceListQuery {
   vendor?: DeviceVendor;
-  limit?: number;
-  offset?: number;
 }
 
 export interface DeviceAssignZoneRequest {
