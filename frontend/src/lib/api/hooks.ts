@@ -35,7 +35,16 @@ const KEYS = {
     ["sensor-readings", id, q] as const,
 };
 
-/** Liste aller Geraete. Aktualisiert sich beim Tab-Focus. */
+/**
+ * Liste **aller** Geraete. Aktualisiert sich beim Tab-Focus.
+ *
+ * Seit Sprint 20c (B-20c-1) holt ``devicesApi.list`` alle Seiten des
+ * paginierten Endpoints. Vorher kamen 100 Zeilen — der Server-Default —, und
+ * alle fuenf Aufrufer dieses Hooks erwarten die vollstaendige Liste:
+ * Geraeteliste, Pairing-Auswahl, Zimmer-Detail, Tausch-Dialog und die
+ * Thermostat-Bubbles der Zonenkarten. Jeder davon hat still gefiltert, was
+ * er nicht bekommen hatte.
+ */
 export function useDevices(q: DeviceListQuery = {}): UseQueryResult<Device[]> {
   return useQuery({
     queryKey: KEYS.devicesList(q),

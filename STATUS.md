@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-09-30, develop-HEAD `9493bd9` (PR #245). Laufender Sprint: **20 (Batteriestufen über die Spannung)** — PR A gemergt, PR B offen, §2bq. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
+**Stand:** 2026-10-02, develop-HEAD `8ba8f91` (PR #249). Laufender Sprint: **20c (Hotfix Geräteliste abgeschnitten, B-20c-1)** — §2bu, PR offen; davor **20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt, PR #250. Abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **`celery_beat`-Healthcheck**, §2bs — PR #249. Letzter abgeschlossener Sprint: **19 (Eingangstest ohne Rückfragen)**, §2bp — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest` auf `f9b4244` (Live-Verify steht aus, §5.67). Davor: Sprint 18 (Alarm-Versand), live bestätigt am 20.09., Tag `v0.2.0-alarm-versand`, §2bn; dazwischen Hotfix Belegungs-Import-Zeitzone (§2bo, PR #241). Sprint-Aufzählung siehe §1.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-09-30
+**Stichtag:** 2026-10-02
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B offen. Migration 0024 (`sensor_reading.battery_voltage`). Stufen: OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V, bewertet über den 24-h-Median, read-time. `alert_battery_warn_percent` aus Schema und Oberfläche entfernt (B-18-7 Eintrag 3). **Neue Regel CLAUDE.md §0.3:** vor jedem Merge nach `develop` wird gefragt, ob ein Montage- oder Eingangstest läuft — der Merge ist ein Deploy auf heizung-test. Davor: **Sprint 19 Eingangstest ohne Rückfragen abgeschlossen** (§2bp) — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest`. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
+**Aktueller Sprint:** **Sprint 20c Hotfix Geräteliste** (§2bu, B-20c-1) — `GET /api/v1/devices` ist paginiert und liefert ohne `limit` 100 Zeilen; fünf Frontend-Aufrufer erwarteten die vollständige Liste und haben still 100 von 104 Geräten bekommen. `devicesApi.list` holt jetzt alle Seiten (`SEITE = 100`) und **wirft**, statt abzuschneiden. Davor **Sprint 20b Batterie-Schwellen in die Settings** (§2bt, AE-73, PR #250) — `BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V` in `config.Settings`, Vorgabe 2,9 / 2,6 V, Badge-Labels „Batterie OK" / „Beobachten" / „Tauschen". Davor: **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B #246, Nachbesserung #248. Migration 0024 (`sensor_reading.battery_voltage`). Stufen: OK ≥ 3,0 V / schwach 2,9 V / kritisch ≤ 2,8 V, bewertet über den 24-h-Median, read-time. `alert_battery_warn_percent` aus Schema und Oberfläche entfernt (B-18-7 Eintrag 3). **Neue Regel CLAUDE.md §0.3:** vor jedem Merge nach `develop` wird gefragt, ob ein Montage- oder Eingangstest läuft — der Merge ist ein Deploy auf heizung-test. Davor: **Sprint 19 Eingangstest ohne Rückfragen abgeschlossen** (§2bp) — PRs #243/#244/#242 gemergt, Tag `v0.2.1-eingangstest`. Migration 0023 (`sensor_reading.broken_sensor`). Montage-Reihenfolge verbindlich in RUNBOOK §10h.6: montieren → Eingangstest mit `--require-motor` → `assign`. Davor: **Sprint 18 Alarm-Versand abgeschlossen** (2026-09-20, §2bn) — PRs #235/#236/#237/#239 gemergt, develop-HEAD `a0981d8`, Images im GHCR als `develop-a0981d8` belegt (§5.11). Abschlussbedingung erfüllt: `send_test_mail` am 20.09. an `verwaltung@hotel-sonnblick.at`, im Posteingang angekommen. Versandweg Gmail → Exchange (Begründung in §2bn). **Tag `v0.2.0-alarm-versand`** (annotated, auf `a0981d8`, gesetzt 2026-09-20). Davor: Sprint 17 (Mass-Pairing-Vorbereitung, Montage ab 26.09.). Davor: Sprint 15g Periodischer room.status-Sync (Backend, AE-68) **abgeschlossen + live-verifiziert** — PR #225 gemerged (`a26d781`), Tag `v0.1.19k-room-status-sync` gesetzt 2026-06-14, **live-verifiziert 14.06.2026 auf Prod** (Workaround 30 Räume, Beat aktiv, Check-out-11:00-Transition in DB bestätigt — §2bm). Davor: Sprint 15f Belegungs-Import-Sichtbarkeit (Frontend, AE-66) **abgeschlossen** — PR #216 gemerged (`eb9e98a`), Tag `v0.1.19j-belegungs-import-front`, live-verifiziert 2026-06-07 (§2bl). Davor: Sprint 15e + 15e-1 Belegungs-Import-Webhook (Backend) **abgeschlossen** — PR #215/#217 gemerged (develop-HEAD `4fbf7d2`), Tag `v0.1.19i-belegungs-import`, live-verifiziert 2026-06-07 (§2bk). Davor: Sprint 15d Batterie als Health-Zustand **VOLLSTÄNDIG gemergt** — PR1 Backend #210 (`106789d`), PR2 Frontend #211 (`54759c9`), PR3 Detail-Badge #212 (`b2fa884`), alle AE-65. Kein Tag `v0.1.19h`: 15d ist über den 15f-Live-Verify (`v0.1.19j`, 2026-06-07) bereits produktiv mitverifiziert; Tag-Slot bleibt bewusst leer (analog `v0.1.10`/`v0.2.0`). Davor: Sprint 15b Batterie-Skala-Fix (§2bf) — abgeschlossen 2026-06-02, Tag `v0.1.19g-batterie-skala` (annotated). Tag-Reihe v0.1.19: a/a.1/b/c/d/e/f/g — **h bewusst leer (Sprint 15d, subsumiert im `v0.1.19j`-Verify)** — i/j. Sprint 15c fcnt-Reboot-Drift-Fix davor abgeschlossen 2026-06-02 (§2be).
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -4294,6 +4294,121 @@ steht der Container auf `unhealthy` wie vorher, und es fällt sofort auf.
 
 ---
 
+## 2bu. Sprint 20c Geräteliste war bei 100 abgeschnitten (2026-10-02, B-20c-1)
+
+**Befund des Hoteliers, am Server belegt:** `device` hat 104 Zeilen, die
+Oberfläche zeigte **100**. Gefehlt haben die Geräte 097–100, also die vier
+mit den höchsten IDs — und das sind die zuletzt eingepairten. Keine
+Fehlermeldung, kein Hinweis: die Liste sah vollständig aus.
+
+**Ursache, belegt im Code.** Der Endpoint ist in Ordnung. `GET
+/api/v1/devices` ist paginiert, `limit` hat den Default **100** und ist auf
+1000 begrenzt ([devices.py:247](backend/src/heizung/api/v1/devices.py:247)),
+sortiert wird serverseitig nach `id` aufsteigend
+([device_service.py:108](backend/src/heizung/services/device_service.py:108)).
+Der Fehler lag im Client: `devicesApi.list` hat **eine Seite** geholt, ohne
+`limit` zu setzen, und sie für die ganze Liste genommen
+([devices.ts:23](frontend/src/lib/api/devices.ts:23), Stand vor diesem PR).
+
+Dass es ausgerechnet die höchsten IDs trifft, ist keine Zufälligkeit, sondern
+die Folge der Sortierung — und es ist der schlechteste denkbare Zuschnitt:
+die neuesten Geräte sind die, die noch montiert werden müssen.
+
+### Alle Stellen, die eine vollständige Liste erwarten
+
+Gesucht wurde nach dem **Verhalten** (Aufrufe des Endpoints, `limit`/`offset`,
+`useDevices`), nicht nach Symbolnamen — die Suche nach Namen war der Fehler,
+der in #250 vier DB-Tests durchgelassen hat.
+
+**Betroffen, alle fünf über `useDevices()` ohne `limit`:**
+
+| Stelle | Was dort still fehlte |
+|---|---|
+| [devices/page.tsx:76](frontend/src/app/devices/page.tsx:76) | die Geräteliste selbst — der gemeldete Befund |
+| [devices/pair/page.tsx:71](frontend/src/app/devices/pair/page.tsx:71) | **die Zuordnung.** `unassigned` filtert aus der abgeschnittenen Liste; die zuletzt eingepairten Pool-Geräte waren nicht auswählbar |
+| [zimmer/[id]/page.tsx:267](frontend/src/app/zimmer/[id]/page.tsx:267) | Geräte im Zimmer — ein Gerät mit hoher ID war dort unsichtbar, also kein Tausch, kein Stilllegen, kein Trennen |
+| [zimmer/[id]/page.tsx:60](frontend/src/app/zimmer/[id]/page.tsx:60) | Ziel-Lookup für Tausch- und Retire-Dialog (dieselbe Liste) |
+| [heating-zone-list.tsx:40](frontend/src/components/patterns/heating-zone-list.tsx:40) | Thermostat-Bubbles der Zonenkarten — kein Ist-Wert, kein Batterie-Badge für das fehlende Gerät |
+
+**Geprüft und NICHT betroffen** — das ist der zweite Teil des Befunds und
+genauso wichtig, weil es sagt, wo man nichts anfassen muss:
+
+| Stelle | Warum nicht |
+|---|---|
+| `GET /api/v1/devices/pool` | kein `limit` in `get_pool_devices` ([device_service.py:136](backend/src/heizung/services/device_service.py:136)) — der Tausch-Dialog war vollständig |
+| Dashboard-Zähler | zählen direkt in der Datenbank ([dashboard_aggregates.py:59](backend/src/heizung/services/dashboard_aggregates.py:59) und `:199`), nicht über den Endpoint |
+| `inbound-test --all-pool` | nutzt `get_pool_devices` ([pair_devices.py:503](backend/src/heizung/scripts/pair_devices.py:503)) |
+| `activate_open_window_detection` | eigener Select ohne `limit` ([:177](backend/src/heizung/scripts/activate_open_window_detection.py:177)) |
+| `seed_rooms` | eigener Select ohne `limit` ([:338](backend/src/heizung/scripts/seed_rooms.py:338)) |
+| RUNBOOK-Handgriffe zum Zählen | gehen über `psql`, nicht über die API — deshalb ist die Abweichung überhaupt aufgefallen (DB 104, UI 100) |
+
+### Der Fix
+
+`devicesApi.list` holt alle Seiten, mit `limit`/`offset` serverseitig
+sortiert, und bricht ab, sobald eine Seite kürzer ist als angefragt. Es gibt
+bewusst **keine** Variante, die eine Seite holt: eine Funktion, die still
+abschneidet, wird irgendwann aus Versehen benutzt. `limit` und `offset` sind
+aus `DeviceListQuery` entfernt — ein Feld, das der Aufrufer setzen kann und
+das dann überschrieben wird, wäre ein Schalter ohne Wirkung.
+
+Bei mehr als 10 000 Geräten (100 Seiten) **wirft** die Schleife, statt eine
+Liste zu liefern, die vollständig aussieht. Der Fall kann nur bei einem
+Backend-Fehler eintreten — er ist das Netz, nicht der Normalfall.
+
+**Seitengröße 100, nicht 500.** Die naheliegende Wahl wäre eine Seite, die
+den ganzen Bestand trägt — dann ist es ein Aufruf und die Schleife reine
+Absicherung. Verworfen: dann läuft sie im Betrieb **nie**, und eine
+Paginierung, die nur im Test greift, wird beim Wachsen des Bestands das
+erste Mal scharf. Bei 100 sind es heute zwei Aufrufe, und der zweite
+Durchlauf ist jeden Tag belegt. Preis ist ein Roundtrip; die Arbeit je Gerät
+bleibt dieselbe.
+
+### Tests
+
+**Backend** (`test_devices_liste_vollstaendig.py`, 5 Tests): der Default
+**ist** 100 (die Eigenschaft, gegen die der Client paginiert); 105 Geräte
+kommen über Seiten von 25 **vollständig und ohne Dopplung** zurück; die
+Sortierung ist aufsteigend; die Grenzfälle „Seite genau so groß wie der
+Bestand" und „einer mehr"; die Dashboard-Zähler sehen alle 105.
+
+Die Grenzfälle stehen **relativ** zum Ist-Bestand, nicht gegen die Literale
+100/101: der Endpoint liefert alle Geräte der Datenbank, und dort liegen
+Zeilen aus anderen Test-Dateien (`test_battery_voltage_db` legt 104 an). Ein
+Test, der 100 als Gesamtzahl behauptet, hinge an der Ausführungsreihenfolge
+der Suite und kippte beim nächsten neuen DB-Test, ohne dass sich am
+Verhalten etwas geändert hätte (§5.39).
+
+**e2e** (`sprint-20c-geraeteliste-vollstaendig.spec.ts`, 5 Tests): dort sind
+die Zahlen kontrolliert, also stehen die Literale da — 105, **genau 100**,
+101, und 99 als Gegenprobe (ein Aufruf genügt). Der Mock wertet
+`limit`/`offset` aus und liefert echte Teilmengen; ein Mock, der immer alles
+zurückgibt, hätte den Bug nie gezeigt — er war genau die falsche Annahme.
+Die **Anzahl der Requests** ist mitgeprüft: beim Grenzfall 100 ist die
+Zeilenzahl mit und ohne Fix gleich, und nur die zweite Anfrage unterscheidet
+die beiden Fassungen.
+
+**Gegenprobe gelaufen:** mit dem alten Einzelaufruf fallen 4 der 5
+e2e-Tests, mit genau dem gemeldeten Bild — 105 → 100, 101 → 100,
+Pairing-Auswahl nicht gefunden. Der fünfte (99 Geräte) ist in beiden
+Fassungen grün, wie es sein soll.
+
+### Offen / Hinweise
+
+- **Dieselbe Klasse, heute unauffällig:** `GET /api/v1/rooms`
+  ([rooms.py:97](backend/src/heizung/api/v1/rooms.py:97)),
+  `GET /api/v1/room-types` ([:80](backend/src/heizung/api/v1/room_types.py:80))
+  und `GET /api/v1/occupancies` ([:141](backend/src/heizung/api/v1/occupancies.py:141))
+  haben denselben Default 100. Mit 45 Zimmern ist das heute folgenlos —
+  aber es ist derselbe Mechanismus, und bei den Belegungen ist die Zahl
+  nicht fest. **Nicht in diesem PR**: der Auftrag war die Geräteliste, und
+  ein Hotfix vor der Pilotmontage soll nicht drei weitere Clients anfassen.
+  Eigener Eintrag: **B-20c-2**.
+- **Live-Verify** steht aus: nach dem Deploy muss `/devices` 104 Zeilen
+  zeigen, und die Pairing-Auswahl muss die höchsten Hardware-Nummern
+  anbieten.
+- **Lokale DB-Tests weiter nicht ausführbar** (B-18-5). Die fünf neuen
+  Backend-Tests sind lokal nur gesammelt, nicht gelaufen; sie hängen an CI.
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 ### 3.1 Sicherheit / Hardening
@@ -4564,6 +4679,8 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | **B-18-7** | **Bestand der verwaisten Schalter.** Ein wirkungsloser Eintrag, der aussieht, als stelle er etwas ein, ist derselbe Fehlertyp wie `alert_email` vor Sprint 18 — nur in der Konfigurationsdatei statt in der Oberflaeche (CLAUDE.md §5.77). Gefuehrter Bestand, Stand 28.09.2026: **(1) `OCCUPANCY_IMPORT_EXPECTED_BY_LOCAL` in der `.env` von heizung-test** — seit dem Zeitzonen-Fix (27.09., §2bo) ohne Wirkung, die Schwelle steht in `global_config` und in der Oberflaeche. Bewusst **nicht** sofort entfernt: der Eintrag richtet keinen Schaden an, und ein `.env`-Eingriff zwei Tage vor der Montage ist das groessere Risiko. Streichung beim naechsten `.env`-Durchgang, **gebuendelt mit B-18-2** (Secrets-Rotation, Frist 01.11.) — derselbe Wartungsblock, dieselbe Datei, ein Container-Neustart statt zwei. `.env.example` traegt den Hinweis bereits, RUNBOOK §10d.9 ebenfalls. **(2) `global_config.alert_device_offline_minutes`** — siehe B-17-1, in der UI editierbar, kein Konsument im Backend (AE-53 rechnet mit eigenen Konstanten). Entscheidung vom 19.09.: aus der UI entfernen, zurueckgestellt auf nach dem 26.09. **(3) `global_config.alert_battery_warn_percent`** — mit Sprint 20 (AE-72) entwertet: die Batterie-Stufen rechnen gegen feste Spannungs-Schwellen (OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V), eine konfigurierbare Prozent-Schwelle hat keinen Konsumenten mehr. **Anders als (1) und (2) ist dieser Fall im selben PR erledigt:** das Feld ist aus `GlobalConfigRead` und `GlobalConfigUpdate` entfernt und in der Einstellungsseite geloescht, die Spalte bleibt in `global_config` (kein destruktives Schema). Der Eintrag steht hier nicht als offene Aufgabe, sondern als Nachweis der Regel — und als Hinweis fuer den Fall, dass jemand die Spalte in der Datenbank findet und sie fuer eine Einstellung haelt. **Regel fuer den Zugang zu dieser Liste:** wer einen Wert entwertet — durch Umzug, Ersatz oder Wegfall seines Konsumenten — traegt ihn hier ein, im selben PR. Sonst bleibt er als stiller Schalter liegen und wird beim naechsten Mal als Einstellung gelesen. | 🟢 |
 | **B-18-4** | **Anpassung an SQLAlchemy 2.1 (und mypy 2).** Befund 27.09.2026: die sechs Typ-Meldungen stammen aus **SQLAlchemy 2.1.1** (lokal 2.0.49), nicht aus mypy — nach dem Pin auf `mypy<2` lief CI mit derselben mypy-Version wie lokal und meldete *mehr* Fehler als vorher. SQLAlchemy 2.1 liefert nullable Spalten beim Row-Unpacking als `X | None` bzw. `object`. Die Stellen sind geprueft, der naechste Durchgang muss sie **nicht erneut untersuchen**: (1) `services/zone_aggregates.py:83`, (2) `services/dashboard_aggregates.py:149`, (3) `rules/engine.py:691` (zwei Meldungen) — der Wert kann dort nie `None`/`object` sein, weil die Query `heating_zone_id.in_(ids)` bzw. einen WHERE-Filter setzt und SQL-`IN` NULL ausschliesst; **kein latenter Defekt**, ein Narrowing mit Begruendung genuegt (in `engine.py:690` steht der passende Kommentar schon). (4) `scripts/pairing/csv_parser.py:273` und (5) `scripts/pairing/batch_inbound_test.py:461` — `type: ignore[arg-type]`, das die neuen Stubs korrekt inferieren; **je eine Zeile zum Loeschen**. Danach beide Pins heben. **Nach dem 29.09.** | 🟢 |
 | **B-18-5** | **Docker Desktop als einzelner Punkt des Versagens.** Am 26.09. liess sich Docker auf der Entwicklungsmaschine nicht starten — die WSL-Distribution `docker-desktop` blieb auf `Stopped`, jeder `docker`-Aufruf hing ohne Zeitlimit. Folge: die DB-Tests (§5.50) waren **nur** in CI ausfuehrbar, und zwar genau an dem Tag, an dem CI zusaetzlich durch den mypy-Sprung blockiert war (§5.80). Zwei Beweiswege, beide gleichzeitig zu. Zu klaeren: WSL-Ursache beheben **und** einen zweiten Weg schaffen, der nicht an Docker Desktop haengt (Postgres-Dienst direkt, WSL-Instanz, oder ein bewusst benutzbarer CI-Lauf auf einem Wegwerf-Branch). **Nach dem 29.09.** | 🟡 |
+| **B-20c-1** | **Geräteliste war bei 100 abgeschnitten.** ✅ **Erledigt am 02.10.2026** (§2bu). Befund des Hoteliers vor der Pilotmontage: 104 Zeilen in `device`, 100 in der Oberfläche, die vier höchsten IDs fehlten. Ursache im Client, nicht im Endpoint — `devicesApi.list` hat eine Seite des paginierten Endpoints für die ganze Liste genommen. Betroffen waren **fünf** Aufrufer, darunter die Zuordnung bei der Montage. Steht hier als Nachweis, nicht als offene Aufgabe: der Eintrag nennt den Fehlertyp, damit er beim nächsten paginierten Endpoint erkannt wird — **ein Client, der eine Seite für die Gesamtmenge nimmt, meldet nichts, er zeigt einfach weniger.** | 🟢 |
+| **B-20c-2** | **Dieselbe Klasse bei Zimmern, Raumtypen und Belegungen.** `GET /api/v1/rooms`, `/room-types` und `/occupancies` haben denselben `limit`-Default 100 wie die Geräteliste vor B-20c-1, und ihre Frontend-Aufrufer setzen kein `limit`. Mit 45 Zimmern und 103 Zonen ist das **heute folgenlos** — bei den Belegungen ist die Zahl aber nicht fest, und ein Haus mit mehr Zimmern oder eine Liste über mehrere Wochen trifft die Grenze. Bewusst **nicht** im Hotfix vor der Pilotmontage mitgeändert (§5.1: ein Thema, ein PR). Vorgehen wie bei den Geräten: Client holt alle Seiten, kein stilles Abschneiden, `limit`/`offset` aus dem Query-Type entfernen. | 🟡 |
 | B-17-7 | **Ragged-CSV-Meldung ist irreführend.** Eine Datenzeile mit mehr Werten als der Header Spalten scheitert an `csv.Sniffer`, weil Spaltenzahl-Konsistenz Teil seiner Trennzeichen-Heuristik ist. Die Datei wird abgewiesen statt still gekürzt (richtig, S5), aber die Meldung nennt fälschlich das Trennzeichen als Ursache. Der praktische Excel-Fall ist nicht betroffen. Verhalten ist als Test festgehalten. | 🟢 |
 
 ---
