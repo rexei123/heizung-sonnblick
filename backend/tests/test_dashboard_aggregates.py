@@ -340,9 +340,9 @@ async def test_count_battery_low_counts_active_below_threshold(db_session: Async
     now = datetime.now(tz=UTC)
 
     d_warn = await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
-    await _mk_battery_series(db_session, d_warn.id, "2.9", when=now)
+    await _mk_battery_series(db_session, d_warn.id, "2.8", when=now)
     d_crit = await _mk_device(db_session, f"{s}2", zone_id=zone.id, health_state="silent")
-    await _mk_battery_series(db_session, d_crit.id, "2.8", when=now)
+    await _mk_battery_series(db_session, d_crit.id, "2.6", when=now)
     d_ok = await _mk_device(db_session, f"{s}3", zone_id=zone.id, health_state="healthy")
     await _mk_battery_series(db_session, d_ok.id, "3.1", when=now)
     d_none = await _mk_device(db_session, f"{s}4", zone_id=zone.id, health_state="healthy")
@@ -352,7 +352,7 @@ async def test_count_battery_low_counts_active_below_threshold(db_session: Async
     )
     await _mk_battery_series(db_session, d_retired.id, "2.0", when=now)
 
-    assert await agg.count_battery_low(db_session) - base == 2, "nur warn(2.9) + kritisch(2.8)"
+    assert await agg.count_battery_low(db_session) - base == 2, "nur warn(2.8) + kritisch(2.6)"
 
 
 async def test_count_battery_low_folgt_dem_median_nicht_dem_letzten_frame(
@@ -407,8 +407,13 @@ async def test_count_battery_low_ist_deckungsgleich_mit_dem_badge(
     Bis Sprint 19 war die Warn-Schwelle konfigurierbar (1..100) und die
     Kritisch-Grenze fix bei 10 %. Eine Schwelle unter 10 haette ein
     kritisch-Badge ohne Kachel-Zaehlung erzeugt; dagegen stand eine Klemmung
-    auf ``BATTERY_CRITICAL_PCT``. Mit festen Spannungs-Schwellen gibt es
-    diesen Fall nicht mehr — Badge und Kachel lesen dieselbe Funktion.
+    auf ``BATTERY_CRITICAL_PCT``.
+
+    Mit den Spannungs-Schwellen gibt es diesen Fall nicht mehr — Badge und
+    Kachel lesen dieselbe Funktion. Dass die Grenzen seit AE-73 wieder
+    konfigurierbar sind, aendert daran nichts: es ist **eine** Konfiguration
+    fuer beide, und sie wird einmal pro Bewertung gelesen. Die alte Luecke
+    kam daher, dass es zwei Schwellen mit unterschiedlicher Herkunft gab.
 
     Der Test prueft die Invariante direkt: die Kachel-Zahl ist die Anzahl der
     Geraete, deren Stufe warn oder kritisch ist. Ein Geraet mit nur zwei
@@ -422,7 +427,7 @@ async def test_count_battery_low_ist_deckungsgleich_mit_dem_badge(
 
     eigene: list[int] = []
     for i, (volts, anzahl) in enumerate(
-        [("2.8", 3), ("2.9", 3), ("3.0", 3), ("3.5", 3), ("2.8", 2)]
+        [("2.6", 3), ("2.8", 3), ("2.9", 3), ("3.5", 3), ("2.6", 2)]
     ):
         d = await _mk_device(db_session, f"{s}{i}", zone_id=zone.id, health_state="healthy")
         await _mk_battery_series(db_session, d.id, volts, when=now, anzahl=anzahl)

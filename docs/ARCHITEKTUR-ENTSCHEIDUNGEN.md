@@ -3362,6 +3362,14 @@ ChirpStack-gRPC-Provisioning (Sprint 17). Der Fehler ist in allen Quell- und
 Testdateien korrigiert; die Commit-Nachrichten bleiben falsch, weil Historie
 nicht umgeschrieben wird. Wer dort „AE-69" liest, meint diesen Eintrag.
 
+> **Überholt in einem Punkt — AE-73 (Sprint 20b, 2026-10-01).** Die
+> **Zahlen** in §1 (OK ≥ 3,0 V · schwach 2,9 V · kritisch ≤ 2,8 V) gelten
+> nicht mehr. Sie sind durch 2,9 / 2,6 ersetzt und stehen nicht mehr als
+> Konstante im Code, sondern in den Settings. Alles andere in diesem Eintrag
+> gilt unverändert: die Entscheidung, auf der Spannung statt auf Prozent zu
+> rechnen, der 24-h-Median, die Sprung-Regel, die Mindest-Stichprobe und die
+> read-time-Ableitung. Wer eine Schwelle sucht, liest AE-73.
+
 ## Kontext / Problem
 
 Die Oberfläche zeigt drei Batteriestufen (OK / schwach / kritisch) plus
@@ -3607,3 +3615,216 @@ eine zweite Schwelle neben der ersten.
   mehreren Einbrüchen pro Tag aber nicht, und die Stufengrenzen liegen
   0,1 V auseinander. Der Median ist gegen Ausreißer unempfindlich, und genau
   darum geht es hier.
+
+
+---
+
+# AE-73 — Batterie-Schwellen in die Settings, und tiefer gelegt (Sprint 20b)
+
+**Datum:** 2026-10-01
+**Status:** Akzeptiert
+**Bezug:** AE-72 (ersetzt dessen Schwellen-Zahlen, §1 — alles andere dort
+gilt weiter), AE-64 (Kennlinie und Codec-Sättigung), AE-65 (Batterie als
+orthogonale Health-Achse), AE-66 (der Gegenfall: eine Einstellung, die in
+die Oberfläche gehört), CLAUDE.md §5.72 / §5.73 / §5.77 / §5.79.
+
+## Kontext / Problem
+
+AE-72 hat die Batteriestufen vor zwei Tagen von Prozent auf die Spannung
+umgestellt und die Grenzen aus der Hersteller-Spec hergeleitet: Betriebsbereich
+2,7–3,6 VDC, Wechselempfehlung „< 2,8 V", also OK ≥ 3,0 V und kritisch
+≤ 2,8 V, mit einem einzigen Rasterschritt (2,9 V) als „schwach".
+
+Diese Herleitung ist richtig und beantwortet die falsche Frage. Die Spec sagt,
+ab wann der **Hersteller** einen Wechsel empfiehlt. Sie sagt nichts darüber,
+ab wann ein Wechsel für **dieses Haus** wirtschaftlich ist. Das sind zwei
+verschiedene Fragen, und nur die zweite ist hier zu entscheiden.
+
+Zwei Umstände, die in AE-72 nicht eingegangen sind:
+
+**1. Das Haus ist thermisch saniert.** Ein Ventil, das einen Tag nicht regelt,
+kostet kaum Komfort — das Zimmer kühlt langsam aus. Das Risiko eines zu späten
+Wechsels ist damit deutlich kleiner als in einem Altbau.
+
+**2. Jeder Wechsel ist ein Gang.** 104 Geräte, zwei Mignon-Zellen je Gerät,
+ein Hausmeister. Wer eine Stufe früher warnt als nötig, erzeugt Gänge, die
+nichts verhindern.
+
+Dazu ein konstruktiver Mangel: die Grenzen standen als Konstanten im Code
+(`BATTERY_OK_MIN_V`, `BATTERY_CRITICAL_MAX_V`). Dass sie nach der Montage
+nachjustiert werden müssen, war absehbar — die Montage beginnt in wenigen
+Tagen, und erst dann liegen Entladeverläufe aus dem laufenden Betrieb vor.
+Jede Nachjustierung hätte ein Image und einen Deploy gekostet.
+
+## Entscheidung
+
+### 1. Die zwei Grenzen stehen in den Settings
+
+`config.Settings`, Typ `Decimal`, gelesen aus der Umgebung:
+
+| Variable | Vorgabe | Bedeutung |
+|---|---|---|
+| `BATTERY_OK_MIN_V` | `2.9` | ab hier einschließlich: Stufe `ok` |
+| `BATTERY_CRITICAL_MAX_V` | `2.6` | bis hier einschließlich: Stufe `kritisch` |
+
+Dazwischen `warn`, also bei der Vorgabe die zwei Rasterschritte 2,7 und
+2,8 V. `Decimal` und nicht `float`, weil 2,9 und 2,6 in IEEE-754 keine exakte
+Darstellung haben und die Vergleiche genau auf diesen Rasterpunkten laufen —
+dieselbe Begründung wie bei `BATTERY_CURVE_2XAA` (AE-64).
+
+Ein Startup-Validator weist `BATTERY_CRITICAL_MAX_V >= BATTERY_OK_MIN_V` ab.
+Das ist bewusst ein **Start-Fehler** und keine Warnung: bei Gleichheit wäre
+der Grenzwert selbst gleichzeitig `kritisch` (≤) und `ok` (≥), und welche
+Antwort herauskommt, entschiede die Reihenfolge der Vergleiche im Code. Eine
+Konfiguration, deren Wirkung man nicht aus ihr ablesen kann, ist schlimmer
+als eine API, die nicht startet — der Fehler steht beim Hochfahren im
+Container-Log, mit beiden Werten im Text.
+
+**Keine Plausibilitäts-Grenze gegen den Spec-Bereich (2,7–3,6 V).** Die
+Vorgabe 2,6 liegt selbst darunter; eine solche Schranke hätte genau diese
+Entscheidung verboten. Wer die Grenzen verschiebt, soll sie auch unter die
+Spec schieben können — das ist der Punkt.
+
+### 2. Die Grenzen liegen tiefer als die Hersteller-Empfehlung
+
+| Stufe | AE-72 | AE-73 | Label |
+|---|---|---|---|
+| ok | ≥ 3,0 V | ≥ **2,9 V** | „Batterie OK" |
+| warn | 2,9 V | **2,7–2,8 V** | „Beobachten" |
+| kritisch | ≤ 2,8 V | ≤ **2,6 V** | „Tauschen" |
+
+**Was das in Kauf nimmt, ausdrücklich:** „Tauschen" beginnt unterhalb der
+Spec-Untergrenze von 2,7 VDC. Ein Gerät, das rot zeigt, kann sein Ventil
+bereits nicht mehr bewegen. Die Vorwarnung ist deshalb nicht rot, sondern
+**gelb** — und sie ist der eigentliche Handlungszeitpunkt. Wer erst bei Rot
+losgeht, geht absichtlich spät; RUNBOOK §10o sagt das dem Hausmeister in
+diesen Worten.
+
+**Was es gewinnt:** „schwach" ist nicht mehr ein einzelner Rasterschritt,
+sondern zwei. Unter AE-72 konnte ein Gerät die Stufe in einem Schritt
+durchlaufen — bei einem Uplink alle zehn Minuten war „schwach" eher ein
+Durchgang als eine Vorwarnung. Zwei Schritte sind Zeit, einen Gang zu planen.
+
+Die Anforderung „volle Batterie nie als leer" ist mit mehr Abstand erfüllt
+als vorher: zwischen der ok-Grenze und dem frischen Alkaline-Zustand (3,1 V)
+liegen jetzt zwei Rasterschritte statt einem.
+
+### 3. Die Labels sagen die Handlung, nicht den Zustand
+
+„Beobachten" statt „Batterie schwach", „Tauschen" statt „Batterie kritisch".
+Farben (grün / gelb / rot), Icons und die vier Zustandswerte der API
+(`ok` / `warn` / `kritisch` / `unbekannt`) sind **unverändert** — es ist eine
+Wortänderung in der Darstellung, keine neue Achse.
+
+Begründung: der Hotelier liest den Badge im Vorbeigehen und muss daraus eine
+Handlung ableiten. „schwach" und „kritisch" sind zwei Adjektive, zwischen
+denen er den Unterschied erst lernen muss; „Beobachten" und „Tauschen" sagen
+ihn.
+
+**Bekannte Kollision, bewusst in Kauf genommen.** Auf der Zimmerseite heißt
+der Knopf zum Austausch des **ganzen Thermostats** ebenfalls „Tauschen"
+(`app/zimmer/[id]/page.tsx:391`, `aria-label="Thermostat tauschen"`). Er
+liegt im Reiter „Geräte", der Batterie-Badge im Reiter „Zonen" — also nicht
+gleichzeitig sichtbar, aber einen Klick voneinander entfernt und im selben
+Gerätekontext. Zwei Bedeutungen für ein Wort. Die Alternative wäre
+„Batterie tauschen · 2,5 V" gewesen; die Vorgabe lautete „Tauschen", und die
+Pille wird dadurch breiter. Wenn die Montage zeigt, dass es verwirrt, ist es
+eine Ein-Wort-Änderung in `battery-badge.tsx`.
+
+### 4. Keine Zahl zweimal
+
+Die Schwellen werden **einmal pro Bewertung** gelesen
+(`battery_schwellen()`) und als `BatterySchwellen`-Wert durchgereicht.
+`battery_stage_from_volts(volts, schwellen)` nimmt sie als **Pflicht**-
+Argument, nicht mit Default — dieselbe Entscheidung wie beim
+`verdict`-Argument von `_build_device_read` (AE-72 §3). Ein Default wäre eine
+zweite Wahrheit über die geltenden Grenzen, die beim ersten Nachjustieren
+stumm auseinanderläuft.
+
+Einmal pro Bewertung und nicht pro Gerät: `get_settings` ist
+`lru_cache`-gestützt, aber ein Aufruf je Zeile der Geräteliste wären 104
+Aufrufe für einen Wert, der sich im Request nicht ändert.
+
+**Es gibt keinen zweiten Auswertungsort.** Alle Konsumenten der Stufe lesen
+`verdict.stage` und nie eine Spannung: die Dashboard-Kachel
+(`dashboard_aggregates.count_battery_low`, zählt `warn` ∪ `kritisch`), die
+Sortierung der Geräteliste (`app/devices/page.tsx:53`), die drei Badge-Orte.
+Ein Mail-Alarm an der Batterie existiert nicht (B-15b-1, siehe unten). Die
+Forderung „keine Zahl doppelt im Code" war damit bereits erfüllt — zu tun
+war nur, die **Texte** von den Zahlen zu lösen.
+
+### 5. Die Schwellen gehören nicht in die Oberfläche
+
+Die naheliegende Alternative wäre `global_config` gewesen, also ein Feld auf
+der Hotel-Einstellungsseite — dort, wo die Alarm-Mail und die Offline-Minuten
+stehen. Verworfen.
+
+Der Unterschied zu AE-66 (Belegungs-Zeitpunkt, der aus genau diesem Grund in
+die DB umgezogen ist) ist die **Quelle der Änderung**. Der Belegungs-Zeitpunkt
+hängt am Versandverhalten fremder Software; er kann sich ändern, ohne dass
+wir es erfahren, und niemand außer dem Hotelier sieht es. Die Batterie-
+Schwellen hängen an einer Abwägung zwischen Ausfallrisiko und Gangzahl, die
+einmal nach der Montage getroffen wird.
+
+Dazu: wer sie verschiebt, muss wissen, dass das Gerät nur in 0,1-V-Schritten
+meldet (ein Feld, in das man 2,85 tippen kann, suggeriert das Gegenteil) und
+wo die Spec-Untergrenze liegt. Ein Feld in der Oberfläche wäre ein Schalter,
+dessen Wirkung der Hotelier nicht vorhersagen kann — genau die Sorte, gegen
+die §5.77 argumentiert, nur von der anderen Seite.
+
+Der Preis ist ein Container-Neustart statt eines Klicks. Handgriff:
+RUNBOOK §10q.
+
+## Konsequenzen
+
+- `BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V` sind **keine** Modul-
+  Konstanten mehr. Wer sie importiert, bekommt einen ImportError — gewollt,
+  damit ein zweiter Lesepfad nicht stumm am alten Wert hängt.
+- `BATTERY_MIN_SAMPLES`, `BATTERY_JUMP_V`, `BATTERY_WINDOW_H` und
+  `BATTERY_LAST_LOOKBACK_D` bleiben Konstanten. Sie sind Eigenschaften der
+  Messung und nicht der Abwägung: wie viele Werte einen Median tragen und
+  was ein Batteriewechsel-Sprung ist, hängt nicht am Haus.
+- Keine Migration, kein Schema-Touch, kein neuer Lesepfad. Die Stufe wird
+  weiter read-time gerechnet (AE-72 §3).
+- `.env.example` nennt beide Variablen mit ihren Vorgabewerten. Sie sind
+  keine Geheimnisse; die Werte stehen dort ausgeschrieben, damit erkennbar
+  ist, was ohne Eintrag gilt.
+- **Bestehende Tests haben ihre Erwartung geändert, nicht ihre Aussage.**
+  Drei DB-Tests hingen an Stufen, die sich verschoben haben: 2,9 V ist jetzt
+  `ok` statt `warn`, 2,8 V `warn` statt `kritisch`. Wo die Stufe der
+  eigentliche Prüfgegenstand war (Entladung nach unten ohne Hysterese), sind
+  die **Messwerte** mitgewandert statt der Erwartung — der Test prüft weiter
+  dieselbe Sache.
+- **Zwei e2e-Fixtures waren nach der Verschiebung unmöglich** (`warn` mit
+  2,9 V, `kritisch` mit 2,8 V). Sie sind auf 2,8 bzw. 2,6 V gesetzt. Ein
+  Test, der eine Lage prüft, die das Backend nie liefern kann, lehrt das
+  Falsche — auch wenn er grün ist.
+- **B-15b-1 bleibt offen und ist weiter neu zu fassen.** AE-72 hat notiert,
+  der Alarm hänge jetzt an der Stufe und nicht an einer Konfiguration. Mit
+  AE-73 ist eine Konfiguration zurück — aber eine andere: sie bestimmt, *wann*
+  eine Stufe erreicht wird, nicht *ob* gemailt wird. Ein Alarm hängt weiter
+  an der Stufe.
+- Die Dashboard-Kachel heißt weiter „Schwache Batterie" und zählt
+  `warn` ∪ `kritisch`. Sie bleibt damit das einzige Element, das die alte
+  Wortwahl trägt; ein Umbenennen stand nicht im Auftrag und wäre eine
+  eigene Entscheidung („Beobachten oder tauschen" ist für eine Kachel zu
+  lang).
+
+## Verworfen
+
+- **Nur die Zahlen ändern, Konstanten behalten.** Hätte den Auftrag halb
+  erfüllt und die nächste Nachjustierung wieder an ein Image gebunden —
+  mitten in der Montage, wo ein Deploy ohnehin gesperrt ist (AE-72 §6 /
+  Sprint 20a).
+- **Schwellen in `global_config` und in die Oberfläche.** Siehe §5.
+- **Eine Plausibilitäts-Grenze gegen den Spec-Bereich.** Hätte die Vorgabe
+  dieses Sprints selbst abgelehnt. Siehe §1.
+- **Fünf Stufen, jetzt da zwischen den Grenzen zwei Schritte liegen.** Der
+  Raster gibt es gerade her, der Nutzen nicht: eine Stufe „etwas schwächer
+  als beobachten" erzeugt keine andere Handlung, und AE-65 hat die Achse
+  bewusst auf 3+1 Zustände festgelegt. Eine Stufe, die zu keiner Handlung
+  führt, ist eine Farbe mehr und keine Information.
+- **Hysterese an den Grenzen** (Stufe fällt erst nach N Meldungen).
+  Weiterhin verworfen, gleiche Begründung wie AE-72: der 24-h-Median ist die
+  Bremse, eine zweite bräuchte persistierten Zustand, der bei Ausfall des
+  Taktgebers plausibel einfriert (CLAUDE.md §5.76).

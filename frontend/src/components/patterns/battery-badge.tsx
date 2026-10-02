@@ -18,6 +18,20 @@
  * Messwert kann unter Motorlast einbrechen, dann widerspricht der Badge sich
  * selbst.
  *
+ * Sprint 20b (AE-73): die Labels sagen, was zu TUN ist, nicht wie der
+ * Zustand heißt — „Beobachten" statt „Batterie schwach", „Tauschen" statt
+ * „Batterie kritisch". Grund: der Hotelier liest den Badge im Vorbeigehen
+ * und muss daraus eine Handlung ableiten; „schwach" und „kritisch" sind
+ * zwei Adjektive, zwischen denen er den Unterschied erst lernen muss.
+ * Farben und Zustände sind unverändert — es ist eine Wortänderung, keine
+ * neue Achse.
+ *
+ * Die Hints nennen **keine Schwellenwerte** mehr. Die Grenzen stehen seit
+ * AE-73 in den Settings und sind pro Haus verstellbar; eine Zahl im Text
+ * wäre eine zweite Wahrheit, die beim ersten Nachjustieren still falsch
+ * wird (§5.77). Was dort steht, sind Eigenschaften der Hardware (die
+ * Spec-Untergrenze von 2,7 V) — die ändert keine Konfiguration.
+ *
  * **Nachbesserung 30.09.2026 (Befund heizung-test).** Auf der Geraeteliste
  * stand reihenweise „Batterie unbekannt" ohne Zahl. Das ist fuer den
  * Hotelier wertlos — er weiss danach so viel wie vorher, und „unbekannt"
@@ -85,16 +99,16 @@ const CONFIG: Record<BatteryHealthState, StateConfig> = {
     hint: "Batterie ausreichend geladen.",
   },
   warn: {
-    label: "Batterie schwach",
+    label: "Beobachten",
     icon: "battery_low",
     badgeClass: "bg-warning-soft text-warning",
-    hint: "Wechsel einplanen — ab 2,8 V wird es dringend.",
+    hint: "Wechsel einplanen — das Gerät regelt weiter.",
   },
   kritisch: {
-    label: "Batterie kritisch",
+    label: "Tauschen",
     icon: "battery_alert",
     badgeClass: "bg-danger-soft text-danger",
-    hint: "Jetzt wechseln: zwei Mignon-Zellen (AA), unter 2,7 V steht das Gerät.",
+    hint: "Zwei Mignon-Zellen (AA) wechseln — unter 2,7 V kann das Gerät stehen.",
   },
   unbekannt: {
     label: "Batterie unbekannt",
@@ -139,7 +153,7 @@ export function BatteryBadge({
   //
   // | Lage | Pille | Farbe |
   // |---|---|---|
-  // | Stufe berechenbar | „Batterie OK · 3,1 V" (Median) | grün/gelb/rot |
+  // | Stufe berechenbar | „Batterie OK · 3,1 V" / „Tauschen · 2,5 V" | grün/gelb/rot |
   // | Wechsel erkannt | „Batteriewechsel erkannt · 3,5 V" | grau |
   // | keine Stufe, Wert bekannt | „3,5 V · vor 2 h" | grau |
   // | nie eine Spannung gemeldet | „Batterie unbekannt" | grau |

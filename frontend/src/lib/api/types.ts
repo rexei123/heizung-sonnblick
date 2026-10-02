@@ -102,7 +102,12 @@ export interface Device {
   /**
    * Sprint 15d (AE-65): Batterie-Health-Achse, orthogonal zu health_state.
    * Sprint 20 (AE-72): read-time abgeleitet aus dem 24-h-Median der
-   * Geraete-Spannung. Schwellen OK >= 3,0 V / schwach 2,9 V / kritisch <= 2,8 V.
+   * Geraete-Spannung.
+   * Sprint 20b (AE-73): die Schwellen stehen in den Backend-Settings
+   * (BATTERY_OK_MIN_V / BATTERY_CRITICAL_MAX_V, Vorgabe 2,9 / 2,6 V) und
+   * sind pro Haus verstellbar. Hier steht deshalb bewusst KEINE Zahl —
+   * das Frontend kennt nur die Stufe, nicht die Grenze, die sie erzeugt
+   * hat. Wer eine Zahl braucht, nimmt battery_voltage_median.
    */
   battery_state: BatteryHealthState;
   /**

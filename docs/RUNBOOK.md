@@ -3242,17 +3242,34 @@ Seit Sprint 20 (AE-72) zeigt jedes Gerät eine Stufe **und** die Spannung:
 
 ### Die drei Stufen
 
+Die Schwellen sind seit Sprint 20b (AE-73) **einstellbar**; die Tabelle zeigt
+die Vorgabe. Wie man sie ändert, steht in §10q.
+
 | Anzeige | Spannung | Was zu tun ist |
 |---|---|---|
-| **Batterie OK** (grün) | ab 3,0 V | nichts |
-| **Batterie schwach** (gelb) | 2,9 V | Wechsel einplanen — beim nächsten Zimmergang mitnehmen |
-| **Batterie kritisch** (rot) | 2,8 V und darunter | jetzt wechseln |
+| **Batterie OK** (grün) | ab 2,9 V | nichts |
+| **Beobachten** (gelb) | 2,7–2,8 V | Wechsel einplanen — beim nächsten Zimmergang mitnehmen |
+| **Tauschen** (rot) | 2,6 V und darunter | jetzt wechseln |
 | **Batterie unbekannt** (grau) | — | keine Aussage möglich, siehe unten |
 
-Gewechselt werden **zwei Mignon-Zellen (AA)** je Gerät. Der Hersteller gibt
-den Betriebsbereich mit 2,7–3,6 V an und empfiehlt den Wechsel unter 2,8 V —
-„kritisch" liegt also eine Stufe davor, nicht danach. Unter 2,7 V stellt das
-Gerät den Betrieb ein.
+Gewechselt werden **zwei Mignon-Zellen (AA)** je Gerät.
+
+**Was man an dieser Tabelle wissen muss, bevor man sich auf sie verlässt.**
+Der Hersteller gibt den Betriebsbereich mit 2,7–3,6 V an und empfiehlt den
+Wechsel unter 2,8 V. Die Vorgabe liegt **darunter**: „Tauschen" beginnt erst
+bei 2,6 V, also unterhalb der Spannung, bei der das Gerät laut Spec noch
+zuverlässig regelt.
+
+Das ist eine Entscheidung und kein Versehen (AE-73). Sie nutzt die Zellen
+weiter aus und spart Gänge; sie nimmt dafür in Kauf, dass ein Ventil bei
+„Tauschen" schon stehen kann. In einem thermisch sanierten Haus kostet das
+kaum Komfort — ein Zimmer, dessen Ventil einen Tag nicht regelt, kühlt
+langsam aus.
+
+**Die Vorwarnung ist „Beobachten", nicht „Tauschen".** Gelb heißt: das Gerät
+regelt noch innerhalb seiner Spec, aber der Vorrat ist zu Ende. Wer erst bei
+Rot losgeht, geht absichtlich spät. Zwei Rasterschritte (2,8 und 2,7 V) sind
+dafür Zeit genug, um den Gang zu planen.
 
 **Lithium oder Alkaline ist gleichgültig.** Die Schwellen liegen auf der
 Spannung und gelten für beide. Ab Werk sind Lithium-Zellen drin; Alkaline
@@ -3307,12 +3324,13 @@ Bei Lithium ist die Stufe also erst im unteren Bereich aussagekräftig.
   Batterie-Schwelle (Backlog B-15b-1). Wer den Bestand im Blick behalten
   will, sieht auf die Dashboard-Kachel „Schwache Batterie" — sie zählt
   gelbe und rote Geräte zusammen.
-- **Sie unterscheidet nicht zwischen „schwach" und „bald schwach".** Bei
-  0,1-V-Auflösung liegt zwischen OK und kritisch genau ein Schritt. Mehr
-  Stufen würden mehr Auflösung brauchen, als die Hardware liefert.
+- **Sie hat drei Stufen und nicht fünf.** Das Gerät meldet die Spannung in
+  Schritten von 0,1 V, von 2,0 bis 3,5 V. Zwischen „Batterie OK" und
+  „Tauschen" liegen bei der Vorgabe zwei dieser Schritte — mehr Stufen
+  würden mehr Auflösung brauchen, als die Hardware liefert.
 - **Sie sagt nichts über die Restlaufzeit.** Die Entladekurve von Alkaline
-  ist am Ende steil; von 2,9 V auf 2,7 V kann es Wochen oder Tage sein.
-  Deshalb heißt „kritisch" jetzt und nicht demnächst.
+  ist am Ende steil; von 2,8 V auf 2,6 V kann es Wochen oder Tage sein.
+  Deshalb heißt „Tauschen" jetzt und nicht demnächst.
 
 ### Einbau-Hinweis
 
@@ -3441,3 +3459,91 @@ eher die Umgehung als die Ursachenbehebung.
 **Querverweise:** CLAUDE.md §0.3 (die Regel, und was das Gate nicht
 abdeckt), §10h.4 (Laufzeit des Eingangstests), §10l (Dead-Man-Checks),
 §5.78 (`docker compose` von Hand — daran geht die Sperre vorbei).
+
+## 10q. Batterie-Schwellen ändern (Sprint 20b)
+
+Die beiden Grenzen der Batterie-Stufen stehen seit Sprint 20b (AE-73) in der
+`.env` des Servers und nicht mehr im Code. Gedacht ist das für **eine**
+Situation: nach der Montage zeigt sich, dass die Vorgabe zu früh oder zu
+spät warnt, und das soll ohne neues Image korrigierbar sein.
+
+**Nicht** gedacht ist es als laufende Einstellung. Wer hier dreht, verschiebt
+die Aussage aller 104 Geräte gleichzeitig.
+
+### Die zwei Werte
+
+| Variable | Vorgabe | Bedeutung |
+|---|---|---|
+| `BATTERY_OK_MIN_V` | `2.9` | ab hier (einschließlich) ist die Stufe grün |
+| `BATTERY_CRITICAL_MAX_V` | `2.6` | bis hier (einschließlich) ist die Stufe rot |
+
+Dazwischen liegt gelb. `BATTERY_CRITICAL_MAX_V` **muss** kleiner sein als
+`BATTERY_OK_MIN_V` — sonst startet die API nicht und sagt im Log, warum. Das
+ist Absicht: eine Anzeige, die nach einem Tippfehler stumm das Gegenteil
+meldet, wäre schlimmer als ein Container, der nicht hochkommt.
+
+### Der Handgriff
+
+**SSH (heizung-test bzw. heizung-main, root):**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+grep BATTERY .env
+```
+
+Stehen die Zeilen nicht da, gilt die Vorgabe. Zum Ändern die beiden Zeilen
+anfügen oder anpassen:
+
+```bash
+nano .env
+```
+
+```
+BATTERY_OK_MIN_V=2.9
+BATTERY_CRITICAL_MAX_V=2.6
+```
+
+Danach die drei Container neu starten, die die Settings lesen:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d api celery_worker celery_beat
+```
+
+Ein Neustart genügt, kein neues Image und keine Migration. Die Stufe wird bei
+jedem Aufruf neu gerechnet — die Geräteliste zeigt den neuen Stand sofort
+nach dem Neuladen.
+
+### Prüfen, dass der Wert angekommen ist
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T api env | grep BATTERY
+```
+
+Kommt hier nichts zurück, hat der Container die `.env` nicht gelesen —
+dann steht die Datei im falschen Verzeichnis (sie muss neben der
+`docker-compose.prod.yml` liegen).
+
+### Was sinnvolle Werte sind
+
+Das Gerät meldet die Spannung nur in Schritten von 0,1 V (2,0 bis 3,5 V).
+Werte zwischen zwei Schritten verschieben deshalb **nichts** — `2.85`
+verhält sich genau wie `2.9`. Sinnvoll sind nur Werte auf dem Raster.
+
+Zur Orientierung: frische Alkaline meldet 3,1 V, frische Lithium 3,5 V
+(Codec-Anschlag). Die Spec-Untergrenze des Geräts ist 2,7 V, die
+Hersteller-Wechselempfehlung „unter 2,8 V".
+
+- **Konservativ** (Spec folgen, häufiger wechseln): `3.0` / `2.8` — das war
+  die Vorgabe von Sprint 20. Grün endet dann, bevor das Gerät die
+  Herstellerempfehlung erreicht.
+- **Vorgabe seit Sprint 20b**: `2.9` / `2.6` — nutzt die Zelle aus, nimmt in
+  Kauf, dass bei Rot das Ventil stehen kann.
+- **`BATTERY_OK_MIN_V` auf 3.1 setzen ist ein Fehler**, auch wenn es
+  vorsichtig wirkt: 3,1 V **ist** der frische Alkaline-Zustand. Jedes
+  Alkaline-Gerät stünde ab dem ersten Rasterschritt dauerhaft auf gelb — und
+  einem Melder, dem niemand mehr glaubt, sieht man nicht mehr zu
+  (CLAUDE.md §5.79).
+
+**Querverweise:** §10o (was die Anzeige sagt, für den Hausmeister), AE-73
+(die Entscheidung und was sie in Kauf nimmt), AE-72 (warum die Stufen auf der
+Spannung rechnen und nicht auf Prozent).
