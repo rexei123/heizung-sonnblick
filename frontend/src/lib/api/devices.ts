@@ -2,6 +2,7 @@
  * API-Funktionen fuer Devices + zugehoerige Zeitreihen.
  */
 
+import { alleSeiten } from "./alle-seiten";
 import { apiClient, queryString } from "./client";
 import type {
   Device,
@@ -18,35 +19,6 @@ import type {
 } from "./types";
 
 const BASE = "/api/v1/devices";
-
-/**
- * Seitengröße für `list`. **100 — dieselbe Zahl wie der Server-Default**
- * (`api/v1/devices.py:247`).
- *
- * Die naheliegende Wahl wäre eine Seite, die so groß ist, dass sie den
- * ganzen Bestand trägt (etwa 500 bei 104 Vickis) — ein Aufruf, Schleife nur
- * als Absicherung. Verworfen: dann läuft die Schleife im Betrieb **nie**,
- * und eine Paginierung, die nur im Test greift, ist genau die Sorte Code,
- * die beim Wachsen des Bestands das erste Mal scharf wird. Bei 100 sind es
- * heute zwei Aufrufe, und der zweite Durchlauf ist belegt — jeden Tag.
- *
- * Der Preis ist ein zusätzlicher Roundtrip pro Listenaufruf. Die Arbeit je
- * Gerät bleibt dieselbe; der Endpoint lädt pro Zeile ohnehin Override und
- * Reading nach (AE-72 §3, akzeptiertes N+1).
- */
-const SEITE = 100;
-
-/**
- * Sicherheitsnetz gegen eine Endlosschleife. Greift nur, wenn das Backend
- * eine volle Seite zurückgibt, obwohl keine weiteren Daten da sind — also
- * bei einem Fehler, nicht bei großen Beständen: 100 × 100 = 10 000 Geräte,
- * das Hundertfache des Bestands.
- *
- * Erreicht die Schleife das Limit, **wirft** sie. Der Aufrufer bekommt
- * einen Fehler zu sehen statt einer Liste, die vollständig aussieht und es
- * nicht ist — das ist der ganze Punkt dieses Fixes.
- */
-const MAX_SEITEN = 100;
 
 export const devicesApi = {
   /**
@@ -70,24 +42,12 @@ export const devicesApi = {
    * nach einem mehrfach vorkommenden Wert — etwa `label` — könnte zwischen
    * zwei Seiten eine Zeile doppelt oder gar nicht erscheinen.
    */
-  list: async (q: DeviceListQuery = {}): Promise<Device[]> => {
-    const alle: Device[] = [];
-    for (let seite = 0; seite < MAX_SEITEN; seite += 1) {
-      const teil = await apiClient.get<Device[]>(
-        `${BASE}${queryString({ ...q, limit: SEITE, offset: seite * SEITE })}`,
-      );
-      alle.push(...teil);
-      // Kürzere Seite als angefragt = letzte Seite. Bei genau SEITE Treffern
-      // folgt noch ein Aufruf, der leer zurückkommt — ein Roundtrip mehr,
-      // dafür keine Annahme darüber, wie viele es insgesamt sind.
-      if (teil.length < SEITE) return alle;
-    }
-    throw new Error(
-      `Geräteliste nicht vollständig geladen: mehr als ${MAX_SEITEN * SEITE} ` +
-        "Einträge oder das Backend liefert dauerhaft volle Seiten. " +
-        "Die Liste wird NICHT angezeigt, weil sie unvollständig wäre.",
-    );
-  },
+  list: (q: DeviceListQuery = {}): Promise<Device[]> =>
+    alleSeiten(
+      (limit, offset) =>
+        apiClient.get<Device[]>(`${BASE}${queryString({ ...q, limit, offset })}`),
+      "Geräteliste",
+    ),
 
   get: (id: number): Promise<Device> => apiClient.get<Device>(`${BASE}/${id}`),
 

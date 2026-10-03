@@ -47,7 +47,6 @@ export default function ZimmerPage() {
     room_type_id: filterRoomTypeId === "" ? undefined : filterRoomTypeId,
     status: filterStatus === "" ? undefined : filterStatus,
     floor: filterFloor.trim() === "" ? undefined : parseInt(filterFloor, 10),
-    limit: 200,
   });
   const createMut = useCreateRoom();
 

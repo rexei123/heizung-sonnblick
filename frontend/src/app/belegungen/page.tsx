@@ -10,7 +10,11 @@ import { useState } from "react";
 import { OccupancyForm } from "@/components/patterns/occupancy-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useCancelOccupancy, useCreateOccupancy, useOccupancies } from "@/lib/api/hooks-occupancies";
+import {
+  useCancelOccupancy,
+  useCreateOccupancy,
+  useOccupanciesSeiten,
+} from "@/lib/api/hooks-occupancies";
 import { useRooms } from "@/lib/api/hooks-rooms";
 import type { ApiError, Occupancy, OccupancyCreate } from "@/lib/api/types";
 
@@ -37,14 +41,38 @@ function rangeBounds(r: Range): { from?: string; to?: string } {
   return {};
 }
 
+/**
+ * Sortierrichtung je Bereich (Gate-Entscheidung zu Sprint 20d).
+ *
+ * Bei „Alle" **absteigend** — die juengsten und kommenden Belegungen
+ * zuerst. Aufsteigend hiesse bei 959 Zeilen: die erste Seite zeigt den
+ * Juni, und wer heute sehen will, klickt neun Mal „Weitere laden".
+ *
+ * Bei „Heute" und „Naechste 7 Tage" bleibt es aufsteigend, weil das
+ * Fenster klein ist und chronologisch gelesen wird.
+ */
+function sortierrichtung(r: Range): "asc" | "desc" {
+  return r === "all" ? "desc" : "asc";
+}
+
 export default function BelegungenPage() {
   const [range, setRange] = useState<Range>("next7");
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState<Occupancy | null>(null);
 
-  const list = useOccupancies({ ...rangeBounds(range), active: true, limit: 200 });
-  const rooms = useRooms({ limit: 1000 });
+  const list = useOccupanciesSeiten({
+    ...rangeBounds(range),
+    active: true,
+    order: sortierrichtung(range),
+  });
+  // Zimmer werden vollstaendig geholt (Sprint 20d) — kein `limit` mehr.
+  const rooms = useRooms();
+
+  // Alle bisher geladenen Seiten als eine Liste, plus die Gesamtzahl aus
+  // dem Envelope. `total` steht in jeder Seite; die erste genuegt.
+  const belegungen = list.data?.pages.flatMap((seite) => seite.items) ?? [];
+  const gesamt = list.data?.pages[0]?.total ?? 0;
   const createMut = useCreateOccupancy();
   const cancelMut = useCancelOccupancy();
 
@@ -81,7 +109,9 @@ export default function BelegungenPage() {
         <div>
           <h1 className="text-2xl font-medium text-text-primary">Belegungen</h1>
           <p className="text-sm text-text-secondary mt-1">
-            {list.data?.length ?? 0} aktive Belegung(en) in diesem Zeitraum.
+            {list.isLoading
+              ? "Lade…"
+              : `${belegungen.length} von ${gesamt} aktive Belegung(en) in diesem Zeitraum.`}
           </p>
         </div>
         {showCreate ? (
@@ -132,13 +162,30 @@ export default function BelegungenPage() {
       </div>
 
       <List
-        list={list.data ?? []}
+        list={belegungen}
         loading={list.isLoading}
         isError={list.isError}
         roomNumber={roomNumber}
         onCancel={(o) => setConfirmCancel(o)}
         cancelPending={cancelMut.isPending}
       />
+
+      {/* „Weitere laden" verschwindet, sobald alles geladen ist — der Knopf
+          ist damit selbst die Antwort auf die Frage, ob noch etwas fehlt. */}
+      {list.hasNextPage ? (
+        <div className="mt-4 flex items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => void list.fetchNextPage()}
+            disabled={list.isFetchingNextPage}
+          >
+            {list.isFetchingNextPage ? "Lädt…" : "Weitere laden"}
+          </Button>
+          <span className="text-sm text-text-secondary">
+            {belegungen.length} von {gesamt} geladen
+          </span>
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={confirmCancel !== null}
