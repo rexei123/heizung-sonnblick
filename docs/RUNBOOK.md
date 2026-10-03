@@ -3600,3 +3600,83 @@ Hersteller-Wechselempfehlung „unter 2,8 V".
 **Querverweise:** §10o (was die Anzeige sagt, für den Hausmeister), AE-73
 (die Entscheidung und was sie in Kauf nimmt), AE-72 (warum die Stufen auf der
 Spannung rechnen und nicht auf Prozent).
+
+---
+
+## 10r. Zeigt die Oberfläche wirklich alles? (Sprint 20d)
+
+**Wofür:** Eine Liste in der Oberfläche gegen die Datenbank halten. Der
+Handgriff ist der Nachweis, der in Sprint 20c und 20d zweimal gefehlt hat —
+eine abgeschnittene Liste sieht vollständig aus und meldet nichts.
+
+**Wann:** Nach jedem Deploy, der eine Listen-Ansicht berührt; außerdem
+immer, wenn Ihnen in einer Liste etwas fehlt, das es geben müsste.
+
+### 10r.1 Die vier Zahlen aus der Datenbank
+
+**SSH (heizung-test oder heizung-main, root):**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+  exec -T db psql -U heizung -d heizung -c "
+SELECT 'Geräte (aktiv)' AS liste, count(*) FROM device WHERE retired_at IS NULL
+UNION ALL SELECT 'Zimmer',        count(*) FROM room
+UNION ALL SELECT 'Raumtypen',     count(*) FROM room_type
+UNION ALL SELECT 'Belegungen (aktiv)', count(*) FROM occupancy WHERE is_active;"
+```
+
+Das `-f` ist nicht optional (§5.78 in CLAUDE.md, RUNBOOK §5.0): ohne es
+fragt der Befehl das **Entwicklungs**-Projekt und gibt eine leere oder
+falsche Antwort.
+
+### 10r.2 Was die Oberfläche zeigen muss
+
+| Liste | Seite | Soll |
+|---|---|---|
+| Geräte | `/devices` | **genau** die Zahl aus 10r.1 |
+| Zimmer | `/zimmer` ohne Filter | **genau** die Zahl |
+| Raumtypen | `/raumtypen` | **genau** die Zahl |
+| Belegungen | `/belegungen`, Bereich **Alle** | Kopfzeile „**N von M**", und `M` ist die Zahl aus 10r.1 |
+
+Die ersten drei Listen werden vollständig geladen — es gibt dort keinen
+Knopf zum Blättern, und wenn die Zahl nicht stimmt, ist das ein Befund.
+
+Die Belegungen werden **seitenweise** geladen, und das ist Absicht: es sind
+über 900, und sie werden täglich mehr. Entscheidend ist dort nicht, dass
+alle Zeilen auf einmal zu sehen sind, sondern dass die Seite **sagt**, wie
+viele es insgesamt gibt. Solange `N < M` ist, steht der Knopf „Weitere
+laden" darunter; nach genug Klicks steht `N = M` und der Knopf verschwindet.
+
+### 10r.3 Wenn eine Zahl nicht stimmt
+
+Erst klären, ob ein **Filter** aktiv ist:
+
+- `/zimmer` hat Filter für Raumtyp, Status und Etage. Ein gesetzter Filter
+  erklärt jede kleinere Zahl.
+- `/belegungen` hat die Bereiche „Heute", „Nächste 7 Tage" und „Alle". Nur
+  „Alle" ist mit der Zahl aus 10r.1 vergleichbar; die anderen beiden zeigen
+  ein Zeitfenster, und ihr `M` ist entsprechend kleiner.
+- `/devices` zählt nur **aktive** Geräte; ein stillgelegtes (`retired_at`
+  gesetzt) erscheint nicht und ist in der SQL-Abfrage oben bereits
+  ausgenommen.
+
+Stimmt die Zahl trotz passender Filter nicht, ist das derselbe Befund wie
+B-20c-1 — dann bitte melden, mit der SQL-Zahl und der angezeigten Zahl. Der
+Unterschied selbst ist die Diagnose; die Ursache liegt immer im Client, nicht
+im Endpoint.
+
+### 10r.4 Was eine Fehlermeldung statt einer Liste bedeutet
+
+Seit Sprint 20c bricht die Oberfläche eine Liste ab, statt sie
+unvollständig zu zeigen — bei Geräten, Zimmern und Raumtypen. Sie sehen dann
+einen Fehler statt einer Tabelle. Das ist **gewollt**: eine Fehlermeldung
+kann man melden, eine stillschweigend gekürzte Liste nicht.
+
+Ausgelöst wird das erst oberhalb von 10 000 Zeilen, also nur bei einem
+Fehler im Backend, nicht bei normalem Wachstum.
+
+**Querverweise:** §5.0 (`docker compose` ohne `-f`), §10h.7 (die
+Zone-Spalte hinkt nach `assign` bis zu fünf Minuten nach — ein anderer Fall
+von „Oberfläche zeigt nicht, was in der Datenbank steht"), CLAUDE.md §5.76
+(Wirkung überwachen statt Mechanik: dieser Handgriff prüft die Wirkung),
+AE-75 (warum Belegungen geblättert werden und die anderen drei nicht).

@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-02, develop-HEAD `e006ea3` (PR #251). Laufender Sprint: **20d (Paginierung Zimmer/Raumtypen/Belegungen, B-20c-2)** — Brief geschrieben, Ausführung offen. Zuletzt abgeschlossen: **Sprint 20c (Hotfix Geräteliste)**, §2bu — PR #251 gemergt. Abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **`celery_beat`-Healthcheck**, §2bs — PR #249, Abnahme am 02.10. bestätigt (24 h `healthy`, `Health.Log` 5× Exit 0); **Sprint 20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt — PR #250. Nächster Sprint: **20d** (B-20c-2, Paginierung bei Zimmern/Raumtypen/Belegungen, vor dem 01.11.).
+**Stand:** 2026-10-03, develop-HEAD `5a134ff` (PR #254). Laufender Sprint: **20d (Paginierung Zimmer/Raumtypen/Belegungen, B-20c-2)** — §2bv, PR #255 offen. Zuletzt abgeschlossen: **Sprint 20c (Hotfix Geräteliste)**, §2bu — PR #251. Abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **`celery_beat`-Healthcheck**, §2bs — PR #249, Abnahme am 02.10. bestätigt; **Sprint 20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt — PR #250. Dazu gemergt am 03.10.: **Brief zu 20d** (#252), **drei Backlog-Befunde aus der Pilotmontage** (#253 — B-20c-3, B-20c-4, B-20e-1), **Brief zu 20e** (#254, AE-74). Nächster Sprint: **20e** (Montage-Status vereinfacht, AE-74 — Gate beantwortet, Reihenfolge nach 20d).
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-10-02
+**Stichtag:** 2026-10-03
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (B-20c-2) — Brief vom 02.10. in `docs/features/`, Ausführung offen; Frist vor dem 01.11. Belegt in der Vorprüfung: die Heizlogik liest Belegungen **direkt per SQLAlchemy**, nicht über die API (`rules/engine.py:872`, `services/occupancy_service.py`) — die Steuerung ist nicht betroffen, es ist ein reines Oberflächen-Thema. Zuletzt abgeschlossen: **Sprint 20c Hotfix Geräteliste** (§2bu, B-20c-1, PR #251 gemergt) — `GET /api/v1/devices` ist paginiert und liefert ohne `limit` 100 Zeilen; fünf Frontend-Aufrufer erwarteten die vollständige Liste und haben still 100 von 104 Geräten bekommen, darunter die Zuordnung bei der Montage. `devicesApi.list` holt jetzt alle Seiten (`SEITE = 100`, dieselbe Zahl wie der Server-Default) und **wirft**, statt abzuschneiden. Davor: **Sprint 20b Batterie-Schwellen in die Settings** (§2bt, AE-73, PR #250 gemergt) — die zwei Grenzen stehen in `config.Settings` (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`, Vorgabe **2,9 / 2,6 V**) und sind ohne Image änderbar (RUNBOOK §10q); Startup-Validator weist `critical_max >= ok_min` ab. Badge-Labels „Batterie OK“ / „Beobachten“ / „Tauschen“, Farben unverändert. Davor: **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B #246, Nachbesserung „nie ein Badge ohne Zahl“ #248. Migration 0024 (`sensor_reading.battery_voltage`). Stufen über den 24-h-Median, read-time; die **Zahlen** aus AE-72 (3,0 / 2,8) sind durch AE-73 ersetzt. Dazu **Sprint 20a Deploy-Sperre** (§2br) — PR #247 gemergt (`55dd8f0`, `collected 961 = 960 passed + 1 xfailed`, 0 skipped): `services/deploy_lock.py` setzt einen Redis-Key, `deploy-pull.sh` überspringt seinen Lauf, solange er steht.
+**Aktueller Sprint:** **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 offen) — **zwei Befunde derselben Klasse, zwei verschiedene Lösungen.** Belegungen waren **scharf**: 959 aktive, Ansicht „Alle“ zeigte 200, ohne das zu sagen — sie wachsen unbegrenzt und werden deshalb **echt paginiert** (Envelope `{items, total, limit, offset}`, „N von M“ + „Weitere laden“, „Alle“ absteigend). Zimmer und Raumtypen sind nach oben gebunden und werden **vollständig** geholt wie die Geräte in 20c; `limit`/`offset` verlassen `RoomListQuery` und `RoomTypeListQuery`, die vier Aufrufer hatten zuvor 1000, 1000, 200 und nichts. Zusatzbefund mitbehoben: die Belegungs-Sortierung war serverseitig, aber **nicht eindeutig** (`check_in` allein) — das wäre erst durch „Weitere laden“ scharf geworden, also durch die Reparatur des anderen Fehlers. Jetzt `(check_in, id)`. Belegt in der Vorprüfung: die Heizlogik liest Belegungen **direkt per SQLAlchemy**, nicht über die API (`rules/engine.py:872`, `services/occupancy_service.py`) — die Steuerung ist nicht betroffen, es ist ein reines Oberflächen-Thema. Zuletzt abgeschlossen: **Sprint 20c Hotfix Geräteliste** (§2bu, B-20c-1, PR #251 gemergt) — `GET /api/v1/devices` ist paginiert und liefert ohne `limit` 100 Zeilen; fünf Frontend-Aufrufer erwarteten die vollständige Liste und haben still 100 von 104 Geräten bekommen, darunter die Zuordnung bei der Montage. Die Schleife steht seit 20d in `lib/api/alle-seiten.ts` statt dreimal kopiert. Davor: **Sprint 20b Batterie-Schwellen in die Settings** (§2bt, AE-73, PR #250 gemergt) — die zwei Grenzen stehen in `config.Settings` (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`, Vorgabe **2,9 / 2,6 V**) und sind ohne Image änderbar (RUNBOOK §10q); Startup-Validator weist `critical_max >= ok_min` ab. Badge-Labels „Batterie OK“ / „Beobachten“ / „Tauschen“, Farben unverändert. Davor: **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B #246, Nachbesserung „nie ein Badge ohne Zahl“ #248. Migration 0024 (`sensor_reading.battery_voltage`). Stufen über den 24-h-Median, read-time; die **Zahlen** aus AE-72 (3,0 / 2,8) sind durch AE-73 ersetzt. Dazu **Sprint 20a Deploy-Sperre** (§2br) — PR #247 gemergt (`55dd8f0`, `collected 961 = 960 passed + 1 xfailed`, 0 skipped): `services/deploy_lock.py` setzt einen Redis-Key, `deploy-pull.sh` überspringt seinen Lauf, solange er steht.
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -4496,7 +4496,166 @@ Fassungen grün, wie es sein soll.
 - **Lokale DB-Tests weiter nicht ausführbar** (B-18-5). Die fünf neuen
   Backend-Tests sind lokal nur gesammelt, nicht gelaufen; sie hängen an CI.
 
+## 2bv. Sprint 20d Paginierung bei Zimmern, Raumtypen und Belegungen (2026-10-03, B-20c-2, AE-75)
+
+**Zwei Befunde derselben Klasse, zwei bewusst verschiedene Lösungen.**
+
+### Der scharfe Fall: Belegungen
+
+Messung auf dem Server am 02.10.2026:
+
+```
+SELECT count(*) FROM occupancy WHERE is_active;  -->  959
+```
+
+Die Belegungen-Seite stand auf `limit: 200` und hat im Bereich „Alle" **200
+von 959** gezeigt, ohne das zu sagen. 759 fehlten. Das ist derselbe Befund
+wie bei den Geräten (B-20c-1, §2bu), nur vier Mal so groß und schon länger
+im Betrieb.
+
+Belegungen wachsen **unbegrenzt** — ein Datensatz je Buchung, täglicher
+PMS-Import seit dem 06.06.2026. Sie alle in den Browser zu laden wäre in
+einem Jahr derselbe Fehler mit umgekehrtem Vorzeichen: dann mehrere Tausend
+Zeilen bei jedem Seitenaufruf. Also echte Paginierung:
+
+- Envelope `{items, total, limit, offset}` statt nackter Liste
+  ([schemas/occupancy.py](backend/src/heizung/schemas/occupancy.py))
+- Oberfläche zeigt „**N von M**" und einen Knopf „**Weitere laden**", der
+  verschwindet, sobald `N === M`
+- Bereich „Alle" fragt **absteigend** (jüngste zuerst), enge Zeitfenster
+  aufsteigend — Gate-Entscheidung des Hoteliers
+
+**`total` zählt mit denselben Filtern wie die Seite.** Die Bedingungen
+stehen einmal in einer Liste und werden zweimal verwendet; wer einen Filter
+ergänzt, kann ihn nicht an einer der beiden Stellen vergessen. Zählte `total`
+ohne Filter, zeigte die Ansicht „Heute" „12 von 959" und einen Knopf, der
+nichts mehr holt.
+
+### Der latente Fall: Zimmer und Raumtypen
+
+Derselbe Default 100, aber die Mengen sind nach oben gebunden: 45 Zimmer,
+eine Handvoll Raumtypen. Eine Oberfläche, die Zimmer blättert, wäre Umstand
+ohne Gegenwert. Also derselbe Weg wie bei den Geräten — der Client holt alle
+Seiten.
+
+Die vier Aufrufer hatten zuvor **drei verschiedene** Antworten auf dieselbe
+Frage:
+
+| Aufrufer | gesetztes `limit` |
+|---|---|
+| `belegungen/page.tsx` | 1000 — am `le`-Anschlag |
+| `occupancy-form.tsx` (Zimmerauswahl) | 1000 — am `le`-Anschlag |
+| `zimmer/page.tsx` | 200 |
+| `devices/pair/page.tsx` | **keines** → 100 |
+
+`limit` und `offset` verlassen `RoomListQuery` und `RoomTypeListQuery`.
+Damit kann keiner der Aufrufer die Frage noch falsch beantworten — und auch
+kein künftiger.
+
+### Warum die Antwort ein Envelope ist und kein Header
+
+`client.ts` gibt aus `request<T>` nur den geparsten Body zurück
+([client.ts:60](frontend/src/lib/api/client.ts:60)); Response-Header werden
+verworfen. Ein `X-Total-Count` käme im Frontend **nie** an, und das wäre
+nicht einmal ein Fehler, der auffällt: „N von M" zeigte dauerhaft „N von 0",
+und der Knopf wäre von Anfang an unsichtbar.
+
+Das ist exakt die Falle aus CLAUDE.md §5.64 — dort hat derselbe Wrapper das
+Feld `error_code` verschluckt, weil er nur `body.detail` gelesen hat. Die
+Entscheidung und die verworfenen Wege stehen in **AE-75**.
+
+### Ein Befund, der nicht im Auftrag stand
+
+Die Sortierung der Belegungen war serverseitig — aber **nicht eindeutig**:
+
+```python
+stmt = stmt.order_by(Occupancy.check_in)   # check_in ist nicht unique
+```
+
+Viele Buchungen teilen einen `check_in`; an einem Anreisetag sind das bei 45
+Zimmern Dutzende. Postgres garantiert bei gleichem Sortierschlüssel **keine**
+Reihenfolge; zwischen zwei Seitenabrufen kann dieselbe Zeile zweimal
+erscheinen und eine andere gar nicht.
+
+Solange die Oberfläche eine einzige Seite geholt hat, war das unsichtbar —
+es gab nur eine Seite. Mit „Weitere laden" wäre daraus eine Liste geworden,
+die Zeilen doppelt zeigt und andere verschweigt, und zwar als scheinbar
+sprunghafte Sortierung, die niemand einem Schlüssel zuordnet.
+
+**Das ist der unangenehme Teil:** der Mangel war seit Sprint 8.5 im Code und
+ohne Wirkung. Er wäre erst durch die **Reparatur** des anderen Mangels
+scharf geworden — dieselbe Familie wie CLAUDE.md §5.76 (zwei Fehler, die
+sich gegenseitig verdecken).
+
+Jetzt `order_by(check_in, id)`. Die anderen beiden Endpoints sind geprüft
+und in Ordnung: `/room-types` auf `id`, `/rooms` auf `(floor, numerischer
+Präfix, number)` — und `Room.number` ist `unique`
+([models/room.py:44](backend/src/heizung/models/room.py:44)), macht die
+Ordnung also total.
+
+### Die Schleife steht jetzt an einer Stelle
+
+Sprint 20c hat die Paginierungs-Schleife in `devices.ts` geschrieben. Drei
+Kopien davon wären genau der Befund eine Ebene höher — vier Aufrufer, drei
+Zahlen, weil jeder für sich entschieden hat. Neu:
+[lib/api/alle-seiten.ts](frontend/src/lib/api/alle-seiten.ts), und
+`devices.ts` zieht mit um.
+
+Das ist **verhaltensneutral** (§5.47), und der Beleg war schon da: die fünf
+e2e-Tests aus 20c prüfen die Aufruf-**Folge**
+(`[{limit:100,offset:0},{limit:100,offset:100}]`) und bleiben unverändert
+grün.
+
+### Tests
+
+**Backend** — `tests/test_listen_paginierung_20d.py`, 7 Tests: Default ist
+100 bei beiden Endpoints; 101 Zimmer und 101 Raumtypen über Seiten von 25
+vollständig; 201 Belegungen mit korrektem `total` auf jeder Seite plus die
+Gegenprobe, dass eine Seite nur 100 trägt; `total` gehört zu denselben
+Filtern, geprüft an zwei Achsen (`room_id`, `active`); **250 Belegungen mit
+identischem `check_in`** über vier Seitenübergänge ohne Dopplung und ohne
+Lücke; beide Richtungen vollständig und spiegelbildlich, Vorgabe bleibt
+`asc`.
+
+Leftover-fest (§5.39): keine Zusicherung rechnet mit einer absoluten
+Tabellen-Zahl, die Belegungs-Tests grenzen per `room_id` auf eigene Zeilen
+ein, eine Fixture räumt in FK-sicherer Reihenfolge nach eigenen IDs auf.
+
+**e2e** — `sprint-20d-paginierung-zimmer-belegungen.spec.ts`, 9 Tests. Die
+Mocks werten `limit`/`offset` aus und liefern echte Teilmengen; die **Zahl
+der Aufrufe** ist mitgeprüft, weil beim Grenzfall 100 die Zeilenzahl mit und
+ohne Fix gleich ist und nur die zweite Anfrage die Fassungen unterscheidet.
+
+**Gegenprobe gelaufen:** alter Code-Stand wiederhergestellt → **alle 9**
+e2e-Tests fallen, mit dem gemeldeten Bild. Zimmer: 101 angelegt, 100
+angezeigt, ein Aufruf statt zwei. Belegungen bei 201 Zeilen, **gemessen** am
+alten Stand: Kopfzeile `"200 aktive Belegung(en) in diesem Zeitraum."`, 200
+Zeilen, ein Aufruf mit `limit=200`, kein `total`, kein Hinweis. Die zweite
+Zeile ist die Messung, nicht die Ableitung (§5.68).
+
+Zum Sortier-Test die ehrliche Einschränkung: dass er mit der alten
+Sortierung **zuverlässig** rot ist, lässt sich nicht garantieren — eine
+undefinierte Reihenfolge darf zufällig auch stabil sein. Er hält fest, warum
+die Ordnung total sein **muss**; der Beleg ist das Postgres-Verhalten, nicht
+ein roter Lauf.
+
+### Offen / Hinweise
+
+- **Live-Verify** steht aus: `/belegungen` muss im Bereich „Alle" „100 von
+  959" zeigen (die Zahl wächst täglich), und „Weitere laden" muss bis zum
+  Ende durchblättern. Handgriff dazu neu in **RUNBOOK §10r**.
+- **Live-Verify aus 20c ebenfalls noch offen:** `/devices` muss 104 Zeilen
+  zeigen, die Pairing-Auswahl die höchsten Hardware-Nummern anbieten.
+- **Lokale DB-Tests weiter nicht ausführbar** (B-18-5). Die sieben neuen
+  Backend-Tests sind lokal nur gesammelt, nicht gelaufen; sie hängen an CI.
+  Der Merge-Anker ist die Testzahl aus dem CI-Lauf (§5.81).
+- **Cursor-Paginierung** (`after=<id>` statt `offset`) ist bewusst
+  verschoben — Begründung in AE-75 unter „Verworfen". Relevant, wenn
+  Belegungen in mehreren Jahren fünfstellig werden, und dann für alle Listen
+  gemeinsam.
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
+
 
 ### 3.1 Sicherheit / Hardening
 - ✅ **PAT-Rotation erledigt** (Sprint 1, 2026-04-21): Neuer Classic PAT mit Scope `read:packages`, alter Token `claude-sprint2-push` widerrufen, Verfahren in RUNBOOK §6.1 dokumentiert.
@@ -4767,7 +4926,7 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | **B-18-4** | **Anpassung an SQLAlchemy 2.1 (und mypy 2).** Befund 27.09.2026: die sechs Typ-Meldungen stammen aus **SQLAlchemy 2.1.1** (lokal 2.0.49), nicht aus mypy — nach dem Pin auf `mypy<2` lief CI mit derselben mypy-Version wie lokal und meldete *mehr* Fehler als vorher. SQLAlchemy 2.1 liefert nullable Spalten beim Row-Unpacking als `X | None` bzw. `object`. Die Stellen sind geprueft, der naechste Durchgang muss sie **nicht erneut untersuchen**: (1) `services/zone_aggregates.py:83`, (2) `services/dashboard_aggregates.py:149`, (3) `rules/engine.py:691` (zwei Meldungen) — der Wert kann dort nie `None`/`object` sein, weil die Query `heating_zone_id.in_(ids)` bzw. einen WHERE-Filter setzt und SQL-`IN` NULL ausschliesst; **kein latenter Defekt**, ein Narrowing mit Begruendung genuegt (in `engine.py:690` steht der passende Kommentar schon). (4) `scripts/pairing/csv_parser.py:273` und (5) `scripts/pairing/batch_inbound_test.py:461` — `type: ignore[arg-type]`, das die neuen Stubs korrekt inferieren; **je eine Zeile zum Loeschen**. Danach beide Pins heben. **Nach dem 29.09.** | 🟢 |
 | **B-18-5** | **Docker Desktop als einzelner Punkt des Versagens.** Am 26.09. liess sich Docker auf der Entwicklungsmaschine nicht starten — die WSL-Distribution `docker-desktop` blieb auf `Stopped`, jeder `docker`-Aufruf hing ohne Zeitlimit. Folge: die DB-Tests (§5.50) waren **nur** in CI ausfuehrbar, und zwar genau an dem Tag, an dem CI zusaetzlich durch den mypy-Sprung blockiert war (§5.80). Zwei Beweiswege, beide gleichzeitig zu. Zu klaeren: WSL-Ursache beheben **und** einen zweiten Weg schaffen, der nicht an Docker Desktop haengt (Postgres-Dienst direkt, WSL-Instanz, oder ein bewusst benutzbarer CI-Lauf auf einem Wegwerf-Branch). **Nach dem 29.09.** | 🟡 |
 | **B-20c-1** | **Geräteliste war bei 100 abgeschnitten.** ✅ **Erledigt am 02.10.2026** (§2bu). Befund des Hoteliers vor der Pilotmontage: 104 Zeilen in `device`, 100 in der Oberfläche, die vier höchsten IDs fehlten. Ursache im Client, nicht im Endpoint — `devicesApi.list` hat eine Seite des paginierten Endpoints für die ganze Liste genommen. Betroffen waren **fünf** Aufrufer, darunter die Zuordnung bei der Montage. Steht hier als Nachweis, nicht als offene Aufgabe: der Eintrag nennt den Fehlertyp, damit er beim nächsten paginierten Endpoint erkannt wird — **ein Client, der eine Seite für die Gesamtmenge nimmt, meldet nichts, er zeigt einfach weniger.** | 🟢 |
-| **B-20c-2** | **Dieselbe Klasse bei Zimmern, Raumtypen und Belegungen.** `GET /api/v1/rooms`, `/room-types` und `/occupancies` haben denselben `limit`-Default 100 wie die Geräteliste vor B-20c-1, und ihre Frontend-Aufrufer setzen kein `limit`. Mit 45 Zimmern und 103 Zonen ist das **heute folgenlos** — bei den Belegungen ist die Zahl aber nicht fest, und ein Haus mit mehr Zimmern oder eine Liste über mehrere Wochen trifft die Grenze. Bewusst **nicht** im Hotfix vor der Pilotmontage mitgeändert (§5.1: ein Thema, ein PR). Vorgehen wie bei den Geräten: Client holt alle Seiten, kein stilles Abschneiden, `limit`/`offset` aus dem Query-Type entfernen. **Geplant als Sprint 20d** (Auftrag vom 02.10.2026, Frist vor dem 01.11.), Brief in `docs/features/2026-10-02-sprint20d-paginierung-zimmer-belegungen.md`. **Messung auf dem Server am 02.10.: 959 aktive Belegungen** — damit ist der Fall bei den Belegungen nicht mehr latent: die Ansicht „Alle“ zeigt 200 von 959, ohne das zu sagen. Zimmer und Raumtypen werden vollständig geladen wie bei den Geräten; Belegungen werden **echt paginiert** (Gesamtzahl vom Endpoint, „N von M“ + „Weitere laden“), weil sie unbegrenzt wachsen — alles zu laden wäre in einem Jahr derselbe Fehler mit umgekehrtem Vorzeichen. **Zusatzbefund aus der Brief-Vorbereitung:** die Belegungs-Sortierung läuft auf `check_in` allein und ist damit **nicht eindeutig** (`occupancies.py:155`). Ohne `id` als zweiten Schlüssel kann „Weitere laden“ eine Zeile doppelt zeigen und eine andere überspringen — bei 45 Zimmern und einem Anreisetag teilen Dutzende Buchungen denselben `check_in`. Bei „alles holen“ fällt das nicht auf, weil es nur eine Seite gibt. | 🟡 |
+| **B-20c-2** | ✅ **Erledigt mit Sprint 20d** (§2bv, AE-75, PR #255). `GET /api/v1/rooms`, `/room-types` und `/occupancies` hatten denselben `limit`-Default 100 wie die Geräteliste vor B-20c-1. **Messung auf dem Server am 02.10.: 959 aktive Belegungen** — damit war der Fall bei den Belegungen nicht latent, sondern scharf: die Ansicht „Alle“ stand auf `limit: 200` und zeigte 200 von 959, ohne das zu sagen. **Zwei verschiedene Lösungen, weil die Mengen verschieden wachsen** (AE-75): Zimmer und Raumtypen sind nach oben gebunden und werden vollständig geholt; Belegungen wachsen unbegrenzt und werden echt paginiert (Envelope mit Gesamtzahl, „N von M“ + „Weitere laden“). **Zusatzbefund mitbehoben:** die Belegungs-Sortierung lief auf `check_in` allein und war damit nicht eindeutig — ohne `id` als zweiten Schlüssel hätte „Weitere laden“ eine Zeile doppelt gezeigt und eine andere übersprungen. Der Mangel war seit Sprint 8.5 im Code und ohne Wirkung; er wäre erst durch die **Reparatur** des anderen Fehlers scharf geworden. | ✅ |
 | **B-20c-3** | **`compute_health_state` liest Geräte ohne Lifecycle-Filter.** `_compute_health_state_async` lädt `select(Device)` ohne `retired_at IS NULL` (`tasks/health_tasks.py:173`) und baut daraus `zone_device_ids` (`:200-202`, Zuweisung `:202`). Ein stillgelegtes Gerät zählt damit weiter für seine alte Zone: die Zone sieht belegt aus, obwohl sie leer ist, und ihr `health_state` folgt einem Gerät, das nicht mehr existiert — bei einem retired Gerät ohne Uplinks also dauerhaft `silent` („Zone Stumm“, rot) statt `no_device`. **Heute folgenlos**, weil kein Gerät retired ist; **ab dem ersten Tausch nicht mehr**, und die Montage ist der Zeitraum, in dem getäuscht wird. Das ist §5.58 (Device-Queries brauchen Lifecycle-Filter) an einer Stelle, die die Lesson nicht genannt hat — §5.79: das Audit von Sprint 13b hat die fünf damaligen Lesestellen geprüft, `health_tasks` kam mit Sprint 11 und war dabei, aber die Zone-Ableitung ist seither umgebaut worden. Fix ist eine Zeile (`.where(Device.retired_at.is_(None))`) plus ein Test, der ein retired Gerät in einer Zone anlegt und `no_device` erwartet. **Engine nicht betroffen:** sie liest `heating_zone.health_state` nirgends, nur `Device.health_state` — und das wird je Gerät gesetzt, nicht über die Zone. Befund aus der Analyse vom 02.10.2026 (Montage-Abend, „Kein Gerät“-Frage). | 🟡 |
 | **B-20c-4** | **`compute_health_state` hat keine Isolation je Gerät oder Zone.** Der Task läuft in einem Stück durch sieben Phasen (`tasks/health_tasks.py:163-317`) ohne `try/except` je Element. Eine Ausnahme irgendwo in Phase 1–5 lässt **alle** Device- und Zone-Zustände unverändert — und zwar lautlos: `health_state` behält seinen alten Wert, die Oberfläche zeigt weiter Grün, und niemandem fällt auf, dass nichts mehr nachgeführt wird. **Das ist die teure Richtung des Fehlers:** ein eingefrorenes `healthy` ist von einem aktuellen `healthy` nicht zu unterscheiden, und die Engine filtert ihre Downlink-Empfänger genau darauf (`tasks/engine_tasks.py:392`, `rules/engine.py:571`, `rules/window_state.py:79`). Ein Gerät, das offline geht, während der Task hängt, bleibt für die Engine `healthy` — sie schickt Soll­werte an ein stummes Gerät und meldet keinen Ausfall. Vorbild ist AE-54: die Engine isoliert pro Zone mit `try/except` und setzt im Fehlerfall `degraded`, statt den ganzen Lauf zu verlieren. **Dazu gehört ein Wirkungs-Melder** (§5.76): nicht „läuft der Task“, sondern „ist der jüngste Health-Schreibvorgang jünger als X Minuten“ — ein Mechanik-Check findet genau diesen Fall nicht. Befund aus derselben Analyse vom 02.10.2026. | 🟡 |
 | **B-20e-1** | **Ventilkriterium des Eingangstests: die obere Schwelle hängt an der Raumtemperatur.** Befund 02.10.2026 an Gerät **099**: zweimal exakt **38 %** Öffnung bei Sollwert 28 °C, Raum ~23 °C — Motor fährt, Readbacks beidseitig korrekt, kein Defekt. `VALVE_OPEN_MIN_PCT = 40` (`scripts/pairing/batch_inbound_test.py:113`) macht daraus ein **FAIL**, zwei Punkte unter der Grenze. Das Gerät ist trotz FAIL zugeordnet worden (Entscheidung des Hoteliers). **Der Code sagt die Ursache selbst:** der Kommentar bei den Schwellen vermerkt, dass die Öffnung am hohen Sollwert „von der Raumtemperatur abhängt“, während der Erwartungswert am niedrigen Sollwert mit 0 % an zwei Geräten scharf belegt ist (`:100-111`). Die Feldwerte stammen von **drei** Geräten, eines davon defekt: 002 erreichte 59 % — und 001 wurde bei Raum 19 °C gemessen, 099 jetzt bei ~23 °C. Je kleiner der Abstand zwischen Sollwert und Raum, desto weniger fährt das Ventil auf. 099 ist damit **kein neuer Befund, sondern der erste gemessene Fall einer bekannten Schwäche**. **Vorschlag des Hoteliers:** von „≥ 40 % bei 28 °C“ auf „Bewegung ≥ 25 Prozentpunkte zwischen 10 und 28 °C“. **Dazu drei Dinge, die vor der Umsetzung geklärt sein müssen:** **(1)** Die Spreizung ist bei dieser Datenlage fast dieselbe Größe wie der Absolutwert. Das untere Kriterium hält `low` schon bei ≤ 10 % und gemessen bei 0 %; `high - low` ist dann ≈ `high`. Der Vorschlag wirkt also nicht als Wechsel von absolut auf relativ, sondern als **Senkung der oberen Schwelle von 40 auf etwa 25–35** — vertretbar, aber es ist eine andere Entscheidung als die, die der Wortlaut nahelegt. Ein wirklich relatives Kriterium müsste auf den Überschuss normieren (Öffnung je Kelvin über Raumtemperatur), und dafür fehlen die Daten. **(2)** Der Kommentar bei `:114-120` begründet ausführlich, warum eine Spreizungs-Schwelle **gestrichen** wurde: sie könne nicht auslösen, weil wer beide Schwellen passiert mindestens 30 Punkte Spreizung hat. Diese Begründung gilt nur, **solange die 40-%-Schwelle steht**. Wer sie ersetzt, macht den Kommentar falsch — er ist im selben PR neu zu schreiben, sonst liest ihn der Nächste als Befund (§5.77). **(3)** Das untere Kriterium bleibt der Urteilsträger und soll **nicht** angetastet werden: ein klemmend **offenes** Ventil heizt ein leeres Zimmer durch (Befund 001, 100 % bei Sollwert 10 °C), ein klemmend geschlossenes lässt es nur kalt. **Die eigentlich wertvolle Änderung ist eine andere:** das Audit hält heute `valve_position`, `observed_setpoint` und die Zeitstempel fest, aber **nicht die Raumtemperatur zum Messzeitpunkt** (`:763-793`). Ohne sie lässt sich keine Schwelle empirisch herleiten — man hätte nach 104 Geräten wieder nur Einzelfälle. Die Temperatur mitzuschreiben ist eine Zeile, und sie macht die nächste Schwellen-Entscheidung belegbar statt verhandelbar. **Empfehlung:** erst diese Zeile und die Montage zu Ende, dann die Schwelle aus den dann vorliegenden ~100 Messungen herleiten. Bis dahin ist FAIL am oberen Kriterium ein **Prüfauftrag**, kein Urteil — so wie 099 behandelt wurde. | 🟡 |
