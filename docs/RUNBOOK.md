@@ -2328,6 +2328,59 @@ SQL
 - **Block 4 muss leer sein.** Ist sie es nicht, hat der Monteur getauscht:
   trennen und erneut zuordnen (§10h.6).
 
+#### Direkt nach dem `assign`: die Spalte „Zone“ zeigt noch „Kein Gerät“
+
+**Das ist richtig so und kein Fehler.** Bis zu **fünf Minuten** nach der
+Zuordnung steht in der Geräteliste in der Spalte „Zone“ noch
+„Kein Gerät“, obwohl die Spalte „Zuordnung“ daneben schon
+das richtige Zimmer und die richtige Zone nennt.
+
+Der Grund: die Spalte „Zuordnung“ liest die Zuordnung selbst, die mit
+dem `assign` geschrieben ist. Die Spalte „Zone“ liest den
+**Gesundheitszustand** der Zone, und den berechnet ein eigener Hintergrund-Lauf
+alle fünf Minuten neu. Bis der das erste Mal nach der Zuordnung läuft,
+steht dort noch das Ergebnis von vorher — und vorher hatte die Zone
+tatsächlich kein Gerät.
+
+**Die Steuerung ist davon nicht betroffen.** Sie nimmt die Geräte einer Zone
+aus der Zuordnung, nicht aus diesem Feld.
+
+Nach fünf Minuten die Seite neu laden. Steht dort dann immer noch
+„Kein Gerät“, ist es ein Befund — diese Abfrage klärt ihn:
+
+```bash
+# SSH (Prod-Server, root)
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+docker compose -f docker-compose.prod.yml exec -T db   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c   "SELECT d.label AS nr, d.health_state AS geraet, z.health_state AS zone,
+          r.number AS zimmer, z.name AS zone_name,
+          to_char(max(s.time) AT TIME ZONE 'Europe/Vienna','DD.MM HH24:MI')
+            AS letzter_uplink
+     FROM device d
+     JOIN heating_zone z ON z.id = d.heating_zone_id
+     JOIN room r         ON r.id = z.room_id
+     LEFT JOIN sensor_reading s ON s.device_id = d.id
+    WHERE d.retired_at IS NULL
+    GROUP BY d.label, d.health_state, z.health_state, r.number, z.name
+    ORDER BY r.number, z.name;"
+```
+
+Steht `geraet` auf `silent`, obwohl `letzter_uplink` jünger als zwei Stunden
+ist, hat der Hintergrund-Lauf nicht geschrieben — **dann ist es keine
+Kosmetik mehr**, denn die Steuerung schickt nur an Geräte mit `healthy`.
+Prüfen, ob der Lauf überhaupt läuft:
+
+```bash
+# SSH (Prod-Server, root)
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml   logs celery_worker --tail 200 | grep -c compute_health_state
+```
+
+Bei Fünf-Minuten-Takt müssen in 200 Zeilen mehrere Treffer stehen.
+
+**Anlass:** Montage-Abend 02.10.2026. Alle zehn frisch zugeordneten Geräte
+zeigten „Kein Gerät“; die Prüfung ergab, dass es genau dieses
+Zeitfenster war. Die Frage hat einen Abend gekostet — deshalb steht sie
+hier, bevor sie am nächsten Montagetag erneut aufkommt.
+
 ---
 
 ### 10h.8 Pilot-Gate (ab 02.10., ≥ 72 h nach der Pilotmontage)
