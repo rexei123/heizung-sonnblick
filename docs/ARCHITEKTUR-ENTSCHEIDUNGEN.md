@@ -3828,3 +3828,177 @@ RUNBOOK §10q.
   Weiterhin verworfen, gleiche Begründung wie AE-72: der 24-h-Median ist die
   Bremse, eine zweite bräuchte persistierten Zustand, der bei Ausfall des
   Taktgebers plausibel einfriert (CLAUDE.md §5.76).
+
+---
+
+# AE-75 — Listen-Antworten: nackte Liste oder Envelope mit Gesamtzahl (Sprint 20d)
+
+**Datum:** 2026-10-03
+**Status:** Akzeptiert
+**Bezug:** B-20c-1 (Geräteliste bei 100 abgeschnitten, Sprint 20c), B-20c-2
+(dieselbe Klasse bei Zimmern, Raumtypen und Belegungen), CLAUDE.md §5.64
+(ein Wert außerhalb des erwarteten Pfades verschwindet im `client.ts`-Wrapper
+lautlos), §5.63 (Frontend-Type-Spiegel zum Backend-Schema)
+
+## Anlass
+
+Zwei Befunde in zwei Tagen, dieselbe Ursache: ein paginierter Endpoint
+liefert eine Seite, und der Client nimmt sie für die ganze Liste.
+
+Bei den Geräten waren es **100 von 104** (B-20c-1, 01.10.2026). Bei den
+Belegungen **200 von 959** (B-20c-2, Messung vom 02.10.2026). In beiden
+Fällen hat die Oberfläche nichts gemeldet — sie hat einfach weniger
+gezeigt. Das ist das Fehlerbild, das am längsten unentdeckt bleibt: eine
+Liste, die vollständig aussieht, hat keine Symptome.
+
+Nach dem zweiten Fall war klar, dass die Frage nicht „wie reparieren wir
+diese Liste" lautet, sondern **welche Form eine Listen-Antwort hat**. Vor
+diesem Sprint gab es im Repo genau eine: die nackte Liste. Damit gab es auch
+keine Möglichkeit, eine Gesamtzahl zu übermitteln — und ohne Gesamtzahl kann
+eine Oberfläche nicht sagen, dass ihr etwas fehlt.
+
+## Entscheidung
+
+### 1. Zwei Formen, und die Wahl richtet sich nach dem Wachstum
+
+| Menge | wächst | Form | Client |
+|---|---|---|---|
+| Geräte, Zimmer, Raumtypen, Zonen | **gebunden** (104 / 45 / Handvoll / 103) | nackte Liste | holt **alle** Seiten |
+| Belegungen | **unbegrenzt** | Envelope `{items, total, limit, offset}` | blättert, zeigt „N von M" |
+
+Die Grenze ist nicht die heutige Zeilenzahl, sondern die Frage, **wodurch**
+sie wächst. Zimmer wachsen, wenn das Hotel baut. Belegungen wachsen mit
+jedem Tag Betrieb — ein Datensatz je Buchung, täglicher PMS-Import seit dem
+06.06.2026.
+
+Daraus folgt für beide Seiten das Gegenteil des Naheliegenden:
+
+- Bei einer **gebundenen** Menge ist eine blätterbare Oberfläche Umstand
+  ohne Gegenwert. Wer 45 Zimmer blättert, hat eine Bedienhandlung
+  eingeführt, die niemandem hilft.
+- Bei einer **unbegrenzten** Menge ist „alles holen" dieselbe Entscheidung
+  wie bei den Geräten, nur mit umgekehrtem Vorzeichen: in einem Jahr lädt
+  der Browser mehrere Tausend Zeilen bei jedem Seitenaufruf, und der
+  Befund wäre dann ein Leistungs- statt ein Vollständigkeitsproblem.
+
+### 2. Die Gesamtzahl steht im Body, nicht in einem Header
+
+Zwei Wege, und der Unterschied ist nicht Geschmack:
+
+| Weg | Dafür | Dagegen |
+|---|---|---|
+| `X-Total-Count`-Header | Response-Form bleibt eine Liste, keine Typ-Änderung | **`client.ts` verwirft Header** |
+| Envelope `{items, total}` | explizit, typisiert, der Compiler erzwingt die Anpassung | Response-Form ändert sich |
+
+`request<T>` in `frontend/src/lib/api/client.ts:60` gibt nur den geparsten
+Body zurück. Ein Header käme im Frontend **nie** an — und das wäre nicht
+einmal ein Fehler, der auffällt: „N von M" zeigte dauerhaft „N von 0", und
+der Knopf „Weitere laden" wäre von Anfang an unsichtbar.
+
+Das ist exakt die Falle aus CLAUDE.md §5.64. Dort hat derselbe Wrapper das
+Feld `error_code` verschluckt, weil er nur `body.detail` gelesen hat. Ein
+Header wäre derselbe Fehler eine Ebene tiefer.
+
+### 3. `limit` und `offset` kommen mit zurück
+
+Sie kosten nichts und machen eine Antwort im Log oder im Netzwerk-Tab
+selbsterklärend: wer sie sieht, weiß, **welche** Seite er hat. Ohne sie ist
+eine Antwort mit 100 Zeilen von einer mit 100 Zeilen an anderer Stelle nicht
+zu unterscheiden.
+
+### 4. `total` zählt mit **denselben** Filtern wie die Seite
+
+Das ist die Zusicherung, die „N von M" erst richtig macht. Zählte `total`
+ohne Filter, würde die Ansicht „Heute" „12 von 959" anzeigen und einen Knopf
+„Weitere laden" zeigen, der nichts mehr holt.
+
+Im Code stehen die Bedingungen deshalb **einmal** in einer Liste und werden
+zweimal verwendet — wer einen Filter ergänzt, kann ihn nicht an einer der
+beiden Stellen vergessen:
+
+```python
+bedingungen = []
+if from_ is not None:
+    bedingungen.append(Occupancy.check_out >= from_)
+# ...
+seite = select(Occupancy).where(*bedingungen).order_by(...).offset(...).limit(...)
+gesamt = select(func.count()).select_from(Occupancy).where(*bedingungen)
+```
+
+### 5. Wer paginiert, braucht eine **eindeutige** Sortierung
+
+Das ist keine Stilfrage, sondern die Voraussetzung dafür, dass Paginierung
+überhaupt trägt. Postgres garantiert bei gleichem Sortierschlüssel keine
+Reihenfolge; zwischen zwei Seitenabrufen kann dieselbe Zeile zweimal
+erscheinen und eine andere gar nicht.
+
+Stand bei Abschluss dieses Sprints:
+
+| Endpoint | Sortierung | eindeutig |
+|---|---|---|
+| `/devices` | `id` | ✅ |
+| `/room-types` | `id` | ✅ |
+| `/rooms` | `floor` nullslast, numerischer Präfix nullslast, `number` | ✅ — `Room.number` ist `unique` |
+| `/occupancies` | `check_in`, **`id`** | ✅ — `id` in Sprint 20d ergänzt |
+
+Vor 20d stand dort `order_by(Occupancy.check_in)` allein, und `check_in` ist
+nicht eindeutig: an einem Anreisetag teilen bei 45 Zimmern Dutzende
+Buchungen denselben Wert. Solange die Oberfläche **eine** Seite geholt hat,
+war das unsichtbar — es gab nur eine Seite. Mit „Weitere laden" wäre es
+sichtbar geworden, und zwar als scheinbar sprunghafte Liste, die niemand
+einem Sortierschlüssel zuordnet.
+
+**Das ist der unangenehme Teil dieses Befunds:** die fehlende Eindeutigkeit
+war seit Sprint 8.5 im Code und ohne Wirkung. Sie wäre erst durch die
+*Reparatur* des anderen Fehlers scharf geworden. Ein Mangel, den die
+Behebung eines zweiten Mangels aktiviert — dieselbe Familie wie CLAUDE.md
+§5.76 (zwei Fehler, die sich gegenseitig verdecken).
+
+### 6. Die Sortierrichtung kommt als Parameter, nicht aus den Filtern
+
+Die naheliegende Abkürzung wäre, `desc` immer dann zu nehmen, wenn kein
+Zeitfilter gesetzt ist — die Oberfläche braucht es genau so. Das wäre eine
+verborgene Kopplung: ein Aufrufer, der nur den Zeitfilter weglässt, bekäme
+unangekündigt eine andere Reihenfolge. Die Vorgabe bleibt `asc` wie bisher;
+wer `desc` will, sagt es.
+
+## Konsequenzen
+
+- **Neue Listen-Endpoints wählen ihre Form nach Punkt 1.** Eine dritte Form
+  entsteht nicht; wer eine braucht, erweitert diesen Eintrag.
+- **Die Client-Schleife steht an einer Stelle**
+  (`frontend/src/lib/api/alle-seiten.ts`) und nicht je Modul. Sie wirft,
+  statt abzuschneiden — der Aufrufer bekommt einen Fehler zu sehen statt
+  einer Liste, die vollständig aussieht und es nicht ist.
+- **Seitengröße ist 100, dieselbe Zahl wie der Server-Default.** Eine
+  größere Seite (etwa 500) würde die Schleife im Betrieb **nie** durchlaufen
+  lassen — Paginierung, die nur im Test greift, wird beim Wachsen des
+  Bestands das erste Mal scharf.
+- **Ein Envelope ist eine Schema-Änderung** und braucht den
+  Frontend-Type-Spiegel im selben PR (§5.63). Hier war es ein Konsument,
+  und der Compiler hat ihn genannt.
+- **Der Belegungs-Endpoint ist nicht mehr abwärtskompatibel.** Geprüft und
+  belegt: ein Konsument (`occupanciesApi.list`), ein Backend-Test, der nur
+  den Status-Code prüft, und die RUNBOOK-Handgriffe nutzen POST und PATCH,
+  nicht die Liste.
+
+## Verworfen
+
+- **`X-Total-Count`-Header.** Siehe Punkt 2 — er käme nicht an, und der
+  Fehler wäre stumm.
+- **Alle Belegungen laden, wie bei Zimmern.** Siehe Punkt 1. Heute 959, in
+  einem Jahr mehrere Tausend.
+- **`total` nur auf der ersten Seite.** Die Oberfläche liest nach „Weitere
+  laden" aus der jüngsten Antwort; eine Zahl, die nur beim ersten Aufruf
+  stimmt, wäre eine Falle für den nächsten Umbau. Kostet eine
+  `count()`-Abfrage je Seite.
+- **Sortierrichtung aus der Abwesenheit des Zeitfilters ableiten.** Siehe
+  Punkt 6.
+- **Cursor-Paginierung** (`after=<id>` statt `offset`). Robuster gegen
+  Einfügungen zwischen zwei Seitenabrufen und ohne den `OFFSET`-Aufwand bei
+  tiefen Seiten. Verworfen für diesen Sprint: `offset` ist im Repo etabliert
+  (vier Endpoints), die Oberfläche blättert vorwärts und selten tief, und
+  ein Wechsel der Paginierungs-Art gehört nicht in denselben PR wie die
+  Behebung eines Vollständigkeits-Befunds (§5.1). Wenn Belegungen in
+  mehreren Jahren fünfstellig werden, ist das der Zug — dann aber für alle
+  Listen gemeinsam, nicht für eine.

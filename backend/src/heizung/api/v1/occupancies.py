@@ -2,7 +2,8 @@
 
 CRUD:
     POST    /api/v1/occupancies
-    GET     /api/v1/occupancies?from=&to=&room_id=&active=true
+    GET     /api/v1/occupancies?from=&to=&room_id=&active=&order=&limit=&offset=
+            -> Envelope {items, total, limit, offset} (Sprint 20d)
     GET     /api/v1/occupancies/{occupancy_id}
     PATCH   /api/v1/occupancies/{occupancy_id}    -> nur Storno (cancel=true)
     DELETE  /api/v1/occupancies/{occupancy_id}    -> 405 (Storno via PATCH)
@@ -16,9 +17,10 @@ room.status wird automatisch synchronisiert (occupancy_service).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_mitarbeiter, require_user
@@ -26,7 +28,12 @@ from heizung.db import get_session
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.user import User
-from heizung.schemas.occupancy import OccupancyCancel, OccupancyCreate, OccupancyRead
+from heizung.schemas.occupancy import (
+    OccupancyCancel,
+    OccupancyCreate,
+    OccupancyListResponse,
+    OccupancyRead,
+)
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import (
     cancel_occupancy_record,
@@ -121,8 +128,8 @@ async def create_occupancy(
 
 @router.get(
     "",
-    response_model=list[OccupancyRead],
-    summary="Belegungs-Liste mit Filtern",
+    response_model=OccupancyListResponse,
+    summary="Belegungs-Liste mit Filtern (paginiert, mit Gesamtzahl)",
 )
 async def list_occupancies(
     from_: datetime | None = Query(  # noqa: B008
@@ -138,23 +145,75 @@ async def list_occupancies(
     active: bool | None = Query(  # noqa: B008
         default=None, description="Nur aktive (true) oder nur stornierte (false) Belegungen."
     ),
+    order: Literal["asc", "desc"] = Query(  # noqa: B008
+        default="asc",
+        description=(
+            "Richtung der Sortierung nach (check_in, id). 'asc' = chronologisch "
+            "(Vorgabe, passend zu engen Zeitfenstern), 'desc' = jüngste zuerst "
+            "(passend zur Ansicht ohne Zeitfilter)."
+        ),
+    ),
     limit: int = Query(default=100, ge=1, le=1000),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[Occupancy]:
-    stmt = select(Occupancy)
+) -> OccupancyListResponse:
+    """Eine Seite Belegungen plus die Gesamtzahl zu denselben Filtern.
+
+    Sprint 20d (B-20c-2). Drei Dinge sind hier bewusst so und nicht anders:
+
+    **1. Die Filter werden einmal gebaut und zweimal verwendet.** ``total``
+    muss die Gesamtzahl zu **genau** diesen Filtern sein — sonst zeigt die
+    Oberflaeche "100 von 959", wenn im gewaehlten Zeitfenster nur 12 liegen.
+    Die Bedingungen stehen deshalb in einer Liste, nicht zweimal
+    hingeschrieben; wer einen Filter ergaenzt, kann ihn nicht an einer der
+    beiden Stellen vergessen.
+
+    **2. Die Sortierung ist jetzt eindeutig: ``(check_in, id)``.** Vorher
+    stand hier nur ``order_by(Occupancy.check_in)``, und ``check_in`` ist
+    **nicht** eindeutig — an einem Anreisetag haben Dutzende Buchungen
+    denselben Wert. Postgres gibt bei gleichem Sortierschluessel keine
+    garantierte Reihenfolge; zwischen zwei Seitenabrufen kann dieselbe Zeile
+    zweimal erscheinen und eine andere gar nicht. Solange die Oberflaeche
+    eine einzige Seite geholt hat, war das unsichtbar. Mit "Weitere laden"
+    waere es sichtbar geworden — als sprunghafte Liste, die niemand einem
+    Sortierschluessel zuordnet. ``id`` ist der Primaerschluessel und macht
+    die Ordnung total.
+
+    **3. Die Richtung kommt als Parameter, nicht aus den Filtern.** Die
+    naheliegende Abkuerzung waere, ``desc`` immer dann zu nehmen, wenn kein
+    ``from``/``to`` gesetzt ist — die Oberflaeche braucht es genau so. Das
+    waere aber eine verborgene Kopplung: ein Aufrufer, der nur den Zeitfilter
+    weglaesst, bekaeme unangekuendigt eine andere Reihenfolge. Die Vorgabe
+    bleibt ``asc`` wie bisher; wer ``desc`` will, sagt es.
+    """
+    bedingungen = []
     if from_ is not None:
-        stmt = stmt.where(Occupancy.check_out >= from_)
+        bedingungen.append(Occupancy.check_out >= from_)
     if to is not None:
-        stmt = stmt.where(Occupancy.check_in <= to)
+        bedingungen.append(Occupancy.check_in <= to)
     if room_id is not None:
-        stmt = stmt.where(Occupancy.room_id == room_id)
+        bedingungen.append(Occupancy.room_id == room_id)
     if active is not None:
-        stmt = stmt.where(Occupancy.is_active.is_(active))
-    stmt = stmt.order_by(Occupancy.check_in).offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+        bedingungen.append(Occupancy.is_active.is_(active))
+
+    sortierung = (
+        (Occupancy.check_in.desc(), Occupancy.id.desc())
+        if order == "desc"
+        else (Occupancy.check_in.asc(), Occupancy.id.asc())
+    )
+    seite = select(Occupancy).where(*bedingungen).order_by(*sortierung).offset(offset).limit(limit)
+    gesamt_stmt = select(func.count()).select_from(Occupancy).where(*bedingungen)
+
+    items = list((await session.execute(seite)).scalars().all())
+    total = int((await session.execute(gesamt_stmt)).scalar_one())
+
+    return OccupancyListResponse(
+        items=[OccupancyRead.model_validate(o) for o in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
