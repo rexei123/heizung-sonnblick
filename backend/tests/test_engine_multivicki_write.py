@@ -641,6 +641,18 @@ class _FakeRedis:
     def delete(self, key: str) -> int:
         return 1 if self.store.pop(key, None) is not None else 0
 
+    def getdel(self, key: str) -> str | None:
+        """Gebraucht von ``resync_flag.consume`` im selben Dispatch-Lauf.
+
+        Der Reboot-Re-Sync (AE-63) sitzt in derselben Zonen-Schleife wie der
+        Abgleich und greift auf denselben Redis-Client. Fehlt die Operation,
+        bricht der Dispatch mit ``AttributeError`` ab — und zwar **nicht**
+        abgefangen, weil ``resync_flag`` nur ``redis.RedisError`` schluckt.
+        Genau daran sind die sechs Tests dieser Gruppe beim ersten CI-Lauf
+        gefallen.
+        """
+        return self.store.pop(key, None)
+
 
 @pytest.fixture
 def abgleich_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
