@@ -52,6 +52,11 @@
 //   Byte 7  : High nibble = battery (V = 2 + nibble * 0.1), Low nibble = status flags
 //   Byte 8  : Erweiterte Status-Flags
 //
+// Handverstellung (Cmd 0x28; FW >= 3.5) — Sprint 20f
+//   Byte 0  : 0x28
+//   Byte 1  : vom Gast eingestellte Zieltemperatur (uint8, degC)
+//   Byte 2+ : eingebetteter Keep-alive (Cmd 0x01/0x81, 9 Byte)
+//
 // Setpoint-Reply (Cmd 0x52; typisch fPort 2)
 //   Byte 0  : 0x52 = Setpoint-Reply
 //   Byte 1+2: bestaetigter Setpoint * 10, Big-Endian
@@ -79,6 +84,13 @@ function decodeUplink(input) {
     var cmd = bytes[0];
     if (cmd === 0x52 || cmd === 0x04 || cmd === 0x46) {
         return decodeCommandReply(bytes);
+    }
+    // Sprint 20f (T1): 0x28 = Handverstellung am Drehrad (FW >= 3.5). Der
+    // Frame traegt ab Byte 2 einen VOLLSTAENDIGEN Keep-alive und muss
+    // deshalb eigenstaendig behandelt werden — decodePeriodicReport bricht
+    // am Command-Byte ab und haette alles verworfen.
+    if (cmd === 0x28) {
+        return decodeManualTargetChange(bytes);
     }
     return decodePeriodicReport(bytes);
 }
@@ -167,6 +179,90 @@ function decodePeriodicReport(bytes) {
 
     return { data: data };
 }
+
+function decodeManualTargetChange(bytes) {
+    // Sprint 20f (T1): Handverstellung am Vicki-Drehrad, Cmd 0x28, FW >= 3.5
+    // (Vendor-Doku docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md §1
+    // "Manual target temp change").
+    //
+    //   Byte 0  : 0x28
+    //   Byte 1  : vom Gast eingestellte Zieltemperatur (uint8, direkt in degC)
+    //   Byte 2+ : eingebetteter Keep-alive (Cmd 0x01 oder 0x81, 9 Byte) —
+    //             wird mit-dekodiert und gemergt
+    //
+    // Live-Belege 05.10.2026 (je 11 Byte, Geraet 015 und 104):
+    //   28 14 81 14 95 95 00 d2 01 b0 30
+    //   28 14 81 14 9e 8f b9 b9 11 f0 30
+    // Beide tragen attachedBackplate=true und motorRange > 0.
+    //
+    // **Warum report_type NICHT 'manual_target_reply' oder aehnlich heisst:**
+    // Der Subscriber ueberspringt den sensor_reading-Insert fuer alles, was
+    // in REPLY_REPORT_TYPES steht (mqtt_subscriber.py REPLY_REPORT_TYPES).
+    // Bei 0x04 MUSS der Reply-Typ drinstehen, damit kein Reading mit
+    // NULL-Werten entsteht. Hier ist es genau umgekehrt: der eingebettete
+    // Keep-alive ist ein echter Messwert-Satz, den wir speichern wollen.
+    // 'manual_target_change' ist deshalb bewusst KEIN Reply-Typ — es
+    // beschreibt den Frame, ohne den Insert zu unterdruecken, und dient
+    // gleichzeitig als Unterscheidungsmerkmal fuer die Override-Erkennung
+    // (Sprint 20f T2).
+    //
+    // Vor Sprint 20f fiel dieser Frame in decodePeriodicReport, brach dort
+    // am Command-Byte ab und erzeugte eine sensor_reading-Zeile, in der
+    // ALLES NULL war. Der Vor-Check des Eingangstests las daraus
+    // attached_backplate IS NULL und urteilte FAIL — am 05.10. traf das die
+    // Geraete 038-044, alle sieben montiert und kalibriert.
+    var data = {};
+
+    if (bytes.length < 2) {
+        return {
+            data: { command: 0x28, report_type: 'manual_target_change' },
+            errors: ['manual target change too short (' + bytes.length + ' bytes, expected 2+)']
+        };
+    }
+
+    // Eingebetteten Keep-alive zuerst dekodieren und als Basis nehmen, damit
+    // die Messwerte (Temperatur, Spannung, Ventil, attachedBackplate,
+    // calibrationFailed) vollstaendig im Objekt landen.
+    if (bytes.length > 2) {
+        var rest = bytes.slice(2);
+        if (rest.length >= 9 && (rest[0] === 0x01 || rest[0] === 0x81)) {
+            var periodic = decodePeriodicReport(rest);
+            if (periodic && periodic.data) {
+                for (var key in periodic.data) {
+                    if (Object.prototype.hasOwnProperty.call(periodic.data, key)) {
+                        data[key] = periodic.data[key];
+                    }
+                }
+            }
+        }
+    }
+
+    // Der Hand-Sollwert aus Byte 1. In allen bisher gesehenen Frames stimmt
+    // er mit dem target_temperature des eingebetteten Keep-alive ueberein —
+    // das Geraet hat den gedrehten Wert ja uebernommen. Er wird trotzdem
+    // separat emittiert: wer die beiden spaeter auseinanderlaufen sieht, hat
+    // einen Befund und nicht ein Raetsel.
+    data.manual_target_temperature = bytes[1];
+    data.manualTargetTemperature = bytes[1];
+
+    // Ohne eingebetteten Keep-alive gibt es kein target_temperature aus dem
+    // Periodic-Teil. Dann traegt der Hand-Wert das Feld, damit die
+    // Override-Erkennung ueberhaupt etwas zu vergleichen hat
+    // (_handle_override_detection liest obj.target_temperature).
+    if (data.target_temperature === undefined) {
+        data.target_temperature = bytes[1];
+        data.targetTemperature = bytes[1];
+    }
+
+    // Zum Schluss, damit ein aus dem Keep-alive gemergtes
+    // report_type='periodic' ueberschrieben wird.
+    data.report_type = 'manual_target_change';
+    data.command = 0x28;
+    data.manual_target_change = true;
+
+    return { data: data };
+}
+
 
 function decodeCommandReply(bytes) {
     if (bytes.length < 1) {

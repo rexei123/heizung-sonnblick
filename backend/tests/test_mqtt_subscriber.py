@@ -971,3 +971,62 @@ async def test_subscriber_accepts_temperature_in_normal_range(
         f"erwarte genau einen evaluate_room.delay({expected_room_id})-Call, gefunden {delay_calls}"
     )
     fake_redis.pipeline.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f (T7): calibrationFailed persistieren
+# ---------------------------------------------------------------------------
+#
+# Das Bit (``status8 & 0x40``) setzt der Codec seit Sprint 6.8
+# (``mclimate-vicki.js:163``) und ``_map_to_reading`` hat es bis Sprint 20f
+# **nicht gelesen** — bei jedem einzelnen Frame verworfen. Geraet 026 meldete
+# am 05.10.2026 ``status8 = 0x70`` und war damit der erste belegte Fall im
+# Haus; die sieben Geraete aus dem 0x28-Befund hatten ``0x30``, also identisch
+# ausser diesem Bit.
+
+
+def test_map_to_reading_calibration_failed_true() -> None:
+    """``calibrationFailed=true`` landet in der Row.
+
+    Warum das zaehlt: ein Geraet mit fehlgeschlagener Kalibrierung fuehrt das
+    Ventil nicht richtig. Der Eingangstest urteilt ueber die Ventilstellung
+    und faellt es durch, **ohne den Grund nennen zu koennen** — mit dem Bit
+    heisst derselbe Befund "Kalibrierung fehlgeschlagen" und ist ein
+    Handgriff am Geraet (Cmd 0x03) statt einer Fehlersuche.
+    """
+    payload = _valid_payload()
+    payload["object"]["calibrationFailed"] = True
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    row = _map_to_reading(uplink, device_id=1)
+
+    assert row["calibration_failed"] is True
+
+
+def test_map_to_reading_calibration_failed_fehlendes_feld_bleibt_null() -> None:
+    """Fehlt das Feld, ist der Wert ``None`` — **nicht** ``False``.
+
+    Dieselbe Drei-Zustands-Regel wie bei ``open_window``,
+    ``attached_backplate`` und ``broken_sensor``: nur ``True`` ist ein
+    Befund. Eine Zeile ohne Wert behauptet nicht, die Kalibrierung sei in
+    Ordnung — sonst wuerde der Vor-Check aus einem alten Codec-Frame ein
+    "kalibriert" ableiten, das niemand gemeldet hat.
+    """
+    payload = _valid_payload()
+    payload["object"].pop("calibrationFailed", None)
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    row = _map_to_reading(uplink, device_id=1)
+
+    assert row["calibration_failed"] is None
+
+
+def test_map_to_reading_calibration_failed_false_bleibt_false() -> None:
+    """``false`` ist eine Aussage und wird als solche gespeichert."""
+    payload = _valid_payload()
+    payload["object"]["calibrationFailed"] = False
+    uplink = ChirpStackUplink.model_validate(payload)
+
+    row = _map_to_reading(uplink, device_id=1)
+
+    assert row["calibration_failed"] is False

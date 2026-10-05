@@ -237,6 +237,11 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         # Sprint 19 (PR B): brokenSensor durchreichen (Migration 0023).
         # NULL wenn das Feld fehlt — nur True ist ein Defekt.
         "broken_sensor": obj.get("brokenSensor"),
+        # Sprint 20f (T7): calibrationFailed durchreichen (Migration 0025).
+        # Der Codec setzt das Bit seit Sprint 6.8; bis hierher stand an
+        # dieser Stelle nichts, und der Wert wurde bei jedem Frame
+        # verworfen. NULL wenn das Feld fehlt — nur True ist ein Befund.
+        "calibration_failed": obj.get("calibrationFailed"),
         "raw_payload": uplink.data,
     }
 

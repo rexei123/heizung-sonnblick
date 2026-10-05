@@ -548,7 +548,7 @@ def test_format_report_empty() -> None:
 
 
 class _FrameStub:
-    """Minimal-Ersatz fuer ``SensorReading`` — nur die drei Felder."""
+    """Minimal-Ersatz fuer ``SensorReading`` — nur die geprueften Felder."""
 
     def __init__(
         self,
@@ -558,6 +558,9 @@ class _FrameStub:
         attached_backplate: bool | None = True,
         broken_sensor: bool | None = None,
         battery_percent: int | None = 100,
+        # Sprint 20f (T7): Vicki ``calibrationFailed``. Default ``None`` wie
+        # in der Datenbank — nur ``True`` ist ein Befund.
+        calibration_failed: bool | None = None,
     ) -> None:
         self.time = time
         self.setpoint = None if setpoint is None else Decimal(setpoint)
@@ -565,6 +568,7 @@ class _FrameStub:
         self.attached_backplate = attached_backplate
         self.broken_sensor = broken_sensor
         self.battery_percent = battery_percent
+        self.calibration_failed = calibration_failed
 
 
 @pytest.fixture
@@ -1842,3 +1846,237 @@ async def test_no_reset_when_the_queue_is_not_proven_empty(
     assert r.reset_note is not None
     assert str(SETPOINT_LOW_C) in r.reset_note
     assert "nicht bestaetigt" in format_report(report)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f (T4 + T7) — der Vor-Check wartet auf ein *brauchbares* Frame
+# ---------------------------------------------------------------------------
+#
+# **Der Befund, am 05.10.2026 belegt.** Ein ``0x28``-Frame (Handverstellung)
+# trug einen vollstaendigen Keep-alive, den der Codec verwarf; der Subscriber
+# schrieb daraus eine Zeile, in der alles ``NULL`` war. ``_await_fresh_readings``
+# prueft nur den **Zeitstempel** und nahm sie als frisches Reading. Der
+# Vor-Check las ``attached_backplate IS NULL``, urteilte ``backplate_unknown``,
+# und mit ``--require-motor`` wurde daraus terminales **FAIL** — fuer die
+# Geraete 038-044, alle sieben montiert und kalibriert.
+#
+# Dazu der zweite Teil desselben Befunds: ``max_age_s`` und ``timeout_s`` waren
+# **dieselbe Zahl** (beide ``wait_s``, also 900 s). Ein Reading von bis zu
+# 15 Minuten vor dem Lauf galt damit als frisch. ``--heartbeat-wait`` hat an
+# diesem Tag keine Sekunde gewartet.
+
+
+async def test_precheck_wartet_auf_ein_frame_mit_backplate_statt_zu_urteilen(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """**Die Regressions-Wand fuer den 05.10.-Befund.**
+
+    Das Geraet sendet zuerst ein Frame ohne ``attached_backplate`` (die
+    NULL-Zeile aus dem verworfenen ``0x28``), danach ein vollstaendiges mit
+    ``True``. Erwartet wird ``ready`` — nicht ``backplate_unknown``.
+
+    Mit dem alten Code ist dieser Test rot: dort gewinnt das erste Frame,
+    weil nur sein Zeitstempel geprueft wird.
+    """
+    dev = _device(device_id=21, label="038")
+    clock = frame_feed(
+        {
+            21: [
+                # Die NULL-Zeile, wie sie aus einem 0x28-Frame entstand.
+                _FrameStub(T0, None, None, attached_backplate=None),
+                # 40 s spaeter der echte Keep-alive.
+                _FrameStub(T0 + timedelta(seconds=40), 21, 0, attached_backplate=True),
+            ]
+        }
+    )
+
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        wait_s=HEARTBEAT_WAIT_MAX_S,
+        poll_interval_s=10,
+        clock=clock,
+    )
+
+    assert verdicts[21][0] == "ready"
+
+
+async def test_precheck_unterscheidet_funkstille_von_fehlendem_feld(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """Zwei verschiedene Befunde, zwei verschiedene Urteile.
+
+    Das ist die Unterscheidung, die der alte Code nicht treffen konnte:
+
+    - Geraet **22** schweigt vollstaendig -> ``no_uplink``. Ein Funk-Befund,
+      und ``_precheck_result`` macht daraus ``timeout`` (kein Urteil, der
+      zweite Lauf holt es).
+    - Geraet **23** sendet, fuehrt aber nie ``attached_backplate`` ->
+      ``backplate_unknown``. Der Funk ist in Ordnung; es ist ein Codec- oder
+      Firmware-Befund.
+
+    Wuerde das zweite ``no_uplink`` heissen, suchte der Pruefer am Funk —
+    und der ist nachweislich gesund.
+    """
+    stumm = _device(device_id=22, label="039")
+    ohne_feld = _device(device_id=23, label="040")
+    clock = frame_feed(
+        {
+            22: [],
+            23: [
+                _FrameStub(T0, None, None, attached_backplate=None),
+                _FrameStub(T0 + timedelta(seconds=40), None, None, attached_backplate=None),
+            ],
+        }
+    )
+
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [stumm, ohne_feld],
+        wait_s=120,
+        poll_interval_s=10,
+        clock=clock,
+    )
+
+    assert verdicts[22][0] == "no_uplink"
+    assert verdicts[23][0] == "backplate_unknown"
+    # Und die Begruendung muss den Unterschied aussprechen, nicht nur den
+    # Code kennen — sie landet im Audit und im Bericht des Pruefers.
+    assert "Funk ist in Ordnung" in verdicts[23][1]
+
+
+async def test_precheck_altersgrenze_ist_von_der_wartezeit_getrennt(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """Ein Frame von **vor** dem Lauf traegt das Urteil nicht mehr.
+
+    Hier steckt der zweite Teil des Befunds. Das Geraet hat 10 Minuten vor
+    dem Lauf ``attached_backplate=False`` gemeldet — also vor der Montage.
+    Mit zusammenfallender Alters- und Wartegrenze waere das sofort
+    ``not_attached`` und mit ``--require-motor`` ein FAIL fuer ein Geraet,
+    das in der Zwischenzeit montiert wurde.
+
+    Mit ``PRECHECK_MAX_AGE_S`` = 120 s ist die alte Zeile zu alt, der
+    Vor-Check wartet, und das neue Frame entscheidet.
+    """
+    dev = _device(device_id=24, label="041")
+    clock = frame_feed(
+        {
+            24: [
+                # Vor der Montage, 10 Minuten alt.
+                _FrameStub(T0 - timedelta(minutes=10), 21, 0, attached_backplate=False),
+                # Nach der Montage.
+                _FrameStub(T0 + timedelta(seconds=30), 21, 0, attached_backplate=True),
+            ]
+        }
+    )
+
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        wait_s=HEARTBEAT_WAIT_MAX_S,
+        poll_interval_s=10,
+        clock=clock,
+    )
+
+    assert verdicts[24][0] == "ready"
+
+
+async def test_precheck_frisches_frame_wird_sofort_genommen(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """Die Gegenprobe: ein junges, brauchbares Frame wartet nicht.
+
+    Ohne diesen Test koennte die Altersgrenze beliebig scharf werden und der
+    Lauf wuerde fuer jedes Geraet eine Keepalive-Periode warten — bei 104
+    Geraeten ist das der Unterschied zwischen Minuten und Stunden.
+    """
+    dev = _device(device_id=25, label="042")
+    clock = frame_feed({25: [_FrameStub(T0 - timedelta(seconds=30), 21, 0)]})
+
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        wait_s=HEARTBEAT_WAIT_MAX_S,
+        poll_interval_s=10,
+        clock=clock,
+    )
+
+    assert verdicts[25][0] == "ready"
+    # Die Uhr darf nicht gelaufen sein — kein Warte-Durchlauf.
+    assert clock.now() == T0
+
+
+async def test_precheck_meldet_fehlgeschlagene_kalibrierung_mit_namen(
+    frame_feed,  # type: ignore[no-untyped-def]
+) -> None:
+    """Sprint 20f (T7): ``calibrationFailed`` ist ein Befund mit Namen.
+
+    Geraet **026** meldete am 05.10.2026 ``status8 = 0x70``, also
+    ``calibrationFailed = true`` bei gesetzter Backplate. Bis Sprint 20f
+    wurde das Bit nie persistiert; so ein Geraet fiel erst am
+    Ventilkriterium durch — mit "Ventil oeffnet nicht weit genug" und ohne
+    den Grund.
+
+    Der Hinweis nennt den Handgriff: Recalibrate (Cmd 0x03).
+    """
+    dev = _device(device_id=26, label="026")
+    clock = frame_feed(
+        {26: [_FrameStub(T0, 21, 0, attached_backplate=True, calibration_failed=True)]}
+    )
+
+    verdicts = await bit._precheck(
+        object(),  # type: ignore[arg-type]
+        [dev],
+        wait_s=HEARTBEAT_WAIT_MAX_S,
+        poll_interval_s=10,
+        clock=clock,
+    )
+
+    verdict, reason = verdicts[26]
+    assert verdict == "calibration_failed"
+    assert "Recalibrate" in reason
+
+
+def test_kalibrier_befund_ist_fail_auch_ohne_require_motor() -> None:
+    """Die einzige Ausnahme von der Tisch-Regel — und sie ist begruendet.
+
+    Sonst gilt: ohne ``--require-motor`` ist eine nicht durchfuehrbare
+    Pruefung kein Fehler, weil am Tisch ``attached_backplate=false`` der
+    erwartete Zustand ist. Dieses Urteil wird aber **nur** erreicht, wenn die
+    Backplate ``True`` ist — der Tisch-Fall ist damit ausgeschlossen, und was
+    bleibt, ist eine Aussage des Geraets ueber sich selbst.
+    """
+    dev = _device(device_id=27, label="026")
+
+    ohne = bit._precheck_result(
+        dev, "calibration_failed", "Kalibrierung fehlgeschlagen.", None, require_motor=False
+    )
+    mit = bit._precheck_result(
+        dev, "calibration_failed", "Kalibrierung fehlgeschlagen.", None, require_motor=True
+    )
+
+    assert ohne.status == "fail"
+    assert mit.status == "fail"
+    # Und terminal — ``--resume`` fasst das Geraet nicht wieder an. Nach dem
+    # Recalibrate braucht es einen Lauf ohne ``--resume``.
+    assert ohne.status in bit.TERMINAL_STATUSES
+
+
+def test_fehlendes_feld_bleibt_ohne_require_motor_kein_fehler() -> None:
+    """``backplate_unknown`` erbt die Tisch-Regel unveraendert.
+
+    Haelt die Trennlinie fest: der neue Kalibrier-Befund ist die Ausnahme,
+    nicht der Anfang einer neuen Regel.
+    """
+    dev = _device(device_id=28, label="043")
+
+    ohne = bit._precheck_result(
+        dev, "backplate_unknown", "Kein attached_backplate.", None, require_motor=False
+    )
+    mit = bit._precheck_result(
+        dev, "backplate_unknown", "Kein attached_backplate.", None, require_motor=True
+    )
+
+    assert ohne.status == "passed_ohne_motor"
+    assert mit.status == "fail"
