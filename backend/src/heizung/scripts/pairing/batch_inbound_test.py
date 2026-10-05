@@ -132,6 +132,23 @@ DEFAULT_POLL_INTERVAL_S = 15
 # Muenzwurf, kein Kriterium.
 HEARTBEAT_WAIT_MAX_S = 900
 
+# Sprint 20f (T4): **Altersgrenze**, getrennt von der Wartezeit. Bis hierher
+# war beides dieselbe Zahl — der Vor-Check wurde mit ``wait_s`` aufgerufen und
+# benutzte sie zugleich als ``max_age_s``. Folge: ein Reading von bis zu
+# 15 Minuten vor dem Lauf galt als "frisch" und wurde sofort beurteilt.
+#
+# **Damit hat ``--heartbeat-wait`` am 05.10.2026 keine Sekunde gewartet.** Die
+# Geraete 038-044 bekamen ihr FAIL aus einer Zeile, die vor dem Lauf
+# entstanden war.
+#
+# Zwei Minuten: kurz genug, dass das Urteil den Zustand *nach* der Montage
+# beschreibt, lang genug, dass ein Geraet, das gerade eben gesendet hat,
+# nicht auf den naechsten Keepalive warten muss. Der Preis ist Wartezeit —
+# im schlechtesten Fall eine Keepalive-Periode (~10 Min) fuer alle noch
+# offenen Geraete **gemeinsam**, weil die Warte-Schleife sie in einer Abfrage
+# abholt.
+PRECHECK_MAX_AGE_S = 120
+
 # Pause zwischen den Downlinks einer Sende-Runde. Verteilt die Last auf dem
 # Gateway, statt 104 Publishes in einer Sekunde abzusetzen (S4).
 SEND_SPACING_S = 0.5
@@ -145,7 +162,15 @@ StepOutcome = Literal[
     "skipped",
 ]
 DeviceStatus = Literal["pass", "passed_ohne_motor", "fail", "timeout"]
-PrecheckVerdict = Literal["ready", "no_uplink", "not_attached", "backplate_unknown"]
+PrecheckVerdict = Literal[
+    "ready",
+    "no_uplink",
+    "not_attached",
+    "backplate_unknown",
+    # Sprint 20f (T7): Geraet sitzt auf der Backplate, meldet aber
+    # ``calibrationFailed``. Eigener Wert, damit das Urteil den Grund nennt.
+    "calibration_failed",
+]
 
 # Endgueltige Ergebnisse — ``--resume`` fasst sie nicht mehr an (T7).
 # ``timeout`` fehlt bewusst: dort ist kein Urteil gefallen, das Geraet hat nur
@@ -384,30 +409,57 @@ async def _await_fresh_readings(
     timeout_s: int,
     poll_interval_s: int,
     clock: Clock,
-) -> dict[int, SensorReading]:
-    """Ein aktuelles Reading je Geraet — wartend, nicht sofort urteilend.
+    brauchbar: Callable[[SensorReading], bool] | None = None,
+) -> tuple[dict[int, SensorReading], dict[int, SensorReading]]:
+    """Ein **brauchbares** Reading je Geraet — wartend, nicht sofort urteilend.
 
     Sprint 19 (T4). Ein Reading, das juenger ist als ``max_age_s``, wird
-    sofort genommen. Fehlt es, wird bis ``timeout_s`` auf einen **neuen**
-    Uplink gewartet (``time`` nach dem Beginn des Wartens).
+    genommen. Fehlt es, wird bis ``timeout_s`` auf einen **neuen** Uplink
+    gewartet (``time`` nach dem Beginn des Wartens).
 
     Der alte Einzeltest verglich das Reading-Alter gegen 5 Minuten und
     scheiterte sofort, wenn es darueber lag ([inbound_test.py] Schritt 1).
     Bei einem Keepalive von 10 Minuten trifft das im Mittel jedes zweite
     gesunde Geraet — die Pruefung war ein Muenzwurf mit dem Anschein eines
     Kriteriums.
+
+    **Sprint 20f (T4): ``brauchbar``.** Ein Zeitstempel allein sagt nicht,
+    dass die Zeile die gesuchte Angabe **enthaelt**. Am 05.10.2026 trug ein
+    ``0x28``-Frame (Handverstellung) einen vollstaendigen Keep-alive, den der
+    Codec verwarf — der Subscriber schrieb daraus eine Zeile, in der alles
+    ``NULL`` war. Diese Funktion nahm sie als "frisches Reading", und der
+    Vor-Check urteilte darauf. Sieben montierte Geraete bekamen FAIL.
+
+    Mit ``brauchbar`` wird nur eine Zeile genommen, die die Frage auch
+    beantworten kann. Alles andere wird uebersprungen und weiter gewartet.
+
+    :return: ``(brauchbare, unbrauchbare)`` — zwei Abbildungen. Die zweite
+        traegt je Geraet das juengste Reading, das **nicht** brauchbar war,
+        und ist genau die Unterscheidung, die der Aufrufer fuer sein Urteil
+        braucht: hat das Geraet geschwiegen (nichts in beiden) oder hat es
+        gesendet, ohne die Angabe zu fuehren (nur in der zweiten)? Das erste
+        ist ein Funk-Befund, das zweite ein Codec- oder Firmware-Befund — und
+        die beiden duerfen nicht dasselbe Urteil bekommen.
     """
     start = clock.now()
     cutoff = start - timedelta(seconds=max_age_s)
     found: dict[int, SensorReading] = {}
+    unbrauchbar: dict[int, SensorReading] = {}
     pending = set(device_ids)
     if not pending:
-        return found
+        return found, unbrauchbar
+
+    def _nimm(device_id: int, reading: SensorReading) -> bool:
+        """True, wenn die Zeile das Urteil tragen kann."""
+        if brauchbar is not None and not brauchbar(reading):
+            unbrauchbar[device_id] = reading
+            return False
+        return True
 
     latest = await _latest_readings(session, list(pending))
     for device_id in list(pending):
         reading = latest.get(device_id)
-        if reading is not None and reading.time >= cutoff:
+        if reading is not None and reading.time >= cutoff and _nimm(device_id, reading):
             found[device_id] = reading
             pending.discard(device_id)
 
@@ -417,12 +469,12 @@ async def _await_fresh_readings(
         latest = await _latest_readings(session, list(pending))
         for device_id in list(pending):
             reading = latest.get(device_id)
-            if reading is not None and reading.time > start:
+            if reading is not None and reading.time > start and _nimm(device_id, reading):
                 found[device_id] = reading
                 pending.discard(device_id)
         if clock.now().timestamp() >= deadline:
             break
-    return found
+    return found, unbrauchbar
 
 
 async def _precheck(
@@ -432,6 +484,7 @@ async def _precheck(
     wait_s: int,
     poll_interval_s: int,
     clock: Clock,
+    max_age_s: int = PRECHECK_MAX_AGE_S,
 ) -> dict[int, tuple[PrecheckVerdict, str]]:
     """Funk und Backplate **vor** dem ersten Downlink (Sprint 19 / T3, T4).
 
@@ -441,41 +494,86 @@ async def _precheck(
     **letzter** Schritt, also nach den beiden Sollwert-Schritten, die sie
     erklaeren wuerde.
 
-    ``None`` gilt wie ``False``: ein Reading ohne das Feld (alter Codec)
-    belegt keine Montage. Dieselbe Regel wie in Layer 4, wo NULL das Geraet
-    aus dem Detached-Trigger heraushaelt statt es hineinzuziehen.
+    **Sprint 20f (T4): es wird auf ein Reading gewartet, das die Angabe
+    fuehrt.** Vorher galt ``None`` wie ``False`` — und das war genau dann
+    falsch, wenn die Zeile aus einem Frame stammte, den der Codec nicht
+    dekodieren konnte (``0x28``-Handverstellung, siehe T1). Am 05.10.2026
+    bekamen die Geraete 038-044 dadurch ein terminales FAIL, obwohl alle
+    sieben montiert **und** kalibriert waren.
+
+    Die Unterscheidung, die daraus folgt:
+
+    - **nichts empfangen** -> ``no_uplink``, ein Funk-Befund.
+    - **empfangen, aber ohne das Feld** -> ``backplate_unknown``. Der Funk
+      hat funktioniert, also ist das **kein** ``no_uplink``. Es heisst
+      entweder alter Codec oder alte Firmware.
+    - **Feld vorhanden und ``False``** -> ``not_attached``.
+    - **Feld ``True``, aber ``calibration_failed``** -> eigener Befund
+      (T7), siehe unten.
+
+    ``max_age_s`` ist **getrennt** von ``wait_s``. Bis Sprint 20f war beides
+    dieselbe Zahl, weshalb ein Reading von vor dem Lauf sofort akzeptiert
+    wurde und das Wartefenster nie zum Tragen kam.
     """
-    fresh = await _await_fresh_readings(
+    fresh, ohne_feld = await _await_fresh_readings(
         session,
         [d.id for d in devices],
-        max_age_s=wait_s,
+        max_age_s=max_age_s,
         timeout_s=wait_s,
         poll_interval_s=poll_interval_s,
         clock=clock,
+        # Brauchbar ist eine Zeile, die die Backplate-Frage beantworten kann.
+        brauchbar=lambda r: r.attached_backplate is not None,
     )
     verdicts: dict[int, tuple[PrecheckVerdict, str]] = {}
     for dev in devices:
         reading = fresh.get(dev.id)
         if reading is None:
-            verdicts[dev.id] = (
-                "no_uplink",
-                f"Kein Uplink innerhalb von {wait_s} s. Funk, "
-                "Duty-Cycle oder Batterie — kein Hardware-Verdacht. Es wurde "
-                "kein Downlink gesendet.",
-            )
+            stumm = ohne_feld.get(dev.id)
+            if stumm is None:
+                verdicts[dev.id] = (
+                    "no_uplink",
+                    f"Kein Uplink innerhalb von {wait_s} s. Funk, "
+                    "Duty-Cycle oder Batterie — kein Hardware-Verdacht. Es wurde "
+                    "kein Downlink gesendet.",
+                )
+            else:
+                verdicts[dev.id] = (
+                    "backplate_unknown",
+                    f"Uplinks empfangen, aber keiner fuehrte innerhalb von "
+                    f"{wait_s} s ein attached_backplate (alter Codec oder "
+                    "Firmware < 4.1) — Montage unbelegt. Der Funk ist in "
+                    "Ordnung. Ohne Backplate-Angabe ist nicht entscheidbar, ob "
+                    "motorRange 0 Montage oder Kalibrierung bedeutet; die "
+                    "Sollwert-Schritte wurden uebersprungen.",
+                )
             continue
         if reading.attached_backplate is not True:
-            unklar = reading.attached_backplate is None
             verdicts[dev.id] = (
-                "backplate_unknown" if unklar else "not_attached",
-                (
-                    "Letztes Reading fuehrt kein attached_backplate (alter "
-                    "Codec) — Montage unbelegt."
-                    if unklar
-                    else "Vicki nicht auf der Backplate (attached_backplate=false)."
-                )
-                + " Ohne Backplate ist motorRange 0 und der Motor faehrt nie; "
+                "not_attached",
+                "Vicki nicht auf der Backplate (attached_backplate=false)."
+                " Ohne Backplate ist motorRange 0 und der Motor faehrt nie; "
                 "die Sollwert-Schritte wurden uebersprungen.",
+            )
+            continue
+        # Sprint 20f (T7): Geraet sitzt, meldet aber eine fehlgeschlagene
+        # Kalibrierung. Bis hierher fiel so ein Geraet erst am
+        # Ventilkriterium durch — mit "Ventil oeffnet nicht weit genug" und
+        # ohne den Grund. Der Hinweis ist ein Handgriff am Geraet
+        # (Recalibrate, Cmd 0x03), keine Fehlersuche.
+        #
+        # Terminal und damit ``--resume``-fest: das ist Absicht. Ein Geraet,
+        # dessen Kalibrierung fehlgeschlagen ist, darf nicht zugeordnet
+        # werden. Nach dem Recalibrate hilft ein Lauf **ohne** ``--resume``
+        # fuer genau diese Nummern.
+        if reading.calibration_failed is True:
+            verdicts[dev.id] = (
+                "calibration_failed",
+                "Vicki sitzt auf der Backplate, meldet aber "
+                "calibrationFailed — die Kalibrierung ist fehlgeschlagen. "
+                "Das Ventil wird nicht korrekt gefuehrt, ein Sollwert-Test "
+                "waere nicht aussagekraeftig. Handgriff: Recalibrate "
+                "(Cmd 0x03) am Geraet, dann erneut testen (ohne --resume).",
             )
             continue
         verdicts[dev.id] = ("ready", "")
@@ -730,10 +828,20 @@ def _precheck_result(
     eine nicht durchfuehrbare Pruefung: am Tisch ist ``false`` der erwartete
     Zustand. Mit ``require_motor`` ist es ein Fehler, weil der Aufrufer dann
     zugesichert hat, dass die Geraete montiert sind.
+
+    **Sprint 20f (T7): ``calibration_failed`` ist immer ``fail``**, auch ohne
+    ``require_motor``. Das ist die einzige Ausnahme von der Regel oben, und
+    sie hat einen Grund: dieses Urteil wird nur erreicht, wenn
+    ``attached_backplate is True`` — das Geraet sitzt also, der Tisch-Fall
+    ist ausgeschlossen. Was bleibt, ist eine Hardware-Aussage des Geraets
+    ueber sich selbst, und die gilt unabhaengig davon, was der Aufrufer
+    zugesichert hat.
     """
     status: DeviceStatus
     if verdict == "no_uplink":
         status = "timeout"
+    elif verdict == "calibration_failed":
+        status = "fail"
     elif require_motor:
         status = "fail"
         reason = f"{reason} --require-motor verlangt einen belegten Motortest."

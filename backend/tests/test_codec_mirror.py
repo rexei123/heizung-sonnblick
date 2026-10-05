@@ -33,6 +33,7 @@ from heizung.services.downlink_adapter import (
     _encode_ow_set_payload,
     _encode_setpoint_payload,
 )
+from heizung.services.mqtt_subscriber import REPLY_REPORT_TYPES
 
 # ---------------------------------------------------------------------------
 # 0x04 — FW-Query (Sprint 9.11x.b)
@@ -297,3 +298,174 @@ async def test_inferred_window_log_format_none_setpoint() -> None:
     assert ev.setpoint_in is None
     assert ev.setpoint_out is None
     assert ev.details["delta_c"] == "0.5"
+
+
+# ---------------------------------------------------------------------------
+# 0x28 — Handverstellung am Drehrad (Sprint 20f, T1)
+# ---------------------------------------------------------------------------
+#
+# **Der Befund, am 05.10.2026 belegt.** Ein 0x28-Frame traegt ab Byte 2 einen
+# vollstaendigen 9-Byte-Keep-alive. Der Codec routete alles, was nicht
+# 0x52/0x04/0x46 ist, nach ``decodePeriodicReport``, und die bricht am
+# Command-Byte ab. Ergebnis war ``{command: 0x28}`` ohne Daten — und der
+# Subscriber schrieb daraus eine ``sensor_reading``-Zeile, in der **alles
+# NULL** war.
+#
+# Der Vor-Check des Eingangstests nahm diese Zeile als frisches Reading, las
+# ``attached_backplate IS NULL`` und urteilte mit ``--require-motor``
+# terminales **FAIL**. Betroffen waren die Geraete 038-044 — alle sieben
+# montiert **und** kalibriert (``motorRange`` 434 bis 527).
+#
+# Wie bei 0x04 ist der Spiegel hier eine Python-Nachbildung der
+# JS-Codec-Logik, mit **echten** Bytes vom Geraet. Eine Variante mit echter
+# JS-Laufzeit ist Backlog ``B-9.11x.b-1``.
+
+
+def _mirror_decode_periodic(b: list[int]) -> dict[str, object] | None:
+    """Spiegel von ``decodePeriodicReport`` — nur die hier geprueften Felder.
+
+    Bewusst knapp: geprueft wird, dass der eingebettete Keep-alive **gelesen
+    statt verworfen** wird. Die vollstaendige Formel-Treue der Temperatur
+    deckt ``test_map_to_reading_live_codec_output_fport2_periodic`` ab.
+    """
+    if len(b) < 9 or b[0] not in (0x01, 0x81):
+        return None
+    motor_range = ((b[6] & 0x0F) << 8) | b[5]
+    motor_pos = (((b[6] >> 4) & 0x0F) << 8) | b[4]
+    valve = 0
+    if motor_range > 0:
+        valve = max(0, min(100, round((1 - motor_pos / motor_range) * 100)))
+    status8 = b[8]
+    return {
+        "report_type": "periodic",
+        "command": b[0],
+        "target_temperature": b[1],
+        "battery_voltage": round(2 + ((b[7] >> 4) & 0x0F) * 0.1, 2),
+        "motor_range": motor_range,
+        "valve_openness": valve,
+        "attachedBackplate": (status8 & 0x20) != 0,
+        "calibrationFailed": (status8 & 0x40) != 0,
+        "perceiveAsOnline": (status8 & 0x10) != 0,
+    }
+
+
+def _mirror_decode_manual_target(b: list[int]) -> dict[str, object]:
+    """Spiegel von ``decodeManualTargetChange`` (Codec Sprint 20f)."""
+    data: dict[str, object] = {}
+    if len(b) < 2:
+        return {"command": 0x28, "report_type": "manual_target_change"}
+    if len(b) > 2:
+        eingebettet = _mirror_decode_periodic(b[2:])
+        if eingebettet is not None:
+            data.update(eingebettet)
+    data["manual_target_temperature"] = b[1]
+    if "target_temperature" not in data:
+        data["target_temperature"] = b[1]
+    data["report_type"] = "manual_target_change"
+    data["command"] = 0x28
+    data["manual_target_change"] = True
+    return data
+
+
+# Echte Payloads vom 05.10.2026, je 11 Byte.
+REAL_0X28 = {
+    "015": "28148114959500d201b030",
+    "104": "281481149e8fb9b911f030",
+}
+
+
+@pytest.mark.parametrize("hardware_nummer", sorted(REAL_0X28))
+def test_0x28_echte_payload_wird_vollstaendig_dekodiert(hardware_nummer: str) -> None:
+    """Der eingebettete Keep-alive kommt an — Feld fuer Feld.
+
+    Das ist die Regressions-Wand fuer die falschen FAILs vom 05.10.2026.
+    Entscheidend sind zwei Felder: ``attachedBackplate`` (daran hing das
+    Urteil des Vor-Checks) und ``motor_range`` (daran haengt, ob der
+    Ventil-Wert ueberhaupt etwas bedeutet).
+    """
+    b = list(bytes.fromhex(REAL_0X28[hardware_nummer]))
+    assert len(b) == 11
+
+    d = _mirror_decode_manual_target(b)
+
+    # Der Hand-Sollwert aus Byte 1 — 0x14 = 20 °C, die Montage-Drehung.
+    assert d["manual_target_temperature"] == 20
+    # Und der eingebettete Keep-alive, der vorher verloren ging.
+    assert d["command"] == 0x28
+    assert d["attachedBackplate"] is True, "genau dieses Feld fehlte und erzeugte FAIL"
+    assert isinstance(d["motor_range"], int)
+    assert d["motor_range"] > 0, "motorRange > 0 heisst kalibriert"
+    assert d["target_temperature"] == 20
+    assert d["calibrationFailed"] is False
+
+
+def test_0x28_ist_kein_reply_typ_und_erzeugt_damit_ein_reading() -> None:
+    """``report_type`` darf **nicht** in ``REPLY_REPORT_TYPES`` stehen.
+
+    Das ist die Stelle, an der 0x28 sich von 0x04 unterscheidet, und zwar
+    genau umgekehrt:
+
+    - Bei **0x04** MUSS der Reply-Typ gesetzt bleiben, sonst schreibt
+      ``_persist_uplink`` ein Reading mit NULL-Werten (der Frame ist eine
+      Antwort, kein Messwert).
+    - Bei **0x28** darf er es NICHT, weil der eingebettete Keep-alive ein
+      echter Messwert-Satz ist, den wir speichern wollen.
+
+    Wer das Muster von 0x04 mechanisch kopiert, baut genau den Datenverlust
+    ein, den dieser Sprint behebt — eine Ebene spaeter.
+    """
+    d = _mirror_decode_manual_target(list(bytes.fromhex(REAL_0X28["015"])))
+
+    assert d["report_type"] == "manual_target_change"
+    assert d["report_type"] not in REPLY_REPORT_TYPES
+
+
+def test_0x28_ohne_eingebetteten_keepalive_traegt_wenigstens_den_handwert() -> None:
+    """Kurzer 0x28-Frame: kein Keep-alive, aber ``target_temperature``.
+
+    Ohne dieses Feld haette die Override-Erkennung nichts zu vergleichen —
+    ``_handle_override_detection`` kehrt sofort zurueck, wenn
+    ``obj["target_temperature"]`` fehlt (``mqtt_subscriber.py:477``).
+    """
+    d = _mirror_decode_manual_target([0x28, 0x14])
+
+    assert d["target_temperature"] == 20
+    assert d["manual_target_temperature"] == 20
+    # Keine Keep-alive-Felder — die Zeile traegt nur den Hand-Wert.
+    assert "attachedBackplate" not in d
+    assert "motor_range" not in d
+
+
+def test_0x28_handwert_und_keepalive_werden_getrennt_gefuehrt() -> None:
+    """Zwei Felder, nicht eines — damit ein Auseinanderlaufen auffaellt.
+
+    In allen bisher gesehenen Frames stimmen Byte 1 und das
+    ``target_temperature`` des eingebetteten Keep-alive ueberein: das Geraet
+    hat den gedrehten Wert uebernommen. Synthetisch auseinandergezogen muss
+    beides sichtbar bleiben — wer sie spaeter abweichen sieht, hat einen
+    Befund und nicht ein Raetsel.
+    """
+    # Byte 1 = 0x19 (25 °C) Handwert, Keep-alive meldet 0x14 (20 °C).
+    b = [0x28, 0x19] + list(bytes.fromhex("8114959500d201b030"))
+
+    d = _mirror_decode_manual_target(b)
+
+    assert d["manual_target_temperature"] == 25
+    assert d["target_temperature"] == 20, "Keep-alive gewinnt fuer das Messfeld"
+
+
+def test_0x28_calibration_failed_kommt_aus_dem_eingebetteten_frame() -> None:
+    """Bit 0x40 im letzten Keep-alive-Byte (Sprint 20f, T7).
+
+    Geraet **026** meldete am 05.10.2026 ``status8 = 0x70`` — identisch zu
+    den sieben aus dem FAIL-Befund (``0x30``), **ausser** diesem Bit. Es war
+    seit Sprint 6.8 im Codec und wurde nie persistiert.
+    """
+    # Derselbe Keep-alive wie bei 104, nur status8 von 0x30 auf 0x70.
+    b = [0x28, 0x14] + list(bytes.fromhex("81149e8fb9b911f070"))
+
+    d = _mirror_decode_manual_target(b)
+
+    assert d["calibrationFailed"] is True
+    assert d["attachedBackplate"] is True, "0x20 bleibt gesetzt"
+    assert d["perceiveAsOnline"] is True, "0x10 bleibt gesetzt"

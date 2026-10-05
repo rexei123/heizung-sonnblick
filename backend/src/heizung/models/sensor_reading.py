@@ -92,6 +92,22 @@ class SensorReading(Base):
     # Nur True ist ein Defekt-Befund.
     broken_sensor: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Sprint 20f (T7, Migration 0025): Vicki ``calibrationFailed``
+    # (``status8 & 0x40``). Der Codec setzt das Bit seit Sprint 6.8 und es
+    # wurde bis hierher bei jedem Frame verworfen.
+    #
+    # Warum es zaehlt: ein Geraet mit fehlgeschlagener Kalibrierung fuehrt
+    # das Ventil nicht richtig. Der Eingangstest urteilt ueber die
+    # Ventilstellung und faellt es durch, ohne den Grund nennen zu koennen —
+    # mit dem Bit heisst derselbe Befund "Kalibrierung fehlgeschlagen" und
+    # ist ein Handgriff am Geraet (Cmd 0x03) statt einer Fehlersuche.
+    # Erster belegter Fall: Geraet 026 am 05.10.2026 (``status8 = 0x70``).
+    #
+    # NULL = Feld nicht im Payload, NICHT identisch mit False. Nur True ist
+    # ein Befund — dieselbe Drei-Zustands-Regel wie bei ``open_window``,
+    # ``attached_backplate`` und ``broken_sensor``.
+    calibration_failed: Mapped[bool | None] = mapped_column(Boolean)
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)
