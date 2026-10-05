@@ -179,18 +179,24 @@ dadurch **3 h** statt 2 h.
 | # | Inhalt | Dauer |
 |---|---|---|
 | **T1** | **Codec `0x28`.** Reply-Teil (Byte 0–1: Command + Hand-Sollwert) und eingebetteten Keepalive (Byte 2+) dekodieren und mergen, Muster von `0x04` ([mclimate-vicki.js:214-245](../../infra/chirpstack/codecs/mclimate-vicki.js:214)). **Umgekehrte Regel beachten:** der Frame darf **keinen** Reply-`report_type` bekommen und nicht in `REPLY_REPORT_TYPES` landen ([mqtt_subscriber.py:49](../../backend/src/heizung/services/mqtt_subscriber.py:49)) — bei `0x04` muss er drinstehen, damit **kein** Reading geschrieben wird, hier wollen wir das Reading. Tests mit beiden Real-Payloads aus 2.2, plus Spiegel-Test gegen `downlink_adapter` (§5.28). | 2 h |
-| **T2** | **Handverstellung als Override.** `0x28` mit abweichendem Sollwert: Zimmer **OCCUPIED** → Override mit Quelle **`device_manual`**, Ablauf **4 h**, im Audit sichtbar; endet zusätzlich mit der Abreise (T5). Zimmer **nicht OCCUPIED** (Montage, Leerstand) → **kein** Override, T3 stellt den Engine-Soll wieder her. Enthält **Migration 0025** für den CHECK (§3.3). Pflicht-Tests: Gast-Override hat Vorrang vor `device_manual`. | 3 h |
+| **T2** | **Handverstellung als Override.** `0x28` mit abweichendem Sollwert: Zimmer **OCCUPIED** → Override mit Quelle **`device_manual`**, Ablauf **4 h**, im Audit sichtbar; endet zusätzlich mit der Abreise (T5). Zimmer **nicht OCCUPIED** (Montage, Leerstand) → **kein** Override, T3 stellt den Engine-Soll wieder her. Enthält **Migration 0026** für den CHECK (§3.3). Pflicht-Tests: Gast-Override hat Vorrang vor `device_manual`. | 3 h |
 | **T3** | **Engine-Abgleich.** Gerät-Ist (letzter gemeldeter `sensor_reading.setpoint`) ≠ Engine-Soll **und** kein aktiver Override → erneut senden, Hysterese umgehen. **Begrenzung ist Pflicht:** höchstens **eine** Nachsendung je Gerät je **30 min**; nach **drei** erfolglosen Versuchen Audit-Eintrag plus Warnung und **Stopp**. Zähler und Drosselung in Redis, Muster aus `alert_throttle` und `resync_flag`. | 3 h |
 | **T4** | **Vor-Check.** Wartet auf einen Frame **mit** `attached_backplate`, bis `--heartbeat-wait`. **Altersgrenze vom Wartefenster trennen** — heute ist beides dieselbe Zahl ([batch_inbound_test.py:401](../../backend/src/heizung/scripts/pairing/batch_inbound_test.py:401), `max_age_s == wait_s == 900`), weshalb bei 038–044 **keine Sekunde** gewartet wurde. Urteil nach Ablauf bleibt `backplate_unknown`, **nicht** `no_uplink` — der Funk hat funktioniert. | 1,5 h |
 | **T5** | **Override endet bei jeder Abreise.** `CHECKOUT_GRACE_WINDOW` entfernen ([override_pms_hook.py:73-82](../../backend/src/heizung/services/override_pms_hook.py:73)), Test [:148](../../backend/tests/test_override_pms_hook.py:148) umdrehen. Der CLEANING-Teil **erst nach der Rückfrage aus §3.1**; wenn ja, zweiter Aufrufpunkt im PATCH-Endpoint plus Audit (+1 h), Test [:193](../../backend/tests/test_override_pms_hook.py:193) anpassen. | 1 h (+1 h) |
 | **T6** | **Trace-Text.** „kein zimmerweiter Override" statt „kein aktiver Override" ([engine-decision-panel.tsx:338](../../frontend/src/components/patterns/engine-decision-panel.tsx:338)); bei vorhandenen Zonen-Einträgen Verweis auf den Block „Pro-Zone-Setpoints". e2e-Test. | 0,5 h |
-| **T7** | **`calibrationFailed` persistieren** (§3.2, von Analyse auf Umsetzung gehoben): Migration 0025 um `sensor_reading.calibration_failed` erweitern, Durchreichen in `_map_to_reading`, im Vor-Check als eigener benannter Befund. | 1,5 h |
+| **T7** | **`calibrationFailed` persistieren** (§3.2, von Analyse auf Umsetzung gehoben): **Migration 0025** für `sensor_reading.calibration_failed`, Durchreichen in `_map_to_reading`, im Vor-Check als eigener benannter Befund. | 1,5 h |
 | **T8** | **Doku.** `STATUS.md`-Abschnitt plus Kopf und §1 (§5.26), AE-Eintrag für den Engine-Abgleich (T3 ändert die Zusicherung „die Engine sendet nur bei eigener Änderung" — das ist eine Architektur-Entscheidung), RUNBOOK-Handgriff „Gerät steht auf einem falschen Wert — was tun". | 1 h |
 
 **Summe: 13,5 h** (14,5 h mit dem CLEANING-Teil).
 
-Beide Migrationen laufen als **eine** Datei 0025 — zwei Migrationen in einem
-Sprint erzeugen sonst eine Reihenfolge-Abhängigkeit ohne Gegenwert.
+**Zwei Migrationen, nicht eine.** Der erste Entwurf dieses Briefs sah beide
+Spalten in einer Datei 0025 vor. Das geht nicht: `calibration_failed` gehört
+zu T7 und damit in PR 1, der CHECK für `device_manual` zu T2 und damit in
+PR 2. Eine gemeinsame Datei müsste quer über zwei PRs liegen. Also
+**0025** (`sensor_reading.calibration_failed`, PR 1) und **0026** (CHECK auf
+`manual_override.source`, PR 2) — jede in dem PR, dessen Code sie braucht.
+Das ist auch die sauberere Form: eine Migration, die zur Hälfte ungenutzt
+deployt wird, ist eine Migration, deren Zweck man später nicht mehr erkennt.
 
 ### PR-Schnitt
 
