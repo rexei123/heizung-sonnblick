@@ -266,3 +266,48 @@ def test_ohne_redis_bleiben_die_anderen_aufrufe_stumm(kaputtes_redis: None) -> N
     assert engine_abgleich.versuche(DEV) == 0
     assert engine_abgleich.versuch_gezaehlt(DEV) == 0
     engine_abgleich.erfolg_gemeldet(DEV)
+
+
+# ---------------------------------------------------------------------------
+# 4. Die Redis-Rueckgabe, versionsunabhaengig gedeutet (§5.80)
+# ---------------------------------------------------------------------------
+#
+# Der Typ-Stub von redis-py sagt je nach Fassung ``int`` oder
+# ``Awaitable[Any] | Any`` — derselbe synchrone Client, zwei Signaturen. Die
+# erste Fassung dieses Moduls hatte deshalb eine Typ-Zusicherung, die lokal
+# **notwendig** und in CI **redundant** war; mypy meldet beides als Fehler.
+# Lokal gruen, CI rot, ohne eine Zeile Unterschied — genau §5.80.
+#
+# ``_zu_int`` nimmt ``object`` und entscheidet zur Laufzeit. Diese Tests
+# halten die Laufzeit-Faelle fest, damit die Funktion nicht spaeter
+# "vereinfacht" wird und dabei einen davon verliert.
+
+
+@pytest.mark.parametrize(
+    ("roh", "erwartet"),
+    [
+        (3, 3),
+        ("3", 3),
+        (b"3", 3),
+        (0, 0),
+        (True, 1),
+    ],
+)
+def test_zu_int_deutet_alle_laufzeit_formen(roh: object, erwartet: int) -> None:
+    """``int``, ``str`` und ``bytes`` — je nach ``decode_responses``."""
+    assert engine_abgleich._zu_int(roh) == erwartet
+
+
+@pytest.mark.parametrize("roh", ["", "x", b"", b"x", None, object()])
+def test_zu_int_faellt_auf_den_standard_zurueck(roh: object) -> None:
+    """Unlesbares darf die Engine nicht anhalten.
+
+    Ein Zaehlerstand, der sich nicht deuten laesst, wirkt wie "noch kein
+    Versuch". Das ist die vorsichtige Richtung: ob gesendet wird, entscheidet
+    ``darf_senden``, und die prueft zusaetzlich die Sperre.
+    """
+    assert engine_abgleich._zu_int(roh) == 0
+
+
+def test_zu_int_nimmt_einen_eigenen_standard() -> None:
+    assert engine_abgleich._zu_int("keine zahl", standard=7) == 7

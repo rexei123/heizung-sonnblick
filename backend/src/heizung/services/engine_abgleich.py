@@ -49,7 +49,6 @@ Event-Loop nicht blockiert.
 from __future__ import annotations
 
 import logging
-from typing import cast
 
 import redis
 
@@ -72,6 +71,38 @@ ZAEHLER_TTL_S = 14400
 
 _DROSSEL = "engine:abgleich:drossel:{dev_eui}"
 _ZAEHLER = "engine:abgleich:versuche:{dev_eui}"
+
+
+def _zu_int(wert: object, *, standard: int = 0) -> int:
+    """Redis-Rueckgabe zu ``int``, ohne Zusicherung an den Typ-Stub.
+
+    **Warum das eine eigene Funktion ist.** Der Typ-Stub von redis-py sagt je
+    nach Fassung ``int`` oder ``Awaitable[Any] | Any`` — derselbe synchrone
+    Client, zwei Signaturen. Eine Typ-Zusicherung ist damit in einer Umgebung
+    notwendig und in der anderen **redundant**, und mypy meldet beides als
+    Fehler. Genau dieser Fall ist CLAUDE.md §5.80: lokal gruen, CI rot, ohne
+    dass sich eine Zeile Code geaendert hat. Die erste Fassung dieses Moduls
+    hat ihn ausgeloest.
+
+    Der Parameter ist deshalb ``object``. Beide Stub-Varianten sind dagegen
+    zuweisbar, und die Funktion entscheidet zur Laufzeit — dort, wo die
+    Information tatsaechlich vorliegt. Zur Laufzeit kommt je nach
+    ``decode_responses`` ``int``, ``bytes`` oder ``str``.
+
+    ``standard`` fuer alles, was sich nicht deuten laesst: ein unlesbarer
+    Zaehlerstand soll die Engine nicht anhalten, sondern wie "noch kein
+    Versuch" wirken. Ob gesendet wird, entscheidet ohnehin ``darf_senden``.
+    """
+    if isinstance(wert, bool):
+        return int(wert)
+    if isinstance(wert, int):
+        return wert
+    if isinstance(wert, bytes | str):
+        try:
+            return int(wert)
+        except ValueError:
+            return standard
+    return standard
 
 
 def _drossel_key(dev_eui: str) -> str:
@@ -99,10 +130,7 @@ def versuche(dev_eui: str) -> int:
         return 0
     if rohwert is None:
         return 0
-    try:
-        return int(cast("int | str", rohwert))
-    except (TypeError, ValueError):
-        return 0
+    return _zu_int(rohwert)
 
 
 def darf_senden(dev_eui: str) -> bool:
@@ -146,7 +174,7 @@ def versuch_gezaehlt(dev_eui: str) -> int:
     """
     try:
         client = redis_client.get_redis_client()
-        stand = int(cast("int", client.incr(_zaehler_key(dev_eui))))
+        stand = _zu_int(client.incr(_zaehler_key(dev_eui)))
         # TTL nur beim ersten Hochzaehlen setzen, sonst verschiebt sich das
         # Fenster mit jedem Versuch nach hinten und laeuft nie ab.
         if stand == 1:
