@@ -19,7 +19,7 @@ import contextlib
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -35,6 +35,7 @@ from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.sensor_reading import SensorReading
 from heizung.rules.engine import (
     HysteresisDecision,
     _last_command_for_device,
@@ -44,7 +45,14 @@ from heizung.rules.engine import (
 from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
-from heizung.services import alert_throttle, engine_lock, resync_flag
+from heizung.services import (
+    alert_throttle,
+    engine_abgleich,
+    engine_lock,
+    override_service,
+    resync_flag,
+)
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.downlink_adapter import send_setpoint
 
@@ -392,6 +400,116 @@ async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]
     return [d for d in active_devices if d.health_state == "healthy"]
 
 
+# Sprint 20f (T3): Audit-Aktion, wenn der Abgleich aufgibt. Eigener Name, kein
+# Anhaengen an ``DEVICE_INBOUND_TEST`` oder den Engine-Trace: das hier ist
+# kein Pruefergebnis und keine Steuerentscheidung, sondern die Meldung, dass
+# eine Nachbesserung **nicht** gewirkt hat.
+AUDIT_ABGLEICH_ERSCHOEPFT = "ENGINE_ABGLEICH_ERSCHOEPFT"
+
+
+async def _melde_abgleich_erschoepft(
+    session: AsyncSession,
+    *,
+    dev: Device,
+    zone_id: int,
+    room_id: int,
+    ist_wert: int,
+    soll_wert: int,
+    versuche: int,
+) -> None:
+    """Schreibt **einmal** einen Audit-Eintrag, wenn der Abgleich aufgibt.
+
+    Sprint 20f (T3). Nach ``MAX_VERSUCHE`` erfolglosen Nachsendungen wird
+    nicht weiter gesendet — ein Geraet an der Funkgrenze wuerde sonst bei
+    jedem Tick angefunkt, und jeder Downlink ist eine Motorbewegung (§0 S4).
+
+    **Das Aufgeben darf nicht stillschweigend passieren.** Ein Geraet, das
+    dauerhaft einen anderen Wert haelt als die Engine will, heizt ein Zimmer
+    falsch — und niemand sieht es, weil die Oberflaeche den Engine-Soll
+    anzeigt und nicht den Geraete-Wert. Genau diese Sorte stiller Ausfall ist
+    §5.76: wer nur die Mechanik ueberwacht ("wurde gesendet"), findet ihn
+    nicht.
+
+    **Einmal, nicht bei jedem Tick.** Die Drosselung haengt am Zaehler-Stand:
+    ``alert_throttle`` sperrt je ``dev_eui`` fuer 24 h. Sonst entstuende bei
+    einem Geraet an der Funkgrenze im Minutentakt ein Audit-Eintrag, und der
+    Melder waere nach einem Tag einer, dem niemand mehr zusieht (§5.79).
+
+    Kein Mail-Versand: der Brief zu 20f sieht fuer T3 eine Warnung und einen
+    Audit-Eintrag vor, keine Benachrichtigung. Die Mail-Entscheidung gehoert
+    zum Hinweis-Pfad aus 20e und wird dort gemeinsam getroffen.
+    """
+    if not await asyncio.to_thread(
+        alert_throttle.should_send,
+        "engine_abgleich_erschoepft",
+        dev.dev_eui,
+        ttl_s=86400,
+    ):
+        return
+
+    logger.warning(
+        "engine_abgleich erschoepft dev_eui=%s device_id=%s zone_id=%s "
+        "ist=%s soll=%s versuche=%s — es wird nicht weiter gesendet",
+        dev.dev_eui,
+        dev.id,
+        zone_id,
+        ist_wert,
+        soll_wert,
+        versuche,
+    )
+    await record_business_action(
+        session,
+        user_id=None,
+        action=AUDIT_ABGLEICH_ERSCHOEPFT,
+        target_type="device",
+        target_id=dev.id,
+        old_value=None,
+        new_value={
+            "dev_eui": dev.dev_eui,
+            "hardware_nummer": dev.label,
+            "room_id": room_id,
+            "zone_id": zone_id,
+            "gemeldeter_sollwert": ist_wert,
+            "engine_sollwert": soll_wert,
+            "versuche": versuche,
+            "hinweis": (
+                "Das Geraet uebernimmt den Engine-Sollwert nicht. Funk, "
+                "Batterie oder Hardware pruefen; nach der Behebung regelt "
+                "der Abgleich von selbst nach."
+            ),
+        },
+        request_ip=None,
+    )
+
+
+async def _gemeldete_sollwerte(session: AsyncSession, device_ids: Sequence[int]) -> dict[int, int]:
+    """Letzter vom Geraet **gemeldeter** Sollwert je Geraet (Sprint 20f, T3).
+
+    ``DISTINCT ON (device_id)`` ueber ``ix_sensor_reading_device_time`` — ein
+    Roundtrip fuer alle Geraete einer Zone, nicht einer je Geraet.
+
+    Das ist die Groesse, die der Engine bis Sprint 20f gefehlt hat. Sie kannte
+    ``control_command.target_setpoint`` (was sie **wollte**) und hat die
+    Hysterese darauf gerechnet; was am Geraet **steht**, stand nie in der
+    Rechnung. Geraete 048 und 057 blieben deshalb nach einer Montage-Drehung
+    auf 20 °C, waehrend der Engine-Soll 18 °C war.
+
+    Zeilen ohne ``setpoint`` werden weggelassen: eine Zeile, die den Wert
+    nicht fuehrt, ist kein Beleg fuer eine Abweichung. Dieselbe
+    Drei-Zustands-Regel wie ueberall sonst — NULL ist keine Aussage.
+    """
+    if not device_ids:
+        return {}
+    stmt = (
+        select(SensorReading.device_id, SensorReading.setpoint)
+        .where(SensorReading.device_id.in_(list(device_ids)))
+        .order_by(SensorReading.device_id, SensorReading.time.desc())
+        .distinct(SensorReading.device_id)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {int(did): int(sp) for did, sp in rows if sp is not None}
+
+
 async def _dispatch_downlinks_per_zone(
     *,
     session: AsyncSession,
@@ -453,8 +571,18 @@ async def _dispatch_downlinks_per_zone(
             )
             continue
 
+        # Sprint 20f (T3): was melden die Geraete dieser Zone, und gibt es
+        # einen Override? Beides einmal je Zone, nicht je Geraet.
+        gemeldet = await _gemeldete_sollwerte(session, [d.id for d in devices])
+        aktiver_override = await override_service.get_active(
+            session, room_id, heating_zone_id=zone.id
+        )
+
         # Per-Vicki-Hysterese-Check
         send_payloads: list[tuple[Device, ControlCommand, str]] = []
+        # Sprint 20f (T3): welche Geraete senden wegen des Abgleichs? Nur fuer
+        # die wird nach dem Downlink ein Versuch gezaehlt.
+        abgleich_ids: set[int] = set()
         skipped_count = 0
         for dev in devices:
             prev = await _last_command_for_device(session, dev.id)
@@ -488,6 +616,74 @@ async def _dispatch_downlinks_per_zone(
                     zone_target_setpoint_c,
                 )
 
+            # Sprint 20f (T3): Engine-Abgleich. Die Hysterese hat eben
+            # entschieden, ob sich der **eigene Wille** geaendert hat. Sie
+            # weiss nichts darueber, was am Geraet steht — und genau dort lag
+            # der Befund: Geraete 048 und 057 blieben nach einer
+            # Montage-Drehung auf 20 °C, waehrend der Engine-Soll 18 °C war
+            # und kein Override existierte. Die Hysterese sah ``delta = 0``
+            # und schwieg.
+            #
+            # Drei Bedingungen muessen zusammenkommen:
+            #   1. die Hysterese wollte nicht senden,
+            #   2. das Geraet meldet einen **anderen** Wert als den Soll,
+            #   3. es gibt **keinen** aktiven Override fuer diese Zone.
+            #
+            # Die dritte ist die wichtigste. Ein Gast-Override ist genau der
+            # Fall, in dem das Geraet absichtlich abweicht — ein Abgleich
+            # wuerde den Gastwunsch ueberschreiben, und zwar jede halbe
+            # Stunde. Deshalb steht hier nicht "ausser bei Override" als
+            # Nebenbedingung, sondern als Hauptbedingung.
+            ist_wert = gemeldet.get(dev.id)
+            abgleich_forced = False
+            if (
+                not dev_decision.should_send
+                and not resync_forced
+                and aktiver_override is None
+                and ist_wert is not None
+                and ist_wert != zone_target_setpoint_c
+            ):
+                # Drosselung und Zaehler: hoechstens 1x/30 min je Geraet, nach
+                # drei erfolglosen Versuchen Schluss. Jeder Downlink ist eine
+                # Motorbewegung (§0 S4) — ein Geraet an der Funkgrenze wuerde
+                # ohne Grenze bei jedem Tick angefunkt.
+                if await asyncio.to_thread(engine_abgleich.darf_senden, dev.dev_eui):
+                    abgleich_forced = True
+                    dev_decision = HysteresisDecision(
+                        should_send=True,
+                        reason=(
+                            f"engine_abgleich: Geraet meldet {ist_wert}, "
+                            f"Soll {zone_target_setpoint_c} (was: {dev_decision.reason})"
+                        ),
+                    )
+                    logger.info(
+                        "engine_abgleich forced dev_eui=%s zone_id=%s ist=%s soll=%s",
+                        dev.dev_eui,
+                        zone.id,
+                        ist_wert,
+                        zone_target_setpoint_c,
+                    )
+                else:
+                    # Entweder die Sperre steht noch, oder die drei Versuche
+                    # sind verbraucht. Der zweite Fall ist ein Befund und
+                    # gehoert ins Audit — einmal, nicht bei jedem Tick: die
+                    # Drosselung des Alarms haengt am selben Zaehler-Stand.
+                    stand = await asyncio.to_thread(engine_abgleich.versuche, dev.dev_eui)
+                    if stand >= engine_abgleich.MAX_VERSUCHE:
+                        await _melde_abgleich_erschoepft(
+                            session,
+                            dev=dev,
+                            zone_id=zone.id,
+                            room_id=room_id,
+                            ist_wert=ist_wert,
+                            soll_wert=zone_target_setpoint_c,
+                            versuche=stand,
+                        )
+            elif ist_wert is not None and ist_wert == zone_target_setpoint_c:
+                # Geraet steht auf dem Soll — Zaehler zuruecksetzen, damit ein
+                # spaeterer Fall wieder drei Versuche hat.
+                await asyncio.to_thread(engine_abgleich.erfolg_gemeldet, dev.dev_eui)
+
             if not dev_decision.should_send:
                 skipped_count += 1
                 per_device_results.append(
@@ -516,6 +712,8 @@ async def _dispatch_downlinks_per_zone(
             )
             session.add(cc)
             send_payloads.append((dev, cc, dev_decision.reason))
+            if abgleich_forced:
+                abgleich_ids.add(dev.id)
 
         if not send_payloads:
             per_zone_status.append(
@@ -563,6 +761,14 @@ async def _dispatch_downlinks_per_zone(
             else:
                 count_sent += 1
                 cc.sent_to_gateway_at = now_sent
+                # Sprint 20f (T3): Abgleich-Versuch zaehlen. Bewusst **nach**
+                # dem Senden und bewusst **nicht** an den Erfolg des Downlinks
+                # gebunden: geloescht wird der Zaehler erst, wenn das Geraet
+                # den Wert meldet. Ein Downlink, der im Gateway verschwindet,
+                # zaehlt damit mit — und das ist richtig, denn er hat nichts
+                # bewirkt (§5.76: die Wirkung zaehlt, nicht die Mechanik).
+                if dev.id in abgleich_ids:
+                    await asyncio.to_thread(engine_abgleich.versuch_gezaehlt, dev.dev_eui)
                 per_device_results.append(
                     {
                         "zone_id": zone.id,

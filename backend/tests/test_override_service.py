@@ -752,3 +752,145 @@ async def test_create_allows_when_blocked_false(db_session: AsyncSession, room_i
     )
     assert override.id is not None
     assert override.setpoint == Decimal("22.0")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f (T2) — device_manual: die gemeldete Drehung
+# ---------------------------------------------------------------------------
+#
+# ``device`` ist ein **abgeleiteter** Befund: der gemeldete Sollwert weicht vom
+# letzten Engine-Send ab, also hat vermutlich jemand gedreht (AE-45). Das kann
+# auch Reboot-Drift oder ein verlorener Downlink sein — deshalb der lange
+# Ablauf bis zum Check-out, der im Zweifel den Gastwunsch schuetzt.
+#
+# ``device_manual`` ist eine **Meldung des Geraets**: seit Sprint 20f T1
+# dekodiert der Codec den ``0x28``-Frame, und die Vicki sagt darin selbst, dass
+# am Rad gedreht wurde. Kein Rateschritt — und daraus folgt der kuerzere
+# Ablauf von vier Stunden.
+
+
+def test_compute_expires_at_device_manual_vier_stunden() -> None:
+    """Vier Stunden, wie ``frontend_4h`` — aber aus anderem Grund.
+
+    Bei ``frontend_4h`` waehlt die Rezeption die Dauer. Hier ist sie die
+    Folge daraus, dass die Drehung **belegt** ist und nicht geraten: wer
+    sicher weiss, dass ein Mensch gedreht hat, braucht die Absicherung "im
+    Zweifel bis zum Check-out halten" nicht.
+    """
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+    result = override_service.compute_expires_at(OverrideSource.DEVICE_MANUAL, now)
+
+    assert result == now + timedelta(hours=4)
+
+
+def test_compute_expires_at_device_manual_braucht_kein_checkout() -> None:
+    """Ohne ``next_checkout_at`` — im Gegensatz zu ``device``.
+
+    ``device`` und ``frontend_checkout`` werfen ohne Check-out-Zeitpunkt
+    (``ValueError``, weil das OCCUPIED-Gate ihn garantiert haette).
+    ``device_manual`` haengt nicht daran, und dieser Test haelt das fest:
+    sonst waere der neue Wert in der falschen Verzweigung gelandet und haette
+    an einer Stelle geworfen, die mitten im Uplink-Pfad liegt.
+    """
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+    result = override_service.compute_expires_at(
+        OverrideSource.DEVICE_MANUAL, now, next_checkout_at=None
+    )
+
+    assert result == now + timedelta(hours=4)
+
+
+async def test_get_active_device_manual_schlaegt_device(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Die ausdrueckliche Meldung schlaegt die Vermutung.
+
+    Der Fall, auf den es ankommt: ein alter ``device``-Override aus einem
+    Reboot-Drift laeuft noch, und ein Gast dreht am Rad. Dann soll die
+    **Drehung** gelten, nicht der Drift.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=expires,
+    )
+    manuell = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    active = await override_service.get_active(db_session, room_id)
+
+    assert active is not None
+    assert active.id == manuell.id
+    assert active.source == OverrideSource.DEVICE_MANUAL
+
+
+async def test_get_active_frontend_schlaegt_device_manual(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Mitarbeiter schlaegt Gast — unveraendert (AE-58).
+
+    Die neue Stufe darf sich nicht vor ``frontend_*`` draengen. Ohne diesen
+    Test koennte ein Gast die Einstellung der Rezeption aushebeln, indem er
+    am Rad dreht.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+    frontend = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+
+    active = await override_service.get_active(db_session, room_id)
+
+    assert active is not None
+    assert active.id == frontend.id
+
+
+async def test_get_active_rangfolge_ist_vollstaendig(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Alle drei Stufen gleichzeitig, gleicher Zeitstempel.
+
+    Haelt die Reihenfolge als Ganzes fest: ``frontend_*`` (0) vor
+    ``device_manual`` (1) vor ``device`` (2). Die Einzeltests oben pruefen je
+    ein Paar; dieser prueft, dass die drei Stufen zusammen stimmen und nicht
+    nur paarweise.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    for quelle, sp in (
+        (OverrideSource.DEVICE, "23.0"),
+        (OverrideSource.DEVICE_MANUAL, "25.0"),
+        (OverrideSource.FRONTEND_MIDNIGHT, "21.0"),
+    ):
+        await override_service.create(
+            db_session,
+            room_id=room_id,
+            setpoint=Decimal(sp),
+            source=quelle,
+            expires_at=expires,
+        )
+
+    active = await override_service.get_active(db_session, room_id)
+
+    assert active is not None
+    assert active.source == OverrideSource.FRONTEND_MIDNIGHT
+    assert active.setpoint == Decimal("21.0")
