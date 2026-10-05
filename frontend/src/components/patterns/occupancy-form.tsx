@@ -33,7 +33,10 @@ export function OccupancyForm({
   error,
   prefilledRoomId,
 }: Props) {
-  const rooms = useRooms({ limit: 1000 });
+  // Sprint 20d: holt alle Seiten. Das Auswahlfeld muss **jedes** Zimmer
+  // anbieten — ein fehlendes Zimmer heisst hier, dass keine Belegung
+  // dafuer angelegt werden kann.
+  const rooms = useRooms();
 
   // Default: heute 14:00 - morgen 11:00 (Hotel-Standardzeiten)
   const today14 = new Date();

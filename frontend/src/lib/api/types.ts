@@ -308,10 +308,13 @@ export interface RoomTypeUpdate {
   treat_unoccupied_as_vacant_after_hours?: number | null;
 }
 
+/**
+ * Sprint 20d (B-20c-2): **kein** `limit`/`offset` mehr. `roomTypesApi.list`
+ * holt alle Seiten selbst; ein Aufrufer, der hier eine Zahl setzen koennte,
+ * koennte die Liste still abschneiden.
+ */
 export interface RoomTypeListQuery {
   is_bookable?: boolean;
-  limit?: number;
-  offset?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,12 +380,15 @@ export interface RoomUpdate {
   notes?: string | null;
 }
 
+/**
+ * Sprint 20d (B-20c-2): **kein** `limit`/`offset` mehr — siehe
+ * `RoomTypeListQuery`. Die vier Aufrufer hatten zuvor 1000, 1000, 200 und
+ * nichts; jetzt entscheidet das keiner von ihnen mehr.
+ */
 export interface RoomListQuery {
   room_type_id?: number;
   status?: RoomStatus;
   floor?: number;
-  limit?: number;
-  offset?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,13 +467,35 @@ export interface OccupancyCreate {
   external_id?: string | null;
 }
 
+/**
+ * Belegungen werden **echt** paginiert (Sprint 20d Entscheidung B), also
+ * behaelt diese Abfrage `limit` und `offset` — im Gegensatz zu Zimmern und
+ * Raumtypen. `order` steuert die Richtung der Sortierung nach
+ * `(check_in, id)`.
+ */
 export interface OccupancyListQuery {
   from?: string;
   to?: string;
   room_id?: number;
   active?: boolean;
+  order?: "asc" | "desc";
   limit?: number;
   offset?: number;
+}
+
+/**
+ * Antwort von `GET /api/v1/occupancies` — Envelope, keine nackte Liste.
+ *
+ * Spiegel zu `OccupancyListResponse` in
+ * `backend/src/heizung/schemas/occupancy.py`. `total` ist die Gesamtzahl zu
+ * **denselben** Filtern, nicht die Laenge von `items`; daraus baut die
+ * Oberflaeche „N von M".
+ */
+export interface OccupancyListResponse {
+  items: Occupancy[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 // ---------------------------------------------------------------------------
