@@ -230,7 +230,11 @@ def compute_expires_at(
     Parameter heisst ``hotel_config`` (Plan-Wording), Typ ist projekt-
     seitig ``GlobalConfig``. Multi-Hotel kommt erst Sprint 11+.
     """
-    if source == OverrideSource.FRONTEND_4H:
+    if source in (OverrideSource.FRONTEND_4H, OverrideSource.DEVICE_MANUAL):
+        # Sprint 20f (T2): ``device_manual`` teilt die vier Stunden mit
+        # ``frontend_4h``. Begruendung in ``OverrideSource``: die Vicki hat die
+        # Drehung ausdruecklich gemeldet, es ist kein abgeleiteter Befund —
+        # also braucht der Wert nicht bis zum Check-out gehalten zu werden.
         raw = now + timedelta(hours=4)
     elif source == OverrideSource.FRONTEND_MIDNIGHT:
         tz_name = hotel_config.timezone if hotel_config is not None else DEFAULT_TIMEZONE
@@ -381,8 +385,18 @@ async def get_active(
     3. **Tiebreaker:** ``created_at DESC`` (neuerer Eintrag gewinnt).
     """
     now = _now()
-    is_device = case(
-        (ManualOverride.source == OverrideSource.DEVICE, 1),
+    # Sprint 20f (T2): drei Stufen statt zwei. Kleinere Zahl gewinnt.
+    #
+    #   0  frontend_*       Mitarbeiter schlaegt Gast (AE-58)
+    #   1  device_manual    ausdrueckliche Meldung des Geraets (0x28)
+    #   2  device           abgeleiteter Befund (Setpoint-Diff, AE-45)
+    #
+    # Die Mitte ist neu und sie ist der Punkt: dreht ein Gast am Rad, waehrend
+    # ein alter ``device``-Override aus einem Reboot-Drift noch laeuft, soll
+    # die **Drehung** gelten und nicht der Drift.
+    quellen_rang = case(
+        (ManualOverride.source == OverrideSource.DEVICE, 2),
+        (ManualOverride.source == OverrideSource.DEVICE_MANUAL, 1),
         else_=0,
     )
     base = (
@@ -394,7 +408,7 @@ async def get_active(
     if heating_zone_id is None:
         stmt = (
             base.where(ManualOverride.heating_zone_id.is_(None))
-            .order_by(is_device, ManualOverride.created_at.desc())
+            .order_by(quellen_rang, ManualOverride.created_at.desc())
             .limit(1)
         )
     else:
@@ -409,7 +423,7 @@ async def get_active(
                     ManualOverride.heating_zone_id.is_(None),
                 )
             )
-            .order_by(is_room_scope, is_device, ManualOverride.created_at.desc())
+            .order_by(is_room_scope, quellen_rang, ManualOverride.created_at.desc())
             .limit(1)
         )
     result = await session.execute(stmt)

@@ -46,6 +46,13 @@ logger = logging.getLogger(__name__)
 # (cmd-byte != 0x01/0x81 Periodic). Subscriber skipped sensor_reading-
 # Insert fuer alle Replies — Reply-Frames haben weder temperature noch
 # valve_position und wuerden nur NULL-Garbage in der Hypertable erzeugen.
+# Sprint 20f (T1/T2): ``report_type`` des 0x28-Frames. Bewusst **kein**
+# Reply-Typ (siehe ``REPLY_REPORT_TYPES`` unten) — der Frame traegt einen
+# vollstaendigen Keep-alive, der als Reading gespeichert werden soll. Dient
+# gleichzeitig als Diskriminator fuer die Override-Quelle: nur hier hat die
+# Vicki die Drehung **gemeldet**, sonst ist sie abgeleitet.
+MANUAL_TARGET_REPORT_TYPE = "manual_target_change"
+
 REPLY_REPORT_TYPES: frozenset[str] = frozenset(
     {
         "setpoint_reply",  # 0x52 — Drehring/Setpoint-Ack (Sprint 9.0)
@@ -501,6 +508,10 @@ async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
                 # Beide Pflicht-Felder im Schema (kein None-Fallback noetig).
                 dev_eui=dev_eui,
                 current_fcnt=uplink.fCnt,
+                # Sprint 20f (T2): hat die Vicki die Drehung selbst gemeldet
+                # (0x28) oder leiten wir sie aus einem Setpoint-Unterschied
+                # ab? Davon haengen Quelle und Ablauf des Overrides ab.
+                manuell_gemeldet=obj.get("report_type") == MANUAL_TARGET_REPORT_TYPE,
             )
             if override is not None:
                 await session.commit()

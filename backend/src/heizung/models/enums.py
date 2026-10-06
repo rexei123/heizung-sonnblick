@@ -170,9 +170,29 @@ class OverrideSource(enum.StrEnum):
     ``frontend_midnight``  Rezeption setzt "bis Mitternacht". Ablauf heute
                       23:59 lokal.
     ``frontend_checkout``  Rezeption setzt "bis Check-Out". Ablauf wie ``device``.
+    ``device_manual``  Handverstellung am Drehrad, **ausdruecklich** gemeldet
+                      ueber einen ``0x28``-Frame (FW >= 3.5, Sprint 20f T1/T2).
+                      Ablauf **4 h**, zusaetzlich endet er mit der Abreise.
+
+    **Warum ``device_manual`` neben ``device`` steht und es nicht ersetzt.**
+    ``device`` ist ein *abgeleiteter* Befund: der gemeldete Sollwert weicht vom
+    letzten Engine-Send ab, also hat vermutlich jemand gedreht (AE-45). Das
+    kann auch ein Reboot-Drift oder ein verlorener Downlink sein — deshalb der
+    lange Ablauf bis zum Check-out, der im Zweifel den Gastwunsch schuetzt.
+
+    ``device_manual`` ist eine *Meldung des Geraets*: die Vicki sagt selbst,
+    dass am Rad gedreht wurde. Kein Rateschritt. Daraus folgt der **kuerzere**
+    Ablauf: wer sicher weiss, dass ein Mensch gedreht hat, braucht die
+    Absicherung "im Zweifel lange halten" nicht und kann nach vier Stunden
+    wieder regeln lassen.
+
+    In der Vorrang-Reihenfolge liegt ``device_manual`` deshalb **ueber**
+    ``device`` (die ausdrueckliche Meldung schlaegt die Vermutung) und
+    **unter** allen ``frontend_*`` (Mitarbeiter schlaegt Gast, AE-58).
     """
 
     DEVICE = "device"
+    DEVICE_MANUAL = "device_manual"
     FRONTEND_4H = "frontend_4h"
     FRONTEND_MIDNIGHT = "frontend_midnight"
     FRONTEND_CHECKOUT = "frontend_checkout"

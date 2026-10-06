@@ -32,14 +32,27 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from heizung.models.business_audit import BusinessAudit
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
-from heizung.models.enums import CommandReason, DeviceKind, DeviceVendor, HeatingZoneKind
+from heizung.models.enums import (
+    CommandReason,
+    DeviceKind,
+    DeviceVendor,
+    HeatingZoneKind,
+    OverrideSource,
+)
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.models.sensor_reading import SensorReading
+from heizung.services import alert_throttle, engine_abgleich
 from heizung.services.downlink_adapter import DownlinkError
-from heizung.tasks.engine_tasks import _dispatch_downlinks_per_zone
+from heizung.tasks.engine_tasks import (
+    AUDIT_ABGLEICH_ERSCHOEPFT,
+    _dispatch_downlinks_per_zone,
+)
 from tests.conftest import purge_test_data_by_prefix
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
@@ -554,3 +567,365 @@ async def test_zone_3_vicki_all_fail_all_failed_marker(
     )
     assert len(ccs) == 3
     assert all(cc.sent_to_gateway_at is None for cc in ccs)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f (T3) — Engine-Abgleich im Dispatch
+# ---------------------------------------------------------------------------
+#
+# **Der Befund.** Die Hysterese vergleicht den neuen Sollwert mit dem **letzten
+# selbst gesendeten**, nicht mit dem, den das Geraet meldet. Hat die Engine
+# zuletzt 18 geschickt und will wieder 18, ist ``delta = 0`` und sie schweigt —
+# unabhaengig davon, was am Geraet steht. Die Geraete **048** und **057**
+# standen deshalb am 05.10.2026 nach einer Montage-Drehung auf 20 °C, waehrend
+# der Engine-Soll 18 °C war und kein Override existierte. Korrigiert wurde per
+# Hand ueber die Queue.
+#
+# Die Engine kannte ihren eigenen Willen, aber nicht den Zustand des Geraets.
+
+
+async def _insert_reading(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    setpoint_c: int | None,
+    age: timedelta = timedelta(minutes=2),
+) -> SensorReading:
+    """Gemeldetes Reading — die Groesse, die der Abgleich liest.
+
+    ``setpoint_c=None`` legt eine Zeile **ohne** Sollwert an. Das ist der Fall,
+    den es wirklich gibt: ein Frame, den der Codec nicht vollstaendig
+    dekodieren konnte (vor Sprint 20f T1 jeder ``0x28``-Frame). Eine solche
+    Zeile darf **keine** Abweichung belegen.
+    """
+    reading = SensorReading(
+        time=datetime.now(tz=UTC) - age,
+        device_id=device_id,
+        setpoint=None if setpoint_c is None else Decimal(setpoint_c),
+    )
+    session.add(reading)
+    await session.flush()
+    return reading
+
+
+class _FakeRedis:
+    """In-Memory-Redis fuer die Drosselung des Abgleichs."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        ex: int | None = None,  # noqa: ARG002
+    ) -> bool | None:
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    def incr(self, key: str) -> int:
+        neu = int(self.store.get(key, "0")) + 1
+        self.store[key] = str(neu)
+        return neu
+
+    def expire(self, key: str, ttl: int) -> bool:  # noqa: ARG002
+        return True
+
+    def delete(self, key: str) -> int:
+        return 1 if self.store.pop(key, None) is not None else 0
+
+    def getdel(self, key: str) -> str | None:
+        """Gebraucht von ``resync_flag.consume`` im selben Dispatch-Lauf.
+
+        Der Reboot-Re-Sync (AE-63) sitzt in derselben Zonen-Schleife wie der
+        Abgleich und greift auf denselben Redis-Client. Fehlt die Operation,
+        bricht der Dispatch mit ``AttributeError`` ab — und zwar **nicht**
+        abgefangen, weil ``resync_flag`` nur ``redis.RedisError`` schluckt.
+        Genau daran sind die sechs Tests dieser Gruppe beim ersten CI-Lauf
+        gefallen.
+        """
+        return self.store.pop(key, None)
+
+
+@pytest.fixture
+def abgleich_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
+    """Faelscht Redis fuer ``engine_abgleich`` **und** ``alert_throttle``.
+
+    Beide muessen gefaelscht werden: der Abgleich drosselt ueber
+    ``engine_abgleich``, und die Meldung "Versuche erschoepft" drosselt sich
+    zusaetzlich ueber ``alert_throttle``. Ein echter Redis waere hier eine
+    zweite Abhaengigkeit fuer einen Test, der ueber Downlinks urteilt.
+    """
+    client = _FakeRedis()
+    monkeypatch.setattr(engine_abgleich.redis_client, "get_redis_client", lambda: client)
+    monkeypatch.setattr(alert_throttle.redis_client, "get_redis_client", lambda: client)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_abgleich_sendet_wenn_das_geraet_abweicht(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """**Die Regressions-Wand fuer 048/057.**
+
+    Die Engine hat zuletzt 18 geschickt und will wieder 18 — die Hysterese
+    sagt also "nichts zu tun". Das Geraet meldet aber 20. Ohne den Abgleich
+    bleibt es dort, bis sich der Engine-Soll aendert; das waren bei 048 und
+    057 mehrere Tage, und behoben hat es ein Mensch per Queue.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a1")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    per_dev, _per_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == [(dev.dev_eui, 18)]
+    assert per_dev[0]["status"] == "sent"
+    assert "engine_abgleich" in per_dev[0]["hysteresis_reason"]
+
+
+@pytest.mark.asyncio
+async def test_abgleich_schweigt_bei_aktivem_override(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """**Der wichtigste Test dieser Datei.**
+
+    Ein Gast-Override ist genau der Fall, in dem das Geraet absichtlich
+    abweicht. Wuerde der Abgleich hier senden, ueberschriebe er den
+    Gastwunsch — und zwar alle 30 Minuten, dauerhaft, waehrend der Gast im
+    Zimmer ist. Das waere aus einer Nachbesserung ein Defekt geworden.
+
+    Deshalb ist "kein aktiver Override" im Code keine Nebenbedingung, sondern
+    eine der drei Hauptbedingungen.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a2")
+    zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=25)
+    # Der Gast hat gedreht — Override auf 25, zonen-scoped.
+    override = ManualOverride(
+        room_id=room.id,
+        heating_zone_id=zone.id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=datetime.now(tz=UTC) + timedelta(hours=4),
+    )
+    db_session.add(override)
+    await db_session.flush()
+
+    per_dev, _per_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == []
+    assert per_dev[0]["status"] == "skipped_hysteresis"
+    assert "engine_abgleich" not in per_dev[0]["hysteresis_reason"]
+
+
+@pytest.mark.asyncio
+async def test_abgleich_sendet_hoechstens_einmal_je_fenster(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """Zweiter Tick im Fenster: kein zweiter Downlink.
+
+    Der Engine-Tick laeuft **jede Minute**. Ohne diese Grenze waere der
+    Abgleich ein Downlink pro Minute, solange das Geraet nicht folgt — und
+    jeder davon eine Motorbewegung (§0 S4).
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a3")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    for _ in range(3):
+        await _dispatch_downlinks_per_zone(
+            session=db_session,
+            room_id=room.id,
+            target_setpoint_c=18,
+            base_reason=CommandReason.VACANT_SETPOINT,
+            eval_id=uuid.uuid4(),
+        )
+
+    assert recorded == [(dev.dev_eui, 18)], "drei Ticks, genau ein Downlink"
+
+
+@pytest.mark.asyncio
+async def test_abgleich_gibt_nach_drei_versuchen_auf_und_meldet(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """Nach ``MAX_VERSUCHE`` kein vierter Downlink — und ein Audit-Eintrag.
+
+    Das Aufgeben darf nicht stillschweigend passieren. Ein Geraet, das
+    dauerhaft einen anderen Wert haelt als die Engine will, heizt ein Zimmer
+    falsch — und niemand sieht es, weil die Oberflaeche den Engine-Soll
+    anzeigt und nicht den Geraete-Wert (§5.76).
+
+    Die Sperre wird zwischen den Durchlaeufen von Hand entfernt; das ist der
+    Zeitablauf, den der Test nicht abwarten soll.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a4")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    # Vier Fenster: drei Versuche plus einer, der nicht mehr gesendet wird.
+    for _ in range(4):
+        abgleich_redis.store.pop(engine_abgleich._drossel_key(dev.dev_eui), None)
+        await _dispatch_downlinks_per_zone(
+            session=db_session,
+            room_id=room.id,
+            target_setpoint_c=18,
+            base_reason=CommandReason.VACANT_SETPOINT,
+            eval_id=uuid.uuid4(),
+        )
+
+    assert len(recorded) == engine_abgleich.MAX_VERSUCHE
+
+    audits = (
+        (
+            await db_session.execute(
+                select(BusinessAudit).where(
+                    BusinessAudit.action == AUDIT_ABGLEICH_ERSCHOEPFT,
+                    BusinessAudit.target_id == dev.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audits) == 1, "einmal melden, nicht bei jedem Tick"
+    assert audits[0].new_value["gemeldeter_sollwert"] == 20
+    assert audits[0].new_value["engine_sollwert"] == 18
+
+
+@pytest.mark.asyncio
+async def test_abgleich_schweigt_wenn_das_geraet_den_soll_meldet(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """Uebereinstimmung heisst Ruhe — und der Zaehler wird zurueckgesetzt.
+
+    Die Gegenprobe zum ersten Test. Ohne sie koennte der Abgleich bei jedem
+    Tick senden, weil die Bedingung falsch herum stuende, und niemand wuerde
+    es an einer einzelnen Zeile merken.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a5")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=18)
+    # Verbrauchte Versuche aus einem frueheren Fall.
+    engine_abgleich.versuch_gezaehlt(dev.dev_eui)
+    engine_abgleich.versuch_gezaehlt(dev.dev_eui)
+
+    await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == []
+    assert engine_abgleich.versuche(dev.dev_eui) == 0
+
+
+@pytest.mark.asyncio
+async def test_reading_ohne_sollwert_belegt_keine_abweichung(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """Eine Zeile ohne ``setpoint`` ist keine Aussage.
+
+    Genau solche Zeilen entstanden vor Sprint 20f T1 aus jedem
+    ``0x28``-Frame: der Codec brach ab, und der Subscriber schrieb eine Zeile,
+    in der alles ``NULL`` war. Wuerde der Abgleich ``NULL`` als Abweichung
+    lesen, haette er genau an den Geraeten gesendet, an denen eine
+    Handverstellung stattfand — alle 30 Minuten, gegen den Gast.
+
+    Dieselbe Drei-Zustands-Regel wie bei ``attached_backplate`` und
+    ``calibration_failed``: NULL ist weder Ja noch Nein.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="a6")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=None)
+
+    await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == []
