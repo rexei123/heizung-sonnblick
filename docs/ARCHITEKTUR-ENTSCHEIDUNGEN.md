@@ -4002,3 +4002,189 @@ wer `desc` will, sagt es.
   Behebung eines Vollständigkeits-Befunds (§5.1). Wenn Belegungen in
   mehreren Jahren fünfstellig werden, ist das der Zug — dann aber für alle
   Listen gemeinsam, nicht für eine.
+
+---
+
+# AE-76 — Die Engine gleicht den Geräte-Zustand ab, nicht nur ihren eigenen Willen (Sprint 20f)
+
+**Datum:** 2026-10-06
+**Status:** Akzeptiert
+**Bezug:** AE-32 (Hysterese), AE-45 (Drehring-Auto-Detect), AE-58
+(Override-Modell), AE-63 (Reboot-Re-Sync — der einzige bisherige
+Hysterese-Bypass), CLAUDE.md §5.76 (Wirkung überwachen statt Mechanik), §0 S4
+(Hardware-Schutz)
+
+## Anlass
+
+Die Geräte **048** und **057** standen am 05.10.2026 nach einer
+Montage-Drehung auf 20 °C. Der Engine-Soll war 18 °C. Es gab **keinen**
+Override. Die Engine hat nicht nachgesendet, und behoben hat es ein Mensch
+über die ChirpStack-Queue (`5100b4`).
+
+Kein Fehler im Code, sondern eine Lücke im Entwurf. Die Hysterese
+(AE-32) vergleicht den neuen Sollwert mit dem **letzten selbst gesendeten**:
+
+```python
+delta = abs(new_setpoint_c - prev_setpoint_c)   # prev aus control_command
+```
+
+`rules/engine.py:815`. Hat die Engine zuletzt 18 geschickt und will wieder
+18, ist `delta = 0` und sie schweigt — unabhängig davon, was am Gerät steht.
+Erst `HEARTBEAT_INTERVAL` löst irgendwann einen Re-Sync aus.
+
+**Die Engine kannte also ihren eigenen Willen, aber nicht den Zustand des
+Geräts.** Das ist §5.76 in der Steuerlogik selbst: überwacht wurde die
+Mechanik („habe ich gesendet"), nicht die Wirkung („steht der Wert am
+Gerät").
+
+Dass es auffiel, lag an der Montage. Im Normalbetrieb driftet ein Gerät
+selten weg, und wenn, dann über den Drehring — und den adoptiert AE-45 als
+Override, womit die Abweichung legitim ist. Die Montage-Drehung ist der
+Fall, in dem beides nicht greift: das Zimmer ist nicht belegt, also entsteht
+kein Override (OCCUPIED-Gate, AE-58), und die Engine will denselben Wert wie
+vorher, also schweigt die Hysterese.
+
+## Entscheidung
+
+### 1. Die Engine liest, was das Gerät meldet
+
+Neue Eingangsgröße im Dispatch: der letzte **gemeldete** Sollwert je Gerät
+(`sensor_reading.setpoint`, jüngste Zeile). Weicht er vom Engine-Soll ab und
+gibt es keinen aktiven Override, wird erneut gesendet — die Hysterese wird
+umgangen.
+
+Drei Bedingungen, alle drei notwendig:
+
+1. die Hysterese wollte nicht senden,
+2. das Gerät meldet einen **anderen** Wert als den Soll,
+3. es gibt **keinen** aktiven Override für diese Zone.
+
+**Die dritte ist die wichtigste.** Ein Override ist genau der Fall, in dem
+das Gerät absichtlich abweicht. Ein Abgleich würde den Gastwunsch
+überschreiben — und zwar alle 30 Minuten, dauerhaft, während der Gast im
+Zimmer ist. Aus einer Nachbesserung wäre ein Defekt geworden. Deshalb steht
+sie im Code nicht als Nebenbedingung, sondern als Hauptbedingung, und ein
+eigener Test sichert sie ab.
+
+### 2. Eine `NULL`-Meldung ist keine Abweichung
+
+Zeilen ohne `setpoint` werden übersprungen. Das ist nicht Vorsicht, sondern
+notwendig: genau solche Zeilen entstanden bis Sprint 20f T1 aus **jedem**
+`0x28`-Frame (Handverstellung) — der Codec brach am Command-Byte ab, und der
+Subscriber schrieb eine Zeile, in der alles `NULL` war. Würde der Abgleich
+`NULL` als Abweichung lesen, hätte er genau an den Geräten gesendet, an
+denen eine Handverstellung stattfand.
+
+Dieselbe Drei-Zustands-Regel wie bei `open_window`, `attached_backplate`,
+`broken_sensor` und `calibration_failed`: `NULL` ist weder Ja noch Nein.
+
+### 3. Die Grenzen sind Teil der Entscheidung, nicht ihr Beiwerk
+
+Jeder Downlink ist eine Motorbewegung und kostet Batterie (§0 S4). Ein Gerät
+an der Funkgrenze bestätigt womöglich nie — ohne Grenze würde die Engine es
+bei **jedem** Tick anfunken, also jede Minute, bis die Batterie leer ist.
+Das wäre der teure Weg, einen Befund zu beheben.
+
+| Grenze | Wert | Warum |
+|---|---|---|
+| Nachsendungen je Gerät | **1 / 30 min** | der Tick läuft jede Minute |
+| Versuche, dann Schluss | **3** | danach Audit und Warnung, kein vierter Downlink |
+| Redis nicht erreichbar | **nicht senden** | ohne nachweisbare Drosselung kein Downlink |
+
+Die letzte Zeile ist die **Gegenrichtung** zu `alert_throttle`, wo ein
+Redis-Ausfall zu „lieber doppelt zustellen" führt. Eine Mail doppelt kostet
+Aufmerksamkeit; ein Downlink ohne funktionierende Drosselung kostet Batterie
+bei jedem Tick. Der Abgleich ist eine **Nachbesserung, kein
+Sicherheitsmelder** — er darf warten.
+
+Daraus folgt der schlechteste Fall: eine Handverstellung in einem unbelegten
+Zimmer steht nach **spätestens 45 min** wieder auf dem Engine-Soll — 30 min
+Drosselung plus eine Keepalive-Periode, bis das Gerät den neuen Wert meldet.
+
+### 4. Der Zähler hängt an der Wirkung, nicht am Absenden
+
+Gelöscht wird er erst, wenn das Gerät den Wert **meldet** — nicht, wenn der
+Downlink abgesetzt wurde. Ein Downlink, der im Gateway verschwindet, zählt
+damit mit, und das ist richtig: er hat nichts bewirkt (§5.76).
+
+Zurückgesetzt wird bei **jedem** Tick, in dem Gerät und Soll
+übereinstimmen, nicht nur nach einer Nachsendung. Ein Gerät, das aus eigener
+Kraft wieder zusammenpasst, beginnt beim nächsten Mal wieder bei drei
+Versuchen statt mit verbrauchten.
+
+### 5. Das Aufgeben wird gemeldet
+
+Nach drei erfolglosen Versuchen ein Audit-Eintrag
+`ENGINE_ABGLEICH_ERSCHOEPFT` auf dem Gerät, plus eine Warnung im Log,
+gedrosselt auf einmal je Gerät und Tag.
+
+Ohne diese Meldung wäre der Abgleich ein Mechanismus, der still aufgibt —
+und ein Gerät, das dauerhaft einen anderen Wert hält als die Engine will,
+heizt ein Zimmer falsch, ohne dass es jemand sieht: die Oberfläche zeigt den
+Engine-Soll, nicht den Geräte-Wert. Genau diese Sorte stiller Ausfall ist
+§5.76.
+
+### 6. `device_manual` als eigene Quelle
+
+Seit T1 dekodiert der Codec den `0x28`-Frame, und damit ist erstmals
+unterscheidbar, ob die Vicki eine Drehung **gemeldet** hat oder ob wir sie
+**ableiten**:
+
+| Quelle | Herkunft | Ablauf |
+|---|---|---|
+| `device_manual` | Meldung des Geräts (`0x28`) | **4 h** |
+| `device` | abgeleitet aus Setpoint-Diff (AE-45) | nächster Check-out |
+
+Der kürzere Ablauf folgt aus der Belegbarkeit: wer sicher weiß, dass ein
+Mensch gedreht hat, braucht die Absicherung „im Zweifel bis zum Check-out
+halten" nicht. `device` bleibt lang, weil dahinter auch Reboot-Drift
+(AE-63) oder ein verlorener Downlink stecken kann.
+
+Vorrang dreistufig: `frontend_*` (0) vor `device_manual` (1) vor `device`
+(2). Die Mitte ist der Punkt — dreht ein Gast am Rad, während ein alter
+`device`-Override aus einem Drift noch läuft, gilt die **Drehung**.
+
+### 7. Ein Override endet mit jeder Abreise
+
+Das Gnaden-Fenster von vier Stunden (`CHECKOUT_GRACE_WINDOW`) ist entfallen.
+Fachliche Regel des Hotels: der Override gehört dem Gast, der gegangen ist.
+
+Überlappende Buchungen bleiben unberührt — dort bleibt das Zimmer
+`OCCUPIED`, der Statuswechsel tritt gar nicht ein, und der Hook wird nicht
+wirksam. **Das Fenster hat also nie den Fall geschützt, für den man es
+vermuten würde.**
+
+## Konsequenzen
+
+- **Die Engine hat eine zweite Eingangsgröße.** Wer die Dispatch-Schleife
+  umbaut, muss beide bedienen: den eigenen Willen (`control_command`) und
+  den gemeldeten Zustand (`sensor_reading.setpoint`).
+- **Ein dritter Hysterese-Bypass.** Bisher gab es einen (Reboot-Re-Sync,
+  AE-63). Jeder weitere braucht eine eigene Drosselung — die Hysterese ist
+  der Batterie-Schutz, und wer sie umgeht, übernimmt dessen Aufgabe.
+- **Pool-Geräte sind nicht betroffen:** ohne Zone kein Engine-Soll, der
+  Dispatch erreicht sie nicht.
+- **Maßnahmen A und B** (Downlink unterdrücken bis bestätigt, Ack-Fenster an
+  Class A anpassen) bleiben offen und sind **nach** einer Beobachtungszeit
+  neu zu bewerten: der Abgleich deckt verlorene Downlinks teilweise ab,
+  und dann wäre A ein Mechanismus ohne Anlass (§0 S6).
+
+## Verworfen
+
+- **Die Hysterese auf den gemeldeten Wert umstellen**, statt einen zweiten
+  Pfad daneben. Verworfen: die Hysterese schützt die Batterie **gegen
+  Schwankungen des eigenen Willens**, und diese Aufgabe bleibt. Ein Gerät,
+  das den Wert noch nicht gemeldet hat, würde bei jedem Tick erneut
+  angefunkt — aus dem Schutz wäre das Gegenteil geworden.
+- **Ohne Grenzen senden.** Siehe Punkt 3. Der Befund ist drei Geräte wert,
+  nicht 104 leere Batterien.
+- **Bei Redis-Ausfall trotzdem senden.** Siehe Punkt 3.
+- **`device_manual` statt `device` überall**, also die alte Quelle
+  ersetzen. Verworfen: der abgeleitete Befund existiert weiter (ein Gerät
+  mit FW < 3.5 meldet keinen `0x28`), und die beiden Aussagen sind
+  verschieden. Im Audit ist das der Unterschied zwischen „ein Gast hat
+  gedreht" und „die Engine hat eine Abweichung gesehen und sie dem Gast
+  zugeschrieben".
+- **Bestandszeilen auf `device_manual` umdeuten.** Welche alten
+  `device`-Overrides aus einer echten Drehung kamen, ist nachträglich nicht
+  entscheidbar; eine Umdeutung wäre eine Behauptung (§5.68).

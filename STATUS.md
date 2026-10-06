@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-05, develop-HEAD `97a13c2` (PR #255). Laufender Sprint: **20f (Gerät folgt immer der Engine)** — Brief vom 05.10. in `docs/features/`, Ausführung offen; Frist vor dem 01.11. Zuletzt abgeschlossen: **Sprint 20d (Paginierung Zimmer/Raumtypen/Belegungen, B-20c-2, AE-75)**, §2bv — PR #255 gemergt (`collected 996 = 995 passed + 1 xfailed`, 0 skipped; Images `develop-97a13c2`). Davor: **Sprint 20c (Hotfix Geräteliste)**, §2bu — PR #251. Abgeschlossen: **Sprint 20 (Batteriestufen über die Spannung)**, §2bq — PR A #245, PR B #246, Nachbesserung #248; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **`celery_beat`-Healthcheck**, §2bs — PR #249, Abnahme am 02.10. bestätigt; **Sprint 20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt — PR #250. Dazu gemergt am 03.10.: **Brief zu 20d** (#252), **drei Backlog-Befunde aus der Pilotmontage** (#253 — B-20c-3, B-20c-4, B-20e-1), **Brief zu 20e** (#254, AE-74). Nächster Sprint: **20e** (Montage-Status vereinfacht, AE-74 — Gate beantwortet, Reihenfolge nach 20d).
+**Stand:** 2026-10-06, develop-HEAD `fded11b` (PR #259). Zuletzt abgeschlossen: **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256 (Brief), #257 (Codec 0x28, Vor-Check, calibrationFailed), #258 (device_manual, Engine-Abgleich), #259 (Abreise, Trace-Text); Migrationen 0025 und 0026. Davor: **Sprint 20d (Paginierung Zimmer/Raumtypen/Belegungen, B-20c-2, AE-75)**, §2bv — PR #255; **Sprint 20c (Hotfix Geräteliste)**, §2bu — PR #251; **Sprint 20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt — PR #250; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **Sprint 20 (Batteriestufen über die Spannung, AE-72)**, §2bq. **Nächster Sprint: 20e** (Montage-Status vereinfacht, AE-74 — Gate beantwortet; die 15-Minuten-Sperre vorher neu bewerten, siehe §2bw). **Offen vor dem 01.11.:** Codec-Re-Paste in ChirpStack (§5.22), Realtest zu T2/T3, Live-Verify aus 20c/20d, Release develop → main.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-10-05
+**Stichtag:** 2026-10-06
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **Sprint 20f Gerät folgt immer der Engine** — Brief vom 05.10. in `docs/features/`, Ausführung offen; Frist vor dem 01.11. Kern: die Hysterese vergleicht den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:795`) — ein Gerät, das nach einer Montage-Drehung auf 20 °C steht, bleibt dort, solange der Engine-Soll sich nicht ändert (Geräte 048, 057). T3 schliesst das. Zuletzt abgeschlossen: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt) — **zwei Befunde derselben Klasse, zwei verschiedene Lösungen.** Belegungen waren **scharf**: 959 aktive, Ansicht „Alle“ zeigte 200, ohne das zu sagen — sie wachsen unbegrenzt und werden deshalb **echt paginiert** (Envelope `{items, total, limit, offset}`, „N von M“ + „Weitere laden“, „Alle“ absteigend). Zimmer und Raumtypen sind nach oben gebunden und werden **vollständig** geholt wie die Geräte in 20c; `limit`/`offset` verlassen `RoomListQuery` und `RoomTypeListQuery`, die vier Aufrufer hatten zuvor 1000, 1000, 200 und nichts. Zusatzbefund mitbehoben: die Belegungs-Sortierung war serverseitig, aber **nicht eindeutig** (`check_in` allein) — das wäre erst durch „Weitere laden“ scharf geworden, also durch die Reparatur des anderen Fehlers. Jetzt `(check_in, id)`. Belegt in der Vorprüfung: die Heizlogik liest Belegungen **direkt per SQLAlchemy**, nicht über die API (`rules/engine.py:872`, `services/occupancy_service.py`) — die Steuerung ist nicht betroffen, es ist ein reines Oberflächen-Thema. Zuletzt abgeschlossen: **Sprint 20c Hotfix Geräteliste** (§2bu, B-20c-1, PR #251 gemergt) — `GET /api/v1/devices` ist paginiert und liefert ohne `limit` 100 Zeilen; fünf Frontend-Aufrufer erwarteten die vollständige Liste und haben still 100 von 104 Geräten bekommen, darunter die Zuordnung bei der Montage. Die Schleife steht seit 20d in `lib/api/alle-seiten.ts` statt dreimal kopiert. Davor: **Sprint 20b Batterie-Schwellen in die Settings** (§2bt, AE-73, PR #250 gemergt) — die zwei Grenzen stehen in `config.Settings` (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`, Vorgabe **2,9 / 2,6 V**) und sind ohne Image änderbar (RUNBOOK §10q); Startup-Validator weist `critical_max >= ok_min` ab. Badge-Labels „Batterie OK“ / „Beobachten“ / „Tauschen“, Farben unverändert. Davor: **Sprint 20 Batteriestufen über die Spannung** (§2bq, AE-72) — PR A #245 gemergt (`9493bd9`, `collected 922 = 921 passed + 1 xfailed`, 0 skipped), PR B #246, Nachbesserung „nie ein Badge ohne Zahl“ #248. Migration 0024 (`sensor_reading.battery_voltage`). Stufen über den 24-h-Median, read-time; die **Zahlen** aus AE-72 (3,0 / 2,8) sind durch AE-73 ersetzt. Dazu **Sprint 20a Deploy-Sperre** (§2br) — PR #247 gemergt (`55dd8f0`, `collected 961 = 960 passed + 1 xfailed`, 0 skipped): `services/deploy_lock.py` setzt einen Redis-Key, `deploy-pull.sh` überspringt seinen Lauf, solange er steht.
+**Aktueller Sprint:** **keiner** — 20f ist abgeschlossen (§2bw, AE-76, vier PRs gemergt). Nächster: **20e** (AE-74). Zuletzt abgeschlossen: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -4654,7 +4654,190 @@ ein roter Lauf.
   Belegungen in mehreren Jahren fünfstellig werden, und dann für alle Listen
   gemeinsam.
 
+## 2bw. Sprint 20f Gerät folgt immer der Engine (2026-10-05/06, AE-76)
+
+**Vier PRs, ein Satz:** Der Sollwert am Gerät entspricht jetzt immer dem
+Engine-Soll — außer während eines aktiven Overrides.
+
+| PR | Inhalt | Merge |
+|---|---|---|
+| [#256](https://github.com/rexei123/heizung-sonnblick/pull/256) | Brief | `4f40b4f` |
+| [#257](https://github.com/rexei123/heizung-sonnblick/pull/257) | T1 Codec `0x28`, T4 Vor-Check, T7 `calibrationFailed` | `b846f5e` |
+| [#258](https://github.com/rexei123/heizung-sonnblick/pull/258) | T2 `device_manual`, T3 Engine-Abgleich | `cb5242b` |
+| [#259](https://github.com/rexei123/heizung-sonnblick/pull/259) | T5 Abreise, T6 Trace-Text | `fded11b` |
+
+### Der Kern-Befund: die Engine kannte ihren Willen, nicht den Zustand
+
+Geräte **048** und **057** standen nach einer Montage-Drehung auf 20 °C, der
+Engine-Soll war 18 °C, es gab **keinen** Override. Die Engine hat nicht
+nachgesendet; behoben hat es ein Mensch über die ChirpStack-Queue.
+
+Kein Fehler im Code, sondern eine Lücke im Entwurf: die Hysterese vergleicht
+den neuen Sollwert mit dem **letzten selbst gesendeten**
+([engine.py:815](backend/src/heizung/rules/engine.py:815)). Will die Engine
+denselben Wert wie zuletzt, ist `delta = 0` und sie schweigt — unabhängig
+davon, was am Gerät steht.
+
+**Das ist §5.76 in der Steuerlogik selbst:** überwacht wurde die Mechanik
+(„habe ich gesendet"), nicht die Wirkung („steht der Wert am Gerät").
+
+Dass es bei der Montage auffiel, ist kein Zufall. Im Normalbetrieb driftet
+ein Gerät selten weg, und wenn über den Drehring, dann adoptiert AE-45 das
+als Override — die Abweichung ist dann legitim. Die Montage-Drehung ist der
+Fall, in dem beides nicht greift: das Zimmer ist nicht belegt, also entsteht
+kein Override (OCCUPIED-Gate), und die Engine will denselben Wert wie vorher.
+
+Behoben mit **T3**: drei Bedingungen, alle notwendig — die Hysterese wollte
+nicht senden, das Gerät meldet einen anderen Wert, **und es gibt keinen
+aktiven Override.** Die dritte ist die wichtigste und steht deshalb als
+Hauptbedingung im Code: ein Override ist genau der Fall, in dem das Gerät
+absichtlich abweicht, und ein Abgleich dort hätte den Gastwunsch alle 30
+Minuten überschrieben. Aus einer Nachbesserung wäre ein Defekt geworden.
+
+**Die Grenzen sind Teil der Entscheidung** (§0 S4): 1 Nachsendung je Gerät je
+30 min, nach drei erfolglosen Versuchen Audit
+(`ENGINE_ABGLEICH_ERSCHOEPFT`) und Schluss, bei Redis-Ausfall **nicht**
+senden. Daraus der schlechteste Fall: eine Handverstellung in einem
+unbelegten Zimmer steht nach **spätestens 45 min** wieder auf dem
+Engine-Soll.
+
+### Der zweite Befund: ein gültiger Frame wurde weggeworfen
+
+Der `0x28`-Frame (Handverstellung, FW ≥ 3.5) trägt ab Byte 2 einen
+**vollständigen 9-Byte-Keepalive**. Der Codec routete alles außer
+`0x52`/`0x04`/`0x46` nach `decodePeriodicReport`, und die bricht am
+Command-Byte ab — Ergebnis `{command: 0x28}` ohne Daten, und der Subscriber
+schrieb daraus eine `sensor_reading`-Zeile, in der **alles NULL** war.
+
+Der Vor-Check nahm diese Zeile als „frisches Reading", las
+`attached_backplate IS NULL` und urteilte mit `--require-motor` terminales
+**FAIL**. Betroffen am 05.10.: Geräte **038–044**. Aus ihren Payloads
+nachgerechnet waren alle sieben **montiert und kalibriert** (`motorRange`
+434–527).
+
+Dazu ein zweiter Teil desselben Befunds: `max_age_s` und `timeout_s` waren
+**dieselbe Zahl** (beide `wait_s` = 900 s). Ein Reading von bis zu 15
+Minuten vor dem Lauf galt damit als frisch — **`--heartbeat-wait` hat an
+diesem Tag keine Sekunde gewartet.** Getrennt, neu
+`PRECHECK_MAX_AGE_S = 120`.
+
+Daraus eine Unterscheidung, die vorher unmöglich war: wer nichts gesendet
+hat, bekommt `no_uplink` (Funk-Befund); wer gesendet hat, ohne das Feld zu
+führen, bekommt `backplate_unknown` mit dem ausdrücklichen Hinweis, dass der
+Funk in Ordnung ist. Vorher hieß beides dasselbe, und der Prüfer suchte am
+Funk.
+
+### Der dritte Befund: ein Bit, das seit Sprint 6.8 ankommt
+
+`calibrationFailed` (`status8 & 0x40`) setzt der Codec seit der ersten
+Fassung ([mclimate-vicki.js:163](infra/chirpstack/codecs/mclimate-vicki.js:163))
+und `_map_to_reading` hat es nie gelesen. Gerät **026** meldete am 05.10.
+`status8 = 0x70` und ist damit der erste belegte Fall — identisch zu den
+sieben aus dem FAIL-Befund (`0x30`), **außer** diesem Bit.
+
+Es ist genau die Information, die im Eingangstest fehlte: ein Gerät mit
+fehlgeschlagener Kalibrierung führt das Ventil nicht richtig und fiel am
+Ventilkriterium durch, **ohne dass der Grund im Urteil stand**. Migration
+0025, Persistenz, eigener Vor-Check-Befund mit dem Handgriff (Recalibrate,
+Cmd `0x03`).
+
+### Was noch im Sprint steckt
+
+- **`device_manual`** als eigene Override-Quelle (Migration 0026). Ablauf
+  4 h statt bis zum Check-out, weil die Drehung **belegt** und nicht geraten
+  ist. Vorrang dreistufig: `frontend_*` vor `device_manual` vor `device`.
+- **Der Override endet mit jeder Abreise.** `CHECKOUT_GRACE_WINDOW` (4 h)
+  entfallen. Überlappende Buchungen bleiben unberührt, weil das Zimmer dort
+  `OCCUPIED` bleibt — das Fenster hat also nie den Fall geschützt, für den
+  man es vermuten würde.
+- **Trace-Text** „kein zimmerweiter Override" mit Verweis auf den Block
+  „Pro-Zone-Setpoints". Der alte Satz war für seinen Geltungsbereich richtig
+  und für den Leser falsch; am 05.10. hat er eine Fehlersuche gekostet
+  (§5.57-Klasse).
+
+### Zwei Befunde, die sich als Fehlalarm erwiesen haben
+
+Sie stehen hier, damit ihnen niemand nachläuft:
+
+- **Die Folge 25/21/25 an Gerät 049 war Bedienung**, kein Engine-Fehler. Das
+  Audit zeigt `SET 09:39:41`, `CLEAR 09:39:48`, `SET 09:39:55` — drei
+  Eingaben in 14 Sekunden, jede korrekt umgesetzt. Die daraus abgeleitete
+  „Maßnahme C" (veraltete Auswertung verwerfen) ist entfallen.
+- **Der Override endet bei Abreise korrekt.** Meine gegenteilige Vorhersage
+  war falsch: der Aufruf hängt zwei Ebenen tiefer in `sync_room_status`
+  hinter einem funktionslokalen Import
+  ([occupancy_service.py:251](backend/src/heizung/services/occupancy_service.py:251)),
+  und die Audit-Aktion heißt `OVERRIDES_AUTO_REVOKED_ON_CHECKOUT`, nicht
+  `MANUAL_OVERRIDE_CLEAR`.
+
+### Zwei Vorab-Analysen, die den Zuschnitt verändert haben
+
+- **`CLEANING` wird nie automatisch gesetzt** — nur von einem Admin über
+  `PATCH /rooms/{id}`, und dieser Pfad ruft `auto_revoke_on_checkout` nicht.
+  Der CLEANING-Teil von T5 hätte einen zweiten Aufrufpunkt gebraucht.
+  Entscheidung des Hoteliers: wird im Haus nicht genutzt, also kein zweiter
+  Aufrufpunkt (§0 S6).
+- **Bit `0x40`** war als Analyse geplant und ist zur Umsetzung geworden,
+  siehe oben.
+
+### Tests
+
+**+62** über die drei Code-PRs: 17 (Codec `0x28`, Vor-Check, Subscriber), 24
+(`engine_abgleich`, `device_manual`, Abgleich im Dispatch), 2 e2e plus drei
+umgedrehte Backend-Tests. CI-Anker beim Abschluss: `collected 1047 = 1046
+passed + 1 xfailed`, **0 skipped**; e2e `133 passed`.
+
+**Gegenproben gelaufen** (§5.79): bei PR 1 fallen 8 der neuen Tests mit dem
+gemeldeten Bild (`assert 'backplate_unknown' == 'ready'`), bei PR 3 der
+Trace-Test (`getByText('kein aktiver Override')` → 1 statt 0). Für T3 ist die
+Probe die **Gegenrichtung** — `test_abgleich_schweigt_bei_aktivem_override`
+und `test_reading_ohne_sollwert_belegt_keine_abweichung` schlagen an, wenn
+die Bedingung zu weit gefasst wird. Das ist die teure Richtung.
+
+### Zwei CI-Befunde unterwegs
+
+- **§5.80, vierter Fall im Repo.** Die redis-Typstubs sagen lokal
+  `Awaitable[Any] | Any` und in CI `int` — dieselbe Typ-Zusicherung war hier
+  nötig und dort redundant, mypy meldet beides. Gelöst mit einer Funktion,
+  die `object` nimmt und zur Laufzeit entscheidet.
+- **Ein Playwright-Lauf scheiterte am Google-Fonts-Abruf** von Next
+  (`next/font/google`, Roboto). Nicht reproduzierbar, Wiederholungslauf grün
+  in 2m42s — flüchtig, kein Code-Befund. Im selben Lauf war
+  `lint-and-build` grün.
+
+In beiden Fällen hat die **Laufzeit** den Unterschied angezeigt (§5.81):
+1m14s und 1m21s heißen Abbruch vor dem eigentlichen Lauf, 3m49s heißt echte
+Testfehler.
+
+### Offen / Hinweise
+
+- **Der Codec wird nicht automatisch ausgerollt** (§5.22).
+  `infra/chirpstack/codecs/mclimate-vicki.js` muss in der ChirpStack-UI **je
+  Server** neu eingefügt werden, danach am Events-Tab eines aktiven Vickis
+  prüfen, dass ein `0x28`-Frame die Keepalive-Felder zeigt. **Ohne diesen
+  Schritt wirkt T1 nicht**, und T4 wartet dann 15 Minuten, bevor es
+  `backplate_unknown` meldet — richtig, aber langsam.
+- **Für 038–044** danach ein Lauf **ohne** `--resume`, nur für diese sieben.
+- **Realtest je Gerät** steht aus, wie im Brief verlangt: eine
+  Handverstellung in einem belegten Zimmer (Gastwert hält 4 h) und eine in
+  einem unbelegten (Engine-Soll nach ≤ 45 min zurück).
+- **Live-Verify aus 20c und 20d** weiter offen: `/devices` muss 104 Zeilen
+  zeigen, `/belegungen` im Bereich „Alle" „100 von N" mit funktionierendem
+  „Weitere laden" (RUNBOOK §10r).
+- **Lokale DB-Tests weiter nicht ausführbar** (B-18-5). Migrationen 0025 und
+  0026 sind lokal nicht gelaufen; der Beleg ist der CI-Anker mit 0 skipped.
+- **Maßnahmen A und B** (Downlink unterdrücken bis bestätigt, Ack-Fenster an
+  Class A) bleiben im Backlog und sind **nach** einer Beobachtungszeit neu zu
+  bewerten — der Abgleich deckt verlorene Downlinks teilweise ab, und dann
+  wäre A ein Mechanismus ohne Anlass (§0 S6).
+- **Folge für Sprint 20e:** die 15-Minuten-Sperre für die Montage-Drehung
+  aus dem 20e-Gate ist durch T2 weitgehend gegenstandslos — in einem
+  unbelegten Zimmer entsteht gar kein Override, und dort wird montiert. Sie
+  bleibt nur für „Montage im belegten Zimmer" relevant. Vor 20e neu
+  bewerten, nicht blind umsetzen.
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
+
 
 
 ### 3.1 Sicherheit / Hardening
@@ -4930,6 +5113,10 @@ Read-only-Diagnose Sprint 15a hat drei Folge-Stränge belegt. Inhaltliche Quelle
 | **B-20c-3** | **`compute_health_state` liest Geräte ohne Lifecycle-Filter.** `_compute_health_state_async` lädt `select(Device)` ohne `retired_at IS NULL` (`tasks/health_tasks.py:173`) und baut daraus `zone_device_ids` (`:200-202`, Zuweisung `:202`). Ein stillgelegtes Gerät zählt damit weiter für seine alte Zone: die Zone sieht belegt aus, obwohl sie leer ist, und ihr `health_state` folgt einem Gerät, das nicht mehr existiert — bei einem retired Gerät ohne Uplinks also dauerhaft `silent` („Zone Stumm“, rot) statt `no_device`. **Heute folgenlos**, weil kein Gerät retired ist; **ab dem ersten Tausch nicht mehr**, und die Montage ist der Zeitraum, in dem getäuscht wird. Das ist §5.58 (Device-Queries brauchen Lifecycle-Filter) an einer Stelle, die die Lesson nicht genannt hat — §5.79: das Audit von Sprint 13b hat die fünf damaligen Lesestellen geprüft, `health_tasks` kam mit Sprint 11 und war dabei, aber die Zone-Ableitung ist seither umgebaut worden. Fix ist eine Zeile (`.where(Device.retired_at.is_(None))`) plus ein Test, der ein retired Gerät in einer Zone anlegt und `no_device` erwartet. **Engine nicht betroffen:** sie liest `heating_zone.health_state` nirgends, nur `Device.health_state` — und das wird je Gerät gesetzt, nicht über die Zone. Befund aus der Analyse vom 02.10.2026 (Montage-Abend, „Kein Gerät“-Frage). | 🟡 |
 | **B-20c-4** | **`compute_health_state` hat keine Isolation je Gerät oder Zone.** Der Task läuft in einem Stück durch sieben Phasen (`tasks/health_tasks.py:163-317`) ohne `try/except` je Element. Eine Ausnahme irgendwo in Phase 1–5 lässt **alle** Device- und Zone-Zustände unverändert — und zwar lautlos: `health_state` behält seinen alten Wert, die Oberfläche zeigt weiter Grün, und niemandem fällt auf, dass nichts mehr nachgeführt wird. **Das ist die teure Richtung des Fehlers:** ein eingefrorenes `healthy` ist von einem aktuellen `healthy` nicht zu unterscheiden, und die Engine filtert ihre Downlink-Empfänger genau darauf (`tasks/engine_tasks.py:392`, `rules/engine.py:571`, `rules/window_state.py:79`). Ein Gerät, das offline geht, während der Task hängt, bleibt für die Engine `healthy` — sie schickt Soll­werte an ein stummes Gerät und meldet keinen Ausfall. Vorbild ist AE-54: die Engine isoliert pro Zone mit `try/except` und setzt im Fehlerfall `degraded`, statt den ganzen Lauf zu verlieren. **Dazu gehört ein Wirkungs-Melder** (§5.76): nicht „läuft der Task“, sondern „ist der jüngste Health-Schreibvorgang jünger als X Minuten“ — ein Mechanik-Check findet genau diesen Fall nicht. Befund aus derselben Analyse vom 02.10.2026. | 🟡 |
 | **B-20e-1** | **Ventilkriterium des Eingangstests: die obere Schwelle hängt an der Raumtemperatur.** Befund 02.10.2026 an Gerät **099**: zweimal exakt **38 %** Öffnung bei Sollwert 28 °C, Raum ~23 °C — Motor fährt, Readbacks beidseitig korrekt, kein Defekt. `VALVE_OPEN_MIN_PCT = 40` (`scripts/pairing/batch_inbound_test.py:113`) macht daraus ein **FAIL**, zwei Punkte unter der Grenze. Das Gerät ist trotz FAIL zugeordnet worden (Entscheidung des Hoteliers). **Der Code sagt die Ursache selbst:** der Kommentar bei den Schwellen vermerkt, dass die Öffnung am hohen Sollwert „von der Raumtemperatur abhängt“, während der Erwartungswert am niedrigen Sollwert mit 0 % an zwei Geräten scharf belegt ist (`:100-111`). Die Feldwerte stammen von **drei** Geräten, eines davon defekt: 002 erreichte 59 % — und 001 wurde bei Raum 19 °C gemessen, 099 jetzt bei ~23 °C. Je kleiner der Abstand zwischen Sollwert und Raum, desto weniger fährt das Ventil auf. 099 ist damit **kein neuer Befund, sondern der erste gemessene Fall einer bekannten Schwäche**. **Vorschlag des Hoteliers:** von „≥ 40 % bei 28 °C“ auf „Bewegung ≥ 25 Prozentpunkte zwischen 10 und 28 °C“. **Dazu drei Dinge, die vor der Umsetzung geklärt sein müssen:** **(1)** Die Spreizung ist bei dieser Datenlage fast dieselbe Größe wie der Absolutwert. Das untere Kriterium hält `low` schon bei ≤ 10 % und gemessen bei 0 %; `high - low` ist dann ≈ `high`. Der Vorschlag wirkt also nicht als Wechsel von absolut auf relativ, sondern als **Senkung der oberen Schwelle von 40 auf etwa 25–35** — vertretbar, aber es ist eine andere Entscheidung als die, die der Wortlaut nahelegt. Ein wirklich relatives Kriterium müsste auf den Überschuss normieren (Öffnung je Kelvin über Raumtemperatur), und dafür fehlen die Daten. **(2)** Der Kommentar bei `:114-120` begründet ausführlich, warum eine Spreizungs-Schwelle **gestrichen** wurde: sie könne nicht auslösen, weil wer beide Schwellen passiert mindestens 30 Punkte Spreizung hat. Diese Begründung gilt nur, **solange die 40-%-Schwelle steht**. Wer sie ersetzt, macht den Kommentar falsch — er ist im selben PR neu zu schreiben, sonst liest ihn der Nächste als Befund (§5.77). **(3)** Das untere Kriterium bleibt der Urteilsträger und soll **nicht** angetastet werden: ein klemmend **offenes** Ventil heizt ein leeres Zimmer durch (Befund 001, 100 % bei Sollwert 10 °C), ein klemmend geschlossenes lässt es nur kalt. **Die eigentlich wertvolle Änderung ist eine andere:** das Audit hält heute `valve_position`, `observed_setpoint` und die Zeitstempel fest, aber **nicht die Raumtemperatur zum Messzeitpunkt** (`:763-793`). Ohne sie lässt sich keine Schwelle empirisch herleiten — man hätte nach 104 Geräten wieder nur Einzelfälle. Die Temperatur mitzuschreiben ist eine Zeile, und sie macht die nächste Schwellen-Entscheidung belegbar statt verhandelbar. **Empfehlung:** erst diese Zeile und die Montage zu Ende, dann die Schwelle aus den dann vorliegenden ~100 Messungen herleiten. Bis dahin ist FAIL am oberen Kriterium ein **Prüfauftrag**, kein Urteil — so wie 099 behandelt wurde. | 🟡 |
+| **B-20f-1** | **Downlink unterdrücken, bis der vorige bestätigt ist (A), und Ack-Fenster an Class A (B).** Beide aus der Analyse vom 05.10.2026. **Bewusst zurückgestellt bis nach einer Beobachtungszeit mit dem Engine-Abgleich** (T3, AE-76): der Abgleich deckt verlorene Downlinks teilweise ab — ein Gerät, dessen Befehl im Gateway verschwindet, meldet weiter den alten Wert, und der Abgleich sendet nach. Möglicherweise genügt das, und dann wäre A ein Mechanismus ohne Anlass (§0 S6). **B hat einen eigenen Anlass, der unabhängig bleibt:** `sent_to_gateway_at` wird beim **MQTT-Publish** gesetzt (`engine_tasks.py`), nicht beim Funk-Versand — der Name sagt etwas anderes. Bei Class A liegen zwischen beidem bis zu eine Keepalive-Periode, und das 60-s-Ack-Fenster (`device_adapter.py:54`, `ACK_WINDOW_SECONDS`) ist dann abgelaufen, wenn die Bestätigung des Geräts eintrifft. Folge: das Echo des eigenen Downlinks kann als Drehring-Verstellung gelesen werden. Belegt an der Zeitlinie vom 05.10.: Publish ~09:40, Auslieferung 09:45:53–09:46:09. Nach der Beobachtungszeit entscheiden, ob A, B oder beides. | 🟡 |
+| **B-20f-2** | **`OccupancyCreate` erzwingt keine Zeitzone.** Die Felder `check_in`/`check_out` sind als „timezone-aware“ **beschrieben** (`schemas/occupancy.py:16-17`), aber nichts validiert das. Ein `curl` mit `"2026-10-05T14:00:00"` ohne `Z` wird angenommen, und was der Wert dann bedeutet, entscheidet die Zeitzone der Datenbanksitzung — nicht die des Hotels. Bei UTC-Session wären das zwei Stunden daneben, also dieselbe Klasse wie der behobene Import-Befund (§5.79). Die Oberfläche ist nicht betroffen (`toISOString()`), der Weg über `curl` schon — und genau den nutzen die RUNBOOK-Handgriffe. Fix: `AwareDatetime` statt `datetime`, plus ein Test mit naivem Eingabewert. Die Beschreibung, die eine Eigenschaft behauptet, die der Code nicht prüft, ist dabei das eigentliche Problem (§5.20-Familie). | 🟡 |
+| **B-20f-3** | **„Stornieren“ wird auch bei abgelaufenen Belegungen angeboten.** Die Belegungs-Liste zeigt den Knopf an jeder Zeile, auch wenn `check_out` lange vorbei ist. Ein Storno wirkt dort nicht mehr auf die Regelung (das Zimmer ist seit der Abreise `VACANT`) und verändert nur die Historie. Harmlos, aber eine Handlung anzubieten, die nichts tut, kostet beim nächsten Mal Vertrauen in die, die etwas tut. Vorschlag: Knopf nur bei laufenden und künftigen Belegungen. | 🟢 |
+| **B-20f-4** | **Paketverlust je Gerät aus `fcnt`-Lücken ableiten.** `sensor_reading.fcnt` liegt seit Migration 0002 vor und wird heute nur für die Reboot-Erkennung gelesen (AE-63). Eine Lücke in der Folge ist ein verlorener Uplink, und die Rate je Gerät wäre die Zahl, die bei jedem Funk-Verdacht fehlt — zuletzt beim Engine-Abgleich (B-20f-1) und beim Eingangstest. Zu beachten: ein Reboot setzt den Zähler zurück, die Auswertung muss den Sprung also wie `is_reboot_frame` behandeln und nicht als Lücke von mehreren Tausend. Diagnose-Größe, keine Steuergröße. | 🟢 |
 | B-17-7 | **Ragged-CSV-Meldung ist irreführend.** Eine Datenzeile mit mehr Werten als der Header Spalten scheitert an `csv.Sniffer`, weil Spaltenzahl-Konsistenz Teil seiner Trennzeichen-Heuristik ist. Die Datei wird abgewiesen statt still gekürzt (richtig, S5), aber die Meldung nennt fälschlich das Trennzeichen als Ursache. Der praktische Excel-Fall ist nicht betroffen. Verhalten ist als Test festgehalten. | 🟢 |
 
 ---
