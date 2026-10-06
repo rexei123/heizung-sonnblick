@@ -53,9 +53,12 @@
 //   Byte 8  : Erweiterte Status-Flags
 //
 // Handverstellung (Cmd 0x28; FW >= 3.5) — Sprint 20f
+//   Ein Datensatz = 11 Byte:
 //   Byte 0  : 0x28
 //   Byte 1  : vom Gast eingestellte Zieltemperatur (uint8, degC)
 //   Byte 2+ : eingebetteter Keep-alive (Cmd 0x01/0x81, 9 Byte)
+//   MEHRERE Datensaetze je Uplink moeglich (Beleg 06.10.2026, Geraet 102:
+//   22 Byte = 16 degC dann 19 degC). Es gilt der LETZTE vollstaendige.
 //
 // Setpoint-Reply (Cmd 0x52; typisch fPort 2)
 //   Byte 0  : 0x52 = Setpoint-Reply
@@ -185,15 +188,34 @@ function decodeManualTargetChange(bytes) {
     // (Vendor-Doku docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md §1
     // "Manual target temp change").
     //
+    // Ein Datensatz ist 11 Byte:
     //   Byte 0  : 0x28
     //   Byte 1  : vom Gast eingestellte Zieltemperatur (uint8, direkt in degC)
-    //   Byte 2+ : eingebetteter Keep-alive (Cmd 0x01 oder 0x81, 9 Byte) —
-    //             wird mit-dekodiert und gemergt
+    //   Byte 2+ : eingebetteter Keep-alive (Cmd 0x01 oder 0x81, 9 Byte)
     //
-    // Live-Belege 05.10.2026 (je 11 Byte, Geraet 015 und 104):
-    //   28 14 81 14 95 95 00 d2 01 b0 30
-    //   28 14 81 14 9e 8f b9 b9 11 f0 30
-    // Beide tragen attachedBackplate=true und motorRange > 0.
+    // **Ein Uplink kann MEHRERE Datensaetze tragen** (Befund 06.10.2026).
+    // Live-Beleg Geraet 102, 05.10.2026 07:43:14, fCnt 110, 22 Byte:
+    //
+    //   28 10 81 10 a5 84 b8 b8 11 60 30   <- 16 degC
+    //   28 13 81 13 a5 84 00 b8 01 60 30   <- 19 degC
+    //
+    // Der Gast hat zweimal gedreht, und die Vicki hat beide Schritte im
+    // selben Uplink gemeldet. Die erste Fassung dieser Funktion hat nur den
+    // ERSTEN Satz ausgewertet und damit 16 statt 19 geliefert — der Override
+    // waere mit dem falschen Wert angelegt worden, und zwar fuer vier
+    // Stunden.
+    //
+    // **Es gilt der LETZTE vollstaendige Satz.** Begruendung: die Saetze sind
+    // eine Reihenfolge von Verstellungen, und der Zustand des Geraets am Ende
+    // des Uplinks ist der letzte davon. Alles Fruehere ist Historie, nicht
+    // Zustand. Dass der eingebettete Keep-alive des letzten Satzes dasselbe
+    // target_temperature traegt wie dessen Byte 1 (hier 19), ist der Beleg
+    // dafuer — das Geraet hat den Wert uebernommen.
+    //
+    // Die Zwischenwerte kommen als manual_target_history mit, **nur zur
+    // Diagnose**. Kein Konsument im Backend; wer eine Reihenfolge von
+    // Drehungen untersuchen will, findet sie sonst nur im raw_payload und
+    // muss von Hand dekodieren.
     //
     // **Warum report_type NICHT 'manual_target_reply' oder aehnlich heisst:**
     // Der Subscriber ueberspringt den sensor_reading-Insert fuer alles, was
@@ -206,12 +228,14 @@ function decodeManualTargetChange(bytes) {
     // gleichzeitig als Unterscheidungsmerkmal fuer die Override-Erkennung
     // (Sprint 20f T2).
     //
-    // Vor Sprint 20f fiel dieser Frame in decodePeriodicReport, brach dort
-    // am Command-Byte ab und erzeugte eine sensor_reading-Zeile, in der
-    // ALLES NULL war. Der Vor-Check des Eingangstests las daraus
+    // Vor Sprint 20f fiel dieser Frame in decodePeriodicReport, brach dort am
+    // Command-Byte ab und erzeugte eine sensor_reading-Zeile, in der ALLES
+    // NULL war. Der Vor-Check des Eingangstests las daraus
     // attached_backplate IS NULL und urteilte FAIL — am 05.10. traf das die
     // Geraete 038-044, alle sieben montiert und kalibriert.
+    var SATZ_LAENGE = 11;
     var data = {};
+    var warnings = [];
 
     if (bytes.length < 2) {
         return {
@@ -220,39 +244,84 @@ function decodeManualTargetChange(bytes) {
         };
     }
 
-    // Eingebetteten Keep-alive zuerst dekodieren und als Basis nehmen, damit
-    // die Messwerte (Temperatur, Spannung, Ventil, attachedBackplate,
-    // calibrationFailed) vollstaendig im Objekt landen.
-    if (bytes.length > 2) {
-        var rest = bytes.slice(2);
-        if (rest.length >= 9 && (rest[0] === 0x01 || rest[0] === 0x81)) {
-            var periodic = decodePeriodicReport(rest);
-            if (periodic && periodic.data) {
-                for (var key in periodic.data) {
-                    if (Object.prototype.hasOwnProperty.call(periodic.data, key)) {
-                        data[key] = periodic.data[key];
-                    }
+    // Saetze von vorn abgehen, solange ein vollstaendiger folgt, der mit 0x28
+    // beginnt. ``letzter`` haelt den zuletzt gueltigen.
+    var historie = [];
+    var letzter = null;
+    var i = 0;
+    while (i + SATZ_LAENGE <= bytes.length && bytes[i] === 0x28) {
+        letzter = bytes.slice(i, i + SATZ_LAENGE);
+        historie.push(bytes[i + 1]);
+        i += SATZ_LAENGE;
+    }
+
+    // Was hinten uebrig bleibt, ist ein unvollstaendiger oder fremder Satz.
+    // Er wird gemeldet und nicht gedeutet — ein halber Datensatz ist keine
+    // Aussage, und stillschweigend zu raten waere genau der Fehler, den
+    // dieser Fix behebt.
+    //
+    // Die Grenze, ab der gewarnt wird, haengt davon ab, ob ueberhaupt ein
+    // vollstaendiger Satz gefunden wurde: ohne einen werden die Bytes 0 und 1
+    // ausgewertet (kurzer Frame), und eine Warnung "ignoriert" waere dann
+    // falsch.
+    var ungedeutet = letzter === null ? bytes.length - 2 : bytes.length - i;
+    if (ungedeutet > 0) {
+        warnings.push(
+            'manual target change: ' + ungedeutet + ' trailing byte(s) ignored ' +
+            '(no further complete 0x28 record)'
+        );
+    }
+
+    if (letzter === null) {
+        // Kein vollstaendiger Satz — nur der Hand-Wert aus Byte 1. Das ist
+        // der kurze 0x28-Frame ohne eingebetteten Keep-alive.
+        data.manual_target_temperature = bytes[1];
+        data.manualTargetTemperature = bytes[1];
+        data.target_temperature = bytes[1];
+        data.targetTemperature = bytes[1];
+        data.manual_target_history = [bytes[1]];
+        data.report_type = 'manual_target_change';
+        data.command = 0x28;
+        data.manual_target_change = true;
+        return warnings.length > 0 ? { data: data, warnings: warnings } : { data: data };
+    }
+
+    // Eingebetteten Keep-alive des LETZTEN Satzes dekodieren und als Basis
+    // nehmen, damit die Messwerte (Temperatur, Spannung, Ventil,
+    // attachedBackplate, calibrationFailed) vollstaendig im Objekt landen.
+    var rest = letzter.slice(2);
+    if (rest.length >= 9 && (rest[0] === 0x01 || rest[0] === 0x81)) {
+        var periodic = decodePeriodicReport(rest);
+        if (periodic && periodic.data) {
+            for (var key in periodic.data) {
+                if (Object.prototype.hasOwnProperty.call(periodic.data, key)) {
+                    data[key] = periodic.data[key];
                 }
             }
         }
+    } else {
+        warnings.push('manual target change: embedded frame is not a keep-alive (0x01/0x81)');
     }
 
-    // Der Hand-Sollwert aus Byte 1. In allen bisher gesehenen Frames stimmt
-    // er mit dem target_temperature des eingebetteten Keep-alive ueberein —
-    // das Geraet hat den gedrehten Wert ja uebernommen. Er wird trotzdem
-    // separat emittiert: wer die beiden spaeter auseinanderlaufen sieht, hat
-    // einen Befund und nicht ein Raetsel.
-    data.manual_target_temperature = bytes[1];
-    data.manualTargetTemperature = bytes[1];
+    // Der Hand-Sollwert aus Byte 1 des letzten Satzes. In allen bisher
+    // gesehenen Frames stimmt er mit dem target_temperature des eingebetteten
+    // Keep-alive ueberein — das Geraet hat den gedrehten Wert uebernommen. Er
+    // wird trotzdem separat emittiert: wer die beiden spaeter auseinanderlaufen
+    // sieht, hat einen Befund und nicht ein Raetsel.
+    data.manual_target_temperature = letzter[1];
+    data.manualTargetTemperature = letzter[1];
 
     // Ohne eingebetteten Keep-alive gibt es kein target_temperature aus dem
     // Periodic-Teil. Dann traegt der Hand-Wert das Feld, damit die
     // Override-Erkennung ueberhaupt etwas zu vergleichen hat
     // (_handle_override_detection liest obj.target_temperature).
     if (data.target_temperature === undefined) {
-        data.target_temperature = bytes[1];
-        data.targetTemperature = bytes[1];
+        data.target_temperature = letzter[1];
+        data.targetTemperature = letzter[1];
     }
+
+    // Nur zur Diagnose, kein Konsument im Backend.
+    data.manual_target_history = historie;
 
     // Zum Schluss, damit ein aus dem Keep-alive gemergtes
     // report_type='periodic' ueberschrieben wird.
@@ -260,7 +329,7 @@ function decodeManualTargetChange(bytes) {
     data.command = 0x28;
     data.manual_target_change = true;
 
-    return { data: data };
+    return warnings.length > 0 ? { data: data, warnings: warnings } : { data: data };
 }
 
 
