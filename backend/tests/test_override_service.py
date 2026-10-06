@@ -313,20 +313,31 @@ async def test_revoke_all_active_overrides_revokes_device_and_frontend(
 
     Ersetzt ``revoke_device_overrides`` ersatzlos — neuer Vertrag: Check-out
     revoked DEVICE und FRONTEND_* in einem Aufruf.
+
+    **Reihenfolge in Sprint 20f-b umgedreht, und das ist kein Kosmetik-Fix.**
+    Der Stapel-Abbau beendet beim Anlegen alles, was der neue Override auch
+    im Lookup gewinnen wuerde. Zuerst ``device``, dann ``frontend_4h`` heisst
+    also: das Frontend verdraengt das Device, und es bleibt **einer** aktiv —
+    der Test haette dann nicht mehr geprueft, was er prueft.
+
+    Umgekehrt bleiben beide aktiv: eine Gast-Drehung verdraengt keine
+    Mitarbeiter-Eingabe (AE-58). Das ist zugleich der realistische Fall —
+    die Rezeption stellt ein, danach dreht der Gast am Rad — und damit
+    genau die Lage, in der der Check-out beide beenden muss.
     """
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
-    device = await override_service.create(
-        db_session,
-        room_id=room_id,
-        setpoint=Decimal("23.0"),
-        source=OverrideSource.DEVICE,
-        expires_at=expires,
-    )
     frontend = await override_service.create(
         db_session,
         room_id=room_id,
         setpoint=Decimal("21.0"),
         source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    device = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE_MANUAL,
         expires_at=expires,
     )
     count = await override_service.revoke_all_active_overrides(db_session, room_id)

@@ -285,7 +285,12 @@ async def test_handle_uplink_creates_device_override(session: AsyncSession) -> N
 
     assert override is not None
     assert override.room_id == room.id
-    assert override.source == OverrideSource.DEVICE
+    # Sprint 20f-b: die Quelle ist jetzt ``device_manual``. Der abgeleitete
+    # Pfad (``device``) ist entfernt, weil er Phantom-Overrides erzeugt hat —
+    # ein Keep-alive meldet bei Class A minutenlang noch den alten Sollwert,
+    # und die Engine hat daraus "der Gast hat gedreht" geschlossen. Dieser
+    # Aufruf steht fuer eine **gemeldete** Drehung (0x28).
+    assert override.source == OverrideSource.DEVICE_MANUAL
     assert override.setpoint == Decimal("23.0")
     # expires_at sollte vom Belegungs-checkout kommen (gerade 2 Tage in der Zukunft,
     # also unter dem 7-Tage-Hard-Cap).
@@ -368,7 +373,12 @@ async def test_drehring_in_occupied_with_zone_creates_override_with_zone_id(
     )
     assert override is not None
     assert override.heating_zone_id == zone_id
-    assert override.source == OverrideSource.DEVICE
+    # Sprint 20f-b: die Quelle ist jetzt ``device_manual``. Der abgeleitete
+    # Pfad (``device``) ist entfernt, weil er Phantom-Overrides erzeugt hat —
+    # ein Keep-alive meldet bei Class A minutenlang noch den alten Sollwert,
+    # und die Engine hat daraus "der Gast hat gedreht" geschlossen. Dieser
+    # Aufruf steht fuer eine **gemeldete** Drehung (0x28).
+    assert override.source == OverrideSource.DEVICE_MANUAL
     assert override.setpoint == Decimal("24.0")
 
 

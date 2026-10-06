@@ -417,7 +417,12 @@ async def test_drehring_with_monotone_fcnt_creates_override_unchanged(
     )
 
     assert result is not None
-    assert result.source == OverrideSource.DEVICE
+    # Sprint 20f-b: ``device_manual``. Der abgeleitete Pfad (``device``) ist
+    # entfernt — ein Keep-alive meldet bei Class A minutenlang noch den alten
+    # Sollwert, und die Engine hat daraus Phantom-Overrides erzeugt. Dieser
+    # Aufruf steht fuer eine **gemeldete** Drehung (0x28), und die bleibt
+    # unveraendert vom Reboot-Gate unterscheidbar — genau das prueft der Test.
+    assert result.source == OverrideSource.DEVICE_MANUAL
     assert result.setpoint == Decimal("23.0")
     assert result.room_id == room_id
 
