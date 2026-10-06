@@ -476,15 +476,61 @@ async def _handle_firmware_version_report(uplink: ChirpStackUplink) -> None:
 
 
 async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
-    """Sprint 9.9 T5: Drehknopf-Override-Detection nach Reading-Persistenz.
+    """Handverstellung am Drehrad -> Override. **Nur fuer ``0x28``.**
 
-    Vergleicht den Uplink-Setpoint mit dem letzten Engine-Send fuer
-    dasselbe Geraet (siehe ``device_adapter.detect_user_override``).
-    Bei Diff > Toleranz und ausserhalb des Acknowledgment-Windows wird
-    ein ``device``-Override angelegt. Failure ist non-fatal; wir loggen
-    und blockieren die Subscriber-Loop nicht.
+    Sprint 9.9 T5 hat das als Vergleich gebaut: Uplink-Setpoint gegen den
+    letzten Engine-Send, und bei genuegend Unterschied einen
+    ``device``-Override (AE-45). Das war die einzige Moeglichkeit, solange
+    keine ausdrueckliche Meldung existierte.
+
+    **Sprint 20f-b: der Vergleichspfad ist entfernt, und zwar wegen eines
+    belegten Produktionsfehlers.**
+
+    Zeitlinie vom 05.10.2026, Zimmer 101 (Geraete 009 und 010):
+
+        20:00:59  Engine sendet Nachtabsenkung 19 °C
+        20:03:25  Keep-alive meldet noch **21** — Class-A-Latenz, das
+                  Geraet hat den Befehl noch nicht umgesetzt
+                  -> alte Erkennung sieht "21 statt 19" und legt
+                     Override 40 mit **21 °C** an, Ablauf Check-out
+        (Engine regelt jetzt auf 21, weil der Override das sagt)
+        20:13:36  Geraet meldet **19** — der erste Befehl ist angekommen
+                  -> alte Erkennung sieht "19 statt 21" und legt
+                     Override 42 mit **19 °C** an
+
+    Ping-Pong. Beide Overrides sind Phantome: niemand hat gedreht.
+
+    **Und es war kein Einzelfall, sondern der Normalfall.** Die Bedingung
+    ist "Engine aendert den Sollwert in einem belegten Zimmer" — also
+    **jede Nachtabsenkung in jedem belegten Zimmer, jede Nacht**. Jede
+    davon haette einen Phantom-Override bis zum Check-out erzeugt.
+
+    Das 60-s-Ack-Fenster haette das abfangen sollen und kann es nicht: es
+    wird ab dem **MQTT-Publish** gemessen (``engine_tasks.py``, nicht ab
+    dem Funk-Versand), und bei Class A liegen dazwischen bis zu eine
+    Keep-alive-Periode. 20:00:59 bis 20:03:25 sind 146 Sekunden.
+
+    Seit Sprint 20f T1 ist der Vergleich auch nicht mehr noetig: der
+    ``0x28``-Frame **meldet** die Drehung. Ein Sollwert-Unterschied **ohne**
+    ``0x28`` ist damit kein Gastwunsch, sondern Drift — und fuer Drift gibt
+    es seit T3 die richtige Antwort: der Engine-Abgleich holt den Sollwert
+    zurueck, statt die Abweichung zu adoptieren (AE-76).
+
+    Failure ist non-fatal; wir loggen und blockieren die Subscriber-Loop
+    nicht.
     """
     obj = uplink.object or {}
+
+    # **Sprint 20f-b: der Torwaechter.** Nur ein Frame, in dem die Vicki die
+    # Drehung ausdruecklich meldet, fuehrt zu einem Override. Alles andere —
+    # Keep-alive, Setpoint-Reply, FW-Antwort — kehrt hier um.
+    #
+    # Das ist die eine Zeile, die den Phantom-Override verhindert. Sie steht
+    # in der Funktion und nicht an der Aufrufstelle, damit sie gilt, egal wer
+    # ruft, und damit ein Test sie direkt pruefen kann.
+    if obj.get("report_type") != MANUAL_TARGET_REPORT_TYPE:
+        return
+
     target_temp_raw = obj.get("target_temperature")
     if target_temp_raw is None:
         return
@@ -508,10 +554,6 @@ async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
                 # Beide Pflicht-Felder im Schema (kein None-Fallback noetig).
                 dev_eui=dev_eui,
                 current_fcnt=uplink.fCnt,
-                # Sprint 20f (T2): hat die Vicki die Drehung selbst gemeldet
-                # (0x28) oder leiten wir sie aus einem Setpoint-Unterschied
-                # ab? Davon haengen Quelle und Ablauf des Overrides ab.
-                manuell_gemeldet=obj.get("report_type") == MANUAL_TARGET_REPORT_TYPE,
             )
             if override is not None:
                 await session.commit()
@@ -587,11 +629,20 @@ async def _consume_loop() -> None:
                             uplink.deviceInfo.devEui,
                             obj.get("report_type"),
                         )
-                        await _handle_override_detection(uplink)
-                        # Sprint 9.11x.b: FW + OW-Status sind eigene Reply-
-                        # Typen (siehe REPLY_REPORT_TYPES). Override-Detection
-                        # ist defensive (fehlt target_temperature -> return),
-                        # daher safe fuer alle Reply-Typen aufzurufen.
+                        # Sprint 20f-b: **hier stand ein Aufruf von
+                        # ``_handle_override_detection``**, und er war die
+                        # Haelfte des Phantom-Override-Befunds.
+                        #
+                        # Der alte Kommentar dazu lautete "der Drehring meldet
+                        # seinen Setpoint hier zurueck" — das war richtig,
+                        # solange ``0x52`` die einzige Spur einer Drehung war.
+                        # Seit Sprint 20f T1 den ``0x28``-Frame dekodiert, ist
+                        # ``0x52`` nur noch die **Bestaetigung des eigenen
+                        # Downlinks**, und die als Gastwunsch zu lesen ist
+                        # zirkulaer: die Engine adoptiert ihren eigenen Befehl.
+                        #
+                        # FW + OW-Status bleiben, sie haben mit Overrides
+                        # nichts zu tun.
                         await _handle_firmware_version_report(uplink)
                         await _handle_open_window_status_report(uplink)
                         continue
@@ -604,6 +655,10 @@ async def _consume_loop() -> None:
                             uplink.deviceInfo.devEui,
                         )
 
+                    # Sprint 20f-b: die Funktion prueft selbst, ob der Frame
+                    # eine Handverstellung ist, und kehrt sonst sofort zurueck.
+                    # Die Bedingung steht dort und nicht hier, damit sie
+                    # unabhaengig von der Aufrufstelle gilt und testbar ist.
                     await _handle_override_detection(uplink)
                     await _handle_firmware_version_report(uplink)
                     await _handle_open_window_status_report(uplink)

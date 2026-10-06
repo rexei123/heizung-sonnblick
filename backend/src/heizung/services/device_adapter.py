@@ -278,7 +278,6 @@ async def handle_uplink_for_override(
     *,
     dev_eui: str | None = None,
     current_fcnt: int | None = None,
-    manuell_gemeldet: bool = False,
 ) -> ManualOverride | None:
     """Vollstaendiger Pfad: Detection + Pre-Insert-Gates + Override-Erzeugung.
 
@@ -449,24 +448,28 @@ async def handle_uplink_for_override(
 
     # Gate (d): Override anlegen.
     #
-    # Sprint 20f (T2): zwei Quellen, und der Unterschied ist nicht Kosmetik.
+    # **Sprint 20f-b: nur noch eine Quelle.** Bis hierher entschied ein
+    # Parameter ``manuell_gemeldet`` zwischen ``device_manual`` (0x28
+    # gemeldet, 4 h) und ``device`` (aus einem Sollwert-Unterschied
+    # abgeleitet, Ablauf Check-out).
     #
-    # ``device_manual`` setzt ein Frame, in dem die Vicki die Drehung
-    # **ausdruecklich meldet** (0x28, FW >= 3.5, seit T1 dekodiert). Ablauf
-    # vier Stunden — wer sicher weiss, dass ein Mensch gedreht hat, braucht
-    # die Absicherung "im Zweifel bis zum Check-out halten" nicht.
+    # Der abgeleitete Weg ist entfernt, weil er in Produktion Phantome
+    # erzeugt hat: ein Keep-alive meldet den Wert, den das Geraet **gerade
+    # haelt**, und bei Class A ist das nach einem Downlink minutenlang noch
+    # der alte. Die Engine hat daraus "der Gast hat gedreht" geschlossen und
+    # ihren eigenen vorherigen Zustand als Gastwunsch bis zum Check-out
+    # festgeschrieben — bei **jeder** Nachtabsenkung in **jedem** belegten
+    # Zimmer. Zeitlinie und Belege im Docstring von
+    # ``mqtt_subscriber._handle_override_detection``.
     #
-    # ``device`` bleibt der abgeleitete Befund: der gemeldete Sollwert weicht
-    # vom letzten Engine-Send ab (AE-45). Das kann auch Reboot-Drift oder ein
-    # verlorener Downlink sein, deshalb der lange Ablauf.
-    #
-    # Beide enden zusaetzlich mit der Abreise (``auto_revoke_on_checkout``).
-    quelle = OverrideSource.DEVICE_MANUAL if manuell_gemeldet else OverrideSource.DEVICE
+    # ``OverrideSource.DEVICE`` bleibt im Enum und in der DB-Beschraenkung:
+    # Bestandszeilen tragen den Wert, und sie umzudeuten waere eine
+    # Behauptung (§5.68). Neu angelegt wird er nicht mehr.
     next_checkout = await next_active_checkout(session, room_id, now=received_at)
     hotel_config = await session.get(GlobalConfig, 1)
 
     expires_at = override_service.compute_expires_at(
-        quelle,
+        OverrideSource.DEVICE_MANUAL,
         received_at,
         next_checkout_at=next_checkout,
         hotel_config=hotel_config,
@@ -476,12 +479,8 @@ async def handle_uplink_for_override(
         session,
         room_id=room_id,
         setpoint=user_setpoint,
-        source=quelle,
+        source=OverrideSource.DEVICE_MANUAL,
         expires_at=expires_at,
-        reason=(
-            "auto: Handverstellung am Drehrad (0x28 gemeldet)"
-            if manuell_gemeldet
-            else "auto: detected user setpoint change"
-        ),
+        reason="auto: Handverstellung am Drehrad (0x28 gemeldet)",
         heating_zone_id=heating_zone_id,
     )

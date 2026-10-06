@@ -17,13 +17,20 @@ import type { OverrideSource } from "@/lib/api/types";
 // Map. Geräte-Seite hat einen eigenen ausführlicheren Map
 // (``app/devices/[device_id]/page.tsx::OVERRIDE_SOURCE_LABEL``).
 export const SOURCE_LABEL: Record<OverrideSource, string> = {
-  device: "Drehknopf (Gast)",
+  // Sprint 20f-b: ``device_manual`` ist die **gemeldete** Drehung (0x28) und
+  // laeuft nach 4 h ab. ``device`` war die aus einem Sollwert-Unterschied
+  // abgeleitete Vermutung — sie wird seit 20f-b nicht mehr angelegt, weil sie
+  // Phantome erzeugt hat. Das Etikett sagt das, damit eine Bestandszeile
+  // nicht wie ein Gastwunsch gelesen wird.
+  device_manual: "Drehknopf (Gast)",
+  device: "Drehknopf, vermutet (alt)",
   frontend_4h: "4 Stunden (Mitarbeiter)",
   frontend_midnight: "Bis Mitternacht (Mitarbeiter)",
   frontend_checkout: "Bis Check-out (Mitarbeiter)",
 };
 
 export const SOURCE_ICON: Record<OverrideSource, string> = {
+  device_manual: "tune",
   device: "tune",
   frontend_4h: "schedule",
   frontend_midnight: "bedtime",
