@@ -350,17 +350,42 @@ def _mirror_decode_periodic(b: list[int]) -> dict[str, object] | None:
 
 
 def _mirror_decode_manual_target(b: list[int]) -> dict[str, object]:
-    """Spiegel von ``decodeManualTargetChange`` (Codec Sprint 20f)."""
+    """Spiegel von ``decodeManualTargetChange`` (Codec Sprint 20f).
+
+    **Ein Uplink kann mehrere Datensaetze tragen** (Befund 06.10.2026,
+    Geraet 102). Es gilt der **letzte vollstaendige** — die Saetze sind eine
+    Reihenfolge von Verstellungen, und der Zustand am Ende des Uplinks ist der
+    letzte davon.
+    """
+    satz_laenge = 11
     data: dict[str, object] = {}
     if len(b) < 2:
         return {"command": 0x28, "report_type": "manual_target_change"}
-    if len(b) > 2:
-        eingebettet = _mirror_decode_periodic(b[2:])
-        if eingebettet is not None:
-            data.update(eingebettet)
-    data["manual_target_temperature"] = b[1]
-    if "target_temperature" not in data:
+
+    historie: list[int] = []
+    letzter: list[int] | None = None
+    i = 0
+    while i + satz_laenge <= len(b) and b[i] == 0x28:
+        letzter = b[i : i + satz_laenge]
+        historie.append(b[i + 1])
+        i += satz_laenge
+
+    if letzter is None:
+        data["manual_target_temperature"] = b[1]
         data["target_temperature"] = b[1]
+        data["manual_target_history"] = [b[1]]
+        data["report_type"] = "manual_target_change"
+        data["command"] = 0x28
+        data["manual_target_change"] = True
+        return data
+
+    eingebettet = _mirror_decode_periodic(letzter[2:])
+    if eingebettet is not None:
+        data.update(eingebettet)
+    data["manual_target_temperature"] = letzter[1]
+    if "target_temperature" not in data:
+        data["target_temperature"] = letzter[1]
+    data["manual_target_history"] = historie
     data["report_type"] = "manual_target_change"
     data["command"] = 0x28
     data["manual_target_change"] = True
@@ -469,3 +494,125 @@ def test_0x28_calibration_failed_kommt_aus_dem_eingebetteten_frame() -> None:
     assert d["calibrationFailed"] is True
     assert d["attachedBackplate"] is True, "0x20 bleibt gesetzt"
     assert d["perceiveAsOnline"] is True, "0x10 bleibt gesetzt"
+
+
+# ---------------------------------------------------------------------------
+# 0x28 mit MEHREREN Datensaetzen (Befund 06.10.2026)
+# ---------------------------------------------------------------------------
+#
+# **Live-Beleg Geraet 102**, 05.10.2026 07:43:14, fCnt 110, 22 Byte:
+#
+#     28 10 81 10 a5 84 b8 b8 11 60 30   <- 16 degC
+#     28 13 81 13 a5 84 00 b8 01 60 30   <- 19 degC
+#
+# Der Gast hat zweimal gedreht, und die Vicki hat beide Schritte im selben
+# Uplink gemeldet. Die erste Fassung von ``decodeManualTargetChange`` hat nur
+# den **ersten** Satz ausgewertet und damit 16 statt 19 geliefert.
+#
+# Die Folge war nicht kosmetisch: Sprint 20f T2 legt aus diesem Wert einen
+# ``device_manual``-Override an, mit vier Stunden Laufzeit. Das Zimmer waere
+# also vier Stunden auf 16 °C geregelt worden, waehrend der Gast 19 °C
+# eingestellt hat.
+
+# Live-Beleg Geraet 102 — zwei Saetze in einem Uplink.
+REAL_0X28_ZWEI_SAETZE = "28108110a584b8b8116030" + "28138113a58400b8016030"
+
+
+def test_0x28_mehrere_saetze_der_letzte_gilt() -> None:
+    """**Die Regressions-Wand fuer den Befund vom 06.10.2026.**
+
+    Erwartung **19**, nicht 16. Begruendung: die Saetze sind eine Reihenfolge
+    von Verstellungen, und der Zustand des Geraets am Ende des Uplinks ist der
+    letzte davon.
+
+    Der Beleg dafuer steckt im Frame selbst: der eingebettete Keep-alive des
+    letzten Satzes traegt dasselbe ``target_temperature`` (19) wie dessen
+    Byte 1 — das Geraet hat den Wert uebernommen.
+    """
+    b = list(bytes.fromhex(REAL_0X28_ZWEI_SAETZE))
+    assert len(b) == 22
+
+    d = _mirror_decode_manual_target(b)
+
+    assert d["manual_target_temperature"] == 19, "der ERSTE Satz waere 16"
+    assert d["target_temperature"] == 19
+    # Und der Keep-alive, der ausgewertet wird, ist der des letzten Satzes:
+    # dort steht das Ventil auf 100 %, im ersten auf 0 %.
+    assert d["valve_openness"] == 100
+
+
+def test_0x28_mehrere_saetze_historie_ist_vollstaendig() -> None:
+    """Die Zwischenwerte gehen nicht verloren — aber nur zur Diagnose.
+
+    ``manual_target_history`` hat **keinen** Konsumenten im Backend. Sie steht
+    im Objekt, damit eine Reihenfolge von Drehungen nachvollziehbar ist, ohne
+    den ``raw_payload`` von Hand zu dekodieren.
+    """
+    d = _mirror_decode_manual_target(list(bytes.fromhex(REAL_0X28_ZWEI_SAETZE)))
+
+    assert d["manual_target_history"] == [16, 19]
+
+
+def test_0x28_ein_satz_hat_eine_historie_mit_einem_eintrag() -> None:
+    """Der Bestandsfall bleibt unveraendert — mit Historie der Laenge 1.
+
+    Haelt fest, dass das Feld immer vorhanden ist. Ein Feld, das nur manchmal
+    da ist, erzeugt beim Konsumenten eine Fallunterscheidung, die niemand
+    testet.
+    """
+    for hex_wert in REAL_0X28.values():
+        d = _mirror_decode_manual_target(list(bytes.fromhex(hex_wert)))
+
+        assert d["manual_target_history"] == [d["manual_target_temperature"]]
+        assert len(d["manual_target_history"]) == 1  # type: ignore[arg-type]
+
+
+def test_0x28_drei_saetze_der_letzte_gilt() -> None:
+    """Die Zerlegung ist nicht auf zwei Saetze festgenagelt.
+
+    Synthetisch: drei Saetze mit unterschiedlichen Hand-Werten. Ohne diesen
+    Test koennte die Schleife als ``if`` statt ``while`` geschrieben sein und
+    waere beim Zwei-Satz-Beleg trotzdem gruen.
+    """
+    satz = list(bytes.fromhex(REAL_0X28["015"]))  # Hand-Wert 20
+    eins = satz[:]
+    zwei = satz[:]
+    zwei[1] = 18
+    drei = satz[:]
+    drei[1] = 23
+
+    d = _mirror_decode_manual_target(eins + zwei + drei)
+
+    assert d["manual_target_temperature"] == 23
+    assert d["manual_target_history"] == [20, 18, 23]
+
+
+def test_0x28_unvollstaendiger_rest_wird_nicht_gedeutet() -> None:
+    """Ein halber Datensatz ist keine Aussage.
+
+    Der vollstaendige Satz davor gilt; die Rest-Bytes werden verworfen (der
+    echte Codec meldet dazu eine ``warning``). Stillschweigend zu raten waere
+    genau der Fehler, den dieser Fix behebt — nur in der anderen Richtung.
+    """
+    vollstaendig = list(bytes.fromhex(REAL_0X28["015"]))
+
+    d = _mirror_decode_manual_target(vollstaendig + [0x28, 0x14, 0x81])
+
+    assert d["manual_target_temperature"] == 20
+    assert d["manual_target_history"] == [20]
+
+
+def test_0x28_zweiter_satz_ohne_28_praefix_wird_abgebrochen() -> None:
+    """Die Zerlegung verlangt ``0x28`` am Satzanfang.
+
+    Ein Uplink, der hinter dem ersten Satz etwas anderes traegt, wird nicht
+    als zweiter Hand-Wert gelesen. Ohne diese Bedingung wuerde jedes
+    beliebige Byte-Paar an Position 11/12 zu einem Sollwert.
+    """
+    vollstaendig = list(bytes.fromhex(REAL_0X28["015"]))
+    fremd = [0x81, 0x14, 0x95, 0x95, 0x00, 0xD2, 0x01, 0xB0, 0x30, 0x00, 0x00]
+
+    d = _mirror_decode_manual_target(vollstaendig + fremd)
+
+    assert d["manual_target_temperature"] == 20
+    assert d["manual_target_history"] == [20]
