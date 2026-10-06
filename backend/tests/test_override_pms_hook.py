@@ -145,13 +145,30 @@ async def test_occupied_to_vacant_no_followup_revokes(session: AsyncSession) -> 
     assert override.revoked_reason == "auto_revoke_on_checkout"
 
 
-async def test_occupied_to_vacant_with_followup_in_2h_does_not_revoke(
+async def test_occupied_to_vacant_mit_folgegast_in_2h_revoked_trotzdem(
     session: AsyncSession,
 ) -> None:
+    """**Umgedreht in Sprint 20f (T5).** Ein Folgegast schuetzt nichts mehr.
+
+    Bis hierher unterblieb der Widerruf, wenn innerhalb von vier Stunden ein
+    Folgegast erwartet wurde (``CHECKOUT_GRACE_WINDOW``). Die fachliche Regel
+    des Hotels ist eindeutig: **ein Override endet mit jeder Abreise, ohne
+    Ausnahme.**
+
+    Der Override gehoert dem Gast, der gegangen ist. Ob der naechste in zwei
+    oder in zwanzig Stunden kommt, aendert daran nichts — er bekommt ein
+    Zimmer auf den globalen Einstellungen, nicht die Wunschtemperatur seines
+    Vorgaengers.
+
+    Dieser Test hiess vorher ``..._does_not_revoke`` und sicherte das
+    Gegenteil zu. Er ist nicht geloescht, sondern umgedreht: wer die alte
+    Zusicherung sucht, findet hier die Begruendung, warum sie nicht mehr
+    gilt.
+    """
     now = datetime.now(tz=UTC)
     room_id, _ = await _seed_room_with_device(session)
     override = await _add_device_override(session, room_id, now + timedelta(days=2))
-    # Folgegast in 2 Stunden -> Auto-Revoke darf NICHT triggern
+    # Folgegast in 2 Stunden — ohne Wirkung auf den Widerruf.
     session.add(
         Occupancy(
             room_id=room_id,
@@ -168,9 +185,10 @@ async def test_occupied_to_vacant_with_followup_in_2h_does_not_revoke(
         new_status=RoomStatus.VACANT,
         now=now,
     )
-    assert revoked == 0
+    assert revoked == 1
     await session.refresh(override)
-    assert override.revoked_at is None
+    assert override.revoked_at is not None
+    assert override.revoked_reason == "auto_revoke_on_checkout"
 
 
 async def test_vacant_to_occupied_does_not_revoke(session: AsyncSession) -> None:
@@ -191,7 +209,21 @@ async def test_vacant_to_occupied_does_not_revoke(session: AsyncSession) -> None
 
 
 async def test_occupied_to_cleaning_does_not_revoke(session: AsyncSession) -> None:
-    """Nur ``OCCUPIED -> VACANT`` triggert. CLEANING hat eigenen Lifecycle."""
+    """Nur ``OCCUPIED -> VACANT`` triggert — **unveraendert in Sprint 20f**.
+
+    Der Auftrag zu T5 sah zunaechst vor, auch ``OCCUPIED -> CLEANING`` zu
+    widerrufen. Die Vorab-Analyse hat gezeigt, dass dieser Wechsel diesen
+    Hook gar nicht erreicht: ``CLEANING`` wird **nie automatisch** gesetzt
+    (``derive_room_status`` kennt den Wert nicht, ``sync_room_status``
+    schuetzt ihn sogar), sondern ausschliesslich von einem Admin ueber
+    ``PATCH /rooms/{id}`` — und dieser Pfad ruft ``auto_revoke_on_checkout``
+    nicht auf.
+
+    Der Hotelier hat daraufhin entschieden: ``CLEANING`` wird im Haus nicht
+    genutzt, also kein zweiter Aufrufpunkt (§0 S6 — die einfachere Variante
+    reicht, solange niemand den Zustand setzt). Wer ``CLEANING`` spaeter
+    einfuehrt, findet die Luecke hier beschrieben.
+    """
     now = datetime.now(tz=UTC)
     room_id, _ = await _seed_room_with_device(session)
     override = await _add_device_override(session, room_id, now + timedelta(days=2))
@@ -273,14 +305,19 @@ async def test_checkout_revoked_alle_override_quellen(session: AsyncSession) -> 
     assert frontend_override.revoked_reason == "auto_revoke_on_checkout"
 
 
-async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSession) -> None:
-    """T6: Folge-Checkin innerhalb 4h Grace -> keine Revokation, auch fuer
-    FRONTEND-Quelle.
+async def test_checkout_mit_folge_checkin_revoked_auch_frontend(
+    session: AsyncSession,
+) -> None:
+    """**Umgedreht in Sprint 20f (T5)**, Gegenstueck mit FRONTEND-Quelle.
 
-    Bestaetigt: ``CHECKOUT_GRACE_WINDOW=4h`` aus Sprint 9.9 T6 weiter
-    aktiv, gilt jetzt fuer alle Override-Quellen (FRONTEND_* + DEVICE).
-    Komplement zu ``test_occupied_to_vacant_with_followup_in_2h_does_not_revoke``
-    (DEVICE-Quelle), pruefen wir hier FRONTEND_4H am 4h-Boundary.
+    Der Test prueft seit Sprint 12a T6, dass die Regel fuer **alle** Quellen
+    gleich gilt — damals "kein Widerruf bei Folgegast", jetzt "Widerruf
+    immer". Die Mitarbeiter-Eingabe traegt genauso wenig ueber die Abreise
+    hinaus wie die Gast-Drehung.
+
+    Der Folge-Checkin steht weiter auf exakt vier Stunden: das war die
+    Grenze des alten Fensters, und ein Test genau dort zeigt am
+    deutlichsten, dass es keine Grenze mehr gibt.
     """
     now = datetime.now(tz=UTC)
     room_id, _ = await _seed_room_with_device(session)
@@ -293,7 +330,7 @@ async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSess
         expires_at=expires,
     )
     session.add(frontend_override)
-    # Folge-Checkin in exakt 4h -> inklusive Grace, kein Revoke.
+    # Folge-Checkin in exakt 4h — die alte Fenstergrenze, jetzt ohne Wirkung.
     session.add(
         Occupancy(
             room_id=room_id,
@@ -310,9 +347,10 @@ async def test_checkout_mit_folge_checkin_4h_keine_revokation(session: AsyncSess
         new_status=RoomStatus.VACANT,
         now=now,
     )
-    assert revoked == 0
+    assert revoked == 1
     await session.refresh(frontend_override)
-    assert frontend_override.revoked_at is None
+    assert frontend_override.revoked_at is not None
+    assert frontend_override.revoked_reason == "auto_revoke_on_checkout"
 
 
 # ---------------------------------------------------------------------------

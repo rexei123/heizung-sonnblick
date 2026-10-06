@@ -241,7 +241,10 @@ function LayerTrace({ entries, zones }: { entries: EventLogEntry[]; zones: Heati
               </td>
               <td className="px-4 py-2 text-sm text-text-tertiary">
                 {e.layer === "manual_override" ? (
-                  <ManualOverrideDetail entry={e} />
+                  <ManualOverrideDetail
+                    entry={e}
+                    hatZonenOverrides={zoneOverrides.length > 0}
+                  />
                 ) : (
                   ((e.details && typeof e.details.detail === "string"
                     ? e.details.detail
@@ -324,7 +327,35 @@ function ZoneOverridesBlock({
   );
 }
 
-function ManualOverrideDetail({ entry }: { entry: EventLogEntry }) {
+/**
+ * Detail-Zelle der Schicht „Manueller Override".
+ *
+ * **Sprint 20f (T6): der Text sagt jetzt, auf welchen Geltungsbereich er sich
+ * bezieht.** Vorher stand hier „kein aktiver Override", und das war für seinen
+ * Geltungsbereich richtig und für den Leser falsch.
+ *
+ * Der Grund: diese Zelle zeigt das Ergebnis der **Zimmer**-Abfrage, und die
+ * sieht zonen-weite Overrides laut Entwurf nicht
+ * (`override_service.get_active` mit `heating_zone_id=None` betrachtet
+ * ausschließlich Room-Scope-Overrides). Ein Zonen-Override steht deshalb
+ * ausschließlich im Block „Pro-Zone-Setpoints" darunter.
+ *
+ * Am 05.10.2026 hat genau das eine Fehlersuche gekostet: Zimmer 207 zeigte
+ * auf Zimmer-Ebene 21 °C mit „kein aktiver Override" und darunter
+ * Schlafzimmer = 25 °C. Zwei Zahlen, die sich zu widersprechen schienen —
+ * weil der Satz „es gibt keinen Override" gelesen wurde, wo „es gibt keinen
+ * **zimmerweiten** Override" gemeint war.
+ *
+ * Dieselbe Klasse wie §5.57: die Information ist da, nur nicht dort, wo der
+ * Leser sie sucht.
+ */
+function ManualOverrideDetail({
+  entry,
+  hatZonenOverrides = false,
+}: {
+  entry: EventLogEntry;
+  hatZonenOverrides?: boolean;
+}) {
   const details = entry.details ?? {};
   const sourceRaw = details["source"];
   const expiresAtRaw = details["expires_at"];
@@ -335,7 +366,19 @@ function ManualOverrideDetail({ entry }: { entry: EventLogEntry }) {
   const expiresAt = typeof expiresAtRaw === "string" ? expiresAtRaw : null;
 
   if (source === null) {
-    return <span className="italic text-text-tertiary">kein aktiver Override</span>;
+    return (
+      <span className="italic text-text-tertiary">
+        kein zimmerweiter Override
+        {hatZonenOverrides ? (
+          <>
+            {" — siehe "}
+            <span className="not-italic font-medium text-text-secondary">
+              Pro-Zone-Setpoints
+            </span>
+          </>
+        ) : null}
+      </span>
+    );
   }
   return <ActiveOverrideDetail source={source} expiresAt={expiresAt} />;
 }

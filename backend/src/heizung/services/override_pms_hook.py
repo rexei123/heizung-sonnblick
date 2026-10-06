@@ -3,11 +3,25 @@
 Sprint 9.9 T6, Sprint 12a T2/T6 (AE-58), Sprint 13 Hygiene (B-12c-AuditGap).
 
 Wird vom Belegungs-Service nach jedem Status-Wechsel aufgerufen
-(``occupancy_service.sync_room_status``). Wenn ein Raum von ``OCCUPIED``
-auf ``VACANT`` wechselt UND keine neue Reservation in den naechsten
-4 Stunden ansteht, werden ALLE aktiven Overrides fuer den Raum revokiert
-(``override_service.revoke_all_active_overrides`` — Sprint 12a T2 hat
-das von „nur device" auf „alle Quellen" erweitert, AE-58).
+(``occupancy_service.sync_room_status``). Wechselt ein Raum von
+``OCCUPIED`` auf ``VACANT``, werden ALLE aktiven Overrides fuer den Raum
+revokiert (``override_service.revoke_all_active_overrides`` — Sprint 12a T2
+hat das von „nur device" auf „alle Quellen" erweitert, AE-58).
+
+**Sprint 20f (T5): das Gnaden-Fenster ist entfallen.** Bis hierher
+unterblieb der Widerruf, wenn innerhalb von vier Stunden ein Folgegast
+erwartet wurde (``CHECKOUT_GRACE_WINDOW``). Die fachliche Regel des Hotels
+ist eindeutig: **ein Override endet mit jeder Abreise, ohne Ausnahme.**
+
+Die Begruendung des Hoteliers trifft den Kern: der Override gehoert dem
+Gast, der gegangen ist. Ob der naechste in zwei oder in zwanzig Stunden
+kommt, aendert daran nichts — er bekommt ein Zimmer auf den globalen
+Einstellungen, nicht die Wunschtemperatur seines Vorgaengers.
+
+Ueberlappende Buchungen bleiben unberuehrt: dort bleibt das Zimmer
+``OCCUPIED``, der Statuswechsel tritt gar nicht ein, und dieser Hook wird
+nicht wirksam. Das Fenster hat also nie den Fall geschuetzt, fuer den man
+es vermuten wuerde.
 
 Sprint 13 Hygiene (B-12c-AuditGap): zusaetzlich wird pro effektiver
 Revokation ein BusinessAudit-Eintrag ``OVERRIDES_AUTO_REVOKED_ON_CHECKOUT``
@@ -31,18 +45,15 @@ Hook dort zusaetzlich aufzurufen.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.enums import RoomStatus
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.occupancy_service import next_active_checkin
 
 logger = logging.getLogger(__name__)
-
-CHECKOUT_GRACE_WINDOW = timedelta(hours=4)
 
 # Sprint 13 Hygiene (B-12c-AuditGap): String wird sowohl als
 # ``manual_override.revoked_reason`` als auch als
@@ -60,26 +71,29 @@ async def auto_revoke_on_checkout(
     new_status: RoomStatus,
     now: datetime,
 ) -> int:
-    """Revokes alle aktiven Overrides, wenn der Raum gerade auf
-    ``VACANT`` wechselt und kein Folgegast innerhalb von 4 Stunden
-    erwartet wird. Schreibt bei effektiver Revokation einen
+    """Revokes alle aktiven Overrides, wenn der Raum auf ``VACANT`` wechselt.
+
+    Schreibt bei effektiver Revokation einen
     ``OVERRIDES_AUTO_REVOKED_ON_CHECKOUT`` BusinessAudit-Eintrag in
     derselben Transaktion (Sprint 13 Hygiene B-12c-AuditGap).
+
+    **Sprint 20f (T5): ohne Gnaden-Fenster.** Vorher unterblieb der
+    Widerruf, wenn innerhalb von vier Stunden ein Folgegast erwartet wurde.
+    Jetzt endet jeder Override mit jeder Abreise — siehe Modul-Kopf.
+
+    ``now`` bleibt in der Signatur, obwohl die Funktion den Wert nicht mehr
+    selbst braucht: sie reicht ihn an ``revoke_all_active_overrides`` weiter,
+    und dort ist er der Bezugspunkt fuer den ``expires_at``-Vergleich **und**
+    fuer den ``revoked_at``-Stempel. Die Kette
+    ``sync_active_rooms -> sync_room_status -> auto_revoke_on_checkout``
+    reicht ihn seit Sprint 15g durch; wer ihn hier entfernt, laesst die
+    letzte Stufe wieder auf die Wanduhr zurueckfallen (§5.59-Familie).
 
     Returns Anzahl der revokierten Overrides (0, wenn der Trigger nicht
     greift oder kein aktiver Override existiert). Bei Returncount 0 wird
     KEIN Audit geschrieben (Idempotenz-Pfad analog 12c).
     """
     if previous_status != RoomStatus.OCCUPIED or new_status != RoomStatus.VACANT:
-        return 0
-
-    has_followup = await next_active_checkin(
-        session,
-        room_id,
-        within=CHECKOUT_GRACE_WINDOW,
-        now=now,
-    )
-    if has_followup:
         return 0
 
     revoked = await override_service.revoke_all_active_overrides(
