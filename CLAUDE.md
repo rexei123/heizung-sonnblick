@@ -2918,6 +2918,47 @@ zugeschlagen: am 29.09., im Montagefenster.
 Damit sind es drei Belege in acht Tagen — mypy, SQLAlchemy, Alembic. Der
 Punkt ist belegt und nur noch zu terminieren (B-18-6).
 
+#### Vierter Fall, 05.10.2026: Typ-Stubs, die sich widersprechen
+
+| | lokal | CI |
+|---|---|---|
+| redis-py-Stub von `client.incr()` | `Awaitable[Any] \| Any` | `int` |
+
+Derselbe **synchrone** Client, zwei Signaturen. Eine Typ-Zusicherung
+(`cast`) ist damit lokal **notwendig** und in CI **redundant**, und mypy
+meldet beides als Fehler. Lokal gruen, CI rot mit
+`Redundant cast to "int"` — in einer Datei, die der PR gerade angelegt
+hatte, also ohne jeden Hinweis auf eine Umgebungsursache.
+
+Dieser Fall ist unangenehmer als die drei oberen, weil die naheliegende
+Reaktion ihn **nicht** behebt: wer die Zusicherung entfernt, macht CI gruen
+und lokal rot. Wer sie behaelt, umgekehrt. Ein `type: ignore` scheitert an
+derselben Spaltung (in der einen Umgebung unbenutzt).
+
+**Die Loesung gehoert nicht ins Typsystem, sondern in den Code.** Eine
+Funktion, die `object` nimmt und zur Laufzeit entscheidet, ist gegen beide
+Stub-Varianten zuweisbar:
+
+```python
+def _zu_int(wert: object, *, standard: int = 0) -> int:
+    if isinstance(wert, bool):
+        return int(wert)
+    if isinstance(wert, int):
+        return wert
+    ...
+```
+
+Und sie ist nicht nur ein Trick gegen mypy: zur Laufzeit liefert Redis je
+nach `decode_responses` tatsaechlich `int`, `bytes` oder `str`. Der Stub war
+also in **beiden** Fassungen ungenau, und der Code hat vorher auf eine
+Zufaelligkeit der Umgebung gebaut. Die Tests dazu halten die drei
+Laufzeit-Formen fest, damit die Funktion nicht spaeter "vereinfacht" wird.
+
+**Regel:** Wo ein Stub je nach Fassung verschieden aussieht, wird nicht die
+Zusicherung gepflegt, sondern die Schnittstelle so geschnitten, dass sie
+ohne Zusicherung auskommt. Eine Typ-Zusicherung, die von der installierten
+Paketversion abhaengt, ist kein Typ-Wissen — sie ist eine Wette.
+
 #### Was ein Lockfile daran aendert
 
 Im Frontend steht in `package.json` ueberall `^` — und das ist **kein**

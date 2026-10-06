@@ -3680,3 +3680,100 @@ Zone-Spalte hinkt nach `assign` bis zu fünf Minuten nach — ein anderer Fall
 von „Oberfläche zeigt nicht, was in der Datenbank steht"), CLAUDE.md §5.76
 (Wirkung überwachen statt Mechanik: dieser Handgriff prüft die Wirkung),
 AE-75 (warum Belegungen geblättert werden und die anderen drei nicht).
+
+---
+
+## 10s. Das Gerät steht auf einem falschen Wert — was tun (Sprint 20f)
+
+**Wofür:** Am Vicki steht eine andere Temperatur, als die Oberfläche anzeigt.
+Seit Sprint 20f holt die Engine das meist selbst zurück; dieser Handgriff
+sagt, wie lange das dauert und was zu tun ist, wenn es nicht passiert.
+
+### 10s.1 Erst einmal abwarten — mit einer klaren Frist
+
+Die Engine vergleicht seit Sprint 20f nicht mehr nur ihren eigenen letzten
+Befehl, sondern auch den Wert, den das Gerät **meldet**. Weicht er ab und es
+gibt keine Übersteuerung, sendet sie nach.
+
+| Lage | Was passiert | Wie lange |
+|---|---|---|
+| Zimmer **belegt**, Gast hat am Rad gedreht | Gastwert bleibt | **4 h**, oder bis zur Abreise |
+| Zimmer **nicht belegt** (Montage, Leerstand) | Engine holt den Sollwert zurück | **spätestens 45 min** |
+
+Die 45 Minuten sind der schlechteste Fall: bis zu 30 Minuten Sperre plus
+eine Heartbeat-Periode, bis das Gerät den neuen Wert meldet. Meistens geht
+es schneller.
+
+**Vor Ablauf dieser Frist ist nichts zu tun.** Ein Downlink von Hand
+dazwischen kostet eine Motorbewegung und bringt nichts, was nicht ohnehin
+käme.
+
+### 10s.2 Nach 45 Minuten immer noch falsch — dann nachsehen
+
+Zuerst: **gibt es eine Übersteuerung?** Die Engine lässt einen aktiven
+Override absichtlich stehen — das ist kein Fehler, sondern der Gastwunsch.
+
+Zimmer-Detailseite → Tab **Übersteuerung**. Steht dort ein aktiver Eintrag,
+ist der abweichende Wert erklärt. Soll er weg, dort widerrufen; danach holt
+die Engine innerhalb von 45 Minuten den Sollwert zurück.
+
+Steht dort nichts, hat die Engine es dreimal versucht und aufgegeben. Dann
+liegt ein Audit-Eintrag vor:
+
+**SSH (heizung-test oder heizung-main, root):**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+  exec -T db psql -U heizung -d heizung -c "
+SELECT ts, target_id,
+       new_value->>'hardware_nummer' AS geraet,
+       new_value->>'gemeldeter_sollwert' AS steht_auf,
+       new_value->>'engine_sollwert'     AS soll,
+       new_value->>'versuche'            AS versuche
+FROM business_audit
+WHERE action = 'ENGINE_ABGLEICH_ERSCHOEPFT'
+  AND ts > now() - interval '7 days'
+ORDER BY ts DESC;"
+```
+
+Das `-f` ist nicht optional (§5.0).
+
+Ein Eintrag hier heißt: **die Engine hat gesendet, das Gerät hat nicht
+übernommen.** Die Ursache liegt dann nicht in der Software. Zu prüfen, in
+dieser Reihenfolge:
+
+1. **Funk.** Meldet das Gerät überhaupt noch? Geräteliste → Spalte
+   Hardware-Status. „Stumm" heißt: Downlinks kommen nicht an.
+2. **Batterie.** Badge „Tauschen" (siehe §10o). Ein Gerät mit schwacher
+   Batterie empfängt schlechter als es sendet.
+3. **Kalibrierung.** Seit Sprint 20f wird `calibrationFailed` mitgeschrieben.
+   Meldet das Gerät das, hilft ein Recalibrate (Cmd `0x03`) — der
+   Eingangstest nennt diesen Befund inzwischen beim Namen.
+
+### 10s.3 Warum die Engine nicht einfach weiter sendet
+
+Nach drei erfolglosen Versuchen hört sie auf. Das ist Absicht: jeder
+Downlink ist eine Motorbewegung und kostet Batterie. Ein Gerät an der
+Funkgrenze würde sonst bei jedem Takt angefunkt — also jede Minute, bis die
+Batterie leer ist.
+
+Nach einer Behebung läuft es von selbst wieder an: sobald das Gerät den
+richtigen Wert meldet, wird der Zähler zurückgesetzt, und beim nächsten
+Abweichen stehen wieder drei Versuche zur Verfügung.
+
+### 10s.4 Von Hand nachhelfen — wenn es eilt
+
+Nur, wenn ein Zimmer belegt ist und nicht gewartet werden kann. Der Weg über
+die Oberfläche ist der richtige: Zimmer-Detailseite → Tab **Übersteuerung**
+→ Wunschtemperatur setzen. Das erzeugt einen Override, den die Engine
+respektiert, und er endet mit der Abreise.
+
+Der direkte Downlink über die ChirpStack-Queue (`5100b4` für 18 °C) bleibt
+der Notnagel. Er ist der Engine **nicht** bekannt: beim nächsten Takt sieht
+sie eine Abweichung und sendet ihren eigenen Wert — der Handgriff hält also
+höchstens eine Heizperiode lang.
+
+**Querverweise:** §5.0 (`docker compose` ohne `-f`), §10o (Batterie
+wechseln), §10h.4 (Eingangstest), AE-76 (die Entscheidung dahinter und was
+sie in Kauf nimmt), CLAUDE.md §5.76 (Wirkung überwachen statt Mechanik —
+genau das tut der Abgleich).
