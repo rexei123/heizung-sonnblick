@@ -248,6 +248,15 @@ async def replace_device(
     old.retired_reason = "replaced_by_pool"
     old.replaced_by_device_id = new_pool_device_id
     old.heating_zone_id = None
+    # Sprint 20e (T12): beides trifft hier zu — der alte Row wird
+    # ausgemustert **und** von der Zone getrennt. Der Nachweis geht in beiden
+    # Faellen weg, also hier doppelt begruendet.
+    #
+    # Der **neue** Pool-Vicki bekommt bewusst keinen: er wurde ein paar
+    # Zeilen hoeher in die Zone reserviert und ist damit zugeordnet, aber
+    # noch nicht montiert. Seinen Nachweis erbringt der erste Frame nach dem
+    # Einbau (T3) — und genau das ist der Zweck des Nachweises.
+    old.mounted_confirmed_at = None
     await session.flush()
 
     # Gate 6: BusinessAudit-Eintrag (atomar mit den UPDATEs).
@@ -303,6 +312,13 @@ async def retire_device(
     now = datetime.now(tz=UTC)
     device.retired_at = now
     device.retired_reason = reason
+    # Sprint 20e (T12): ein ausgemustertes Geraet traegt keinen
+    # Montage-Nachweis. Begruendung wie beim Detach-Endpoint — der Nachweis
+    # gehoert zur Zuordnung, nicht zum Geraet. Hier zusaetzlich: ein
+    # ausgemustertes Geraet kann wieder auftauchen (Werksreset,
+    # DevEUI-Wiederverwendung nach AE-57), und dann soll es bei Null
+    # anfangen.
+    device.mounted_confirmed_at = None
     await session.flush()
 
     await record_business_action(

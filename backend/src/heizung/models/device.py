@@ -99,6 +99,24 @@ class Device(Base):
         ForeignKey("device.id", ondelete="SET NULL")
     )
 
+    # Sprint 20e (T1, Migration 0027): der Montage-Nachweis. Gesetzt auf dem
+    # ersten Frame, der ``attached_backplate=true`` UND ``valve_position > 0``
+    # zusammen meldet — also "der Taster war gedrueckt, waehrend der Motor
+    # das Ventil geoeffnet hat". Danach nie wieder geschrieben, bis
+    # ``detach``/``retire``/``replace`` ihn loeschen (T12).
+    #
+    # Eine Lebenszyklus-Tatsache wie ``retired_at`` (AE-57), kein Zustand:
+    # Layer 4 fragte bisher "sitzt das Geraet **jetzt**?" und bekam vom
+    # Backplate-Taster zu oft ein falsches Nein. Der Nachweis fragt "**war**
+    # es je belegt montiert?", und das kann sich nicht zurueckdrehen, solange
+    # das Geraet an derselben Zone haengt.
+    #
+    # Schreibpfade: ``mqtt_subscriber._persist_uplink`` (setzen),
+    # ``device_service``/``api.v1.devices`` (loeschen). Kein Schema-Default,
+    # kein Backfill in der Migration — ``scripts/backfill_mounted_confirmed``
+    # urteilt ueber die Historie (§5.61).
+    mounted_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
