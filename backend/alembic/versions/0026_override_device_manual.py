@@ -66,8 +66,7 @@ TABLE = "manual_override"
 
 ALT = "source IN ('device', 'frontend_4h', 'frontend_midnight', 'frontend_checkout')"
 NEU = (
-    "source IN ('device', 'device_manual', 'frontend_4h', "
-    "'frontend_midnight', 'frontend_checkout')"
+    "source IN ('device', 'device_manual', 'frontend_4h', 'frontend_midnight', 'frontend_checkout')"
 )
 
 
