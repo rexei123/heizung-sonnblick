@@ -312,15 +312,46 @@ class DeviceAssignZoneResponse(BaseModel):
 class HardwareStatusResponse(BaseModel):
     """Hardware-Status-Snapshot fuer ein Geraet (Sprint 9.13c, B-LT-2-followup-1).
 
-    Bewertet die letzten ``window_minutes`` Minuten ``sensor_reading``-Frames
-    auf das Vicki-Codec-Feld ``attached_backplate``. Datenquelle ist dieselbe
-    wie fuer Engine-Layer-4-Detached, aber als reine Lese-Aggregation
-    (kein Engine-Pfad, kein Cache).
+    **Sprint 20e (T5): zwei Quellen, und die Antwort sagt welche.**
+
+    Fuer ein **zugeordnetes** Geraet mit ``device.mounted_confirmed_at``
+    urteilt der Nachweis: einmal belegt montiert, bleibt montiert, solange
+    das Geraet an derselben Zone haengt (``source="mounted_confirmed"``).
+    Sonst wie bisher das 30-Minuten-Fenster ueber
+    ``sensor_reading.attached_backplate`` (``source="window"``), und der
+    Pool-Pfad bleibt damit unberuehrt.
+
+    ``frames_in_window`` und ``last_seen`` behalten in **beiden** Faellen
+    ihre Bedeutung: sie beschreiben das Fenster, nicht das Urteil. Das ist
+    Absicht — die Detailseite zeigt sie als Diagnose, und bei einem sticky
+    Geraet ist die interessante Frage gerade "was meldet der Taster
+    eigentlich, obwohl das Urteil schon feststeht".
+
+    Datenquelle ist dieselbe wie fuer Engine-Layer-4-Detached, aber als
+    reine Lese-Aggregation (kein Engine-Pfad, kein Cache).
     """
 
     status: Literal["active", "inactive"] = Field(
         ...,
-        description="active wenn mindestens ein True-Frame im Fenster, sonst inactive",
+        description=(
+            "Das Urteil. active = montiert. Quelle steht in ``source``: "
+            "entweder der Montage-Nachweis oder mindestens ein True-Frame im Fenster."
+        ),
+    )
+    source: Literal["mounted_confirmed", "window"] = Field(
+        ...,
+        description=(
+            "Woraus ``status`` gebildet wurde. mounted_confirmed = "
+            "``device.mounted_confirmed_at`` (zugeordnetes Geraet, Sprint 20e); "
+            "window = das ``window_minutes``-Fenster ueber attached_backplate."
+        ),
+    )
+    mounted_confirmed_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Zeitpunkt des Montage-Nachweises (erster Frame mit attached_backplate=true "
+            "UND valve_position > 0). None bei Pool-Geraeten und bis zum ersten Beleg."
+        ),
     )
     last_seen: datetime | None = Field(
         default=None,

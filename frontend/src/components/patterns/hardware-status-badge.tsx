@@ -41,6 +41,23 @@
  * - ``compact``: nur die Pille, Unterzeile als ``title``-Tooltip.
  * - ``detailed``: Pille plus Unterzeile.
  *
+ * **Sprint 20e (T5): der Montage-Nachweis schlägt das Fenster.** Meldet das
+ * Backend ``source="mounted_confirmed"``, ist das Gerät zugeordnet und hat
+ * einmal nachweislich auf einem Ventil gesessen. Die Pille sagt dann
+ * „Montiert" — wie bei einem frischen True-Frame, denn das Urteil ist
+ * dasselbe —, aber die Unterzeile nennt den Beleg und nicht das Fenster.
+ *
+ * Absichtlich **keine** fünfte Pille für diesen Fall: er ist der normale,
+ * gesunde Zustand eines montierten Geräts im Haus, und eine eigene Farbe
+ * dafür würde ihn als Besonderheit darstellen. Was sich unterscheidet, ist
+ * die Begründung, und die gehört in die Unterzeile.
+ *
+ * Der Grund für die Umkehrung steht in
+ * ``rules/engine.layer_device_detached``: der Taster meldet im Haus zu oft
+ * ``false``, obwohl das Gerät sitzt. Engine und Oberfläche urteilen seit
+ * 20e aus derselben Quelle — zwei Urteile zur selben Frage wären die Sorte
+ * Drift, die §5.53 beschreibt.
+ *
  * Für einen echten Online-Indikator wäre ``device.last_seen_at`` die Quelle
  * (wird vom MQTT-Subscriber gepflegt, heute in keiner Ansicht gerendert) —
  * eigener Badge, eigener Sprint.
@@ -124,6 +141,8 @@ export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: P
     );
   }
 
+  const sticky = data.source === "mounted_confirmed";
+
   const state: MountState =
     data.status === "active"
       ? "montiert"
@@ -138,11 +157,23 @@ export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: P
   // ``last_seen`` zählt ausschliesslich True-Frames — ein Gerät, das sich
   // meldet und nicht montiert ist, hat hier NULL und ist trotzdem nicht
   // stumm. Das war die zweite Fehlaussage in der alten Zeile.
-  const subline = data.last_seen
-    ? `Montiert zuletzt: ${formatRelative(data.last_seen)}`
-    : data.frames_in_window > 0
-      ? "meldet sich, nicht montiert"
-      : "noch nicht gemeldet";
+  //
+  // Sprint 20e: Bei ``mounted_confirmed`` steht hier der Beleg, nicht das
+  // Fenster. Der Zusatz „Taster meldet aktuell nicht" ist der eigentliche
+  // Nutzen der Zeile — er sagt dem Hausmeister, dass das Urteil am Nachweis
+  // hängt und der Taster gerade schweigt oder widerspricht. Ohne diesen
+  // Zusatz wäre die sticky-Anzeige von einer frischen Meldung nicht zu
+  // unterscheiden, und genau diese Unterscheidung ist die Diagnose.
+  const subline = sticky
+    ? data.mounted_confirmed_at
+      ? `Montage belegt: ${formatRelative(data.mounted_confirmed_at)}` +
+        (data.last_seen ? "" : " · Taster meldet aktuell nicht")
+      : "Montage belegt"
+    : data.last_seen
+      ? `Montiert zuletzt: ${formatRelative(data.last_seen)}`
+      : data.frames_in_window > 0
+        ? "meldet sich, nicht montiert"
+        : "noch nicht gemeldet";
 
   const pill = (
     <span

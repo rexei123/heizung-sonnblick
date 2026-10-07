@@ -101,6 +101,8 @@ async function mockPaginiert(
       body: JSON.stringify({
         status: "inactive",
         last_seen: null,
+        source: "window" as const,
+        mounted_confirmed_at: null,
         frames_in_window: 0,
         window_minutes: 30,
       }),

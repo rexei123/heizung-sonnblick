@@ -48,6 +48,8 @@ function makeDevice(id: number, health: ZoneHealth) {
 const HW_STATUS = {
   status: "active",
   last_seen: iso(5 * 60 * 1000),
+  source: "window" as const,
+  mounted_confirmed_at: null,
   frames_in_window: 3,
   window_minutes: 30,
 };

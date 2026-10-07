@@ -234,12 +234,21 @@ export interface DeviceRetireRequest {
 
 /**
  * Hardware-Status-Snapshot (Sprint 9.13c). Spiegelt
- * ``HardwareStatusResponse`` aus ``schemas/device.py``. Datenquelle ist
- * ``sensor_reading.attached_backplate`` der letzten ``window_minutes``
- * Minuten — siehe Backend-Docstring.
+ * ``HardwareStatusResponse`` aus ``schemas/device.py``.
+ *
+ * **Sprint 20e (T5): zwei Quellen, und ``source`` sagt welche.** Für ein
+ * zugeordnetes Gerät mit Montage-Nachweis urteilt der Nachweis
+ * (``mounted_confirmed``), sonst wie bisher das ``window_minutes``-Fenster
+ * über ``sensor_reading.attached_backplate`` (``window``).
+ *
+ * ``last_seen`` und ``frames_in_window`` beschreiben in beiden Fällen das
+ * Fenster, nicht das Urteil — bei einem belegt montierten Gerät sind sie
+ * die Diagnose („Urteil montiert, Taster meldet trotzdem false").
  */
 export interface HardwareStatusResponse {
   status: "active" | "inactive";
+  source: "mounted_confirmed" | "window";
+  mounted_confirmed_at: string | null;
   last_seen: string | null;
   frames_in_window: number;
   window_minutes: number;

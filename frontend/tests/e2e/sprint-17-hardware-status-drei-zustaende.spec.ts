@@ -66,6 +66,8 @@ const HW = {
   montiert: {
     status: "active",
     last_seen: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+    source: "window" as const,
+    mounted_confirmed_at: null,
     frames_in_window: 3,
     window_minutes: 30,
   },
@@ -73,6 +75,8 @@ const HW = {
     // Frames kommen an, aber keiner meldet attached_backplate=true.
     status: "inactive",
     last_seen: null,
+    source: "window" as const,
+    mounted_confirmed_at: null,
     frames_in_window: 3,
     window_minutes: 30,
   },
@@ -80,6 +84,8 @@ const HW = {
     // Gar kein Frame mit dem Feld: alter Codec, FW < 4.1 oder kein Uplink.
     status: "inactive",
     last_seen: null,
+    source: "window" as const,
+    mounted_confirmed_at: null,
     frames_in_window: 0,
     window_minutes: 30,
   },
