@@ -201,6 +201,58 @@ def _to_decimal(v: Any) -> Decimal | None:
         return None
 
 
+def _snr_db(rx: _RxInfo | None) -> Decimal | None:
+    """SNR aus den Empfangsdaten — mit der 0-dB-Luecke von protojson.
+
+    **Befund 07.10.2026, Geraet 001.** Die Signal-Kachel zeigte "–" statt
+    eines SNR-Werts. Messung ueber sieben Tage:
+
+        zeilen 1004 | mit_snr 976 | genau_null 0 | kleinster -8.0 | mit_rssi 1004
+
+    Drei Zahlen zusammen sind der Beleg:
+
+    1. ``mit_rssi = zeilen`` — die Empfangsdaten (``rxInfo``) waren in
+       **jedem** Frame da. Es fehlt also nicht der Block, sondern ein Feld
+       darin.
+    2. ``kleinster = -8.0`` — negative Werte kommen durch. Es ist also kein
+       Vorzeichen- oder Typproblem.
+    3. ``genau_null = 0`` in 976 Messwerten, obwohl Geraet 001 nachweislich
+       um 0 dB herum funkt. Ein Wert, der nie auftritt, obwohl er der
+       haeufigste sein muesste.
+
+    **Ursache:** ``chirpstack.toml`` setzt ``[integration.mqtt] json = true``.
+    ChirpStack serialisiert das Event dann ueber protojson, und protojson
+    laesst Felder mit **Default-Wert** weg. ``"snr": 0.0`` steht also gar
+    nicht im JSON; ``_RxInfo.snr`` bleibt ``None``, und die Spalte bekam
+    NULL.
+
+    Fuer diesen Erzeuger heisst "Feld fehlt, Block vorhanden" damit
+    **genau 0**. Das ist der Schluss, den diese Funktion zieht — und er ist
+    nur zulaessig, weil Punkt 1 ihn traegt: ohne ``rxInfo`` wissen wir
+    nichts und die Spalte bleibt NULL.
+
+    **Warum nicht dasselbe fuer ``rssi``.** Dort gilt die Lueckenlogik
+    technisch genauso, aber 0 dBm am Empfaenger waere 1 mW — physikalisch
+    nicht vorstellbar, und die Messung zeigt ``mit_rssi = zeilen``. Eine
+    Regel fuer einen Fall, der nicht vorkommt, waere eine Annahme mehr
+    (§0 S6). Wer sie doch braucht, hat dann einen Befund und nicht eine
+    Vermutung.
+
+    **Warum kein Codec- oder ChirpStack-Eingriff.** ``EmitUnpopulated``
+    liesse sich serverseitig setzen, dann kaeme die 0 mit. Das waere die
+    Ursache statt der Wirkung — aber es aendert das Format **aller** Events
+    fuer **alle** Felder, auf einem Server, der die Heizung steuert, und
+    ohne Testpfad dafuer. Die zwei Zeilen hier sind der kleinere Eingriff;
+    der andere Weg steht im Backlog.
+    """
+    if rx is None:
+        return None
+    if rx.snr is None:
+        # Block da, Feld weg -> protojson hat die 0 verschluckt.
+        return Decimal("0")
+    return _to_decimal(rx.snr)
+
+
 def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
     """Periodic-Report (fPort 1) -> SensorReading-Row.
 
@@ -234,7 +286,10 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         # ``_battery_pct_from_volts``.
         "battery_percent": _battery_pct_from_volts(obj.get("battery_voltage")),
         "rssi_dbm": rx.rssi if rx else None,
-        "snr_db": _to_decimal(rx.snr) if rx else None,
+        # Sprint 20e-Nachtrag: ``0`` statt NULL, wenn ``rxInfo`` da ist und
+        # ``snr`` fehlt — protojson laesst den Default-Wert weg. Beleg und
+        # Begruendung im Docstring von ``_snr_db``.
+        "snr_db": _snr_db(rx),
         # Sprint 9.10: Vicki openWindow durchreichen (NULL wenn Feld fehlt,
         # nicht False).
         "open_window": obj.get("openWindow"),
