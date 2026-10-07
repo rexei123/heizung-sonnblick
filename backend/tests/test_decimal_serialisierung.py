@@ -89,8 +89,37 @@ def test_mindestens_ein_decimal_feld_wird_gefunden() -> None:
     )
 
 
-@pytest.mark.parametrize("modell", MODELLE, ids=lambda m: m.__name__)
-def test_decimal_felder_serialisieren_als_zahl(modell: type[BaseModel]) -> None:
+# Die zu pruefenden Paare werden beim Sammeln gebildet, nicht im Test
+# uebersprungen.
+#
+# Die erste Fassung parametrisierte ueber die Modelle und rief
+# ``pytest.skip`` fuer eines ohne ``Decimal``-Felder. Das war bequem und hat
+# den Merge-Anker beschaedigt: "``collected`` = ``passed`` + ``xfailed``, und
+# ``skipped`` = 0" ist nach §5.81 der Beleg, dass eine Suite wirklich
+# gelaufen ist. Ein absichtlicher Skip macht genau diese Null unbrauchbar —
+# ein echter Skip, etwa weil die Datenbank fehlt, wuerde darin nicht mehr
+# auffallen.
+#
+# Also keine Ausnahme im Anker, sondern eine Parametrisierung ohne leere
+# Faelle. Dass es mindestens ein Paar gibt, sichert
+# ``test_mindestens_ein_decimal_feld_wird_gefunden``.
+DECIMAL_PAARE: list[tuple[type[BaseModel], str]] = [
+    (modell, feld) for modell in MODELLE for feld in _decimal_felder(modell)
+]
+
+OPTIONALE_PAARE: list[tuple[type[BaseModel], str]] = [
+    (modell, feld)
+    for modell, feld in DECIMAL_PAARE
+    if type(None) in typing.get_args(modell.model_fields[feld].annotation)
+]
+
+
+def _id(paar: tuple[type[BaseModel], str]) -> str:
+    return f"{paar[0].__name__}.{paar[1]}"
+
+
+@pytest.mark.parametrize("paar", DECIMAL_PAARE, ids=_id)
+def test_decimal_feld_serialisiert_als_zahl(paar: tuple[type[BaseModel], str]) -> None:
     """**Der Wachposten.** Kein ``Decimal`` darf als String nach draussen.
 
     ``model_construct`` statt des Konstruktors: es umgeht die Validierung
@@ -99,27 +128,22 @@ def test_decimal_felder_serialisieren_als_zahl(modell: type[BaseModel]) -> None:
     allen Pflichtfeldern aufzubauen waere Arbeit, die mit jedem neuen Feld
     erneut anfaellt.
     """
-    felder = _decimal_felder(modell)
-    if not felder:
-        pytest.skip(f"{modell.__name__} hat keine Decimal-Felder")
-
+    modell, name = paar
     # Ein Wert, der als String auffaellt: zwei Nachkommastellen, wie
     # ``Numeric(5,2)`` ihn aus der Datenbank liefert.
-    objekt = modell.model_construct(**{name: Decimal("5.40") for name in felder})
-    rohdaten = objekt.model_dump(mode="json")
+    objekt = modell.model_construct(**{name: Decimal("5.40")})
+    wert = objekt.model_dump(mode="json")[name]
 
-    for name in felder:
-        wert = rohdaten[name]
-        assert isinstance(wert, int | float), (
-            f"{modell.__name__}.{name} serialisiert als {type(wert).__name__} "
-            f"({wert!r}). Das Frontend rechnet damit und stuerzt ab. "
-            f"Feld in den field_serializer des Modells aufnehmen."
-        )
-        assert wert == pytest.approx(5.4)
+    assert isinstance(wert, int | float), (
+        f"{modell.__name__}.{name} serialisiert als {type(wert).__name__} "
+        f"({wert!r}). Das Frontend rechnet damit und stuerzt ab. "
+        f"Feld in den field_serializer des Modells aufnehmen."
+    )
+    assert wert == pytest.approx(5.4)
 
 
-@pytest.mark.parametrize("modell", MODELLE, ids=lambda m: m.__name__)
-def test_none_bleibt_none(modell: type[BaseModel]) -> None:
+@pytest.mark.parametrize("paar", OPTIONALE_PAARE, ids=_id)
+def test_none_bleibt_none(paar: tuple[type[BaseModel], str]) -> None:
     """``None`` darf nicht zu ``0.0`` werden.
 
     Bei den Ventil-Hinweisen traegt das Bedeutung: ``valve_delta_k`` ist
@@ -127,16 +151,7 @@ def test_none_bleibt_none(modell: type[BaseModel]) -> None:
     waere dort die Aussage "Abstand genau null" — und die Oberflaeche
     schreibt sie in den Hinweistext.
     """
-    felder = [
-        name
-        for name in _decimal_felder(modell)
-        if type(None) in typing.get_args(modell.model_fields[name].annotation)
-    ]
-    if not felder:
-        pytest.skip(f"{modell.__name__} hat keine optionalen Decimal-Felder")
+    modell, name = paar
+    objekt = modell.model_construct(**{name: None})
 
-    objekt = modell.model_construct(**dict.fromkeys(felder))
-    rohdaten = objekt.model_dump(mode="json")
-
-    for name in felder:
-        assert rohdaten[name] is None, f"{modell.__name__}.{name}"
+    assert objekt.model_dump(mode="json")[name] is None, f"{modell.__name__}.{name}"
