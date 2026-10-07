@@ -21,12 +21,12 @@
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.12
+    rev: v0.16.10
     hooks:
       - id: ruff
         name: ruff check (backend)
-        files: ^backend/(src|tests)/.*\.py$
+        files: ^backend/(src|tests|alembic)/.*\.py$
         args: [--fix]
       - id: ruff-format
         name: ruff format --check (backend)
-        files: ^backend/(src|tests)/.*\.py$
+        files: ^backend/(src|tests|alembic)/.*\.py$
