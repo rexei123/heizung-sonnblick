@@ -364,7 +364,109 @@ async def create(
     )
     session.add(override)
     await session.flush()
+
+    # Sprint 20f-b: aeltere aktive Overrides desselben Bereichs beenden.
+    # **Nach** dem Flush, damit die eigene ID bekannt ist und nicht mit
+    # beendet wird. Begruendung in der Funktion.
+    await _beende_aeltere_im_selben_bereich(
+        session,
+        room_id=room_id,
+        heating_zone_id=heating_zone_id,
+        neuer_rang=_QUELLEN_RANG[source],
+        neue_id=override.id,
+        now=now,
+    )
     return override
+
+
+# Sprint 20f-b: Vorrang-Rang als Zahl, einmal definiert. Kleinere Zahl
+# gewinnt. Dieselbe Reihenfolge wie der ``CASE`` in ``get_active`` — und
+# genau deshalb hier und nicht zweimal: der Stapel-Abbau in ``create``
+# braucht sie als Python-Wert, der Lookup als SQL-Ausdruck. Zwei Fassungen
+# derselben Rangfolge waeren eine Drift-Quelle in der Steuerlogik.
+#
+#   0  frontend_*       Mitarbeiter schlaegt Gast (AE-58)
+#   1  device_manual    ausdrueckliche Meldung des Geraets (0x28)
+#   2  device           abgeleiteter Befund — wird seit 20f-b nicht mehr
+#                       angelegt, Bestandszeilen tragen ihn noch
+_QUELLEN_RANG: dict[OverrideSource, int] = {
+    OverrideSource.DEVICE: 2,
+    OverrideSource.DEVICE_MANUAL: 1,
+    OverrideSource.FRONTEND_4H: 0,
+    OverrideSource.FRONTEND_MIDNIGHT: 0,
+    OverrideSource.FRONTEND_CHECKOUT: 0,
+}
+
+# ``revoked_reason``, wenn ein neuer Override einen aelteren derselben Zone
+# ersetzt. Eigener Grund, nicht ``auto: expired`` oder der Check-out-Grund:
+# wer die Historie liest, soll den Unterschied zwischen "abgelaufen",
+# "Abreise" und "durch einen neueren ersetzt" sehen koennen.
+REVOKE_REASON_SUPERSEDED = "superseded"
+
+
+async def _beende_aeltere_im_selben_bereich(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    heating_zone_id: int | None,
+    neuer_rang: int,
+    neue_id: int,
+    now: datetime,
+) -> int:
+    """Beendet aktive Overrides desselben Bereichs, die der neue verdraengt.
+
+    **Sprint 20f-b. Die Fachregel des Hotels:** der juengste Gastwunsch je
+    Zone gilt allein.
+
+    Ohne diesen Abbau stapeln sich Overrides, und der Stapel wird sichtbar,
+    sobald der oberste **ablaeuft**: dann greift der naechstaeltere, und das
+    Zimmer faellt nicht auf den Engine-Soll, sondern auf einen Wert von
+    vorgestern. Belegt am 06.10.2026 in Zimmer 101 — fuenf aktive Overrides
+    in einer Zone, und nach Ablauf des juengsten (23 °C, 4 h) haette 19 °C
+    aus dem Vortag bis zum Check-out gegolten.
+
+    **Bereich heisst room_id *und* heating_zone_id**, einschliesslich
+    ``NULL`` fuer Room-Scope. Ein Zonen-Override verdraengt keinen
+    Zimmer-weiten und umgekehrt: sie beschreiben verschiedene Mengen, und
+    der Lookup behandelt sie getrennt (``get_active``).
+
+    **Verdraengt wird nur, was der neue auch gewinnen wuerde** — also
+    ``rang >= neuer_rang``. Ein ``device_manual`` beendet also aeltere
+    ``device_manual`` und ``device``, laesst aber ein ``frontend_*``
+    unberuehrt. Sonst koennte ein Gast die Einstellung der Rezeption
+    aushebeln, indem er am Rad dreht, und AE-58 (Mitarbeiter schlaegt Gast)
+    waere ueber den Umweg des Stapel-Abbaus ausgehebelt.
+
+    Returns Anzahl der beendeten Overrides.
+    """
+    verdraengbar = [q for q, r in _QUELLEN_RANG.items() if r >= neuer_rang]
+    stmt = (
+        select(ManualOverride)
+        .where(ManualOverride.room_id == room_id)
+        .where(ManualOverride.id != neue_id)
+        .where(ManualOverride.revoked_at.is_(None))
+        .where(ManualOverride.expires_at > now)
+        .where(ManualOverride.source.in_(verdraengbar))
+    )
+    if heating_zone_id is None:
+        stmt = stmt.where(ManualOverride.heating_zone_id.is_(None))
+    else:
+        stmt = stmt.where(ManualOverride.heating_zone_id == heating_zone_id)
+
+    ersetzt = list((await session.execute(stmt)).scalars().all())
+    for alt in ersetzt:
+        alt.revoked_at = now
+        alt.revoked_reason = REVOKE_REASON_SUPERSEDED
+    if ersetzt:
+        await session.flush()
+        logger.info(
+            "override superseded room_id=%s zone_id=%s neu=%s ersetzt=%s",
+            room_id,
+            heating_zone_id,
+            neue_id,
+            [o.id for o in ersetzt],
+        )
+    return len(ersetzt)
 
 
 async def get_active(
@@ -394,11 +496,7 @@ async def get_active(
     # Die Mitte ist neu und sie ist der Punkt: dreht ein Gast am Rad, waehrend
     # ein alter ``device``-Override aus einem Reboot-Drift noch laeuft, soll
     # die **Drehung** gelten und nicht der Drift.
-    quellen_rang = case(
-        (ManualOverride.source == OverrideSource.DEVICE, 2),
-        (ManualOverride.source == OverrideSource.DEVICE_MANUAL, 1),
-        else_=0,
-    )
+    quellen_rang = case(_QUELLEN_RANG, value=ManualOverride.source, else_=0)
     base = (
         select(ManualOverride)
         .where(ManualOverride.room_id == room_id)

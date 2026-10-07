@@ -285,12 +285,26 @@ async def test_handle_uplink_creates_device_override(session: AsyncSession) -> N
 
     assert override is not None
     assert override.room_id == room.id
-    assert override.source == OverrideSource.DEVICE
+    # Sprint 20f-b: die Quelle ist jetzt ``device_manual``. Der abgeleitete
+    # Pfad (``device``) ist entfernt, weil er Phantom-Overrides erzeugt hat —
+    # ein Keep-alive meldet bei Class A minutenlang noch den alten Sollwert,
+    # und die Engine hat daraus "der Gast hat gedreht" geschlossen. Dieser
+    # Aufruf steht fuer eine **gemeldete** Drehung (0x28).
+    assert override.source == OverrideSource.DEVICE_MANUAL
     assert override.setpoint == Decimal("23.0")
-    # expires_at sollte vom Belegungs-checkout kommen (gerade 2 Tage in der Zukunft,
-    # also unter dem 7-Tage-Hard-Cap).
-    assert abs((override.expires_at - next_checkout).total_seconds()) < 1
-    assert override.reason == "auto: detected user setpoint change"
+    # Sprint 20f-b: **vier Stunden, nicht bis zum Check-out.**
+    #
+    # Der lange Ablauf gehoerte zum abgeleiteten Pfad: wer nur vermutet, dass
+    # jemand gedreht hat, haelt den Wert im Zweifel lange, um einen echten
+    # Gastwunsch nicht zu verlieren. Eine **gemeldete** Drehung braucht diese
+    # Absicherung nicht — und der lange Ablauf war genau das, was die
+    # Phantom-Overrides vom 05.10. bis zum Check-out stehen liess.
+    #
+    # ``next_checkout`` bleibt im Setup: die Belegung macht das Zimmer
+    # OCCUPIED, und ohne das greift das Gate aus AE-58.
+    assert abs((override.expires_at - (now + timedelta(hours=4))).total_seconds()) < 1
+    assert override.expires_at < next_checkout
+    assert override.reason == "auto: Handverstellung am Drehrad (0x28 gemeldet)"
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +382,12 @@ async def test_drehring_in_occupied_with_zone_creates_override_with_zone_id(
     )
     assert override is not None
     assert override.heating_zone_id == zone_id
-    assert override.source == OverrideSource.DEVICE
+    # Sprint 20f-b: die Quelle ist jetzt ``device_manual``. Der abgeleitete
+    # Pfad (``device``) ist entfernt, weil er Phantom-Overrides erzeugt hat —
+    # ein Keep-alive meldet bei Class A minutenlang noch den alten Sollwert,
+    # und die Engine hat daraus "der Gast hat gedreht" geschlossen. Dieser
+    # Aufruf steht fuer eine **gemeldete** Drehung (0x28).
+    assert override.source == OverrideSource.DEVICE_MANUAL
     assert override.setpoint == Decimal("24.0")
 
 

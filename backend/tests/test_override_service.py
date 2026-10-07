@@ -313,20 +313,31 @@ async def test_revoke_all_active_overrides_revokes_device_and_frontend(
 
     Ersetzt ``revoke_device_overrides`` ersatzlos — neuer Vertrag: Check-out
     revoked DEVICE und FRONTEND_* in einem Aufruf.
+
+    **Reihenfolge in Sprint 20f-b umgedreht, und das ist kein Kosmetik-Fix.**
+    Der Stapel-Abbau beendet beim Anlegen alles, was der neue Override auch
+    im Lookup gewinnen wuerde. Zuerst ``device``, dann ``frontend_4h`` heisst
+    also: das Frontend verdraengt das Device, und es bleibt **einer** aktiv —
+    der Test haette dann nicht mehr geprueft, was er prueft.
+
+    Umgekehrt bleiben beide aktiv: eine Gast-Drehung verdraengt keine
+    Mitarbeiter-Eingabe (AE-58). Das ist zugleich der realistische Fall —
+    die Rezeption stellt ein, danach dreht der Gast am Rad — und damit
+    genau die Lage, in der der Check-out beide beenden muss.
     """
     expires = datetime.now(tz=UTC) + timedelta(hours=4)
-    device = await override_service.create(
-        db_session,
-        room_id=room_id,
-        setpoint=Decimal("23.0"),
-        source=OverrideSource.DEVICE,
-        expires_at=expires,
-    )
     frontend = await override_service.create(
         db_session,
         room_id=room_id,
         setpoint=Decimal("21.0"),
         source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+    device = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE_MANUAL,
         expires_at=expires,
     )
     count = await override_service.revoke_all_active_overrides(db_session, room_id)
@@ -894,3 +905,261 @@ async def test_get_active_rangfolge_ist_vollstaendig(
     assert active is not None
     assert active.source == OverrideSource.FRONTEND_MIDNIGHT
     assert active.setpoint == Decimal("21.0")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f-b — der juengste Gastwunsch je Zone gilt allein
+# ---------------------------------------------------------------------------
+#
+# **Befund 06.10.2026, Zimmer 101.** Fuenf aktive Overrides in einer Zone,
+# gestapelt. Der Stapel wird sichtbar, sobald der oberste **ablaeuft**: dann
+# greift der naechstaeltere, und das Zimmer faellt nicht auf den Engine-Soll,
+# sondern auf einen Wert von vorgestern.
+#
+# Konkret: nach Ablauf des juengsten (23 degC, 4 h) haette 19 degC aus dem
+# Vortag bis zum Check-out gegolten — obwohl die Engine 21 degC wollte.
+#
+# Fachregel des Hoteliers: ein neuer Override beendet aeltere aktive derselben
+# Zone, mit eigenem ``revoked_reason``.
+
+
+@pytest_asyncio.fixture
+async def zone_id_fuer_stapel(db_session: AsyncSession, room_id: int) -> int:
+    """Eine Heizzone im Testzimmer, fuer die Bereichs-Tests."""
+    zone_id, _ = await _add_zone_with_device(
+        db_session,
+        room_id=room_id,
+        zone_name="Schlafzimmer",
+        dev_eui=f"20fb{datetime.now(tz=UTC).strftime('%H%M%S%f')}"[:16],
+    )
+    return zone_id
+
+
+async def test_neuer_override_beendet_aelteren_derselben_zone(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Der Kern der Fachregel: der juengste gilt allein."""
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    alt = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    neu = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    await db_session.refresh(alt)
+    assert alt.revoked_at is not None
+    assert alt.revoked_reason == override_service.REVOKE_REASON_SUPERSEDED
+    aktiv = await override_service.get_active(db_session, room_id)
+    assert aktiv is not None
+    assert aktiv.id == neu.id
+
+
+async def test_abgelaufener_device_manual_laesst_keinen_alten_greifen(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """**Der Fall aus dem Auftrag — und der eigentliche Schaden.**
+
+    Ein alter Override (19 degC, laeuft zwei Tage) liegt unter einem neuen
+    (23 degC, 4 h). Laeuft der neue ab, darf der alte **nicht** greifen: das
+    Zimmer gehoert dann der Engine, nicht einem Wunsch von vorgestern.
+
+    Dass der alte nicht mehr erscheint, liegt nicht am Ablauf-Filter — er
+    laeuft ja noch —, sondern daran, dass er beim Anlegen des neuen beendet
+    wurde. Deshalb wird genau das geprueft und nicht nur das Ergebnis von
+    ``get_active``.
+    """
+    jetzt = datetime.now(tz=UTC)
+    alt = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("19.0"),
+        source=OverrideSource.DEVICE,
+        expires_at=jetzt + timedelta(days=2),
+    )
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=jetzt + timedelta(hours=4),
+    )
+
+    await db_session.refresh(alt)
+    assert alt.revoked_at is not None, "der alte muss beim Anlegen beendet worden sein"
+    # Er laeuft noch zwei Tage — ohne den Abbau waere er nach vier Stunden
+    # der aktive Override.
+    assert alt.expires_at > jetzt + timedelta(hours=4)
+
+    aktiv = await override_service.get_active(db_session, room_id)
+    assert aktiv is not None
+    assert aktiv.setpoint == Decimal("23.0")
+
+
+async def test_frontend_wird_von_gast_drehung_nicht_verdraengt(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """**Die Grenze des Stapel-Abbaus.** AE-58 bleibt unangetastet.
+
+    Verdraengt wird nur, was der neue Override auch im Lookup gewinnen wuerde.
+    Eine Gast-Drehung beendet also keine Mitarbeiter-Eingabe — sonst waere
+    "Mitarbeiter schlaegt Gast" ueber den Umweg des Abbaus ausgehebelt, und
+    zwar unauffaelliger als durch eine Aenderung der Rangfolge.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    vom_personal = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_4H,
+        expires_at=expires,
+    )
+
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    await db_session.refresh(vom_personal)
+    assert vom_personal.revoked_at is None, "Mitarbeiter-Eingabe bleibt stehen"
+    aktiv = await override_service.get_active(db_session, room_id)
+    assert aktiv is not None
+    assert aktiv.id == vom_personal.id
+
+
+async def test_mitarbeiter_eingabe_verdraengt_gast_drehung(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Die Gegenrichtung: ein ``frontend_*`` beendet alles Aeltere.
+
+    Rang 0 verdraengt 0, 1 und 2. Ohne diesen Test waere die Rang-Bedingung
+    auch mit vertauschtem Vergleichsoperator gruen.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    gast = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_MIDNIGHT,
+        expires_at=expires,
+    )
+
+    await db_session.refresh(gast)
+    assert gast.revoked_at is not None
+    assert gast.revoked_reason == override_service.REVOKE_REASON_SUPERSEDED
+
+
+async def test_zonen_override_verdraengt_keinen_zimmerweiten(
+    db_session: AsyncSession, room_id: int, zone_id_fuer_stapel: int
+) -> None:
+    """Bereich heisst Zimmer **und** Zone, ``NULL`` eingeschlossen.
+
+    Ein Zonen-Override und ein Zimmer-weiter beschreiben verschiedene Mengen,
+    und der Lookup behandelt sie getrennt (Zone-Match vor Room-Match). Wuerde
+    der Abbau sie vermischen, haette eine Drehung im Schlafzimmer die
+    Einstellung fuer das ganze Zimmer beendet.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    zimmerweit = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("25.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+        heating_zone_id=zone_id_fuer_stapel,
+    )
+
+    await db_session.refresh(zimmerweit)
+    assert zimmerweit.revoked_at is None
+
+
+async def test_andere_zone_bleibt_unberuehrt(
+    db_session: AsyncSession, room_id: int, zone_id_fuer_stapel: int
+) -> None:
+    """Zwei Bereiche, zwei Wuensche — der eine beendet den anderen nicht.
+
+    Im Befund vom 06.10. lagen Overrides in Zone 204 **und** 205. Ein Abbau,
+    der nur nach ``room_id`` filtert, haette das Bad mit abgeschaltet, wenn
+    jemand im Schlafzimmer dreht.
+    """
+    expires = datetime.now(tz=UTC) + timedelta(hours=4)
+    in_der_zone = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("24.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+        heating_zone_id=zone_id_fuer_stapel,
+    )
+
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("20.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=expires,
+    )
+
+    await db_session.refresh(in_der_zone)
+    assert in_der_zone.revoked_at is None
+
+
+async def test_bereits_beendete_behalten_ihren_grund(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Ein widerrufener Override behaelt seinen ``revoked_reason``.
+
+    Sonst ueberschriebe der naechste Abbau die Historie: aus "Abreise" oder
+    "abgelaufen" wuerde rueckwirkend "ersetzt", und die Rekonstruktion ueber
+    ``revoked_reason`` (12c-Pattern) waere wertlos.
+    """
+    jetzt = datetime.now(tz=UTC)
+    frueher = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("22.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=jetzt + timedelta(hours=4),
+    )
+    frueher.revoked_at = jetzt
+    frueher.revoked_reason = "auto_revoke_on_checkout"
+    await db_session.flush()
+
+    await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("23.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=jetzt + timedelta(hours=4),
+    )
+
+    await db_session.refresh(frueher)
+    assert frueher.revoked_reason == "auto_revoke_on_checkout"

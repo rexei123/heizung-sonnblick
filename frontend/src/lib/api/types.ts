@@ -686,8 +686,21 @@ export type CommandReason =
 // Manual Override (Sprint 9.9 - Engine Layer 3)
 // ---------------------------------------------------------------------------
 
+/**
+ * Spiegel zu ``OverrideSource`` in ``backend/src/heizung/models/enums.py``.
+ *
+ * ``device_manual`` kam mit Sprint 20f T2 und hat hier gefehlt (§5.63 — der
+ * Frontend-Type-Spiegel gehoert in denselben PR wie die Schema-Aenderung).
+ * Die Folge war sichtbar: `sourceRaw in SOURCE_LABEL` traf nicht zu, und
+ * Badge wie Historie blieben **leer** statt die Quelle zu nennen.
+ *
+ * ``device`` wird seit Sprint 20f-b nicht mehr neu angelegt — der
+ * abgeleitete Erkennungspfad hat Phantom-Overrides erzeugt. Der Wert bleibt,
+ * weil Bestandszeilen ihn tragen.
+ */
 export type OverrideSource =
   | "device"
+  | "device_manual"
   | "frontend_4h"
   | "frontend_midnight"
   | "frontend_checkout";

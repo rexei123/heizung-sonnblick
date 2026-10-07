@@ -561,7 +561,8 @@ function WindowBackplateCard({
 }
 
 const OVERRIDE_SOURCE_LABEL: Record<OverrideSource, string> = {
-  device: "Drehring am Thermostat",
+  device_manual: "Drehring am Thermostat",
+  device: "Drehring am Thermostat (vermutet, alt)",
   frontend_4h: "Rezeption (4 h)",
   frontend_midnight: "Rezeption (bis Mitternacht)",
   frontend_checkout: "Rezeption (bis Check-out)",
