@@ -486,3 +486,50 @@ async def test_backfill_ueberspringt_pool_und_bereits_bestaetigte(
     gefunden = {b.device_id for b in befunde}
     assert pool_id not in gefunden
     assert bestaetigt_id not in gefunden
+
+
+# ---------------------------------------------------------------------------
+# T8-Abgleich: der Eingangstest stuetzt sich NICHT auf den Nachweis
+# ---------------------------------------------------------------------------
+
+
+async def test_eingangstest_liest_den_rohwert_und_nicht_den_nachweis() -> None:
+    """**Der Lauf ist die Pruefung, die den Nachweis erzeugt.**
+
+    Deshalb darf er sich nicht auf ihn stuetzen — sonst beurteilt er ein
+    Geraet anhand eines Belegs, den er selbst erst erbringen soll. Beim
+    zweiten Lauf (``--resume``) waere das Urteil dann zirkulaer: "montiert,
+    weil beim letzten Mal montiert".
+
+    Dieselbe Klasse wie die Zirkularitaet, die Sprint 20f-b beseitigt hat
+    (die Engine adoptierte ihre eigene Bestaetigung als Gastwunsch).
+
+    Der Test prueft die **Struktur** und nicht das Verhalten, weil es hier
+    um eine Abwesenheit geht: ein Verhaltens-Test koennte nur zeigen, dass
+    der Lauf heute das Richtige tut. Diese Zusicherung soll aber auch gelten,
+    wenn jemand den Vor-Check umbaut und dabei nach einer bequemen
+    Abkuerzung sucht — und `mounted_confirmed_at` ist genau so eine.
+
+    Strukturtests dieser Art sind sonst selten im Repo; hier ist er
+    gerechtfertigt, weil der Brief die Unberuehrtheit des Eingangstests
+    ausdruecklich als T8-Punkt fuehrt und sie nicht aus einem Datenpfad
+    folgt, sondern daraus, dass eine Abfrage **nicht** existiert.
+    """
+    from pathlib import Path
+
+    quelle = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "heizung"
+        / "scripts"
+        / "pairing"
+        / "batch_inbound_test.py"
+    )
+    text = quelle.read_text(encoding="utf-8")
+    assert "mounted_confirmed" not in text, (
+        "Der Eingangstest darf den Montage-Nachweis nicht lesen — er erzeugt ihn. "
+        "Siehe AE-74 und Brief §7."
+    )
+    # Gegenprobe: er liest den Rohwert sehr wohl. Ohne diese Zeile waere der
+    # Test auch gruen, wenn die Datei leer oder umbenannt waere.
+    assert "attached_backplate" in text

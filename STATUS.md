@@ -4836,6 +4836,135 @@ Testfehler.
   bleibt nur für „Montage im belegten Zimmer" relevant. Vor 20e neu
   bewerten, nicht blind umsetzen.
 
+## 2bx. Sprint 20e Montage-Status vereinfacht (2026-10-07, AE-74)
+
+**Fünf PRs, ein Satz:** Der Montage-Status ist keine Momentaufnahme des
+Backplate-Tasters mehr, sondern ein einmal erbrachter Nachweis — und für den
+Melder, der damit entfällt, gibt es zwei Ersatzregeln.
+
+| PR | Inhalt | Merge |
+|---|---|---|
+| [#264](https://github.com/rexei123/heizung-sonnblick/pull/264) | T1 Migration 0027, T2 Backfill, T3 Subscriber, T12 Löschung | `8366227` |
+| [#265](https://github.com/rexei123/heizung-sonnblick/pull/265) | ruff-Gate auf `alembic` ausgeweitet (Nebenbefund) | `8f7f167` |
+| [#266](https://github.com/rexei123/heizung-sonnblick/pull/266) | T4 Layer 4 sticky, T5 `/hardware-status` | `1e337b4` |
+| [#267](https://github.com/rexei123/heizung-sonnblick/pull/267) | T6 Funkstille-Alarm 24 h → 3 h | `fc8596f` |
+| [#268](https://github.com/rexei123/heizung-sonnblick/pull/268) | T7 Regel 3, T10 Regel 3b | `394a056` |
+
+Images: `develop-394a056` auf `heizung-api` und `heizung-web`.
+
+### Der Befund: der Melder war schlechter als keiner
+
+Engine-Layer 4 hat den Montage-Zustand aus `attached_backplate` des letzten
+Frames gelesen. Der Taster meldet im Haus zu oft `false`, obwohl das Gerät an
+der Wand hängt — die Folge war nicht ein übersehener Defekt, sondern ein
+**belegtes Zimmer im Frostschutz**, weil ein Taster klemmte.
+
+20e dreht die Frage um: nicht „sitzt es jetzt?", sondern „war es je belegt
+montiert?". `device.mounted_confirmed_at` (Migration 0027) hält die Antwort,
+gesetzt auf dem ersten Frame mit `attached_backplate=true` **und**
+`valve_position > 0` zugleich, bei vorhandener Zuordnung.
+
+### Der Preis, und dass er im selben Sprint bezahlt wurde
+
+Mit der Entscheidung „ein Gerät mit Nachweis zählt als montiert" erkennt
+Layer 4 ein Gerät, das **tatsächlich** abfällt, nicht mehr. Der Hotelier hat
+das beim Freigeben der Variante benannt und Regel 3/3b als Pflicht vor dem
+01.11. gesetzt — nicht verschiebbar.
+
+Der Ersatz misst die Wirkung statt der Mechanik (§5.76): ein Ventil ohne Kopf
+steht voll offen, das Zimmer wird **heiß**. Regel 3b erkennt genau das, ohne
+den Taster anzufassen.
+
+### Zahlen des Sprints
+
+| | |
+|---|---|
+| Neue Tests | **+58** Backend, **+12** e2e |
+| Backfill am 07.10. | **99** Nachweise gesetzt, 2 (027/100) schon live über den Subscriber |
+| Stand danach | **101 zugeordnete Geräte mit Nachweis, keines ohne** |
+| Funkstille-Alarm | von **24 h** auf **3 h** |
+| Dashboard-Kacheln | von 8 auf **10** |
+
+### Bewusste Abweichung vom Gate: 5 K für Regel 3b
+
+Das Gate sah 3 K für beide Regeln vor. Umgesetzt sind **3 K für Regel 3 und
+5 K für Regel 3b**, als getrennte Einstellung; vom Hotelier am 07.10.
+ausdrücklich akzeptiert. Begründung in AE-74: der interne Vicki-Sensor wird
+von der Heizkörperwärme mitgezogen (§5.27), und die Verzerrung wirkt nur auf
+Regel 3b **für** die Bedingung. Ein gemeinsames Delta wäre entweder für 3 zu
+grob oder für 3b zu empfindlich.
+
+### Kein Mailversand — bestätigter Stand
+
+Regel 3 und 3b sind **UI-Hinweise**. Keine Mail, in keinem der beiden Fälle.
+Sichtbar am Gerät und als zwei getrennte Dashboard-Kacheln. Der Versandweg
+bleibt den zwei bestehenden Alarmen vorbehalten (Health nach `silent`,
+fehlende Belegungsliste).
+
+### T11 gestrichen
+
+Die 15-min-Sperre nach einer Zuordnung war geplant, als `0x28` noch nicht
+dekodiert wurde. Mit Sprint 20f und 20f-b entsteht in einem unbelegten Zimmer
+— und Montage findet dort statt — gar kein Override mehr. Für die Montage im
+belegten Zimmer hebt das Personal den Override in der Oberfläche auf.
+Vermerkt im Brief als §12.3a.
+
+### Drei Nebenbefunde, mitgenommen
+
+1. **`backend-ci` prüfte ruff nur auf `src` und `tests`.** Die 27 Migrationen
+   waren ungeprüft — nicht nur Formatierung, auch echte Lint-Befunde wären
+   durchgelaufen, und eine Migration läuft beim Deploy mit Schreibrecht auf
+   dem Schema. Pfad ergänzt, dazu dieselbe Lücke im pre-commit-Hook. Bei der
+   Gelegenheit kam ruff auf eine Obergrenze (`>=0.16.10,<0.17`) und der
+   Hook-`rev` auf dieselbe Zahl: der Hook formatierte mit 0.15.12, während CI
+   mit 0.16.10 prüfte, und der Kommentar in der Hook-Konfiguration verlangt
+   ausdrücklich, dass die drei Stellen übereinstimmen (§5.80).
+2. **Der Brief war bei T12 falsch.** Er nennt zwei Pfade („beide gehen durch
+   `device_service`"); es sind drei, weil `detach` inline im DELETE-Endpoint
+   lebt und keine Service-Funktion hat.
+3. **Die e2e-Mocks nehmen am Type-Spiegel nicht teil.** Beim Ergänzen von
+   `source`/`valve_state` hat der Compiler die typisierten Stellen gemeldet
+   und die neun untypisierten JSON-Mocks nicht. Neu geschriebene Mocks sind
+   seither gegen den echten Typ gebunden.
+
+### Zwei Fehler in eigener Sache
+
+**Der ValveHintBadge konnte die Geräteliste abschießen.** Die
+Zustandsprüfung war als Ausschlussliste formuliert, ließ also `undefined`
+durch; `CONFIG[undefined]` ist dann `undefined` und der folgende Zugriff ein
+Fehler, der die ganze Tabellenzeile mitnimmt. Aufgefallen an fünf
+Bestands-Specs, deren Mocks das neue Feld nicht hatten. Die Mocks
+nachzuziehen wäre die halbe Antwort gewesen — ein Hinweis-Badge, der 104
+Zeilen abschießen kann, weil ein Feld fehlt, ist falsch gebaut, und ein neuer
+Zustand aus dem Backend hätte in Produktion dasselbe getan.
+
+**Die Konfliktauflösung zwischen PR 3 und PR 4 hat einen Validator
+stillgelegt.** Beide fügen in derselben Gegend von `config.py` ein; das
+mechanische „beide Seiten behalten" hat an der Nahtstelle das `return self`
+und den `@model_validator`-Dekorator verschluckt, weil beide Seiten mit genau
+diesen Zeilen endeten. Ergebnis war kein Syntaxfehler, sondern ein Validator,
+der in den nächsten hineinlief — also eine Konfiguration, die nicht mehr
+geprüft wird, stumm, und genau an der Stelle, die vor Tippfehlern in der
+`.env` schützen soll. Gefunden hat es die lokale Suite, nicht der Blick auf
+den Diff.
+
+### B-18-5 ist überholt
+
+Docker Desktop läuft auf dem Arbeitsrechner wieder (Server 29.8.1). Der
+§5.50-Verify gegen echtes Postgres war in diesem Sprint durchgehend möglich
+und hat drei der fünf PRs beim ersten CI-Lauf grün gemacht. Der
+Backlog-Eintrag „lokale DB-Tests unmöglich" gilt nicht mehr.
+
+### Live-Verify offen
+
+- `/devices`: trägt ein Gerät mit `valve_state != ok` den Hinweis, und bleibt
+  die Liste bei 104 Zeilen?
+- Dashboard: zehn Kacheln, „Geräte online" fällt jetzt nach 3 h statt nach
+  24 h — die Zahl wird öfter unter 104 stehen, ohne dass etwas kaputt ist.
+- Geräteseite eines Geräts mit Nachweis: Pille „Montiert · Montage belegt: …",
+  Kachel „Fenster + Backplate" darunter als Diagnose gekennzeichnet.
+- Nach zwei Wochen Heizperiode: Schwellen nachjustieren (RUNBOOK §10t).
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 
