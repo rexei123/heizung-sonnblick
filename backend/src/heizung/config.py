@@ -170,6 +170,37 @@ class Settings(BaseSettings):
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
 
+    # --- Health-Altersschwellen (Sprint 20e, T6; Muster AE-73) ------------
+    # Ab welchem Alter des juengsten Readings ein Geraet ``degraded`` und ab
+    # wann ``silent`` ist (AE-53). In **Stunden**, weil das die Einheit ist,
+    # in der darueber gesprochen wird; die ``timedelta``-Umrechnung passiert
+    # einmal in ``health_tasks.health_schwellen()``.
+    #
+    # **Die Aenderung in 20e ist die zweite Zahl: 24 -> 3.** Der
+    # Funkstille-Alarm haengt am Uebergang nach ``silent``
+    # (``health_alerts.handle_silent_transitions``), er feuerte also erst
+    # einen Tag nach dem letzten Lebenszeichen. Bei einem Keep-alive alle
+    # zehn Minuten sind 24 h rund 144 verpasste Meldungen, bevor jemand
+    # etwas erfaehrt — und in der Heizperiode ist ein Zimmer, dessen Vicki
+    # seit dem Vormittag schweigt, ein Zimmer, das niemand regelt.
+    #
+    # Warum in den Settings und nicht als Konstante: dieselbe Begruendung
+    # wie bei den Batterie-Grenzen. Die richtige Zahl haengt davon ab, wie
+    # oft im Haus Funkloecher auftreten, und das weiss man erst nach ein
+    # paar Wochen Betrieb. Nachjustieren soll ohne Code-Aenderung gehen.
+    #
+    # Warum NICHT in ``global_config`` (also in die Oberflaeche): wer sie
+    # verschiebt, muss wissen, dass die Engine an drei Stellen auf
+    # ``healthy`` filtert und dass die Dashboard-Kachel "online"
+    # ``healthy`` **und** ``degraded`` zaehlt. Ein Feld, dessen Wirkung
+    # zwei Bildschirme weiter auftaucht, gehoert nicht in die Oberflaeche.
+    #
+    # ``int``, nicht ``Decimal``: hier gibt es keine Rundungsfrage, und
+    # halbe Stunden hat bisher niemand gebraucht. Waechst der Bedarf, wird
+    # es ein eigener Minuten-Wert — nicht ein Float.
+    health_healthy_max_age_h: int = 2
+    health_degraded_max_age_h: int = 3
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.
@@ -185,6 +216,38 @@ class Settings(BaseSettings):
                 "SECRET_KEY ist auf Default-Wert. Echtes Secret setzen "
                 "(`openssl rand -hex 32`) oder ALLOW_DEFAULT_SECRETS=1 "
                 "fuer lokale Dev-Maschine."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _health_schwellen_sind_geordnet(self) -> "Settings":
+        """T6: ``degraded`` muss spaeter liegen als ``healthy``, und beide > 0.
+
+        Bei ``degraded <= healthy`` verschwindet die Stufe ``degraded``
+        vollstaendig: ``_basis_state_from_age`` prueft ``healthy`` zuerst,
+        jedes Geraet waere also entweder ``healthy`` oder ``silent``. Der
+        Funkstille-Alarm feuerte dann bereits bei ``healthy_max_age`` — bei
+        einer Vorgabe von 2 h ein Alarm fuer jedes Geraet, das zwei Stunden
+        lang kein Funkloch verlaesst. Nach einer Woche liest die Mails
+        niemand mehr (§5.79).
+
+        Start-Fehler und keine Warnung, aus demselben Grund wie bei den
+        Batterie-Grenzen: ein Haus, dessen Alarm nach einem Tippfehler in
+        der ``.env`` stumm das Falsche tut, ist schlechter bedient als eines,
+        dessen API nicht startet.
+        """
+        if self.health_healthy_max_age_h < 1:
+            raise ValueError(
+                "HEALTH_HEALTHY_MAX_AGE_H muss mindestens 1 sein "
+                f"(ist: {self.health_healthy_max_age_h})."
+            )
+        if self.health_degraded_max_age_h <= self.health_healthy_max_age_h:
+            raise ValueError(
+                "HEALTH_DEGRADED_MAX_AGE_H muss groesser als "
+                "HEALTH_HEALTHY_MAX_AGE_H sein (ist: "
+                f"{self.health_degraded_max_age_h} <= {self.health_healthy_max_age_h}). "
+                "Sonst gibt es keine Stufe 'degraded', und der Funkstille-Alarm "
+                "feuert bereits an der healthy-Grenze."
             )
         return self
 
