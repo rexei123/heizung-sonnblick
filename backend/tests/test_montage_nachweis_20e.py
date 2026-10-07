@@ -41,7 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.models.device import Device
-from heizung.models.enums import DeviceKind, DeviceVendor
+from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
@@ -205,7 +205,15 @@ async def _purge(session: AsyncSession) -> None:
 
 
 async def _make_zone(session: AsyncSession) -> int:
-    """Zimmer + Zone, damit ein Geraet zugeordnet sein kann."""
+    """Zimmer + Zone, damit ein Geraet zugeordnet sein kann.
+
+    # schema_constraint: room.number max 20 chars, room_type.name max 50
+    # schema_constraint: heating_zone.kind NOT NULL (HeatingZoneKind)
+
+    ``20e-`` + 8 Hex = 12 Zeichen (§5.18, §5.49). ``kind`` hat weder
+    Python- noch Server-Default — der erste CI-Lauf dieses PRs ist genau
+    daran gescheitert.
+    """
     suffix = uuid.uuid4().hex[:8]
     rt = RoomType(name=f"20e-{suffix}")
     session.add(rt)
@@ -213,13 +221,17 @@ async def _make_zone(session: AsyncSession) -> int:
     room = Room(number=f"20e-{suffix}", room_type_id=rt.id)
     session.add(room)
     await session.flush()
-    zone = HeatingZone(room_id=room.id, name="Schlafzimmer")
+    zone = HeatingZone(room_id=room.id, name="Schlafzimmer", kind=HeatingZoneKind.BEDROOM)
     session.add(zone)
     await session.flush()
     return zone.id
 
 
 async def _make_device(session: AsyncSession, *, zone_id: int | None = None) -> Device:
+    # Hinweis fuer Aufrufer: ``device.id`` NICHT nach ``expire_all()`` lesen.
+    # SQLAlchemy versucht dann einen sync-gebrueckten Refresh, der unter
+    # asyncpg mit ``MissingGreenlet`` bricht (§5.38). Die ID vorher in eine
+    # lokale Variable holen.
     device = Device(
         dev_eui=f"{EUI_PREFIX}{uuid.uuid4().hex[:8]}",
         kind=DeviceKind.THERMOSTAT,
@@ -235,13 +247,13 @@ async def _make_device(session: AsyncSession, *, zone_id: int | None = None) -> 
 async def test_nachweis_wird_mit_zuordnung_gesetzt(db_session: AsyncSession) -> None:
     """Der Positivfall in der Datenbank: Zeitstempel ist der Frame-Zeitpunkt."""
     zone_id = await _make_zone(db_session)
-    device = await _make_device(db_session, zone_id=zone_id)
+    device_id = (await _make_device(db_session, zone_id=zone_id)).id
 
-    await _maybe_confirm_mounted(db_session, device.id, _werte(), SEEN_AT)
+    await _maybe_confirm_mounted(db_session, device_id, _werte(), SEEN_AT)
     await db_session.flush()
     db_session.expire_all()
 
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at == SEEN_AT
 
@@ -254,14 +266,14 @@ async def test_zweiter_frame_ueberschreibt_den_nachweis_nicht(db_session: AsyncS
     Zustandsfeld, das 20e gerade abschafft.
     """
     zone_id = await _make_zone(db_session)
-    device = await _make_device(db_session, zone_id=zone_id)
+    device_id = (await _make_device(db_session, zone_id=zone_id)).id
 
-    await _maybe_confirm_mounted(db_session, device.id, _werte(), SEEN_AT)
-    await _maybe_confirm_mounted(db_session, device.id, _werte(), SEEN_AT + timedelta(days=3))
+    await _maybe_confirm_mounted(db_session, device_id, _werte(), SEEN_AT)
+    await _maybe_confirm_mounted(db_session, device_id, _werte(), SEEN_AT + timedelta(days=3))
     await db_session.flush()
     db_session.expire_all()
 
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at == SEEN_AT, "der erste Beleg gilt"
 
@@ -274,13 +286,13 @@ async def test_pool_geraet_ohne_zone_bekommt_keinen_nachweis(db_session: AsyncSe
     Merkmale in einem Frame, wenn der Taster gedrueckt ist. "Montiert" ist
     aber eine Aussage ueber einen Heizkoerper, nicht ueber ein Geraet.
     """
-    device = await _make_device(db_session, zone_id=None)
+    device_id = (await _make_device(db_session, zone_id=None)).id
 
-    await _maybe_confirm_mounted(db_session, device.id, _werte(), SEEN_AT)
+    await _maybe_confirm_mounted(db_session, device_id, _werte(), SEEN_AT)
     await db_session.flush()
     db_session.expire_all()
 
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at is None
 
@@ -296,12 +308,13 @@ async def test_ausgemustertes_geraet_bekommt_keinen_nachweis(db_session: AsyncSe
     device.retired_at = SEEN_AT - timedelta(days=1)
     device.retired_reason = "defekt"
     await db_session.flush()
+    device_id = device.id
 
-    await _maybe_confirm_mounted(db_session, device.id, _werte(), SEEN_AT)
+    await _maybe_confirm_mounted(db_session, device_id, _werte(), SEEN_AT)
     await db_session.flush()
     db_session.expire_all()
 
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at is None
 
@@ -324,12 +337,13 @@ async def test_retire_loescht_den_nachweis(db_session: AsyncSession) -> None:
     device = await _make_device(db_session, zone_id=zone_id)
     device.mounted_confirmed_at = SEEN_AT
     await db_session.flush()
+    device_id = device.id
 
-    await retire_device(db_session, device_id=device.id, reason="defekt", user_id=None)
+    await retire_device(db_session, device_id=device_id, reason="defekt", user_id=None)
     await db_session.flush()
     db_session.expire_all()
 
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at is None
 
@@ -396,16 +410,16 @@ async def test_backfill_nimmt_den_spaeteren_der_beiden_belege(db_session: AsyncS
     belegt), der juengste Frame haette mit dem Nachweis nichts zu tun.
     """
     zone_id = await _make_zone(db_session)
-    device = await _make_device(db_session, zone_id=zone_id)
+    device_id = (await _make_device(db_session, zone_id=zone_id)).id
     taster_am = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
     ventil_am = datetime(2026, 10, 3, 8, 0, tzinfo=UTC)
 
-    await _reading(db_session, device.id, taster_am, fcnt=1, backplate=True, valve=0)
-    await _reading(db_session, device.id, ventil_am, fcnt=2, backplate=None, valve=65)
-    await _reading(db_session, device.id, ventil_am + timedelta(days=1), fcnt=3, valve=0)
+    await _reading(db_session, device_id, taster_am, fcnt=1, backplate=True, valve=0)
+    await _reading(db_session, device_id, ventil_am, fcnt=2, backplate=None, valve=65)
+    await _reading(db_session, device_id, ventil_am + timedelta(days=1), fcnt=3, valve=0)
 
     befunde = await ermittle(db_session)
-    meine = [b for b in befunde if b.device_id == device.id]
+    meine = [b for b in befunde if b.device_id == device_id]
     assert len(meine) == 1
     assert meine[0].erster_taster == taster_am
     assert meine[0].erstes_ventil == ventil_am
@@ -414,7 +428,7 @@ async def test_backfill_nimmt_den_spaeteren_der_beiden_belege(db_session: AsyncS
     assert await schreibe(db_session, meine) == 1
     await db_session.flush()
     db_session.expire_all()
-    frisch = await db_session.get(Device, device.id)
+    frisch = await db_session.get(Device, device_id)
     assert frisch is not None
     assert frisch.mounted_confirmed_at == ventil_am
 
@@ -428,10 +442,10 @@ async def test_backfill_ueberspringt_geraet_mit_nur_einem_beleg(
     aufgesetzt) — ein Nachweis waere hier eine Behauptung.
     """
     zone_id = await _make_zone(db_session)
-    device = await _make_device(db_session, zone_id=zone_id)
+    device_id = (await _make_device(db_session, zone_id=zone_id)).id
     await _reading(
         db_session,
-        device.id,
+        device_id,
         datetime(2026, 10, 1, 8, 0, tzinfo=UTC),
         fcnt=1,
         backplate=None,
@@ -439,7 +453,7 @@ async def test_backfill_ueberspringt_geraet_mit_nur_einem_beleg(
     )
 
     befunde = await ermittle(db_session)
-    assert [b for b in befunde if b.device_id == device.id] == []
+    assert [b for b in befunde if b.device_id == device_id] == []
 
 
 async def test_backfill_ueberspringt_pool_und_bereits_bestaetigte(
@@ -457,10 +471,11 @@ async def test_backfill_ueberspringt_pool_und_bereits_bestaetigte(
     bestaetigt.mounted_confirmed_at = SEEN_AT
     await db_session.flush()
 
-    for d in (pool, bestaetigt):
+    pool_id, bestaetigt_id = pool.id, bestaetigt.id
+    for device_id in (pool_id, bestaetigt_id):
         await _reading(
             db_session,
-            d.id,
+            device_id,
             datetime(2026, 10, 1, 8, 0, tzinfo=UTC),
             fcnt=1,
             backplate=True,
@@ -469,5 +484,5 @@ async def test_backfill_ueberspringt_pool_und_bereits_bestaetigte(
 
     befunde = await ermittle(db_session)
     gefunden = {b.device_id for b in befunde}
-    assert pool.id not in gefunden
-    assert bestaetigt.id not in gefunden
+    assert pool_id not in gefunden
+    assert bestaetigt_id not in gefunden
