@@ -109,11 +109,21 @@ export function ValveHintBadge({
   valveDeltaK,
   variant = "compact",
 }: ValveHintBadgeProps) {
-  if (valveState === "ok" || valveState === "unbekannt") {
+  // Positiv formuliert statt als Ausschlussliste, und das ist nicht Kosmetik:
+  // ein Wert, den dieser Badge nicht kennt — ein neuer Zustand aus dem
+  // Backend, ein veralteter Mock, eine Antwort ohne das Feld — darf die
+  // Geräteliste nicht zum Absturz bringen. Mit `CONFIG[valveState]` auf einem
+  // unbekannten Schlüssel wäre `config` undefined und `config.hint` ein
+  // Fehler, der die ganze Zeile mitnimmt.
+  //
+  // Aufgefallen in CI: fünf Bestands-Specs bauen Geräte-Mocks ohne
+  // `valve_state`, und die Ausschlussliste ließ `undefined` durch. Das war
+  // mein Fehler im Badge, nicht in den Mocks — ein Hinweis-Badge, der eine
+  // Liste von 104 Zeilen abschießen kann, ist falsch gebaut.
+  const config = valveState in CONFIG ? CONFIG[valveState as keyof typeof CONFIG] : undefined;
+  if (config === undefined) {
     return null;
   }
-
-  const config = CONFIG[valveState];
   const hint = config.hint(formatDelta(valveDeltaK));
 
   const pill = (

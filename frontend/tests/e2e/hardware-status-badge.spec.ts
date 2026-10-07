@@ -39,6 +39,8 @@ const SAMPLE_DEVICE = {
   },
   active_override: null,
   latest_reading: null,
+  valve_state: "ok" as const,
+  valve_delta_k: null,
 };
 
 const SAMPLE_HW_STATUS = {
