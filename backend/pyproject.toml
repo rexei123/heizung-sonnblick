@@ -45,7 +45,11 @@ dev = [
     # bricht, sobald ein anderes Paket sie fallen laesst — und zwar mit einem
     # ImportError, der nach einem Testfehler aussieht (CLAUDE.md §5.80).
     "pyyaml>=6.0",
-    "ruff>=0.3",
+    # Obergrenze seit 07.10.2026 (§5.80): ruff faellt ein Urteil, also
+    # darf der Zeitpunkt des Versionssprungs nicht von aussen kommen.
+    # Der Wert muss mit ``rev`` in ``.pre-commit-config.yaml``
+    # uebereinstimmen — sonst formatiert der Hook anders, als CI prueft.
+    "ruff>=0.16.10,<0.17",
     # Obergrenze bewusst gesetzt (26.09.2026). mypy 2.x meldet vier Stellen
     # in Bestandscode, die 1.x durchgelassen hat. Der eigentliche Mangel war
     # aber nicht der Typfehler, sondern die fehlende Obergrenze: zwei Laeufe
