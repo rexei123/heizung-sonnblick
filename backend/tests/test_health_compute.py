@@ -300,8 +300,18 @@ async def test_mixed_states_zone_becomes_degraded(
     await _add_reading(
         db_session, device_id=dev_a_id, age=timedelta(minutes=30), temperature_c=Decimal("20.0")
     )
+    # Sprint 20e (T6): 2 h 30 min, nicht mehr 5 h. Die ``degraded``-Stufe
+    # reicht seit der Schwellen-Verschiebung von 2 h bis 3 h — bei 5 h waere
+    # dieses Geraet jetzt ``silent``, und der Test wuerde zwei silent-Geraete
+    # pruefen statt der Mischung, die er im Namen trägt.
+    #
+    # Angepasst wird die Fixture, nicht die Schwelle (§5.51): die
+    # Domaenen-Wahrheit hat sich geaendert, der Test soll ihr folgen.
     await _add_reading(
-        db_session, device_id=dev_b_id, age=timedelta(hours=5), temperature_c=Decimal("20.0")
+        db_session,
+        device_id=dev_b_id,
+        age=timedelta(hours=2, minutes=30),
+        temperature_c=Decimal("20.0"),
     )
     await _add_reading(
         db_session, device_id=dev_c_id, age=timedelta(hours=30), temperature_c=Decimal("20.0")
