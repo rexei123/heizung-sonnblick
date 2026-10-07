@@ -4188,3 +4188,273 @@ vermuten würde.**
 - **Bestandszeilen auf `device_manual` umdeuten.** Welche alten
   `device`-Overrides aus einer echten Drehung kamen, ist nachträglich nicht
   entscheidbar; eine Umdeutung wäre eine Behauptung (§5.68).
+
+---
+
+# AE-74 — Der Montage-Nachweis ersetzt den Backplate-Taster als Melder (Sprint 20e)
+
+**Datum:** 2026-10-07
+**Status:** angenommen, umgesetzt in Sprint 20e (PRs #264, #266, #267, #268)
+
+## Der Befund
+
+Engine-Layer 4 (`layer_device_detached`, Sprint 9.11x) hat den
+Montage-Zustand als **Zustand** gelesen: melden alle Thermostate eines
+Zimmers in den letzten zwei frischen Frames `attached_backplate=false`,
+schaltet die Zone in den Frostschutz.
+
+Im Haus hat dieser Melder nicht funktioniert. Der Taster meldet zu oft
+`false`, obwohl das Gerät an der Wand hängt — der Hersteller schreibt die
+Unzuverlässigkeit seiner Erkennungen selbst (§5.27). Die Folge war nicht ein
+übersehener Defekt, sondern das Gegenteil: ein belegtes Zimmer im
+Frostschutz, weil ein Taster klemmte.
+
+Ein Melder, dem niemand mehr glaubt, überwacht nichts (§5.79). Das ist die
+Begründung des ganzen Sprints.
+
+## Die Entscheidung
+
+**Die Frage wird umgedreht.** Nicht „sitzt das Gerät jetzt?", sondern „**war**
+es je belegt montiert?".
+
+`device.mounted_confirmed_at` (`TIMESTAMPTZ NULL`, Migration 0027) hält die
+Antwort. Gesetzt wird sie vom Subscriber auf dem ersten Frame, der **beide**
+Merkmale zugleich trägt:
+
+- `attached_backplate = true` — der Taster hinter dem Gerät war gedrückt
+- `valve_position > 0` — der Motor hat das Ventil geöffnet
+
+plus eine vorhandene Zuordnung (`heating_zone_id IS NOT NULL`) und
+`retired_at IS NULL`.
+
+Ein Gerät mit Nachweis gilt in Layer 4 als **montiert**, unabhängig davon,
+was der Taster gerade meldet.
+
+### Warum eine Spalte und nicht read-time abgeleitet
+
+§5.73 sagt: ableitbare Werte read-time ableiten. Hier gilt die Regel nicht,
+aus zwei Gründen:
+
+1. **Das Prädikat ist monoton über die ganze Historie.** Read-time wäre es ein
+   `EXISTS` ohne Zeitgrenze — billig, solange es **wahr** ist (erster Treffer
+   über `ix_sensor_reading_device_time`), und teuer genau dann, wenn es
+   **falsch** ist: dann liest es die ganze Historie des Geräts. Falsch ist es
+   bei den interessanten Geräten, also bei Pool und defekt. Bei 45 Zimmern
+   wären das 45 solche Abfragen je Minute, dauerhaft.
+2. **`sensor_reading` ist eine Hypertable, und Retention ist vorgesehen**
+   (B-17-2). Ein Nachweis, der aus Daten abgeleitet wird, die gelöscht werden
+   dürfen, ist kein Nachweis.
+
+Vorbild ist `retired_at` (AE-57): eine Lebenszyklus-Tatsache des Geräts,
+geschrieben von genau den Service-Pfaden, die den Vorgang abbilden.
+
+### Warum beide Merkmale im selben Frame
+
+Jedes Merkmal allein ist erklärbar, ohne dass das Gerät montiert ist: den
+Taster kann eine Hand drücken, und der Motor fährt auch in der Luft. Erst die
+Gleichzeitigkeit schließt beides aus — der Taster sagt „etwas drückt von
+hinten", das Ventil sagt „und zwar ein Ventil".
+
+**Die Zuordnung ist dabei nicht Formsache.** Der Eingangstest fährt jedes
+Gerät auf 28 °C und erwartet dort eine Ventilöffnung (RUNBOOK §10h.4); ein
+Pool-Vicki auf dem Werkstatt-Tisch erfüllt dabei beide Merkmale in einem
+Frame. „Montiert" ist aber eine Aussage über einen **Heizkörper**, nicht über
+ein Gerät.
+
+### Warum der Nachweis mit der Zuordnung verschwindet
+
+`detach`, `retire` und `replace` löschen ihn. Bleibt er stehen, kommt ein
+Pool-Rückläufer mit einem Nachweis zurück, den niemand erbracht hat — und
+Layer 4 nimmt ihn nach dem nächsten Einbau sofort aus der Prüfung, ohne dass
+je ein Frame die Montage belegt hat.
+
+**Befund zum Brief:** er nennt zwei Pfade („beide gehen durch
+`device_service`"). Es sind **drei**: `detach` lebt inline im
+DELETE-Endpoint und hat keine Service-Funktion, anders als sein Gegenstück
+`assign_zone`, das Sprint 17 C8 genau deswegen herausgezogen hat.
+
+### Gemischtes Zimmer: das Gerät mit Nachweis zählt als attached
+
+Entscheidung des Hoteliers vom 07.10.2026, und der Unterschied ist nicht
+akademisch. Schlafzimmer mit Nachweis, Bad ohne, beide melden `false`:
+
+- **Gewählt (a):** der Nachweis macht `any_attached` wahr, das Zimmer kippt
+  nicht.
+- **Verworfen (b):** das Gerät mit Nachweis fällt aus der Liste, das Bad-Gerät
+  entscheidet allein — und ein einzelner unbewiesener Taster könnte das ganze
+  Zimmer in den Frostschutz schicken. Genau diese Lage beendet 20e.
+
+Im Trace steht `detail="sticky_mounted"` und `extras["sticky_devices"]`, aber
+nur, wenn das Urteil **ausschließlich** am Nachweis hängt. Meldet ein Gerät im
+Zimmer jetzt `true`, steht weiter `device_attached` da: ein frischer Frame ist
+der bessere Beleg als ein Nachweis von vorletzter Woche.
+
+### Für Geräte ohne Nachweis ändert sich nichts
+
+Ausdrücklich geprüft und belegt, weil es die Frage war, die vor dem Bau
+geklärt werden musste: ein zugeordnetes Gerät ohne Nachweis läuft durch
+dieselben drei Kategorien wie vor 20e. Kein Sicherheitsmodus, kein
+Sonderpfad.
+
+Insbesondere spielt das **Ventil hier keine Rolle** — `valve_position` kommt
+in `rules/engine.py` kein einziges Mal vor und ist ausschließlich Teil der
+Nachweis-Bedingung. Ein neu zugeordnetes Gerät in einem warmen Zimmer, dessen
+Ventil wochenlang geschlossen bleibt, bekommt keinen Nachweis und wird
+behandelt wie vorher: der aktuelle `attached_backplate` gilt.
+
+Belegt zweifach: durch einen eigenen Test mit `valve_position = 0` auf allen
+Frames, und durch die 31 Bestandstests der Layer-4-Familie, die **ohne
+Anpassung** grün bleiben (§5.47).
+
+## Der Preis, und wie er bezahlt wird
+
+**Mit Variante (a) erkennt Layer 4 ein Gerät, das tatsächlich abfällt, nicht
+mehr** — und zwar ausgerechnet bei den Geräten, bei denen er anschlagen
+sollte. Das war bekannt, als die Entscheidung fiel, und es ist der Grund,
+warum Regel 3b in denselben Sprint gehört und nicht in den Backlog.
+
+Der Ersatz kann nicht derselbe Mechanismus sein, denn der Taster bleibt
+unzuverlässig. Er misst die **Wirkung** statt der Mechanik (§5.76):
+
+**Regel 3b — Zimmer zu warm.** Ein Ventil ohne Kopf steht **voll offen**: der
+Stift wird von der Feder herausgedrückt, sobald der Thermostatkopf ab ist. Ein
+abgenommenes Gerät führt also nicht zu einem kalten, sondern zu einem
+**heißen** Zimmer, und das ist ohne den Taster messbar. Bedingung: `Ist >=
+Soll + ROOM_TOO_WARM_DELTA_K` über jeden Messwert des Fensters.
+
+**Regel 3 — Ventil klemmt zu.** Die Gegenrichtung: `Soll >= Ist +
+VALVE_STUCK_DELTA_K` **und** `valve_position <= VALVE_STUCK_OPENNESS_MAX`,
+ebenfalls über das ganze Fenster. Ein Zimmer, das nicht warm wird, obwohl die
+Engine heizt.
+
+Beide read-time, eine Aggregat-Query mit zwei `bool_and` über denselben
+`GROUP BY` (`services/valve_health.py`). Muster und Begründung wie bei der
+Batterie-Stufe (AE-72 §3): kein persistierter Zustand, der bei Ausfall des
+Taktgebers plausibel einfriert.
+
+### Bewusste Abweichung vom Gate: 5 K für Regel 3b statt 3 K
+
+**Das Gate hatte „Δ 3 K" für beide Regeln vorgesehen. Umgesetzt sind 3 K für
+Regel 3 und 5 K für Regel 3b, als getrennte Einstellung. Vom Hotelier am
+07.10.2026 ausdrücklich akzeptiert.**
+
+Begründung: `temperature` ist der **interne Vicki-Sensor**, nicht die
+Raumtemperatur, und er wird von der Heizkörperwärme mitgezogen — der
+Hersteller sagt das selbst (§5.27). Die Verzerrung hat eine Richtung, und sie
+wirkt auf die beiden Regeln verschieden:
+
+| | Verzerrung wirkt | Folge |
+|---|---|---|
+| **Regel 3** (`Soll >= Ist + Δ`) | gegen die Bedingung | Hinweis kommt eher **zu selten** — harmlos |
+| **Regel 3b** (`Ist >= Soll + Δ`) | **für** die Bedingung | Hinweis käme eher **zu oft** — schädlich |
+
+Ein gemeinsames Delta wäre deshalb entweder für Regel 3 zu grob oder für
+Regel 3b zu empfindlich. 5 K ist der Aufschlag für die Richtung, in der der
+Sensor lügt.
+
+**Warum ein zu häufiger Hinweis schädlich ist und nicht nur lästig:** nach
+zwei Wochen sieht niemand mehr hin, und dann überwacht der Melder nichts
+(§5.79) — während er gleichzeitig der einzige Ersatz für den abgeschalteten
+Layer 4 ist. Die Schwellen stehen in den Settings und werden nach zwei Wochen
+Heizperiode nachjustiert; der Weg dafür steht in RUNBOOK §10t.
+
+### Kein Mailversand — bestätigt
+
+Gate-Entscheidung, hier als geltender Stand festgehalten: **Regel 3 und 3b
+sind UI-Hinweise. Sie lösen keine Mail aus, in keinem der beiden Fälle.**
+
+Sichtbar sind sie am Gerät (`ValveHintBadge`) und auf dem Dashboard (zwei
+getrennte Kacheln). Der Versandweg (`services/mailer.py`) bleibt den zwei
+bestehenden Alarmen vorbehalten: Health-Übergang nach `silent` und fehlende
+Belegungsliste.
+
+Begründung: ein Hinweis in der Oberfläche, der manchmal zu viel zeigt, kostet
+einen Blick; eine Mail, die manchmal zu viel zeigt, kostet die
+Glaubwürdigkeit **aller** Mails. Wer Regel 3 per Mail will, braucht eine
+zweite Adresse — nicht denselben Posteingang wie den Engine-Alarm.
+
+### Die beiden Kacheln sind getrennt gezählt
+
+`valve_stuck_count` und `room_too_warm_count`, nicht eine Summe. Die Hinweise
+bedeuten verschiedene Handgriffe: „Ventil prüfen" heißt kalibrieren oder
+gangbar machen, „Zimmer zu warm" heißt nachsehen, ob der Kopf noch sitzt. Eine
+gemeinsame Zahl hätte den Hausmeister losgeschickt, ohne ihm zu sagen, was er
+mitnehmen soll.
+
+## Was ebenfalls in 20e entschieden wurde
+
+**Funkstille-Alarm bei 3 h statt 24 h** (T6). Der Alarm hängt am Übergang nach
+`silent`; die Grenze stand auf 24 h, also rund 144 verpasste Keep-alives,
+bevor jemand eine Mail bekommt. Beide Altersgrenzen stehen seither in den
+Settings (`HEALTH_HEALTHY_MAX_AGE_H`, `HEALTH_DEGRADED_MAX_AGE_H`).
+
+Zwei sichtbare Nebenwirkungen, beide bewusst:
+
+- Die Dashboard-Kachel „Geräte online" zählt `healthy` **und** `degraded`. Ein
+  Gerät fällt damit nach 3 h aus „online" statt nach 24 h.
+- `degraded` ist jetzt eine Durchgangsstufe von einer Stunde Breite (2 h bis
+  3 h). `HEALTHY_MAX_AGE` bleibt bei 2 h — mit den Settings ist das eine
+  Konfigurationsfrage statt einer Code-Frage.
+
+**T11 (15-min-Sperre nach Zuordnung) gestrichen.** Die Sperre war geplant, als
+`0x28` noch nicht dekodiert wurde und jede Sollwert-Abweichung als Gastwunsch
+galt. Beide Hälften dieser Lage sind mit Sprint 20f und 20f-b weg: in einem
+unbeleg­ten Zimmer — und Montage findet im unbelegten Zimmer statt — entsteht
+gar kein Override mehr. Für den Fall „Montage im belegten Zimmer" hebt das
+Personal den Override in der Oberfläche auf; das ist ein Klick in einem
+seltenen Fall gegen eine Schwelle, ein Settings-Feld, ein Audit-Ereignis und
+einen Grenzwert-Test.
+
+## Verworfen
+
+- **`sensor_reading.motor_range` als Nachweis-Kriterium** (Weg B aus dem
+  Brief). Die wörtliche Bedingung des Auftrags, aber sie wirkt **nur nach
+  vorn**: für die bereits montierten Geräte gibt es keine historischen Werte,
+  der Nachweis müsste trotzdem aus `valve_position > 0` kommen. Der Rohwert
+  bleibt als Backlog-Eintrag für Ventil-Diagnosen.
+- **`valve_position` als Zusatzbedingung für Regel 3b.** Naheliegend wäre
+  „Hinweis nur, wenn das Ventil auch offen gemeldet wird" — das verliert genau
+  den Hauptfall. Ein abgenommener Kopf meldet die **Motorposition, die er
+  zuletzt angefahren hat**; stand der Sollwert niedrig, meldet er
+  „geschlossen", während das Ventil mechanisch voll offen ist. Die
+  Zusatzbedingung hätte den Melder gegen seinen eigenen Zweck abgedichtet.
+- **Mittelwert statt `bool_and` über das Fenster.** Ein Durchschnitt hätte den
+  Aufheiz-Peak nach jeder Nachtabsenkung als Befund gelesen — in jedem
+  Zimmer, jede Nacht.
+- **Backfill in der Migration.** Das Urteil über die Historie ist fachlich
+  („beide Merkmale irgendwann") und muss wiederholbar sein; eine Migration
+  läuft genau einmal. Es liegt als Skript
+  (`scripts/backfill_mounted_confirmed.py`, Vorschau als Standard) und hat am
+  07.10.2026 **99 Nachweise** gesetzt; zwei Geräte (027, 100) hatten ihren
+  schon live über den Subscriber bekommen. Ergebnis: **101 zugeordnete Geräte
+  mit Nachweis, keines ohne.**
+- **Eine gemeinsame Dashboard-Kachel für beide Ventil-Hinweise.** Siehe oben:
+  verschiedene Handgriffe.
+- **Eine fünfte Pille für den sticky-Fall.** Er ist der normale, gesunde
+  Zustand eines montierten Geräts im Haus; eine eigene Farbe hätte ihn als
+  Besonderheit dargestellt. Was sich unterscheidet, ist die Begründung, und
+  die steht in der Unterzeile („Montage belegt: … · Taster meldet aktuell
+  nicht").
+
+## Querverweise
+
+- **AE-47** — Hardware-First bei der Fenstererkennung; derselbe Taster, andere
+  Richtung.
+- **AE-57** — `retired_at` als Lebenszyklus-Tatsache; Vorbild für
+  `mounted_confirmed_at`.
+- **AE-72 §3** — read-time abgeleitetes Urteil über ein Zeitfenster, eine
+  Aggregat-Query je Request; Vorbild für `valve_verdicts`.
+- **AE-73** — Schwellen als `Decimal` in den Settings; Muster für alle vier
+  Ventil-Werte und die zwei Health-Grenzen.
+- **AE-76** — der Engine-Abgleich; er holt den Sollwert zurück, wo 20e
+  früher einen Override adoptiert hätte.
+- **§5.27** — der Hersteller zum internen Sensor und zur Zuverlässigkeit der
+  Vicki-Erkennungen. Die Quelle für die 5-K-Abweichung.
+- **§5.47** — Verhaltensneutralität belegen: die Layer-4-Tests für Geräte
+  **ohne** Nachweis bleiben ohne Anpassung grün.
+- **§5.76** — Wirkung überwachen statt Mechanik. Der Grund, warum Regel 3b
+  der Ersatz für Layer 4 ist und nicht ein zweiter Taster-Check.
+- **§5.79** — ein Melder, dem niemand glaubt, überwacht nichts. Die
+  Begründung des Sprints und gleichzeitig das Argument gegen den Mailversand.
+- **RUNBOOK §10t** — was der Hausmeister bei den beiden Hinweisen tut, und
+  wie die Schwellen geändert werden.

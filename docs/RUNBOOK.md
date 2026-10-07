@@ -3777,3 +3777,160 @@ höchstens eine Heizperiode lang.
 wechseln), §10h.4 (Eingangstest), AE-76 (die Entscheidung dahinter und was
 sie in Kauf nimmt), CLAUDE.md §5.76 (Wirkung überwachen statt Mechanik —
 genau das tut der Abgleich).
+
+---
+
+## 10t. „Ventil prüfen" und „Zimmer zu warm" — was zu tun ist (Sprint 20e)
+
+**Wichtig vorweg: diese beiden Hinweise schicken keine Mail.** Sie stehen in
+der Oberfläche — am Gerät und als zwei Kacheln auf dem Dashboard. Wer sie
+nicht ansieht, erfährt nichts. Das ist gewollt: eine Mail, die manchmal zu
+viel zeigt, kostet die Glaubwürdigkeit aller Mails, und die zwei echten
+Alarme (Gerät meldet sich nicht, Belegungsliste fehlt) sollen ihre Wirkung
+behalten.
+
+**Und: seit Sprint 20e ist die Dashboard-Kachel „Zimmer zu warm" der einzige
+automatische Melder für ein abgefallenes Gerät.** Layer 4 erkennt das nicht
+mehr, sobald ein Gerät einmal belegt montiert war (AE-74). Ein Blick auf die
+beiden Kacheln gehört deshalb in den Tagesablauf, so wie der Blick auf
+„Geräte online".
+
+### Was die beiden Hinweise bedeuten
+
+| Anzeige | Farbe | Was gemessen wurde | Was wahrscheinlich ist |
+|---|---|---|---|
+| **Zimmer zu warm** | rot | Ist-Temperatur liegt über zwei Stunden durchgehend deutlich über dem Sollwert | Thermostatkopf ist ab (das Ventil steht dann **offen**), oder das Ventil klemmt offen |
+| **Ventil prüfen** | gelb | Sollwert liegt über zwei Stunden durchgehend deutlich über dem Ist, Ventil meldet trotzdem geschlossen | Ventil klemmt zu, oder das Gerät ist nicht kalibriert |
+
+Beide nennen den gemessenen Abstand in Kelvin, zum Beispiel „Ist liegt 6,2 K
+über Soll". Das ist der **knappste** Wert der zwei Stunden, nicht der
+Spitzenwert — die Lage ist also mindestens so deutlich wie die Zahl sagt.
+
+### „Zimmer zu warm": Handgriff
+
+1. **Ins Zimmer gehen und das Gerät ansehen.** Sitzt der Thermostatkopf auf
+   der Ventilhalterung, oder liegt er auf der Fensterbank? Das ist der
+   häufigste Fall und in fünf Sekunden entschieden.
+2. **Sitzt er nicht:** aufsetzen, handfest andrehen. Danach einmal
+   rekalibrieren (`0x03`, siehe §10e) — der Motor muss den Ventilhub neu
+   ausmessen.
+3. **Sitzt er:** das Ventil klemmt mechanisch offen. Dann hilft kein
+   Downlink. Ventilunterteil von Hand prüfen (Stift lässt sich eindrücken und
+   federt zurück?), sonst Heizungsmonteur.
+4. **Zimmer belegt?** Dann vorher nachsehen, ob gerade jemand im Zimmer ist —
+   ein Handgriff am Heizkörper im belegten Zimmer gehört angekündigt.
+
+Der Hinweis verschwindet von selbst, sobald zwei Stunden ohne die Bedingung
+vergangen sind. Nach einem Handgriff also **nicht** sofort nachsehen, sondern
+am nächsten Tag.
+
+### „Ventil prüfen": Handgriff
+
+1. **Erst rekalibrieren** (`0x03`, §10e). „Ventil meldet geschlossen" heißt
+   auch bei einem nicht kalibrierten Gerät 0 %, und das ist der billigere
+   Fall.
+2. **Hilft das nicht:** Ventilunterteil prüfen. Ein Stift, der sich nicht
+   eindrücken lässt, ist festgesetzt — das ist Heizungsmonteur-Arbeit und
+   kein Thermostat-Problem.
+3. **Gegenprobe, wenn das Zimmer trotzdem warm ist:** dann stimmt der
+   Ist-Wert nicht. Der Vicki-Sensor sitzt am Heizkörper und wird von ihm
+   mitgezogen; in einem Zimmer, in dem ein anderer Heizkörper heizt, kann der
+   gemessene Ist-Wert weit unter der Raumtemperatur liegen.
+
+### Wenn ein Hinweis zu oft kommt
+
+Das ist kein Kosmetikproblem. Ein Hinweis, den man nach zwei Wochen übergeht,
+überwacht nichts — und bei „Zimmer zu warm" ist er der Ersatz für einen
+abgeschalteten Melder. Also lieber nachjustieren als ignorieren.
+
+Die vier Werte stehen in der Umgebung des api-Containers, nicht in der
+Oberfläche:
+
+| Variable | Vorgabe | Wirkung |
+|---|---|---|
+| `ROOM_TOO_WARM_DELTA_K` | `5.0` | ab wie viel Kelvin über dem Soll „Zimmer zu warm" gilt |
+| `VALVE_STUCK_DELTA_K` | `3.0` | ab wie viel Kelvin unter dem Soll „Ventil prüfen" gilt |
+| `VALVE_STUCK_OPENNESS_MAX` | `0` | bis zu welcher Ventilöffnung in Prozent „geschlossen" gilt |
+| `VALVE_WINDOW_H` | `2` | Fensterlänge beider Regeln in Stunden |
+
+**Die beiden Deltas sind absichtlich verschieden** (AE-74): der Vicki-Sensor
+verzerrt nur in Richtung „zu warm", deshalb braucht diese Richtung mehr
+Abstand. Wer sie gleichsetzt, bekommt „Zimmer zu warm" in halb leeren
+Zimmern.
+
+Ändern wie bei den Batterie-Schwellen (§10q):
+
+**SSH (heizung-test bzw. heizung-main, root):**
+
+```bash
+cd /opt/heizung-sonnblick
+# Wert in die .env eintragen oder ändern:
+grep -n "ROOM_TOO_WARM_DELTA_K" .env || echo "ROOM_TOO_WARM_DELTA_K=6.0" >> .env
+docker compose -f infra/deploy/docker-compose.prod.yml up -d api celery_worker celery_beat
+```
+
+Das `-f` ist nicht optional (§5.78). Es müssen **alle drei** Container neu
+starten: die Werte werden beim Hochfahren gelesen.
+
+**Danach prüfen**, dass die API wirklich läuft:
+
+```bash
+docker compose -f infra/deploy/docker-compose.prod.yml logs --tail 20 api | grep -i "valve\|error\|Uvicorn running"
+```
+
+Ein unsinniger Wert (Delta 0 oder negativ, Ventil-Prozent über 100,
+Fenster 0) lässt die API **nicht starten** — der Fehler steht dann im Log.
+Das ist Absicht: eine Konfiguration, die stumm das Falsche tut, ist
+schlimmer als eine API, die beim Hochfahren meckert.
+
+### Welche Geräte gerade einen Hinweis tragen
+
+Ohne Oberfläche, direkt in der Datenbank — nützlich, wenn man eine Liste zum
+Mitnehmen braucht. Das Urteil selbst entsteht erst beim Lesen, die Abfrage
+baut es deshalb nach:
+
+**SSH (Server, root):**
+
+```bash
+docker compose -f infra/deploy/docker-compose.prod.yml exec db psql -U heizung -d heizung -c "
+SELECT d.label, d.dev_eui,
+       count(*) AS messwerte,
+       bool_and(sr.setpoint >= sr.temperature + 3.0 AND sr.valve_position <= 0) AS ventil_klemmt,
+       bool_and(sr.temperature >= sr.setpoint + 5.0) AS zu_warm
+FROM device d
+JOIN sensor_reading sr ON sr.device_id = d.id
+WHERE d.retired_at IS NULL
+  AND sr.time >= now() - interval '2 hours'
+  AND sr.setpoint IS NOT NULL
+  AND sr.temperature IS NOT NULL
+GROUP BY d.id, d.label, d.dev_eui
+HAVING count(*) >= 6
+   AND (bool_and(sr.setpoint >= sr.temperature + 3.0 AND sr.valve_position <= 0)
+        OR bool_and(sr.temperature >= sr.setpoint + 5.0))
+ORDER BY d.label;"
+```
+
+Die Zahlen `3.0`, `5.0`, `0` und `6` in der Abfrage sind die Vorgabewerte.
+Wer die Schwellen geändert hat, muss sie hier mit ändern — die Abfrage liest
+die Einstellungen nicht. Die `6` ist die Mindest-Stichprobe: unter sechs
+Messwerten in zwei Stunden gibt es kein Urteil, sondern „unbekannt".
+
+### Was die Hinweise NICHT sagen
+
+- **Nicht, ob das Gerät online ist.** Das steht auf der Health-Achse
+  („Geräte online", `health_state`). Ein Gerät, das schweigt, trägt keinen
+  Ventil-Hinweis — es hat zu wenige Messwerte und ist damit „unbekannt", und
+  „unbekannt" rendert nichts.
+- **Nicht, ob der Montage-Status stimmt.** Die Pille „Montiert" oben auf der
+  Geräteseite kommt seit 20e aus dem Montage-Nachweis und kann „Montiert"
+  sagen, während die Kachel „Fenster + Backplate" weiter unten „abgenommen"
+  zeigt. Das ist kein Widerspruch: oben steht das Urteil, unten der Rohwert
+  des letzten Frames. Die Kachel ist entsprechend gekennzeichnet.
+- **Nicht, dass es dringend ist.** Beide Hinweise brauchen zwei Stunden, bis
+  sie erscheinen, und verschwinden genauso langsam. Für die Frage „läuft die
+  Steuerung gerade" ist der Engine-Trace zuständig (§10l).
+
+**Querverweise:** §10e (Downlinks von Hand, inkl. Rekalibrieren), §10h.4
+(Eingangstest, Ventilkriterium), §10o (Batterie wechseln — dieselbe Form),
+§10q (Batterie-Schwellen ändern — dasselbe Vorgehen), AE-74 (die
+Entscheidung und die 5-K-Begründung).

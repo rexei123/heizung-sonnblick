@@ -287,6 +287,37 @@ Das ist eine Produktentscheidung und gehört ins Gate.
 | **T8** | Tests: Sticky (Flag kippt auf false → Status bleibt, Layer 4 feuert nicht), Backfill, Regel 2 an den Grenzen, Regel 3 an den Grenzen inkl. des Falls `valve_position = 0` bei `motorRange == 0`, Pool-Geräte unberührt, Eingangstest unberührt | 2 h |
 | **T9** | AE-74, RUNBOOK (was der Hausmeister bei „Ventil prüfen" tut, und dass der Taster kein Status mehr ist), §5.27-Nachtrag, STATUS | 1 h |
 
+**T8-Abgleich (07.10.2026, nach PR 4).** Die im Brief verlangten Tests sind
+über die PRs 1-4 verteilt gelandet, nicht als eigener Block. Stand:
+
+| T8-Punkt | Wo | Status |
+|---|---|---|
+| Sticky: Flag kippt auf `false`, Status bleibt, Layer 4 feuert nicht | `test_layer4_sticky_20e.py` | ✅ |
+| Backfill | `test_montage_nachweis_20e.py` (3 Tests) | ✅ |
+| Regel 2 an den Grenzen | `test_health_schwellen_20e.py` (sekundengenau) | ✅ |
+| Regel 3 an den Grenzen | `test_ventil_hinweise_20e.py` (0,1-K-Schritte) | ✅ |
+| davon: `valve_position = 0` bei `motorRange == 0` | — | **durch die Bauart erledigt** |
+| Pool-Geräte unberührt | `test_montage_nachweis_20e.py`, `test_layer4_sticky_20e.py` | ✅ |
+| Eingangstest unberührt | `test_montage_nachweis_20e.py` (Strukturtest, 07.10. nachgetragen) | ✅ |
+
+Zwei Einträge brauchen eine Erklärung:
+
+**`valve_position = 0` bei `motorRange == 0`** ist kein eigener Testfall,
+sondern dieselbe Datenlage wie „Ventil geschlossen" — ein nicht kalibriertes
+Gerät meldet 0 %, ein geschlossenes auch, und die beiden sind aus den Daten
+**nicht** unterscheidbar. Das ist in §5 so festgehalten und für Regel 3
+ausdrücklich kein Problem: beide Ursachen verdienen denselben Handgriff, und
+der Hinweistext nennt beide („Ventil klemmt oder ist nicht kalibriert"). Ein
+Test könnte hier nur zweimal dieselbe Zusicherung aufschreiben.
+
+**Der Eingangstest** war der einzige echte Rest. Er ist nachgetragen, und
+zwar als **Strukturtest** (`"mounted_confirmed" not in quelle`): die
+Zusicherung ist eine Abwesenheit, und ein Verhaltens-Test könnte nur zeigen,
+dass der Lauf heute das Richtige tut. Der Punkt ist, dass er sich auch nach
+einem Umbau nicht auf den Nachweis stützen darf — er ist die Prüfung, die
+den Nachweis **erzeugt**, und sich darauf zu stützen wäre dieselbe
+Zirkularität, die Sprint 20f-b beseitigt hat.
+
 **Summe 11,5 h** — über der ersten Schätzung von 8–11 h. Treiber sind T4
 (Engine, Stufe 1) und T8. Wenn gekürzt werden soll: T7 (Regel 3) ist der
 abtrennbare Teil und könnte ein eigener kleiner Sprint sein; Regeln 1 und 2
