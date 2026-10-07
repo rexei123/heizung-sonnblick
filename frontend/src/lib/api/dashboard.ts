@@ -23,6 +23,12 @@ const dashboardKpiSchema = z.object({
   // Sprint 15d (AE-65): ohne diesen Key strippt Zod battery_low_count -> Kachel
   // bekäme undefined (§5.64).
   battery_low_count: z.number(),
+  // Sprint 20e (T7/T10): dieselbe Falle, und sie hat zugeschlagen — der
+  // Typecheck hat die beiden fehlenden Keys gemeldet, bevor die Kacheln
+  // stumm „undefined" angezeigt hätten. Genau dafür steht der Zod-Spiegel
+  // hier und nicht ein ``as DashboardKpi``.
+  valve_stuck_count: z.number(),
+  room_too_warm_count: z.number(),
 });
 
 export const dashboardApi = {

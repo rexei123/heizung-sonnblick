@@ -54,6 +54,12 @@ _EXPECTED_KEYS = {
     "zones_window_open",
     "last_engine_tick",
     "battery_low_count",
+    # Sprint 20e (T7/T10): die beiden Ventil-Hinweise, getrennt gezaehlt.
+    # Dass dieser Test bei einer Schema-Erweiterung faellt, ist sein Zweck —
+    # er ist ein Vertrag ueber die Antwort-Form, und eine Erweiterung soll
+    # eine Entscheidung sein, keine Entdeckung.
+    "valve_stuck_count",
+    "room_too_warm_count",
 }
 
 

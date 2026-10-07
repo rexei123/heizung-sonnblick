@@ -48,6 +48,8 @@ function makeDevice(id: number) {
     last_seen_at: iso(5 * 60 * 1000),
     firmware_version: "4.2",
     health_state: "healthy" as const,
+    valve_state: "ok" as const,
+    valve_delta_k: null,
     battery_state: "ok" as const,
     battery_voltage_median: 3.2,
     battery_jump_at: null,

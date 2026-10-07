@@ -22,6 +22,21 @@ export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious"
 // Spiegel zu DeviceRead.battery_state.
 export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
 
+/**
+ * Ventil-Hinweis (Sprint 20e, T7/T10). Spiegel zu ``ValveState`` in
+ * ``services/valve_health.py``.
+ *
+ * Read-time abgeleitet aus dem 2-h-Fenster über ``sensor_reading`` — keine
+ * Spalte, kein Beat-Task. Das Urteil kommt vollständig aus dem Backend; das
+ * Frontend baut die Schwellen NICHT nach (sie stehen in den Settings und
+ * sind pro Haus verstellbar).
+ *
+ * ``ok`` heißt „im Fenster nichts auffällig", ``unbekannt`` heißt „zu wenige
+ * Messwerte". Die beiden sind nicht dasselbe: ein Gerät, das schweigt, ist
+ * kein Gerät, dessen Ventil in Ordnung ist.
+ */
+export type ValveState = "ok" | "ventil_klemmt_zu" | "zimmer_zu_warm" | "unbekannt";
+
 /** Zone-Health (AE-53): aus den Devices der Zone aggregiert (no_device statt suspicious). */
 export type ZoneHealthState = "healthy" | "degraded" | "silent" | "no_device";
 
@@ -110,6 +125,10 @@ export interface Device {
    * hat. Wer eine Zahl braucht, nimmt battery_voltage_median.
    */
   battery_state: BatteryHealthState;
+  // Sprint 20e (T7/T10): Ventil-Hinweis plus der gemessene Abstand in
+  // Kelvin, der zum Urteil gehört (knappster Wert des Fensters).
+  valve_state: ValveState;
+  valve_delta_k: number | null;
   /**
    * Der Median, aus dem battery_state entstanden ist — in Volt. Die Zahl, die
    * neben die Stufe gehoert („OK · 3,1 V"). NICHT
@@ -801,6 +820,12 @@ export interface DashboardKpi {
   last_engine_tick: string | null;
   // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch).
   battery_low_count: number;
+  // Sprint 20e (T7/T10): die beiden Ventil-Hinweise, getrennt gezählt.
+  // Getrennt, weil sie verschiedene Handgriffe bedeuten — eine gemeinsame
+  // Zahl hätte den Hausmeister losgeschickt, ohne ihm zu sagen, was er
+  // mitnehmen soll.
+  valve_stuck_count: number;
+  room_too_warm_count: number;
 }
 
 // ---------------------------------------------------------------------------

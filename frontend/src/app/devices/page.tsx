@@ -7,6 +7,7 @@ import { Suspense, useState, type KeyboardEvent } from "react";
 
 import { BatteryBadge } from "@/components/patterns/battery-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
+import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -193,6 +194,21 @@ function DeviceRow({ device: d }: { device: Device }) {
           isPool={d.heating_zone_id === null}
           variant="detailed"
         />
+        {/*
+          Sprint 20e (T7/T10): der Ventil-Hinweis steht unter dem
+          Montage-Status, nicht in einer eigenen Spalte. Grund: er rendert
+          nur in zwei von vier Zuständen, eine eigene Spalte wäre also
+          meistens leer — und eine leere Spalte mit Kopfzeile liest sich wie
+          fehlende Daten (§5.57 ist die Schwester-Lesson: ein Kopf ohne
+          Inhalt ist schlimmer als keiner).
+
+          Dieselbe Zelle ist vertretbar, weil beide Badges dieselbe Frage
+          beantworten — sitzt das Gerät und tut es, was es soll. §5.66
+          (feste Spalten-Slots) greift hier nicht: die Badges stehen
+          untereinander, nicht nebeneinander, es gibt also keinen geteilten
+          Inline-Slot, dessen Breite driften könnte.
+        */}
+        <ValveHintBadge valveState={d.valve_state} valveDeltaK={d.valve_delta_k} />
       </td>
       <td className="px-4 py-3" data-testid="device-battery-cell">
         <BatteryBadge

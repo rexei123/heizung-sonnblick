@@ -191,6 +191,24 @@ class DeviceRead(BaseModel):
     model: str
     label: str | None
     heating_zone_id: int | None
+    # Sprint 20e (T7/T10): Ventil-Hinweis, read-time abgeleitet aus dem
+    # 2-h-Fenster (``services/valve_health.valve_verdicts``). Keine Spalte,
+    # kein Beat-Task — Begruendung wie bei ``battery_state`` (AE-72 §3).
+    #
+    # ``ok`` heisst "im Fenster nichts auffaellig", ``unbekannt`` heisst "zu
+    # wenige Messwerte im Fenster". Die beiden sind nicht dasselbe, und die
+    # Oberflaeche darf sie nicht zusammenfassen: ein Geraet, das schweigt,
+    # ist kein Geraet, dessen Ventil in Ordnung ist.
+    # Inline-``Literal`` und kein Import aus ``services``: dieselbe
+    # Konvention wie bei ``battery_state`` — die Schema-Schicht soll nicht
+    # von der Service-Schicht abhaengen. Die Spiegelung gegen
+    # ``valve_health.ValveState`` haelt ein Test fest.
+    valve_state: Literal["ok", "ventil_klemmt_zu", "zimmer_zu_warm", "unbekannt"] = "unbekannt"
+    # Der gemessene Abstand zum Urteil, in Kelvin. Bei ``ok`` und
+    # ``unbekannt`` ``None``. Der **knappste** Wert des Fensters, nicht der
+    # Spitzenwert — siehe ``ValveVerdict``.
+    valve_delta_k: Decimal | None = None
+
     retired_at: datetime | None
     retired_reason: str | None
     replaced_by_device_id: int | None

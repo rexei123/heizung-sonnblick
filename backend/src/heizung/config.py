@@ -170,6 +170,35 @@ class Settings(BaseSettings):
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
 
+    # --- Ventil-Hinweise, Regel 3 und 3b (Sprint 20e, T7/T10) -------------
+    # Zwei Hinweise aus demselben Fenster ueber ``sensor_reading``, beide
+    # read-time abgeleitet (``services/valve_health.py``):
+    #
+    #   Regel 3   Sollwert >= Ist + VALVE_STUCK_DELTA_K und Ventil <=
+    #             VALVE_STUCK_OPENNESS_MAX  ->  "Ventil klemmt zu"
+    #   Regel 3b  Ist >= Sollwert + ROOM_TOO_WARM_DELTA_K  ->  "Zimmer zu warm"
+    #
+    # **Warum zwei verschiedene Deltas und nicht eines.** ``temperature`` ist
+    # der interne Vicki-Sensor, der von der Heizkoerperwaerme mitgezogen wird
+    # (§5.27). Fuer Regel 3 wirkt das harmlos — der Wert ist zu hoch, die
+    # Bedingung trifft seltener zu. Fuer Regel 3b wirkt es in die
+    # unangenehme Richtung, also braucht diese Richtung mehr Abstand. Ein
+    # gemeinsames Delta waere entweder fuer 3 zu grob oder fuer 3b zu
+    # empfindlich.
+    #
+    # ``Decimal``, nicht ``float``: verglichen wird gegen ``Numeric(5,2)``
+    # aus der Datenbank, und 3.0 hat in IEEE-754 keine exakte Darstellung.
+    # Dieselbe Begruendung wie bei den Batterie-Grenzen.
+    #
+    # Nach zwei Wochen Heizperiode nachjustieren — dafuer stehen sie hier
+    # und nicht als Konstante im Code.
+    valve_stuck_delta_k: Decimal = Decimal("3.0")
+    valve_stuck_openness_max: int = 0
+    room_too_warm_delta_k: Decimal = Decimal("5.0")
+    # Fenster beider Regeln in Stunden. Gemeinsam, weil beide dieselben
+    # Zeilen lesen — zwei Fenster waeren zwei Scans fuer eine Information.
+    valve_window_h: int = 2
+
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":
         """QA-Audit K-3: Default-Secrets in JEDEM Modus blockieren.
@@ -186,6 +215,43 @@ class Settings(BaseSettings):
                 "(`openssl rand -hex 32`) oder ALLOW_DEFAULT_SECRETS=1 "
                 "fuer lokale Dev-Maschine."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _ventil_schwellen_sind_sinnvoll(self) -> "Settings":
+        """T7/T10: beide Deltas positiv, Ventil-Grenze im Prozentbereich.
+
+        **Die Deltas muessen > 0 sein, und daran haengt mehr als
+        Plausibilitaet.** Die beiden Regeln schliessen sich nur dann
+        gegenseitig aus, wenn beide Deltas positiv sind: ``soll >= ist + a``
+        und ``ist >= soll + b`` koennen bei ``a, b > 0`` nicht zugleich
+        gelten. Bei ``a = 0`` waere ein Zimmer, in dem Soll und Ist genau
+        gleich sind, gleichzeitig "Ventil klemmt" — also ein Hinweis fuer
+        jedes Zimmer, das seinen Sollwert exakt haelt. Der Code hat dann
+        keine Vorrangregel, weil er keine braucht; mit ``a = 0`` braeuchte
+        er eine, und welche es waere, entschiede die Reihenfolge der
+        Abfragen.
+
+        Start-Fehler, nicht Warnung — wie bei den anderen Schwellen.
+        """
+        if self.valve_stuck_delta_k <= 0:
+            raise ValueError(
+                "VALVE_STUCK_DELTA_K muss groesser als 0 sein "
+                f"(ist: {self.valve_stuck_delta_k}). Bei 0 traegt jedes Zimmer, "
+                "das seinen Sollwert genau haelt, den Hinweis 'Ventil klemmt'."
+            )
+        if self.room_too_warm_delta_k <= 0:
+            raise ValueError(
+                "ROOM_TOO_WARM_DELTA_K muss groesser als 0 sein "
+                f"(ist: {self.room_too_warm_delta_k})."
+            )
+        if not 0 <= self.valve_stuck_openness_max <= 100:
+            raise ValueError(
+                "VALVE_STUCK_OPENNESS_MAX ist eine Ventiloeffnung in Prozent und "
+                f"muss zwischen 0 und 100 liegen (ist: {self.valve_stuck_openness_max})."
+            )
+        if self.valve_window_h < 1:
+            raise ValueError(f"VALVE_WINDOW_H muss mindestens 1 sein (ist: {self.valve_window_h}).")
         return self
 
     @model_validator(mode="after")

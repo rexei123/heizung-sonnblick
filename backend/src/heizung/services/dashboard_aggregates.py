@@ -35,6 +35,7 @@ from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.aggregation import ReadingForAggregate, aggregate_zone_readings
 from heizung.services.battery_health import battery_verdicts
+from heizung.services.valve_health import valve_verdicts
 
 _ONLINE_STATES = ("healthy", "degraded")
 _QUANT_TENTH: Decimal = Decimal("0.1")
@@ -173,6 +174,38 @@ async def avg_room_temperature(session: AsyncSession) -> Decimal | None:
 async def count_zones_window_open(session: AsyncSession) -> int:
     """Anzahl Zonen mit ``open_window=True`` (OR ueber healthy Vickis der Zone)."""
     return sum(1 for _, window in await _collect_zone_aggregates(session) if window is True)
+
+
+async def count_valve_alerts(session: AsyncSession) -> tuple[int, int]:
+    """Aktive Geraete mit Ventil-Hinweis: ``(klemmt_zu, zu_warm)``.
+
+    **Getrennt gezaehlt und nicht summiert.** Die beiden Hinweise bedeuten
+    verschiedene Handgriffe: "Ventil klemmt zu" heisst Ventil pruefen oder
+    neu kalibrieren, "Zimmer zu warm" heisst nachsehen, ob der Kopf noch
+    sitzt. Eine gemeinsame Zahl haette den Hausmeister losgeschickt, ohne
+    ihm zu sagen, was er mitnehmen soll.
+
+    Die Kachel zaehlt damit **genau** die Geraete, die auch ein Badge
+    tragen — beides kommt aus ``valve_verdicts``, es gibt keine zweite
+    Schwelle, die davon abdriften koennte. Dieselbe Invariante wie bei der
+    Batterie.
+
+    ``unbekannt`` zaehlt in keine der beiden Zahlen. Ein Geraet mit zu
+    wenigen Messwerten ist kein Befund, sondern ein Geraet ohne Aussage —
+    es gehoert auf die Offline-Achse, nicht hierher.
+
+    Zwei Queries, unabhaengig von der Geraetezahl — kein N+1.
+    Lifecycle-Filter ``retired_at IS NULL`` (§5.58).
+    """
+    device_ids = list(
+        (await session.execute(select(Device.id).where(Device.retired_at.is_(None))))
+        .scalars()
+        .all()
+    )
+    verdicts = await valve_verdicts(session, device_ids)
+    klemmt = sum(1 for v in verdicts.values() if v.state == "ventil_klemmt_zu")
+    warm = sum(1 for v in verdicts.values() if v.state == "zimmer_zu_warm")
+    return klemmt, warm
 
 
 async def count_battery_low(session: AsyncSession) -> int:
