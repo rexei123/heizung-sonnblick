@@ -23,6 +23,11 @@ const VICKI_UNASSIGNED = {
   last_seen_at: new Date(NOW - 5 * 60 * 1000).toISOString(),
   created_at: new Date(NOW - 86400 * 1000).toISOString(),
   updated_at: new Date(NOW).toISOString(),
+  // Sprint 20e (T7/T10): Ventil-Hinweis. Der Badge rendert bei "ok" nichts,
+  // der Mock bleibt also optisch unveraendert — er ist nur wieder
+  // vollstaendig.
+  valve_state: "ok" as const,
+  valve_delta_k: null,
 };
 
 const VICKI_ASSIGNED = {

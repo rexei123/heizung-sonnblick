@@ -27,6 +27,8 @@ const ASSIGNED_DEVICE = {
   last_seen_at: iso(5 * 60 * 1000),
   firmware_version: "4.2",
   health_state: "healthy",
+  valve_state: "ok" as const,
+  valve_delta_k: null,
   battery_state: "ok",
   created_at: iso(86400 * 1000),
   updated_at: iso(),
@@ -61,6 +63,8 @@ const POOL_DEVICE = {
   last_seen_at: iso(5 * 60 * 1000),
   firmware_version: null,
   health_state: "silent",
+  valve_state: "ok" as const,
+  valve_delta_k: null,
   battery_state: "unbekannt",
   created_at: iso(86400 * 1000),
   updated_at: iso(),
@@ -251,6 +255,8 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     // Falsche.
     const withBattery = {
       ...ASSIGNED_DEVICE,
+      valve_state: "ok" as const,
+      valve_delta_k: null,
       battery_state: "warn",
       battery_voltage_median: 2.8,
     };

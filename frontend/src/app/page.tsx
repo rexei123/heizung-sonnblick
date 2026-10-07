@@ -111,6 +111,23 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       icon: "battery_alert",
       tone: data.battery_low_count > 0 ? "warning-soft" : "neutral",
     },
+    {
+      // Sprint 20e (T7): dieselbe Achse wie der gelbe ValveHintBadge.
+      label: "Ventil prüfen",
+      value: data.valve_stuck_count,
+      icon: "build",
+      tone: data.valve_stuck_count > 0 ? "warning-soft" : "neutral",
+    },
+    {
+      // Sprint 20e (T10): der Ersatz-Melder für Layer 4 Detached. Rot, nicht
+      // gelb — ein offenes Ventil ohne Kopf heizt gegen das Fenster,
+      // solange es niemand sieht. Dieselbe Achse wie der rote
+      // ValveHintBadge; die Kachel zählt genau die Geräte, die ihn tragen.
+      label: "Zimmer zu warm",
+      value: data.room_too_warm_count,
+      icon: "local_fire_department",
+      tone: data.room_too_warm_count > 0 ? "danger-soft" : "neutral",
+    },
   ];
 }
 

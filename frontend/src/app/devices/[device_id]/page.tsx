@@ -6,6 +6,7 @@ import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { BatteryBadge } from "@/components/patterns/battery-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
+import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
@@ -126,6 +127,12 @@ export default function DeviceDetailPage() {
                     variant="detailed"
                   />
                 </div>
+                {/* Sprint 20e: mit Erklärzeile, hier ist Platz dafür. */}
+                <ValveHintBadge
+                  valveState={device.valve_state}
+                  valveDeltaK={device.valve_delta_k}
+                  variant="detailed"
+                />
                 {device.heating_zone ? (
                   <ZoneHealthBadge
                     healthState={device.heating_zone.health_state}

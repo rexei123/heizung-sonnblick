@@ -32,6 +32,7 @@ async def get_dashboard_kpi(
 ) -> DashboardKpiRead:
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
     devices_online, devices_total = await agg.count_devices_online(session)
+    valve_stuck, room_too_warm = await agg.count_valve_alerts(session)
     return DashboardKpiRead(
         rooms_occupied=rooms_occupied,
         rooms_total=rooms_total,
@@ -42,4 +43,6 @@ async def get_dashboard_kpi(
         zones_window_open=await agg.count_zones_window_open(session),
         last_engine_tick=await agg.last_engine_tick(session),
         battery_low_count=await agg.count_battery_low(session),
+        valve_stuck_count=valve_stuck,
+        room_too_warm_count=room_too_warm,
     )

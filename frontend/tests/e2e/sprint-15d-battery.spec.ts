@@ -49,6 +49,8 @@ function makeDevice(
     last_seen_at: iso(5 * 60 * 1000),
     firmware_version: "4.2",
     health_state: healthState,
+    valve_state: "ok" as const,
+    valve_delta_k: null,
     battery_state: batteryState,
     // Sprint 20 (AE-72): der 24-h-Median ist die Quelle der Zahl am Badge.
     battery_voltage_median: batteryVolts,

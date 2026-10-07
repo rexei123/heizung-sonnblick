@@ -85,6 +85,8 @@ function makeDevice(activeOverride: unknown = null) {
     last_seen_at: NOW,
     firmware_version: "4.2",
     health_state: "healthy" as const,
+    valve_state: "ok" as const,
+    valve_delta_k: null,
     battery_state: "ok" as const,
     // Sprint 20 (AE-72): der Badge liest den Median vom Device, nicht den
     // Einzelwert aus latest_reading.

@@ -55,6 +55,7 @@ from heizung.services.device_service import (
     replace_device,
     retire_device,
 )
+from heizung.services.valve_health import ValveVerdict, valve_verdicts
 from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,10 @@ async def _ensure_zone_exists(session: AsyncSession, zone_id: int | None) -> Non
 
 
 async def _build_device_read(
-    session: AsyncSession, device: Device, verdict: BatteryVerdict
+    session: AsyncSession,
+    device: Device,
+    verdict: BatteryVerdict,
+    ventil: ValveVerdict,
 ) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
     + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
@@ -122,6 +126,12 @@ async def _build_device_read(
     wuerde genau den Fehler zulassen, den er verdeckt — eine Liste, die
     stillschweigend "unbekannt" fuer jedes Geraet ausgibt, weil jemand das
     Argument vergessen hat.
+
+    ``ventil`` ebenso (Sprint 20e, T7/T10): das Ventil-Urteil kommt aus dem
+    2-h-Fenster, auch in einer Query fuer alle Geraete
+    (``valve_verdicts``). Hier waere ein Default besonders schaedlich —
+    "unbekannt" sieht in der Oberflaeche aus wie "noch keine Daten" und
+    nicht wie "vergessen".
     """
     read = DeviceRead.model_validate(device)
 
@@ -160,11 +170,24 @@ async def _build_device_read(
             # damit sie nicht auseinanderlaufen koennen.
             "battery_state": verdict.stage,
             "battery_voltage_median": verdict.median_v,
+            # Sprint 20e (T7/T10): Urteil und gemessener Abstand aus
+            # demselben Verdict, damit sie nicht auseinanderlaufen.
+            "valve_state": ventil.state,
+            "valve_delta_k": ventil.delta_k,
             "battery_jump_at": verdict.jump_at,
             "battery_last_voltage": verdict.last_v,
             "battery_last_at": verdict.last_at,
         }
     )
+
+
+async def _ventil_fuer(session: AsyncSession, device_id: int) -> ValveVerdict:
+    """Ventil-Urteil fuer ein einzelnes Geraet.
+
+    Gegenstueck zu ``_verdict_fuer``: ``valve_verdicts`` liefert garantiert
+    einen Eintrag je angefragter ID, der Index-Zugriff ist also sicher.
+    """
+    return (await valve_verdicts(session, [device_id]))[device_id]
 
 
 async def _verdict_fuer(session: AsyncSession, device_id: int) -> BatteryVerdict:
@@ -192,7 +215,12 @@ async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRe
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
-    return await _build_device_read(session, device, await _verdict_fuer(session, device_id))
+    return await _build_device_read(
+        session,
+        device,
+        await _verdict_fuer(session, device_id),
+        await _ventil_fuer(session, device_id),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +291,12 @@ async def list_devices(
     # Sprint 20 (AE-72): EINE Aggregat-Query fuer die Batterie-Stufen aller
     # Geraete der Seite, vor der Schleife. Ein Aufruf je Geraet waere bei
     # 104 Geraeten ein dritter N+1-Pfad neben Override und Reading.
-    verdicts = await battery_verdicts(session, [d.id for d in devices])
-    return [await _build_device_read(session, d, verdicts[d.id]) for d in devices]
+    ids = [d.id for d in devices]
+    verdicts = await battery_verdicts(session, ids)
+    # Sprint 20e (T7/T10): dieselbe Form fuer die Ventil-Hinweise — eine
+    # Aggregat-Query fuer die ganze Seite, vor der Schleife.
+    ventile = await valve_verdicts(session, ids)
+    return [await _build_device_read(session, d, verdicts[d.id], ventile[d.id]) for d in devices]
 
 
 @router.get(
@@ -288,8 +320,10 @@ async def list_pool_devices(
     ``active_override`` sind null; ``latest_reading`` kann gesetzt sein.
     """
     pool = await get_pool_devices(session)
-    verdicts = await battery_verdicts(session, [d.id for d in pool])
-    return [await _build_device_read(session, d, verdicts[d.id]) for d in pool]
+    pool_ids = [d.id for d in pool]
+    verdicts = await battery_verdicts(session, pool_ids)
+    ventile = await valve_verdicts(session, pool_ids)
+    return [await _build_device_read(session, d, verdicts[d.id], ventile[d.id]) for d in pool]
 
 
 @router.get(
@@ -310,7 +344,12 @@ async def get_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
-    return await _build_device_read(session, device, await _verdict_fuer(session, device_id))
+    return await _build_device_read(
+        session,
+        device,
+        await _verdict_fuer(session, device_id),
+        await _ventil_fuer(session, device_id),
+    )
 
 
 @router.patch(

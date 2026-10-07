@@ -30,10 +30,20 @@ class DashboardKpiRead(BaseModel):
     active_overrides: int
     zones_window_open: int
     last_engine_tick: datetime | None
-    # Sprint 15d (AE-65): aktive Geraete mit schwacher Batterie (juengster
-    # battery_percent < alert_battery_warn_percent). Additiv, die bestehenden
-    # KPI-Felder bleiben unveraendert.
+    # Sprint 15d (AE-65), Eingangsgroesse seit Sprint 20 die Spannung
+    # (AE-72): aktive Geraete mit Batterie-Stufe ``warn`` oder ``kritisch``.
+    #
+    # Der Vermerk hier stand bis Sprint 20e auf "juengster battery_percent <
+    # alert_battery_warn_percent". Beides gilt nicht mehr: die Stufe rechnet
+    # auf dem 24-h-Median der Spannung, und die konfigurierbare
+    # Prozent-Schwelle ist mit AE-72 entfallen (§5.77 — ein ueberholter
+    # Vermerk wird wie ein Befund gelesen).
     battery_low_count: int
+    # Sprint 20e (T7/T10): Ventil-Hinweise, getrennt gezaehlt. Siehe
+    # ``dashboard_aggregates.count_valve_alerts`` fuer die Begruendung,
+    # warum es zwei Zahlen sind und nicht eine.
+    valve_stuck_count: int = 0
+    room_too_warm_count: int = 0
 
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:

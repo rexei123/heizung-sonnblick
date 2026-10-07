@@ -42,6 +42,8 @@ function makeDevice(id: number, health: ZoneHealth) {
     },
     active_override: null,
     latest_reading: null,
+    valve_state: "ok" as const,
+    valve_delta_k: null,
   };
 }
 

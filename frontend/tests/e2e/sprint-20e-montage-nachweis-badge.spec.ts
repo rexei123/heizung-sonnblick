@@ -69,6 +69,8 @@ const DEVICE = {
     broken_sensor: null,
     fcnt: 1234,
   },
+  valve_state: "ok" as const,
+  valve_delta_k: null,
   battery_state: "ok",
 };
 

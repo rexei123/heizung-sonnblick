@@ -27,6 +27,8 @@ const KPI = {
   zones_window_open: 0,
   last_engine_tick: new Date(Date.now() - 60_000).toISOString(),
   battery_low_count: 0,
+  valve_stuck_count: 0,
+  room_too_warm_count: 0,
 };
 
 function logPayload(partial: Record<string, unknown>): string {

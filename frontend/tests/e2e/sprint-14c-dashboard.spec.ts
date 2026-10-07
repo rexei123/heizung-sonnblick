@@ -18,6 +18,9 @@ interface Kpi {
   last_engine_tick: string | null;
   // Sprint 15d (AE-65): Zod verlangt den Key jetzt — ohne ihn wirft parse.
   battery_low_count: number;
+  // Sprint 20e (T7/T10): Zod verlangt diese beiden ebenfalls.
+  valve_stuck_count: number;
+  room_too_warm_count: number;
 }
 
 const BASE_KPI: Kpi = {
@@ -30,6 +33,8 @@ const BASE_KPI: Kpi = {
   zones_window_open: 0,
   last_engine_tick: new Date(Date.now() - 60_000).toISOString(),
   battery_low_count: 0,
+  valve_stuck_count: 0,
+  room_too_warm_count: 0,
 };
 
 async function mockKpi(
@@ -68,12 +73,17 @@ test.describe("Sprint 14c Dashboard", () => {
     });
   });
 
-  test("rendert 8 KPI-Kacheln", async ({ page }) => {
+  test("rendert 10 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
-    // Sprint 15d: „Schwache Batterie" (7.), Sprint 15f: „Belegungsliste" (8.).
-    await expect(page.getByTestId("kpi-card")).toHaveCount(8);
+    // Sprint 15d: „Schwache Batterie" (7.), Sprint 15f: „Belegungsliste" (8.),
+    // Sprint 20e: „Ventil prüfen" (9.) und „Zimmer zu warm" (10.).
+    //
+    // Dass dieser Test bei jeder neuen Kachel fällt, ist sein Zweck: das
+    // Dashboard ist die Seite, die der Hotelier täglich liest, und eine
+    // Kachel mehr ist eine Entscheidung, keine Nebenwirkung.
+    await expect(page.getByTestId("kpi-card")).toHaveCount(10);
   });
 
   test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({ page }) => {
@@ -82,6 +92,26 @@ test.describe("Sprint 14c Dashboard", () => {
     const card = page.getByTestId("kpi-card").filter({ hasText: "Schwache Batterie" });
     await expect(card).toBeVisible();
     await expect(card).toContainText("3");
+  });
+
+  test("Sprint 20e: Ventil-prüfen-Kachel zählt valve_stuck_count", async ({ page }) => {
+    await mockKpi(page, { valve_stuck_count: 2 });
+    await page.goto("/");
+    const card = page.getByTestId("kpi-card").filter({ hasText: "Ventil prüfen" });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("2");
+  });
+
+  test("Sprint 20e: Zimmer-zu-warm-Kachel zählt room_too_warm_count", async ({ page }) => {
+    // Das ist der Ersatz-Melder für Engine-Layer 4 Detached, den 20e T4
+    // stillgelegt hat — ein Ventil ohne Kopf steht offen, das Zimmer wird
+    // heiß. Die Kachel ist die einzige Stelle, an der das auffällt, solange
+    // niemand die Geräteliste durchsieht.
+    await mockKpi(page, { room_too_warm_count: 1 });
+    await page.goto("/");
+    const card = page.getByTestId("kpi-card").filter({ hasText: "Zimmer zu warm" });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("1");
   });
 
   test("zeigt eine Begruessung", async ({ page }) => {
@@ -109,7 +139,7 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    await expect(cards).toHaveCount(8);
+    await expect(cards).toHaveCount(10);
     // Einspaltig: alle Karten teilen dieselbe linke Kante (gleiche x).
     const box0 = await cards.nth(0).boundingBox();
     const box1 = await cards.nth(1).boundingBox();
