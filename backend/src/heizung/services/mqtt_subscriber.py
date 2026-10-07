@@ -29,6 +29,7 @@ import redis
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.config import get_settings
 from heizung.db import SessionLocal
@@ -292,6 +293,65 @@ async def _increment_implausible_counter(dev_eui: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _maybe_confirm_mounted(
+    session: AsyncSession,
+    device_id: int,
+    values: dict[str, Any],
+    seen_at: datetime,
+) -> None:
+    """Sprint 20e (T3): den Montage-Nachweis setzen, wenn dieser Frame ihn belegt.
+
+    **Die Bedingung ist ein einzelner Frame, nicht die Historie.** Beide
+    Merkmale muessen zusammen in derselben Meldung stehen:
+
+    - ``attached_backplate is True`` — der Taster hinter dem Geraet war
+      gedrueckt, als der Frame entstand.
+    - ``valve_position > 0`` — der Motor hat das Ventil geoeffnet, also
+      sitzt das Geraet auf einem Ventil und nicht auf dem Tisch.
+
+    Zwei Frames, von denen je einer eines der Merkmale traegt, sind kein
+    Nachweis: ein Geraet auf dem Werkstatt-Tisch kann den Taster per Hand
+    gedrueckt bekommen, und ein Geraet in der Hand kann den Motor fahren.
+    Erst die Gleichzeitigkeit schliesst beides aus.
+
+    **Zone-Pflicht.** Ohne ``heating_zone_id`` gibt es keinen Nachweis, denn
+    "montiert" ist eine Aussage ueber einen Heizkoerper, nicht ueber ein
+    Geraet. Ein Pool-Vicki, der beim Eingangstest auf dem Tisch vollstaendig
+    durchfaehrt, soll hinterher nicht als montiert gelten.
+
+    **Ein Schreibvorgang je Geraet und Lebenszeit.** ``WHERE
+    mounted_confirmed_at IS NULL`` steht in der ``UPDATE``-Bedingung und
+    nicht als Python-Vorabpruefung (§5.60): bei 104 Geraeten und einem
+    Keep-alive alle zehn Minuten laufen hier rund 15 000 Frames am Tag
+    durch, und zwei parallele Subscriber-Durchlaeufe duerfen den Zeitstempel
+    nicht gegenseitig ueberschreiben. Die Datenbank entscheidet, nicht die
+    Reihenfolge der Tasks.
+
+    ``retired_at IS NULL`` ebenfalls in der Bedingung: ein ausgemustertes
+    Geraet, das noch sendet (abgenommen, aber nicht entpaart), bekommt
+    keinen frischen Nachweis.
+
+    Der Aufruf sitzt in derselben Transaktion wie der Reading-Insert — der
+    Nachweis und der Frame, der ihn belegt, sind damit entweder beide da
+    oder beide nicht.
+    """
+    if values.get("attached_backplate") is not True:
+        return
+
+    ventil = values.get("valve_position")
+    if ventil is None or ventil <= 0:
+        return
+
+    await session.execute(
+        update(Device)
+        .where(Device.id == device_id)
+        .where(Device.mounted_confirmed_at.is_(None))
+        .where(Device.heating_zone_id.is_not(None))
+        .where(Device.retired_at.is_(None))
+        .values(mounted_confirmed_at=seen_at)
+    )
+
+
 async def _persist_uplink(uplink: ChirpStackUplink) -> None:
     """DevEUI -> device_id aufloesen, Reading idempotent inserten,
     last_seen_at am Device aktualisieren (M-6 / QA-Audit 2026-04-29).
@@ -350,6 +410,10 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
             .where((Device.last_seen_at.is_(None)) | (Device.last_seen_at < seen_at))
             .values(last_seen_at=seen_at)
         )
+
+        # Sprint 20e (T3): Montage-Nachweis auf demselben Frame.
+        await _maybe_confirm_mounted(session, device_id, values, seen_at)
+
         await session.commit()
 
         logger.info(

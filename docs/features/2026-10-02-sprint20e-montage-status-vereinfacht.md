@@ -277,7 +277,7 @@ Das ist eine Produktentscheidung und gehört ins Gate.
 
 | # | Inhalt | Dauer |
 |---|---|---|
-| **T1** | Migration 0025: `device.mounted_confirmed_at TIMESTAMPTZ NULL`. Kein Backfill im Schema — siehe T2 | 0,5 h |
+| **T1** | Migration **0027**: `device.mounted_confirmed_at TIMESTAMPTZ NULL`. Kein Backfill im Schema — siehe T2. (Nummer korrigiert 06.10.2026: 0025 und 0026 sind in Sprint 20f vergeben — `sensor_reading.calibration_failed` und `device_manual` in der Quellen-Beschränkung.) | 0,5 h |
 | **T2** | Einmal-Backfill als **Skript**, nicht in der Migration: setzt den Nachweis für Geräte, die in der Historie einen Frame mit `attached_backplate=true` **und** einen mit `valve_position > 0` haben. Getrennt von der Migration, weil er fachlich urteilt und wiederholbar sein muss (§5.61: committet selbst, mit Bericht) | 1 h |
 | **T3** | Subscriber: Nachweis setzen, wenn beide Bedingungen im selben Frame erfüllt sind und `mounted_confirmed_at IS NULL`, Zuordnung vorhanden. Ein `UPDATE … WHERE` (§5.60) | 1 h |
 | **T4** | Engine Layer 4 Detached: Geräte mit Nachweis aus der Detached-Prüfung nehmen, `detail="sticky_mounted"` im Pass-Through-Fall. **Alle bestehenden Layer-4-Tests müssen ohne Anpassung grün bleiben**, soweit sie Geräte ohne Nachweis prüfen (§5.47) | 1,5 h |
@@ -359,7 +359,7 @@ wiederherstellen und belegen, dass die neuen Tests fallen.
 | Regel 3 + 3b | Hinweis in Oberfläche und Dashboard, **keine Mail** |
 | `detach` / `retire` | löschen den Montage-Nachweis |
 | **Neu: Regel 3b** | Ist ≥ Soll + 3 K über 2 h → „Zimmer zu warm – Gerät abgenommen oder Ventil klemmt offen?“ |
-| **Neu: Montage-Drehung** | Handverstellung in den ersten 15 min nach Montage/Zuordnung nicht als Override werten |
+| ~~**Neu: Montage-Drehung**~~ | ~~Handverstellung in den ersten 15 min nach Montage/Zuordnung nicht als Override werten~~ — **gestrichen 06.10.2026, §12.3a** |
 
 ### 12.1 Regel 3b schließt die Lücke aus §0 — teilweise
 
@@ -451,6 +451,40 @@ einem Command-Byte, sondern an einem neuen Gate in
 `handle_uplink_for_override` — an derselben Stelle wie das Reboot-Gate
 (AE-63) und die OCCUPIED-/Window-Gates. Ein Gate, nicht drei.
 
+### 12.3a Montage-Drehung gestrichen — die Lage hat sich geändert
+
+**Entscheidung des Hoteliers, 06.10.2026: T11 entfällt.** Begründung
+wörtlich: „20f T2 + UI-Aufheben".
+
+Der Brief hat die Sperre geplant, als `0x28` noch nicht dekodiert wurde und
+jede Abweichung des gemeldeten Sollwerts als Gastwunsch galt. In dieser Lage
+war ein Zeitfenster nach der Zuordnung nötig: der Monteur dreht beim
+Aufsetzen am Rad, und ohne Fenster hätte das einen Override bis zum
+nächsten Check-out erzeugt.
+
+Beide Hälften dieser Lage sind inzwischen weg:
+
+1. **20f T2** macht den Override vom Zimmerstatus abhängig. In einem
+   **unbelegten** Zimmer — und Montage findet im unbelegten Zimmer statt —
+   entsteht gar kein Override mehr; der Engine-Abgleich (T3) holt den
+   Sollwert in höchstens 45 min zurück
+   ([engine_tasks.py](backend/src/heizung/tasks/engine_tasks.py), AE-76).
+2. **20f-b** entfernt die abgeleitete Erkennung ganz. Ein Sollwert, der vom
+   Engine-Soll abweicht, erzeugt **ohne** `0x28`-Frame überhaupt keinen
+   Override mehr.
+
+Bleibt der Fall „Montage im belegten Zimmer". Dort greift T2 absichtlich,
+weil dort nicht zu unterscheiden ist, wer gedreht hat. Die Entscheidung des
+Hoteliers ist, das **nicht** zu automatisieren: das Personal hebt den
+Override in der Oberfläche auf. Das ist ein Klick in einem seltenen Fall
+gegen eine Schwelle, ein Settings-Feld, ein Audit-Ereignis und einen
+Grenzwert-Test — und die Sperre hätte zusätzlich den Fall verschluckt, in
+dem der Gast innerhalb der 15 min tatsächlich dreht, weil ihm kalt ist.
+
+**Auswirkung auf den Rest des Briefs:** §12.3 bleibt als Analyse stehen
+(sie ist der Grund, warum `0x28` überhaupt dekodiert wird, siehe 20f T1),
+die Zeile in der Gate-Tabelle §12 ist damit erledigt statt offen.
+
 ### 12.4 Der Zeitpunkt, ab dem die 15 Minuten laufen — und warum keine Spalte
 
 **Nicht die Montage, sondern die Zuordnung.** Vor dem `assign` ist das
@@ -506,9 +540,9 @@ dann nicht mehr.
 | # | Inhalt | Dauer |
 |---|---|---|
 | **T10** | Regel 3b: zweites read-time Urteil im selben Fensterlauf wie Regel 3 (eine Query, zwei Bedingungen — nicht zwei Queries). Eigene Schwelle `ROOM_TOO_WARM_DELTA_K`, Vorgabe 5 K (§12.2), eigenes Badge und eigener Dashboard-Zähler | 1,5 h |
-| **T11** | Montage-Drehung: Gate in `handle_uplink_for_override` nach `detect_user_override`, Fenster aus dem `DEVICE_ZONE_ASSIGNED`-Audit, Schwelle `ASSIGN_GRACE_MIN` in den Settings (Vorgabe 15). Skip wird auditiert wie die anderen Gates (§5.52: Off-Pipeline-Eintrag mit Grund) — ein stiller Skip wäre genau das, was man später sucht | 1,5 h |
+| **T11** | ~~Montage-Drehung: 15-min-Sperre nach Zuordnung~~ — **gestrichen (Entscheidung Hotelier, 06.10.2026).** Begründung: 20f T2 + UI-Aufheben. Siehe §12.3a | — |
 | **T12** | `detach` / `retire` löschen `mounted_confirmed_at`. Beide Pfade gehen durch `device_service`, also eine Stelle je Vorgang; Test, dass ein Pool-Rückläufer keinen Nachweis mehr trägt | 0,5 h |
-| **T13** | Tests zu T10–T12: 3b an den Grenzen (4,9 K / 5,0 K / Fenster unvollständig), Montage-Drehung (14 min → kein Override, 16 min → Override), Nachweis-Löschung | 1,5 h |
+| **T13** | Tests zu T10 und T12: 3b an den Grenzen (4,9 K / 5,0 K / Fenster unvollständig), Nachweis-Löschung. Der Teil zur Montage-Drehung entfällt mit T11 | 1,0 h |
 
 ### 12.7 Neue Gesamtschätzung
 
@@ -517,7 +551,9 @@ dann nicht mehr.
 | T1–T9 (Brief §8) | 11,5 h |
 | **minus T1** (Migration für `motor_range` entfällt — Weg A) | −0,5 h |
 | T10–T13 (Gate-Zusätze) | +5,0 h |
-| **Summe** | **16,0 h** |
+| **minus T11** (gestrichen, §12.3a) | −1,5 h |
+| **minus Test-Anteil T11** | −0,5 h |
+| **Summe** | **14,0 h** |
 
 Das ist nicht mehr ein kleiner Sprint. Zwei Schnitte sind möglich, und ich
 empfehle den ersten:
@@ -531,12 +567,14 @@ empfehle den ersten:
    bessere Ersatz für diesen Melder. Wer so schneidet, sollte 3b im
    **ersten** Teil behalten und nur Regel 3 (das klemmende, geschlossene
    Ventil) verschieben — dann 12,0 h / 4,0 h.
-2. **Montage-Drehung abtrennen** (T11, 1,5 h + Test). Unabhängig von
-   allem anderen, aber sie ist der Teil mit dem größten Nutzen je
-   Stunde: ein falsch übernommener Override hält bis zum
-   nächsten Check-out.
+2. ~~**Montage-Drehung abtrennen** (T11, 1,5 h + Test).~~ **Erledigt durch
+   Streichung (§12.3a).** Der Nutzen, den dieser Punkt veranschlagt hat —
+   „ein falsch übernommener Override hält bis zum nächsten Check-out" —
+   ist inzwischen anders eingelöst: 20f-b hat genau diesen Schaden an der
+   Wurzel entfernt, und zwar für alle Zimmer, nicht nur für die ersten
+   15 min nach einer Zuordnung.
 
-**Empfehlung:** Regel 1 + Regel 2 + 3b + Montage-Drehung in 20e (12,0 h),
+**Empfehlung:** Regel 1 + Regel 2 + 3b in 20e (10,0 h nach Streichung T11),
 Regel 3 als 20f (4,0 h). Begründung: alles, was den abgeschalteten Melder
 ersetzt, geht zusammen; das klemmende geschlossene Ventil ist ein
 Komfortthema und kann warten.

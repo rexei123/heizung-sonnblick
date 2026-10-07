@@ -439,6 +439,18 @@ async def detach_device_from_zone(
 
     prev = device.heating_zone_id
     device.heating_zone_id = None
+
+    # Sprint 20e (T12): der Montage-Nachweis gehoert zur Zuordnung.
+    #
+    # "Montiert" ist eine Aussage ueber einen Heizkoerper, nicht ueber ein
+    # Geraet (siehe ``_maybe_confirm_mounted``). Wer das Geraet von der Zone
+    # trennt, nimmt es von genau diesem Heizkoerper ab — der Nachweis gilt
+    # danach fuer nichts mehr. Bleibt er stehen, kommt das Geraet als
+    # Pool-Reserve mit einem Nachweis zurueck, den niemand erbracht hat, und
+    # Layer 4 nimmt es nach dem naechsten Einbau sofort aus der
+    # Detached-Pruefung, ohne dass je ein Frame die Montage belegt hat.
+    device.mounted_confirmed_at = None
+
     await session.commit()
     await session.refresh(device)
 
