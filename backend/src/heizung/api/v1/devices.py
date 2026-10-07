@@ -538,8 +538,15 @@ async def get_hardware_status(
 ) -> HardwareStatusResponse:
     """Binaerer Hardware-Status fuer das Frontend-Badge.
 
-    Liest ``sensor_reading.attached_backplate`` der letzten
-    ``WINDOW_STALE_THRESHOLD_MIN`` Minuten:
+    **Sprint 20e (T5): ein zugeordnetes Geraet mit Montage-Nachweis ist
+    montiert, Punkt.** ``status="active"``, ``source="mounted_confirmed"``,
+    ohne das Fenster zu befragen — dieselbe Umkehrung wie in Engine-Layer 4
+    (``rules/engine.layer_device_detached``), damit Oberflaeche und Engine
+    nicht verschiedene Dinge behaupten. Zwei Urteile zur selben Frage waeren
+    die Sorte Drift, die §5.53 beschreibt.
+
+    Sonst wie bisher ``sensor_reading.attached_backplate`` der letzten
+    ``WINDOW_STALE_THRESHOLD_MIN`` Minuten, ``source="window"``:
       - ``status="active"`` wenn mindestens ein Frame ``attached_backplate=True``
         existiert; ``last_seen`` ist dessen Zeitstempel.
       - ``status="inactive"`` sonst (alle False, alle NULL, oder keine Frames).
@@ -547,10 +554,22 @@ async def get_hardware_status(
         (NULL-Frames aus FW < 4.1 / Recovery-Daten werden bewusst ausgeschlossen,
         konsistent zu Layer 4 Detached, siehe ``rules/engine.py``).
 
+    **Der Pool-Pfad ist unberuehrt**, und zwar durch zwei Bedingungen: ein
+    Pool-Geraet bekommt keinen Nachweis (``_maybe_confirm_mounted`` verlangt
+    eine Zuordnung), und ``detach`` loescht ihn. Die Abfrage auf
+    ``heating_zone_id`` hier ist die dritte Absicherung — ohne sie haenge
+    das Urteil daran, dass die beiden Schreibpfade vollstaendig sind.
+
+    **Die Fensterwerte kommen in beiden Faellen mit.** Bei einem sticky
+    Geraet sind sie die eigentliche Diagnose: "Urteil montiert, Taster
+    meldet seit zwei Tagen false" ist die Information, mit der ein
+    Hausmeister arbeiten kann.
+
     Reine Lese-Aggregation, kein Engine-Pfad und kein Cache. AE-47
     Hardware-First bleibt unveraendert.
     """
-    await _get_or_404(session, device_id)
+    device = await _get_or_404(session, device_id)
+    sticky = device.heating_zone_id is not None and device.mounted_confirmed_at is not None
 
     now = datetime.now(UTC)
     threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
@@ -570,7 +589,9 @@ async def get_hardware_status(
     last_seen = (await session.execute(last_seen_stmt)).scalar_one()
 
     return HardwareStatusResponse(
-        status="active" if last_seen is not None else "inactive",
+        status="active" if (sticky or last_seen is not None) else "inactive",
+        source="mounted_confirmed" if sticky else "window",
+        mounted_confirmed_at=device.mounted_confirmed_at,
         last_seen=last_seen,
         frames_in_window=frames_in_window,
         window_minutes=WINDOW_STALE_THRESHOLD_MIN,

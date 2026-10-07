@@ -111,7 +111,7 @@ function makeDevice(activeOverride: unknown = null) {
   };
 }
 
-const HW_STATUS = { status: "active" as const, last_seen: NOW, frames_in_window: 3, window_minutes: 30 };
+const HW_STATUS = { status: "active" as const, last_seen: NOW, source: "window" as const, mounted_confirmed_at: null, frames_in_window: 3, window_minutes: 30 };
 
 // Sprint 14d FU-5: aktiver Zone-Override jetzt aus HeatingZoneRead.active_override.
 // Form spiegelt DeviceActiveOverride (setpoint_celsius: number, expires_at: ISO).

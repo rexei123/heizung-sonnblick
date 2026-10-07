@@ -627,9 +627,40 @@ async def layer_device_detached(
     setzt ``detail="superseded_by_window"``. Beide Trigger meinen Frostschutz,
     aber der Audit-Trail braucht eine eindeutige Reason.
 
+    **Sprint 20e (T4): Geraete mit Montage-Nachweis gelten als montiert.**
+
+    Ein Geraet mit ``device.mounted_confirmed_at`` hat einmal nachweislich
+    auf einem Ventil gesessen (Taster gedrueckt UND Motor geoeffnet, im
+    selben Frame — ``mqtt_subscriber._maybe_confirm_mounted``). Diese
+    Tatsache dreht sich nicht zurueck, solange das Geraet an derselben Zone
+    haengt; ``detach``/``retire``/``replace`` loeschen den Nachweis.
+
+    Es zaehlt deshalb als **attached**, unabhaengig davon, was der Taster
+    gerade meldet. Grund ist der Befund, der 20e ausgeloest hat: der Taster
+    meldet im Haus zu oft ``false``, obwohl das Geraet sitzt, und die Engine
+    schaltete daraufhin ein belegtes Zimmer in den Frostschutz. Ein Melder,
+    dem niemand glaubt, ueberwacht nichts (§5.79).
+
+    **Warum "zaehlt als attached" und nicht "faellt aus der Liste":** Bei
+    einem gemischten Zimmer — Schlafzimmer mit Nachweis, Bad ohne — wuerde
+    ein Herausnehmen aus der Liste das Bad-Geraet allein entscheiden lassen,
+    und ein einzelner unbewiesener Taster koennte das ganze Zimmer kippen.
+    Genau diese Lage beendet 20e. Entscheidung des Hoteliers vom 07.10.2026.
+
+    **Fuer Geraete OHNE Nachweis ist nichts anders.** Sie laufen durch
+    dieselben drei Kategorien wie vorher. Insbesondere spielt das Ventil
+    hier keine Rolle — ``valve_position`` kommt in dieser Datei nicht vor
+    und ist ausschliesslich Teil der Nachweis-Bedingung. Ein neu
+    zugeordnetes Geraet in einem warmen Zimmer, dessen Ventil wochenlang
+    geschlossen bleibt, bekommt keinen Nachweis und wird behandelt wie vor
+    20e: kein Sicherheitsmodus, der aktuelle ``attached_backplate`` gilt.
+    Die zehn Bestandstests in ``test_engine_layer4_detached.py`` belegen das
+    — sie setzen keinen Nachweis und bleiben ohne Anpassung gruen (§5.47).
+
     ``extras`` enthaelt IMMER ``detached_devices`` (Liste der dev_euis mit
     beiden letzten frischen Frames False — auch im No-Trigger-Fall, sodass
-    Operatoren sehen "1 von 2 detached, B haelt") und ``occupancy_state``.
+    Operatoren sehen "1 von 2 detached, B haelt"), seit 20e ausserdem
+    ``sticky_devices`` (dev_euis mit Nachweis), und ``occupancy_state``.
     """
     threshold = now - timedelta(minutes=WINDOW_STALE_THRESHOLD_MIN)
     occupancy_state = "occupied" if room_status == RoomStatus.OCCUPIED else "vacant"
@@ -638,13 +669,19 @@ async def layer_device_detached(
     # Sprint 13b.1 (AE-57): Lifecycle-Filter retired_at IS NULL ergaenzt
     # (inline, weil JOIN-basiert ueber HeatingZone; Helper-Signatur
     # waere room-scope-N+1).
+    # Sprint 20e (T4): ``mounted_confirmed_at`` kommt als dritte Spalte mit —
+    # dieselbe Query, keine zusaetzliche Rundreise.
     devices_stmt = (
-        select(Device.id, Device.dev_eui)
+        select(Device.id, Device.dev_eui, Device.mounted_confirmed_at)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
         .where(Device.retired_at.is_(None))
     )
-    devices: list[tuple[int, str]] = list((await session.execute(devices_stmt)).tuples().all())
+    device_rows: list[tuple[int, str, datetime | None]] = list(
+        (await session.execute(devices_stmt)).tuples().all()
+    )
+    devices: list[tuple[int, str]] = [(dev_id, eui) for dev_id, eui, _ in device_rows]
+    sticky_ids: set[int] = {dev_id for dev_id, _, nachweis in device_rows if nachweis is not None}
 
     if not devices:
         return LayerStep(
@@ -652,7 +689,11 @@ async def layer_device_detached(
             setpoint_c=prev_setpoint_c,
             reason=prev_reason,
             detail="no_devices_in_zone",
-            extras={"detached_devices": [], "occupancy_state": occupancy_state},
+            extras={
+                "detached_devices": [],
+                "sticky_devices": [],
+                "occupancy_state": occupancy_state,
+            },
         )
 
     # 2. Pro Device die letzten 2 frischen Frames mit nicht-NULL
@@ -692,11 +733,19 @@ async def layer_device_detached(
 
     eui_by_id: dict[int, str] = dict(devices)
     detached_dev_euis: list[str] = []
+    sticky_dev_euis: list[str] = []
     any_attached = False
     any_unclear = False
+    any_sticky = False
 
     for dev_id, frames in frames_by_dev.items():
-        if len(frames) < 2:
+        # Sprint 20e (T4): der Nachweis wird VOR den Frames geprueft. Die
+        # Reihenfolge ist die Aussage — ein belegt montiertes Geraet wird
+        # nicht mehr danach befragt, was sein Taster gerade meldet.
+        if dev_id in sticky_ids:
+            sticky_dev_euis.append(eui_by_id[dev_id])
+            any_sticky = True
+        elif len(frames) < 2:
             any_unclear = True
         elif all(f is False for f in frames):
             detached_dev_euis.append(eui_by_id[dev_id])
@@ -705,10 +754,22 @@ async def layer_device_detached(
 
     extras: dict[str, Any] = {
         "detached_devices": detached_dev_euis,
+        "sticky_devices": sticky_dev_euis,
         "occupancy_state": occupancy_state,
     }
 
-    all_detached = not any_unclear and not any_attached and len(detached_dev_euis) == len(devices)
+    # Sprint 20e (T4): ``any_sticky`` wirkt wie ``any_attached`` — ein
+    # Geraet mit Nachweis verhindert den Trigger fuer das ganze Zimmer. Die
+    # Laengen-Pruefung traegt das schon, weil ein sticky Geraet nicht in
+    # ``detached_dev_euis`` landet; ``any_sticky`` steht trotzdem
+    # ausdruecklich in der Bedingung, damit sie ohne Umweg ueber die
+    # Listenlaenge lesbar bleibt.
+    all_detached = (
+        not any_unclear
+        and not any_attached
+        and not any_sticky
+        and len(detached_dev_euis) == len(devices)
+    )
 
     # 4. Reason-Prioritaets-Schutz: Window gewinnt (§5.23 Pass-Through).
     if all_detached and prev_reason == CommandReason.WINDOW_OPEN:
@@ -730,8 +791,17 @@ async def layer_device_detached(
         )
 
     # 5. Pass-Through: WARUM kein Trigger? Operator-Diagnose im Trace.
+    #
+    # Reihenfolge nach Beweiskraft, nicht nach Wichtigkeit: ein Geraet, das
+    # JETZT ``true`` meldet, ist der bessere Beleg als ein Nachweis von
+    # vorletzter Woche. Steht ``sticky_mounted`` im Trace, haengt das Urteil
+    # am Nachweis — und genau das soll ein Operator sehen koennen, wenn er
+    # sich fragt, warum ein Zimmer mit lauter ``false``-Tastern normal
+    # heizt.
     if any_attached:
         detail = "device_attached"
+    elif any_sticky:
+        detail = "sticky_mounted"
     elif any_unclear:
         detail = "device_unclear"
     else:

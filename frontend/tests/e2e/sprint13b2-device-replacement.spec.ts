@@ -111,6 +111,8 @@ const POOL_DEVICE_B = {
 const SAMPLE_HARDWARE_STATUS = {
   status: "active" as const,
   last_seen: NOW,
+  source: "window" as const,
+  mounted_confirmed_at: null,
   frames_in_window: 3,
   window_minutes: 30,
 };

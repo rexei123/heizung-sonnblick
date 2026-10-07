@@ -99,6 +99,8 @@ async function mockDevices(page: Page, devices: unknown[]) {
       body: JSON.stringify({
         status: "inactive",
         last_seen: null,
+        source: "window" as const,
+        mounted_confirmed_at: null,
         frames_in_window: 0,
         window_minutes: 30,
       }),

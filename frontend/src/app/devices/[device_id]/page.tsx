@@ -525,6 +525,17 @@ function formatValve(v: number | null): string {
   return `${v} %`;
 }
 
+/**
+ * Rohwerte des letzten Frames — **nicht** der Montage-Status.
+ *
+ * Sprint 20e (T5): Seit der Montage-Status aus ``device.mounted_confirmed_at``
+ * kommt, kann diese Kachel „abgenommen" zeigen, während die Pille oben
+ * „Montiert" sagt. Das ist kein Widerspruch, sondern der Zweck: oben steht
+ * das Urteil, hier der Rohwert, aus dem es früher gebildet wurde. Ohne
+ * sichtbare Kennzeichnung läse man die beiden Zeilen als zwei Antworten auf
+ * dieselbe Frage — und würde der falschen glauben, nämlich der, die weiter
+ * unten und damit scheinbar genauer steht.
+ */
 function WindowBackplateCard({
   reading,
 }: {
@@ -546,6 +557,9 @@ function WindowBackplateCard({
         </span>
         <span>Fenster + Backplate</span>
       </div>
+      <p className="mt-1 text-xs text-text-tertiary">
+        Rohwerte des letzten Frames, zur Diagnose. Der Montage-Status steht oben.
+      </p>
       <div className="mt-2 space-y-1 text-sm">
         <div className="flex justify-between">
           <span className="text-text-tertiary">Fenster</span>

@@ -44,6 +44,8 @@ const SAMPLE_DEVICE = {
 const SAMPLE_HW_STATUS = {
   status: "active",
   last_seen: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+  source: "window" as const,
+  mounted_confirmed_at: null,
   frames_in_window: 3,
   window_minutes: 30,
 };
