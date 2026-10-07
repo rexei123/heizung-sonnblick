@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from statistics import median
@@ -38,6 +39,7 @@ import redis
 from sqlalchemy import select
 
 from heizung.celery_app import app
+from heizung.config import get_settings
 from heizung.models import Device, HeatingZone, Room, SensorReading
 from heizung.models.global_config import GlobalConfig
 from heizung.services import mail_status, redis_client
@@ -47,8 +49,11 @@ from heizung.tasks.engine_tasks import _task_session
 logger = logging.getLogger(__name__)
 
 # AE-53 Schwellen — Decimal/timedelta, keine Float-Vergleiche.
-HEALTHY_MAX_AGE = timedelta(hours=2)
-DEGRADED_MAX_AGE = timedelta(hours=24)
+#
+# Sprint 20e (T6): die beiden Altersschwellen stehen in den Settings
+# (``health_healthy_max_age_h`` / ``health_degraded_max_age_h``, Muster
+# AE-73) und nicht mehr hier. ``DEGRADED_MAX_AGE`` ist dabei von 24 h auf
+# 3 h gewandert — der Funkstille-Alarm haengt an dieser Grenze.
 OUTLIER_THRESHOLD_C: Decimal = Decimal("7.0")
 IMPLAUSIBLE_THRESHOLD = 10
 READING_FRESHNESS = timedelta(minutes=30)
@@ -84,14 +89,55 @@ async def _read_implausible_counter(dev_eui: str) -> int:
         return 0
 
 
-def _basis_state_from_age(latest_time: datetime | None, now: datetime) -> str:
-    """Reines AE-53-Basis-State-Mapping. Kein I/O."""
+@dataclass(frozen=True, slots=True)
+class HealthSchwellen:
+    """Die beiden Altersgrenzen als ein Wert.
+
+    Zusammen und nicht als zwei Argumente, aus demselben Grund wie bei
+    ``BatterySchwellen`` (AE-73): zwei Grenzen, die eine Reihenfolge
+    zueinander haben, sollen nicht einzeln ersetzbar sein. Zwei getrennte
+    Parameter liessen sich halb uebergeben, und genau daraus entsteht eine
+    Bewertung, in der die eine Grenze aus den Settings und die andere aus
+    einem Default kommt.
+
+    Die Ordnung prueft der Settings-Validator beim Start
+    (``config._health_schwellen_sind_geordnet``), an der einen Stelle, an
+    der die Werte von aussen kommen. Eine zweite Pruefung hier waere eine
+    zweite Wahrheit darueber, was gueltig ist.
+    """
+
+    healthy_max_age: timedelta
+    degraded_max_age: timedelta
+
+
+def health_schwellen() -> HealthSchwellen:
+    """Die konfigurierten Altersgrenzen aus den Settings (T6).
+
+    Einmal pro Lauf aufrufen, nicht pro Geraet.
+    """
+    settings = get_settings()
+    return HealthSchwellen(
+        healthy_max_age=timedelta(hours=settings.health_healthy_max_age_h),
+        degraded_max_age=timedelta(hours=settings.health_degraded_max_age_h),
+    )
+
+
+def _basis_state_from_age(
+    latest_time: datetime | None, now: datetime, schwellen: HealthSchwellen
+) -> str:
+    """Reines AE-53-Basis-State-Mapping. Kein I/O.
+
+    ``schwellen`` ist **Pflicht-Argument ohne Default** (Muster AE-73): ein
+    Default waere eine zweite Wahrheit ueber die Grenzen, und er wuerde
+    einen vergessenen Parameter zu einer stillen Fehlbewertung machen statt
+    zu einem Fehler.
+    """
     if latest_time is None:
         return "silent"
     age = now - latest_time
-    if age <= HEALTHY_MAX_AGE:
+    if age <= schwellen.healthy_max_age:
         return "healthy"
-    if age <= DEGRADED_MAX_AGE:
+    if age <= schwellen.degraded_max_age:
         return "degraded"
     return "silent"
 
@@ -202,10 +248,18 @@ async def _compute_health_state_async() -> dict[str, Any]:
                 zone_device_ids.setdefault(d.heating_zone_id, []).append(d.id)
 
         # Phase 1: Basis-State pro Device.
+        #
+        # Sprint 20e (T6): die Schwellen einmal fuer den ganzen Lauf, nicht
+        # je Geraet. Sonst waere ein Lauf moeglich, der die Grenzen
+        # mittendrin wechselt — und bei 104 Geraeten 104 Aufrufe fuer einen
+        # Wert, der sich im Lauf nicht aendert.
+        schwellen = health_schwellen()
         target_state: dict[int, str] = {}
         for d in devices:
             latest = latest_reading.get(d.id)
-            target_state[d.id] = _basis_state_from_age(latest[0] if latest else None, now)
+            target_state[d.id] = _basis_state_from_age(
+                latest[0] if latest else None, now, schwellen
+            )
 
         # Phase 2: Outlier-Check — nur Devices, die jetzt healthy sind.
         for d in devices:
