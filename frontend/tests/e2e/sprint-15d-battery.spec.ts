@@ -151,10 +151,26 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
     await expect(unknownBadge).toHaveAttribute("data-battery", "unbekannt");
   });
 
-  test("statusScore: offline (silent) schlägt batt-kritisch (health-Achse > batt-Achse)", async ({
+  test("statusScore: batt-kritisch schlägt silent (Handlungsbedarf vor Datenlage)", async ({
     page,
   }) => {
-    // Scores: Offline-OK=4 (silent), Online-Kritisch=2, Online-Warn=1, Online-OK=0.
+    // **Geändert am 08.10.2026, und zwar bewusst.** Dieser Test hieß vorher
+    // „offline (silent) schlägt batt-kritisch" und sicherte die Regel „die
+    // health_state-Achse schlägt die Batterie-Achse".
+    //
+    // Die Regel war vertretbar, solange `silent` erst nach 24 Stunden
+    // eintrat — dann war es ein echter Ausfall. Sprint 20e T6 hat die
+    // Grenze auf 3 Stunden gesenkt; seither ist `silent` häufig und oft
+    // vorübergehend, und als Trumpf über allem verdeckte es genau die
+    // Geräte, bei denen jemand etwas tun muss. Befund auf /devices am
+    // 08.10.: 102 mit „Tauschen · 2,6 V" war nach unten gerutscht.
+    //
+    // Also nicht die Schwelle zurückdrehen (der Alarm kam sonst wieder
+    // einen Tag zu spät), sondern die Rangfolge: Handlungsbedarf vor
+    // Datenlage. Begründung im Docstring von `statusScore`.
+    //
+    // Scores: Online-Kritisch=4, Offline-OK=3 (silent), Online-Warn=1,
+    // Online-OK=0.
     await mockDevices(page, [
       makeDevice(10, "Online-OK", "healthy", "ok", 3.4),
       makeDevice(11, "Online-Warn", "healthy", "warn", 2.8),
@@ -166,11 +182,17 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
 
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(4);
-    // Erwartete Reihenfolge absteigend nach Score: 4 > 2 > 1 > 0.
-    await expect(rows.nth(0)).toContainText("Offline-OK"); // silent = 4 (schlägt kritisch=2)
-    await expect(rows.nth(1)).toContainText("Online-Kritisch"); // batt-kritisch = 2
-    await expect(rows.nth(2)).toContainText("Online-Warn"); // batt-warn = 1
-    await expect(rows.nth(3)).toContainText("Online-OK"); // healthy+ok = 0
+    await expect(rows.nth(0)).toContainText("Online-Kritisch");
+    await expect(rows.nth(1)).toContainText("Offline-OK");
+    await expect(rows.nth(2)).toContainText("Online-Warn");
+    await expect(rows.nth(3)).toContainText("Online-OK");
+    // Gegen die Zahlen und nicht nur gegen die Reihenfolge: bei Gleichstand
+    // entscheidet die alphabetische Zweitsortierung, dann prüft ein
+    // Reihenfolge-Test etwas anderes als er meint.
+    await expect(rows.nth(0)).toHaveAttribute("data-status-score", "4");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "3");
+    await expect(rows.nth(2)).toHaveAttribute("data-status-score", "1");
+    await expect(rows.nth(3)).toHaveAttribute("data-status-score", "0");
   });
 
   // ------------------------------------------------------------------
