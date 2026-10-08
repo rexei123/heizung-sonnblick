@@ -1,0 +1,11 @@
+Roboto, Variable Font, Subset "latin" (v51)
+Bezogen am 08.10.2026 von fonts.gstatic.com.
+
+Copyright Google LLC
+Lizenziert unter der Apache License, Version 2.0.
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Warum die Datei im Repo liegt und nicht zur Build-Zeit geholt wird:
+siehe den Kommentar an `localFont(...)` in `src/app/layout.tsx`.
+Kurz: `next/font/google` laedt zur Build-Zeit von fonts.googleapis.com und
+hat am 08.10.2026 zweimal binnen einer Stunde CI gekippt.
