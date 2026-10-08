@@ -420,3 +420,76 @@ def test_checkout_holt_den_vorgaenger() -> None:
     checkout = [s for s in schritte if str(s.get("uses", "")).startswith("actions/checkout")]
     assert len(checkout) == 1
     assert checkout[0]["with"]["fetch-depth"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 5. Liest der Build etwas, das der Tree-Vergleich nicht sieht?
+# ---------------------------------------------------------------------------
+#
+# Der Tree-Hash ist nur dann ein **vollstaendiger** Schluessel, wenn der
+# Build nichts ausserhalb seines Kontexts liest. Heute ist das so (geprueft
+# am 08.10.2026: kein ``build-args``, keine ``secrets``, null ``ARG``, beide
+# Dockerfiles im eigenen Kontext). Die beiden Tests hier halten es fest.
+#
+# Sie sind **keine Verbote**, sondern Entscheidungs-Zwaenge: wer eine solche
+# Eingabe hinzufuegt, bekommt einen roten Test mit dem Hinweis, dass die
+# Entscheidung „bauen oder umhaengen" sie beruecksichtigen muss. Ohne sie
+# waere der Fehler still — umhaengen, obwohl sich eine Build-Eingabe
+# geaendert hat, und der Server zieht ein Image, das nicht zum Commit passt.
+
+
+def _build_schritte() -> list[tuple[str, dict[str, object]]]:
+    daten = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    treffer: list[tuple[str, dict[str, object]]] = []
+    for job in ("build-api", "build-web"):
+        for schritt in daten["jobs"][job]["steps"]:
+            if "build-push-action" in str(schritt.get("uses", "")):
+                treffer.append((job, schritt.get("with", {})))
+    return treffer
+
+
+def test_dockerfile_liegt_im_verglichenen_baum() -> None:
+    """``file`` muss unter ``context`` liegen.
+
+    Sonst steht das Dockerfile ausserhalb des Baums, der ueber „bauen oder
+    umhaengen" entscheidet — eine Aenderung daran wuerde umgehaengt statt
+    gebaut. Heute ist es ``./backend/Dockerfile`` zu ``./backend``; ein
+    Umzug nach ``infra/`` waere genau dieser Fehler.
+    """
+    schritte = _build_schritte()
+    assert len(schritte) == 2, f"erwarte zwei Build-Schritte, gefunden {len(schritte)}"
+    for job, w in schritte:
+        kontext = str(w["context"]).rstrip("/")
+        datei = str(w["file"])
+        assert datei.startswith(kontext + "/"), (
+            f"{job}: {datei} liegt nicht unter {kontext}. Der Tree-Vergleich "
+            f"sieht es dann nicht, und eine Aenderung daran wuerde umgehaengt "
+            f"statt gebaut."
+        )
+
+
+def test_keine_build_eingaben_ausserhalb_des_kontexts() -> None:
+    """``build-args`` und Verwandte brauchen eine Entscheidung.
+
+    Solche Werte stehen im Workflow oder kommen aus einer Datei daneben —
+    in beiden Faellen nicht im Baum des Build-Kontexts. Steht der Wert im
+    Workflow selbst, ist er abgedeckt (eine Aenderung an
+    ``build-images.yml`` baut immer). Kommt er aus einer Datei ausserhalb,
+    ist er **nicht** abgedeckt, und der Vergleich muss sie einschliessen.
+
+    Dieser Test unterscheidet die beiden Faelle nicht — er kann es nicht,
+    ohne den Wert zu deuten. Er verlangt stattdessen, dass jemand
+    hinsieht: wer eine solche Eingabe hinzufuegt, faellt hier auf und
+    entscheidet dann bewusst.
+    """
+    heikel = ("build-args", "secrets", "secret-files", "build-contexts", "secret-envs")
+    for job, w in _build_schritte():
+        gefunden = sorted(k for k in heikel if k in w)
+        assert not gefunden, (
+            f"{job} deklariert {gefunden}. Das sind Build-Eingaben ausserhalb "
+            f"des Kontext-Baums. Entscheiden: stehen die Werte im Workflow "
+            f"(dann abgedeckt, weil eine Aenderung daran immer baut) oder in "
+            f"einer Datei daneben (dann muss sie in den Vergleich im Schritt "
+            f"'baeume' aufgenommen werden)? Danach diesen Test anpassen und "
+            f"die Begruendung dazuschreiben."
+        )
