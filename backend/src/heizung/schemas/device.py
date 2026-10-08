@@ -269,8 +269,27 @@ class DeviceRead(BaseModel):
     active_override: DeviceActiveOverrideRead | None = None
     latest_reading: DeviceLatestReadingRead | None = None
 
-    @field_serializer("battery_voltage_median", "battery_last_voltage")
-    def _volt_to_float(self, v: Decimal | None) -> float | None:
+    # **Jedes** ``Decimal``-Feld dieser Antwort muss hier stehen.
+    #
+    # Ohne Eintrag serialisiert Pydantic ein ``Decimal`` als JSON-**String**
+    # ("5.40"), waehrend der TypeScript-Spiegel ``number | null`` sagt. Das
+    # ist kein Schoenheitsfehler: das Frontend ruft ``.toFixed()`` darauf,
+    # und das wirft ``TypeError: a.toFixed is not a function`` — kein
+    # stiller Anzeigefehler, sondern ein Absturz der ganzen Seite.
+    #
+    # **Genau das ist am 07.10.2026 passiert.** ``valve_delta_k`` kam mit
+    # Sprint 20e T7/T10 dazu und fehlte hier; ``/devices`` war nach dem
+    # Deploy mit "Application error: a client-side exception" nicht mehr
+    # benutzbar. Die e2e-Tests waren gruen, weil ihre Mocks Zahlen trugen —
+    # also meine Annahme statt der echten Serialisierung.
+    #
+    # Der Wachposten dagegen ist kein Kommentar, sondern ein Test:
+    # ``test_decimal_felder_serialisieren_als_zahl`` liest die
+    # Feld-Annotationen dieser Modelle und prueft jedes ``Decimal``-Feld.
+    # Wer eins hinzufuegt, ohne es hier einzutragen, bekommt einen roten
+    # Test und keine rote Produktion.
+    @field_serializer("battery_voltage_median", "battery_last_voltage", "valve_delta_k")
+    def _decimal_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 
 

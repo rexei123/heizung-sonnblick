@@ -4,6 +4,7 @@
 
 import { alleSeiten } from "./alle-seiten";
 import { apiClient, queryString } from "./client";
+import { zahlenfelderNormalisieren } from "./zahlen";
 import type {
   Device,
   DeviceAssignZoneRequest,
@@ -19,6 +20,30 @@ import type {
 } from "./types";
 
 const BASE = "/api/v1/devices";
+
+/**
+ * Zahlenfelder von ``Device``, die aus einem Backend-``Decimal`` kommen.
+ *
+ * Sie werden an der Grenze normalisiert, weil ein ``Decimal`` ohne
+ * ``field_serializer`` als JSON-String ankommt und das Frontend damit
+ * rechnet. Am 07.10.2026 hat das ``/devices`` abgeschossen
+ * (``TypeError: a.toFixed is not a function``); die Ursache ist im Backend
+ * behoben, das hier ist die zweite Linie. Begründung in ``zahlen.ts``.
+ *
+ * **Wer ein Zahlenfeld zu ``Device`` hinzufügt, trägt es hier ein.** Das ist
+ * dieselbe Pflicht wie der Serializer im Backend — und sie ist bewusst
+ * doppelt: zwei Listen, die beide vergessen werden können, sind besser als
+ * eine, deren Vergessen die Seite zerstört.
+ */
+const DEVICE_ZAHLENFELDER = [
+  "valve_delta_k",
+  "battery_voltage_median",
+  "battery_last_voltage",
+] as const;
+
+/** Normalisiert die Zahlenfelder eines Geräts. */
+const geraetNormalisieren = (d: Device): Device =>
+  zahlenfelderNormalisieren(d, DEVICE_ZAHLENFELDER);
 
 export const devicesApi = {
   /**
@@ -42,14 +67,17 @@ export const devicesApi = {
    * nach einem mehrfach vorkommenden Wert — etwa `label` — könnte zwischen
    * zwei Seiten eine Zeile doppelt oder gar nicht erscheinen.
    */
-  list: (q: DeviceListQuery = {}): Promise<Device[]> =>
-    alleSeiten(
-      (limit, offset) =>
-        apiClient.get<Device[]>(`${BASE}${queryString({ ...q, limit, offset })}`),
-      "Geräteliste",
-    ),
+  list: async (q: DeviceListQuery = {}): Promise<Device[]> =>
+    (
+      await alleSeiten(
+        (limit, offset) =>
+          apiClient.get<Device[]>(`${BASE}${queryString({ ...q, limit, offset })}`),
+        "Geräteliste",
+      )
+    ).map(geraetNormalisieren),
 
-  get: (id: number): Promise<Device> => apiClient.get<Device>(`${BASE}/${id}`),
+  get: async (id: number): Promise<Device> =>
+    geraetNormalisieren(await apiClient.get<Device>(`${BASE}/${id}`)),
 
   create: (payload: DeviceCreate): Promise<Device> =>
     apiClient.post<Device>(BASE, payload),
@@ -80,7 +108,8 @@ export const devicesApi = {
   // Transaktion, race-safe via UPDATE-WHERE auf Pool-Cell), Retire
   // ohne Ersatz. Beide Mutationen liefern den aktualisierten alten
   // Device-Row zurueck (mit gesetztem retired_at).
-  getPool: (): Promise<Device[]> => apiClient.get<Device[]>(`${BASE}/pool`),
+  getPool: async (): Promise<Device[]> =>
+    (await apiClient.get<Device[]>(`${BASE}/pool`)).map(geraetNormalisieren),
 
   replaceFromPool: (
     id: number,

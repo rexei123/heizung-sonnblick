@@ -97,8 +97,27 @@ const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
   },
 };
 
-function formatDelta(k: number | null | undefined): string | null {
-  if (k === null || k === undefined) return null;
+/**
+ * Formatiert den Abstand, und zwar **total**: kein Eingabewert kann werfen.
+ *
+ * Die erste Fassung war `k.toFixed(1)` mit einer Prüfung auf
+ * `null`/`undefined`. Das hat am 07.10.2026 `/devices` abgeschossen: das
+ * Backend sendete das `Decimal`-Feld als JSON-String (`"5.40"`), `.toFixed`
+ * existiert auf einem String nicht, und `TypeError: a.toFixed is not a
+ * function` nahm die ganze Seite mit.
+ *
+ * Der Typ sagt `number | null` — aber ein Typ ist eine Behauptung über
+ * fremde Daten, keine Zusicherung. Die Prüfung geht deshalb auf
+ * `typeof === "number"` statt auf die Abwesenheit von `null`: so ist nicht
+ * nur der eine bekannte Fall abgedeckt, sondern jeder, in dem hier etwas
+ * anderes als eine Zahl ankommt.
+ *
+ * Dieselbe Umkehrung wie bei der Zustandsprüfung unten (positiv formulieren
+ * statt Ausschlussliste) und aus demselben Grund: ein Hinweis-Badge darf
+ * eine Liste von 104 Zeilen nicht zerstören.
+ */
+function formatDelta(k: unknown): string | null {
+  if (typeof k !== "number" || !Number.isFinite(k)) return null;
   // Eine Dezimalstelle: die Messgröße ist Numeric(5,2), aber 0,1 K ist die
   // Auflösung, in der über Raumtemperaturen gesprochen wird.
   return `${k.toFixed(1).replace(".", ",")} K`;
