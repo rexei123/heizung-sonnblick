@@ -4458,3 +4458,244 @@ einen Grenzwert-Test.
   Begründung des Sprints und gleichzeitig das Argument gegen den Mailversand.
 - **RUNBOOK §10t** — was der Hausmeister bei den beiden Hinweisen tut, und
   wie die Schwellen geändert werden.
+
+---
+
+# AE-77 — Jeder Commit hat ein Image, und der Rückfallpunkt überlebt den Timer (H-6)
+
+**Datum:** 2026-10-08
+**Status:** angenommen, umgesetzt in Sprint 20g (PRs #277, #281)
+
+## Der Befund
+
+Der Betrieb lief auf einem **gleitenden Tag**. Die Compose-Datei sagt
+`ghcr.io/rexei123/heizung-api:${IMAGE_TAG:-develop}`, `IMAGE_TAG` stand in
+der `.env` auf `develop`, und der Timer zog alle fünf Minuten, was gerade
+darunter lag.
+
+Zwei Folgen, und die zweite ist die teure:
+
+1. **Es gab keinen Rückfallpunkt.** Bricht ein Merge die Steuerung, ist der
+   Weg zurück „den vorigen Stand wiederfinden und von Hand einen anderen Tag
+   setzen" — während der Timer alle fünf Minuten erneut `develop` zieht.
+2. **Es war nicht nachweisbar, was läuft.** „Der Server ist auf `develop`"
+   sagt nichts darüber, welcher Commit das ist. Der Digest stand in
+   `docker images`, aber niemand hielt ihn gegen einen Commit. Das ist §5.68
+   in der Infrastruktur: eine Aussage über den Server-Zustand, die man nicht
+   belegen kann.
+
+In der Heizperiode ist der zweite Punkt der wichtigere. Ein Zimmer, das nicht
+heizt, ist kein CI-Problem, und die erste Frage lautet dann „seit wann und
+mit welchem Stand".
+
+## Was §5.4 wirklich sagt
+
+Die Lesson hält fest: „`build-images.yml` taggt mit dem push-event-SHA
+(= Merge-Commit auf der Ziel-Branch). Eine Logik in `deploy-pull.sh`, die
+`IMAGE_TAG` aus `git log -- backend/...` ableitet, findet aber den
+Source-Branch-Commit."
+
+**Der zweite Satz ist das Problem, nicht der erste.** Der Versuch von
+2026-04-30 hat den Tag aus dem *letzten Commit, der `backend/` berührt hat*
+abgeleitet — bei einem Merge ein anderer Commit als der Merge-Commit selbst.
+
+Der Server kennt den richtigen Wert längst: Phase 1 berechnet
+`git rev-parse "origin/$TARGET_BRANCH"`. Die ersten sieben Zeichen davon sind
+der Tag. Kein `git log`, kein Pfadfilter, keine Heuristik.
+
+Gemessen an fünf Merges dieser Session, nicht angenommen:
+`develop-8c1de5c`, `develop-8366227`, `develop-1e337b4`, `develop-fc8596f`,
+`develop-394a056` — jedes Mal der develop-Commit.
+
+## Die Entscheidungen
+
+### 1. Jeder Commit bekommt ein Image — durch Umhängen, nicht durch Bauen
+
+Pinning setzt voraus, dass es für **jeden** Commit einen Tag gibt. Der
+`paths`-Filter in `build-images.yml` verhinderte das: ein Merge, der nur
+`docs/` oder `STATUS.md` berührt, baute nichts. Belegt an `d7e54fd`
+(PR #261, nur `STATUS.md`) — dieser Commit hat keinen Tag, und mit Pinning
+wäre der Deploy dort hängengeblieben.
+
+| Weg | Verworfen, weil |
+|---|---|
+| **A: immer bauen** | Ein Doku-Commit erzeugt einen neuen Digest, `up -d` rekreiert die Container — also ein Neustart der Steuerung für eine Änderung an `STATUS.md` |
+| **B: Tag auflösen** (neuesten Commit ≤ HEAD mit Image finden) | Braucht entweder eine Registry-Schleife im Deploy-Skript oder `git log -- backend/` — und letzteres ist genau die Heuristik, die 2026-04-30 gescheitert ist |
+| **C: Re-Tag** ✅ | — |
+
+**Gewählt: C.** Berührt ein Commit ein Image nicht, wird der Tag des
+Vorgängers umgehängt (`docker buildx imagetools create`, registry-seitig,
+ohne Pull und ohne Build). Der Digest bleibt bitgleich, `up -d` rekreiert
+also nichts.
+
+Nachgewiesen vor dem Bau (T1a-Probe in CI, mit `GITHUB_TOKEN` und
+`packages: write` — also mit den Rechten des echten Schritts):
+
+```
+QUELLE develop  -> sha256:72c0575652b8ed77…
+ZIEL   h6-probe -> sha256:72c0575652b8ed77…
+ERGEBNIS: IDENTISCH
+```
+
+Und live am ersten Merge danach (`30b6ffe`, reiner Frontend-Commit):
+`develop-77547ed` und `develop-30b6ffe` tragen beide
+`sha256:d198640ac25b`.
+
+### 2. Die Entscheidung fällt je Image, nicht je Commit
+
+Der `paths`-Filter stand auf **Workflow**-Ebene: berührte ein Commit
+`backend/**`, liefen **beide** Jobs. Jeder Backend-Merge baute also das
+Web-Image mit.
+
+**Weg C baut damit weniger als der Status quo**, nicht mehr. Beleg: `935facc`
+(PR #276, nur Frontend) hat vorher beide Images gebaut.
+
+### 3. Verglichen werden Tree-Hashes, nicht Dateinamen
+
+`git rev-parse HEAD:backend` liefert die Objekt-ID des Verzeichnisbaums. Sie
+ist genau dann gleich wie beim Vorgänger, wenn **kein Byte** darin anders ist
+— Umbenennungen, Modus-Änderungen und Unterverzeichnisse eingeschlossen. Und
+der Baum **ist** die Eingabe des Builds, weil `build-push-action`
+`context: ./backend` bekommt.
+
+Der naheliegende Weg (`git diff --name-only` plus `grep -E '^backend/'`)
+wurde zuerst gebaut und verworfen: er vergleicht **Namen** und urteilt dann
+über **Inhalt**, und die gefährliche Fehlerrichtung ist dabei die stille. Ein
+Regex-Fehler, der eine geänderte Datei nicht erfasst, lässt umhängen statt
+bauen — und deployt ein veraltetes Image unter einem Tag, der einen neuen
+Commit behauptet. Nichts wird rot.
+
+**Was der Vergleich nicht erfasst:** ein Basis-Image, das sich unter
+demselben Tag bewegt (`FROM python:3.12-slim`). Gleicher Baum, anderes
+Ergebnis. Das gilt für einen `paths`-Filter genauso, ist also nicht neu; die
+Behebung wäre ein Digest-Pin am `FROM` und ist ein eigener Zug.
+
+**Was außerhalb des Build-Kontexts gelesen wird, muss mit in den Vergleich.**
+Geprüft am 08.10.: es gibt heute nichts — keine `build-args`, keine
+`secrets`, null `ARG`, beide Dockerfiles im eigenen Kontext. Zwei Tests
+halten das fest und fallen, sobald es aufhört zu stimmen.
+
+### 4. `cancel-in-progress: false`
+
+Ein abgebrochener Lauf hinterlässt einen Commit ohne Tag, und der nächste
+Re-Tag sucht ihn als Vorgänger. Der Rückfall auf Build fängt das ab — aber
+dann baut ein Doku-Commit doch, also genau das, was Weg C vermeiden soll.
+Builds reihen sich seither ein statt sich zu verdrängen.
+
+### 5. Der Rückfallpunkt steht in der `.env` und das Skript schreibt sie nicht
+
+`PIN_SHA` gesetzt → dieser Commit, dieses Image, Automatik aus. Leeren und
+einen Timer-Lauf abwarten holt den Branch-Kopf zurück.
+
+**Das Skript schreibt die `.env` nicht.** Der Tag wird je Lauf berechnet und
+an `docker compose` übergeben; die Shell-Umgebung schlägt dort die Datei.
+Grund: eine Datei, die der Timer alle fünf Minuten überschreibt, ist kein Ort
+für eine Entscheidung des Menschen — ein Rückfall per `.env`-Eintrag wäre
+nach fünf Minuten weg.
+
+`IMAGE_TAG` in der `.env` bleibt als Rückfall für ein von Hand getipptes
+`docker compose up -d` stehen; dann gilt der gleitende Tag, und das ist
+besser als ein leerer Wert.
+
+### 6. Der Working-Tree geht mit
+
+Phase 1 macht `git reset --hard origin/<branch>`, der Working-Tree folgt also
+dem Branch-Kopf — und darin stecken die Compose-Datei, die Caddyfiles, die
+ChirpStack-TOMLs und die Mosquitto-Config.
+
+**Ein Rückfall, der nur das Image zurückdreht, ist deshalb kein Rückfall.**
+Er kombiniert alte Container mit neuer Compose-Datei, und wenn dazwischen ein
+Service dazukam oder eine Umgebungsvariable ihren Namen geändert hat, startet
+der Stack nicht oder startet falsch. Bei gesetztem Pin geht das Skript
+deshalb auf einen **losgelösten HEAD** an diesem Commit.
+
+### 7. Ein unbekannter Pin bricht ab
+
+Kein Rückfall auf den Branch. Ein Tippfehler würde sonst stumm den neuesten
+Stand deployen — das Gegenteil dessen, was jemand wollte, der gerade
+zurückrollt. Lieber ein Deploy, der steht und es sagt.
+
+### 8. Rückfall nur über additive Migrationen
+
+Der Container führt beim Start `alembic upgrade head` aus; rückwärts
+geschieht das nicht. Ein Image von vor einer Migration startet gegen ein
+Schema, das weiter ist als der Code.
+
+Bei einer **additiven** Migration ist das harmlos: eine nullable Spalte ohne
+Backfill liest älterer Code nicht. Bei einer **nicht-additiven** —
+`DROP COLUMN`, `RENAME`, nachträgliches `NOT NULL`, Enum-Wert entfernt, Typ
+verengt — ist es nicht harmlos.
+
+**Regel:** Jede nicht-additive Migration wird im PR als „bricht Rückfall"
+markiert, und zusätzlich im Docstring der Migration. Der PR-Text ist, was
+beim Suchen nach „seit wann" gelesen wird; der Docstring ist, was beim Lesen
+der Migration gelesen wird.
+
+Die Migrationen dieses Herbstes sind alle additiv. **0026 ist der
+interessante Fall** und der Grund, die Regel genau zu formulieren: eine
+`CHECK`-Beschränkung zu **erweitern** ist additiv, sie zu **verengen** nicht.
+Ein Rückfall auf ein Image vor 0026 läuft gegen das erweiterte `CHECK` ohne
+Problem — er schreibt nur nie `device_manual`.
+
+**Keine CI-Prüfung dafür** (Entscheidung 08.10.): ein Linter könnte
+`op.drop_column` und `op.alter_column(nullable=False)` erkennen, hätte aber
+eigene Falsch-Positive — eine `drop_column` im `downgrade` ist normal und
+richtig. Backlog; die Regel steht stattdessen in der PR-Vorlage.
+
+### 9. Ein vergessener Pin erinnert
+
+Mail nach sieben Tagen, danach wöchentlich, solange gepinnt. Über einen
+Beat-Task, nicht über `deploy-pull.sh`: das Skript läuft alle fünf Minuten
+und wüsste nicht, ob es heute schon erinnert hat — ein Zustand, den es
+nirgends ablegen kann, ohne eine Datei zu schreiben, die beim nächsten
+`git reset --hard` verschwindet.
+
+Erinnerung, nicht Alarm: ein gesetzter Pin ist eine Entscheidung, kein
+Fehler. Dazu trägt jeder Deploy-Ping den Pin im Body, damit er im Monitor
+steht und nicht nur im Server-Log.
+
+## Verworfen
+
+- **Digest-Pinning** (`@sha256:…` in der Compose-Datei). Exakter, aber nicht
+  lesbar und nicht auf einen Commit zurückführbar, ohne ihn irgendwo zu
+  notieren — verschiebt das Problem in eine zweite Quelle. Wenn Tags nicht
+  reichen, ist das der nächste Zug.
+- **Automatischer Rückfall bei Fehlern.** Ein Deploy, der selbst entscheidet
+  zurückzugehen, braucht ein Urteil darüber, was „kaputt" heißt — und ein
+  falsches Urteil würde die Steuerung im Kreis fahren. Der Rückfall bleibt
+  ein Handgriff mit einer Zeile in der `.env`.
+- **Zwei Workflows mit `paths` und `paths-ignore`** für die
+  Bauen-oder-Umhängen-Entscheidung. §5.55 Nachtrag beschreibt, warum das
+  Spiegel-Paar im Repo abgeschafft ist: zwei von Hand synchron gehaltene
+  Pfadlisten erzeugen genau die Lücke, die sie schließen sollen.
+- **`latest` auf develop.** Gibt es nur auf `main`, und dabei bleibt es.
+
+## Offen
+
+- **Retention im GHCR.** Mit einem Tag je Commit wachsen die Tags schneller.
+  Aufräumen ist nicht trivial: GHCR löscht **Versionen**, nicht Tags, und
+  sobald mehrere Tags auf einer Version sitzen, löscht man mehr als man
+  meint. Aufgefallen bei der T1a-Probe — das Probe-Tag `h6-probe` sitzt auf
+  derselben Version wie `develop` und ist einzeln nicht entfernbar. Eigener
+  Backlog-Punkt mit der Regel: **eine Version mit `develop-` oder `PIN`-Tag
+  wird nie gelöscht.** Nicht vor dem 01.11.
+- **Basis-Image per Digest pinnen** (§3).
+- **Migrations-Linter** (§8).
+
+## Querverweise
+
+- **§5.4** — die Lesson, die diesen Sprint ausgelöst hat; sie beschreibt den
+  alten Fix, nicht eine Notwendigkeit.
+- **§5.10 / §5.11** — `build-images.yml` triggert nicht immer zuverlässig,
+  und `docker compose pull` ist kein Beweis. Mit einem gepinnten Tag wird
+  beides prüfbar: entweder das Image zum Commit ist da oder nicht.
+- **§5.55 Nachtrag** — Präzedenzfall gegen das Spiegel-Paar.
+- **§5.68** — „der Server läuft auf develop" ist eine Behauptung, solange
+  niemand den Commit nennen kann.
+- **§5.76** — Wirkung statt Mechanik: die Abschlusszeile und der Ping machen
+  den Zusammenhang Commit↔Image sichtbar.
+- **§5.78** — `docker compose` ohne `-f` auf dem Server.
+- **§5.82** — Tests am echten Skript, nicht an einem Nachbau.
+- **§0.3** — ein Merge nach develop ist ein Deploy. Die Deploy-Sperre
+  (Phase 0) läuft unverändert **vor** allem Neuen, auch vor einem Rückfall.
+- **RUNBOOK §10u** — der Handgriff, Schritt für Schritt.
