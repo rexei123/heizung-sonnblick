@@ -27,34 +27,88 @@ function toMessage(e: unknown): string {
 /**
  * Fehlerstatus-Score absteigend: hoeher = problematischer.
  *
- * Sprint 15d (AE-65) — REDESIGN: kombiniert beide Health-Achsen statt der
- * frueheren reinen `last_seen`-Zeit-Heuristik (die `health_state` gar nicht
- * las). Feste Tabelle, pro Geraet der HOECHSTE zutreffende Wert (max ueber
- * beide Achsen):
- *   retired_at gesetzt                -> 5
- *   health_state silent               -> 4  (offline / kein Frame)
- *   health_state degraded|suspicious  -> 3  (unplausibel)
- *   battery_state kritisch            -> 2
- *   battery_state warn                -> 1
- *   sonst (healthy + ok)              -> 0
+ * Pro Geraet der HOECHSTE zutreffende Wert ueber alle Achsen:
  *
- * Rangfolge ist die Betriebsentscheidung: offline > unplausibel >
- * batt-kritisch > batt-warn > ok. Die `health_state`-Achse schlaegt die
- * Batterie-Achse. `retired_at` (5) ist Schutz fuer `?include_retired=true`-
- * Sichten (Default-Liste blendet retired aus, AE-57).
+ *   retired_at gesetzt                -> 6
+ *   valve_state zimmer_zu_warm        -> 5  (Energie laeuft weg)
+ *   battery_state kritisch            -> 4  ("Tauschen")
+ *   health_state silent               -> 3  (meldet sich nicht)
+ *   valve_state ventil_klemmt_zu      -> 2  ("Ventil pruefen")
+ *   battery_state warn                -> 1  ("Beobachten")
+ *   health_state degraded|suspicious  -> 1  (unplausibel)
+ *   sonst                             -> 0
+ *
+ * **Die Rangfolge ist die Betriebsentscheidung.** Wer sie aendern will,
+ * aendert diese Tabelle und sonst nichts; die e2e-Tests pruefen sie gegen
+ * das `data-status-score`-Attribut der Zeile.
+ *
+ * ---
+ *
+ * **Befund 08.10.2026, und er hatte zwei Ursachen.** Auf `/devices` stand
+ * Geraet 001 oben, waehrend keines der 14 mit „Zimmer zu warm" nach oben
+ * kam — und 102 („Tauschen · 2,6 V"), das am 05.10. noch oben stand, war
+ * nach unten gerutscht.
+ *
+ * **Erstens: die Ventil-Achse fehlte ganz.** Sprint 20e T7/T10 hat
+ * `valve_state` eingefuehrt und diesen Konsumenten nicht nachgezogen —
+ * dieselbe Auslassung wie der fehlende TypeScript-Typ in 20f-b und der
+ * fehlende `field_serializer` im Hotfix vom 07.10. Eine neue Achse zu bauen
+ * heisst, **alle** Stellen zu finden, die Achsen lesen.
+ *
+ * **Zweitens, und das ist der interessantere Teil: die alte Rangfolge liess
+ * `health_state` grundsaetzlich gewinnen** („die health_state-Achse schlaegt
+ * die Batterie-Achse"). Das war vertretbar, solange `silent` erst nach
+ * **24 Stunden** eintrat — dann war es ein echter Ausfall. Sprint 20e T6 hat
+ * die Grenze auf **3 Stunden** gesenkt (guter Grund: der Funkstille-Alarm
+ * kam sonst einen Tag zu spaet). Seither ist `silent` haeufig und oft
+ * voruebergehend — und verdeckt als Trumpf ueber allem genau die Geraete,
+ * bei denen jemand etwas tun muss.
+ *
+ * 102 ist also nicht abgerutscht, sondern **ueberholt worden** von Geraeten,
+ * die durch die neue Schwelle auf `silent` oder `degraded` gekippt sind. Die
+ * Nebenwirkung von T6 war im PR fuer die Dashboard-Kachel „Geraete online"
+ * benannt, fuer die Sortierung nicht.
+ *
+ * **Daraus die neue Rangfolge: Handlungsbedarf vor Datenlage.** Oben stehen
+ * die vier Zustaende, zu denen es einen Handgriff gibt — Zimmer zu warm,
+ * Batterie tauschen, meldet sich nicht, Ventil pruefen. Darunter das, was
+ * nur Beobachtung ist: `warn` und `degraded`/`suspicious`.
+ *
+ * Innerhalb des Handlungsbedarfs nach **Kosten des Nichtstuns**:
+ *
+ * - `zimmer_zu_warm` ganz oben, weil dort jede Stunde Energie gegen das
+ *   Fenster geheizt wird — und weil es seit AE-74 der einzige automatische
+ *   Melder fuer ein abgefallenes Geraet ist. Wird es verdeckt, gibt es
+ *   keinen zweiten.
+ * - `kritisch` darueber `silent`, weil „Batterie unter 2,6 V" ein Befund
+ *   ueber einen Tag ist (24-h-Median) und `silent` oft ein Funkloch von
+ *   drei Stunden.
+ * - `ventil_klemmt_zu` darunter, weil es Komfort in **einem** Zimmer kostet
+ *   und nicht Energie im ganzen Haus.
+ *
+ * `degraded`/`suspicious` faellt dabei von 3 auf 1: unplausible Messwerte
+ * sind eine Datenlage, kein Handgriff. Die Engine schliesst solche Geraete
+ * ohnehin aus (`health_state == "healthy"`-Filter an drei Stellen).
+ *
+ * `retired_at` (6) bleibt Schutz fuer `?include_retired=true`-Sichten; die
+ * Default-Liste blendet retired aus (AE-57).
  */
 function statusScore(d: Device): number {
-  if (d.retired_at !== null) return 5;
+  if (d.retired_at !== null) return 6;
 
-  let health = 0;
-  if (d.health_state === "silent") health = 4;
-  else if (d.health_state === "degraded" || d.health_state === "suspicious") health = 3;
+  let ventil = 0;
+  if (d.valve_state === "zimmer_zu_warm") ventil = 5;
+  else if (d.valve_state === "ventil_klemmt_zu") ventil = 2;
 
   let battery = 0;
-  if (d.battery_state === "kritisch") battery = 2;
+  if (d.battery_state === "kritisch") battery = 4;
   else if (d.battery_state === "warn") battery = 1;
 
-  return Math.max(health, battery);
+  let health = 0;
+  if (d.health_state === "silent") health = 3;
+  else if (d.health_state === "degraded" || d.health_state === "suspicious") health = 1;
+
+  return Math.max(ventil, battery, health);
 }
 
 export default function DevicesPage() {
@@ -181,7 +235,16 @@ function DevicesTable({ devices }: { devices: Device[] }) {
 
 function DeviceRow({ device: d }: { device: Device }) {
   return (
-    <tr className="border-t border-border hover:bg-surface-alt transition-colors">
+    // `data-status-score` macht die Rangfolge pruefbar und im Browser
+    // nachlesbar. Ohne das Attribut liesse sich nur die Reihenfolge testen —
+    // und die ist bei Gleichstand von der alphabetischen Zweitsortierung
+    // bestimmt, also nicht von dem, was man prueft. Beim Befund vom
+    // 08.10. haette es die Diagnose auf einen Blick erledigt: 001 trug
+    // einen Score, keines der 14 „Zimmer zu warm"-Geraete.
+    <tr
+      className="border-t border-border hover:bg-surface-alt transition-colors"
+      data-status-score={statusScore(d)}
+    >
       <td className="px-4 py-3">
         <LabelCell device={d} />
       </td>
