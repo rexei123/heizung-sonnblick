@@ -30,10 +30,11 @@ function toMessage(e: unknown): string {
  * Pro Geraet der HOECHSTE zutreffende Wert ueber alle Achsen:
  *
  *   retired_at gesetzt                -> 6
- *   valve_state zimmer_zu_warm        -> 5  (Energie laeuft weg)
  *   health_state silent               -> 4  (meldet sich nicht — Tausch-Ausloeser)
  *   valve_state ventil_klemmt_zu      -> 3  ("Ventil pruefen")
  *   battery_state kritisch            -> 2  (Spannung niedrig — Information)
+ *   valve_state zimmer_zu_warm        -> 2  (**Uebergang**, siehe
+ *                                            RANG_ZIMMER_ZU_WARM; ab 20e-b 5)
  *   battery_state warn                -> 1  (Information)
  *   health_state degraded|suspicious  -> 1  (unplausibel)
  *   sonst                             -> 0
@@ -75,11 +76,12 @@ function toMessage(e: unknown): string {
  *
  * Innerhalb des Handlungsbedarfs nach **Kosten des Nichtstuns**:
  *
- * - `zimmer_zu_warm` ganz oben, weil dort jede Stunde Energie gegen das
- *   Fenster geheizt wird — und weil es seit AE-74 der einzige automatische
- *   Melder fuer ein abgefallenes Geraet ist. Wird es verdeckt, gibt es
- *   keinen zweiten.
- * - `silent` darunter: drei Stunden ohne Meldung heisst, dass die Engine
+ * - `zimmer_zu_warm` **gehoert** ganz oben, weil dort jede Stunde Energie
+ *   gegen das Fenster geheizt wird und es seit AE-74 der einzige
+ *   automatische Melder fuer ein abgefallenes Geraet ist. Es steht heute
+ *   trotzdem im Informations-Band, weil die Regel noch Fehlalarme liefert —
+ *   Begruendung an `RANG_ZIMMER_ZU_WARM`, Hebung mit Sprint 20e-b.
+ * - `silent` darueber: drei Stunden ohne Meldung heisst, dass die Engine
  *   das Geraet nicht mehr sieht — und es ist seit der Betriebsregel vom
  *   08.10. der **Ausloeser fuer den Batteriewechsel**.
  * - `ventil_klemmt_zu` darunter, weil es Komfort in **einem** Zimmer kostet
@@ -118,11 +120,36 @@ function toMessage(e: unknown): string {
  * `retired_at` (6) bleibt Schutz fuer `?include_retired=true`-Sichten; die
  * Default-Liste blendet retired aus (AE-57).
  */
+/**
+ * Rang von `zimmer_zu_warm` — **Übergangswert bis Sprint 20e-b.**
+ *
+ * Gehört nach AE-74 nach oben: es ist der einzige automatische Melder für
+ * ein abgefallenes Gerät, und dort läuft jede Stunde Energie gegen das
+ * Fenster. **Solange die Regel aber Fehlalarme liefert, gehört sie nicht
+ * nach oben, sondern nach unten.**
+ *
+ * Stand 08.10.2026: die Kachel meldet **15** Geräte, zwei davon sind echt.
+ * Mit Rang 5 besetzen also 13 Falschmeldungen die Spitze der Liste und
+ * verdecken jedes stille Gerät und jeden echten Ventil-Fall — genau das
+ * Verdecken, das diese Sortierung beenden sollte, nur mit anderer Ursache.
+ *
+ * Die Ursache ist bekannt und in Arbeit: das absolute Kriterium
+ * (`Ist >= Soll + 5 K`) kann einen klemmenden Kopf nicht von einem warmen
+ * Herbsttag unterscheiden. Sprint 20e-b ergänzt den Vergleich gegen den
+ * Median der unbelegten Zimmer; die Messung vom 08.10. senkt damit 15 auf 1
+ * (`docs/features/2026-10-08-sprint20eb-regel3b-relativ.md`).
+ *
+ * **Mit 20e-b wird dieser Wert auf 5 gesetzt.** Der Test
+ * `der Übergangswert ist bewusst und wird mit 20e-b gehoben` fällt dann und
+ * verlangt, dass es jemand absichtlich tut.
+ */
+const RANG_ZIMMER_ZU_WARM = 2;
+
 function statusScore(d: Device): number {
   if (d.retired_at !== null) return 6;
 
   let ventil = 0;
-  if (d.valve_state === "zimmer_zu_warm") ventil = 5;
+  if (d.valve_state === "zimmer_zu_warm") ventil = RANG_ZIMMER_ZU_WARM;
   else if (d.valve_state === "ventil_klemmt_zu") ventil = 3;
 
   let battery = 0;

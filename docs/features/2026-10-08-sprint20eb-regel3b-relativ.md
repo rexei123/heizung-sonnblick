@@ -213,6 +213,81 @@ passt sie hier mit an.
 
 ---
 
+## 5a. T0-Ergebnis und die Entscheidungen daraus
+
+**Messung 08.10.2026, 09:48, Kessel aus:**
+
+```
+median_unbelegt 21.7 | zimmer_unbelegt 44 | heute_gemeldet 15 | mit_relativ_uebrig 1
+```
+
+Übrig bleibt allein **102/406 (W)**, mit `ueber_median` **genau 3,0**. Gerät
+027 steht gar nicht in der absoluten Liste; 100/405 liegt nur 1,4 K über dem
+Median.
+
+### Akzeptanzkriterium 1 war falsch, und zwar von mir
+
+AK 1 verlangte „höchstens 027/110 und 100/405". Ich hatte die Erwartung aus
+der Live-Meldung des Hoteliers übernommen, ohne zu prüfen, ob sie bei
+**ausgeschaltetem Kessel** gelten kann. Sie kann es nicht: ein klemmend
+geschlossenes Ventil heizt dann nicht, also ist es thermisch unsichtbar. Die
+richtige Erwartung bei Kessel aus ist **0 bis 1**.
+
+Korrigiert, und ein zweites Kriterium kommt dazu — die eigentliche Probe:
+
+* **AK 1 (neu):** Bei ausgeschaltetem Kessel meldet Regel 3b **höchstens
+  0–1** Geräte.
+* **AK 1b (neu):** Bei **eingeschaltetem** Kessel werden 027/110 und
+  100/405 gemeldet (beide klemmen offen). **Live-Test beim nächsten
+  Kesselstart.**
+
+### Entscheidungen des Hoteliers (08.10.)
+
+| Punkt | Entscheidung |
+|---|---|
+| Variante für G3 | **A** — hausweiter Median, keine Himmelsrichtungs-Gruppen |
+| `ROOM_REL_DELTA_K` | **3,5** statt 3,0 — 102 lag exakt auf 3,0, die Vorgabe braucht Luft |
+| Rückfallkette | dreistufig wie §3, `REF_MIN_ROOMS` wie vorgeschlagen |
+| Reihenfolge | H-6 zuerst, dann 20e-b |
+
+**G1 ist heute nicht aktiv:** 44 unbelegte Zimmer, die Mindestzahl ist also
+reichlich erfüllt. Sie bleibt trotzdem drin — für die Hochsaison.
+
+### Offener Prüfpunkt: G3 ist am Morgen nicht scharf, am Nachmittag ungeprüft
+
+12 der 15 absolut gemeldeten Geräte sind **W**, und das relative Kriterium
+filtert sie trotzdem. Daraus folgt „G3 nicht scharf" — **für 09:48**.
+
+Westzimmer bekommen **Nachmittagssonne**; morgens tragen sie nur die
+Restwärme des Vortags. Die Messung liegt damit am Zeitpunkt, an dem W am
+wenigsten auffällt. Um 16:00 an einem sonnigen Tag laufen sie gemeinsam nach
+oben, während die Nordzimmer es nicht tun, und der Median über alle 44
+unbelegten verschiebt sich nur teilweise mit.
+
+**Zweite Messung (16:00, sonnig) als offener Prüfpunkt, kein Blocker.** Der
+Hotelier liefert sie. Fällt sie wie die erste aus, ist G3 erledigt; fällt
+`mit_relativ_uebrig` deutlich höher aus und die Übrigen sind W, braucht es
+Variante B doch.
+
+### Folge für die Sortierung auf /devices — mit 20e-b zu heben
+
+Die Fehlalarme haben eine zweite Wirkung, außerhalb dieses Sprints: in
+`statusScore` (`app/devices/page.tsx`) gehört `zimmer_zu_warm` nach AE-74 an
+die Spitze — es ist der einzige automatische Melder für ein abgefallenes
+Gerät. Solange die Regel aber 15 Geräte meldet und zwei davon echt sind,
+besetzen 13 Falschmeldungen die Spitze der Liste und verdecken jedes stille
+Gerät.
+
+Der Rang steht deshalb seit dem 08.10. als **Übergangswert** auf 2
+(`RANG_ZIMMER_ZU_WARM`), also im Informations-Band.
+
+**Mit 20e-b ist er auf 5 zu setzen.** Der e2e-Test „der Übergangswert ist
+bewusst und wird mit 20e-b gehoben" fällt dann und verlangt, dass es jemand
+absichtlich tut. Zu ändern sind: die Konstante, dieser Test und die zwei
+Reihenfolge-Tests in `fix-fehlerstatus-sortierung.spec.ts`.
+
+---
+
 ## 6. Tasks
 
 | # | Inhalt | Dauer |
@@ -225,16 +300,22 @@ passt sie hier mit an.
 | **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (zu wenige Zimmer → kein Urteil); G2 (Rückfall auf Stufe 2); G4 (Median mit drei von sieben heißen Zimmern hält, mit fünf von sieben nicht — die 50-%-Grenze als Test, damit sie eine Aussage ist); Referenz im Verdict korrekt benannt | 2,5 h |
 | **T6** | **Der Test mit dem heutigen Datenstand** als Fixture: die Temperaturlage vom 07.10. nachgebaut, Erwartung höchstens 027/110 und 100/405. Der Befund als Testwand, wie bei 20f-b die Nachtabsenkung | 1 h |
 | **T7** | RUNBOOK §10t ergänzen: was „über vergleichbaren Zimmern" heißt, und dass bei Hochsaison die Referenz wechselt. AE-74 um die Entscheidung erweitern | 1 h |
-| **Summe** | | **10,5 h** |
+| **T8** | `RANG_ZIMMER_ZU_WARM` von 2 auf 5 heben (§5a), die drei e2e-Tests dazu anpassen. **Erst nach T6**, also nachdem die Messung die Fehlalarme belegt beseitigt hat — nicht gleichzeitig | 0,5 h |
+| **Summe** | | **11,0 h** |
 
-Bei Variante A statt B: **−2,5 h** (T2 bleibt dreistufig, T5 ohne Gruppen).
+Variante A ist entschieden (§5a), die −2,5 h für Gruppen entfallen also:
+**8,5 h**.
 
 ---
 
 ## 7. Akzeptanzkriterien
 
-1. Gegen den Datenstand vom 07.10. 14:58 meldet Regel 3b **höchstens** die
-   Geräte 027 (Zimmer 110) und 100 (Zimmer 405).
+1. Bei **ausgeschaltetem** Kessel meldet Regel 3b höchstens **0–1** Geräte.
+   (Die erste Fassung verlangte „höchstens 027/110 und 100/405" — falsch,
+   siehe §5a: bei ausgeschaltetem Kessel ist ein klemmend geschlossenes
+   Ventil thermisch unsichtbar.)
+1b. Bei **eingeschaltetem** Kessel werden 027/110 und 100/405 gemeldet.
+   Live-Test beim nächsten Kesselstart.
 2. Ein Gerät, dessen Zimmer gegenüber der Referenz auffällt, wird weiter
    gemeldet — auch wenn das ganze Haus warm ist. Belegt mit einem Test, der
    alle Zimmer um 5 K hebt und das eine zusätzlich.
