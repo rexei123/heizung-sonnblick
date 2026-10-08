@@ -1,21 +1,155 @@
+# Baut die App-Images und taggt sie mit `<branch>` und `<branch>-<sha>`.
+#
+# **Weg C (Sprint H-6, AE-77): bauen oder umhaengen, je Image.**
+#
+# Jeder Commit auf `develop`/`main` bekommt einen `<branch>-<sha>`-Tag —
+# auch wenn er das jeweilige Image nicht beruehrt. Dann wird nicht gebaut,
+# sondern der Tag des Vorgaengers auf den neuen Namen **umgehaengt**
+# (`imagetools create`, Registry-seitig, ohne Pull und ohne Build). Der
+# Digest bleibt dabei bitgleich — nachgewiesen in der T1a-Probe am
+# 08.10.2026 —, also rekreiert `docker compose up -d` auf dem Server
+# nichts. Ein Doku-Commit startet die Steuerung nicht neu.
+#
+# Warum ueberhaupt ein Tag je Commit: ohne ihn kann `deploy-pull.sh` nicht
+# auf den Commit pinnen, auf den es den Working-Tree synct, und ohne Pinning
+# gibt es keinen Rueckfallpunkt (AE-77).
+#
+# ## Warum KEIN `paths`-Filter mehr
+#
+# Vorher stand hier ein `paths`-Filter auf `backend/**` und `frontend/**`.
+# Er hatte zwei Wirkungen, und beide waren falsch:
+#
+# 1. **Commits ohne Treffer bekamen gar kein Image.** Beleg: `d7e54fd`
+#    (PR #261, nur `STATUS.md`) hat keinen Tag. Mit Pinning waere der
+#    Deploy dort stehengeblieben.
+# 2. **Ein Treffer liess BEIDE Jobs laufen**, weil der Filter auf
+#    Workflow-Ebene steht. Jeder Backend-Merge baute also das Web-Image mit.
+#
+# Die Entscheidung faellt jetzt **je Image** und zur Laufzeit. Damit baut
+# dieser Workflow in Summe **weniger** als mit dem Filter, nicht mehr.
+#
+# **Den Filter nicht wieder einsetzen.** §5.55 Nachtrag beschreibt, warum
+# das Spiegel-Paar aus `paths` und `paths-ignore` im Repo abgeschafft ist:
+# zwei von Hand synchron gehaltene Pfadlisten erzeugen genau die Luecke,
+# die sie schliessen sollen, und zwar unsichtbar. Hier gibt es ueberhaupt
+# keine Pfadliste mehr — der Schritt `was-hat-sich-geaendert` vergleicht
+# **Tree-Hashes** des Build-Kontexts. Begruendung dort.
 name: Build Images
 
 on:
   push:
     branches: [develop, main]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - ".github/workflows/build-images.yml"
   workflow_dispatch:
 
+# **`cancel-in-progress: false`, Entscheidung des Hoteliers vom 08.10.2026.**
+#
+# Vorher stand hier `true`. Mit Weg C ist das falsch: ein abgebrochener Lauf
+# hinterlaesst einen Commit ohne Tag, und der naechste Re-Tag sucht ihn als
+# Vorgaenger. Der Rueckfall auf Build (siehe unten) faengt das ab, aber dann
+# baut ein Doku-Commit doch — also genau das, was Weg C vermeiden soll.
+# Builds reihen sich jetzt ein statt sich zu verdraengen.
 concurrency:
   group: build-images-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  # Eine Quelle der Wahrheit darueber, ob sich der **Build-Inhalt** geaendert
+  # hat.
+  #
+  # ## Verglichen werden Tree-Hashes, nicht Dateinamen
+  #
+  # `git rev-parse HEAD:backend` liefert die Objekt-ID des Verzeichnisbaums
+  # `backend/`. Sie ist genau dann gleich wie beim Vorgaenger, wenn **kein
+  # Byte** darin anders ist — Umbenennungen, Modus-Aenderungen und
+  # Unterverzeichnisse eingeschlossen.
+  #
+  # Der naheliegende Weg waere `git diff --name-only HEAD^1 HEAD` plus ein
+  # `grep -E '^backend/'`. Den habe ich zuerst gebaut und wieder verworfen:
+  # er vergleicht **Namen** und urteilt dann ueber **Inhalt**, und die
+  # gefaehrliche Fehlerrichtung ist dabei die stille. Ein Regex-Fehler, der
+  # eine geaenderte Datei nicht erfasst, laesst umhaengen statt bauen — und
+  # deployt damit ein veraltetes Image, ohne dass irgendwo etwas rot wird.
+  # Der Tree-Hash kann das nicht: er ist entweder gleich oder nicht.
+  #
+  # Dass der Baum der richtige Schluessel ist, liegt am Build-Kontext:
+  # `build-push-action` bekommt `context: ./backend` — der Baum **ist** die
+  # Eingabe des Builds.
+  #
+  # ## Der Workflow selbst zaehlt mit
+  #
+  # Aendert sich `build-images.yml`, wird in jedem Fall gebaut. Die Datei
+  # steht nicht im Build-Kontext, bestimmt aber, wie gebaut wird.
+  #
+  # ## Was dieser Vergleich NICHT erfasst
+  #
+  # Ein Basis-Image, das sich unter demselben Tag bewegt
+  # (`FROM python:3.12-slim`). Gleicher Baum, anderes Ergebnis. Das gilt
+  # heute genauso — ein `paths`-Filter hat denselben blinden Fleck —, es ist
+  # also nicht neu. Wer reproduzierbare Builds will, pinnt das Basis-Image
+  # per Digest; das ist ein eigener Zug und nicht H-6.
+  #
+  # `fetch-depth: 2` — der Default 1 hat keinen Parent.
+  was-hat-sich-geaendert:
+    name: Hat sich der Build-Inhalt geaendert
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.baeume.outputs.backend }}
+      frontend: ${{ steps.baeume.outputs.frontend }}
+      vorgaenger: ${{ steps.baeume.outputs.vorgaenger }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Tree-Hashes vergleichen
+        id: baeume
+        run: |
+          set -euo pipefail
+
+          if ! git rev-parse --verify --quiet HEAD^1 >/dev/null; then
+            # Kein Vorgaenger (erster Commit). Alles bauen — ein leeres
+            # `VOR` wuerde den Re-Tag-Schritt stumm falsch machen.
+            echo "vorgaenger=" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "Kein Vorgaenger-Commit — beide Images werden gebaut."
+            exit 0
+          fi
+
+          VOR=$(git rev-parse --short=7 HEAD^1)
+          echo "vorgaenger=$VOR" >> "$GITHUB_OUTPUT"
+
+          # Der Workflow selbst: aendert er sich, wird immer gebaut.
+          WF=".github/workflows/build-images.yml"
+          if ! git diff --quiet HEAD^1 HEAD -- "$WF"; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "$WF geaendert — beide Images werden gebaut."
+            exit 0
+          fi
+
+          baum() {
+            # Fehlt das Verzeichnis in einem der beiden Commits, gibt
+            # `rev-parse` nichts zurueck. Dann sind die Werte verschieden
+            # und es wird gebaut — die sichere Richtung.
+            git rev-parse --verify --quiet "$1:$2" || echo "fehlt-$2"
+          }
+
+          for VZ in backend frontend; do
+            A=$(baum HEAD^1 "$VZ")
+            B=$(baum HEAD "$VZ")
+            if [ "$A" = "$B" ]; then
+              echo "$VZ=false" >> "$GITHUB_OUTPUT"
+              echo "$VZ/: Baum unveraendert ($B) — Image wird umgehaengt."
+            else
+              echo "$VZ=true" >> "$GITHUB_OUTPUT"
+              echo "$VZ/: Baum geaendert ($A -> $B) — Image wird gebaut."
+            fi
+          done
+
   build-api:
     name: Build API Image
+    needs: was-hat-sich-geaendert
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,8 +164,45 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Weg C: umhaengen statt bauen, wenn `backend/` unberuehrt ist UND
+      # der Vorgaenger-Tag existiert.
+      #
+      # Fehlt er (Bootstrap, abgebrochener Lauf, geloeschtes Tag), wird
+      # **gebaut** und nicht geraten. Ein Abbruch waere hier falsch: ein
+      # fehlender Vorgaenger-Tag ist kein Grund, einen Commit ohne Image zu
+      # lassen — das waere der Zustand, den H-6 beseitigt.
+      - name: Re-Tag pruefen und ggf. setzen
+        id: retag
+        if: needs.was-hat-sich-geaendert.outputs.backend == 'false'
+        run: |
+          set -euo pipefail
+          IMG=ghcr.io/${{ github.repository_owner }}/heizung-api
+          VOR='${{ needs.was-hat-sich-geaendert.outputs.vorgaenger }}'
+          NEU=$(echo '${{ github.sha }}' | cut -c1-7)
+          BRANCH=$(echo '${{ github.ref_name }}')
+          QUELLE="$IMG:${BRANCH}-${VOR}"
+          ZIEL="$IMG:${BRANCH}-${NEU}"
+          if [ -z "$VOR" ] || ! docker buildx imagetools inspect "$QUELLE" >/dev/null 2>&1; then
+            echo "Quelle $QUELLE fehlt — es wird gebaut."
+            echo "umgehaengt=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Der gleitende `<branch>`-Tag zeigt bereits auf denselben Digest
+          # (der Vorgaenger-Build hat ihn gesetzt) und bleibt unberuehrt.
+          docker buildx imagetools create --tag "$ZIEL" "$QUELLE"
+          A=$(docker buildx imagetools inspect "$QUELLE" --format '{{.Manifest.Digest}}')
+          B=$(docker buildx imagetools inspect "$ZIEL"   --format '{{.Manifest.Digest}}')
+          if [ "$A" != "$B" ]; then
+            echo "Digest weicht ab ($A vs $B) — das darf nicht sein."
+            exit 1
+          fi
+          echo "Umgehaengt: $QUELLE -> $ZIEL ($B)"
+          echo "umgehaengt=true" >> "$GITHUB_OUTPUT"
+
       - name: Metadata
         id: meta
+        if: steps.retag.outputs.umgehaengt != 'true'
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/heizung-api
@@ -40,6 +211,7 @@ jobs:
             type=sha,prefix={{branch}}-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
       - name: Build & Push
+        if: steps.retag.outputs.umgehaengt != 'true'
         uses: docker/build-push-action@v7
         with:
           context: ./backend
@@ -52,6 +224,7 @@ jobs:
 
   build-web:
     name: Build Web Image
+    needs: was-hat-sich-geaendert
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,8 +239,37 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Siehe build-api: dieselbe Logik, anderes Image.
+      - name: Re-Tag pruefen und ggf. setzen
+        id: retag
+        if: needs.was-hat-sich-geaendert.outputs.frontend == 'false'
+        run: |
+          set -euo pipefail
+          IMG=ghcr.io/${{ github.repository_owner }}/heizung-web
+          VOR='${{ needs.was-hat-sich-geaendert.outputs.vorgaenger }}'
+          NEU=$(echo '${{ github.sha }}' | cut -c1-7)
+          BRANCH=$(echo '${{ github.ref_name }}')
+          QUELLE="$IMG:${BRANCH}-${VOR}"
+          ZIEL="$IMG:${BRANCH}-${NEU}"
+          if [ -z "$VOR" ] || ! docker buildx imagetools inspect "$QUELLE" >/dev/null 2>&1; then
+            echo "Quelle $QUELLE fehlt — es wird gebaut."
+            echo "umgehaengt=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          docker buildx imagetools create --tag "$ZIEL" "$QUELLE"
+          A=$(docker buildx imagetools inspect "$QUELLE" --format '{{.Manifest.Digest}}')
+          B=$(docker buildx imagetools inspect "$ZIEL"   --format '{{.Manifest.Digest}}')
+          if [ "$A" != "$B" ]; then
+            echo "Digest weicht ab ($A vs $B) — das darf nicht sein."
+            exit 1
+          fi
+          echo "Umgehaengt: $QUELLE -> $ZIEL ($B)"
+          echo "umgehaengt=true" >> "$GITHUB_OUTPUT"
+
       - name: Metadata
         id: meta
+        if: steps.retag.outputs.umgehaengt != 'true'
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/heizung-web
@@ -76,6 +278,7 @@ jobs:
             type=sha,prefix={{branch}}-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
       - name: Build & Push
+        if: steps.retag.outputs.umgehaengt != 'true'
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
