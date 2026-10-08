@@ -1,6 +1,17 @@
 {
   "extends": ["next/core-web-vitals"],
   "rules": {
-    "react/no-unescaped-entities": "off"
+    "react/no-unescaped-entities": "off",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "next/font/google",
+            "message": "Schriften kommen aus dem Repo (next/font/local). next/font/google laedt zur Build-Zeit von fonts.googleapis.com und hat am 08.10.2026 zweimal binnen einer Stunde CI gekippt; mit H-6 Weg C ist ein fehlgeschlagener Build ausserdem ein Commit ohne Image-Tag. Begruendung: src/app/layout.tsx am localFont-Aufruf."
+          }
+        ]
+      }
+    ]
   }
 }
