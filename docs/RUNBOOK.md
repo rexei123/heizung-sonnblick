@@ -3298,31 +3298,49 @@ Seit Sprint 20 (AE-72) zeigt jedes Gerät eine Stufe **und** die Spannung:
 Die Schwellen sind seit Sprint 20b (AE-73) **einstellbar**; die Tabelle zeigt
 die Vorgabe. Wie man sie ändert, steht in §10q.
 
-| Anzeige | Spannung | Was zu tun ist |
+| Anzeige | Spannung | Was sie bedeutet |
 |---|---|---|
 | **Batterie OK** (grün) | ab 2,9 V | nichts |
-| **Beobachten** (gelb) | 2,7–2,8 V | Wechsel einplanen — beim nächsten Zimmergang mitnehmen |
-| **Tauschen** (rot) | 2,6 V und darunter | jetzt wechseln |
+| **Batterie schwach** (gelb) | 2,7–2,8 V | Vorrat geht zu Ende |
+| **Batterie niedrig** (rot) | 2,6 V und darunter | Vorrat fast zu Ende |
 | **Batterie unbekannt** (grau) | — | keine Aussage möglich, siehe unten |
 
 Gewechselt werden **zwei Mignon-Zellen (AA)** je Gerät.
 
-**Was man an dieser Tabelle wissen muss, bevor man sich auf sie verlässt.**
-Der Hersteller gibt den Betriebsbereich mit 2,7–3,6 V an und empfiehlt den
-Wechsel unter 2,8 V. Die Vorgabe liegt **darunter**: „Tauschen" beginnt erst
-bei 2,6 V, also unterhalb der Spannung, bei der das Gerät laut Spec noch
-zuverlässig regelt.
+### Wann wirklich getauscht wird — und es ist nicht diese Tabelle
 
-Das ist eine Entscheidung und kein Versehen (AE-73). Sie nutzt die Zellen
-weiter aus und spart Gänge; sie nimmt dafür in Kauf, dass ein Ventil bei
-„Tauschen" schon stehen kann. In einem thermisch sanierten Haus kostet das
-kaum Komfort — ein Zimmer, dessen Ventil einen Tag nicht regelt, kühlt
-langsam aus.
+**Betriebsregel ab 08.10.2026: getauscht wird, wenn sich ein Gerät drei
+Stunden nicht meldet. Die Spannung ist Information, kein Auftrag.**
 
-**Die Vorwarnung ist „Beobachten", nicht „Tauschen".** Gelb heißt: das Gerät
-regelt noch innerhalb seiner Spec, aber der Vorrat ist zu Ende. Wer erst bei
-Rot losgeht, geht absichtlich spät. Zwei Rasterschritte (2,8 und 2,7 V) sind
-dafür Zeit genug, um den Gang zu planen.
+Vorher hieß die rote Stufe „Tauschen" und war damit ein Auftrag. Sie war der
+falsche Auftrag, und das hat ein Fall gezeigt:
+
+**Gerät 102, 04.10.2026.** Der 24-h-Median fiel auf 2,6 V, die Anzeige sagte
+„Tauschen". Nachgesehen: `fCnt` lief **lückenlos** weiter — das Gerät sendete
+also ununterbrochen —, und seit dem 06.10. meldet es wieder 3,5 V. Es war ein
+**gehaltener Einbruch unter Last**, kein Lebensende. Ein Tausch wäre ein Gang
+für nichts gewesen.
+
+Der 24-h-Median (AE-72) soll genau solche Einbrüche abfangen. Bei einem
+Einbruch, der **über Stunden** anhält, kann er es nicht — die Hälfte der
+Messwerte liegt dann unten. Die Stufe ist also schwächer, als ihr alter Name
+versprach.
+
+**Was stattdessen zählt:** ein Gerät, das drei Stunden schweigt, ist ein
+Gerät, das die Engine nicht mehr sieht (Funkstille-Alarm, §10m). Das ist der
+Zeitpunkt für den Gang — und dann sagt die Batterie-Anzeige, ob Zellen
+mitzunehmen sind.
+
+**Die Stufen bleiben nützlich**, nur anders: sie sagen, **wie viele** Zellen
+man mitnimmt, wenn man ohnehin geht. Wer bei einem Zimmergang ein Gerät mit
+„Batterie niedrig" sieht, kann es gleich mitmachen. Was man **nicht** tun
+muss: wegen der Farbe allein losgehen.
+
+**Zu den Schwellen selbst** (unverändert, AE-73): der Hersteller gibt den
+Betriebsbereich mit 2,7–3,6 V an und empfiehlt den Wechsel unter 2,8 V. Die
+Vorgabe liegt darunter — rot beginnt erst bei 2,6 V. Das nutzt die Zellen
+weiter aus; in einem thermisch sanierten Haus kostet ein Ventil, das einen
+Tag nicht regelt, kaum Komfort.
 
 **Lithium oder Alkaline ist gleichgültig.** Die Schwellen liegen auf der
 Spannung und gelten für beide. Ab Werk sind Lithium-Zellen drin; Alkaline

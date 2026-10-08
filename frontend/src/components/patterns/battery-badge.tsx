@@ -18,15 +18,41 @@
  * Messwert kann unter Motorlast einbrechen, dann widerspricht der Badge sich
  * selbst.
  *
- * Sprint 20b (AE-73): die Labels sagen, was zu TUN ist, nicht wie der
+ * Sprint 20b (AE-73): die Labels sagten, was zu TUN ist, nicht wie der
  * Zustand heißt — „Beobachten" statt „Batterie schwach", „Tauschen" statt
  * „Batterie kritisch". Grund: der Hotelier liest den Badge im Vorbeigehen
- * und muss daraus eine Handlung ableiten; „schwach" und „kritisch" sind
- * zwei Adjektive, zwischen denen er den Unterschied erst lernen muss.
- * Farben und Zustände sind unverändert — es ist eine Wortänderung, keine
- * neue Achse.
+ * und muss daraus eine Handlung ableiten.
  *
- * Die Hints nennen **keine Schwellenwerte** mehr. Die Grenzen stehen seit
+ * **Teilweise zurückgenommen am 08.10.2026 — und zwar auf eigenen Wunsch
+ * des Hoteliers, nicht als Korrektur eines Fehlers.** Das Prinzip aus AE-73
+ * („das Label sagt die Handlung") steht und fällt damit, dass die Handlung
+ * stimmt. Bei `kritisch` stimmte sie nicht: „Tauschen" ist ein Auftrag, und
+ * die Betriebsregel lautet anders.
+ *
+ * **Die Betriebsregel: getauscht wird bei drei Stunden Funkstille, nicht
+ * bei einer Spannung.** Die Spannung ist Information, kein Auftrag.
+ *
+ * Der Befund dahinter, Gerät 102: 2,6 V am 04.10. war ein **gehaltener
+ * Einzelwert unter Last**, kein Lebensende. `fCnt` lief lückenlos weiter,
+ * und seit dem 06.10. meldet das Gerät wieder 3,5 V. Ein Tausch wäre
+ * unnötig gewesen.
+ *
+ * Das ist unangenehm, weil der 24-h-Median genau solche Einbrüche abfangen
+ * soll (AE-72) — und bei einem Einbruch, der **über Stunden** anhält, kann
+ * er es nicht. Die Stufe ist deshalb schwächer, als ihr Name versprach, und
+ * das Etikett sagt es nun.
+ *
+ * Deshalb: `kritisch` heißt „Batterie niedrig", `warn` heißt „Batterie
+ * schwach". Beides Zustände. Die Handlung steht im Hinweistext und nennt die
+ * Bedingung, unter der sie gilt.
+ *
+ * Farben und Zustände sind unverändert — es ist eine Wortänderung, keine
+ * neue Achse. **Wer sie zurückdreht, muss die Betriebsregel mit ändern**
+ * (§5.77: ein überholter Vermerk wird wie ein Befund gelesen).
+ *
+ * Die Hints nennen **keine Schwellenwerte** mehr (die Spec-Untergrenze von
+ * 2,7 V ist mit dem Etikett-Wechsel ebenfalls entfallen — sie legte eine
+ * Handlung nahe, die es nicht gibt). Die Grenzen stehen seit
  * AE-73 in den Settings und sind pro Haus verstellbar; eine Zahl im Text
  * wäre eine zweite Wahrheit, die beim ersten Nachjustieren still falsch
  * wird (§5.77). Was dort steht, sind Eigenschaften der Hardware (die
@@ -99,16 +125,18 @@ const CONFIG: Record<BatteryHealthState, StateConfig> = {
     hint: "Batterie ausreichend geladen.",
   },
   warn: {
-    label: "Beobachten",
+    label: "Batterie schwach",
     icon: "battery_low",
     badgeClass: "bg-warning-soft text-warning",
-    hint: "Wechsel einplanen — das Gerät regelt weiter.",
+    hint: "Spannung niedrig. Das Gerät regelt weiter; getauscht wird bei Funkstille.",
   },
   kritisch: {
-    label: "Tauschen",
+    label: "Batterie niedrig",
     icon: "battery_alert",
     badgeClass: "bg-danger-soft text-danger",
-    hint: "Zwei Mignon-Zellen (AA) wechseln — unter 2,7 V kann das Gerät stehen.",
+    hint:
+      "Spannung niedrig — zur Kenntnis, nicht als Auftrag. Getauscht wird, " +
+      "wenn sich das Gerät drei Stunden nicht meldet.",
   },
   unbekannt: {
     label: "Batterie unbekannt",
@@ -153,7 +181,7 @@ export function BatteryBadge({
   //
   // | Lage | Pille | Farbe |
   // |---|---|---|
-  // | Stufe berechenbar | „Batterie OK · 3,1 V" / „Tauschen · 2,5 V" | grün/gelb/rot |
+  // | Stufe berechenbar | „Batterie OK · 3,1 V" / „Batterie niedrig · 2,5 V" | grün/gelb/rot |
   // | Wechsel erkannt | „Batteriewechsel erkannt · 3,5 V" | grau |
   // | keine Stufe, Wert bekannt | „3,5 V · vor 2 h" | grau |
   // | nie eine Spannung gemeldet | „Batterie unbekannt" | grau |

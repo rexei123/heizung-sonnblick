@@ -134,10 +134,13 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
     );
     // Sprint 20 (AE-72): Spannung SICHTBAR neben der Stufe, und zwar der
     // Median — nicht der letzte Frame.
-    // Sprint 20b (AE-73): das Label sagt die Handlung, nicht den Zustand —
-    // „Tauschen" statt „Batterie kritisch". Die Farbe bleibt rot.
+    // Sprint 20b (AE-73) sagte die Handlung („Tauschen"). Am 08.10.2026
+    // teilweise zurückgenommen: die Betriebsregel lautet „getauscht wird bei
+    // drei Stunden Funkstille, nicht bei einer Spannung", also war
+    // „Tauschen" ein Auftrag, den es nicht gibt. Jetzt der Zustand, die
+    // Handlung steht im Hinweistext. Die Farbe bleibt rot.
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toContainText(
-      "Tauschen · 2,6 V",
+      "Batterie niedrig · 2,6 V",
     );
     await expect(page.locator("tbody tr").nth(0).getByTestId("battery-badge")).toHaveAttribute(
       "title",
@@ -151,25 +154,34 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
     await expect(unknownBadge).toHaveAttribute("data-battery", "unbekannt");
   });
 
-  test("statusScore: batt-kritisch schlägt silent (Handlungsbedarf vor Datenlage)", async ({
+  test("statusScore: Funkstille schlägt niedrige Spannung (Betriebsregel)", async ({
     page,
   }) => {
-    // **Geändert am 08.10.2026, und zwar bewusst.** Dieser Test hieß vorher
-    // „offline (silent) schlägt batt-kritisch" und sicherte die Regel „die
-    // health_state-Achse schlägt die Batterie-Achse".
+    // Dieser Test hat an einem Tag zweimal seine Erwartung gewechselt, und
+    // das ist der Grund, warum die Begründung hier steht und nicht nur im
+    // Commit.
     //
-    // Die Regel war vertretbar, solange `silent` erst nach 24 Stunden
-    // eintrat — dann war es ein echter Ausfall. Sprint 20e T6 hat die
-    // Grenze auf 3 Stunden gesenkt; seither ist `silent` häufig und oft
-    // vorübergehend, und als Trumpf über allem verdeckte es genau die
-    // Geräte, bei denen jemand etwas tun muss. Befund auf /devices am
-    // 08.10.: 102 mit „Tauschen · 2,6 V" war nach unten gerutscht.
+    // Ursprünglich (Sprint 15d): „offline (silent) schlägt batt-kritisch",
+    // Regel „die health_state-Achse schlägt die Batterie-Achse".
     //
-    // Also nicht die Schwelle zurückdrehen (der Alarm kam sonst wieder
-    // einen Tag zu spät), sondern die Rangfolge: Handlungsbedarf vor
-    // Datenlage. Begründung im Docstring von `statusScore`.
+    // Am 08.10. früh umgedreht (PR #276): `silent` tritt seit Sprint 20e T6
+    // schon nach drei statt nach 24 Stunden ein, ist also häufig und oft
+    // vorübergehend — und verdeckte als Trumpf über allem die Geräte mit
+    // Handgriff. Argument damals: der 24-h-Median hinter `kritisch` sei der
+    // belastbarere Befund.
     //
-    // Scores: Online-Kritisch=4, Offline-OK=3 (silent), Online-Warn=1,
+    // Am 08.10. mittags wieder zurück, diesmal mit einem Befund statt mit
+    // einem Argument: **getauscht wird bei drei Stunden Funkstille, nicht
+    // bei einer Spannung** (Betriebsregel des Hoteliers). Gerät 102 meldete
+    // am 04.10. 2,6 V — ein gehaltener Einzelwert unter Last, fCnt
+    // lückenlos, seit 06.10. wieder 3,5 V. Ein Einbruch, der über Stunden
+    // anhält, überlebt auch den Median; die Stufe ist schwächer, als ihr
+    // Name versprach.
+    //
+    // `silent` ist damit der Auftrag, `kritisch` Information. Was von #276
+    // bleibt: die Ventil-Achse überhaupt, und `degraded` im Informations-Band.
+    //
+    // Scores: Offline-OK=4 (silent), Online-Kritisch=2, Online-Warn=1,
     // Online-OK=0.
     await mockDevices(page, [
       makeDevice(10, "Online-OK", "healthy", "ok", 3.4),
@@ -182,15 +194,15 @@ test.describe("Sprint 15d — Batterie-Badge + statusScore", () => {
 
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(4);
-    await expect(rows.nth(0)).toContainText("Online-Kritisch");
-    await expect(rows.nth(1)).toContainText("Offline-OK");
+    await expect(rows.nth(0)).toContainText("Offline-OK");
+    await expect(rows.nth(1)).toContainText("Online-Kritisch");
     await expect(rows.nth(2)).toContainText("Online-Warn");
     await expect(rows.nth(3)).toContainText("Online-OK");
     // Gegen die Zahlen und nicht nur gegen die Reihenfolge: bei Gleichstand
     // entscheidet die alphabetische Zweitsortierung, dann prüft ein
     // Reihenfolge-Test etwas anderes als er meint.
     await expect(rows.nth(0)).toHaveAttribute("data-status-score", "4");
-    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "3");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "2");
     await expect(rows.nth(2)).toHaveAttribute("data-status-score", "1");
     await expect(rows.nth(3)).toHaveAttribute("data-status-score", "0");
   });

@@ -31,10 +31,10 @@ function toMessage(e: unknown): string {
  *
  *   retired_at gesetzt                -> 6
  *   valve_state zimmer_zu_warm        -> 5  (Energie laeuft weg)
- *   battery_state kritisch            -> 4  ("Tauschen")
- *   health_state silent               -> 3  (meldet sich nicht)
- *   valve_state ventil_klemmt_zu      -> 2  ("Ventil pruefen")
- *   battery_state warn                -> 1  ("Beobachten")
+ *   health_state silent               -> 4  (meldet sich nicht — Tausch-Ausloeser)
+ *   valve_state ventil_klemmt_zu      -> 3  ("Ventil pruefen")
+ *   battery_state kritisch            -> 2  (Spannung niedrig — Information)
+ *   battery_state warn                -> 1  (Information)
  *   health_state degraded|suspicious  -> 1  (unplausibel)
  *   sonst                             -> 0
  *
@@ -69,10 +69,9 @@ function toMessage(e: unknown): string {
  * Nebenwirkung von T6 war im PR fuer die Dashboard-Kachel „Geraete online"
  * benannt, fuer die Sortierung nicht.
  *
- * **Daraus die neue Rangfolge: Handlungsbedarf vor Datenlage.** Oben stehen
- * die vier Zustaende, zu denen es einen Handgriff gibt — Zimmer zu warm,
- * Batterie tauschen, meldet sich nicht, Ventil pruefen. Darunter das, was
- * nur Beobachtung ist: `warn` und `degraded`/`suspicious`.
+ * **Daraus die Rangfolge: Handlungsbedarf vor Information.** Oben die
+ * Zustaende, zu denen es einen Handgriff gibt. Darunter das, was nur
+ * Auskunft ist.
  *
  * Innerhalb des Handlungsbedarfs nach **Kosten des Nichtstuns**:
  *
@@ -80,15 +79,41 @@ function toMessage(e: unknown): string {
  *   Fenster geheizt wird — und weil es seit AE-74 der einzige automatische
  *   Melder fuer ein abgefallenes Geraet ist. Wird es verdeckt, gibt es
  *   keinen zweiten.
- * - `kritisch` darueber `silent`, weil „Batterie unter 2,6 V" ein Befund
- *   ueber einen Tag ist (24-h-Median) und `silent` oft ein Funkloch von
- *   drei Stunden.
+ * - `silent` darunter: drei Stunden ohne Meldung heisst, dass die Engine
+ *   das Geraet nicht mehr sieht — und es ist seit der Betriebsregel vom
+ *   08.10. der **Ausloeser fuer den Batteriewechsel**.
  * - `ventil_klemmt_zu` darunter, weil es Komfort in **einem** Zimmer kostet
  *   und nicht Energie im ganzen Haus.
  *
- * `degraded`/`suspicious` faellt dabei von 3 auf 1: unplausible Messwerte
- * sind eine Datenlage, kein Handgriff. Die Engine schliesst solche Geraete
- * ohnehin aus (`health_state == "healthy"`-Filter an drei Stellen).
+ * ---
+ *
+ * **Korrektur vom 08.10.2026, und sie betrifft meine eigene Begruendung
+ * von einem Tag vorher.**
+ *
+ * Diese Tabelle stellte `battery_state kritisch` (4) **ueber** `silent` (3),
+ * mit dem Argument: „‚Batterie unter 2,6 V' ist ein Befund ueber einen Tag
+ * (24-h-Median), `silent` oft ein Funkloch von drei Stunden."
+ *
+ * Die Betriebsregel des Hoteliers sagt das Gegenteil, und sie hat einen
+ * Befund hinter sich: **getauscht wird bei drei Stunden Funkstille, nicht
+ * bei einer Spannung.** Geraet 102 meldete am 04.10. 2,6 V — ein gehaltener
+ * Einzelwert unter Last, `fCnt` lueckenlos, seit dem 06.10. wieder 3,5 V.
+ * Ein Tausch waere unnoetig gewesen.
+ *
+ * Damit ist `kritisch` **Information** und `silent` der Auftrag. Die
+ * Reihenfolge dreht sich, und `kritisch` wandert in das Informations-Band
+ * zu `warn` — mit 2 statt 1, weil eine niedrigere Spannung mehr sagt als
+ * eine knapp niedrige.
+ *
+ * Mein Argument von gestern war nicht falsch in der Mechanik (der Median
+ * ist tatsaechlich robuster als ein Einzelwert), aber es traf die Sache
+ * nicht: ein Einbruch, der **ueber Stunden** anhaelt, ueberlebt auch den
+ * 24-h-Median. Die Stufe ist schwaecher, als ihr Name versprach.
+ *
+ * Was von #276 bleibt: die Ventil-Achse ueberhaupt (sie fehlte ganz), und
+ * dass `degraded`/`suspicious` von 3 auf 1 faellt — unplausible Messwerte
+ * sind eine Datenlage, kein Handgriff, und die Engine schliesst solche
+ * Geraete ohnehin aus (`health_state == "healthy"`-Filter an drei Stellen).
  *
  * `retired_at` (6) bleibt Schutz fuer `?include_retired=true`-Sichten; die
  * Default-Liste blendet retired aus (AE-57).
@@ -98,14 +123,14 @@ function statusScore(d: Device): number {
 
   let ventil = 0;
   if (d.valve_state === "zimmer_zu_warm") ventil = 5;
-  else if (d.valve_state === "ventil_klemmt_zu") ventil = 2;
+  else if (d.valve_state === "ventil_klemmt_zu") ventil = 3;
 
   let battery = 0;
-  if (d.battery_state === "kritisch") battery = 4;
+  if (d.battery_state === "kritisch") battery = 2;
   else if (d.battery_state === "warn") battery = 1;
 
   let health = 0;
-  if (d.health_state === "silent") health = 3;
+  if (d.health_state === "silent") health = 4;
   else if (d.health_state === "degraded" || d.health_state === "suspicious") health = 1;
 
   return Math.max(ventil, battery, health);
