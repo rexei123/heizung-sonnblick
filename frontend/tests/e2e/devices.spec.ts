@@ -270,7 +270,11 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     // Sprint 20 (AE-72): die Spannung steht SICHTBAR neben der Stufe. Das ist
     // die Anforderung („Stufe + Spannung"), nicht der Tooltip — deshalb wird
     // hier der Pillen-Text geprueft und der Tooltip nur auf die Zahl.
-    await expect(badge).toContainText("Beobachten · 2,8 V");
+    // Etikett am 08.10.2026 von „Beobachten" auf „Batterie schwach"
+    // umgestellt: die Labels sagen wieder den Zustand, weil die Handlung
+    // („tauschen") erst bei drei Stunden Funkstille gilt und nicht bei einer
+    // Spannung. Begründung im Docstring von BatteryBadge.
+    await expect(badge).toContainText("Batterie schwach · 2,8 V");
     await expect(badge).toHaveAttribute("title", /2,8 V/);
     await expect(badge).toHaveAttribute("title", /Median der letzten 24 Stunden/);
     // Kein „%" im Haupttext: die Prozent-Anzeige ist mit Sprint 20 ganz weg.

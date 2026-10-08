@@ -108,15 +108,20 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(7);
 
-    // Absteigend: 5 zu warm > 4 batt-kritisch > 3 silent > 2 ventil zu
+    // Absteigend: 5 zu warm > 4 silent > 3 ventil zu > 2 batt-kritisch
     // > 1 warn = 1 degraded (alphabetisch) > 0 ok.
+    //
+    // Geaendert am 08.10. mit der Betriebsregel „getauscht wird bei drei
+    // Stunden Funkstille, nicht bei einer Spannung": `silent` ist der
+    // Auftrag, `kritisch` Information. Begruendung im Docstring von
+    // `statusScore`.
     await expect(rows.nth(0)).toContainText("g-zu-warm");
     await expect(rows.nth(0)).toHaveAttribute("data-status-score", "5");
-    await expect(rows.nth(1)).toContainText("f-batt-kritisch");
+    await expect(rows.nth(1)).toContainText("e-silent");
     await expect(rows.nth(1)).toHaveAttribute("data-status-score", "4");
-    await expect(rows.nth(2)).toContainText("e-silent");
+    await expect(rows.nth(2)).toContainText("d-ventil-zu");
     await expect(rows.nth(2)).toHaveAttribute("data-status-score", "3");
-    await expect(rows.nth(3)).toContainText("d-ventil-zu");
+    await expect(rows.nth(3)).toContainText("f-batt-kritisch");
     await expect(rows.nth(3)).toHaveAttribute("data-status-score", "2");
     // Gleichstand bei 1 — die Zweitsortierung entscheidet, und genau
     // deshalb steht hier die Zahl und nicht nur die Position.
@@ -147,24 +152,35 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     await expect(rows.nth(1)).toContainText("a-still");
   });
 
-  test("der zweite Teil des Befunds: batt-kritisch steht wieder über silent", async ({
+  test("Funkstille steht über niedriger Spannung — die Betriebsregel", async ({
     page,
   }) => {
-    // 102 trug „Tauschen · 2,6 V" und war nach unten gerutscht, weil
-    // `health_state` grundsätzlich gewann und `silent` seit der
-    // 3-h-Schwelle häufig ist.
+    // **Umgedreht am 08.10.2026, und zwar gegen meine eigene Begründung
+    // von einem Tag vorher.** Dieser Test verlangte „batt-kritisch über
+    // silent", weil der 24-h-Median robuster sei als ein Einzelwert.
+    //
+    // Die Betriebsregel sagt das Gegenteil, mit einem Befund: getauscht
+    // wird bei drei Stunden Funkstille, nicht bei einer Spannung. Gerät 102
+    // meldete am 04.10. 2,6 V — ein gehaltener Einzelwert unter Last, fCnt
+    // lückenlos, seit 06.10. wieder 3,5 V. Ein Einbruch, der über Stunden
+    // anhält, überlebt auch den Median.
+    //
+    // Namen gegen die Erwartung alphabetisch: fiele die Sortierung auf die
+    // Zweitsortierung zurück, stünde „a-spannung-niedrig" oben.
     await mockDevices(page, [
-      makeDevice(30, "a-still", { health_state: "silent" }),
-      makeDevice(31, "z-tauschen", {
+      makeDevice(30, "a-spannung-niedrig", {
         battery_state: "kritisch",
         battery_voltage_median: 2.6,
       }),
+      makeDevice(31, "z-still", { health_state: "silent" }),
     ]);
     await page.goto("/devices");
 
     const rows = page.locator("tbody tr");
-    await expect(rows.nth(0)).toContainText("z-tauschen");
-    await expect(rows.nth(1)).toContainText("a-still");
+    await expect(rows.nth(0)).toContainText("z-still");
+    await expect(rows.nth(0)).toHaveAttribute("data-status-score", "4");
+    await expect(rows.nth(1)).toContainText("a-spannung-niedrig");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "2");
   });
 
   test("unbekannte Achsen-Werte zählen nicht als Problem", async ({ page }) => {

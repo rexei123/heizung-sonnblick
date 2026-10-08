@@ -2409,9 +2409,28 @@ weil jemand das Argument vergessen hat.
 
 **Frontend:** Das `BatteryBadge` ist an die `battery_state`-Achse
 gekoppelt — **keine eigene Skala, keine zweite Schwelle**. 3+1 Zustände
-direkt aus `device.battery_state`. Seit Sprint 20b (AE-73) sagen die Labels
-die **Handlung** statt des Zustands: „Batterie OK" · „Beobachten" ·
-„Tauschen" · „Batterie unbekannt". Farben, Icons und die vier API-Werte sind
+direkt aus `device.battery_state`. Sprint 20b (AE-73) liess die Labels
+die **Handlung** sagen: „Batterie OK" · „Beobachten" · „Tauschen" ·
+„Batterie unbekannt".
+
+**Am 08.10.2026 teilweise zurueckgenommen**, auf Entscheidung des Hoteliers
+und mit Befund: „Tauschen" war ein Auftrag, und die Betriebsregel lautet
+anders — **getauscht wird bei drei Stunden Funkstille, nicht bei einer
+Spannung.** Geraet 102 meldete am 04.10. einen 24-h-Median von 2,6 V, `fCnt`
+lief lueckenlos weiter, seit 06.10. wieder 3,5 V: ein gehaltener Einbruch
+unter Last, kein Lebensende. Ein Einbruch ueber Stunden ueberlebt auch den
+Median (AE-72), die Stufe ist also schwaecher als ihr Name versprach.
+
+Die Labels heissen seither „Batterie OK" · „Batterie schwach" ·
+„Batterie niedrig" · „Batterie unbekannt" — Zustaende. Die Handlung steht im
+Hinweistext und nennt ihre Bedingung. Das Prinzip aus AE-73 („das Label sagt
+die Handlung") gilt weiter, wo die Handlung stimmt; hier stimmte sie nicht.
+
+**Folge fuer die Sortierung:** `statusScore` auf `/devices` stellt seither
+`silent` ueber `battery_state kritisch` — Funkstille ist der Auftrag,
+niedrige Spannung Information. Das dreht eine Entscheidung vom Vormittag
+desselben Tages (PR #276) wieder um; die Begruendung steht im Docstring der
+Funktion. Farben, Icons und die vier API-Werte sind
 unverändert. Die Hint-Texte nennen **keine Schwellenwerte** mehr — die
 Grenzen sind pro Haus verstellbar, eine Zahl im Text wäre eine zweite
 Wahrheit (§5.77). Was dort an Zahlen steht, sind Hardware-Eigenschaften
