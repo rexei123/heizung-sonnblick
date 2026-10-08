@@ -108,20 +108,19 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(7);
 
-    // Absteigend: 5 zu warm > 4 silent > 3 ventil zu > 2 batt-kritisch
-    // > 1 warn = 1 degraded (alphabetisch) > 0 ok.
+    // Absteigend: 4 silent > 3 ventil zu > 2 batt-kritisch = 2 zu warm
+    // (alphabetisch) > 1 warn = 1 degraded > 0 ok.
     //
-    // Geaendert am 08.10. mit der Betriebsregel „getauscht wird bei drei
-    // Stunden Funkstille, nicht bei einer Spannung": `silent` ist der
-    // Auftrag, `kritisch` Information. Begruendung im Docstring von
-    // `statusScore`.
-    await expect(rows.nth(0)).toContainText("g-zu-warm");
-    await expect(rows.nth(0)).toHaveAttribute("data-status-score", "5");
-    await expect(rows.nth(1)).toContainText("e-silent");
-    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "4");
-    await expect(rows.nth(2)).toContainText("d-ventil-zu");
-    await expect(rows.nth(2)).toHaveAttribute("data-status-score", "3");
-    await expect(rows.nth(3)).toContainText("f-batt-kritisch");
+    // `zimmer_zu_warm` steht im Informations-Band, nicht oben — Übergang
+    // bis Sprint 20e-b, Begründung an `RANG_ZIMMER_ZU_WARM`.
+    await expect(rows.nth(0)).toContainText("e-silent");
+    await expect(rows.nth(0)).toHaveAttribute("data-status-score", "4");
+    await expect(rows.nth(1)).toContainText("d-ventil-zu");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "3");
+    // Gleichstand bei 2: f-batt-kritisch vor g-zu-warm (alphabetisch).
+    await expect(rows.nth(2)).toContainText("f-batt-kritisch");
+    await expect(rows.nth(2)).toHaveAttribute("data-status-score", "2");
+    await expect(rows.nth(3)).toContainText("g-zu-warm");
     await expect(rows.nth(3)).toHaveAttribute("data-status-score", "2");
     // Gleichstand bei 1 — die Zweitsortierung entscheidet, und genau
     // deshalb steht hier die Zahl und nicht nur die Position.
@@ -131,16 +130,17 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     await expect(rows.nth(6)).toHaveAttribute("data-status-score", "0");
   });
 
-  test("der Befund: ein Gerät mit „Zimmer zu warm“ steht über einem stillen", async ({
+  test("„Zimmer zu warm“ zählt, steht aber unter einem stillen Gerät", async ({
     page,
   }) => {
-    // **Die Regressions-Wand.** Vorher war „Zimmer zu warm" gar nicht im
-    // Score, das Gerät landete also bei 0 und stand ganz unten — unter
-    // jedem Gerät, das gerade ein Funkloch hatte.
+    // **Die Regressions-Wand für den Befund vom 08.10.** Vorher war
+    // „Zimmer zu warm" gar nicht im Score, das Gerät landete bei 0 und
+    // stand ganz unten.
     //
-    // Mit Namen, die alphabetisch gegen die Erwartung laufen: wäre die
-    // Sortierung kaputt und fiele auf die Zweitsortierung zurück, stünde
-    // „a-still" oben und der Test wäre rot.
+    // Es zählt jetzt (2 > 0), steht aber **nicht** oben: die Regel liefert
+    // bis Sprint 20e-b Fehlalarme (15 Meldungen, zwei davon echt), und 13
+    // Falschmeldungen an der Spitze verdecken jedes stille Gerät. Mit 20e-b
+    // wird der Rang gehoben.
     await mockDevices(page, [
       makeDevice(20, "a-still", { health_state: "silent" }),
       makeDevice(21, "z-zu-warm", { valve_state: "zimmer_zu_warm", valve_delta_k: 6.2 }),
@@ -148,8 +148,30 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     await page.goto("/devices");
 
     const rows = page.locator("tbody tr");
-    await expect(rows.nth(0)).toContainText("z-zu-warm");
-    await expect(rows.nth(1)).toContainText("a-still");
+    await expect(rows.nth(0)).toContainText("a-still");
+    await expect(rows.nth(0)).toHaveAttribute("data-status-score", "4");
+    await expect(rows.nth(1)).toContainText("z-zu-warm");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "2");
+  });
+
+  test("der Übergangswert ist bewusst und wird mit 20e-b gehoben", async ({ page }) => {
+    // **Dieser Test soll mit 20e-b fallen.** Er hält den Übergangswert
+    // fest, damit das Heben eine Entscheidung ist und keine Entdeckung —
+    // und damit niemand den Wert aus Versehen hebt, solange die Regel noch
+    // Fehlalarme liefert.
+    //
+    // Was mit 20e-b zu tun ist: `RANG_ZIMMER_ZU_WARM` auf 5, diesen Test
+    // und die beiden Reihenfolge-Tests darüber anpassen, den Vermerk im
+    // 20e-b-Brief abhaken.
+    await mockDevices(page, [
+      makeDevice(60, "zu-warm", { valve_state: "zimmer_zu_warm", valve_delta_k: 9.9 }),
+    ]);
+    await page.goto("/devices");
+
+    await expect(page.locator("tbody tr").first()).toHaveAttribute(
+      "data-status-score",
+      "2",
+    );
   });
 
   test("Funkstille steht über niedriger Spannung — die Betriebsregel", async ({
@@ -217,6 +239,6 @@ test.describe("Fehlerstatus-Sortierung — Handlungsbedarf vor Datenlage", () =>
     const rows = page.locator("tbody tr");
     await expect(rows.nth(0)).toContainText("a-ok");
     await expect(rows.nth(1)).toContainText("z-zu-warm");
-    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "5");
+    await expect(rows.nth(1)).toHaveAttribute("data-status-score", "2");
   });
 });

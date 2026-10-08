@@ -9,7 +9,8 @@
 #      DEPLOY_BRANCH leitet sich aus STAGE in der .env ab:
 #         STAGE=test  ->  develop
 #         STAGE=main  ->  main
-#   2. App-Images aus GHCR pullen (api, web).
+#   2. App-Images aus GHCR pullen (api, web) — mit einem Tag, der auf
+#      den Commit zeigt, auf den Phase 1 gesynct hat (H-6, AE-77).
 #   3. Container-Stand aktualisieren (alle Services, recreate nur
 #      bei Config- oder Image-Drift).
 #
@@ -35,6 +36,11 @@
 #   2026-04-30  H-6 SHA-Pinning revertiert (Tag-Mismatch CI vs git-log).
 #               Eigener Sprint, der CI-Workflow + deploy-pull synchron
 #               anpasst, ist Backlog. Bis dahin: mutierender Tag aus .env.
+#   2026-10-08  H-6 (AE-77): Pinning kommt wieder, diesmal ohne die
+#               Heuristik von damals. Der Tag wird aus `NEW_SHA`
+#               gebildet — also aus dem Commit, auf den Phase 1 ohnehin
+#               synct — und nicht aus `git log -- backend/...`. Dazu
+#               `PIN_SHA` als Rueckfallpunkt, der den Timer ueberlebt.
 
 set -euo pipefail
 
@@ -106,6 +112,7 @@ read_env_key() {
 
 STAGE_VAL=$(read_env_key STAGE)
 DEPLOY_BRANCH_VAL=$(read_env_key DEPLOY_BRANCH)
+PIN_SHA_VAL=$(read_env_key PIN_SHA)
 
 if [ -n "$DEPLOY_BRANCH_VAL" ]; then
     TARGET_BRANCH="$DEPLOY_BRANCH_VAL"
@@ -207,33 +214,131 @@ if ! git diff --quiet HEAD; then
 fi
 
 OLD_SHA=$(git rev-parse HEAD)
-NEW_SHA=$(git rev-parse "origin/$TARGET_BRANCH")
 
-if [ "$OLD_SHA" != "$NEW_SHA" ]; then
-    OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $TARGET_BRANCH@$NEW_SHA ..."
-    git checkout --quiet "$TARGET_BRANCH"
-    git reset --hard --quiet "origin/$TARGET_BRANCH"
+# ---------------------------------------------------------------------
+# PIN_SHA: der Rueckfallpunkt gewinnt (H-6 T4)
+# ---------------------------------------------------------------------
+#
+# Ist `PIN_SHA` in der .env gesetzt, faehrt der Server **diesen** Commit —
+# Working-Tree UND Image — und folgt dem Branch nicht mehr. Leeren und einen
+# Timer-Lauf abwarten holt den Branch-Kopf zurueck.
+#
+# **Warum der Working-Tree mitgeht.** Darin stecken die Compose-Datei, die
+# Caddyfiles, die ChirpStack-TOMLs und die Mosquitto-Config. Ein Rueckfall,
+# der nur das Image zurueckdreht, kombiniert alte Container mit neuer
+# Compose-Datei — und wenn dazwischen ein Service dazukam oder eine
+# Umgebungsvariable ihren Namen geaendert hat, startet der Stack nicht oder
+# startet falsch.
+#
+# **Warum ein unbekannter Pin ABBRICHT und nicht auf den Branch zurueckfaellt.**
+# Ein Tippfehler im Pin wuerde sonst stumm den neuesten Stand deployen —
+# also genau das Gegenteil dessen, was jemand wollte, der gerade
+# zurueckrollt. Lieber ein Deploy, der steht und es sagt.
+#
+# Migrations-Vorbehalt: ein Rueckfall ist nur ueber **additive** Migrationen
+# zulaessig. Der Container fuehrt beim Start `alembic upgrade head` aus;
+# rueckwaerts geht das nicht automatisch. Siehe RUNBOOK §10u.
+if [ -n "$PIN_SHA_VAL" ]; then
+    if ! git rev-parse --verify --quiet "${PIN_SHA_VAL}^{commit}" >/dev/null; then
+        log "ABBRUCH: PIN_SHA='$PIN_SHA_VAL' ist in diesem Repo kein Commit."
+        log "         Kein Rueckfall auf den Branch — das waere das Gegenteil"
+        log "         dessen, was ein Pin bedeutet. Pin korrigieren oder leeren."
+        ping_healthcheck "$(read_env_key HEALTHCHECK_DEPLOY_URL)" "deploy" \
+            "abort: PIN_SHA '$PIN_SHA_VAL' unbekannt" || true
+        exit 1
+    fi
+    ZIEL_SHA=$(git rev-parse "$PIN_SHA_VAL")
+    log "PIN_SHA gesetzt: $PIN_SHA_VAL -> $ZIEL_SHA. Automatik aus,"
+    log "         der Branch-Kopf wird NICHT verfolgt."
 else
-    log "Working-Tree bereits auf origin/$TARGET_BRANCH ($NEW_SHA)."
+    ZIEL_SHA=$(git rev-parse "origin/$TARGET_BRANCH")
 fi
+
+if [ "$OLD_SHA" != "$ZIEL_SHA" ]; then
+    OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    log "Sync $OLD_BRANCH@$OLD_SHA  ->  $ZIEL_SHA ..."
+    if [ -n "$PIN_SHA_VAL" ]; then
+        # Losgeloester HEAD: der Pin ist kein Branch, und ein Branch, der
+        # auf einen alten Commit zeigt, waere eine zweite Wahrheit neben
+        # der .env.
+        git checkout --quiet --detach "$ZIEL_SHA"
+    else
+        git checkout --quiet "$TARGET_BRANCH"
+        git reset --hard --quiet "origin/$TARGET_BRANCH"
+    fi
+else
+    log "Working-Tree bereits auf $ZIEL_SHA."
+fi
+
+# ---------------------------------------------------------------------
+# Der Image-Tag (H-6 T2)
+# ---------------------------------------------------------------------
+#
+# `<branch>-<sha7>` — genau das Format, das `build-images.yml` vergibt
+# (`type=sha,prefix={{branch}}-,format=short`). Die sieben Zeichen sind
+# nicht geraten: `format=short` liefert sieben, und die Tags im GHCR
+# (`develop-394a056` ...) belegen es.
+#
+# **Der Tag wird NICHT in die .env geschrieben** (T5). Eine Datei, die der
+# Timer alle fuenf Minuten ueberschreibt, ist kein Ort fuer eine
+# Entscheidung des Menschen — ein Rueckfall per .env-Eintrag waere nach
+# fuenf Minuten weg. Der Wert wird je Lauf berechnet und an
+# `docker compose` uebergeben; die Shell-Umgebung schlaegt dort die .env.
+#
+# `IMAGE_TAG` in der .env bleibt als Rueckfall fuer einen von Hand
+# getippten `docker compose up -d` stehen — dann gilt der gleitende Tag,
+# und das ist besser als ein leerer Wert.
+IMAGE_TAG="${TARGET_BRANCH}-$(printf '%s' "$ZIEL_SHA" | cut -c1-7)"
+export IMAGE_TAG
+log "IMAGE_TAG=$IMAGE_TAG"
+
+NEW_SHA="$ZIEL_SHA"
 
 # ---------------------------------------------------------------------
 # Phase 2: Images aus GHCR pullen
 # ---------------------------------------------------------------------
 #
-# IMAGE_TAG kommt aus .env (mutierender Tag develop/main).
-# Sprint 6 H-6 (SHA-Pinning) wurde mehrfach versucht und revertiert:
-# build-images.yml taggt mit GitHub-push-event-SHA (= Merge-Commit auf
-# Ziel-Branch). Eine deploy-Logik aus dem lokalen git log findet aber
-# den Source-Branch-Commit. Tag-Mismatch -> Pull schlaegt fehl.
-# H-6 deferred auf eigenen Sprint, der CI + deploy-pull synchron anpasst.
+# `IMAGE_TAG` ist oben aus `ZIEL_SHA` gebildet und exportiert.
+#
+# Der Versuch von 2026-04-30 scheiterte daran, dass er den Tag aus
+# `git log -- backend/...` ableitete — also aus dem letzten Commit, der
+# `backend/` beruehrt hat, und das ist bei einem Merge ein anderer als der
+# Merge-Commit. Der richtige Wert steht in `ZIEL_SHA`: der Commit, auf den
+# dieses Skript den Working-Tree gesynct hat (§5.4 beschreibt den alten
+# Fix, nicht eine Notwendigkeit).
+#
+# Dass es fuer **jeden** Commit einen Tag gibt, stellt `build-images.yml`
+# sicher: beruehrt ein Commit ein Image nicht, wird der Tag des Vorgaengers
+# umgehaengt statt gebaut (Weg C, AE-77).
 
 cd "$COMPOSE_DIR"
 
-log "docker compose pull api web ..."
+log "docker compose pull api web (IMAGE_TAG=$IMAGE_TAG) ..."
 if ! docker compose -f "$COMPOSE_FILE" pull api web >>"$LOG" 2>&1; then
-    log "FEHLER: Image-Pull fehlgeschlagen (ggf. ghcr-Login pruefen)."
+    # Der Pull ist gleichzeitig die Existenzpruefung: er aendert keinen
+    # Container, nur den lokalen Image-Speicher. Ein Fehlschlag bricht also
+    # ab, **bevor** Phase 3 etwas anfasst — kein halber Deploy.
+    #
+    # Zwei Ursachen, zwei Reaktionen, und sie zu unterscheiden ist die Arbeit
+    # des Diagnose-Schritts: ein **fehlender Tag** heisst, dass ein Build
+    # nicht gelaufen ist (dann wartet man auf ihn oder pinnt woanders hin);
+    # eine **unerreichbare Registry** ist voruebergehend (dann holt der
+    # naechste Timer-Lauf es nach). Ohne diese Unterscheidung sucht jemand
+    # im falschen System.
+    log "FEHLER: Image-Pull fehlgeschlagen (IMAGE_TAG=$IMAGE_TAG)."
+    for IMG in heizung-api heizung-web; do
+        REF="ghcr.io/rexei123/$IMG:$IMAGE_TAG"
+        if docker manifest inspect "$REF" >/dev/null 2>&1; then
+            log "         $REF: vorhanden."
+        else
+            log "         $REF: NICHT vorhanden oder nicht abfragbar."
+        fi
+    done
+    log "         Fehlt der Tag, ist der Build zu diesem Commit nicht gelaufen"
+    log "         (build-images.yml pruefen). Ist er da, war es die Registry"
+    log "         oder der ghcr-Login — der naechste Lauf holt es nach."
+    ping_healthcheck "$(read_env_key HEALTHCHECK_DEPLOY_URL)" "deploy" \
+        "abort: pull failed for $IMAGE_TAG" || true
     exit 1
 fi
 
@@ -256,7 +361,25 @@ if ! docker compose -f "$COMPOSE_FILE" up -d --remove-orphans >>"$LOG" 2>&1; the
 fi
 
 log "Aktiv: $(docker compose -f "$COMPOSE_FILE" ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
-log "Fertig (HEAD=$NEW_SHA)."
+
+# ---------------------------------------------------------------------
+# Abschluss-Zeile (H-6 T6)
+# ---------------------------------------------------------------------
+#
+# Die Zeile, die bei „seit wann laeuft was" gelesen wird. Sie nennt Commit,
+# Tag und die beiden Digests zusammen — vorher stand der Commit im Log und
+# der Digest in `docker images`, und niemand hielt sie gegeneinander.
+# Das war §5.68 in der Infrastruktur: „der Server laeuft auf develop" ist
+# eine Behauptung, solange niemand den Commit nennen kann.
+API_DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' \
+    "ghcr.io/rexei123/heizung-api:$IMAGE_TAG" 2>/dev/null | cut -d@ -f2 | cut -c1-19)
+WEB_DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' \
+    "ghcr.io/rexei123/heizung-web:$IMAGE_TAG" 2>/dev/null | cut -d@ -f2 | cut -c1-19)
+if [ -n "$PIN_SHA_VAL" ]; then
+    log "Fertig. HEAD=$NEW_SHA IMAGE_TAG=$IMAGE_TAG api=${API_DIGEST:-?} web=${WEB_DIGEST:-?} PIN=$PIN_SHA_VAL"
+else
+    log "Fertig. HEAD=$NEW_SHA IMAGE_TAG=$IMAGE_TAG api=${API_DIGEST:-?} web=${WEB_DIGEST:-?}"
+fi
 
 # ---------------------------------------------------------------------
 # Dead-Man-Ping (Sprint 18)
@@ -276,5 +399,15 @@ log "Fertig (HEAD=$NEW_SHA)."
 #
 # Der Ping darf den Lauf nie abbrechen. Deshalb `|| true` in der Funktion,
 # `return 0` am Ende und der Aufruf ohne `set -e`-Exposition.
+#
+# Bei gesetztem Pin traegt der Ping ihn im Body. Grund: ein Pin, den jemand
+# gesetzt und vergessen hat, ist ein Server, der weitere Merges nicht mehr
+# zieht — und das faellt in einem gruenen Monitor nicht auf. Die
+# woechentliche Erinnerung per Mail ist ein eigener Task (T10).
 HEALTHCHECK_DEPLOY_URL=$(read_env_key HEALTHCHECK_DEPLOY_URL)
-ping_healthcheck "$HEALTHCHECK_DEPLOY_URL" "deploy" || true
+if [ -n "$PIN_SHA_VAL" ]; then
+    ping_healthcheck "$HEALTHCHECK_DEPLOY_URL" "deploy" \
+        "ok: pinned to $IMAGE_TAG (automatik aus)" || true
+else
+    ping_healthcheck "$HEALTHCHECK_DEPLOY_URL" "deploy" || true
+fi
