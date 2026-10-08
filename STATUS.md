@@ -4965,6 +4965,123 @@ Backlog-Eintrag „lokale DB-Tests unmöglich" gilt nicht mehr.
   Kachel „Fenster + Backplate" darunter als Diagnose gekennzeichnet.
 - Nach zwei Wochen Heizperiode: Schwellen nachjustieren (RUNBOOK §10t).
 
+## 2by. Sprint 20f-b Phantom-Overrides durch Class-A-Latenz (2026-10-06/07)
+
+**Ein Satz:** Die Engine hat ihre eigene, noch nicht umgesetzte Anweisung
+als Gastwunsch gelesen und sich darauf festgelegt — bei **jeder**
+Nachtabsenkung in **jedem** belegten Zimmer.
+
+| PR | Inhalt | Merge |
+|---|---|---|
+| [#261](https://github.com/rexei123/heizung-sonnblick/pull/261) | Backlog B-21-1 (Repo Private: GitHub Pro + Deploy-Key) | `d7e54fd` |
+| [#262](https://github.com/rexei123/heizung-sonnblick/pull/262) | Codec `0x28`: ein Uplink kann mehrere Datensätze tragen, der letzte gilt | `1699fe6` |
+| [#263](https://github.com/rexei123/heizung-sonnblick/pull/263) | Alte Erkennung entfernt, Stapel-Abbau, Etikett `device_manual` | `8c1de5c` |
+
+### Der Befund: das eigene Echo
+
+Zimmer 101 trug fünf aktive Overrides in einer Zone, drei davon mit
+`source=device` und Ablauf erst beim Check-out. Niemand hatte gedreht.
+
+Die Zeitlinie vom 05.10., Geräte 009 (Zone 204) und 010 (Zone 205):
+
+```
+20:00:59  Engine sendet Nachtabsenkung 19 °C
+20:03:25  Keep-alive meldet noch 21 — Class-A-Latenz, das Gerät hat den
+          Befehl noch nicht umgesetzt
+          -> alte Erkennung sieht "21 statt 19" und legt Override 40 mit
+             21 °C an, Ablauf Check-out
+          (die Engine regelt jetzt auf 21, weil der Override das sagt)
+20:13:36  Gerät meldet 19 — der erste Befehl ist angekommen
+          -> alte Erkennung sieht "19 statt 21" und legt Override 42 mit
+             19 °C an
+```
+
+Ping-Pong. Beide Overrides waren Phantome.
+
+**Und es war kein Einzelfall, sondern der Normalfall.** Die Bedingung lautet
+„Engine ändert den Sollwert in einem belegten Zimmer" — also jede
+Nachtabsenkung in jedem belegten Zimmer, jede Nacht.
+
+Das 60-s-Ack-Fenster hätte das abfangen sollen und konnte es nicht: es wird
+ab dem **MQTT-Publish** gemessen, nicht ab dem Funk-Versand, und bei Class A
+liegen dazwischen bis zu eine Keep-alive-Periode. Von 20:00:59 bis 20:03:25
+sind 146 Sekunden.
+
+### Drei Maßnahmen
+
+1. **Die abgeleitete Erkennung ist entfernt**, und zwar an **drei**
+   Eingängen statt der zwei aus dem Auftrag. Der dritte war `0x52` — die
+   Bestätigung des **eigenen** Downlinks. Der alte Kommentar dort lautete
+   „der Drehring meldet seinen Setpoint hier zurück"; das war richtig,
+   solange `0x52` die einzige Spur einer Drehung war, und ist seit 20f T1
+   zirkulär. Der Torwächter sitzt in `_handle_override_detection` selbst,
+   nicht an der Aufrufstelle — so gilt er unabhängig vom Aufrufer und ist
+   direkt testbar.
+
+   Seit T1 ist der Vergleich auch nicht mehr nötig: der `0x28`-Frame
+   **meldet** die Drehung. Ein Sollwert-Unterschied **ohne** `0x28` ist
+   damit Drift, und für Drift gibt es seit T3 den Engine-Abgleich (AE-76).
+
+2. **Stapel-Abbau** mit `revoked_reason='superseded'`. Verdrängt wird nur,
+   was der neue Override im Lookup auch gewinnen würde — eine Gast-Drehung
+   beendet also keine Mitarbeiter-Eingabe, sonst wäre AE-58 über den Umweg
+   des Abbaus ausgehebelt. Bereich heißt Zimmer **und** Zone: im Befund
+   lagen Overrides in 204 **und** 205, ein Abbau nur nach `room_id` hätte
+   das Bad mitgenommen. Die Rangfolge steht seither **einmal** als
+   `_QUELLEN_RANG` und speist den SQL-`CASE` und den Abbau.
+
+3. **Etikett für `device_manual`.** Die Ursache war der fehlende Eintrag im
+   TypeScript-Typ `OverrideSource` — deshalb traf `sourceRaw in SOURCE_LABEL`
+   nicht zu und der Badge blieb leer. Das ist der Frontend-Spiegel, der in
+   20f PR 2 gehört hätte (§5.63). Mit dem Typ brachen alle drei Label-Maps
+   den Typecheck, bis sie gefüllt waren — der Compiler war der Test.
+
+### Der Codec-Befund aus demselben Block
+
+Live-Beleg Gerät 102 (05.10., fCnt 110, 22 Byte): **zwei** `0x28`-Datensätze
+in einem Uplink, 16 °C und dann 19 °C. Die erste Fassung von
+`decodeManualTargetChange` wertete nur den ersten aus — der Override wäre mit
+16 statt 19 °C angelegt worden, und zwar für vier Stunden. Seit #262 gilt der
+**letzte vollständige** Satz; die Zwischenwerte kommen als
+`manual_target_history` nur zur Diagnose mit.
+
+### Live bestätigt — Nachtprüfung 07.10.2026, 22:00
+
+| | |
+|---|---|
+| Zimmer | 101 |
+| Neue Overrides | **0** |
+| Geräte 009/010 | sauber **21 → 19 °C**, kein Ping-Pong |
+
+Das ist die Wirkungsprobe, die kein Test liefern kann: genau die Sequenz, die
+am 05.10. zwei Phantome erzeugt hat, läuft jetzt durch, ohne einen Override
+anzulegen. Der Regressions-Test (`test_nachtabsenkung_in_belegtem_zimmer_
+erzeugt_keinen_override`) prüft dieselbe Zeitlinie synthetisch; die
+Nachtprüfung prüft sie am Gerät.
+
+**Nachlauf:** die Overrides 40–42 in Zimmer 101 sind beim Check-out am 07.10.
+um 10:00 durch `auto_revoke_on_checkout` beendet worden — ein `UPDATE` von
+Hand war damit nicht nötig. 43 und 44 (`device_manual`, 4 h) sind von selbst
+abgelaufen.
+
+### Was dabei über die Tests gelernt wurde
+
+Die Gegenprobe war ungewöhnlich aussagekräftig: mit entferntem Torwächter
+fallen **7 von 9** Tests der neuen Datei. Der Grund ist, wo gezählt wird — am
+**Eingang** von `handle_uplink_for_override` und zusätzlich an der Zahl
+geöffneter DB-Sessions, nicht am Ergebnis. Ein Test, der nur auf „kein
+Override in der Datenbank" prüft, wäre auch grün, wenn der Pfad läuft und
+erst ein späteres Tor greift — und genau die späteren Tore (OCCUPIED,
+Fenster) sind im Phantom-Fall **offen**, weil das Zimmer belegt ist.
+
+Ein Bestandstest war dabei ein echter Befund und keine Anpassung:
+`test_revoke_all_active_overrides_revokes_device_and_frontend` legte erst
+`device`, dann `frontend_4h` an. Mit dem Abbau verdrängt das Frontend das
+Device beim Anlegen, es bleibt **einer** aktiv, und der Test hätte nicht mehr
+geprüft, was sein Name sagt. Reihenfolge umgedreht — zuerst Rezeption, dann
+Gast-Drehung; beide bleiben aktiv, der Check-out muss beide beenden, und das
+ist zugleich der realistische Fall.
+
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
 
