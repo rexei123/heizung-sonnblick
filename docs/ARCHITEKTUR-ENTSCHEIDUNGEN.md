@@ -4654,6 +4654,84 @@ Erinnerung, nicht Alarm: ein gesetzter Pin ist eine Entscheidung, kein
 Fehler. Dazu trägt jeder Deploy-Ping den Pin im Body, damit er im Monitor
 steht und nicht nur im Server-Log.
 
+### 10. Das Skript dreht sich mit zurück — und bricht deshalb ab, statt es zu tun
+
+**Nachtrag 09.10.2026, Befund des Hoteliers.** Entscheidung 6 („der
+Working-Tree geht mit") hat eine Folge, die dort nicht stand: `deploy-pull.sh`
+liegt **selbst** im Working-Tree, und die systemd-Unit startet es von dort.
+
+```
+heizung-deploy-pull.service:
+  ExecStart=/opt/heizung-sonnblick/infra/deploy/deploy-pull.sh
+```
+
+Die Unit liegt in `/etc/systemd/system` (`install-timer.sh` kopiert sie
+dorthin) und geht beim Rückfall **nicht** mit zurück — der Pfad zeigt also
+weiter auf die Datei im Working-Tree, und die ist nach dem Pin die alte
+Fassung.
+
+**Gemessen** (altes Skript aus `30b6ffe`, Attrappen für `git`/`docker`,
+`.env` mit `PIN_SHA=30b6ffe`, losgelöster HEAD):
+
+```
+git fetch --quiet origin develop
+git rev-parse HEAD            -> 30b6ffe…
+git rev-parse origin/develop  -> aaaaaaa…
+git checkout --quiet develop
+git reset --hard --quiet origin/develop
+Log: Sync (detached)@30b6ffe…  ->  develop@aaaaaaa… ...
+```
+
+Kein Wort über den Pin. Das alte Skript kennt `PIN_SHA` nicht, sieht nur
+„HEAD weicht vom Branch-Kopf ab" und stellt das her — **der Rückfall hebt
+sich beim nächsten Tick selbst auf, also nach höchstens fünf Minuten.**
+
+Zwei Dinge machen das schlimmer als einen lauten Fehler:
+
+1. **Der Lauf von Hand meldet vorher korrekt.** `PIN_SHA gesetzt`,
+   `IMAGE_TAG=develop-…`, die Abschlusszeile — und die Prüfung nach RUNBOOK
+   §10u Schritt 5 ist grün. Erst danach kippt es, und zwar ohne dass jemand
+   noch hinsieht.
+2. **Der laufende Prozess merkt nichts.** Git ersetzt die Datei (neuer
+   Inode) statt sie an Ort und Stelle zu überschreiben — gemessen —, der
+   gerade laufende Rückfall läuft also korrekt zu Ende. Es gibt keinen
+   Absturz, der die Sache verraten würde.
+
+**Die Entscheidung: das Skript prüft vor dem Rückfall, ob das Skript im
+Ziel-Commit den Pin kennt, und bricht sonst ab.**
+
+```bash
+if ! git show "${PIN_SHA_VAL}:infra/deploy/deploy-pull.sh" 2>/dev/null |
+    grep -q 'read_env_key PIN_SHA'; then
+    log "ABBRUCH: Ziel-Commit '$PIN_SHA_VAL' enthaelt ein deploy-pull.sh"
+    log "         ohne Pin-Logik. …"
+    exit 1
+fi
+```
+
+Begründet wie Entscheidung 7: **lieber kein Rückfall als einer, der nicht
+hält.** Ein Abbruch lässt den kaputten Stand laufen und sagt warum; ein
+Rückfall, der sich selbst aufhebt, lässt denselben Stand laufen und sagt
+das Gegenteil.
+
+**Warum gegen das Muster und nicht gegen einen SHA geprüft wird.** Ein
+`[ "$ZIEL" \< "805c31c" ]` gibt es nicht (Commits sind nicht sortierbar),
+und eine Liste pin-fähiger SHAs im Skript wäre eine zweite Wahrheit, die
+beim ersten Umbau veraltet (§5.77). Gegriffen wird deshalb die Zeile, die
+die Fähigkeit **ausmacht** — `read_env_key PIN_SHA`. Wird `read_env_key`
+einmal umbenannt, bricht jeder Pin ab, bis das Muster nachgezogen ist: ein
+Fehlalarm in der sicheren Richtung, mit einer Meldung, die auf den
+Ziel-Commit zeigt. Ein Hinweis darauf steht im Skript an der gegrepten
+Zeile.
+
+**Reichweite danach:** pin-fähig sind `805c31c` und alles danach. Der
+Verlust ist kleiner, als er klingt — vor der Weg-C-Umstellung (`aefb4d0`)
+lief `build-images.yml` mit einem `paths`-Filter, ein Commit hat also nur
+dann einen `develop-<sha7>`-Tag, wenn er `backend/**` oder `frontend/**`
+berührt hat. Doku-Commits von davor haben gar keinen, und Schritt 2 des
+Handgriffs fängt sie ab. Die erreichbare Fenstergröße wächst mit jedem
+Merge.
+
 ## Verworfen
 
 - **Digest-Pinning** (`@sha256:…` in der Compose-Datei). Exakter, aber nicht
@@ -4681,6 +4759,37 @@ steht und nicht nur im Server-Log.
   wird nie gelöscht.** Nicht vor dem 01.11.
 - **Basis-Image per Digest pinnen** (§3).
 - **Migrations-Linter** (§8).
+- **Runner außerhalb des Working-Trees** (§10). Der Wächter verbietet den
+  gefährlichen Fall; er hebt ihn nicht auf. Aufzuheben wäre er, indem die
+  Unit nicht mehr in den Working-Tree zeigt — `install-timer.sh` kopiert
+  `deploy-pull.sh` nach `/usr/local/sbin/`, die Unit startet die Kopie.
+  Dann dreht sich das Skript nicht mit zurück, und die Reichweite wird nur
+  noch durch die Images begrenzt.
+
+  **Dagegen spricht die zweite Kopie.** Sie kann vom Repo abweichen, und
+  zwar still — dieselbe Klasse wie der ChirpStack-Codec (§5.22), der
+  seitdem bei jedem Touch von Hand nachgezogen werden muss. Es bräuchte
+  also mindestens: einen Drift-Melder (Hash-Vergleich Kopie↔Repo, in jedem
+  Lauf ins Log), eine Zeile im RUNBOOK „nach einem Merge, der
+  `deploy-pull.sh` berührt, Runner nachziehen", und einen Test dafür.
+
+  **Der naheliegende Komfortweg hebt den Gewinn auf:** ein Runner, der sich
+  nach dem git-Schritt selbst aus dem Repo nachzieht, kopiert sich im
+  gepinnten Zustand die **alte** Fassung über sich — genau der Fehler, den
+  der Umbau beseitigen soll. Man müsste „nur nachziehen, wenn kein Pin
+  steht" bauen, und damit hängt das Verhalten des Runners am Pin-Zustand:
+  wer das Log liest, muss es mitdenken.
+
+  **Aufwand** ~2–2,5 h (Unit, Install-Skript, Drift-Melder, Test, RUNBOOK,
+  SERVER-SETUP) plus ein Server-Handgriff je Server.
+
+  **Einschätzung: nicht vor dem 01.11.** Der Gewinn ist Reichweite in
+  Commits von **vor** dem 09.10., und die sind teils ohne Image (siehe
+  §10). Was ein Rückfall am 01.11. braucht, ist der letzte Stand, der lief
+  — und der liegt im pin-fähigen Fenster. Dagegen steht eine zweite Kopie,
+  die genau in der Woche driften könnte, in der niemand Zeit hat, das zu
+  prüfen. Wiederaufnehmen, wenn ein Rückfall einmal an der Reichweite
+  gescheitert ist, oder im nächsten Hygiene-Sprint.
 
 ## Querverweise
 

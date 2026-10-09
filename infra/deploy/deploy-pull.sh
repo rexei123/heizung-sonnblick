@@ -112,6 +112,10 @@ read_env_key() {
 
 STAGE_VAL=$(read_env_key STAGE)
 DEPLOY_BRANCH_VAL=$(read_env_key DEPLOY_BRANCH)
+# Die naechste Zeile wird vom Pin-Waechter weiter unten gegrept (er prueft
+# sie im Ziel-Commit). Wer `read_env_key` umbenennt, zieht das Muster dort
+# mit nach — sonst bricht jeder Pin ab, mit einer Meldung, die nach einem
+# zu alten Ziel-Commit aussieht.
 PIN_SHA_VAL=$(read_env_key PIN_SHA)
 
 if [ -n "$DEPLOY_BRANCH_VAL" ]; then
@@ -247,6 +251,33 @@ if [ -n "$PIN_SHA_VAL" ]; then
             "abort: PIN_SHA '$PIN_SHA_VAL' unbekannt" || true
         exit 1
     fi
+    # Der Pin-Waechter: zeigt der Pin auf einen Commit, dessen
+    # deploy-pull.sh die Pin-Logik noch nicht kennt, haelt der Rueckfall
+    # nicht.
+    #
+    # Der Timer startet dieses Skript **aus dem Working-Tree**
+    # (ExecStart=/opt/heizung-sonnblick/infra/deploy/deploy-pull.sh), und der
+    # Working-Tree geht beim Pin mit zurueck. Beim naechsten Tick laeuft dann
+    # das alte Skript, kennt `PIN_SHA` nicht und synct auf den Branch-Kopf:
+    # der Rueckfall hebt sich nach fuenf Minuten selbst auf.
+    #
+    # Das ist das lautlose Fehlerbild, nicht das laute. Der Lauf von Hand
+    # meldet vorher korrekt „PIN_SHA gesetzt", die Pruefung nach RUNBOOK §10u
+    # Schritt 5 ist gruen — und fuenf Minuten spaeter ist der Stand wieder
+    # da, den jemand gerade verlassen wollte. Deshalb hier der Abbruch:
+    # lieber kein Rueckfall als einer, der nicht haelt (§5.76).
+    if ! git show "${PIN_SHA_VAL}:infra/deploy/deploy-pull.sh" 2>/dev/null |
+        grep -q 'read_env_key PIN_SHA'; then
+        log "ABBRUCH: Ziel-Commit '$PIN_SHA_VAL' enthaelt ein deploy-pull.sh"
+        log "         ohne Pin-Logik. Der naechste Timer-Lauf wuerde das alte"
+        log "         Skript starten, den Pin ignorieren und den Rueckfall"
+        log "         aufheben. Neueren Ziel-Commit waehlen — RUNBOOK §10u,"
+        log "         Schritt 0a nennt den Pruefbefehl."
+        ping_healthcheck "$(read_env_key HEALTHCHECK_DEPLOY_URL)" "deploy" \
+            "abort: PIN_SHA '$PIN_SHA_VAL' ohne Pin-Logik im Skript" || true
+        exit 1
+    fi
+
     ZIEL_SHA=$(git rev-parse "$PIN_SHA_VAL")
     log "PIN_SHA gesetzt: $PIN_SHA_VAL -> $ZIEL_SHA. Automatik aus,"
     log "         der Branch-Kopf wird NICHT verfolgt."
