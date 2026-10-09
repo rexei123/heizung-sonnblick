@@ -198,6 +198,48 @@ class Settings(BaseSettings):
     # Fenster beider Regeln in Stunden. Gemeinsam, weil beide dieselben
     # Zeilen lesen — zwei Fenster waeren zwei Scans fuer eine Information.
     valve_window_h: int = 2
+    # --- Regel 3b relativ (Sprint 20e-b, T3) -----------------------------
+    #
+    # Das absolute Kriterium allein kann Wetter nicht von einem klemmenden
+    # Ventil unterscheiden. Befund vom 07.10.2026, 14:58, Kessel aus: leere
+    # Zimmer standen bei 22-24 °C ueber einem Sollwert von 18 °C, also
+    # ``>= Soll + 5 K`` — die Kachel meldete **14** Geraete, echt waren
+    # zwei. Ein Melder, dem niemand mehr glaubt, ueberwacht nichts (§5.79).
+    #
+    # 3b verlangt deshalb seit 20e-b **zwei** Bedingungen (UND): ueber dem
+    # Sollwert *und* ueber vergleichbaren Zimmern. Die zweite ist relativ
+    # und geht mit der Jahreszeit mit.
+    #
+    # **Die Zahlen sind gemessen, nicht geschaetzt.** T0 am 08.10. 09:48:
+    # Median der unbelegten Zimmer 21,7 °C, 44 unbelegte Zimmer, 15 absolut
+    # gemeldete Geraete, mit dem relativen Kriterium bleibt **eines** uebrig
+    # (102/406, ``ueber_median`` genau 3,0). Deshalb 3,5 und nicht 3,0: die
+    # Vorgabe braucht Luft zum knappsten gemessenen Fall, sonst haengt sie
+    # an einer Stelle, von der wir wissen, dass sie erreicht wird.
+    #
+    # Zweite Messung am 08.10. 15:20 (Nachmittag, der Zeitpunkt, an dem
+    # Westzimmer auffallen): ebenfalls 0 uebrig. Damit ist die
+    # Himmelsrichtung als eigene Gruppe vom Tisch (Variante A, AE-74).
+    room_rel_delta_k: Decimal = Decimal("3.5")
+    # Stufe 2 der Rueckfallkette, wenn zu wenige Zimmer unbelegt sind
+    # (Hochsaison). Groesser, weil belegte Zimmer eine andere Population
+    # sind: Gaeste stellen 22-24 °C ein, der Median liegt also hoeher und
+    # 3b wuerde mit demselben Delta stumpf. Ein eigenes Delta ist hier
+    # keine zusaetzliche Stellschraube, sondern die Anerkennung, dass die
+    # Referenz eine andere ist.
+    room_rel_delta_all_k: Decimal = Decimal("4.0")
+    # Mindestzahl **Zimmer** in der Referenzmenge. Darunter gibt es kein
+    # relatives Urteil und damit keinen 3b-Hinweis — die Bedingungen sind
+    # mit UND verknuepft.
+    #
+    # Fuenf, weil ein Median ueber vier Werten von zwei Zimmern bestimmt
+    # wird (dem Mittel der beiden mittleren) und ueber drei von einem
+    # einzigen. Das ist kein Median, sondern ein Einzelwert mit
+    # Zufallsanteil — dieselbe Ueberlegung wie bei ``VALVE_MIN_SAMPLES``.
+    #
+    # Heute nicht aktiv (44 unbelegte Zimmer am 08.10.), sondern fuer die
+    # Hochsaison.
+    ref_min_rooms: int = 5
     # --- Health-Altersschwellen (Sprint 20e, T6; Muster AE-73) ------------
     # Ab welchem Alter des juengsten Readings ein Geraet ``degraded`` und ab
     # wann ``silent`` ist (AE-53). In **Stunden**, weil das die Einheit ist,
@@ -311,6 +353,50 @@ class Settings(BaseSettings):
             )
         if self.valve_window_h < 1:
             raise ValueError(f"VALVE_WINDOW_H muss mindestens 1 sein (ist: {self.valve_window_h}).")
+        return self
+
+    @model_validator(mode="after")
+    def _relative_schwellen_sind_sinnvoll(self) -> "Settings":
+        """20e-b T3: beide relativen Deltas > 0, Stufe 2 nicht empfindlicher als Stufe 1.
+
+        **Warum ``ALL >= normal`` erzwungen wird.** Stufe 2 vergleicht gegen
+        **alle** Zimmer, also auch gegen belegte, in denen Gaeste 22-24 °C
+        einstellen. Der Median liegt dort hoeher. Waere das Delta kleiner
+        als bei Stufe 1, wuerde der Rueckfall den Melder **empfindlicher**
+        machen statt vorsichtiger — und zwar genau dann, wenn das Haus voll
+        ist und niemand Zeit hat, einer Fehlmeldung nachzugehen. Gleich
+        gross ist erlaubt (dann ist der Rueckfall neutral), kleiner nicht.
+
+        ``REF_MIN_ROOMS >= 3``, weil ein Median ueber zwei Werten das
+        Mittel genau dieser zwei ist. Unter drei ist das Wort "Median"
+        irrefuehrend, und die Grenze soll nicht so gesetzt werden koennen,
+        dass sie nichts mehr bedeutet.
+
+        Start-Fehler, nicht Warnung — wie bei allen anderen Schwellen.
+        """
+        if self.room_rel_delta_k <= 0:
+            raise ValueError(
+                "ROOM_REL_DELTA_K muss groesser als 0 sein "
+                f"(ist: {self.room_rel_delta_k}). Bei 0 traegt jedes Zimmer, das genau "
+                "auf dem Median liegt, den Hinweis 'Zimmer zu warm'."
+            )
+        if self.room_rel_delta_all_k <= 0:
+            raise ValueError(
+                f"ROOM_REL_DELTA_ALL_K muss groesser als 0 sein (ist: {self.room_rel_delta_all_k})."
+            )
+        if self.room_rel_delta_all_k < self.room_rel_delta_k:
+            raise ValueError(
+                "ROOM_REL_DELTA_ALL_K darf nicht kleiner als ROOM_REL_DELTA_K sein "
+                f"({self.room_rel_delta_all_k} < {self.room_rel_delta_k}). Stufe 2 "
+                "vergleicht gegen alle Zimmer, auch belegte mit 22-24 °C — ein "
+                "kleineres Delta machte den Rueckfall empfindlicher statt vorsichtiger."
+            )
+        if self.ref_min_rooms < 3:
+            raise ValueError(
+                "REF_MIN_ROOMS muss mindestens 3 sein "
+                f"(ist: {self.ref_min_rooms}). Ein Median ueber zwei Werten ist "
+                "das Mittel dieser zwei."
+            )
         return self
 
     @model_validator(mode="after")

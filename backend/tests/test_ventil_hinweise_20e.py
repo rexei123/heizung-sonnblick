@@ -47,7 +47,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from heizung.config import Settings, get_settings
 from heizung.models.device import Device
-from heizung.models.enums import DeviceKind, DeviceVendor
+from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
+from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.schemas.device import DeviceRead
 from heizung.services.valve_health import (
@@ -61,6 +64,9 @@ TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt — DB-Tests brauchen Postgres"
 
 EUI_PREFIX = "7e14a020"
+# Eigenes Praefix fuer die Referenz-Zimmer, damit ``_purge`` sie findet.
+# ``room.number`` ist VARCHAR(20) (§5.49): 4 + 8 Hex = 12 Zeichen.
+RAUM_PREFIX = "v3b-"
 JETZT = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
 
 pytestmark = pytest.mark.asyncio
@@ -100,6 +106,17 @@ async def _purge(session: AsyncSession) -> None:
             sa_delete(SensorReading).where(SensorReading.device_id.in_(device_ids))
         )
         await session.execute(sa_delete(Device).where(Device.id.in_(device_ids)))
+    # Die Referenz-Zimmer aus ``_referenz_zimmer`` muessen mit weg, sonst
+    # bildet der naechste Lauf seinen Median ueber Leichen: die Referenz in
+    # ``valve_health`` ist hausweit und sieht jede Zeile im Fenster, auch
+    # fremde (§5.39).
+    await session.execute(
+        sa_delete(HeatingZone).where(
+            HeatingZone.room_id.in_(select(Room.id).where(Room.number.like(f"{RAUM_PREFIX}%")))
+        )
+    )
+    await session.execute(sa_delete(Room).where(Room.number.like(f"{RAUM_PREFIX}%")))
+    await session.execute(sa_delete(RoomType).where(RoomType.name.like(f"{RAUM_PREFIX}%")))
 
 
 async def _device(session: AsyncSession) -> int:
@@ -140,6 +157,57 @@ async def _fenster(
             )
         )
     await session.flush()
+
+
+async def _referenz_zimmer(
+    session: AsyncSession,
+    *,
+    ist: Decimal,
+    anzahl: int = 5,
+) -> None:
+    """``anzahl`` nicht belegte Zimmer mit je einem Geraet auf ``ist`` Grad.
+
+    **Warum 3b-Tests das brauchen.** Seit 20e-b verlangt Regel 3b zwei
+    Bedingungen: ueber dem Sollwert **und** ueber vergleichbaren Zimmern.
+    Die Referenz ist hausweit und entsteht aus Zimmern — ein Geraet ohne
+    Zimmer (wie ``_device`` es anlegt) traegt nichts dazu bei. Ohne diese
+    Fixture gibt es keine Referenzmenge, die Kette landet auf Stufe 3
+    ("keine") und **kein** 3b-Hinweis kommt. Das ist richtig so und war der
+    Grund, warum die vier 3b-Tests mit 20e-b angepasst werden mussten.
+
+    ``anzahl`` ist die Vorgabe von ``REF_MIN_ROOMS`` (5). Alle Geraete
+    melden denselben Wert, der Median ist damit exakt ``ist`` — die Tests
+    rechnen also mit einer Zahl und nicht mit einer Schaetzung.
+
+    Zimmer sind im Modell-Default ``vacant``, die Kette landet also auf
+    Stufe 1 (``unbelegt``). Wer Stufe 2 pruefen will, setzt ``status``
+    nachtraeglich.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    raumtyp = RoomType(name=f"{RAUM_PREFIX}rt-{suffix[:4]}")
+    session.add(raumtyp)
+    await session.flush()
+
+    for i in range(anzahl):
+        room = Room(number=f"{RAUM_PREFIX}{suffix[:4]}{i:02d}", room_type_id=raumtyp.id)
+        session.add(room)
+        await session.flush()
+        # ``kind`` ist NOT NULL ohne Default (§5.49).
+        zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="z0")
+        session.add(zone)
+        await session.flush()
+        device = Device(
+            dev_eui=f"{EUI_PREFIX}{suffix[:6]}{i:02d}",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="vicki",
+            heating_zone_id=zone.id,
+        )
+        session.add(device)
+        await session.flush()
+        # Soll gleich Ist: diese Zimmer sollen die Referenz bilden und
+        # selbst kein Urteil tragen.
+        await _fenster(session, device.id, soll=ist, ist=ist, ventil=50)
 
 
 async def _urteil(session: AsyncSession, device_id: int) -> ValveState:
@@ -220,10 +288,19 @@ async def test_regel3b_zimmer_deutlich_zu_warm(db_session: AsyncSession) -> None
     eines abgenommenen Thermostatkopfs: der Stift wird von der Feder
     herausgedrueckt, das Ventil steht offen, das Zimmer heizt durch.
     """
+    await _referenz_zimmer(db_session, ist=Decimal("20.0"))
     device_id = await _device(db_session)
     await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=0)
 
-    assert await _urteil(db_session, device_id) == "zimmer_zu_warm"
+    verdict = (await valve_verdicts(db_session, [device_id], now=JETZT))[device_id]
+    assert verdict.state == "zimmer_zu_warm"
+    # Beide Abstaende, benannt: 6 K ueber Soll und 4 K ueber der Referenz.
+    assert verdict.delta_k == Decimal("6.00")
+    assert verdict.referenz == "unbelegt"
+    assert verdict.referenz_median_c == Decimal("20.000"), (
+        "Median verschoben — fremde Messwerte im Fenster? Die Referenz ist hausweit."
+    )
+    assert verdict.referenz_delta_k == Decimal("4.000")
 
 
 async def test_regel3b_ventilstellung_ist_keine_bedingung(db_session: AsyncSession) -> None:
@@ -238,6 +315,7 @@ async def test_regel3b_ventilstellung_ist_keine_bedingung(db_session: AsyncSessi
     zu warm. Eine Ventil-Bedingung haette den Melder gegen seinen eigenen
     Zweck abgedichtet.
     """
+    await _referenz_zimmer(db_session, ist=Decimal("20.0"))
     device_id = await _device(db_session)
     await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=0)
 
@@ -252,6 +330,12 @@ async def test_regel3b_an_der_schwelle(db_session: AsyncSession) -> None:
     bei Regel 3, weil der interne Vicki-Sensor in diese Richtung verzerrt
     (§5.27).
     """
+    # Referenz bewusst **tief** (18 Grad), damit hier die absolute Schwelle
+    # entscheidet und nicht die relative: 23 liegt 5 K ueber dem Median,
+    # 22,9 noch 4,9 K. Beide erfuellen die relative Bedingung (>= 3,5 K) —
+    # der Unterschied liegt also allein am Sollwert-Abstand, und genau das
+    # soll dieser Test pruefen.
+    await _referenz_zimmer(db_session, ist=Decimal("18.0"))
     knapp_drueber = await _device(db_session)
     await _fenster(db_session, knapp_drueber, soll=Decimal("18.0"), ist=Decimal("23.0"), ventil=50)
     knapp_drunter = await _device(db_session)
@@ -394,6 +478,7 @@ async def test_beide_regeln_koennen_nicht_zugleich_zutreffen(db_session: AsyncSe
     beiden ``elif`` im Code eine stille Entscheidung, die erst auffaellt,
     wenn jemand ein Delta auf 0 stellt (was der Start-Validator verbietet).
     """
+    await _referenz_zimmer(db_session, ist=Decimal("20.0"))
     kalt = await _device(db_session)
     await _fenster(db_session, kalt, soll=Decimal("22.0"), ist=Decimal("18.0"), ventil=0)
     warm = await _device(db_session)
