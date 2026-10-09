@@ -28,6 +28,10 @@ richtig. Die Falsch-Positiven wären häufiger als die echten Fälle.
 Ein Merge nach `develop` ist ein Deploy auf heizung-test (CLAUDE.md §0.3).
 Die Deploy-Sperre fängt den Fall ab, wenn der Lauf über die CLI kam — sie hat
 drei Lücken, deshalb bleibt die Frage Pflicht.
+
+Ab 01.11.2026 zusätzlich das Merge-Fenster: werktags 10-12 Uhr, Doku-PRs
+gebündelt (CLAUDE.md §0.3, RUNBOOK §10v). Jeder Merge startet den Stack neu.
+Hotfix ist die Ausnahme — dann hier den Grund nennen.
 -->
 
 ---

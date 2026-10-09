@@ -4275,3 +4275,72 @@ funktioniert.
 hier), §10q (Einstellungen ändern, dasselbe `.env`-Muster), §5.0 (`-f` bei
 `docker compose`), §10n (hat der Lauf wirklich geprüft), AE-77 (die
 Entscheidung hinter Pinning und Rückfallpunkt).
+
+---
+
+## 10v. Wann gemergt wird — das Merge-Fenster ab 01.11.2026
+
+**Regel:** Merges nach `develop` nur **werktags zwischen 10 und 12 Uhr**.
+Doku-PRs werden **gebündelt** und nicht einzeln gemergt. Ausnahme:
+**Hotfix**, mit Begründung im PR-Text.
+
+### Warum es diese Regel gibt
+
+Ein Merge nach `develop` ist ein Deploy auf den Server (§0.3 in CLAUDE.md).
+Seit H-6 trägt jeder Commit einen eigenen Image-Tag — und Compose entscheidet
+über einen Neustart auch anhand der **Image-Referenz**, nicht nur anhand des
+Digests. **Folge: jeder Merge startet `api`, `web`, `celery_worker` und
+`celery_beat` neu**, auch wenn sich am Programm nichts geändert hat.
+
+Was dabei kurz aussetzt:
+
+| Dienst | Folge des Neustarts |
+|---|---|
+| `web` | Die Oberfläche ist für Sekunden nicht erreichbar |
+| `api` | Dasselbe, plus: ein laufender Handgriff (Tausch, Zuordnung) bricht ab |
+| `celery_worker` | Ein Engine-Tick kann ausfallen. Er läuft jede Minute und ist idempotent (S2), der nächste holt es |
+| `celery_beat` | Der Takt setzt für einen Zyklus aus |
+
+Einzeln ist das nichts. In der Heizperiode mit Gästen im Haus ist es etwas
+anderes, und zwar nicht wegen der Sekunden, sondern wegen des **Zeitpunkts**:
+ein Deploy um 22 Uhr, der etwas bricht, wird am nächsten Morgen entdeckt.
+
+### Warum 10 bis 12
+
+* **Die Zimmer sind leer.** Anreise ab 14:00, Abreise bis 11:00 — zwischen
+  10 und 12 ist die geringste Zahl an Gästen im Haus.
+* **Es bleibt ein Arbeitstag übrig.** Bricht etwas, ist bis zum Abend Zeit
+  für einen Fix oder den Rückfall nach §10u — mit jemandem am Rechner, nicht
+  am Telefon.
+* **Werktags**, weil am Wochenende niemand da ist, der den Rückfall
+  ausführen kann.
+
+### Doku-PRs bündeln
+
+Ein PR, der nur `docs/`, `STATUS.md` oder `CLAUDE.md` berührt, ändert am
+Programm **nichts** — und startet den Stack trotzdem neu. Mehrere solche PRs
+einzeln zu mergen ist deshalb mehrfach derselbe Preis für keinen Nutzen.
+Sammeln und in einem Lauf mergen.
+
+### Ausnahme Hotfix
+
+Ein Fehler, der im Betrieb wirkt, wartet nicht auf den nächsten Werktag. Der
+PR-Text nennt dann den Grund — ein Satz genügt, aber er muss dastehen. Ohne
+ihn ist in sechs Wochen nicht mehr unterscheidbar, ob die Regel bewusst
+übergangen oder vergessen wurde.
+
+### Wann die Regel wieder weggeht
+
+Sie ist die Antwort auf eine **behebbare** Eigenschaft, nicht auf ein Gesetz.
+Referenziert die Compose-Datei die Images per Digest statt per Tag (AE-77
+Offen, Variante 1, ~2 h, Backlog nach dem 01.11.), startet ein Doku-Merge
+nichts mehr neu, und die Regel schrumpft auf das, was ohnehin gilt: §0.3 und
+die Deploy-Sperre.
+
+**Was die Regel NICHT ersetzt:** die Frage nach einem laufenden Montage- oder
+Eingangstest (§0.3) und die Deploy-Sperre (§10p). Ein Montagegang um 10:30
+ist ein Grund zu warten, auch wenn das Fenster offen ist.
+
+**Querverweise:** CLAUDE.md §0.3 (die Frage vor jedem Merge, dort steht die
+Regel ebenfalls), §10p (Deploy-Sperre), §10u (Rückfall, wenn es schiefgeht),
+AE-77 §1 und Offen (der Neustart und seine Behebung).
