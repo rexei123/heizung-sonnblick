@@ -4654,6 +4654,48 @@ Erinnerung, nicht Alarm: ein gesetzter Pin ist eine Entscheidung, kein
 Fehler. Dazu trägt jeder Deploy-Ping den Pin im Body, damit er im Monitor
 steht und nicht nur im Server-Log.
 
+**Gebaut in T10** (`services/pin_reminder.py`, `tasks/pin_reminder_tasks.py`,
+Beat-Slot `pin-reminder-hourly`). Vier Entscheidungen, die beim Bauen
+anfielen:
+
+**Der Pin kommt aus der Umgebung, nicht aus der Datei.** `infra/deploy/.env`
+hängt per `env_file` an api, worker und beat — `PIN_SHA` steht damit schon
+in der Umgebung der Container, ohne eine Zeile Compose-Änderung. Das ist
+auch die *richtige* Größe: die Umgebung trägt den Pin, mit dem der
+**laufende** Stand deployt wurde. Wer ihn setzt, während die Deploy-Sperre
+steht (§10p), hat noch keinen wirksamen Pin — und bekommt richtigerweise
+noch keine Erinnerung. Ein Lesen der Datei hätte an einen Zustand erinnert,
+den es nicht gibt.
+
+**Die Uhr steht in der Datenbank, nicht in Redis.** `alert_throttle` hält
+seine Bremsen in Redis, und bei sechs Stunden passt das. Der Redis-Dienst
+hat in `docker-compose.prod.yml` **kein Volume** — jeder Neustart leert ihn.
+Bei einer Sieben-Tage-Uhr wäre das der stille Ausfall aus §5.76: der Zähler
+springt auf Null, die Erinnerung kommt nie, und niemand bemerkt es, weil ein
+ausbleibender Hinweis nichts hinterlässt. Deshalb zwei Laufzeit-Spalten auf
+`global_config` (Migration 0028, additiv), nach dem Muster der
+Mail-Felder aus Migration 0021: geschrieben nur vom Service, nicht Teil von
+`GlobalConfigUpdate`.
+
+**Die Uhr startet bei einem Pin-Wechsel nicht neu.** Gemessen wird „der
+Server folgt dem Branch nicht", und das hält an, wenn der Pin von einem
+Commit zum nächsten wandert. Der SHA wird nachgezogen (die Mail soll den
+aktuellen nennen), `pin_sha_seen_at` nicht. Andernfalls könnte man die
+Erinnerung beliebig hinausschieben, indem man neu pinnt — ohne den Zustand
+zu beenden. Aus demselben Grund ist der Bremsen-Schlüssel der **Zustand**
+(`pin_active:aktiv`) und nicht der SHA.
+
+**Zwei Mechanismen, nicht einer.** Die erste Mail kommt von der Uhr („ist es
+lange genug her"), der Rhythmus danach von `alert_throttle` („habe ich schon
+erinnert"). Das sind zwei verschiedene Fragen, und ein Mechanismus, der
+beide beantworten soll, beantwortet eine davon falsch: eine TTL allein
+schickte die erste Mail sofort, eine Uhr allein jede Stunde eine.
+
+Der Takt ist **stündlich** (`crontab(minute=40)`), wie beim Belegungs-
+Wächter und aus demselben Grund: ein fester Tages-Slot ist ein Slot, der
+verpasst werden kann (§5.79). Die Bremse sorgt dafür, dass daraus trotzdem
+höchstens eine Mail pro Woche wird.
+
 ### 10. Das Skript dreht sich mit zurück — und bricht deshalb ab, statt es zu tun
 
 **Nachtrag 09.10.2026, Befund des Hoteliers.** Entscheidung 6 („der

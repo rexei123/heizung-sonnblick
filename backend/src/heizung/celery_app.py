@@ -43,6 +43,7 @@ app: Celery = Celery(
         "heizung.tasks.override_cleanup_tasks",
         "heizung.tasks.occupancy_import_tasks",
         "heizung.tasks.occupancy_status_tasks",
+        "heizung.tasks.pin_reminder_tasks",
     ],
 )
 
@@ -123,6 +124,19 @@ app.conf.update(
         "sync-room-statuses-every-60s": {
             "task": "heizung.sync_room_statuses",
             "schedule": 60.0,
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 20g (H-6 T10): erinnert an einen gesetzten PIN_SHA — Mail
+        # nach sieben Tagen, danach woechentlich. Stuendlich aus demselben
+        # Grund wie der Import-Waechter darueber: ein fester Tages-Slot ist
+        # ein Slot, der verpasst werden kann (§5.79). Die Mail bremst
+        # ``alert_throttle``, der Takt hier ist nur die Gelegenheit.
+        #
+        # Versetzt zu :20, damit nicht beide Waechter dieselbe Minute
+        # belegen — kein Lastproblem, nur lesbarere Logs.
+        "pin-reminder-hourly": {
+            "task": "heizung.check_pin_reminder",
+            "schedule": crontab(minute=40),
             "options": {"queue": "heizung_default"},
         },
     },

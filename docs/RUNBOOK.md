@@ -4161,7 +4161,19 @@ wenn man es vergisst. Zwei Dinge erinnern daran:
   (`ok: pinned to develop-… (automatik aus)`), nicht nur im Server-Log.
 * Nach **sieben Tagen** kommt eine Mail an die Alarm-Adresse, danach
   wöchentlich, solange der Pin steht. Sie ist eine Erinnerung, kein Alarm:
-  ein gesetzter Pin ist eine Entscheidung.
+  ein gesetzter Pin ist eine Entscheidung. Sie nennt den Commit, seit wann
+  er steht und den Weg zurück (Schritt 6).
+
+  Die Uhr beginnt bei dem **Deploy**, der den Pin wirksam gemacht hat —
+  nicht beim Eintrag in die `.env`. Wird der Lauf wegen eines Eingangstests
+  übersprungen (§10p), zählt erst der Lauf danach. Wandert der Pin später
+  auf einen anderen Commit, läuft die Uhr **weiter**: gezählt wird, wie
+  lange der Server dem Branch nicht folgt, nicht wie lange dieser eine
+  Commit steht.
+
+  Voraussetzung ist eine Alarm-Adresse unter Einstellungen. Fehlt sie,
+  steht der Hinweis nur im Server-Log — dann ist die Erinnerung so viel
+  wert wie das Log, in das niemand sieht.
 
 **Ein Pin ist kein Dauerzustand.** Er hält den Betrieb am Laufen, während
 jemand den Fehler behebt. Je länger er steht, desto größer wird der Sprung,
