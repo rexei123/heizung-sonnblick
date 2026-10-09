@@ -278,6 +278,36 @@ if [ -n "$PIN_SHA_VAL" ]; then
         exit 1
     fi
 
+    # Zweiter Waechter: liegen Migrationen zwischen Ziel und laufendem
+    # Stand, muss das Ziel-Image den Revisions-Vorcheck mitbringen.
+    #
+    # Sonst findet `alembic upgrade head` im alten Container eine Revision,
+    # die sein `versions/`-Verzeichnis nicht kennt, bricht ab
+    # ("Can't locate revision") — und weil api, celery_worker und
+    # celery_beat dasselbe Image mit demselben Entrypoint fahren und
+    # `restart: always` gilt, ist das Ergebnis ein Neustart-Karussell ohne
+    # API und ohne Engine. Belegt am 09.10.2026 gegen eine DB auf 0028 mit
+    # dem alembic-Baum von 85125ae.
+    #
+    # Das gilt unabhaengig davon, ob die Migration additiv ist: Alembic
+    # scheitert an seiner Buchfuehrung, bevor eine Zeile Schema geprueft
+    # wird. Die Additivitaet entscheidet danach, ob der Stand auch
+    # *fachlich* laufen kann — das kann dieses Skript nicht pruefen, dafuer
+    # gibt es §10u Schritt 0b und die Pflichtzeile im PR-Template.
+    if [ -n "$(git log --format=%h "${PIN_SHA_VAL}..${OLD_SHA}" -- backend/alembic/versions/ 2>/dev/null)" ] &&
+        ! git show "${PIN_SHA_VAL}:backend/docker-entrypoint.sh" 2>/dev/null |
+            grep -q 'db_revision_check'; then
+        log "ABBRUCH: zwischen Ziel-Commit '$PIN_SHA_VAL' und dem laufenden"
+        log "         Stand liegen Migrationen, und das Ziel-Image startet"
+        log "         ohne Revisions-Vorcheck. Der alte Container wuerde an"
+        log "         'alembic upgrade head' scheitern und in einer"
+        log "         Neustart-Schleife haengen — ohne API und ohne Engine."
+        log "         Neueren Ziel-Commit waehlen — RUNBOOK §10u, Schritt 0b."
+        ping_healthcheck "$(read_env_key HEALTHCHECK_DEPLOY_URL)" "deploy" \
+            "abort: PIN_SHA '$PIN_SHA_VAL' ohne Revisions-Vorcheck, Migrationen dazwischen" || true
+        exit 1
+    fi
+
     ZIEL_SHA=$(git rev-parse "$PIN_SHA_VAL")
     log "PIN_SHA gesetzt: $PIN_SHA_VAL -> $ZIEL_SHA. Automatik aus,"
     log "         der Branch-Kopf wird NICHT verfolgt."

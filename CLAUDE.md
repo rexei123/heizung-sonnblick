@@ -3214,6 +3214,68 @@ ohne Messung), RUNBOOK §10n (der Beleg-Anker — von der Laufzeit-Schwelle
 auf die Testzahl umgestellt, weil die alte Schwelle nach diesem Fix einen
 gesunden Lauf als Abbruch gemeldet haette).
 
+### 5.83 Eine Zusicherung gilt nur auf der Ebene, auf der sie geprueft wurde (H-6, 09.10.2026)
+
+H-6 hat einen Rueckfallpunkt gebaut und fuer belastbar erklaert. Innerhalb
+von zwei Tagen fielen **zwei** Wege auf, auf denen er nicht gehalten haette
+— beide vom Hotelier gefunden, beide nicht im Code, den der Sprint
+angefasst hatte:
+
+| Zusicherung | Stimmte auf Ebene | Widerlegt auf Ebene |
+|---|---|---|
+| „`PIN_SHA` ueberlebt den Timer" | das **Skript** tut, was es soll | das Skript **liegt im Working-Tree** und geht beim Pin mit zurueck; der naechste Tick startet die alte Fassung |
+| „Rueckfall ueber additive Migrationen ist zulaessig" | das **Schema** ist vorwaertskompatibel | **Alembics Buchfuehrung**: die Revision in `alembic_version` steht nicht im `versions/` des alten Images, `upgrade head` bricht ab, bevor Schema geprueft wird |
+
+Beide Male war die Begruendung richtig und unvollstaendig, und beide Male
+war das Fehlerbild **leise**: der Lauf von Hand meldete korrekt, die
+Pruefung nach der Anleitung war gruen, und der Schaden trat erst danach
+ein — einmal nach fuenf Minuten, einmal beim Hochfahren der Container.
+
+**Die Lesson ist nicht „denke an den Working-Tree" oder „denke an
+Alembic".** Sie ist: **wer eine Eigenschaft zusichert, nennt die Ebene, auf
+der er sie geprueft hat.** „Der Pin haelt" ist keine Aussage, solange nicht
+dabeisteht, *was* gehalten wurde — die Variable, die Datei, der Prozess,
+der naechste Lauf. Eine Zusicherung ohne Ebene liest sich wie eine
+Zusicherung ueber alle Ebenen, und genau so wird sie spaeter verwendet.
+
+Praktisch heisst das fuer jede Infrastruktur-Zusicherung die Frage: **wer
+fuehrt das aus, von welchem Dateistand, und was liest es dabei?** Bei H-6
+haetten beide Faelle daran haengen muessen:
+
+- *Wer fuehrt es aus?* → `ExecStart` zeigt in den Working-Tree, der
+  zurueckgeht (Fall 1).
+- *Was liest es dabei?* → `alembic_version` in der Datenbank, die nicht
+  zurueckgeht (Fall 2).
+
+**Der unbequeme Teil.** Ich habe in beiden Faellen eine plausible
+Kausalkette fuer einen Beweis genommen — §5.68 und §5.76 sagen genau das,
+und es ist trotzdem zweimal in einen Sprint gelangt, der **selbst** von
+Rueckfaellen handelt. Der Unterschied zwischen beiden Richtungen ist
+billig zu pruefen: Fall 2 war in zehn Minuten belegt (alembic-Baum des
+Ziel-Commits gegen die Datenbank laufen lassen), nachdem die Frage
+ueberhaupt gestellt war. Das Teure ist nicht die Messung, sondern darauf zu
+kommen, dass eine faellig ist.
+
+**Und der konstruktive Teil:** In beiden Faellen war die Antwort derselbe
+Mechanismus — **ein Waechter an der Stelle, an der der Zustand noch
+pruefbar ist**, statt eines Satzes in der Anleitung. Das Skript prueft vor
+dem Rueckfall, ob das Ziel-Skript den Pin kennt; es prueft vor dem
+Rueckfall, ob das Ziel-Image den Revisions-Vorcheck mitbringt; und der
+Entrypoint prueft vor dem Upgrade, ob er die Revision kennt. Eine Anleitung
+braucht jemanden, der sie im richtigen Moment liest — und der richtige
+Moment ist hier einer, in dem etwas kaputt ist (§5.82, dritter Teil, in
+derselben Sache).
+
+**Querverweise:** §5.68 (Behauptung vs. Befund — hier zweimal in eigener
+Sache), §5.76 (Wirkung statt Mechanik; beide Faelle waren Mechanik, die
+stimmte, bei Wirkung, die ausfiel), §5.79 (ein Audit gilt nur fuer den
+Stand, den es gesehen hat — Schwesterfall: dort die Zeit, hier die Ebene),
+§5.4 (CI und Image-Tagging kennen, **bevor** man Pinning baut — dieselbe
+Familie, und der Grund, warum H-6 ein eigener Sprint war), §5.3 (ASCII in
+allem, was Shell- und Locale-Grenzen ueberquert — der Vorcheck haette sonst
+still versagt), AE-77 §10 und §11 (die beiden Faelle mit ihren Messungen),
+RUNBOOK §10u Schritt 0a und 0b.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
