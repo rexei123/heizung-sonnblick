@@ -79,6 +79,19 @@ class GlobalConfig(Base):
     # (``mailer._redact`` greift vor dem Schreiben).
     last_mail_error: Mapped[str | None] = mapped_column(String(200))
 
+    # --- Laufzeit-Felder zum Rueckfallpunkt (Sprint 20g, Migration 0028) --
+    # Ebenfalls KEINE Konfiguration, siehe Block darueber. Geschrieben
+    # ausschliesslich von ``services/pin_reminder.run_pin_reminder``.
+    #
+    # Der wirksame Pin steht in der Umgebung des Containers (``PIN_SHA`` aus
+    # ``infra/deploy/.env`` via ``env_file``). Diese zwei Felder halten, was
+    # die Umgebung nicht hergibt: **seit wann** er steht.
+    pin_sha_seen: Mapped[str | None] = mapped_column(String(40))
+    # Laeuft ueber einen Pin-Wechsel hinweg weiter — gemessen wird "der
+    # Server folgt dem Branch nicht", nicht "dieser SHA steht". Siehe
+    # Migration 0028 und AE-77 §9.
+    pin_sha_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

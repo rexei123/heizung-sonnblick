@@ -13,7 +13,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Final, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default-Werte, die NIE in einem produktiven Setup landen duerfen.
@@ -228,6 +228,35 @@ class Settings(BaseSettings):
     # es ein eigener Minuten-Wert — nicht ein Float.
     health_healthy_max_age_h: int = 2
     health_degraded_max_age_h: int = 3
+
+    # --- Rueckfallpunkt (Sprint 20g, H-6 T10) ---
+    #
+    # ``PIN_SHA`` steht in ``infra/deploy/.env`` und wird von
+    # ``deploy-pull.sh`` gelesen; die Container bekommen dieselbe Datei als
+    # ``env_file`` und sehen den Wert damit in ihrer Umgebung.
+    #
+    # Das ist nicht derselbe Wert wie der in der Datei, und das ist Absicht:
+    # die Umgebung traegt den Pin, mit dem der **laufende** Stand deployt
+    # wurde. Wer ihn setzt, waehrend die Deploy-Sperre steht (§10p), hat
+    # noch keinen wirksamen Pin — und bekommt richtigerweise noch keine
+    # Erinnerung.
+    #
+    # KEINE Konfiguration der Anwendung: das Backend liest ihn nur, um daran
+    # zu erinnern (``services/pin_reminder``). Es handelt nicht danach.
+    pin_sha: str | None = None
+
+    @field_validator("pin_sha", mode="after")
+    @classmethod
+    def _pin_leer_ist_kein_pin(cls, wert: str | None) -> str | None:
+        """``PIN_SHA=`` (geleert) ist kein Pin.
+
+        Der Rueckweg aus RUNBOOK §10u Schritt 6 leert die Zeile, statt sie zu
+        entfernen — das Skript liest dann einen leeren Wert. Ohne diese
+        Normalisierung waere ``""`` ein wahrheitsfaehiger Zustand, und die
+        Erinnerung liefe nach dem Loesen weiter.
+        """
+        geputzt = (wert or "").strip()
+        return geputzt or None
 
     @model_validator(mode="after")
     def _reject_default_secrets(self) -> "Settings":

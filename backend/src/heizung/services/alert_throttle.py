@@ -56,9 +56,21 @@ KEY_TEMPLATE = "alert_sent:{kind}:{subject}"
 TTL_DEVICE_SILENT_S = 6 * 3600
 # Belegungsliste ausgeblieben: knapp unter einem Tag.
 TTL_IMPORT_STALE_S = 20 * 3600
+# Rueckfallpunkt steht noch: woechentlich. Die erste Mail kommt nicht von
+# dieser Bremse, sondern von der Sieben-Tage-Uhr in ``pin_reminder`` — hier
+# wird nur der Rhythmus danach gehalten. Sieben Tage und nicht sechs:
+# bei knapper TTL kaeme die zweite Mail im Zweifel einen Tag zu frueh, und
+# eine Erinnerung, die oefter kommt als vereinbart, wird ignoriert (§5.79).
+TTL_PIN_ACTIVE_S = 7 * 24 * 3600
 
 KIND_DEVICE_SILENT = "device_silent"
 KIND_IMPORT_STALE = "import_stale"
+KIND_PIN_ACTIVE = "pin_active"
+
+# Gegenstand der Pin-Erinnerung ist der Zustand, nicht der SHA. Mit dem SHA
+# als Schluessel koennte ein Pin-Wechsel sofort eine zweite Mail ausloesen —
+# derselbe Grund, aus dem die Uhr in ``pin_reminder`` nicht neu startet.
+SUBJECT_PIN_ACTIVE = "aktiv"
 
 
 def _key(kind: str, subject: str) -> str:

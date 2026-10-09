@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-06, develop-HEAD `fded11b` (PR #259). Zuletzt abgeschlossen: **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256 (Brief), #257 (Codec 0x28, Vor-Check, calibrationFailed), #258 (device_manual, Engine-Abgleich), #259 (Abreise, Trace-Text); Migrationen 0025 und 0026. Davor: **Sprint 20d (Paginierung Zimmer/Raumtypen/Belegungen, B-20c-2, AE-75)**, §2bv — PR #255; **Sprint 20c (Hotfix Geräteliste)**, §2bu — PR #251; **Sprint 20b (Batterie-Schwellen in die Settings, AE-73)**, §2bt — PR #250; **Sprint 20a (Deploy-Sperre)**, §2br — PR #247; **Sprint 20 (Batteriestufen über die Spannung, AE-72)**, §2bq. **Nächster Sprint: 20e** (Montage-Status vereinfacht, AE-74 — Gate beantwortet; die 15-Minuten-Sperre vorher neu bewerten, siehe §2bw). **Offen vor dem 01.11.:** Codec-Re-Paste in ChirpStack (§5.22), Realtest zu T2/T3, Live-Verify aus 20c/20d, Release develop → main.
+**Stand:** 2026-10-09, develop-HEAD `31a5d07` (PR #283) + PR #284, der den Sprint abschließt. Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Offen vor dem 01.11.:** Rückfall-Übung nach §10u (Ziel `85125ae`), 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-10-06
+**Stichtag:** 2026-10-09
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **keiner** — 20f ist abgeschlossen (§2bw, AE-76, vier PRs gemergt). Nächster: **20e** (AE-74). Zuletzt abgeschlossen: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **keiner** — 20g (H-6) ist abgeschlossen (§2bz, AE-77, fünf PRs gemergt, Migration 0028). Nächster: **20e-b** (Regel 3b relativ, Variante A). Offen aus 20g: die **Rückfall-Übung** nach RUNBOOK §10u, Ziel `85125ae`. Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5081,6 +5081,98 @@ Device beim Anlegen, es bleibt **einer** aktiv, und der Test hätte nicht mehr
 geprüft, was sein Name sagt. Reihenfolge umgedreht — zuerst Rezeption, dann
 Gast-Drehung; beide bleiben aktiv, der Check-out muss beide beenden, und das
 ist zugleich der realistische Fall.
+
+## 2bz. Sprint 20g H-6 Image-Pinning und Rückfallpunkt (2026-10-08/09, AE-77)
+
+**Warum.** Vor diesem Sprint lief der Betrieb auf einem gleitenden Tag: die
+Compose-Datei sagt `:${IMAGE_TAG:-develop}`, der Timer zog, was gerade
+darunter lag. Zwei Folgen, und die zweite ist die teure:
+
+1. Es gab **keinen Rückfallpunkt.** Bricht ein Merge die Steuerung, war der
+   Weg zurück „den vorigen Stand wiederfinden und von Hand einen anderen Tag
+   setzen" — während der Timer alle fünf Minuten erneut `develop` zieht.
+2. Es war **nicht nachweisbar, was läuft.** „Der Server ist auf develop"
+   sagt nichts über den Commit. §5.68 in der Infrastruktur.
+
+Vier Wochen vor dem 01.11. ist das der Punkt, an dem ein Fehler nicht
+behebbar, sondern nur aussitzbar wäre.
+
+**PRs:** #280 (T1 bauen oder umhängen), #281 (T2–T6 Pinning im Skript),
+#282 (T8/T9/T11 RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter),
+#284 (T10 Erinnerung). Migration **0028** (additiv). Keine
+Engine-Änderung — der Sprint fasst Infrastruktur und Betrieb an.
+
+### Was jetzt gilt
+
+**Jeder Commit auf `develop` hat ein Image.** Berührt ein Commit ein Image
+nicht, hängt der Build-Workflow den Tag des Vorgängers um
+(`docker buildx imagetools create`), statt neu zu bauen — „Weg C". Je Image
+entschieden, anhand von **Tree-Hashes** (`git rev-parse HEAD:backend`), nicht
+anhand von Pfadnamen: die gefährliche Fehlerrichtung ist ein falsches
+„unverändert", und die ist still. Live belegt nach dem ersten Merge:
+`develop-77547ed` und `develop-30b6ffe` tragen beide
+`sha256:d198640ac25b`.
+
+**`PIN_SHA` in `infra/deploy/.env` hält den Stand**, und zwar über den Timer
+hinweg. Das Skript löst den Pin auf, prüft ihn, geht mit losgelöstem HEAD
+dorthin und setzt `IMAGE_TAG=<branch>-<sha7>`. Ein **unbekannter** Pin
+bricht ab, statt auf den Branch zurückzufallen — ein Tippfehler würde sonst
+stumm den neuesten Stand deployen, also das Gegenteil dessen, was jemand
+wollte, der gerade zurückrollt.
+
+**Der Handgriff steht in RUNBOOK §10u**, so geschrieben, dass der Hotelier
+ihn selbst ausführt: sechs Schritte, Befehl zum Kopieren, Prüfung nach
+jedem, Rückweg. Schritt 0 steht **vor** Schritt 1, weil es zwei Fälle gibt,
+in denen ein Rückfall nicht zulässig ist und die von außen nicht zu sehen
+sind (Pin-Fähigkeit und Migrationen).
+
+**Ein vergessener Pin erinnert:** Mail nach sieben Tagen, danach
+wöchentlich, an die Alarm-Adresse. Erinnerung, nicht Alarm.
+
+### Zwei Befunde aus dem Sprint, die mehr wert sind als die Features
+
+**Der Rückfall hätte sich selbst aufgehoben** (Befund des Hoteliers,
+09.10.). Der Timer startet das Skript **aus dem Working-Tree**, und der
+Working-Tree geht beim Pin mit zurück. Ein Pin auf einen Commit vor
+`805c31c` hätte beim nächsten Tick das alte Skript gestartet, das
+`PIN_SHA` nicht kennt und auf den Branch-Kopf synct — Rückfall nach fünf
+Minuten weg. Gemessen am alten Skript (`30b6ffe`): `git checkout develop`,
+`git reset --hard origin/develop`, kein Wort über den Pin.
+
+Das Fehlerbild war **leise**: der Lauf von Hand meldet vorher korrekt, und
+die Prüfung nach Schritt 5 ist grün. Behoben in #283 — das Skript prüft vor
+dem Rückfall, ob das Skript im Ziel-Commit die Pin-Logik kennt, und bricht
+sonst ab. Pin-fähig ist `805c31c` und alles danach; das Fenster wächst mit
+jedem Merge.
+
+**GHCR löscht Versionen, nicht Tags.** Aufgefallen bei der T1a-Probe: das
+Probe-Tag `h6-probe` sitzt auf derselben Version wie `develop` und ist
+einzeln nicht entfernbar. Ein Aufräumskript, das das nicht weiß, löscht das
+laufende Image. Offener Backlog-Punkt mit der Regel: **eine Version mit
+`develop-` oder `PIN`-Tag wird nie gelöscht.** Nicht vor dem 01.11.
+
+### Was dieser Sprint nicht kann
+
+Daten zurückdrehen, eine nicht-additive Migration rückgängig machen, einen
+Fehler im ChirpStack-Codec beheben (der lebt in der ChirpStack-Oberfläche,
+§5.22) oder einen abgeschickten Downlink zurückholen. Steht so in §10u,
+damit niemand den Rückfall für mehr hält, als er ist.
+
+### Offen
+
+**Rückfall-Übung:** einmal echt, Ziel `85125ae` nach dem Merge von #283 —
+dieser Commit hat ein frisch gebautes api-Image, der Rückfall ist also am
+Digest sichtbar. Dazu die **Pflichtzeile im PR-Template** (`Migration
+additiv: ja / nein / keine Migration`) und CLAUDE.md §3 Regel 10, die den
+Grund nennt: ein Rückfall per Pin ist nur über additive Migrationen
+zulässig, und wer unter Druck zurückrollt, muss das aus dem PR-Text sehen
+können.
+
+**Runner außerhalb des Working-Trees** (AE-77 Offen): bewertet,
+~2–2,5 h, **nicht vor dem 01.11.** Der Gewinn wäre Reichweite in Commits von
+vor dem 09.10., und die sind teils ohne Image; dagegen steht eine zweite
+Kopie des Skripts, die still vom Repo abweichen kann (dieselbe Klasse wie
+der ChirpStack-Codec).
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
