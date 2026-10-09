@@ -4617,6 +4617,16 @@ zurückrollt. Lieber ein Deploy, der steht und es sagt.
 
 ### 8. Rückfall nur über additive Migrationen
 
+> **Nachtrag 09.10.2026 — dieser Abschnitt war notwendig und nicht
+> hinreichend.** „Additiv" beschreibt das **Schema**, und daran war nichts
+> falsch. Nur scheitert Alembic vorher an seiner **eigenen Buchführung**:
+> die Revision in `alembic_version` steht nicht im `versions/`-Verzeichnis
+> des alten Images, und `upgrade head` bricht ab, bevor eine Zeile Schema
+> geprüft wird. Ohne den Vorcheck aus §11 machte damit **jede** Migration
+> einen Rückfall unmöglich — auch jede additive. Was unten steht, gilt
+> weiter; es beantwortet die Frage „läuft der alte Stand", nicht die Frage
+> „startet er überhaupt".
+
 Der Container führt beim Start `alembic upgrade head` aus; rückwärts
 geschieht das nicht. Ein Image von vor einer Migration startet gegen ein
 Schema, das weiter ist als der Code.
@@ -4773,6 +4783,81 @@ dann einen `develop-<sha7>`-Tag, wenn er `backend/**` oder `frontend/**`
 berührt hat. Doku-Commits von davor haben gar keinen, und Schritt 2 des
 Handgriffs fängt sie ab. Die erreichbare Fenstergröße wächst mit jedem
 Merge.
+
+### 11. Der Container startet über eine Migration hinweg — oder der Deploy bricht ab
+
+**Nachtrag 09.10.2026, zweiter Befund des Hoteliers.** Nach §10 (das Skript
+dreht sich mit zurück) der zweite Fall derselben Art: eine Zusicherung, die
+auf einer Ebene stimmt und auf einer anderen nicht gilt.
+
+**Gemessen**, alembic-Baum von `85125ae` gegen eine Datenbank auf `0028`:
+
+```
+ERROR [alembic.util.messaging] Can't locate revision identified by '0028_global_config_pin_seen'
+FAILED: Can't locate revision identified by '0028_global_config_pin_seen'
+```
+
+Und der echte Entrypoint derselben Fassung gegen eine Datenbank mit einer
+unbekannten Revision:
+
+```
+[entrypoint] Starte Alembic-Migration...
+FAILED: Can't locate revision identified by '0099_aus_der_zukunft'
+[entrypoint] Migration-Versuch 1 fehlgeschlagen, warte 3 s...
+… (fünf Versuche) …
+[entrypoint] Migration nach 5 Versuchen fehlgeschlagen. Abbruch.   exit 1
+```
+
+**Der Schaden wäre nicht ein halber Rückfall, sondern ein Ausfall.** `api`,
+`celery_worker` und `celery_beat` fahren dasselbe Image mit demselben
+Entrypoint, und `restart: always` gilt für alle drei. Ergebnis: ein
+Neustart-Karussell ohne Oberfläche und **ohne Engine** — im Moment, in dem
+jemand unter Druck zurückrollt. Das ist teurer als der Fehler, den der
+Rückfall beheben sollte.
+
+**Entscheidung: der Entrypoint prüft vor dem Upgrade, ob dieses Image die
+Revision in der Datenbank kennt.** Kennt es sie nicht, ist die Datenbank
+neuer als der Code — dann wird das Upgrade übersprungen, mit einer
+unmissverständlichen Meldung im Log, und die Anwendung startet.
+
+Drei Dinge daran sind Absicht:
+
+**Es gibt keinen Fehler-Rückgabewert.** Der Vorcheck ist eine Zugabe und
+darf nicht selbst zur Abbruchursache werden: `10` heißt überspringen,
+**alles andere** heißt ausführen — Datenbank nicht erreichbar, `alembic.ini`
+nicht lesbar, Vorcheck selbst abgestürzt. Dann verhält sich der Entrypoint
+wie vorher: fünf Versuche, dann sichtbarer Absturz. Ein bekanntes
+Fehlerbild mit bekannter Diagnose ist besser als ein neues.
+
+**Die Ausgaben sind ASCII, und `main` fängt alles.** Läuft der Container
+ohne UTF-8-Locale, würde ein `print` mit `§` werfen — und der Entrypoint
+liest jeden Code außer `10` als „ausführen". Der Vorcheck wäre damit
+**still wirkungslos**, und genau das ist die Fehlerrichtung, die man nicht
+sieht (§5.3 ist dieselbe Familie).
+
+**Übersprungen wird nur dieser eine Zustand.** Ein echter Migrationsfehler
+bricht weiter ab. Ein Container, der mit halb angewandten Migrationen
+hochfährt, wäre schlimmer als einer, der nicht startet.
+
+**Pin-Wächter-Prinzip, zweiter Fall.** Der Vorcheck muss im **Ziel-Image**
+liegen, nicht im laufenden — er wirkt also nur für Ziele ab dieser
+Änderung. `deploy-pull.sh` prüft das deshalb vorher und bricht ab:
+
+```bash
+if [ -n "$(git log --format=%h "${PIN_SHA_VAL}..${OLD_SHA}" -- backend/alembic/versions/)" ] &&
+    ! git show "${PIN_SHA_VAL}:backend/docker-entrypoint.sh" | grep -q 'db_revision_check'; then
+```
+
+Beide Bedingungen zusammen, und das ist der Punkt: **liegt keine Migration
+dazwischen, wird nichts verlangt.** Die Datenbank steht dann schon auf dem
+Kopf, den das Ziel kennt, und `upgrade head` ist ein No-Op. Ein Wächter,
+der den Vorcheck auch dann fordert, verbietet den Rückfall in genau dem
+Fall, für den er gebaut ist.
+
+**Reichweite:** Ziele ab dieser Änderung sind uneingeschränkt. Ziele
+zwischen `805c31c` und hier bleiben brauchbar, solange **keine Migration**
+dazwischen liegt — das deckt den häufigen Fall ab („der letzte Stand, der
+lief"), weil die meisten Merges keine Migration mitbringen.
 
 ## Verworfen
 

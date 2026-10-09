@@ -136,8 +136,21 @@ def umgebung(tmp_path: Path) -> dict[str, object]:
         # kennt das Skript im Ziel-Commit die Pin-Logik? Vorgabe ja, sonst
         # waeren alle Pin-Tests hier auf einen Abbruch gelaufen.
         "  show)\n"
-        '    if [ "$GIT_ZIEL_PINFAEHIG" = "nein" ]; then exit 0; fi\n'
-        "    echo 'PIN_SHA_VAL=$(read_env_key PIN_SHA)'\n"
+        '    case "$*" in\n'
+        "      *docker-entrypoint.sh*)\n"
+        # Zweiter Waechter: bringt das Ziel-Image den Revisions-Vorcheck?
+        '        if [ "$GIT_ZIEL_VORCHECK" = "nein" ]; then exit 0; fi\n'
+        "        echo 'python -m heizung.scripts.db_revision_check' ;;\n"
+        "      *)\n"
+        '        if [ "$GIT_ZIEL_PINFAEHIG" = "nein" ]; then exit 0; fi\n'
+        "        echo 'PIN_SHA_VAL=$(read_env_key PIN_SHA)' ;;\n"
+        "    esac\n"
+        "    ;;\n"
+        # ``log -- backend/alembic/versions/`` fragt der zweite Waechter:
+        # liegen Migrationen zwischen Ziel und laufendem Stand? Vorgabe
+        # nein, sonst haetten alle Pin-Tests den neuen Abbruch getroffen.
+        "  log)\n"
+        '    if [ "$GIT_MIGRATIONEN" = "ja" ]; then echo "abc1234"; fi\n'
         "    ;;\n"
         "esac\n"
         "exit 0\n",
@@ -385,6 +398,70 @@ def test_ziel_ohne_pin_logik_bricht_ab(umgebung: dict[str, object]) -> None:
     assert "pull api web" not in protokoll
     assert "up -d" not in protokoll
     assert "curl" in protokoll
+
+
+def test_migration_ohne_vorcheck_im_ziel_bricht_ab(umgebung: dict[str, object]) -> None:
+    """Migrationen dazwischen + Ziel-Image ohne Revisions-Vorcheck -> Abbruch.
+
+    Der alte Container fuehrt beim Start ``alembic upgrade head`` aus und
+    findet in ``alembic_version`` eine Revision, die sein
+    ``versions/``-Verzeichnis nicht kennt. Alembic bricht ab, der
+    Entrypoint nach fuenf Versuchen auch — und weil api, celery_worker und
+    celery_beat dasselbe Image mit demselben Entrypoint fahren und
+    ``restart: always`` gilt, kreist der Stack ohne API und ohne Engine.
+
+    Das passiert **unabhaengig von der Additivitaet** der Migration:
+    Alembic scheitert an seiner Buchfuehrung, bevor eine Zeile Schema
+    geprueft wird.
+    """
+    _env_schreiben(umgebung, pin="85125ae")
+    lauf = _lauf(umgebung, GIT_MIGRATIONEN="ja", GIT_ZIEL_VORCHECK="nein")
+
+    assert lauf.returncode == 1
+    log = _log(umgebung)
+    assert "ABBRUCH" in log
+    assert "Revisions-Vorcheck" in log
+    assert "Neustart-Schleife" in log
+    assert "§10u" in log
+    protokoll = _aufrufe(umgebung)
+    assert "checkout" not in protokoll
+    assert "up -d" not in protokoll
+    assert "curl" in protokoll
+
+
+def test_migration_mit_vorcheck_im_ziel_laeuft(umgebung: dict[str, object]) -> None:
+    """Dieselbe Lage, aber das Ziel-Image kann es: der Rueckfall laeuft.
+
+    Die Gegenprobe zum Test darueber — ohne sie wuesste niemand, ob der
+    Waechter unterscheidet oder nur verbietet.
+    """
+    _env_schreiben(umgebung, pin=PIN_SHA)
+    lauf = _lauf(umgebung, GIT_MIGRATIONEN="ja")
+
+    assert lauf.returncode == 0
+    log = _log(umgebung)
+    assert "ABBRUCH" not in log
+    assert f"PIN_SHA gesetzt: {PIN_SHA}" in log
+    assert "up -d" in _aufrufe(umgebung)
+
+
+def test_ohne_migrationen_fragt_niemand_nach_dem_vorcheck(
+    umgebung: dict[str, object],
+) -> None:
+    """Kein Migrations-Risiko, keine zusaetzliche Huerde.
+
+    Liegt zwischen Ziel und laufendem Stand keine Migration, steht die DB
+    schon auf dem Kopf, den das Ziel-Image kennt — ``upgrade head`` ist
+    dann ein No-Op. Ein Ziel ohne Vorcheck ist in diesem Fall
+    unproblematisch, und ein Waechter, der ihn trotzdem verlangt, wuerde
+    den Rueckfall in genau dem Fall verbieten, fuer den er gebaut ist.
+    """
+    _env_schreiben(umgebung, pin=PIN_SHA)
+    lauf = _lauf(umgebung, GIT_ZIEL_VORCHECK="nein")
+
+    assert lauf.returncode == 0
+    assert "ABBRUCH" not in _log(umgebung)
+    assert "up -d" in _aufrufe(umgebung)
 
 
 # ---------------------------------------------------------------------------

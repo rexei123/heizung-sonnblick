@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-09, develop-HEAD `31a5d07` (PR #283) + PR #284, der den Sprint abschließt. Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Offen vor dem 01.11.:** Rückfall-Übung nach §10u (Ziel `85125ae`), 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-09, develop-HEAD `cbfc3d4` (PR #284) + PR #285, der den Sprint abschließt. Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Offen vor dem 01.11.:** Rückfall-Übung nach §10u (Ziel `cbfc3d4`), 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-10-09
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **keiner** — 20g (H-6) ist abgeschlossen (§2bz, AE-77, fünf PRs gemergt, Migration 0028). Nächster: **20e-b** (Regel 3b relativ, Variante A). Offen aus 20g: die **Rückfall-Übung** nach RUNBOOK §10u, Ziel `85125ae`. Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **keiner** — 20g (H-6) ist abgeschlossen (§2bz, AE-77, fünf PRs gemergt, Migration 0028). Nächster: **20e-b** (Regel 3b relativ, Variante A). Offen aus 20g: die **Rückfall-Übung** nach RUNBOOK §10u, Ziel `cbfc3d4` (nicht `85125ae` — dazwischen liegt Migration 0028, siehe §2bz). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5129,7 +5129,7 @@ sind (Pin-Fähigkeit und Migrationen).
 **Ein vergessener Pin erinnert:** Mail nach sieben Tagen, danach
 wöchentlich, an die Alarm-Adresse. Erinnerung, nicht Alarm.
 
-### Zwei Befunde aus dem Sprint, die mehr wert sind als die Features
+### Drei Befunde aus dem Sprint, die mehr wert sind als die Features
 
 **Der Rückfall hätte sich selbst aufgehoben** (Befund des Hoteliers,
 09.10.). Der Timer startet das Skript **aus dem Working-Tree**, und der
@@ -5144,6 +5144,27 @@ die Prüfung nach Schritt 5 ist grün. Behoben in #283 — das Skript prüft vor
 dem Rückfall, ob das Skript im Ziel-Commit die Pin-Logik kennt, und bricht
 sonst ab. Pin-fähig ist `805c31c` und alles danach; das Fenster wächst mit
 jedem Merge.
+
+**Der Container wäre über eine Migration hinweg nicht gestartet** (Befund
+des Hoteliers, 09.10., der dritte). AE-77 §8 erlaubte Rückfälle „über
+additive Migrationen", weil eine neue leere Spalte den alten Code nicht
+stört. Das stimmt für das **Schema** und half nichts: `alembic upgrade head`
+findet in `alembic_version` eine Revision, die das alte Image nicht kennt,
+und bricht ab, **bevor** eine Zeile Schema geprüft wird. Der Entrypoint
+versucht es fünfmal und beendet sich; weil api, celery_worker und
+celery_beat dasselbe Image fahren und `restart: always` gilt, wäre das
+Ergebnis ein Neustart-Karussell ohne Oberfläche und ohne Engine.
+
+Gemessen, beide Richtungen: der alte Entrypoint gegen eine Datenbank mit
+unbekannter Revision → `Migration nach 5 Versuchen fehlgeschlagen. Abbruch.`
+(`exit 1`); der neue → `Migration UEBERSPRUNGEN (DB neuer als dieses
+Image).` und die Anwendung läuft. **Ohne diesen Fix machte jede Migration
+einen Rückfall unmöglich, auch jede additive.** Behoben in #285; wie beim
+Pin muss der Vorcheck im **Ziel-Image** liegen, und `deploy-pull.sh` bricht
+vorher ab, wenn er fehlt und eine Migration dazwischenliegt.
+
+Daraus CLAUDE.md **§5.83**: eine Zusicherung gilt nur auf der Ebene, auf der
+sie geprüft wurde. Zwei der drei Befunde hier sind Fälle davon.
 
 **GHCR löscht Versionen, nicht Tags.** Aufgefallen bei der T1a-Probe: das
 Probe-Tag `h6-probe` sitzt auf derselben Version wie `develop` und ist
@@ -5160,13 +5181,20 @@ damit niemand den Rückfall für mehr hält, als er ist.
 
 ### Offen
 
-**Rückfall-Übung:** einmal echt, Ziel `85125ae` nach dem Merge von #283 —
-dieser Commit hat ein frisch gebautes api-Image, der Rückfall ist also am
-Digest sichtbar. Dazu die **Pflichtzeile im PR-Template** (`Migration
-additiv: ja / nein / keine Migration`) und CLAUDE.md §3 Regel 10, die den
-Grund nennt: ein Rückfall per Pin ist nur über additive Migrationen
-zulässig, und wer unter Druck zurückrollt, muss das aus dem PR-Text sehen
-können.
+**Rückfall-Übung:** einmal echt, Ziel **`cbfc3d4`** (Merge von #284) nach
+dem Merge von #285. Drei Gründe für genau diesen Commit: er ist pin-fähig,
+zwischen ihm und `develop` liegt **keine Migration** (0028 kam mit ihm), und
+er hat ein frisch gebautes api-Image — der Rückfall ist also am Digest
+sichtbar und nicht nur im Log.
+
+**Nicht `85125ae`**, wie zuerst geplant: dazwischen liegt Migration 0028,
+und das Ziel-Image kennt den Revisions-Vorcheck noch nicht. Das Deploy-
+Skript bricht dort seit #285 selbst ab.
+
+Dazu die **Pflichtzeile im PR-Template** (`Migration additiv: ja / nein /
+keine Migration`) und CLAUDE.md §3 Regel 10, die den Grund nennt: ein
+Rückfall per Pin ist nur über additive Migrationen zulässig, und wer unter
+Druck zurückrollt, muss das aus dem PR-Text sehen können.
 
 **Runner außerhalb des Working-Trees** (AE-77 Offen): bewertet,
 ~2–2,5 h, **nicht vor dem 01.11.** Der Gewinn wäre Reichweite in Commits von

@@ -4011,17 +4011,9 @@ Ersatz für ihn und der Abbruch keiner für ihn.
 
 ### Schritt 0b — Darf zurückgerollt werden? (Migrationen)
 
-**Ein Rückfall ist nur über *additive* Migrationen zulässig.**
-
 Der api-Container führt beim Start `alembic upgrade head` aus. Vorwärts
 geschieht das von selbst; **rückwärts nicht.** Ein Image von vor einer
-Migration startet also gegen ein Schema, das weiter ist als der Code.
-
-Bei einer **additiven** Migration ist das harmlos: eine neue, leere Spalte
-liest der alte Code nicht, und er stört sich nicht an ihr. Bei einer
-**nicht-additiven** — Spalte entfernt, umbenannt, nachträglich `NOT NULL`,
-Enum-Wert gestrichen — ist es nicht harmlos: der alte Code sucht etwas, das
-es nicht mehr gibt.
+Migration startet also gegen eine Datenbank, die weiter ist als der Code.
 
 **So sehen Sie nach, ob Migrationen im Weg sind:**
 
@@ -4031,12 +4023,55 @@ es nicht mehr gibt.
 cd /opt/heizung-sonnblick && git log --oneline <ZIEL-SHA>..HEAD -- backend/alembic/versions/
 ```
 
-* **Keine Ausgabe** → keine Migration dazwischen, weiter mit Schritt 1.
-* **Eine oder mehrere Zeilen** → jede davon im zugehörigen Pull-Request
-  nachlesen. Seit Sprint 20g trägt jeder PR die Zeile
-  `Migration additiv: ja/nein`. Steht dort **nein** oder fehlt die Zeile,
-  **nicht per Pin zurückrollen** — dann ist es ein Handgriff mit
-  `alembic downgrade`, und der gehört besprochen.
+* **Keine Ausgabe** → keine Migration dazwischen. **Weiter mit Schritt 1**,
+  dieser Schritt ist damit erledigt.
+* **Eine oder mehrere Zeilen** → zwei Dinge müssen stimmen, siehe unten.
+
+#### Erstens: startet der alte Container überhaupt?
+
+**Ja, aber erst für Ziele ab dem 09.10.2026.** Liegt eine Migration
+dazwischen, steht in der Datenbank eine Revision, die das alte Image in
+seinem eigenen Verzeichnis **nicht kennt**. Alembic bricht dann ab:
+
+```
+FAILED: Can't locate revision identified by '0028_global_config_pin_seen'
+```
+
+Der Entrypoint versucht es fünfmal und beendet sich. Weil api,
+celery_worker und celery_beat dasselbe Image fahren und sich selbst neu
+starten, wäre das Ergebnis kein halber Rückfall, sondern ein
+Neustart-Karussell **ohne Oberfläche und ohne Heizungssteuerung** — im
+Moment, in dem Sie zurückrollen.
+
+Seit dem 09.10.2026 prüft der Container das vor dem Start, überspringt das
+Upgrade und läuft. **Das muss im Ziel-Image drin sein**, so wie beim Pin
+selbst (Schritt 0a):
+
+```bash
+cd /opt/heizung-sonnblick && git show <ZIEL-SHA>:backend/docker-entrypoint.sh | grep -q 'db_revision_check' && echo "startet" || echo "startet NICHT -- neueren Commit waehlen"
+```
+
+Das Deploy-Skript bricht in diesem Fall von selbst ab, statt den Stack ins
+Karussell zu schicken. Der Befehl hier erspart Ihnen den Abbruch.
+
+#### Zweitens: läuft der alte Stand auch fachlich?
+
+**Nur über *additive* Migrationen.** Dass der Container startet, heißt
+nicht, dass er arbeiten kann.
+
+Bei einer **additiven** Migration ist es harmlos: eine neue, leere Spalte
+liest der alte Code nicht, und er stört sich nicht an ihr. Bei einer
+**nicht-additiven** — Spalte entfernt, umbenannt, nachträglich `NOT NULL`,
+Enum-Wert gestrichen, Typ oder `CHECK` verengt — ist es nicht harmlos: der
+alte Code sucht etwas, das es nicht mehr gibt. Er startet dann und
+scheitert später an der Abfrage, also an einer Stelle, an der niemand den
+Zusammenhang zum Rückfall sieht.
+
+Jede Zeile aus dem `git log` oben im zugehörigen Pull-Request nachlesen.
+Seit Sprint 20g trägt jeder PR die Zeile `Migration additiv: ja/nein`.
+Steht dort **nein** oder fehlt die Zeile, **nicht per Pin zurückrollen** —
+dann ist es ein Handgriff mit `alembic downgrade`, und der gehört
+besprochen.
 
 ---
 
@@ -4054,8 +4089,10 @@ der Wert, den Sie brauchen — zum Beispiel `805c31c`.
 Seit H-6 hat **jeder** Commit auf `develop` ein Image: berührt ein Commit ein
 Image nicht, hängt der Build-Workflow den Tag des Vorgängers um, statt neu zu
 bauen. Die Liste ist also nicht löchrig — aber sie reicht weiter zurück, als
-Sie zielen dürfen: **nur Commits ab `805c31c` sind pin-fähig** (Schritt 0a).
-Beides muss stimmen, Image **und** Pin-Fähigkeit.
+Sie zielen dürfen: **nur Commits ab `805c31c` sind pin-fähig** (Schritt 0a),
+und liegt eine **Migration** dazwischen, muss das Ziel zusätzlich den
+Revisions-Vorcheck mitbringen — den gibt es ab `09.10.2026` (Schritt 0b).
+Image, Pin-Fähigkeit und Migrations-Lage müssen zusammen stimmen.
 
 ---
 
@@ -4190,6 +4227,8 @@ funktioniert.
 * **Über die Pin-Logik hinaus zurückgehen.** Vor `805c31c` gibt es sie
   nicht, und das Skript würde sich selbst mit zurückdrehen. Siehe
   Schritt 0a.
+* **Über eine Migration hinaus auf ein Image ohne Revisions-Vorcheck.**
+  Der Container käme nicht hoch. Siehe Schritt 0b.
 * **Einen Fehler auf dem ChirpStack-Codec beheben.** Der Codec lebt in der
   ChirpStack-Oberfläche und wird von Hand eingefügt (§5.22, §10c) — ein
   Rückfall des Repos berührt ihn nicht.
