@@ -258,7 +258,15 @@ In dieser Reihenfolge:
 7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)**, **SSH (Server)** oder **Claude Code (im Repo)** kennzeichnen.
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
 9. **Kein Schreiben in main/develop direkt:** Branch-Protection ist aktiv, immer über PR.
-10. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
+10. **Migrations-Markierung (AE-77):** Jeder PR traegt die Zeile
+    `Migration additiv: ja / nein / keine Migration`. Bei **nein** —
+    `DROP COLUMN`, `RENAME`, nachtraegliches `NOT NULL`, Enum-Wert entfernt,
+    Typ oder `CHECK` verengt — zusaetzlich eine Zeile im Docstring der
+    Migration. Grund: ein Rueckfall per `PIN_SHA` (RUNBOOK §10u) ist nur
+    ueber additive Migrationen zulaessig, und wer unter Druck zurueckrollt,
+    muss das aus dem PR-Text sehen koennen. Eine `CHECK`-Bedingung zu
+    **erweitern** ist additiv; sie zu **verengen** nicht.
+11. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
 
 ## 3.11 — gh pr create IMMER mit --base develop
 

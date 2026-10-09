@@ -3952,3 +3952,197 @@ Messwerten in zwei Stunden gibt es kein Urteil, sondern „unbekannt".
 (Eingangstest, Ventilkriterium), §10o (Batterie wechseln — dieselbe Form),
 §10q (Batterie-Schwellen ändern — dasselbe Vorgehen), AE-74 (die
 Entscheidung und die 5-K-Begründung).
+
+---
+
+## 10u. Stand zurückdrehen — Schritt für Schritt (H-6, Sprint 20g)
+
+**Wofür das gut ist.** Ein Merge hat etwas gebrochen, und die Heizung läuft.
+Sie setzen den Server auf einen früheren Stand zurück, ohne auf einen Fix zu
+warten. Der Rückfall hält, bis Sie ihn aufheben — der Timer überschreibt ihn
+**nicht**.
+
+**Was dabei zurückgeht:** der Programmcode (beide Images) **und** der
+Working-Tree, also auch Compose-Datei, Caddyfiles, ChirpStack-Konfiguration
+und Mosquitto-Config. Das muss zusammen gehen: alte Container mit neuer
+Compose-Datei ist ein Zustand, den niemand getestet hat.
+
+**Lesen Sie zuerst Schritt 0.** Es gibt einen Fall, in dem ein Rückfall nicht
+zulässig ist, und er ist von außen nicht zu sehen.
+
+---
+
+### Schritt 0 — Darf zurückgerollt werden? (Migrationen)
+
+**Ein Rückfall ist nur über *additive* Migrationen zulässig.**
+
+Der api-Container führt beim Start `alembic upgrade head` aus. Vorwärts
+geschieht das von selbst; **rückwärts nicht.** Ein Image von vor einer
+Migration startet also gegen ein Schema, das weiter ist als der Code.
+
+Bei einer **additiven** Migration ist das harmlos: eine neue, leere Spalte
+liest der alte Code nicht, und er stört sich nicht an ihr. Bei einer
+**nicht-additiven** — Spalte entfernt, umbenannt, nachträglich `NOT NULL`,
+Enum-Wert gestrichen — ist es nicht harmlos: der alte Code sucht etwas, das
+es nicht mehr gibt.
+
+**So sehen Sie nach, ob Migrationen im Weg sind:**
+
+**SSH (heizung-test bzw. heizung-main, root):**
+
+```bash
+cd /opt/heizung-sonnblick && git log --oneline <ZIEL-SHA>..HEAD -- backend/alembic/versions/
+```
+
+* **Keine Ausgabe** → keine Migration dazwischen, weiter mit Schritt 1.
+* **Eine oder mehrere Zeilen** → jede davon im zugehörigen Pull-Request
+  nachlesen. Seit Sprint 20g trägt jeder PR die Zeile
+  `Migration additiv: ja/nein`. Steht dort **nein** oder fehlt die Zeile,
+  **nicht per Pin zurückrollen** — dann ist es ein Handgriff mit
+  `alembic downgrade`, und der gehört besprochen.
+
+---
+
+### Schritt 1 — Ziel-Commit wählen
+
+**SSH (Server, root):**
+
+```bash
+cd /opt/heizung-sonnblick && git log --oneline -15
+```
+
+Nehmen Sie den letzten Stand, der lief. Die siebenstellige Kurzform links ist
+der Wert, den Sie brauchen — zum Beispiel `30b6ffe`.
+
+Seit H-6 hat **jeder** Commit auf `develop` ein Image: berührt ein Commit ein
+Image nicht, hängt der Build-Workflow den Tag des Vorgängers um, statt neu zu
+bauen. Sie können also jeden Commit aus der Liste nehmen.
+
+---
+
+### Schritt 2 — Prüfen, dass es das Image gibt
+
+**Vor** dem Pin, nicht danach. Fehlt das Image, bricht der Deploy ab und der
+Server bleibt auf dem alten (kaputten) Stand — der Rückfall wäre dann nur
+halb passiert.
+
+**SSH (Server, root):**
+
+```bash
+for i in heizung-api heizung-web; do printf '%s: ' "$i"; docker manifest inspect ghcr.io/rexei123/$i:develop-<ZIEL-SHA> >/dev/null 2>&1 && echo vorhanden || echo FEHLT; done
+```
+
+Beide müssen `vorhanden` melden. Fehlt eines, ist der Build zu diesem Commit
+nicht gelaufen — nehmen Sie den Commit davor.
+
+---
+
+### Schritt 3 — Pin setzen
+
+**SSH (Server, root):**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep -q '^PIN_SHA=' .env && sed -i "s|^PIN_SHA=.*|PIN_SHA=<ZIEL-SHA>|" .env || echo "PIN_SHA=<ZIEL-SHA>" >> .env; grep '^PIN_SHA=' .env
+```
+
+Die letzte Ausgabe muss `PIN_SHA=<ZIEL-SHA>` zeigen. Der Befehl ist so
+gebaut, dass er einen vorhandenen Eintrag ersetzt und keinen zweiten anlegt —
+zwei `PIN_SHA`-Zeilen wären gefährlich, weil das Skript die **letzte** liest.
+
+---
+
+### Schritt 4 — Deploy anstoßen, ohne auf den Timer zu warten
+
+**SSH (Server, root):**
+
+```bash
+systemctl start heizung-deploy-pull.service && sleep 20 && tail -25 /var/log/heizung-deploy.log
+```
+
+**Läuft gerade ein Eingangs- oder Montagetest**, überspringt der Lauf sich
+selbst (§10p) und schreibt `UEBERSPRUNGEN` ins Log. Das ist richtig so — ein
+Deploy mitten in einem Lauf lässt ein Gerät mit ausstehendem Downlink zurück.
+Dann erst den Test beenden, danach diesen Schritt wiederholen.
+
+---
+
+### Schritt 5 — Prüfen, dass der Rückfall wirkt
+
+Im Log aus Schritt 4 müssen **drei** Dinge stehen:
+
+```
+PIN_SHA gesetzt: <ZIEL-SHA> -> ...   Automatik aus,
+IMAGE_TAG=develop-<ZIEL-SHA>
+Fertig. HEAD=<voller ZIEL-SHA> IMAGE_TAG=develop-<ZIEL-SHA> api=sha256:... web=sha256:... PIN=<ZIEL-SHA>
+```
+
+Steht `ABBRUCH: PIN_SHA ... ist in diesem Repo kein Commit`, haben Sie sich
+vertippt. Das Skript fällt dann **nicht** auf den neuesten Stand zurück —
+richtig so, denn das wäre das Gegenteil dessen, was Sie wollten. Schritt 3
+mit dem richtigen Wert wiederholen.
+
+**Dann die Container und die Anwendung:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+Alle Dienste `Up`. Das `-f` ist nicht optional (§5.0).
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://heizung.hoteltec.at/
+```
+
+`200`. Und zum Schluss die Sicht, um die es Ihnen ging — die Geräteliste oder
+das Zimmer, das nicht mehr ging.
+
+---
+
+### Schritt 6 — Zurück zum laufenden Stand
+
+Wenn der Fix gemergt ist: Pin leeren, Deploy anstoßen, prüfen.
+
+**SSH (Server, root):**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && sed -i "s|^PIN_SHA=.*|PIN_SHA=|" .env && grep '^PIN_SHA=' .env && systemctl start heizung-deploy-pull.service && sleep 20 && tail -15 /var/log/heizung-deploy.log
+```
+
+Im Log steht danach **kein** `PIN_SHA gesetzt` mehr, und `IMAGE_TAG` zeigt
+auf den aktuellen Branch-Kopf. Der Server folgt wieder `develop`.
+
+---
+
+### Was Sie über einen gesetzten Pin wissen müssen
+
+**Der Server zieht keine Merges mehr.** Das ist der Zweck — und die Gefahr,
+wenn man es vergisst. Zwei Dinge erinnern daran:
+
+* Jeder Deploy-Ping trägt den Pin im Monitor-Eintrag
+  (`ok: pinned to develop-… (automatik aus)`), nicht nur im Server-Log.
+* Nach **sieben Tagen** kommt eine Mail an die Alarm-Adresse, danach
+  wöchentlich, solange der Pin steht. Sie ist eine Erinnerung, kein Alarm:
+  ein gesetzter Pin ist eine Entscheidung.
+
+**Ein Pin ist kein Dauerzustand.** Er hält den Betrieb am Laufen, während
+jemand den Fehler behebt. Je länger er steht, desto größer wird der Sprung,
+den der Server beim Lösen macht — und desto weniger weiß man, ob der Sprung
+funktioniert.
+
+---
+
+### Was dieser Handgriff NICHT kann
+
+* **Daten zurückdrehen.** Overrides, Belegungen, Messwerte bleiben, wie sie
+  sind. Nur Code und Konfiguration gehen zurück.
+* **Eine nicht-additive Migration rückgängig machen.** Siehe Schritt 0.
+* **Einen Fehler auf dem ChirpStack-Codec beheben.** Der Codec lebt in der
+  ChirpStack-Oberfläche und wird von Hand eingefügt (§5.22, §10c) — ein
+  Rückfall des Repos berührt ihn nicht.
+* **Etwas an den Geräten rückgängig machen.** Ein Downlink, der raus ist, ist
+  raus.
+
+**Querverweise:** §10p (Deploy-Sperre während des Eingangstests — greift auch
+hier), §10q (Einstellungen ändern, dasselbe `.env`-Muster), §5.0 (`-f` bei
+`docker compose`), §10n (hat der Lauf wirklich geprüft), AE-77 (die
+Entscheidung hinter Pinning und Rückfallpunkt).
