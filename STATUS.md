@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-09, develop-HEAD `cbfc3d4` (PR #284) + PR #285, der den Sprint abschließt. Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Offen vor dem 01.11.:** Rückfall-Übung nach §10u (Ziel `cbfc3d4`), 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-09, develop-HEAD `f7475a7` (PR #285) + PR #286 (Nachtrag aus der Übung). Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-10-09
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **keiner** — 20g (H-6) ist abgeschlossen (§2bz, AE-77, fünf PRs gemergt, Migration 0028). Nächster: **20e-b** (Regel 3b relativ, Variante A). Offen aus 20g: die **Rückfall-Übung** nach RUNBOOK §10u, Ziel `cbfc3d4` (nicht `85125ae` — dazwischen liegt Migration 0028, siehe §2bz). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **keiner** — 20g (H-6) ist abgeschlossen (§2bz, AE-77, fünf PRs gemergt, Migration 0028). Nächster: **20e-b** (Regel 3b relativ, Variante A). Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5181,20 +5181,58 @@ damit niemand den Rückfall für mehr hält, als er ist.
 
 ### Offen
 
-**Rückfall-Übung:** einmal echt, Ziel **`cbfc3d4`** (Merge von #284) nach
-dem Merge von #285. Drei Gründe für genau diesen Commit: er ist pin-fähig,
-zwischen ihm und `develop` liegt **keine Migration** (0028 kam mit ihm), und
-er hat ein frisch gebautes api-Image — der Rückfall ist also am Digest
-sichtbar und nicht nur im Log.
+**Rückfall-Übung: am 09.10.2026 bestanden**, Ziel `cbfc3d4` (Merge von
+#284). Belege aus `/var/log/heizung-deploy.log`:
 
-**Nicht `85125ae`**, wie zuerst geplant: dazwischen liegt Migration 0028,
-und das Ziel-Image kennt den Revisions-Vorcheck noch nicht. Das Deploy-
-Skript bricht dort seit #285 selbst ab.
+```
+[10:03:09] Fertig. HEAD=f7475a7e88 IMAGE_TAG=develop-f7475a7 api=sha256:5b72a50f6014 web=sha256:e15eb2e2c017
+[10:04:24] Fertig. HEAD=cbfc3d45c8 IMAGE_TAG=develop-cbfc3d4 api=sha256:d18df22d7550 web=sha256:e15eb2e2c017 PIN=cbfc3d4
+[10:05:47] Fertig. HEAD=f7475a7e88 IMAGE_TAG=develop-f7475a7 api=sha256:5b72a50f6014 web=sha256:e15eb2e2c017
+```
+
+Der api-Digest geht zurück und wieder vor, der web-Digest bleibt gleich
+(beide Tags zeigen auf dieselbe Version — Weg C). Dead-Man-Ping trug den
+Pin: `ok (pinned to develop-cbfc3d4 (automatik aus))`. Alle Dienste
+healthy, HTTP 200 vor, während und nach dem Rückfall. **Dauer des ganzen
+Handgriffs inklusive Rückweg: knapp drei Minuten.**
+
+Ziel war `cbfc3d4` und nicht `85125ae`: zwischen `85125ae` und `develop`
+liegt Migration 0028, und dessen Image kennt den Revisions-Vorcheck nicht —
+das Deploy-Skript bricht dort seit #285 selbst ab.
+
+**Drei Befunde aus der Übung**, alle in §10u bzw. AE-77 nachgezogen:
+
+1. **Schritt 3 muss auch bei Ergebnis `0` abbrechen.** Die `.env` hatte
+   keinen Zeilenumbruch am Ende, `echo >>` hängte den Pin an die letzte
+   Zeile (`STAGE=testPIN_SHA=…`). Der Befehl setzt den Umbruch jetzt
+   vorher, und `0` ist ein Abbruchgrund wie `2`.
+2. **Der erste Lauf direkt nach einem Merge kann scheitern**, weil der
+   Build noch läuft (`pull failed develop-f7475a7`, 09:56). Bricht vor
+   Phase 3 ab, kein Container angefasst; der nächste Lauf holt es. Vor H-6
+   trat das nicht auf — der gleitende Tag zeigte dann auf das **alte**
+   Image und der Pull gelang still.
+3. **`web` wird neu gestartet, obwohl der Digest identisch ist** — siehe
+   den eigenen Punkt unten.
 
 Dazu die **Pflichtzeile im PR-Template** (`Migration additiv: ja / nein /
 keine Migration`) und CLAUDE.md §3 Regel 10, die den Grund nennt: ein
 Rückfall per Pin ist nur über additive Migrationen zulässig, und wer unter
 Druck zurückrollt, muss das aus dem PR-Text sehen können.
+
+**Neustart bei unverändertem Digest** (Befund des Hoteliers aus der Übung,
+AE-77 §1 Korrektur und Offen): Compose entscheidet über den Neustart auch
+anhand der Image-**Referenz**, nicht nur anhand des Digests. Gemessen an
+einem Image mit zwei Tags: gleicher Tag → `Running`, anderer Tag bei
+identischer Image-ID → **neuer Container**. Mit einem Tag je Commit heißt
+das: seit H-6 startet **jeder** Merge den ganzen Stack neu, auch ein reiner
+Doku-Merge, der vorher nichts anfasste.
+
+Damit ist ein Satz in AE-77 §1 falsch, der dort als **Grund** für Weg C
+stand („Digest bitgleich, `up -d` rekreiert also nichts"). Die Wahl bleibt
+richtig, die Zusicherung war es nicht; korrigiert, mit CLAUDE.md §5.83 als
+Lesson. Lösung bewertet (drei Wege, Empfehlung: Digest statt Tag in der
+Compose-Datei, ~2 h) — **nicht vor 20e-b**, und vor dem 01.11. kein
+Hindernis.
 
 **Runner außerhalb des Working-Trees** (AE-77 Offen): bewertet,
 ~2–2,5 h, **nicht vor dem 01.11.** Der Gewinn wäre Reichweite in Commits von

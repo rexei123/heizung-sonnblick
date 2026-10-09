@@ -4519,14 +4519,45 @@ wäre der Deploy dort hängengeblieben.
 
 | Weg | Verworfen, weil |
 |---|---|
-| **A: immer bauen** | Ein Doku-Commit erzeugt einen neuen Digest, `up -d` rekreiert die Container — also ein Neustart der Steuerung für eine Änderung an `STATUS.md` |
+| **A: immer bauen** | Kostet bei jedem Doku-Commit einen Build (zwei bis vier Minuten, Cache-Druck, eine weitere GHCR-Version) und gibt die **beweisbare Bitgleichheit** auf: zwei Builds aus demselben Baum sind nicht digest-gleich |
 | **B: Tag auflösen** (neuesten Commit ≤ HEAD mit Image finden) | Braucht entweder eine Registry-Schleife im Deploy-Skript oder `git log -- backend/` — und letzteres ist genau die Heuristik, die 2026-04-30 gescheitert ist |
 | **C: Re-Tag** ✅ | — |
 
 **Gewählt: C.** Berührt ein Commit ein Image nicht, wird der Tag des
 Vorgängers umgehängt (`docker buildx imagetools create`, registry-seitig,
-ohne Pull und ohne Build). Der Digest bleibt bitgleich, `up -d` rekreiert
-also nichts.
+ohne Pull und ohne Build). Der Digest bleibt bitgleich.
+
+> **Korrektur 09.10.2026 (Befund des Hoteliers bei der Rückfall-Übung).**
+> Hier stand zusätzlich: „Der Digest bleibt bitgleich, `up -d` rekreiert
+> also nichts." **Der zweite Halbsatz ist falsch**, und er stand in der
+> Begründungs-Spalte gegen Weg A — die Zeile oben ist deshalb neu
+> geschrieben.
+>
+> Compose entscheidet über den Neustart **auch anhand der Image-Referenz**,
+> nicht nur anhand des aufgelösten Digests. Gemessen an einem Image mit
+> zwei Tags:
+>
+> | Lauf | Ergebnis |
+> |---|---|
+> | `up -d` erneut, **gleicher** Tag | `Running` — Container-ID unverändert |
+> | `up -d`, **anderer** Tag, identische Image-ID | `Starting` — **neuer** Container |
+> | `up -d`, gleicher Tag, der auf ein **anderes** Image zeigt | `Starting` — neuer Container (so lief es vor H-6) |
+>
+> Es rekreiert also, wenn sich **die Referenz oder das Image** ändert. Mit
+> einem Tag je Commit ändert sich die Referenz bei **jedem** Merge: seit
+> H-6 startet damit auch ein reiner Doku-Merge den ganzen Stack neu,
+> während vorher nichts passierte. Belegt am Übungs-Log: `web` wurde bei
+> Rückfall und Rückweg neu erstellt, obwohl beide Tags auf
+> `sha256:e15eb2e2c017` zeigen.
+>
+> **Die Entscheidung C bleibt** — sie war nie vom Neustart abhängig, und
+> die Gründe in der Tabelle tragen ohne diesen Punkt. **Die Zusicherung
+> war falsch, nicht die Wahl.** Was daraus folgt, steht unter Offen
+> („Neustart bei unverändertem Digest").
+>
+> Und die Einordnung in eigener Sache: „`up -d` rekreiert also nichts" war
+> eine Ableitung aus dem Mechanismus, ohne eine einzige Messung — §5.68,
+> und der dritte Fall derselben Art in diesem Sprint (§5.83).
 
 Nachgewiesen vor dem Bau (T1a-Probe in CI, mit `GITHUB_TOKEN` und
 `packages: write` — also mit den Rechten des echten Schritts):
@@ -4886,6 +4917,35 @@ lief"), weil die meisten Merges keine Migration mitbringen.
   wird nie gelöscht.** Nicht vor dem 01.11.
 - **Basis-Image per Digest pinnen** (§3).
 - **Migrations-Linter** (§8).
+- **Neustart bei unverändertem Digest** (Korrektur in §1). Seit H-6 trägt
+  jeder Commit einen eigenen Tag, und Compose rekreiert schon, wenn sich
+  die **Referenz** ändert. Folge: jeder Merge startet api, web, worker und
+  beat neu — auch ein reiner Doku-Merge, der vorher nichts anfasste.
+
+  **Wie schlimm?** Sekunden ohne Oberfläche und ein möglicherweise
+  verlorener Engine-Tick. Der Tick läuft jede Minute und ist idempotent
+  (S2), und ein Merge passiert, während jemand am Rechner sitzt. Der
+  Schaden ist klein; neu ist er trotzdem, und er stand als **Vorteil** von
+  Weg C in diesem Dokument.
+
+  Drei Wege, bewertet:
+
+  | | Aufwand | Haken |
+  |---|---|---|
+  | **Digest statt Tag in der Compose-Datei** — das Skript löst den Tag auf und exportiert `@sha256:…`, Compose referenziert das | ~2 h | `docker compose -f … ps` von Hand braucht die Variable; ohne Vorgabewert bricht jeder RUNBOOK-Handgriff, der das benutzt. Lösbar (`image: …${API_REF:-:develop}`), aber nicht schön |
+  | **`up -d` nur für Dienste mit geändertem Digest** | ~3 h | Verfehlt Änderungen an der Compose-Datei und an der `.env` — und zwar **still**. Braucht dafür einen zweiten Zustandsspeicher. Gegen S6 |
+  | **Phase 3 ganz überspringen, wenn beide Digests und der `infra/deploy`-Baum unverändert sind** | ~1,5 h | Ohne neuen Zustand machbar (beides aus git und docker). Aber eine von Hand geänderte `.env` wird übersehen — dann tut der Auslöser aus §10q nichts. Dieselbe Falle, eine Ebene höher |
+
+  **Empfehlung: Variante 1**, weil sie die Entscheidung dorthin legt, wo
+  sie hingehört — Compose vergleicht dann das, was zählt, und
+  Compose-Datei und `.env` wirken weiter wie heute. Die anderen zwei
+  ersetzen Compose' Urteil durch ein eigenes und müssen jeden Fall
+  nachbauen, den Compose schon kennt.
+
+  **Nicht vor 20e-b** (Entscheidung des Hoteliers, 09.10.). Vor dem 01.11.
+  kein Hindernis: ein Neustart von Sekunden ist kein Stabilitätsrisiko,
+  und bis dahin steht die Erwartung wenigstens richtig im RUNBOOK.
+
 - **Runner außerhalb des Working-Trees** (§10). Der Wächter verbietet den
   gefährlichen Fall; er hebt ihn nicht auf. Aufzuheben wäre er, indem die
   Unit nicht mehr in den Working-Tree zeigt — `install-timer.sh` kopiert

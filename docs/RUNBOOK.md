@@ -4118,12 +4118,24 @@ nicht gelaufen — nehmen Sie den Commit davor.
 **SSH (Server, root):**
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && grep -q '^PIN_SHA=' .env && sed -i "s|^PIN_SHA=.*|PIN_SHA=<ZIEL-SHA>|" .env || echo "PIN_SHA=<ZIEL-SHA>" >> .env; grep '^PIN_SHA=' .env
+cd /opt/heizung-sonnblick/infra/deploy && [ -n "$(tail -c1 .env)" ] && printf '\n' >> .env; grep -q '^PIN_SHA=' .env && sed -i "s|^PIN_SHA=.*|PIN_SHA=<ZIEL-SHA>|" .env || echo "PIN_SHA=<ZIEL-SHA>" >> .env; grep -c '^PIN_SHA=' .env; grep '^PIN_SHA=' .env
 ```
 
-Die letzte Ausgabe muss `PIN_SHA=<ZIEL-SHA>` zeigen. Der Befehl ist so
-gebaut, dass er einen vorhandenen Eintrag ersetzt und keinen zweiten anlegt —
-zwei `PIN_SHA`-Zeilen wären gefährlich, weil das Skript die **letzte** liest.
+Die Ausgabe muss **genau `1`** sein und danach `PIN_SHA=<ZIEL-SHA>`.
+
+**Bei `0` oder `2` abbrechen** und die Datei von Hand ansehen
+(`cat .env`), bevor Sie weitermachen:
+
+* **`2`** → zwei `PIN_SHA`-Zeilen. Gefährlich, weil das Skript die
+  **letzte** liest: Sie würden einen anderen Stand fahren als den, den Sie
+  gerade eingetragen haben.
+* **`0`** → der Eintrag ist in der letzten Zeile gelandet, statt eine neue
+  zu bilden (`STAGE=testPIN_SHA=…`). Ursache ist eine `.env` **ohne
+  Zeilenumbruch am Ende**; `echo >>` hängt dann direkt an. Das `tail -c1`
+  am Anfang des Befehls setzt den Umbruch vorher — aufgefallen bei der
+  Übung am 09.10.2026, davor fehlte er.
+
+Der Befehl ersetzt einen vorhandenen Eintrag und legt keinen zweiten an.
 
 ---
 
@@ -4139,6 +4151,19 @@ systemctl start heizung-deploy-pull.service && sleep 20 && tail -25 /var/log/hei
 selbst (§10p) und schreibt `UEBERSPRUNGEN` ins Log. Das ist richtig so — ein
 Deploy mitten in einem Lauf lässt ein Gerät mit ausstehendem Downlink zurück.
 Dann erst den Test beenden, danach diesen Schritt wiederholen.
+
+**Steht im Log `pull fehlgeschlagen` für den Tag, den Sie gerade wollen**,
+und haben Sie **kurz vorher gemergt**: dann läuft der Build in GitHub noch.
+Das ist kein Fehler des Pins, sondern ein Wettlauf — der Timer zieht alle
+fünf Minuten, der Build braucht zwei bis vier Minuten. Der Lauf bricht
+dabei **vor** Phase 3 ab, kein Container wird angefasst. Entweder den
+nächsten Timer-Lauf abwarten oder, nach `gh run watch`, diesen Schritt
+wiederholen.
+
+Aufgefallen bei der Übung am 09.10.2026 (09:56, `pull failed
+develop-f7475a7`). Vor H-6 trat das nicht auf — der gleitende `develop`-Tag
+zeigte dann eben noch auf das **alte** Image, der Pull gelang, und der
+Server blieb still auf dem alten Stand. Der laute Abbruch ist der Fortschritt.
 
 ---
 
@@ -4165,9 +4190,20 @@ docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
 
 Alle Dienste `Up`. Das `-f` ist nicht optional (§5.0).
 
+**Normal ist, dass *alle* Dienste neu starten** — auch `web`, auch wenn
+dessen Image-Digest sich nicht geändert hat. Grund: Compose entscheidet
+über den Neustart auch anhand der **Image-Referenz** (des Tags), nicht nur
+anhand des Digests. Siehe AE-77 Offen; es ist kein Zeichen dafür, dass der
+Rückfall nur halb gegriffen hätte.
+
+Dann die Anwendung — **die Adresse des Servers, auf dem Sie gerade
+arbeiten:**
+
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://heizung.hoteltec.at/
 ```
+
+Auf dem Test-Server stattdessen `https://heizung-test.hoteltec.at/`.
 
 `200`. Und zum Schluss die Sicht, um die es Ihnen ging — die Geräteliste oder
 das Zimmer, das nicht mehr ging.

@@ -3217,19 +3217,29 @@ gesunden Lauf als Abbruch gemeldet haette).
 ### 5.83 Eine Zusicherung gilt nur auf der Ebene, auf der sie geprueft wurde (H-6, 09.10.2026)
 
 H-6 hat einen Rueckfallpunkt gebaut und fuer belastbar erklaert. Innerhalb
-von zwei Tagen fielen **zwei** Wege auf, auf denen er nicht gehalten haette
-— beide vom Hotelier gefunden, beide nicht im Code, den der Sprint
-angefasst hatte:
+von zwei Tagen fielen **drei** Zusicherungen auf, die nicht hielten — alle
+drei vom Hotelier gefunden, keine im Code, den der Sprint angefasst hatte:
 
 | Zusicherung | Stimmte auf Ebene | Widerlegt auf Ebene |
 |---|---|---|
 | „`PIN_SHA` ueberlebt den Timer" | das **Skript** tut, was es soll | das Skript **liegt im Working-Tree** und geht beim Pin mit zurueck; der naechste Tick startet die alte Fassung |
 | „Rueckfall ueber additive Migrationen ist zulaessig" | das **Schema** ist vorwaertskompatibel | **Alembics Buchfuehrung**: die Revision in `alembic_version` steht nicht im `versions/` des alten Images, `upgrade head` bricht ab, bevor Schema geprueft wird |
+| „Digest bitgleich, also rekreiert `up -d` nichts" | die **Registry**: der Digest ist tatsaechlich identisch | **Compose' Neustart-Urteil**: es vergleicht auch die Image-**Referenz**, und die aendert sich mit jedem Commit-Tag |
 
-Beide Male war die Begruendung richtig und unvollstaendig, und beide Male
+Der dritte Fall ist der lehrreichste, weil die Zusicherung dort in der
+**Begruendungs-Spalte einer Entscheidung** stand (AE-77 §1, Weg C gegen
+Weg A). Eine falsche Zusicherung in einer Begruendung ueberlebt die
+Entscheidung: wer spaeter liest, warum C gewaehlt wurde, erbt den Satz als
+Eigenschaft des Systems. Die Wahl war trotzdem richtig — sie hing nie an
+diesem Punkt. **Begruendungen gehoeren deshalb genauso gemessen wie
+Zusicherungen**, und eine, die nur plausibel ist, wird als solche
+gekennzeichnet.
+
+Jedes Mal war die Begruendung richtig und unvollstaendig, und jedes Mal
 war das Fehlerbild **leise**: der Lauf von Hand meldete korrekt, die
 Pruefung nach der Anleitung war gruen, und der Schaden trat erst danach
-ein — einmal nach fuenf Minuten, einmal beim Hochfahren der Container.
+ein — nach fuenf Minuten, beim Hochfahren der Container, oder als
+unnoetiger Neustart, den niemand als Fehler erkennt.
 
 **Die Lesson ist nicht „denke an den Working-Tree" oder „denke an
 Alembic".** Sie ist: **wer eine Eigenschaft zusichert, nennt die Ebene, auf
@@ -3247,14 +3257,21 @@ haetten beide Faelle daran haengen muessen:
 - *Was liest es dabei?* → `alembic_version` in der Datenbank, die nicht
   zurueckgeht (Fall 2).
 
-**Der unbequeme Teil.** Ich habe in beiden Faellen eine plausible
+**Der unbequeme Teil.** Ich habe in allen drei Faellen eine plausible
 Kausalkette fuer einen Beweis genommen — §5.68 und §5.76 sagen genau das,
-und es ist trotzdem zweimal in einen Sprint gelangt, der **selbst** von
-Rueckfaellen handelt. Der Unterschied zwischen beiden Richtungen ist
-billig zu pruefen: Fall 2 war in zehn Minuten belegt (alembic-Baum des
-Ziel-Commits gegen die Datenbank laufen lassen), nachdem die Frage
-ueberhaupt gestellt war. Das Teure ist nicht die Messung, sondern darauf zu
-kommen, dass eine faellig ist.
+und es ist trotzdem dreimal in einen Sprint gelangt, der **selbst** von
+Rueckfaellen handelt. Jede Messung war billig: Fall 2 war in zehn Minuten
+belegt (alembic-Baum des Ziel-Commits gegen die Datenbank laufen lassen),
+Fall 3 in fuenf (ein Image zweimal taggen, `up -d` zweimal laufen lassen,
+Container-ID vergleichen) — jeweils **nachdem** die Frage gestellt war.
+Das Teure ist nicht die Messung, sondern darauf zu kommen, dass eine
+faellig ist.
+
+Der brauchbare Ausloeser dafuer ist nicht „pruefe alles", sondern: **jede
+Zusicherung, die ein Wort wie „also" enthaelt, ist eine Ableitung.** „Der
+Digest bleibt bitgleich, `up -d` rekreiert **also** nichts" — der erste
+Halbsatz war gemessen, der zweite nur gefolgert, und das Wort dazwischen
+hat den Unterschied verdeckt.
 
 **Und der konstruktive Teil:** In beiden Faellen war die Antwort derselbe
 Mechanismus — **ein Waechter an der Stelle, an der der Zustand noch
