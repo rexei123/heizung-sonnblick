@@ -132,6 +132,13 @@ def umgebung(tmp_path: Path) -> dict[str, object]:
         "    esac\n"
         "    ;;\n"
         "  diff) exit 0 ;;\n"
+        # ``show <pin>:infra/deploy/deploy-pull.sh`` fragt der Pin-Waechter:
+        # kennt das Skript im Ziel-Commit die Pin-Logik? Vorgabe ja, sonst
+        # waeren alle Pin-Tests hier auf einen Abbruch gelaufen.
+        "  show)\n"
+        '    if [ "$GIT_ZIEL_PINFAEHIG" = "nein" ]; then exit 0; fi\n'
+        "    echo 'PIN_SHA_VAL=$(read_env_key PIN_SHA)'\n"
+        "    ;;\n"
         "esac\n"
         "exit 0\n",
     )
@@ -346,6 +353,37 @@ def test_unbekannter_pin_bricht_ab(umgebung: dict[str, object]) -> None:
     assert "pull api web" not in protokoll
     assert "up -d" not in protokoll
     # Und der Monitor erfaehrt den Grund, sonst schlaegt er nur stumm an.
+    assert "curl" in protokoll
+
+
+def test_ziel_ohne_pin_logik_bricht_ab(umgebung: dict[str, object]) -> None:
+    """Der Pin-Waechter: ein Ziel-Commit, dessen Skript den Pin nicht kennt.
+
+    **Die lautlose Fehlerrichtung**, und damit die gefaehrlichere als der
+    Tippfehler darueber. Der Timer startet das Skript aus dem Working-Tree,
+    und der Working-Tree geht beim Pin mit zurueck. Zeigt der Pin auf einen
+    Commit vor der Pin-Logik, laeuft beim naechsten Tick das alte Skript,
+    ignoriert ``PIN_SHA`` und synct auf den Branch-Kopf — der Rueckfall hebt
+    sich nach fuenf Minuten selbst auf.
+
+    Der Lauf von Hand haette vorher korrekt gemeldet, die Pruefung nach
+    RUNBOOK §10u Schritt 5 waere gruen gewesen. Genau deshalb muss der
+    Abbruch **vor** dem Rueckfall kommen und nicht in die Doku allein.
+    """
+    _env_schreiben(umgebung, pin="30b6ffe")
+    lauf = _lauf(umgebung, GIT_ZIEL_PINFAEHIG="nein")
+
+    assert lauf.returncode == 1
+    log = _log(umgebung)
+    assert "ABBRUCH" in log
+    assert "ohne Pin-Logik" in log
+    # Der Hinweis muss sagen, was zu tun ist — der Lauf passiert unter Druck.
+    assert "§10u" in log
+    # Kein Rueckfall, kein halber Zustand: nicht ausgecheckt, nichts gezogen.
+    protokoll = _aufrufe(umgebung)
+    assert "checkout" not in protokoll
+    assert "pull api web" not in protokoll
+    assert "up -d" not in protokoll
     assert "curl" in protokoll
 
 

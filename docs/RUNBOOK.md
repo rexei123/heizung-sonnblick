@@ -3967,12 +3967,49 @@ Working-Tree, also auch Compose-Datei, Caddyfiles, ChirpStack-Konfiguration
 und Mosquitto-Config. Das muss zusammen gehen: alte Container mit neuer
 Compose-Datei ist ein Zustand, den niemand getestet hat.
 
-**Lesen Sie zuerst Schritt 0.** Es gibt einen Fall, in dem ein Rückfall nicht
-zulässig ist, und er ist von außen nicht zu sehen.
+**Lesen Sie zuerst Schritt 0.** Es gibt zwei Fälle, in denen ein Rückfall
+nicht zulässig ist, und beide sind von außen nicht zu sehen.
+
+**Lesen Sie diese Anleitung nicht von der Platte des Servers.** Der
+Working-Tree geht mit zurück, und mit ihm `docs/RUNBOOK.md` — mitten im
+Handgriff wäre der Text verschwunden, den Sie gerade befolgen. Nehmen Sie
+GitHub, diesen Chat oder einen Ausdruck.
 
 ---
 
-### Schritt 0 — Darf zurückgerollt werden? (Migrationen)
+### Schritt 0a — Kennt das Ziel-Skript den Pin? (Pflicht)
+
+**Der Timer startet das Deploy-Skript aus dem Working-Tree** — und der
+Working-Tree geht beim Pin mit zurück. Zeigt der Pin auf einen Commit von
+**vor** dem 09.10.2026, liegt dort ein `deploy-pull.sh` **ohne** Pin-Logik.
+Beim nächsten Tick läuft dann das alte Skript, ignoriert den Pin und zieht
+wieder den Branch-Kopf: **der Rückfall hebt sich nach fünf Minuten selbst
+auf.**
+
+Das ist der unangenehmste Fall in diesem Abschnitt, weil er *leise* ist. Der
+Lauf von Hand meldet korrekt, Schritt 5 ist grün — und fünf Minuten später
+ist der kaputte Stand zurück.
+
+**So sehen Sie nach, ob ein Commit pin-fähig ist:**
+
+**SSH (heizung-test bzw. heizung-main, root):**
+
+```bash
+cd /opt/heizung-sonnblick && git show <ZIEL-SHA>:infra/deploy/deploy-pull.sh | grep -q 'read_env_key PIN_SHA' && echo "PIN-FAEHIG" || echo "NICHT pin-faehig -- neueren Commit waehlen"
+```
+
+* **`PIN-FAEHIG`** → weiter mit Schritt 0b.
+* **`NICHT pin-faehig`** → diesen Commit **nicht** nehmen. Pin-fähig sind
+  `805c31c` und alles danach.
+
+**Das Skript prüft das seit 09.10.2026 selbst** und bricht mit
+`ABBRUCH: Ziel-Commit … ohne Pin-Logik` ab, statt einen Rückfall zu fahren,
+der nicht hält. Der Befehl hier erspart Ihnen diesen Abbruch — er ist kein
+Ersatz für ihn und der Abbruch keiner für ihn.
+
+---
+
+### Schritt 0b — Darf zurückgerollt werden? (Migrationen)
 
 **Ein Rückfall ist nur über *additive* Migrationen zulässig.**
 
@@ -4012,11 +4049,13 @@ cd /opt/heizung-sonnblick && git log --oneline -15
 ```
 
 Nehmen Sie den letzten Stand, der lief. Die siebenstellige Kurzform links ist
-der Wert, den Sie brauchen — zum Beispiel `30b6ffe`.
+der Wert, den Sie brauchen — zum Beispiel `805c31c`.
 
 Seit H-6 hat **jeder** Commit auf `develop` ein Image: berührt ein Commit ein
 Image nicht, hängt der Build-Workflow den Tag des Vorgängers um, statt neu zu
-bauen. Sie können also jeden Commit aus der Liste nehmen.
+bauen. Die Liste ist also nicht löchrig — aber sie reicht weiter zurück, als
+Sie zielen dürfen: **nur Commits ab `805c31c` sind pin-fähig** (Schritt 0a).
+Beides muss stimmen, Image **und** Pin-Fähigkeit.
 
 ---
 
@@ -4135,7 +4174,10 @@ funktioniert.
 
 * **Daten zurückdrehen.** Overrides, Belegungen, Messwerte bleiben, wie sie
   sind. Nur Code und Konfiguration gehen zurück.
-* **Eine nicht-additive Migration rückgängig machen.** Siehe Schritt 0.
+* **Eine nicht-additive Migration rückgängig machen.** Siehe Schritt 0b.
+* **Über die Pin-Logik hinaus zurückgehen.** Vor `805c31c` gibt es sie
+  nicht, und das Skript würde sich selbst mit zurückdrehen. Siehe
+  Schritt 0a.
 * **Einen Fehler auf dem ChirpStack-Codec beheben.** Der Codec lebt in der
   ChirpStack-Oberfläche und wird von Hand eingefügt (§5.22, §10c) — ein
   Rückfall des Repos berührt ihn nicht.
