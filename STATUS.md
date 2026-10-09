@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-09, develop-HEAD `f7475a7` (PR #285) + PR #286 (Nachtrag aus der Übung). Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #280 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#279/#280 (Fehlerstatus-Sortierung, Batterie-Etikett, Schrift aus dem Repo); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-09, develop-HEAD `f7475a7` (PR #285) + PR #286 (Nachtrag aus der Übung). Zuletzt abgeschlossen: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-b** (Regel 3b relativ, Variante A hausweit, `ROOM_REL_DELTA_K = 3.5` — T0 gemessen, Entscheidung gefallen, ~8,5 h). **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** 20e-b, AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
@@ -5097,10 +5097,18 @@ darunter lag. Zwei Folgen, und die zweite ist die teure:
 Vier Wochen vor dem 01.11. ist das der Punkt, an dem ein Fehler nicht
 behebbar, sondern nur aussitzbar wäre.
 
-**PRs:** #280 (T1 bauen oder umhängen), #281 (T2–T6 Pinning im Skript),
+**PRs:** #277 (T1 bauen oder umhängen), #281 (T2–T6 Pinning im Skript),
 #282 (T8/T9/T11 RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter),
-#284 (T10 Erinnerung). Migration **0028** (additiv). Keine
+#284 (T10 Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286
+(Nachtrag aus der Übung). Migration **0028** (additiv). Keine
 Engine-Änderung — der Sprint fasst Infrastruktur und Betrieb an.
+
+**PR #280 ist ein Blindgänger und gehört geschlossen, nicht gemergt.** Ihr
+Inhalt (Rang 2 als Übergang, T0 im Brief) ist vollständig auf `develop` —
+er kam mit `805c31c` (#281) mit, weil dessen Branch auf #280 aufsetzte.
+Geprüft: `git diff origin/fix/rang-zu-warm-uebergang develop` ist für alle
+drei Dateien leer. Die PR zeigt trotzdem einen Diff, weil ihr Branch hinter
+`develop` liegt.
 
 ### Was jetzt gilt
 
