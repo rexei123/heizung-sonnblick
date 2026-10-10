@@ -31,10 +31,10 @@ function toMessage(e: unknown): string {
  *
  *   retired_at gesetzt                -> 6
  *   health_state silent               -> 4  (meldet sich nicht — Tausch-Ausloeser)
+ *   valve_state zimmer_zu_warm        -> 5  (einziger Melder fuer ein
+ *                                            abgefallenes Geraet, AE-74)
  *   valve_state ventil_klemmt_zu      -> 3  ("Ventil pruefen")
  *   battery_state kritisch            -> 2  (Spannung niedrig — Information)
- *   valve_state zimmer_zu_warm        -> 2  (**Uebergang**, siehe
- *                                            RANG_ZIMMER_ZU_WARM; ab 20e-b 5)
  *   battery_state warn                -> 1  (Information)
  *   health_state degraded|suspicious  -> 1  (unplausibel)
  *   sonst                             -> 0
@@ -121,29 +121,34 @@ function toMessage(e: unknown): string {
  * Default-Liste blendet retired aus (AE-57).
  */
 /**
- * Rang von `zimmer_zu_warm` — **Übergangswert bis Sprint 20e-b.**
+ * Rang von `zimmer_zu_warm` — **der höchste Handlungsbedarf unter den
+ * Hinweisen**, über „Ventil prüfen" und über jeder Batterie-Stufe.
  *
- * Gehört nach AE-74 nach oben: es ist der einzige automatische Melder für
- * ein abgefallenes Gerät, und dort läuft jede Stunde Energie gegen das
- * Fenster. **Solange die Regel aber Fehlalarme liefert, gehört sie nicht
- * nach oben, sondern nach unten.**
+ * Begründung aus AE-74: seit Sprint 20e erkennt Engine-Layer 4 ein
+ * abgefallenes Gerät nicht mehr, sobald es einmal belegt montiert war.
+ * `zimmer_zu_warm` ist damit der **einzige automatische Melder** dafür —
+ * und ein Ventil ohne Kopf steht voll offen, dort läuft also jede Stunde
+ * Energie gegen das Fenster.
  *
- * Stand 08.10.2026: die Kachel meldet **15** Geräte, zwei davon sind echt.
- * Mit Rang 5 besetzen also 13 Falschmeldungen die Spitze der Liste und
- * verdecken jedes stille Gerät und jeden echten Ventil-Fall — genau das
+ * **Warum der Wert zwei Tage lang auf 2 stand.** Am 08.10.2026 meldete die
+ * Kachel 15 Geräte, zwei davon echt. Mit Rang 5 hätten 13 Falschmeldungen
+ * die Spitze der Liste besetzt und jedes stille Gerät verdeckt — genau das
  * Verdecken, das diese Sortierung beenden sollte, nur mit anderer Ursache.
+ * Ein Melder gehört nicht nach oben, weil er wichtig ist, sondern wenn er
+ * stimmt.
  *
- * Die Ursache ist bekannt und in Arbeit: das absolute Kriterium
- * (`Ist >= Soll + 5 K`) kann einen klemmenden Kopf nicht von einem warmen
- * Herbsttag unterscheiden. Sprint 20e-b ergänzt den Vergleich gegen den
- * Median der unbelegten Zimmer; die Messung vom 08.10. senkt damit 15 auf 1
- * (`docs/features/2026-10-08-sprint20eb-regel3b-relativ.md`).
+ * **Gehoben am 10.10.2026, nach einer Live-Prüfung und nicht nach einem
+ * Testlauf.** Sprint 20e-b hat Regel 3b um den Vergleich gegen den Median
+ * der nicht belegten Zimmer ergänzt; auf dem Server stand die Kachel
+ * danach um 09:58 bei **0** statt bei 14-15 (Kessel aus). Erst dieser
+ * Befund hat den Rang freigegeben.
  *
- * **Mit 20e-b wird dieser Wert auf 5 gesetzt.** Der Test
- * `der Übergangswert ist bewusst und wird mit 20e-b gehoben` fällt dann und
- * verlangt, dass es jemand absichtlich tut.
+ * Offen bleibt die andere Richtung: dass der Melder bei **eingeschaltetem**
+ * Kessel auch wirklich anschlägt (027/110 und 100/405). Das ist AK 1b aus
+ * dem 20e-b-Brief und steht noch aus — bis dahin ist belegt, dass die
+ * Kachel nicht lärmt, nicht dass sie bellt.
  */
-const RANG_ZIMMER_ZU_WARM = 2;
+const RANG_ZIMMER_ZU_WARM = 5;
 
 function statusScore(d: Device): number {
   if (d.retired_at !== null) return 6;
