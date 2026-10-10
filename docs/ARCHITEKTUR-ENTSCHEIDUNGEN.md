@@ -4334,6 +4334,11 @@ Taktgebers plausibel einfriert.
 
 ### Bewusste Abweichung vom Gate: 5 K für Regel 3b statt 3 K
 
+> **Nachtrag 09.10.2026: 5 K waren richtig und nicht genug.** Noch am Tag
+> der Freigabe meldete die Kachel 14 Geräte statt zwei. Was unten steht,
+> gilt weiter — es war nur die falsche Schraube. Die Antwort steht im
+> Abschnitt darunter („Regel 3b bekommt eine zweite Bedingung").
+
 **Das Gate hatte „Δ 3 K" für beide Regeln vorgesehen. Umgesetzt sind 3 K für
 Regel 3 und 5 K für Regel 3b, als getrennte Einstellung. Vom Hotelier am
 07.10.2026 ausdrücklich akzeptiert.**
@@ -4357,6 +4362,119 @@ zwei Wochen sieht niemand mehr hin, und dann überwacht der Melder nichts
 (§5.79) — während er gleichzeitig der einzige Ersatz für den abgeschalteten
 Layer 4 ist. Die Schwellen stehen in den Settings und werden nach zwei Wochen
 Heizperiode nachjustiert; der Weg dafür steht in RUNBOOK §10t.
+
+### Regel 3b bekommt eine zweite Bedingung: über vergleichbaren Zimmern (Sprint 20e-b)
+
+**Befund des Hoteliers, 07.10.2026, 14:58, Kessel aus:** die Dashboard-Kachel
+„Zimmer zu warm" meldete **14** Geräte, echt waren zwei (027/110 und 100/405,
+beide klemmen offen). Leere Zimmer standen bei 22–24 °C über einem Sollwert
+von 18 °C — jedes einzelne also über `Soll + 5 K`.
+
+**Die Lehre ist nicht „Schwelle höher".** Ein absolutes Kriterium kann Wetter
+nicht von einem klemmenden Ventil unterscheiden, bei keiner Schwelle. Im
+Herbst ohne Heizung ist ein leeres Zimmer über seinem Sollwert; im Januar
+wäre dieselbe Schwelle blind. Eine Zahl, die zweimal im Jahr von Hand
+nachgezogen werden muss und zwischendurch falsch ist, ist keine Lösung.
+
+**Entscheidung: 3b verlangt zwei Bedingungen mit UND.** Ist über dem Sollwert
+**und** Ist über dem Median der anderen Zimmer. Die zweite geht mit der
+Jahreszeit mit: wird das Haus wärmer, wandert der Median mit, und nur ein
+Zimmer, das aus der Reihe fällt, bleibt übrig. Ein abgefallenes Gerät fällt
+aus der Reihe — Wetter nicht.
+
+#### Die Zahlen sind gemessen, nicht gewählt
+
+T0 am 08.10.2026, 09:48, Kessel aus:
+
+```
+median_unbelegt 21.7 | zimmer_unbelegt 44 | heute_gemeldet 15 | mit_relativ_uebrig 1
+```
+
+Übrig blieb allein 102/406 mit `ueber_median` **genau 3,0**. Daraus
+`ROOM_REL_DELTA_K = 3.5` und nicht 3,0: eine Schwelle, die einen bekannten
+Fall genau trifft, ist keine Schwelle, sondern ein Zufall. Zwei Tests halten
+beides fest — mit 3,5 bleibt von 16 absolut zu warmen Geräten keines übrig,
+mit 3,0 genau der knappe Fall.
+
+**Auch das Akzeptanzkriterium war erst falsch, und zwar von mir.** AK 1
+verlangte „höchstens 027/110 und 100/405" — ich hatte die Erwartung aus der
+Live-Meldung übernommen, ohne zu prüfen, ob sie bei **ausgeschaltetem Kessel**
+gelten kann. Sie kann nicht: ein klemmend geschlossenes Ventil heizt dann
+nicht und ist thermisch unsichtbar. Richtig ist „0–1 bei Kessel aus"; die
+eigentliche Probe ist **AK 1b, bei eingeschaltetem Kessel**, und die steht
+noch aus.
+
+#### Variante A statt Himmelsrichtungs-Gruppen (G3 geschlossen)
+
+Der kritische Grenzfall war, dass ein Südzimmer im Oktober bei Sonne mehr als
+3 K über einem Nordzimmer liegt — ein hausweiter Median würde dann **jedes**
+Südzimmer markieren. Drei Varianten standen zur Wahl; empfohlen war B
+(Median je Richtungsgruppe).
+
+**Gemessen, zweimal, in der ungünstigsten Jahreszeit:** 08.10. 09:48 und
+15:20, `rel_35` jeweils **0**. Die zweite Messung lag bewusst am Nachmittag —
+12 der 15 absolut gemeldeten Geräte sind Westzimmer, und die fallen morgens
+am wenigsten auf. Auch dann kein Treffer.
+
+**Entscheidung des Hoteliers: Variante A**, hausweiter Median, keine Gruppen.
+Begründung: der Mehraufwand von B ist nicht gedeckt, solange die Messung die
+Lage nicht zeigt — und bei Fehlalarmen im Frühjahr wird die Schwelle in den
+Einstellungen nachgezogen. Damit ist G3 **nicht** ein offener Mangel, sondern
+eine gemessene Nicht-Lage; wäre B nötig, hätte die Nachmittags-Messung es
+gezeigt.
+
+#### Drei Stufen, benannt statt impliziert
+
+| Stufe | Referenz | Delta | Im Verdict |
+|---|---|---|---|
+| 1 | nicht belegte Zimmer, ≥ `REF_MIN_ROOMS` | `ROOM_REL_DELTA_K` (3,5) | `unbelegt` |
+| 2 | **alle** Zimmer, ≥ `REF_MIN_ROOMS` | `ROOM_REL_DELTA_ALL_K` (4,0) | `alle` |
+| 3 | — | — | `keine` → **kein** 3b-Hinweis |
+
+Die Referenz steht **im Verdict und im Hinweistext** („über vergleichbaren
+Zimmern" / „über allen Zimmern"), nicht nur im Code. Ohne diese Angabe müsste
+ein Hausmeister raten, womit sein Zimmer verglichen wurde.
+
+**Stufe 2 ist nicht die erste**, weil belegte Zimmer eine andere Population
+sind: Gäste stellen 22–24 °C ein, ein Median darüber liegt höher und hebt die
+Hürde genau dann, wenn ohnehin niemand nachsieht. Deshalb hat Stufe 2 ein
+**größeres** Delta — der Rückfall soll vorsichtiger werden, nicht
+empfindlicher. Ein Startup-Validator erzwingt `ALL >= normal`.
+
+**Stufe 3 fällt nicht auf das absolute Kriterium zurück.** Die Versuchung ist
+„besser etwas als nichts" — das wäre der Zustand vom 07.10., nur seltener und
+damit unberechenbar. Lieber eine Lücke, die man kennt, als ein Melder, dessen
+Verlässlichkeit von der Belegung abhängt.
+
+#### Die Grenze der Methode, ausgesprochen
+
+Ein Median verträgt bis zu **50 %** Verunreinigung. Sitzen nach einer
+Reinigungsrunde auf einem Stockwerk mehr als die Hälfte der Köpfe ab, sind
+diese Zimmer heiß und ziehen den Median mit hoch — dann meldet die Kachel
+**nichts**, obwohl etwas ist.
+
+Das steht hier, im Docstring der Abfrage und in RUNBOOK §10t, und ein Test
+hält beide Richtungen fest (drei von sieben heißen Zimmern: Median hält;
+fünf von sieben: Median kippt). Wer die Methode ändert, muss diesen Test
+ändern und merkt dabei, was er aufgibt.
+
+Der Fehler geht dabei in die **stille** Richtung — kein Fehlalarm, sondern
+ein fehlender Hinweis. Bei einem Melder, dessen Glaubwürdigkeit der ganze
+Zweck ist, ist das die richtige Richtung (§5.79). Praktischer Schluss für den
+Betrieb: nach einer Runde mit vielen abgenommenen Köpfen selbst nachsehen,
+statt sich auf die Kachel zu verlassen.
+
+#### Was offen bleibt
+
+- **AK 1b**, der eigentliche Beleg: bei eingeschaltetem Kessel müssen
+  027/110 und 100/405 gemeldet werden. Live-Test beim nächsten Kesselstart.
+- **Der Rang in der Geräteliste.** `RANG_ZIMMER_ZU_WARM` steht seit dem
+  08.10. als Übergangswert auf 2 (Informations-Band), weil 13 von 15
+  Meldungen falsch waren und die Spitze der Liste besetzten. Nach AE-74 ist
+  3b der einzige automatische Melder für ein abgefallenes Gerät und gehört
+  **nach oben**; gehoben wird der Rang erst, wenn der Hotelier live geprüft
+  hat, dass die Kachel stimmt. Ein e2e-Test hält den Übergangswert fest und
+  fällt beim Heben — damit es jemand absichtlich tut.
 
 ### Kein Mailversand — bestätigt
 

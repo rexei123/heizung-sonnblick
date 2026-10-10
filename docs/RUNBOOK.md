@@ -3824,6 +3824,56 @@ Beide nennen den gemessenen Abstand in Kelvin, zum Beispiel „Ist liegt 6,2 K
 über Soll". Das ist der **knappste** Wert der zwei Stunden, nicht der
 Spitzenwert — die Lage ist also mindestens so deutlich wie die Zahl sagt.
 
+### „über vergleichbaren Zimmern" — warum da eine zweite Zahl steht
+
+Seit Sprint 20e-b nennt „Zimmer zu warm" **zwei** Abstände:
+
+> Ist liegt 6,2 K über Soll und **4,1 K über vergleichbaren Zimmern
+> (Median 20,0 °C)**.
+
+Der Grund steht in einem Befund vom 07.10.2026: die Kachel meldete **14**
+Geräte, echt waren zwei. Es war Herbst, der Kessel aus, und die leeren
+Zimmer standen bei 22–24 °C über ihrem Sollwert von 18 °C — jedes einzelne
+also „deutlich über dem Soll". Der Satz war wahr und nutzlos: **das
+absolute Kriterium kann Wetter nicht von einem klemmenden Ventil
+unterscheiden.**
+
+Deshalb muss jetzt **beides** zutreffen, damit der Hinweis kommt:
+
+1. Ist-Temperatur deutlich über dem Sollwert — wie bisher.
+2. Ist-Temperatur deutlich über dem **Median der anderen Zimmer**.
+
+Die zweite Bedingung geht mit der Jahreszeit mit. Wird das ganze Haus
+wärmer, wandert der Median mit, und nur ein Zimmer, das aus der Reihe
+fällt, bleibt übrig. Ein einzelnes abgefallenes Gerät fällt aus der Reihe —
+Wetter nicht.
+
+**Welche Zimmer „vergleichbar" sind, wechselt mit der Belegung.** Das ist
+Absicht, und der Hinweistext sagt es jedes Mal mit:
+
+| Im Text steht | Verglichen wurde gegen | Wann |
+|---|---|---|
+| „über **vergleichbaren** Zimmern" | die **nicht belegten** Zimmer | der Normalfall |
+| „über **allen** Zimmern" | alle Zimmer, auch belegte | Hochsaison: zu wenige Zimmer frei |
+| *(kein zweiter Abstand)* | — | zu wenige Zimmer mit Messwerten → **kein** Hinweis |
+
+Warum nicht immer alle Zimmer: **in belegten Zimmern stellen Gäste 22–24 °C
+ein.** Ein Median darüber liegt höher und hebt die Hürde genau dann, wenn
+ohnehin niemand nachsieht. Deshalb sind die nicht belegten Zimmer die erste
+Wahl — sie sind thermisch dieselbe Lage wie ein Zimmer mit einem defekten
+Ventil, nur ohne den Defekt. Beim Rückfall auf alle Zimmer gilt ein
+**größerer** Abstand (Vorgabe 4,0 K statt 3,5 K), damit der Rückfall
+vorsichtiger wird und nicht empfindlicher.
+
+**Und die Grenze, die man kennen muss:** Der Median verträgt es, wenn bis zu
+**der Hälfte** der Zimmer betroffen ist. Sitzen nach einer Reinigungsrunde
+auf einem Stockwerk mehr als die Hälfte der Köpfe ab, sind diese Zimmer heiß
+und ziehen den Median mit hoch — dann meldet die Kachel **nichts**, obwohl
+etwas ist. Das ist keine Nachlässigkeit, sondern die Eigenschaft eines
+Medians; ein Test hält sie fest. Praktischer Schluss: nach einer Runde, bei
+der viele Köpfe abgenommen wurden, **selbst nachsehen** statt sich auf die
+Kachel zu verlassen.
+
 ### „Zimmer zu warm": Handgriff
 
 1. **Ins Zimmer gehen und das Gerät ansehen.** Sitzt der Thermostatkopf auf
@@ -3870,11 +3920,25 @@ Oberfläche:
 | `VALVE_STUCK_DELTA_K` | `3.0` | ab wie viel Kelvin unter dem Soll „Ventil prüfen" gilt |
 | `VALVE_STUCK_OPENNESS_MAX` | `0` | bis zu welcher Ventilöffnung in Prozent „geschlossen" gilt |
 | `VALVE_WINDOW_H` | `2` | Fensterlänge beider Regeln in Stunden |
+| `ROOM_REL_DELTA_K` | `3.5` | ab wie viel Kelvin über dem Median der **nicht belegten** Zimmer (20e-b) |
+| `ROOM_REL_DELTA_ALL_K` | `4.0` | dasselbe beim Rückfall auf **alle** Zimmer; darf nicht kleiner sein als der Wert darüber |
+| `REF_MIN_ROOMS` | `5` | wie viele Zimmer die Referenz mindestens braucht; darunter **kein** Hinweis |
 
 **Die beiden Deltas sind absichtlich verschieden** (AE-74): der Vicki-Sensor
 verzerrt nur in Richtung „zu warm", deshalb braucht diese Richtung mehr
 Abstand. Wer sie gleichsetzt, bekommt „Zimmer zu warm" in halb leeren
 Zimmern.
+
+**`ROOM_REL_DELTA_K` ist gemessen, nicht geschätzt.** Am 08.10.2026 lag der
+Median der 44 nicht belegten Zimmer bei 21,7 °C; von 15 absolut gemeldeten
+Geräten blieb mit 3,0 K genau **eines** übrig, und das lag bei exakt 3,0.
+Deshalb 3,5: eine Schwelle, die einen bekannten Fall genau trifft, ist keine
+Schwelle. Wer sie senkt, holt sich diesen Fall zurück.
+
+**Nach zwei Wochen Heizperiode nachjustieren.** Kommen im Frühjahr wieder
+Fehlalarme, ist `ROOM_REL_DELTA_K` die Schraube — nicht
+`ROOM_TOO_WARM_DELTA_K`. Die erste geht mit dem Wetter mit, die zweite
+nicht.
 
 Ändern wie bei den Batterie-Schwellen (§10q):
 
