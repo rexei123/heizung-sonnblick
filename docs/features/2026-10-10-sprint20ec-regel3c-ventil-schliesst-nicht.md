@@ -183,21 +183,41 @@ Die Frage des Hoteliers, und sie ist die, bei der man es falsch machen kann.
 | **B: unter „Zimmer zu warm"** (zu `room_too_warm_count`) | Dieselbe Wirkung (Energie läuft gegen das Fenster), derselbe Handgriff aus §10t | Die Kachel zählte dann zwei **verschiedene Empfindlichkeiten** (5 K + relativ gegen 2 K + offen). Wer sie beobachtet, kann einen Anstieg nicht mehr deuten. Und „zu warm" ist bei 2 K über dem Sollwert eine Übertreibung |
 | **C: eigener Zustand, eigenes Etikett, eigene Kachel** ✅ | Die Aussage ist spezifischer als beide: Funk arbeitet, Regelung nicht. Das ist nennbar und erspart einen Diagnoseschritt | Eine dritte Ventil-Kachel. §5.79 warnt vor zu vielen Meldern |
 
-**Empfehlung: C**, mit zwei Bedingungen daran:
+**Meine Empfehlung war C. Entschieden hat der Hotelier am 10.10. anders,
+und zwar für einen Mittelweg, den ich nicht aufgeschrieben hatte:**
 
-1. **Das Etikett nennt den Befund, nicht die Vermutung:**
-   „**Ventil schließt nicht**", rot (die Wirkung ist Energieverlust, wie bei
-   3b). Hinweistext: „Zimmer liegt X K über Soll, Gerät meldet trotzdem
-   Y % offen. Ventil fährt nicht zu oder ist nicht kalibriert."
-2. **Der Handgriff ist derselbe wie bei „Zimmer zu warm"** (RUNBOOK §10t)
-   und wird dort gemeinsam geführt, nicht als dritter Abschnitt. Drei
-   Etiketten sind vertretbar, drei Anleitungen für denselben Gang ins
-   Zimmer nicht.
+> **Keine eigene Kachel.** 3c zählt in die Kachel „Ventil prüfen"; am
+> Gerät trägt es ein **eigenes Etikett** „Ventil schließt nicht".
+> Gleicher Handgriff, eine Zahl weniger.
 
-**Und der Ausweg, falls C sich als zu viel erweist:** zeigt T0 (oder der
-Betrieb nach vier Wochen), dass 3c und 3b fast immer dieselben Geräte
-treffen, werden sie zusammengelegt. Das ist dann eine Messung und keine
-Geschmacksfrage — und der Weg dahin ist kürzer als zurück.
+Das ist besser als meine drei Varianten, weil es die beiden Fragen trennt,
+die ich zusammengeworfen hatte:
+
+* **Die Kachel** ist eine Zahl für den Tagesblick. Sie soll sagen „am
+  Ventil ist etwas", nicht welche Sorte — die Sorte steht eine Ebene
+  tiefer. Mein Einwand gegen Variante A (ein Etikett für zwei
+  entgegengesetzte Symptome) trifft das **Etikett am Gerät**, nicht die
+  Kachel.
+* **Das Etikett am Gerät** unterscheidet weiter, weil dort der Hausmeister
+  steht und weil die Hinweistexte unterschiedliche Verdachte nennen.
+
+Damit bleibt: Etikett „**Ventil schließt nicht**", rot (die Wirkung ist
+Energieverlust, wie bei 3b). Hinweistext: „Zimmer liegt X K über Soll,
+Gerät meldet trotzdem Y % offen. Ventil fährt nicht zu oder ist nicht
+kalibriert." Der Handgriff wird in RUNBOOK §10t **gemeinsam** mit „Zimmer
+zu warm" geführt, nicht als dritter Abschnitt.
+
+**Eine Folge davon gehört benannt:** das Antwortfeld heißt heute
+`valve_stuck_count`. Zählt es auch 3c, behauptet der Name etwas Falsches —
+genau die Klasse aus §5.77. Es wird deshalb in **`valve_check_count`**
+umbenannt (eine Zeile im Schema, eine im Frontend-Spiegel, der `type-check`
+findet die Konsumenten). Die Kachel-Beschriftung „Ventil prüfen" bleibt
+und stimmt für beide Sorten.
+
+**Und der Ausweg bleibt in der anderen Richtung offen:** zeigt der Betrieb
+nach vier Wochen, dass 3c und 3b fast immer dieselben Geräte treffen, werden
+die **Zustände** zusammengelegt. Dann als Messung und nicht als
+Geschmacksfrage.
 
 ---
 
@@ -210,7 +230,18 @@ und ohne sie hätte die Schwelle auf einem bekannten Fall gelegen.
 Dasselbe hier. Die Zahlen 80 % und 2 K sind plausibel und **nicht gemessen**.
 Vor einer Zeile Code:
 
-**SSH (heizung-test, root), bei laufendem Kessel:**
+**Festes Fenster statt `now()`, Entscheidung des Hoteliers vom 10.10.** Er
+hat um 13:50 Ortszeit `0x03` (Recalibrate motor) an 027 und 100 geschickt —
+hilft das, klemmen sie heute nicht mehr, und eine Abfrage auf `now() - 2h`
+würde den Zustand nicht mehr finden, den sie messen soll. Die Fenster sind
+deshalb festgenagelt:
+
+| Messung | Fenster (UTC) | Lage |
+|---|---|---|
+| **A: Kessel an** | 10.10. 09:30–11:30 | Kessel an seit ca. 08:10 UTC, **vor** dem Recalibrate um 11:50 UTC |
+| **B: Nachtabsenkung** | 10.10. 20:00–23:00, in 30-Minuten-Schritten | Test-Belegung Zimmer 101 von 14:00 bis morgen 10:00 Ortszeit |
+
+**SSH (heizung-test, root):**
 
 ```bash
 docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec db psql -U heizung -d heizung -c "
@@ -222,7 +253,8 @@ WITH fenster AS (
   JOIN device d        ON d.id = sr.device_id AND d.retired_at IS NULL
   JOIN heating_zone hz ON hz.id = d.heating_zone_id
   JOIN room r          ON r.id = hz.room_id
-  WHERE sr.time >= now() - interval '2 hours'
+  WHERE sr.time >  timestamptz '2026-10-10 09:30:00+00'
+    AND sr.time <= timestamptz '2026-10-10 11:30:00+00'
     AND sr.temperature IS NOT NULL AND sr.setpoint IS NOT NULL
 )
 SELECT geraet, zimmer, status,
@@ -253,8 +285,36 @@ Messwerte) und liest keine Einstellungen.
 * **027 und 100 fehlen** → `ventil_min`/`ventil_max` zeigen, was sie
   wirklich melden. Liegt es unter 80, ist die Schwelle zu hoch gegriffen,
   und `ventil_min` sagt, wo sie läge.
-* **Eine zweite Messung bei Sollwert-Absenkung** (abends nach 22:00, wenn
-  die Nachtabsenkung greift) prüft G1 — die Hauptquelle für Fehlalarme.
+### Messung B: die Absenkung, über gleitende Fenster-Enden
+
+G1 ist die Hauptquelle für Fehlalarme, und sie lässt sich nicht mit **einem**
+Fenster messen: die Regel läuft read-time, also mit einem Fenster, das
+ständig weiterwandert. Gefährlich ist das Fenster, das **vollständig nach**
+dem Sollwert-Sprung liegt. Abfrage B wertet deshalb die Regel an mehreren
+Fenster-Enden aus (alle 30 Minuten von 20:00 bis 23:00 UTC) und zeigt je
+Ende, wie viele Geräte melden würden und in welchen Fenstern der Sollwert
+gesprungen ist.
+
+Die Abfrage steht im PR-Text und wird vom Hotelier ausgeführt.
+
+**Befund aus der Funktionsprobe (synthetische Daten, 10.10.):** das
+Übergangsfenster **schützt sich selbst**. Solange ein Messwert mit dem
+alten, höheren Sollwert im Fenster liegt, fällt `bool_and` — G1 kann also
+nur zuschlagen, wenn ein Gerät **volle zwei Stunden nach** der Absenkung
+offen bleibt, und das ist dann kein Fehlalarm mehr, sondern der gesuchte
+Befund.
+
+```
+20:00   soll_sprung 0   wuerde_melden 0     (vor der Absenkung)
+20:30   soll_sprung 1   wuerde_melden 0     (Sprung im Fenster)
+22:00   soll_sprung 1   wuerde_melden 0
+22:30   soll_sprung 0   wuerde_melden 1     Ventil>=90, Ist 22, Soll 18
+```
+
+Das ist eine **Erwartung an Messung B**, keine Entwarnung: geprüft wurde die
+Abfrage, nicht das Haus. Fällt B anders aus, liegt es an echtem Verhalten,
+das die Probe nicht kennt — etwa an Geräten, die nach einer Absenkung
+tatsächlich zwei Stunden brauchen.
 
 **Ohne diese zwei Messungen keine Umsetzung.** Pflicht-Stop.
 
@@ -268,10 +328,10 @@ Messwerte) und liest keine Einstellungen.
 | **T1** | `valve_health`: dritte Bedingung im **selben** `GROUP BY` (`bool_and` über Stellung und Abstand), neuer Zustand `ventil_schliesst_nicht`, Ausschlüsse nach T0 | 1,5 h |
 | **T2** | Vorrangregel 3c vor 3b, im Docstring ausgesprochen und per Test an einem Gerät geprüft, das beide erfüllt. Dazu der Test „3 und 3c schließen sich aus" | 0,75 h |
 | **T3** | Einstellungen `VALVE_OPEN_MIN_PCT` (80) und `VALVE_NOT_CLOSING_DELTA_K` (2.0), Muster AE-73, mit Start-Validator (Delta > 0, Prozent 0..100, und **Delta kleiner als `ROOM_TOO_WARM_DELTA_K`** — sonst wäre 3c nie die engere Aussage) | 0,75 h |
-| **T4** | Schema (`valve_state` erweitern, Spiegel-Test greift automatisch), Frontend-Spiegel, Badge-Etikett und Hinweistext, Dashboard-Kachel, `statusScore`-Rang | 1,5 h |
+| **T4** | Schema (`valve_state` erweitern, Spiegel-Test greift automatisch), Frontend-Spiegel, Badge-Etikett „Ventil schließt nicht" und Hinweistext, `statusScore`-Rang **5** (gleiche Stufe wie „Zimmer zu warm" — dieselbe Wirkung, Energieverlust; Gleichstand löst die alphabetische Zweitsortierung). **Keine** neue Kachel: 3c zählt in „Ventil prüfen", und das Feld wird von `valve_stuck_count` in `valve_check_count` umbenannt (§5) | 1,75 h |
 | **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (Absenkung, ein Messwert unter der Schwelle fällt das Urteil); G2/G3 nach T0-Entscheidung; Vorrang; **der Datenstand vom 10.10. als Testwand** (027 gemeldet, 100 gemeldet, sonst keiner) | 2 h |
 | **T6** | RUNBOOK §10t (gemeinsamer Handgriff, Abgrenzungs-Tabelle aus §2), AE-74 um 3c erweitern, STATUS | 1 h |
-| **Summe** | | **8,0 h** |
+| **Summe** | | **8,25 h** |
 | **T7** *(optional)* | `lowMotorConsumption` persistieren: Migration (additiv, nullable), Subscriber, im Hinweistext als „Motor läuft ohne Widerstand". **Nicht** als Bedingung | 1 h |
 
 ---
@@ -289,6 +349,9 @@ Messwerte) und liest keine Einstellungen.
    Vorrangregel" behaupten; die werden zur Vorrangregel.
 5. Der Hinweistext nennt den Abstand **und** die gemeldete Stellung.
 6. Kein Mailversand (wie 3 und 3b, AE-74).
+7. Die Kachel „Ventil prüfen" zählt beide Sorten, und ihr Antwortfeld heißt
+   nicht mehr `valve_stuck_count` — ein Name, der behauptet, nur klemmende
+   Ventile zu zählen, wäre die nächste §5.77-Stelle.
 
 ---
 
@@ -298,7 +361,7 @@ Messwerte) und liest keine Einstellungen.
 |---|---|
 | **Die 80 % sind geraten** und treffen die beiden Fälle nicht | T0 misst `ventil_min`/`ventil_max` der betroffenen Geräte, bevor die Zahl feststeht |
 | **G1 (Absenkung) erzeugt eine Fehlalarm-Welle jeden Abend** — und zwar genau die Sorte, die 20e-b gerade beseitigt hat | Zweite T0-Messung zur Absenkung ist Pflicht-Stop. Fällt sie schlecht aus, wird das Fenster für 3c verlängert statt die Schwelle verschoben |
-| **Drei Ventil-Kacheln**, und die dritte verwässert die zwei bestehenden | Erwartete Zahl ist 2. Nach vier Wochen gegen 3b halten; treffen beide dieselben Geräte, zusammenlegen |
+| **Eine Kachel für zwei Sorten** — ein Anstieg ist nicht mehr deutbar, ohne in die Liste zu sehen | Entscheidung des Hoteliers (§5), und der Preis ist klein: die Sorte steht am Gerät, und der Handgriff ist derselbe. Wird die Zahl größer als eine Handvoll, lohnt die Aufteilung — dann mit Zahlen |
 | **3c macht 3b scheinbar überflüssig**, und jemand baut es ab | Die Abgrenzungs-Tabelle aus §2 gehört in Modul-Docstring und RUNBOOK: ein abgenommener Kopf, dessen letzte Stellung „zu" war, meldet **zu** — den findet nur 3b |
 | **Vorrang falsch gewählt** | Als Test festgehalten, nicht als Reihenfolge von `elif`-Zweigen (§5.23) |
 
