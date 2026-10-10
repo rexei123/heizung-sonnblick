@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-10, develop-HEAD `2d751f5` (PR #291) + PRs #292 und #293, die Sprint 20e-b abschließen. Zuletzt abgeschlossen: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: offen** — 20e-b ist abgeschlossen. Vor dem 01.11. steht noch AK 1b (Kessel an → 027/110 und 100/405 gemeldet; Termin folgt) und der Release develop → main. **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** AK 1b (Kessel-Lauf), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-10, develop-HEAD `4fddf43` (PR #293). Sprint 20e-b abgeschlossen; **AK 1b ist halb erfüllt und bleibt offen** (siehe §2ca). Zuletzt abgeschlossen: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Nächster Sprint: 20e-c zur Freigabe** (Regel 3c „Ventil schließt nicht“, ~8 h, T0-Messung als Pflicht-Stop). Davor/daneben: Release develop → main. **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** AK 1b (im Winter erneut prüfen), Entscheidung zu **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, Brief liegt vor), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-10-10
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **keiner** — 20e-b ist abgeschlossen (§2ca, AE-74, §5.84; sechs PRs gemergt, keine Migration), davor 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b** (bei eingeschaltetem Kessel müssen 027/110 und 100/405 gemeldet werden) — belegt ist bisher, dass die Kachel nicht lärmt, nicht dass sie bellt. Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **keiner** — 20e-b ist abgeschlossen (§2ca, AE-74, §5.84; sechs PRs gemergt, keine Migration), davor 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b ist halb erfüllt** — beim Kesseltest am 10.10. wurde 027/110 gemeldet, 100/405 nicht (3,1 K über dem Median gegen eine Schwelle von 3,5). Ursache ist die Eigenwärme im Herbst-Median, nicht die Schwelle; im Winter läge der Fall klar darüber. Daraus der Vorschlag **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, saisonunabhängig, Brief liegt zur Freigabe vor). Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5305,10 +5305,46 @@ nach oben, weil er wichtig ist, sondern wenn er stimmt.
 
 ### Offen
 
-**AK 1b — die andere Richtung, und die wichtigere.** Belegt ist, dass die
-Kachel nicht lärmt. Dass sie **bellt**, ist noch offen: bei eingeschaltetem
-Kessel müssen 027/110 und 100/405 gemeldet werden. Live-Test beim nächsten
-Kesselstart, Termin folgt.
+**AK 1b — halb erfüllt, und damit nicht erfüllt.** Kesseltest am 10.10.2026
+(Kessel an ab ca. 10:10, Prüfung 13:36):
+
+| Gerät | Raum | Soll | Befund |
+|---|---|---|---|
+| **027/110** | 26,1 °C | 18 | **gemeldet** — „7,2 K über Soll und 3,7 K über vergleichbaren Zimmern (Median 21,5 °C)" |
+| **100/405** | 24,6 °C | 18 | **nicht gemeldet** — ca. 3,1 K über dem Median, Schwelle 3,5 |
+
+Beide klemmen offen. Einer wird gefunden, einer nicht.
+
+**Die Ursache ist die Jahreszeit, nicht die Schwelle.** Im Herbst hebt die
+Eigenwärme der heizenden Zimmer den Median auf ~21,5 °C, der Abstand eines
+defekten Zimmers dazu schrumpft entsprechend. Im Winter läge der Median
+näher am Sollwert (~18 °C) und 100/405 wäre mit ~6 K klar darüber. 100/405
+liegt zusätzlich im 4. OG und flacht ab — der Heizkörper wird weniger heiß
+als bei 027.
+
+**Regel 3b erkennt im Herbst also nur die stark heizenden Defekte.** Das ist
+kein Fehler der Regel; die Saisonabhängigkeit war der Preis dafür, die 14
+Fehlalarme loszuwerden. Aber es ist eine Lücke, und sie ist jetzt gemessen
+statt vermutet. **Die Schwelle zu senken ist nicht der Ausweg:** 3,5 K steht
+dort, weil der knappste bekannte Fehlalarm bei genau 3,0 lag.
+
+**Nicht als bestanden zu lesen.** AK 1b bleibt offen und wird im Winter
+erneut geprüft — dann ohne die Eigenwärme im Median.
+
+**Daraus der Vorschlag Regel 3c „Ventil schließt nicht“**
+(`docs/features/2026-10-10-sprint20ec-regel3c-ventil-schliesst-nicht.md`,
+Sprint 20e-c, ~8 h, **zur Freigabe**): `valve_position >= 80 %` **und**
+`Raum >= Soll + 2 K` über dasselbe Fenster. Das Kriterium vergleicht das
+Gerät mit **sich selbst** statt mit dem Haus und ist damit saisonunabhängig
+— es steht nicht gegen die Umwelt, sondern gegen eine Zusicherung des
+Geräts (§5.84 gilt dafür nicht). T0-Messung zuerst, als Pflicht-Stop.
+
+Nebenbefund bei der Bewertung: **`lowMotorConsumption` ist nicht
+persistiert.** Der Codec dekodiert das Bit (`mclimate-vicki.js:175`), aber
+es gibt keine Spalte in `sensor_reading` und keinen Leser im Backend — der
+Flag an 027 und 100 stand in der ChirpStack-Oberfläche, nicht in unseren
+Daten. Optionale Aufgabe im 20e-c-Brief (T7), als Diagnose-Text und
+**nicht** als Bedingung.
 
 **G3 ist geschlossen, aber nicht widerlegt.** Variante A (hausweiter Median)
 statt Gruppen je Himmelsrichtung — zwei Läufe in der ungünstigsten
