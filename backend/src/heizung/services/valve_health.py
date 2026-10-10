@@ -78,13 +78,47 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import (
+    CTE,
+    ColumnElement,
+    Numeric,
+    and_,
+    case,
+    cast,
+    distinct,
+    func,
+    literal,
+    select,
+    true,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.config import get_settings
+from heizung.models.device import Device
+from heizung.models.enums import RoomStatus
+from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
 
 ValveState = Literal["ok", "ventil_klemmt_zu", "zimmer_zu_warm", "unbekannt"]
+
+# Worauf das relative Urteil von Regel 3b fusst (Sprint 20e-b).
+#
+# ``keine`` ist kein Fehler, sondern eine Aussage: die Referenzmenge war zu
+# klein, also gibt es **kein** 3b-Urteil. Benannt und nicht impliziert, damit
+# die Oberflaeche "warum kein Hinweis" beantworten kann.
+ValveReferenz = Literal["unbelegt", "alle", "keine"]
+
+# Der Median wird auf ``Numeric`` gegossen, nicht als ``double precision``
+# gelassen. ``percentile_cont`` nimmt in Postgres ``double precision``, und
+# verglichen wird gegen ``Numeric(5,2)`` aus ``sensor_reading`` — ohne Cast
+# mischt die Abfrage Gleitkomma und Festkomma, und der Vergleich an der
+# Schwelle entscheidet sich im letzten Bit. Dieselbe Begruendung wie bei den
+# ``Decimal``-Schwellen in den Settings.
+#
+# Drei Nachkommastellen, weil ``percentile_cont`` bei gerader Anzahl
+# interpoliert: der Median von 21,7 und 21,8 ist 21,75.
+_MEDIAN_TYP = Numeric(6, 3)
 
 # Mindest-Stichprobe im Fenster.
 #
@@ -118,6 +152,9 @@ class ValveSchwellen:
     stuck_openness_max: int
     too_warm_delta_k: Decimal
     window_h: int
+    rel_delta_k: Decimal
+    rel_delta_all_k: Decimal
+    ref_min_rooms: int
 
 
 def valve_schwellen() -> ValveSchwellen:
@@ -131,6 +168,9 @@ def valve_schwellen() -> ValveSchwellen:
         stuck_openness_max=settings.valve_stuck_openness_max,
         too_warm_delta_k=settings.room_too_warm_delta_k,
         window_h=settings.valve_window_h,
+        rel_delta_k=settings.room_rel_delta_k,
+        rel_delta_all_k=settings.room_rel_delta_all_k,
+        ref_min_rooms=settings.ref_min_rooms,
     )
 
 
@@ -151,14 +191,142 @@ class ValveVerdict:
     stellt, nimmt diese: sie sagt, wie weit die Lage von der Schwelle weg
     ist, und ein Spitzenwert wuerde den Befund dramatischer darstellen, als
     er ist.
+
+    ``referenz`` und ``referenz_median_c`` sagen, **gegen was** Regel 3b
+    verglichen hat — die Rueckfallkette aus Sprint 20e-b waehlt die
+    Referenzmenge je nach Belegung, und ohne diese Angabe muesste ein
+    Hausmeister raten. ``referenz_delta_k`` ist der knappste gemessene
+    Abstand zu diesem Median, dieselbe Lesart wie ``delta_k``.
+
+    Diese drei Felder sind bei **jedem** Urteil gefuellt, nicht nur bei
+    ``zimmer_zu_warm``: wer wissen will, warum ein offensichtlich warmes
+    Zimmer *keinen* Hinweis traegt, braucht die Referenz gerade dann.
     """
 
     state: ValveState
     samples: int
     delta_k: Decimal | None = None
+    referenz: ValveReferenz = "keine"
+    referenz_median_c: Decimal | None = None
+    referenz_delta_k: Decimal | None = None
 
 
 UNBEKANNT = ValveVerdict(state="unbekannt", samples=0)
+
+
+def _referenz_cte(seit: datetime, schwellen: ValveSchwellen) -> CTE:
+    """Die Rueckfallkette als **ein** CTE: Median, Delta und Name der Referenz.
+
+    **Was gemessen wird, und warum genau das.** Der Median laeuft ueber die
+    einzelnen **Messwerte** des Fensters, nicht ueber Zimmer-Mittelwerte. Das
+    ist nicht die elegantere, sondern die kalibrierte Groesse: die
+    T0-Messung vom 08.10.2026 (Brief §5) hat ``percentile_cont(0.5) WITHIN
+    GROUP (ORDER BY temperature)`` ueber dieselbe Menge gerechnet, und die
+    Vorgabe 3,5 K stammt aus ihrer Spalte ``ueber_median``. Eine andere
+    Aggregation waere eine andere Zahl — und das Delta waere wieder geraten.
+
+    Die **Zimmer** werden getrennt gezaehlt (``count(distinct room_id)``),
+    weil die Mindestzahl eine Aussage ueber die Stichprobe macht: zwoelf
+    Messwerte aus zwei Zimmern sind zwei Zimmer.
+
+    **Die Kette (drei Stufen, Brief §3):**
+
+    1. Nicht belegte Zimmer, wenn mindestens ``ref_min_rooms`` davon da
+       sind -> ``rel_delta_k``
+    2. **Alle** Zimmer, wenn Stufe 1 nicht reicht -> ``rel_delta_all_k``
+    3. Sonst: Median ``NULL``, Name ``keine`` -> **kein** 3b-Urteil
+
+    Stufe 3 fuehrt deshalb zu keinem Hinweis, weil ein Vergleich gegen
+    ``NULL`` in SQL ``NULL`` ergibt und ``bool_and`` darueber ebenfalls
+    ``NULL`` — der ``is True``-Vergleich im Aufrufer behandelt das schon
+    richtig. Das ist kein glueklicher Zufall, sondern dieselbe
+    NULL-Disziplin, die Regel 3 fuer fehlende Ventilwerte braucht.
+
+    **Nicht** auf den absoluten Hinweis zurueckfallen, wenn die Referenz
+    fehlt: das waere der Zustand vom 07.10. mit 14 Falsch-Alarmen, nur
+    seltener und damit unberechenbar. Lieber eine Luecke, die man kennt.
+
+    **``status <> 'occupied'`` und nicht ``== 'vacant'``.** Ein reserviertes
+    oder gerade gereinigtes Zimmer ist thermisch kein belegtes, und die
+    T0-Messung hat genau so gefiltert. Belegte Zimmer sind eine andere
+    Population (Brief §2 G5): Gaeste stellen 22-24 °C ein, ein Median
+    darueber hebt die Huerde genau dann, wenn ohnehin niemand nachsieht.
+
+    **Annahme, ausgesprochen (Brief §2 G4):** Der Median traegt bis zu 50 %
+    Verunreinigung. Sitzen nach einer Reinigungsrunde mehrere Koepfe ab, sind
+    diese Zimmer heiss und heben den Median — er verdeckt dann genau den
+    Fehler, den er finden soll. Bei mehr als der Haelfte betroffener Zimmer
+    ist dieses Kriterium blind, und kein Code hier aendert das. Ein Test
+    haelt die Grenze fest, damit sie eine Aussage bleibt und nicht ein
+    Nebeneffekt.
+    """
+    # Das Fenster, einmal, mit Zimmer-Bezug. ``retired_at IS NULL``, weil ein
+    # abgemeldetes Geraet keine Aussage ueber ein Zimmer mehr macht (§5.58).
+    # Pool-Geraete fallen ueber den Join heraus — sie haengen an keinem
+    # Zimmer und koennen daher keine Referenz bilden.
+    fenster = (
+        select(
+            SensorReading.temperature.label("temperature"),
+            Room.id.label("room_id"),
+            Room.status.label("status"),
+        )
+        .join(Device, Device.id == SensorReading.device_id)
+        .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
+        .join(Room, Room.id == HeatingZone.room_id)
+        .where(Device.retired_at.is_(None))
+        .where(SensorReading.time >= seit)
+        .where(SensorReading.temperature.is_not(None))
+        # Dieselbe Bedingung wie in der Hauptabfrage: eine Zeile ohne
+        # Sollwert ist fuer diese Bewertung kein Messwert, auch nicht in der
+        # Referenz. Sonst waere die Referenz ueber einer anderen Menge
+        # gebildet als das Urteil.
+        .where(SensorReading.setpoint.is_not(None))
+        .cte("fenster")
+    )
+
+    def _referenz(name: str, *bedingungen: ColumnElement[bool]) -> CTE:
+        stmt = select(
+            cast(func.percentile_cont(0.5).within_group(fenster.c.temperature), _MEDIAN_TYP).label(
+                "median"
+            ),
+            func.count(distinct(fenster.c.room_id)).label("zimmer"),
+        )
+        for bedingung in bedingungen:
+            stmt = stmt.where(bedingung)
+        return stmt.cte(name)
+
+    # Eine Aggregat-Abfrage ohne GROUP BY liefert **immer** genau eine Zeile,
+    # bei leerer Menge mit ``median = NULL`` und ``zimmer = 0``. Der
+    # Cross-Join unten hat damit nie null Zeilen, und Stufe 3 greift von
+    # selbst — ohne Sonderfall im Python-Code.
+    ref_unbelegt = _referenz("ref_unbelegt", fenster.c.status != RoomStatus.OCCUPIED)
+    ref_alle = _referenz("ref_alle")
+
+    genug_unbelegt = ref_unbelegt.c.zimmer >= schwellen.ref_min_rooms
+    genug_alle = ref_alle.c.zimmer >= schwellen.ref_min_rooms
+
+    return (
+        select(
+            case(
+                (genug_unbelegt, ref_unbelegt.c.median),
+                (genug_alle, ref_alle.c.median),
+                else_=literal(None, _MEDIAN_TYP),
+            ).label("median"),
+            case(
+                (genug_unbelegt, literal(schwellen.rel_delta_k, _MEDIAN_TYP)),
+                (genug_alle, literal(schwellen.rel_delta_all_k, _MEDIAN_TYP)),
+                else_=literal(None, _MEDIAN_TYP),
+            ).label("delta"),
+            case(
+                (genug_unbelegt, literal("unbelegt")),
+                (genug_alle, literal("alle")),
+                else_=literal("keine"),
+            ).label("referenz"),
+        )
+        .select_from(ref_unbelegt)
+        .join(ref_alle, true())
+        .cte("gewaehlt")
+    )
 
 
 async def valve_verdicts(
@@ -198,15 +366,22 @@ async def valve_verdicts(
     seit = jetzt - timedelta(hours=schwellen.window_h)
     ids = list(device_ids)
 
+    gewaehlt = _referenz_cte(seit, schwellen)
+
     # Regel 3: Sollwert deutlich ueber Ist UND Ventil zu — ueber jeden
     # einzelnen Messwert des Fensters.
     klemmt_zu = and_(
         SensorReading.setpoint >= SensorReading.temperature + schwellen.stuck_delta_k,
         SensorReading.valve_position <= schwellen.stuck_openness_max,
     )
-    # Regel 3b: Ist deutlich ueber Sollwert. **Ohne** Ventil-Bedingung, siehe
-    # Modul-Docstring — sie haette den Hauptfall verloren.
+    # Regel 3b, erste Bedingung: Ist deutlich ueber Sollwert. **Ohne**
+    # Ventil-Bedingung, siehe Modul-Docstring — sie haette den Hauptfall
+    # verloren.
     zu_warm = SensorReading.temperature >= SensorReading.setpoint + schwellen.too_warm_delta_k
+    # Regel 3b, zweite Bedingung (20e-b): auch ueber vergleichbaren Zimmern.
+    # Gegen ``NULL`` (Stufe 3 der Kette) ergibt der Vergleich ``NULL``, und
+    # ``bool_and`` darueber ebenfalls — also kein Urteil, kein Hinweis.
+    ueber_referenz = SensorReading.temperature >= gewaehlt.c.median + gewaehlt.c.delta
 
     stmt = (
         select(
@@ -214,6 +389,7 @@ async def valve_verdicts(
             func.count().label("samples"),
             func.bool_and(klemmt_zu).label("klemmt_zu"),
             func.bool_and(zu_warm).label("zu_warm"),
+            func.bool_and(ueber_referenz).label("ueber_referenz"),
             # Die knappsten gemessenen Abstaende, fuer die Diagnose-Zahl.
             # Im selben Durchgang, kein zweiter Roundtrip.
             func.min(SensorReading.setpoint - SensorReading.temperature).label(
@@ -222,7 +398,20 @@ async def valve_verdicts(
             func.min(SensorReading.temperature - SensorReading.setpoint).label(
                 "min_ist_minus_soll"
             ),
+            func.min(SensorReading.temperature - gewaehlt.c.median).label("min_ueber_median"),
+            gewaehlt.c.median.label("referenz_median"),
+            gewaehlt.c.referenz.label("referenz"),
         )
+        .select_from(SensorReading)
+        # Cross-Join auf eine Ein-Zeilen-CTE: die Referenz gilt fuer alle
+        # Geraete gleich. Kein Unterabfrage-je-Zeile, der Planer liest die
+        # CTE einmal.
+        #
+        # Die Referenz steht ausserdem bewusst **nicht** unter
+        # ``device_ids``: sie ist hausweit. Ein Request, der nur ein Geraet
+        # bewertet, muss gegen dasselbe Haus vergleichen wie die
+        # Geraeteliste, sonst haengt das Urteil davon ab, wo man hinsieht.
+        .join(gewaehlt, true())
         .where(SensorReading.device_id.in_(ids))
         .where(SensorReading.time >= seit)
         # Beide Groessen muessen da sein, sonst ist die Zeile fuer diese
@@ -236,7 +425,11 @@ async def valve_verdicts(
         # Geraet ohne Ventilwerte wuerde sonst auch fuer 3b unbewertbar.
         # Stattdessen traegt ``klemmt_zu`` den NULL-Fall selbst — siehe
         # unten.
-        .group_by(SensorReading.device_id)
+        #
+        # Median und Referenz-Name stehen mit im GROUP BY, nicht in einem
+        # ``max()``: sie sind je Lauf konstant, und ``max()`` ueber eine
+        # Konstante waere ein Trick, den ein Leser erst entschluesseln muss.
+        .group_by(SensorReading.device_id, gewaehlt.c.median, gewaehlt.c.referenz)
     )
 
     ergebnis: dict[int, ValveVerdict] = dict.fromkeys(ids, UNBEKANNT)
@@ -244,9 +437,19 @@ async def valve_verdicts(
     for row in (await session.execute(stmt)).all():
         device_id = int(row.device_id)
         samples = int(row.samples)
+        # Bei jedem Urteil mitgegeben, auch bei "ok" und "unbekannt" — wer
+        # wissen will, warum ein warmes Zimmer *keinen* Hinweis traegt,
+        # braucht die Referenz gerade dann.
+        referenz: ValveReferenz = row.referenz
+        median = row.referenz_median
 
         if samples < VALVE_MIN_SAMPLES:
-            ergebnis[device_id] = ValveVerdict(state="unbekannt", samples=samples)
+            ergebnis[device_id] = ValveVerdict(
+                state="unbekannt",
+                samples=samples,
+                referenz=referenz,
+                referenz_median_c=median,
+            )
             continue
 
         # ``bool_and`` liefert NULL, wenn **jeder** Eingabewert NULL ist —
@@ -259,14 +462,33 @@ async def valve_verdicts(
                 state="ventil_klemmt_zu",
                 samples=samples,
                 delta_k=row.min_soll_minus_ist,
+                referenz=referenz,
+                referenz_median_c=median,
             )
-        elif row.zu_warm is True:
+        # Regel 3b ab 20e-b: **beide** Bedingungen, mit UND. Die zweite
+        # fehlt, wenn die Referenzmenge zu klein war — dann ist
+        # ``ueber_referenz`` NULL und das Urteil faellt auf "ok", nicht auf
+        # den alten absoluten Hinweis. Siehe ``_referenz_cte``.
+        elif row.zu_warm is True and row.ueber_referenz is True:
             ergebnis[device_id] = ValveVerdict(
                 state="zimmer_zu_warm",
                 samples=samples,
                 delta_k=row.min_ist_minus_soll,
+                referenz=referenz,
+                referenz_median_c=median,
+                referenz_delta_k=row.min_ueber_median,
             )
         else:
-            ergebnis[device_id] = ValveVerdict(state="ok", samples=samples)
+            ergebnis[device_id] = ValveVerdict(
+                state="ok",
+                samples=samples,
+                referenz=referenz,
+                referenz_median_c=median,
+                # Auch im "ok"-Fall: ist das Zimmer absolut zu warm, aber
+                # nicht relativ, ist dieser Abstand die Zahl, die den
+                # Unterschied erklaert. Ohne sie saehe die Lage aus wie
+                # "nichts gemessen".
+                referenz_delta_k=row.min_ueber_median if row.zu_warm is True else None,
+            )
 
     return ergebnis
