@@ -4412,16 +4412,35 @@ Südzimmer markieren. Drei Varianten standen zur Wahl; empfohlen war B
 (Median je Richtungsgruppe).
 
 **Gemessen, zweimal, in der ungünstigsten Jahreszeit:** 08.10. 09:48 und
-15:20, `rel_35` jeweils **0**. Die zweite Messung lag bewusst am Nachmittag —
-12 der 15 absolut gemeldeten Geräte sind Westzimmer, und die fallen morgens
-am wenigsten auf. Auch dann kein Treffer.
+15:20, `rel_35` jeweils **0**.
+
+**Was die zweite Messung nicht zeigt, und das gehört hierher.** Der
+Prüfpunkt im Brief verlangte „16:00, **sonnig**" — 12 der 15 absolut
+gemeldeten Geräte sind Westzimmer, und die laufen erst mit
+Nachmittagssonne gemeinsam nach oben. Der 08.10. 15:20 war **bewölkt**. Die
+Messung belegt damit, dass das Kriterium an einem bedeckten Nachmittag nicht
+anschlägt — über den Fall „Westzimmer bei Sonne" sagt sie **nichts**.
 
 **Entscheidung des Hoteliers: Variante A**, hausweiter Median, keine Gruppen.
-Begründung: der Mehraufwand von B ist nicht gedeckt, solange die Messung die
-Lage nicht zeigt — und bei Fehlalarmen im Frühjahr wird die Schwelle in den
-Einstellungen nachgezogen. Damit ist G3 **nicht** ein offener Mangel, sondern
-eine gemessene Nicht-Lage; wäre B nötig, hätte die Nachmittags-Messung es
-gezeigt.
+Die Begründung ist eine Abwägung und keine Messung:
+
+* **Herbst ist die ungünstigste Jahreszeit** für dieses Kriterium — leere
+  Zimmer, kein Kessel, große Spreizung zwischen den Zimmern. Zwei Läufe
+  darin ohne einen einzigen Fehlalarm bei 3,5 K.
+* **Der Mehraufwand von B ist damit nicht gedeckt.** Gruppen je
+  Himmelsrichtung bedeuten mehr Code und eine Mindestzahl **je Gruppe**, die
+  in der Hochsaison öfter reißt — für einen Fall, der sich in zwei Messungen
+  nicht gezeigt hat.
+* **Der Rückweg ist eine Zahl, kein Umbau.** Kommen im Frühjahr Fehlalarme,
+  wird `ROOM_REL_DELTA_K` in den Einstellungen nachgezogen (RUNBOOK §10t).
+  Erst wenn das nicht reicht — also wenn Südzimmer melden und Nordzimmer bei
+  derselben Schwelle stumm bleiben —, ist B wieder das Thema.
+
+**G3 ist damit geschlossen, aber nicht widerlegt.** Der sonnige Nachmittag
+ist ungeprüft, und das ist der Unterschied zwischen „wir haben nachgesehen"
+und „es gibt den Fall nicht" (§5.68). Die erste Fassung dieses Abschnitts
+behauptete, die Nachmittags-Messung hätte B gezeigt, wäre es nötig — das war
+eine Ableitung ohne die Bedingung, die der Prüfpunkt verlangt hatte.
 
 #### Drei Stufen, benannt statt impliziert
 
