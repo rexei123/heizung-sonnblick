@@ -286,6 +286,14 @@ bewusst und wird mit 20e-b gehoben" fällt dann und verlangt, dass es jemand
 absichtlich tut. Zu ändern sind: die Konstante, dieser Test und die zwei
 Reihenfolge-Tests in `fix-fehlerstatus-sortierung.spec.ts`.
 
+> **Erledigt am 10.10.2026 (T8).** Freigegeben hat es nicht der grüne
+> Testlauf, sondern die Live-Prüfung: nach dem Deploy von 20e-b stand die
+> Dashboard-Kachel um 09:58 bei **0** statt bei 14-15 (Kessel aus).
+> Geändert wurden die Konstante und **vier** Tests statt der hier genannten
+> drei — `sort=label lässt den Score unberührt` prüft die Zahl ebenfalls
+> und ist beim Heben mitgefallen. Dass der Vermerk sie nicht nannte, ist
+> kein Schaden: der Test hat selbst Bescheid gegeben.
+
 ---
 
 ## 6. Tasks
