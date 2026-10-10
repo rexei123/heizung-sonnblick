@@ -42,6 +42,12 @@ function makeDevice(
     model: "Vicki",
     label,
     heating_zone_id: null,
+    // 20e-b: der Spiegel verlangt die drei Referenz-Felder. Hier steuert
+    // nur `valve_state` die Sortierung — die Referenz ist Beiwerk und
+    // bleibt auf dem Normalfall.
+    valve_referenz: "unbelegt",
+    valve_referenz_median_c: 20.0,
+    valve_referenz_delta_k: null,
     retired_at: null,
     retired_reason: null,
     replaced_by_device_id: null,

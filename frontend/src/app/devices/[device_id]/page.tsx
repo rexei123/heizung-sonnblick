@@ -131,6 +131,9 @@ export default function DeviceDetailPage() {
                 <ValveHintBadge
                   valveState={device.valve_state}
                   valveDeltaK={device.valve_delta_k}
+                  valveReferenz={device.valve_referenz}
+                  valveReferenzMedianC={device.valve_referenz_median_c}
+                  valveReferenzDeltaK={device.valve_referenz_delta_k}
                   variant="detailed"
                 />
                 {device.heating_zone ? (

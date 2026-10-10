@@ -323,7 +323,13 @@ function DeviceRow({ device: d }: { device: Device }) {
           untereinander, nicht nebeneinander, es gibt also keinen geteilten
           Inline-Slot, dessen Breite driften könnte.
         */}
-        <ValveHintBadge valveState={d.valve_state} valveDeltaK={d.valve_delta_k} />
+        <ValveHintBadge
+          valveState={d.valve_state}
+          valveDeltaK={d.valve_delta_k}
+          valveReferenz={d.valve_referenz}
+          valveReferenzMedianC={d.valve_referenz_median_c}
+          valveReferenzDeltaK={d.valve_referenz_delta_k}
+        />
       </td>
       <td className="px-4 py-3" data-testid="device-battery-cell">
         <BatteryBadge
