@@ -148,14 +148,49 @@ sie vergessen wurde. Beides zusammen ist der Schutz; keines allein.
 Anlass war der Merge von Sprint 20 / PR A am 30.09.2026, bei dem die
 Frage zum ersten Mal gestellt wurde (Antwort: kein Lauf offen).
 
+### Merge-Fenster ab 01.11.2026
+
+**Merges nach `develop` nur werktags zwischen 10 und 12 Uhr. Doku-PRs
+werden gebündelt. Ausnahme: Hotfix, mit Begründung im PR-Text.**
+
+Der Grund ist eine Eigenschaft, die mit H-6 dazukam: jeder Commit trägt
+einen eigenen Image-Tag, und Compose entscheidet über einen Neustart auch
+anhand der **Image-Referenz**, nicht nur anhand des Digests (AE-77 §1,
+Korrektur vom 09.10.2026). **Jeder Merge startet damit `api`, `web`,
+`celery_worker` und `celery_beat` neu** — auch ein reiner Doku-Merge, der
+am Programm nichts ändert.
+
+Einzeln sind das Sekunden. Entscheidend ist nicht die Dauer, sondern der
+**Zeitpunkt**: ein Deploy um 22 Uhr, der etwas bricht, wird am nächsten
+Morgen entdeckt. Zwischen 10 und 12 sind die Zimmer am leersten (Abreise
+bis 11:00, Anreise ab 14:00), und es bleibt ein Arbeitstag für einen Fix
+oder den Rückfall nach RUNBOOK §10u — mit jemandem am Rechner.
+
+Ein Doku-PR kostet denselben Neustart wie ein Code-PR und bringt dafür
+keine Änderung am Programm. Mehrere einzeln zu mergen ist deshalb mehrfach
+derselbe Preis für keinen Nutzen.
+
+Die Regel ist die Antwort auf eine **behebbare** Eigenschaft: referenziert
+die Compose-Datei die Images per Digest statt per Tag (AE-77 Offen,
+Variante 1, Backlog nach dem 01.11.), startet ein Doku-Merge nichts mehr
+neu, und die Regel schrumpft auf das, was ohnehin gilt. Wer sie liest,
+prüft also zuerst, ob sie noch nötig ist (§5.77).
+
+**Sie ersetzt nichts.** Die Frage nach einem laufenden Montage- oder
+Eingangstest bleibt Pflicht, und die Deploy-Sperre greift unverändert. Ein
+Montagegang um 10:30 ist ein Grund zu warten, auch wenn das Fenster offen
+ist.
+
 **Querverweise:** §5.78 (`docker compose` ohne `-f` auf dem
 Server — dieselbe Familie: ein Eingriff, dessen Nebenwirkung man
 nicht sieht, und gleichzeitig Lücke 2 des Gates), §0 S4
 (Hardware-Schutz, keine doppelten Downlinks), §5.76 (Wirkung
 überwachen statt Mechanik — der übersprungene Lauf pingt deshalb
-mit Grund, statt zu schweigen), RUNBOOK §10h.4 (Laufzeit des
+mit Grund, statt zu schweigen), §5.83 (die Zusicherung, deren Korrektur
+das Merge-Fenster nötig gemacht hat), RUNBOOK §10h.4 (Laufzeit des
 Eingangstests: 1-3 h — so lange ist das Fenster), RUNBOOK §10p
-(Sperre im Betrieb: prüfen, lesen, notfalls löschen).
+(Sperre im Betrieb: prüfen, lesen, notfalls löschen), RUNBOOK §10v
+(das Merge-Fenster mit Begründung, für den Hotelier).
 
 ### Auto-Continue (autonom)
 
