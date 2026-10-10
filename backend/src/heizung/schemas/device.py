@@ -209,6 +209,30 @@ class DeviceRead(BaseModel):
     # Spitzenwert — siehe ``ValveVerdict``.
     valve_delta_k: Decimal | None = None
 
+    # Sprint 20e-b: gegen **was** Regel 3b verglichen hat.
+    #
+    # 3b verlangt seit 20e-b zwei Bedingungen (UND): ueber dem Sollwert und
+    # ueber vergleichbaren Zimmern. Die Referenzmenge waehlt eine
+    # Rueckfallkette je nach Belegung, und ohne diese Angabe muesste ein
+    # Hausmeister raten, womit sein Zimmer verglichen wurde.
+    #
+    # ``keine`` heisst: die Referenzmenge war zu klein (Hochsaison, wenige
+    # Zimmer mit Messwerten) — dann gibt es **kein** 3b-Urteil. Das ist eine
+    # Aussage und kein Fehler, deshalb ein eigener Wert statt ``None``.
+    #
+    # Inline-``Literal`` wie bei ``valve_state``, aus demselben Grund: die
+    # Schema-Schicht haengt nicht von der Service-Schicht ab. Ein Test
+    # haelt die Spiegelung gegen ``valve_health.ValveReferenz`` fest.
+    valve_referenz: Literal["unbelegt", "alle", "keine"] = "keine"
+    # Der Median der Referenzmenge in °C — die Zahl, die der Hinweistext
+    # nennt. ``None``, wenn es keine Referenz gab.
+    valve_referenz_median_c: Decimal | None = None
+    # Der knappste gemessene Abstand zu diesem Median, in Kelvin. Gesetzt
+    # bei ``zimmer_zu_warm`` **und** bei ``ok``, wenn das Zimmer absolut zu
+    # warm ist, aber nicht relativ: das ist die Zahl, die den Unterschied
+    # erklaert. Ohne sie saehe die Lage aus wie "nichts gemessen".
+    valve_referenz_delta_k: Decimal | None = None
+
     retired_at: datetime | None
     retired_reason: str | None
     replaced_by_device_id: int | None
@@ -288,7 +312,13 @@ class DeviceRead(BaseModel):
     # Feld-Annotationen dieser Modelle und prueft jedes ``Decimal``-Feld.
     # Wer eins hinzufuegt, ohne es hier einzutragen, bekommt einen roten
     # Test und keine rote Produktion.
-    @field_serializer("battery_voltage_median", "battery_last_voltage", "valve_delta_k")
+    @field_serializer(
+        "battery_voltage_median",
+        "battery_last_voltage",
+        "valve_delta_k",
+        "valve_referenz_median_c",
+        "valve_referenz_delta_k",
+    )
     def _decimal_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 
