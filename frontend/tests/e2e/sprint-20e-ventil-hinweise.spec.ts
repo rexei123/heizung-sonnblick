@@ -52,6 +52,12 @@ const BASE_DEVICE: Device = {
   latest_reading: null,
   valve_state: "ok",
   valve_delta_k: null,
+  // 20e-b: Regel 3b verlangt zwei Bedingungen. Der Basis-Mock traegt die
+  // Referenz, die der Normalfall auf dem Server auch hat — 44 nicht
+  // belegte Zimmer mit einem Median.
+  valve_referenz: "unbelegt",
+  valve_referenz_median_c: 20.0,
+  valve_referenz_delta_k: null,
   battery_state: "ok",
   battery_voltage_median: 3.1,
   battery_jump_at: null,
@@ -95,15 +101,95 @@ test.describe("Sprint 20e — Ventil-Hinweise", () => {
   test("Zimmer zu warm: roter Hinweis mit gemessenem Abstand", async ({ page }) => {
     // Das Bild eines abgenommenen Thermostatkopfs: der Stift wird von der
     // Feder herausgedrückt, das Ventil steht offen, das Zimmer heizt durch.
-    await mockDetail(page, { valve_state: "zimmer_zu_warm", valve_delta_k: 6.2 });
+    await mockDetail(page, {
+      valve_state: "zimmer_zu_warm",
+      valve_delta_k: 6.2,
+      valve_referenz_delta_k: 4.1,
+    });
     await page.goto(`/devices/${DEVICE_ID}`);
 
     const hinweis = page.getByTestId("valve-hint");
     await expect(hinweis).toContainText("Zimmer zu warm");
     await expect(hinweis).toContainText("6,2 K");
+    // 20e-b: der **zweite** Abstand und die Referenz. Ohne sie klingt
+    // „6,2 K über Soll" im Oktober nach Herbstsonne — am 07.10.2026 traf
+    // der Satz auf 14 Geräte zu, echt waren zwei.
+    await expect(hinweis).toContainText("4,1 K");
+    await expect(hinweis).toContainText("vergleichbaren Zimmern");
+    await expect(hinweis).toContainText("Median 20,0 °C");
     // Der Hauptverdacht steht zuerst, weil er der teuerste ist.
     await expect(hinweis).toContainText("Thermostatkopf abgenommen");
     await expect(hinweis.locator("span").first()).toHaveClass(/text-danger/);
+  });
+
+  test("Rückfall auf alle Zimmer sagt es im Text", async ({ page }) => {
+    // Hochsaison: zu wenige nicht belegte Zimmer, die Kette fällt auf
+    // Stufe 2. Der Text muss das nennen und nicht „vergleichbare Zimmer"
+    // behaupten — gegen belegte Zimmer mit 22-24 °C ist der Vergleich ein
+    // anderer, und der Satz soll nicht mehr Genauigkeit behaupten, als er
+    // hat.
+    await mockDetail(page, {
+      valve_state: "zimmer_zu_warm",
+      valve_delta_k: 6.0,
+      valve_referenz: "alle",
+      valve_referenz_median_c: 22.5,
+      valve_referenz_delta_k: 4.5,
+    });
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const hinweis = page.getByTestId("valve-hint");
+    await expect(hinweis).toContainText("allen Zimmern");
+    await expect(hinweis).not.toContainText("vergleichbaren Zimmern");
+    await expect(hinweis).toContainText("Median 22,5 °C");
+  });
+
+  test("ohne Referenz nennt der Text nur den Soll-Abstand", async ({ page }) => {
+    // `keine` heißt: die Referenzmenge war zu klein, es gab **kein**
+    // relatives Urteil. Ein Satz über eine Referenz, die es nicht gab,
+    // wäre eine Erfindung — und ein leeres „über " wäre ein Textfehler,
+    // den der Hotelier für einen Datenfehler hält.
+    //
+    // Diese Lage ist auf dem Server nicht erreichbar (ohne Referenz gibt
+    // es keinen 3b-Hinweis), aber der Badge muss total sein: er bekommt
+    // seine Daten von außen.
+    await mockDetail(page, {
+      valve_state: "zimmer_zu_warm",
+      valve_delta_k: 6.0,
+      valve_referenz: "keine",
+      valve_referenz_median_c: null,
+      valve_referenz_delta_k: null,
+    });
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const hinweis = page.getByTestId("valve-hint");
+    await expect(hinweis).toContainText("Ist liegt 6,0 K über Soll.");
+    await expect(hinweis).not.toContainText("Zimmern");
+    await expect(hinweis).not.toContainText("Median");
+    await expect(hinweis).not.toContainText("undefined");
+  });
+
+  test("Referenz als String aus dem Backend wirft nicht", async ({ page }) => {
+    // Derselbe Absturz wie am 07.10.2026, eine Ebene weiter: zwei neue
+    // `Decimal`-Felder, und ohne Eintrag im `field_serializer` kämen sie
+    // als JSON-String. `formatDelta`/`formatMedian` prüfen deshalb auf
+    // `typeof === "number"` und nicht auf die Abwesenheit von `null`.
+    //
+    // Der Mock umgeht den Typ absichtlich — genau so kommen fremde Daten
+    // an, und ein Typ ist eine Behauptung darüber, keine Zusicherung.
+    await mockDetail(page, {
+      valve_state: "zimmer_zu_warm",
+      valve_delta_k: "6.00" as unknown as number,
+      valve_referenz_median_c: "20.000" as unknown as number,
+      valve_referenz_delta_k: "4.000" as unknown as number,
+    });
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    // Die Seite lebt, der Hinweis steht, und die unlesbaren Zahlen fehlen
+    // schlicht — `null` statt `0`, denn eine 0 wäre eine Aussage.
+    const hinweis = page.getByTestId("valve-hint");
+    await expect(hinweis).toContainText("Zimmer zu warm");
+    await expect(hinweis).not.toContainText("NaN");
+    await expect(hinweis).not.toContainText("undefined");
   });
 
   test("Ventil klemmt zu: gelber Hinweis, beide Ursachen genannt", async ({ page }) => {
@@ -146,7 +232,11 @@ test.describe("Sprint 20e — Ventil-Hinweise", () => {
   test("ohne Abstand bleibt der Text sinnvoll", async ({ page }) => {
     // Der Abstand ist optional; ein Urteil ohne Zahl darf keine Lücke im
     // Satz hinterlassen („Ist liegt über Soll" statt „Ist liegt  über Soll").
-    await mockDetail(page, { valve_state: "zimmer_zu_warm", valve_delta_k: null });
+    await mockDetail(page, {
+      valve_state: "zimmer_zu_warm",
+      valve_delta_k: null,
+      valve_referenz_delta_k: null,
+    });
     await page.goto(`/devices/${DEVICE_ID}`);
 
     const hinweis = page.getByTestId("valve-hint");

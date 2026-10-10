@@ -55,6 +55,7 @@ from heizung.models.sensor_reading import SensorReading
 from heizung.schemas.device import DeviceRead
 from heizung.services.valve_health import (
     VALVE_MIN_SAMPLES,
+    ValveReferenz,
     ValveState,
     valve_schwellen,
     valve_verdicts,
@@ -582,4 +583,21 @@ async def test_schema_spiegelt_die_service_zustaende() -> None:
 
     schema_werte = set(get_args(DeviceRead.model_fields["valve_state"].annotation))
     service_werte = set(get_args(ValveState))
+    assert schema_werte == service_werte
+
+
+async def test_schema_spiegelt_die_referenz_werte() -> None:
+    """Dasselbe fuer ``valve_referenz`` (20e-b).
+
+    Hier ist der Preis einer zweiten Liste hoeher als bei ``valve_state``:
+    die Werte stehen nicht nur im Schema nach, sondern auch im Hinweistext
+    des Frontends (``REFERENZ_WORT`` in ``valve-hint-badge.tsx``). Ein
+    neuer Wert im Service, den niemand nachzieht, erzeugt dort keinen
+    Absturz — der Badge prueft positiv —, sondern einen Satz **ohne** die
+    Referenz. Also einen Hinweis, der wieder so aussieht wie vor 20e-b.
+    """
+    from typing import get_args
+
+    schema_werte = set(get_args(DeviceRead.model_fields["valve_referenz"].annotation))
+    service_werte = set(get_args(ValveReferenz))
     assert schema_werte == service_werte

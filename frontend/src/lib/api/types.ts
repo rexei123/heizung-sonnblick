@@ -37,6 +37,26 @@ export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
  */
 export type ValveState = "ok" | "ventil_klemmt_zu" | "zimmer_zu_warm" | "unbekannt";
 
+/**
+ * Worauf das relative Urteil von Regel 3b fußt (Sprint 20e-b). Spiegel zu
+ * ``ValveReferenz`` in ``services/valve_health.py``.
+ *
+ * Seit 20e-b verlangt 3b zwei Bedingungen (UND): Ist über dem Sollwert UND
+ * Ist über vergleichbaren Zimmern. Welche Zimmer „vergleichbar" sind, wählt
+ * eine Rückfallkette je nach Belegung — und der Hinweistext muss es nennen,
+ * sonst müsste ein Hausmeister raten, womit sein Zimmer verglichen wurde.
+ *
+ * | Wert | Referenzmenge |
+ * |---|---|
+ * | ``unbelegt`` | die nicht belegten Zimmer (der Normalfall) |
+ * | ``alle`` | alle Zimmer — Rückfall in der Hochsaison, mit größerem Delta |
+ * | ``keine`` | zu wenige Zimmer: **kein** 3b-Urteil |
+ *
+ * ``keine`` ist eine Aussage und kein Fehler. Deshalb ein eigener Wert und
+ * nicht ``null``.
+ */
+export type ValveReferenz = "unbelegt" | "alle" | "keine";
+
 /** Zone-Health (AE-53): aus den Devices der Zone aggregiert (no_device statt suspicious). */
 export type ZoneHealthState = "healthy" | "degraded" | "silent" | "no_device";
 
@@ -129,6 +149,12 @@ export interface Device {
   // Kelvin, der zum Urteil gehört (knappster Wert des Fensters).
   valve_state: ValveState;
   valve_delta_k: number | null;
+  // Sprint 20e-b: gegen was Regel 3b verglichen hat — Referenzmenge, deren
+  // Median in °C und der knappste Abstand dazu in Kelvin. Der Hinweistext
+  // nennt beide Abstände, damit „zu warm" nicht nach Wetter aussieht.
+  valve_referenz: ValveReferenz;
+  valve_referenz_median_c: number | null;
+  valve_referenz_delta_k: number | null;
   /**
    * Der Median, aus dem battery_state entstanden ist — in Volt. Die Zahl, die
    * neben die Stufe gehoert („OK · 3,1 V"). NICHT

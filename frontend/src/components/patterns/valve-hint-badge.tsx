@@ -50,7 +50,7 @@
  * gegen das Fenster und kostet Energie, solange es niemand sieht.
  */
 
-import type { ValveState } from "@/lib/api/types";
+import type { ValveReferenz, ValveState } from "@/lib/api/types";
 
 type Variant = "compact" | "detailed";
 
@@ -63,15 +63,59 @@ interface ValveHintBadgeProps {
    * ein Spitzenwert würde den Befund dramatischer darstellen, als er ist.
    */
   valveDeltaK?: number | null;
+  /**
+   * Worauf das relative Urteil von Regel 3b fußt (Sprint 20e-b) — plus der
+   * Median der Referenzmenge und der Abstand dazu.
+   *
+   * **Warum der Hinweistext das nennen muss.** Bis 20e-b stand dort nur
+   * „Ist liegt 6,0 K über Soll". Am 07.10.2026 traf das auf 14 Geräte zu,
+   * echt waren zwei: leere Zimmer standen bei Herbstwetter ohne Heizung
+   * über ihrem Sollwert. Der Satz war wahr und nutzlos. Mit dem zweiten
+   * Abstand steht daneben, dass es nicht am Wetter liegt — und mit der
+   * Referenz, womit verglichen wurde.
+   */
+  valveReferenz?: ValveReferenz | null;
+  valveReferenzMedianC?: number | null;
+  valveReferenzDeltaK?: number | null;
   variant?: Variant;
+}
+
+/** Was der Hinweistext zur Verfügung hat. */
+interface HintDaten {
+  /** Abstand zum Sollwert, formatiert („6,0 K") oder `null`. */
+  delta: string | null;
+  /** Abstand zur Referenzmenge, formatiert, oder `null`. */
+  refDelta: string | null;
+  /** Die Referenzmenge, in Worten („vergleichbaren Zimmern") oder `null`. */
+  refName: string | null;
+  /** Median der Referenzmenge („20,0 °C") oder `null`. */
+  refMedian: string | null;
 }
 
 interface HintConfig {
   label: string;
   icon: string;
   badgeClass: string;
-  hint: (delta: string | null) => string;
+  hint: (daten: HintDaten) => string;
 }
+
+/**
+ * Die Referenzmenge in Worten.
+ *
+ * `unbelegt` heißt „vergleichbare Zimmer", weil genau das die fachliche
+ * Aussage ist: nicht belegte Zimmer sind thermisch dieselbe Population.
+ * Bei `alle` steht „allen Zimmern" — der Rückfall vergleicht auch gegen
+ * belegte, in denen Gäste 22–24 °C einstellen, und der Satz soll nicht
+ * mehr Genauigkeit behaupten, als er hat.
+ *
+ * `keine` ergibt `null`: dann gibt es kein relatives Urteil, und ein Satz
+ * über eine Referenz, die es nicht gab, wäre eine Erfindung.
+ */
+const REFERENZ_WORT: Record<ValveReferenz, string | null> = {
+  unbelegt: "vergleichbaren Zimmern",
+  alle: "allen Zimmern",
+  keine: null,
+};
 
 const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
   ventil_klemmt_zu: {
@@ -82,7 +126,7 @@ const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
     // Ventilstellung von 0 % heißt entweder „zu" oder „nicht kalibriert",
     // und das ist aus den Daten nicht zu unterscheiden. Beide verdienen
     // denselben Handgriff.
-    hint: (delta) =>
+    hint: ({ delta }) =>
       `Soll liegt${delta ? ` ${delta}` : ""} über Ist, Ventil meldet trotzdem zu. ` +
       `Ventil klemmt oder ist nicht kalibriert.`,
   },
@@ -90,10 +134,20 @@ const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
     label: "Zimmer zu warm",
     icon: "local_fire_department",
     badgeClass: "bg-danger-soft text-danger",
-    // Der Satz nennt den Hauptverdacht zuerst, weil er der teuerste ist.
-    hint: (delta) =>
-      `Ist liegt${delta ? ` ${delta}` : ""} über Soll. ` +
-      `Thermostatkopf abgenommen (Ventil steht dann offen) oder Ventil klemmt offen.`,
+    // Der Satz nennt zuerst die beiden Abstände und dann den Hauptverdacht,
+    // weil der zweite Abstand das Wetter ausschließt — ohne ihn klingt
+    // „6,0 K über Soll" im Oktober nach Herbstsonne.
+    hint: ({ delta, refDelta, refName, refMedian }) => {
+      const abstaende =
+        refDelta && refName
+          ? `Ist liegt${delta ? ` ${delta}` : ""} über Soll und ${refDelta} über ` +
+            `${refName}${refMedian ? ` (Median ${refMedian})` : ""}.`
+          : `Ist liegt${delta ? ` ${delta}` : ""} über Soll.`;
+      return (
+        `${abstaende} ` +
+        `Thermostatkopf abgenommen (Ventil steht dann offen) oder Ventil klemmt offen.`
+      );
+    },
   },
 };
 
@@ -123,9 +177,22 @@ function formatDelta(k: unknown): string | null {
   return `${k.toFixed(1).replace(".", ",")} K`;
 }
 
+/**
+ * Formatiert den Median als Temperatur, mit derselben Totalität wie
+ * `formatDelta` und aus demselben Grund (§5.3-Familie: ein Typ ist eine
+ * Behauptung über fremde Daten, keine Zusicherung).
+ */
+function formatMedian(c: unknown): string | null {
+  if (typeof c !== "number" || !Number.isFinite(c)) return null;
+  return `${c.toFixed(1).replace(".", ",")} °C`;
+}
+
 export function ValveHintBadge({
   valveState,
   valveDeltaK,
+  valveReferenz,
+  valveReferenzMedianC,
+  valveReferenzDeltaK,
   variant = "compact",
 }: ValveHintBadgeProps) {
   // Positiv formuliert statt als Ausschlussliste, und das ist nicht Kosmetik:
@@ -143,7 +210,20 @@ export function ValveHintBadge({
   if (config === undefined) {
     return null;
   }
-  const hint = config.hint(formatDelta(valveDeltaK));
+  // `valveReferenz` kommt aus fremden Daten und kann ein Wert sein, den
+  // diese Fassung nicht kennt (neuer Zustand im Backend, veralteter Mock).
+  // Positiv geprüft wie der Zustand oben: ein unbekannter Schlüssel ergibt
+  // `undefined` und damit keinen Referenz-Satz, nicht einen Absturz.
+  const refName =
+    valveReferenz != null && valveReferenz in REFERENZ_WORT
+      ? REFERENZ_WORT[valveReferenz]
+      : null;
+  const hint = config.hint({
+    delta: formatDelta(valveDeltaK),
+    refDelta: formatDelta(valveReferenzDeltaK),
+    refName,
+    refMedian: formatMedian(valveReferenzMedianC),
+  });
 
   const pill = (
     <span

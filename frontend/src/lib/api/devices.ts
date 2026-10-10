@@ -37,6 +37,11 @@ const BASE = "/api/v1/devices";
  */
 const DEVICE_ZAHLENFELDER = [
   "valve_delta_k",
+  // 20e-b: zwei weitere Decimal-Felder derselben Antwort. Dieselbe Falle,
+  // dieselbe Liste — wer hier eins vergisst, bekommt im Hinweistext einen
+  // String, auf dem `.toFixed()` wirft.
+  "valve_referenz_median_c",
+  "valve_referenz_delta_k",
   "battery_voltage_median",
   "battery_last_voltage",
 ] as const;

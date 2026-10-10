@@ -174,6 +174,13 @@ async def _build_device_read(
             # demselben Verdict, damit sie nicht auseinanderlaufen.
             "valve_state": ventil.state,
             "valve_delta_k": ventil.delta_k,
+            # 20e-b: gegen was 3b verglichen hat. Vollstaendig durchgereicht,
+            # nicht nur bei ``zimmer_zu_warm`` — wer wissen will, warum ein
+            # warmes Zimmer *keinen* Hinweis traegt, braucht die Referenz
+            # gerade dann.
+            "valve_referenz": ventil.referenz,
+            "valve_referenz_median_c": ventil.referenz_median_c,
+            "valve_referenz_delta_k": ventil.referenz_delta_k,
             "battery_jump_at": verdict.jump_at,
             "battery_last_voltage": verdict.last_v,
             "battery_last_at": verdict.last_at,
