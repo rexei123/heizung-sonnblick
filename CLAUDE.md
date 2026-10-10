@@ -3380,10 +3380,33 @@ beide Werte fest, damit der naechste, der sie senken will, die Zahl daneben
 findet.
 
 **Was diese Lesson nicht sagt:** dass absolute Schwellen falsch sind. Die
-Batterie-Stufen (§5.73) stehen zu Recht auf absoluten Spannungen — eine
-Zelle bei 2,6 V ist leer, unabhaengig davon, was die anderen 103 Geraete
-melden. Der Unterschied ist, ob die Messgroesse eine **gemeinsame** aeussere
-Ursache hat. Bei Raumtemperatur im selben Haus: ja. Bei Zellspannung: nein.
+Batterie-Stufen (§5.73) stehen zu Recht auf absoluten Spannungen — aber
+**nicht**, weil eine bestimmte Spannung „leer" bedeutete.
+
+Hier stand zuerst „eine Zelle bei 2,6 V ist leer". Das ist falsch, und der
+Befund dazu liegt im Haus: Geraet 102 zeigte am 04.10.2026 um 15:02 einen
+Median von 2,6 V, hielt ihn zwei Tage, und war ab dem 06.10. wieder bei
+3,5 V — **ohne Tausch, mit lueckenlosem fCnt**. Der Wert war unter Last
+gemessen, kein Lebensende. Die Betriebsregel lautet deshalb: **getauscht
+wird bei drei Stunden Funkstille, die Spannung ist Information** (§5.73
+Nachtrag). Eine Stufe ist kein Auftrag.
+
+Der Grund, warum sie trotzdem **absolut** bleibt, ist ein anderer — und er
+ist das Spiegelbild dieser Lesson. Bei der Zellspannung ist die gemeinsame
+Bewegung **genau das, was man finden will**: die Zellen wurden im
+September gemeinsam eingebaut (RUNBOOK §10h) und werden deshalb absehbar in
+derselben Zeitspanne schwach. Faellt ein Median ueber sie mit ihnen, meldet
+„relativ zu den anderen" **nichts** — ausgerechnet, wenn alle zu tauschen
+sind. Das ist eine Erwartung aus dem gemeinsamen Einbaudatum und keine
+Messung; sie taugt als Konstruktionsgrund, nicht als Befund. Bei der Raumtemperatur ist die
+gemeinsame Bewegung das Wetter, also gerade **nicht** das Gesuchte.
+
+**Die Probe ist deshalb nicht** „hat die Messgroesse eine gemeinsame aeussere
+Ursache" — die hat sie fast immer irgendwie. Sie ist: **ist die gemeinsame
+Bewegung das Stoersignal oder das Nutzsignal?** Wetter ueber 45 Zimmern:
+Stoersignal, also relativieren. Gemeinsames Altern von 104 Zellen:
+Nutzsignal, also nicht relativieren. Wer das verwechselt, baut einen Melder,
+der im Normalfall ruhig ist und im Ernstfall schweigt.
 
 **Querverweise:** §5.79 (ein Melder, dem niemand mehr glaubt, ueberwacht
 nichts — der Grund, warum 14 Fehlalarme kein Kosmetikproblem sind), §5.82
