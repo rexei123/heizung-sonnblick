@@ -3328,6 +3328,72 @@ allem, was Shell- und Locale-Grenzen ueberquert — der Vorcheck haette sonst
 still versagt), AE-77 §10 und §11 (die beiden Faelle mit ihren Messungen),
 RUNBOOK §10u Schritt 0a und 0b.
 
+### 5.84 Ein Melder gegen eine Umwelt braucht ein relatives Kriterium, nicht eine hoehere Schwelle (Sprint 20e-b)
+
+Regel 3b sollte ein abgefallenes Thermostat finden: ein Ventil ohne Kopf
+steht offen, das Zimmer wird heiss. Umgesetzt als `Ist >= Soll + 5 K`, und
+die 5 K waren gegenueber den 3 K des Gates schon der **vorsichtigere** Wert
+(§5.27: der Vicki-Sensor verzerrt nur in diese Richtung).
+
+**Am Tag der Freigabe meldete die Kachel 14 Geraete. Echt waren zwei.** Es
+war Herbst, der Kessel aus, und die leeren Zimmer standen bei 22-24 °C ueber
+ihrem Sollwert von 18 °C.
+
+**Die naheliegende Reaktion ist die falsche.** „Dann 7 K" verschiebt den
+Fehler in die Jahreszeit: im Januar waere dieselbe Schwelle blind. Eine Zahl,
+die zweimal im Jahr von Hand nachgezogen werden muss und zwischendurch falsch
+ist, ist keine Schwelle, sondern ein Wartungsvertrag. Und es ist derselbe
+Zug, den §5.82 schon als Fehler benennt: den Melder leiser stellen, statt die
+Ursache zu suchen.
+
+**Die Ursache war die Bezugsgroesse, nicht ihr Wert.** Der Sollwert sagt, was
+das Zimmer haben soll — nicht, was ein gesundes Zimmer unter denselben
+aeusseren Bedingungen hat. Das zweite ist die Frage, die der Melder stellen
+wollte.
+
+**Regel:** Ein Melder, dessen Messgroesse von der Umwelt mitbewegt wird
+(Aussentemperatur, Sonne, Jahreszeit, Netzlast, Tageszeit), braucht ein
+Kriterium **relativ zu einer vergleichbaren Grundgesamtheit** — nicht einen
+absoluten Grenzwert. Die Grundgesamtheit bewegt sich mit der Umwelt mit, der
+Ausreisser nicht. Praktisch heisst das drei Entscheidungen, und alle drei
+gehoeren benannt:
+
+1. **Wer ist vergleichbar?** Hier: die nicht belegten Zimmer, weil in
+   belegten Gaeste 22-24 °C einstellen. Eine falsche Grundgesamtheit ist
+   schlimmer als eine absolute Schwelle, weil sie Objektivitaet vorspiegelt.
+2. **Was, wenn die Grundgesamtheit zu klein ist?** Eine Mindestzahl, und
+   darunter **kein** Urteil — nicht ein Rueckfall auf das absolute
+   Kriterium. „Besser etwas als nichts" waere der alte Zustand, nur seltener
+   und damit unberechenbar.
+3. **Wo liegt die Grenze der Statistik?** Ein Median traegt bis 50 %
+   Verunreinigung. Darueber ist der Melder blind, und das ist keine
+   Nachlaessigkeit, sondern eine Eigenschaft. Sie gehoert in den Code, in die
+   Betriebsdoku **und** in einen Test, der beide Richtungen festhaelt — sonst
+   wird aus einer bekannten Grenze stillschweigend eine Zusicherung.
+
+**Und die Schwelle wird gemessen, bevor sie gewaehlt wird.** Der relative
+Abstand hat keinen Wert, den man aus der Physik herleiten kann. Die T0-Abfrage
+am echten Datenstand hat gezeigt, dass der knappste echte Fall bei genau
+3,0 K lag — deshalb 3,5 und nicht 3,0. **Eine Schwelle, die einen bekannten
+Fall genau trifft, ist keine Schwelle, sondern ein Zufall.** Ein Test haelt
+beide Werte fest, damit der naechste, der sie senken will, die Zahl daneben
+findet.
+
+**Was diese Lesson nicht sagt:** dass absolute Schwellen falsch sind. Die
+Batterie-Stufen (§5.73) stehen zu Recht auf absoluten Spannungen — eine
+Zelle bei 2,6 V ist leer, unabhaengig davon, was die anderen 103 Geraete
+melden. Der Unterschied ist, ob die Messgroesse eine **gemeinsame** aeussere
+Ursache hat. Bei Raumtemperatur im selben Haus: ja. Bei Zellspannung: nein.
+
+**Querverweise:** §5.79 (ein Melder, dem niemand mehr glaubt, ueberwacht
+nichts — der Grund, warum 14 Fehlalarme kein Kosmetikproblem sind), §5.82
+(den Vergleichswert nachziehen statt die Ursache suchen — derselbe Zug, hier
+an einer Schwelle), §5.76 (Wirkung statt Mechanik — 3b misst die Wirkung,
+und diese Lesson ist, wie man sie richtig misst), §5.27 (die Verzerrung des
+Vicki-Sensors, die zu den 5 K gefuehrt hat), §5.73 (der Gegenfall: absolute
+Schwellen, wo sie hingehoeren), AE-74 (die Entscheidung mit ihren Messungen),
+RUNBOOK §10t (was „ueber vergleichbaren Zimmern" fuer den Betrieb heisst).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
