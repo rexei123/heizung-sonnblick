@@ -216,7 +216,20 @@ async def _compute_health_state_async() -> dict[str, Any]:
     now = datetime.now(tz=UTC)
 
     async with _task_session() as session:
-        devices = list((await session.execute(select(Device))).scalars().all())
+        # Lifecycle-Filter (§5.58). Fehlte bis 12.10.2026, und die Luecke
+        # wurde an einem konkreten Fall scharf: fuer die Koepfe 027, 100 und
+        # 056, die zur Reparatur ins Lager gehen, waere die Batterie-Entnahme
+        # als Funkstille-Alarm angekommen — Stilllegen haette daran nichts
+        # geaendert, weil dieser Lauf retired Geraete mitgerechnet hat.
+        #
+        # Ein stillgelegtes Geraet behaelt damit den ``health_state``, den es
+        # beim Stilllegen hatte. Das ist richtig: ein Zustand, der nicht mehr
+        # gemessen wird, soll nicht weiterlaufen.
+        devices = list(
+            (await session.execute(select(Device).where(Device.retired_at.is_(None))))
+            .scalars()
+            .all()
+        )
         zones = list((await session.execute(select(HeatingZone))).scalars().all())
         rooms = list((await session.execute(select(Room))).scalars().all())
 
@@ -312,6 +325,11 @@ async def _compute_health_state_async() -> dict[str, Any]:
                     {
                         "device_id": d.id,
                         "dev_eui": d.dev_eui,
+                        # Entscheidet ueber den Mailversand, nicht ueber den
+                        # Logeintrag: ein Pool-Geraet darf still werden und
+                        # sichtbar sein, aber niemanden wecken
+                        # (``health_alerts.handle_silent_transitions``).
+                        "heating_zone_id": d.heating_zone_id,
                         "reason": reason,
                         "device_name": d.label,
                         "zone_name": zone.name if zone is not None else None,

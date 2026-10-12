@@ -134,6 +134,23 @@ class SammelmailErgebnis:
     result: mailer.MailResult | None = None
 
 
+# Sentinel fuer "das Feld war nicht dabei". Siehe ``_ist_pool``.
+_FEHLT = object()
+
+
+def _ist_pool(t: dict[str, Any]) -> bool:
+    """Ist dieser Uebergang ein Geraet **ohne** Heizzone?
+
+    **Die Vorgabe bei fehlendem Feld ist bewusst „nein".** Ein Aufrufer, der
+    ``heating_zone_id`` nicht mitgibt, bekommt die Mail — nicht das
+    Schweigen. Ein fehlendes Feld darf einen Alarm nicht abschalten; das
+    waere die stille Fehlerrichtung, und die ist bei einem Melder die
+    teure (§5.76).
+    """
+    zone = t.get("heating_zone_id", _FEHLT)
+    return zone is not _FEHLT and zone is None
+
+
 def handle_silent_transitions(
     transitions: list[dict[str, Any]], *, recipient: str | None
 ) -> SammelmailErgebnis:
@@ -171,7 +188,31 @@ def handle_silent_transitions(
         return SammelmailErgebnis(0)
 
     # Nur Stufe 2. Stufe 3 bleibt in diesem Sprint Logger-only.
-    kandidaten = [t for t in transitions if t["reason"] != REASON_IMPLAUSIBLE]
+    #
+    # **Und nur zugeordnete Geraete** (Entscheidung des Hoteliers,
+    # 12.10.2026). Ein Geraet im Pool ist kein Zimmer, das nicht geregelt
+    # wird — es liegt im Lager, womoeglich ohne Batterie, und das ist dort
+    # der Normalzustand. Eine Mail dafuer ist der Fall aus §5.79: ein
+    # Melder, von dem man gelernt hat, dass er auch bei Absicht anschlaegt,
+    # verliert Gewicht.
+    #
+    # Der **Logeintrag** oben entsteht trotzdem fuer jeden Uebergang. Wer
+    # spaeter fragt, warum ein Pool-Geraet still ist, findet die Spur; wer
+    # nachts geweckt wird, hat etwas zu tun. Das ist die Trennung.
+    #
+    # Stilllegen waere die Alternative gewesen und ist fuer reparierbare
+    # Koepfe falsch: ``retired_at`` ist endgueltig (AE-57), ein Kopf vom
+    # Techniker kommt zurueck.
+    ohne_zone = [t for t in transitions if _ist_pool(t)]
+    if ohne_zone:
+        logger.info(
+            "health_alert_pool_geraet_ohne_mail",
+            extra={
+                "anzahl": len(ohne_zone),
+                "dev_euis": [t["dev_eui"] for t in ohne_zone],
+            },
+        )
+    kandidaten = [t for t in transitions if t["reason"] != REASON_IMPLAUSIBLE and not _ist_pool(t)]
 
     # Die Bremse wird fuer JEDES Geraet einzeln gefragt, auch wenn am Ende
     # eine gemeinsame Mail rausgeht. Sonst wuerde ein einziges frisches

@@ -88,6 +88,15 @@ def _transitions(anzahl: int) -> list[dict[str, Any]]:
     return [_transition(i) for i in range(1, anzahl + 1)]
 
 
+def _pool_transition(nr: int) -> dict[str, Any]:
+    """Ein Uebergang fuer ein Geraet **ohne** Heizzone (Pool/Lager)."""
+    t = _transition(nr)
+    t["heating_zone_id"] = None
+    t["room_name"] = None
+    t["zone_name"] = None
+    return t
+
+
 # ---------------------------------------------------------------------------
 # Die drei geforderten Mengen
 # ---------------------------------------------------------------------------
@@ -314,3 +323,83 @@ def test_ohne_versuch_bleibt_das_resultat_leer(postfach: _Postfach, fake_redis: 
         ).result
         is None
     )
+
+
+# ---------------------------------------------------------------------------
+# Pool-Geraete: still ja, Mail nein (12.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def test_pool_geraet_erzeugt_keine_mail(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
+    """Ein Geraet ohne Heizzone weckt niemanden.
+
+    **Der Anlass war konkret.** Die Koepfe 027, 100 und 056 gehen zur
+    Reparatur ins Lager, die Batterien kommen heraus — ohne diese Regel
+    waere das als Funkstille-Alarm angekommen. Ein Geraet im Lager ohne
+    Batterie ist kein Zimmer, das nicht geregelt wird; es ist der
+    Normalzustand eines Ersatzteils.
+
+    Stilllegen waere die Alternative gewesen und ist fuer **reparierbare**
+    Koepfe falsch: ``retired_at`` ist endgueltig (AE-57), ein Kopf vom
+    Techniker kommt zurueck.
+    """
+    ergebnis = health_alerts.handle_silent_transitions(
+        [_pool_transition(27)], recipient="alarm@example.invalid"
+    )
+
+    assert ergebnis.gemeldet == 0
+    assert ergebnis.result is None, "gar nicht versucht, also kein Fehlversuch"
+    assert postfach.mails == []
+
+
+def test_pool_geraet_bremst_den_zugeordneten_nicht(
+    postfach: _Postfach, fake_redis: _FakeRedis
+) -> None:
+    """Ein Pool-Geraet in derselben Liste darf die echte Meldung nicht schlucken.
+
+    Der gemischte Fall ist der realistische: nachts kippen ein Lager-Geraet
+    und ein montiertes gleichzeitig auf ``silent``. Die Mail muss genau
+    **eines** nennen.
+    """
+    ergebnis = health_alerts.handle_silent_transitions(
+        [_pool_transition(27), _transition(49)], recipient="alarm@example.invalid"
+    )
+
+    assert ergebnis.gemeldet == 1
+    assert len(postfach.mails) == 1
+    body = postfach.mails[0]["body"]
+    assert "049" in body
+    assert "027" not in body, "das Lager-Geraet gehoert nicht in die Mail"
+
+
+def test_pool_geraet_verbraucht_die_bremse_nicht(
+    postfach: _Postfach, fake_redis: _FakeRedis
+) -> None:
+    """Die Sperre wird fuer ein Pool-Geraet gar nicht gefragt.
+
+    Sonst waere das Geraet sechs Stunden lang gebremst, ohne dass je eine
+    Mail dazu rausgegangen ist — und wuerde dann beim Wiedereinbau in ein
+    Zimmer stumm bleiben, genau wenn es zaehlt.
+    """
+    health_alerts.handle_silent_transitions(
+        [_pool_transition(27)], recipient="alarm@example.invalid"
+    )
+
+    assert fake_redis.store == {}, "kein Bremsen-Schluessel fuer ein Pool-Geraet"
+
+
+def test_fehlendes_zonen_feld_meldet_trotzdem(postfach: _Postfach, fake_redis: _FakeRedis) -> None:
+    """**Die Vorgabe bei fehlendem Feld ist „melden", nicht „schweigen".**
+
+    ``_transition`` gibt ``heating_zone_id`` nicht mit — so sehen alle
+    Bestandstests und ein aelterer Aufrufer aus. Ein fehlendes Feld darf
+    einen Alarm nicht abschalten: das waere die stille Fehlerrichtung, und
+    bei einem Melder ist die die teure (§5.76).
+    """
+    t = _transition(49)
+    assert "heating_zone_id" not in t
+
+    ergebnis = health_alerts.handle_silent_transitions([t], recipient="alarm@example.invalid")
+
+    assert ergebnis.gemeldet == 1
+    assert len(postfach.mails) == 1
