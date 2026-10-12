@@ -161,7 +161,7 @@ einen Test, der sie an einem Gerät prüft, das beide Bedingungen erfüllt.
 | **G1** | **Sollwert fällt gerade** (Nachtabsenkung, Abreise → 18 °C). Das Zimmer ist über dem neuen Sollwert, das Ventil noch offen | 3c würde kurz nach jeder Absenkung anschlagen | `bool_and` über 2 h trägt das: ein funktionierendes Vicki schließt innerhalb von Minuten, und ein einziger Messwert unter 80 % fällt das Urteil. **In T0 zu prüfen**, weil es die Hauptquelle für Fehlalarme wäre |
 | **G2** | **Frostschutz / offenes Fenster.** Die Engine senkt den Sollwert stark, das Zimmer liegt weit darüber | Jedes Gerät, das offen meldet, erfüllt 3c | Fachlich richtig (ein Ventil, das bei Frostschutz offen bleibt, ist ein Defekt) — aber es überlagert sich mit Layer 4. **In T0 zählen**, und falls häufig: `open_window` im Fenster schließt 3c aus |
 | **G3** | **Kalibrierung gescheitert** | `valve_position` ist bedeutungslos | Ausschluss, siehe §2 |
-| **G4** | **Gerät im Pool, keiner Zone zugeordnet** | Kein Sollwert-Bezug? | Nein: `setpoint` kommt vom Gerät selbst, nicht aus der Engine. 3c funktioniert auch ohne Zuordnung — und soll es, denn ein defekter Antrieb fällt am Tisch genauso auf |
+| **G4** | **Gerät im Pool, keiner Zone zugeordnet** | Kein Sollwert-Bezug? | Nein: `setpoint` kommt vom Gerät selbst, nicht aus der Engine. 3c funktioniert auch ohne Zuordnung — und soll es, denn ein defekter Antrieb fällt am Tisch genauso auf. **Im Code geprüft (12.10.), nichts zu ändern:** siehe §4a |
 | **G5** | **`motorRange` falsch gemessen**, aber Kalibrierung formal erfolgreich | `valve_position` systematisch verschoben | Nicht abfangbar und nicht zu verwechseln mit G3. Bekannte Grenze; der Hinweistext nennt die Rekalibrierung als ersten Handgriff, und das deckt diesen Fall mit ab |
 
 **Warum der Sollwert vom Gerät kommt und nicht aus der Engine.** Das ist eine
@@ -170,6 +170,47 @@ Geräts** gegen **dessen eigene** Zielvorgabe. Nähme man den
 Engine-Sollwert, würde ein nicht angekommener Downlink wie ein defekter
 Antrieb aussehen — zwei verschiedene Fehler unter einem Hinweis, und der
 Handgriff wäre je nach Ursache ein anderer.
+
+---
+
+## 4a. Joint `valve_health` über die Zone? (Frage des Hoteliers, 12.10.)
+
+**An genau einer Stelle, und es ist die richtige.** Geprüft am Code, nicht
+geschätzt:
+
+| Stelle | Zonen-Join | Folge für Geräte ohne Zone |
+|---|---|---|
+| **Urteil je Gerät** (`valve_verdicts`, Hauptabfrage) | **nein** — gelesen wird `sensor_reading` nach `device_id` | werden bewertet, wie jedes andere Gerät |
+| **Referenz-Median** (`_referenz_cte`) | **ja** — `device → heating_zone → room` | tragen **nichts** zur Referenz bei; sie haben kein Zimmer |
+| **Dashboard-Kacheln** (`count_valve_alerts`) | **nein** — `select(Device.id).where(retired_at IS NULL)` | werden mitgezählt |
+
+**Für 3c ist damit nichts zu tun.** Ein Gerät ohne Zone bekommt sein Urteil,
+weil 3c nur `setpoint`, `temperature` und `valve_position` braucht — alles
+vom Gerät selbst. G4 stimmt, und zwar ohne Zutun.
+
+### Ein Nebenbefund, der nicht zu 3c gehört, aber zu dieser Frage
+
+Dieselbe Mechanik heißt: **ein Gerät ohne Zone kann heute den Hinweis
+„Zimmer zu warm" tragen** (Regel 3b). Es wird gegen den Hausmedian
+verglichen, obwohl es in keinem Zimmer sitzt — ein Pool-Gerät auf einem
+warmen Schreibtisch erfüllt beide Bedingungen ohne Weiteres.
+
+**Und das ist seit dem 12.10. keine Theorie:** 027 und 100 liegen jetzt im
+Pool. Ein Etikett „Zimmer zu warm" an einem Gerät in der Schublade ist
+nicht falsch gerechnet, aber falsch benannt.
+
+**Vorschlag, als eigene kleine Entscheidung:**
+
+* **3b nur für Geräte mit Zone.** Ohne Zimmer gibt es kein „Zimmer zu
+  warm", und der Vergleich mit Zimmern ist für einen Schreibtisch ohnehin
+  ohne Aussage.
+* **3 und 3c bleiben für Pool-Geräte.** Beide sind Aussagen über das
+  **Gerät** („Ventil klemmt zu", „Ventil schließt nicht") und damit
+  genau das, was ein Eingangstest am Tisch wissen will.
+
+Aufwand: ein `WHERE` in der Hauptabfrage mit Fallunterscheidung je Zustand,
+plus zwei Tests. **0,5 h**, und es gehört in T1, weil es dieselbe Abfrage
+ist. Nicht eingeplant, bis der Hotelier entscheidet.
 
 ---
 
@@ -250,9 +291,9 @@ WITH fenster AS (
          sr.temperature, sr.setpoint, sr.valve_position,
          sr.calibration_failed, sr.open_window
   FROM sensor_reading sr
-  JOIN device d        ON d.id = sr.device_id AND d.retired_at IS NULL
-  JOIN heating_zone hz ON hz.id = d.heating_zone_id
-  JOIN room r          ON r.id = hz.room_id
+  JOIN device d             ON d.id = sr.device_id AND d.retired_at IS NULL
+  LEFT JOIN heating_zone hz ON hz.id = d.heating_zone_id
+  LEFT JOIN room r          ON r.id = hz.room_id
   WHERE sr.time >  timestamptz '2026-10-10 09:30:00+00'
     AND sr.time <= timestamptz '2026-10-10 11:30:00+00'
     AND sr.temperature IS NOT NULL AND sr.setpoint IS NOT NULL
@@ -274,6 +315,18 @@ ORDER BY ueber_soll DESC;"
 
 Die Abfrage rechnet die vorgeschlagenen Werte nach (80 % / 2,0 K / 6
 Messwerte) und liest keine Einstellungen.
+
+**`LEFT JOIN` und nicht `JOIN` (Hotelier, 12.10.).** 027 und 100 sind seit
+dem 12.10. **nicht mehr zugeordnet**: getauscht wurden 005 → 405
+Schlafzimmer und 008 → 110 Schlafzimmer, beide Ventile schließen sauber und
+die Flags stehen auf `false`. **Damit sind die Köpfe 027 und 100 defekt und
+nicht die Ventile** — der Befund ist schärfer als vorher gedacht.
+
+Für die Abfrage heißt das: der Zonen-Join läuft über die **heutige**
+Zuordnung, nicht über die von damals. Mit einem inneren `JOIN` fielen genau
+die zwei Geräte aus dem historischen Fenster heraus, deren Befund belegt
+werden soll. `zimmer` und `status` sind für sie dann `NULL`, und das ist
+richtig so.
 
 **Die Bäder 53/54 mitlesen.** Der Hotelier nennt sie als Fälle für den
 Techniker. Tauchen sie in Abfrage A auf, ist das ein zweiter Beleg für die
@@ -338,26 +391,33 @@ hier festgehalten statt in einer Chat-Nachricht:
   **vollständig nach** dem Sprung sehr wohl meldet, wenn die Stellung dann
   noch hoch ist.
 
-**Unbekannt bleibt also genau eine Zahl:** wie lange ein gesundes Vicki nach
-einer Absenkung braucht, bis es **gemeldet** unter 80 % ist. Bleibt es länger
-als zwei Stunden, meldet 3c jede Nacht das halbe Haus — also die
-Fehlalarm-Lage, die 20e-b gerade beseitigt hat.
+**Unbekannt blieb damit genau eine Zahl:** wie lange ein gesundes Vicki nach
+einer Absenkung braucht, bis es **gemeldet** unter 80 % ist.
 
-**Zwei Dinge halten das auf:**
+### Und die Zahl ist jetzt gemessen (Hotelier, 12.10.)
 
-1. **Der G1-Test in T5 ist damit tragend**, nicht mehr nur Vollständigkeit.
-   Er prüft die Mechanik (ein Messwert unter der Schwelle fällt das Urteil);
-   die Zahl aus dem Haus prüft er nicht.
-2. **AK 1b ist die Gegenprobe im Betrieb** — nach dem Deploy darf die Kachel
-   durch 3c nicht ansteigen. Der Unterschied zu einer Messung vorher ist der
-   Zeitpunkt: ein Befund nach dem Deploy ist ein Befund an einem laufenden
-   System, vier Wochen vor dem 01.11.
+Zimmer 207, Schlafzimmer, Gerät **049**, am 05.10.:
 
-**Die Messung bleibt jederzeit nachholbar**, und das ist der Grund, warum
-dieser Abschnitt nicht dramatischer klingt: `sensor_reading` hat keine
-Retention, das Fenster vom 10.10. 20:00–23:00 UTC liegt weiter in der
-Datenbank, und die Abfrage steht im PR-Text von #295. Ein Einfügen, eine
-Minute — auch nächste Woche noch.
+| Zeit | Soll | Ventil |
+|---|---|---|
+| 14:06 | 25 → **18** (Abreise) | 74 % |
+| 14:16 | 18 | **0 %** |
+
+**Unter zehn Minuten von 74 % auf 0 %** — ein einzelner Frame-Abstand, und
+damit weit unter dem 2-h-Fenster. Das ist der Beleg, den Abfrage B hätte
+liefern sollen, und er ist besser als sie: ein echtes Gerät, eine echte
+Absenkung, die gemeldete Stellung selbst.
+
+**G1 ist damit kein offenes Risiko mehr**, sondern eine Lage mit zwei
+unabhängigen Gründen: das Übergangsfenster schützt sich selbst (Probe oben),
+und ein gesundes Gerät ist ohnehin binnen Minuten unter der Schwelle. Der
+G1-Test in T5 hält die Mechanik fest; die Zahl steht hier.
+
+Abfrage B bleibt gestrichen und braucht nicht nachgeholt zu werden.
+
+**AK 1b bleibt die Gegenprobe im Betrieb** — nach dem Deploy darf die Kachel
+durch 3c nicht ansteigen. Nicht mehr als Ersatz für eine fehlende Messung,
+sondern als das, was eine Live-Abnahme immer ist.
 
 **Pflicht-Stop bleibt Messung A.**
 
@@ -426,7 +486,7 @@ Minute — auch nächste Woche noch.
 | Risiko | Gegenmaßnahme |
 |---|---|
 | **Die 80 % sind geraten** und treffen die beiden Fälle nicht | T0 misst `ventil_min`/`ventil_max` der betroffenen Geräte, bevor die Zahl feststeht |
-| **G1 (Absenkung) erzeugt eine Fehlalarm-Welle jeden Abend** — und zwar genau die Sorte, die 20e-b gerade beseitigt hat | **Ungemessen** (Messung B entfällt, §6). Es trägt: das Übergangsfenster schützt sich selbst, der G1-Test in T5, und AK 1b als Gegenprobe im Betrieb. Tritt es ein, wird das **Fenster** für 3c verlängert und nicht die Schwelle verschoben — und die Messung ist jederzeit nachholbar, weil `sensor_reading` keine Retention hat |
+| **G1 (Absenkung) erzeugt eine Fehlalarm-Welle jeden Abend** | **Gemessen und ausgeräumt** (§6): Gerät 049 am 05.10. von 74 % auf 0 % in unter zehn Minuten nach einer Absenkung von 25 auf 18. Dazu schützt sich das Übergangsfenster selbst. Der G1-Test in T5 hält die Mechanik fest |
 | **Eine Kachel für zwei Sorten** — ein Anstieg ist nicht mehr deutbar, ohne in die Liste zu sehen | Entscheidung des Hoteliers (§5), und der Preis ist klein: die Sorte steht am Gerät, und der Handgriff ist derselbe. Wird die Zahl größer als eine Handvoll, lohnt die Aufteilung — dann mit Zahlen |
 | **3c macht 3b scheinbar überflüssig**, und jemand baut es ab | Die Abgrenzungs-Tabelle aus §2 gehört in Modul-Docstring und RUNBOOK: ein abgenommener Kopf, dessen letzte Stellung „zu" war, meldet **zu** — den findet nur 3b |
 | **Vorrang falsch gewählt** | Als Test festgehalten, nicht als Reihenfolge von `elif`-Zweigen (§5.23) |
