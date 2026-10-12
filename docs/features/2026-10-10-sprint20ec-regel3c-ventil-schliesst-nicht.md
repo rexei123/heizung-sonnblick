@@ -275,6 +275,12 @@ ORDER BY ueber_soll DESC;"
 Die Abfrage rechnet die vorgeschlagenen Werte nach (80 % / 2,0 K / 6
 Messwerte) und liest keine Einstellungen.
 
+**Die Bäder 53/54 mitlesen.** Der Hotelier nennt sie als Fälle für den
+Techniker. Tauchen sie in Abfrage A auf, ist das ein zweiter Beleg für die
+Regel; tauchen sie **nicht** auf, obwohl sie defekt sind, sagt
+`ventil_min`/`ventil_max`, woran es liegt — und das ist vor der Reparatur
+zu klären, danach nicht mehr.
+
 **Was die Ausgabe entscheidet:**
 
 * **Zwei Zeilen, nämlich 027 und 100** → der Vorschlag trifft, Werte
@@ -312,11 +318,48 @@ Befund.
 ```
 
 Das ist eine **Erwartung an Messung B**, keine Entwarnung: geprüft wurde die
-Abfrage, nicht das Haus. Fällt B anders aus, liegt es an echtem Verhalten,
-das die Probe nicht kennt — etwa an Geräten, die nach einer Absenkung
-tatsächlich zwei Stunden brauchen.
+Abfrage, nicht das Haus.
 
-**Ohne diese zwei Messungen keine Umsetzung.** Pflicht-Stop.
+### Messung B entfällt (Entscheidung des Hoteliers, 12.10.) — und was offen bleibt
+
+Begründung: die Nachtabsenkung ist am 07.10. live belegt (Zimmer 101,
+21 → 19 °C ohne Ping-Pong), und das 2-h-Fenster schützt nach der Probe oben
+selbst vor dem Übergangs-Fehlalarm.
+
+**Beides stimmt. Die Lücke, die bleibt, ist eine andere**, und sie gehört
+hier festgehalten statt in einer Chat-Nachricht:
+
+* Der 07.10.-Beleg ist ein Beleg über **Sollwerte** — die Engine senkt
+  sauber ab. Über die **gemeldete Ventilstellung** danach sagt er nichts,
+  und genau die ist die Eingangsgröße von 3c.
+* Die Probe oben ist ein Beleg über die **Abfrage**, mit einem Ventil, das
+  synthetisch auf 90 % festgehalten wurde. Sie zeigt, dass das
+  Übergangsfenster schützt — und gleichzeitig, dass ein Fenster
+  **vollständig nach** dem Sprung sehr wohl meldet, wenn die Stellung dann
+  noch hoch ist.
+
+**Unbekannt bleibt also genau eine Zahl:** wie lange ein gesundes Vicki nach
+einer Absenkung braucht, bis es **gemeldet** unter 80 % ist. Bleibt es länger
+als zwei Stunden, meldet 3c jede Nacht das halbe Haus — also die
+Fehlalarm-Lage, die 20e-b gerade beseitigt hat.
+
+**Zwei Dinge halten das auf:**
+
+1. **Der G1-Test in T5 ist damit tragend**, nicht mehr nur Vollständigkeit.
+   Er prüft die Mechanik (ein Messwert unter der Schwelle fällt das Urteil);
+   die Zahl aus dem Haus prüft er nicht.
+2. **AK 1b ist die Gegenprobe im Betrieb** — nach dem Deploy darf die Kachel
+   durch 3c nicht ansteigen. Der Unterschied zu einer Messung vorher ist der
+   Zeitpunkt: ein Befund nach dem Deploy ist ein Befund an einem laufenden
+   System, vier Wochen vor dem 01.11.
+
+**Die Messung bleibt jederzeit nachholbar**, und das ist der Grund, warum
+dieser Abschnitt nicht dramatischer klingt: `sensor_reading` hat keine
+Retention, das Fenster vom 10.10. 20:00–23:00 UTC liegt weiter in der
+Datenbank, und die Abfrage steht im PR-Text von #295. Ein Einfügen, eine
+Minute — auch nächste Woche noch.
+
+**Pflicht-Stop bleibt Messung A.**
 
 ---
 
@@ -324,12 +367,12 @@ tatsächlich zwei Stunden brauchen.
 
 | # | Inhalt | Dauer |
 |---|---|---|
-| **T0** | Beide Messungen aus §6 (Kessel an; Nachtabsenkung), Schwellen und Ausschlüsse festlegen. **Pflicht-Stop** | 0,5 h |
+| **T0** | Messung **A** aus §6 (Kessel an, festes Fenster 10.10.), Schwellen und Ausschlüsse festlegen. **Pflicht-Stop.** Messung B (Absenkung) entfällt auf Entscheidung des Hoteliers — die Lücke steht in §6 | 0,25 h |
 | **T1** | `valve_health`: dritte Bedingung im **selben** `GROUP BY` (`bool_and` über Stellung und Abstand), neuer Zustand `ventil_schliesst_nicht`, Ausschlüsse nach T0 | 1,5 h |
 | **T2** | Vorrangregel 3c vor 3b, im Docstring ausgesprochen und per Test an einem Gerät geprüft, das beide erfüllt. Dazu der Test „3 und 3c schließen sich aus" | 0,75 h |
 | **T3** | Einstellungen `VALVE_OPEN_MIN_PCT` (80) und `VALVE_NOT_CLOSING_DELTA_K` (2.0), Muster AE-73, mit Start-Validator (Delta > 0, Prozent 0..100, und **Delta kleiner als `ROOM_TOO_WARM_DELTA_K`** — sonst wäre 3c nie die engere Aussage) | 0,75 h |
 | **T4** | Schema (`valve_state` erweitern, Spiegel-Test greift automatisch), Frontend-Spiegel, Badge-Etikett „Ventil schließt nicht" und Hinweistext, `statusScore`-Rang **5** (gleiche Stufe wie „Zimmer zu warm" — dieselbe Wirkung, Energieverlust; Gleichstand löst die alphabetische Zweitsortierung). **Keine** neue Kachel: 3c zählt in „Ventil prüfen", und das Feld wird von `valve_stuck_count` in `valve_check_count` umbenannt (§5) | 1,75 h |
-| **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (Absenkung, ein Messwert unter der Schwelle fällt das Urteil); G2/G3 nach T0-Entscheidung; Vorrang; **der Datenstand vom 10.10. als Testwand** (027 gemeldet, 100 gemeldet, sonst keiner) | 2 h |
+| **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (Absenkung, ein Messwert unter der Schwelle fällt das Urteil); G2/G3 nach T0-Entscheidung; Vorrang; **der Datenstand vom 10.10. als Testwand** — und zwar aus den **echten Zahlen** von Abfrage A (`ueber_soll`, `ventil_min`/`ventil_max` je Gerät), weil dieser Test seit dem 12.10. die Stelle von AK 1 einnimmt. Die Ausgabe von A gehört deshalb aufbewahrt und in den Test-Docstring übernommen, wie die T0-Aggregate in 20e-b | 2,25 h |
 | **T6** | RUNBOOK §10t (gemeinsamer Handgriff, Abgrenzungs-Tabelle aus §2), AE-74 um 3c erweitern, STATUS | 1 h |
 | **Summe** | | **8,25 h** |
 | **T7** *(optional)* | `lowMotorConsumption` persistieren: Migration (additiv, nullable), Subscriber, im Hinweistext als „Motor läuft ohne Widerstand". **Nicht** als Bedingung | 1 h |
@@ -338,8 +381,31 @@ tatsächlich zwei Stunden brauchen.
 
 ## 8. Akzeptanzkriterien
 
-1. **027/110 und 100/405 werden gemeldet, sonst keiner** (Live-Abnahme des
-   Hoteliers, bei laufendem Kessel).
+1. **027/110 und 100/405 werden gemeldet, sonst keiner** — belegt über
+   **Abfrage A auf dem festen Fenster 10.10. 09:30–11:30 UTC**, nicht über
+   eine Live-Abnahme.
+
+   **Grund (Entscheidung des Hoteliers, 12.10.):** 027, 100 und die Bäder
+   53/54 übernimmt der Techniker. Sind die Ventile vor dem 3c-Deploy
+   repariert, gibt es den Defekt nicht mehr zu finden — eine Live-Abnahme
+   wäre dann nicht „erfüllt", sondern **unmöglich**.
+
+   Das geht, weil die Daten bleiben: `sensor_reading` hat **keine
+   Retention-Policy** (B-17-2 betrifft `event_log`, und dort ist Retention
+   selbst offen). Das feste Fenster ist damit dauerhaft nachrechenbar —
+   **und wer später eine Retention auf `sensor_reading` einführt, löscht
+   diesen Beleg.** Gehört in den Backlog-Eintrag.
+
+   **Was dieser Beleg nicht kann, und das gehört dazu:** er zeigt, dass die
+   Regel die beiden Fälle in historischen Daten findet. Dass sie sie im
+   Betrieb findet, zeigt erst der nächste echte Defekt. Dieselbe Lage wie
+   bei AK 1b in 20e-b — belegt ist dann, dass die Regel rechnet, nicht dass
+   sie wacht. Kein Grund, es anders zu machen; ein Grund, es so zu
+   schreiben.
+
+1b. **Nach dem Deploy live: keine Fehlalarme.** Mit repariertem Bestand ist
+   das die einzige Richtung, die am Haus noch prüfbar ist — die Kachel
+   „Ventil prüfen" darf durch 3c nicht ansteigen.
 2. Bei **Nachtabsenkung** entsteht kein Hinweis — ein Gerät, das nach dem
    Sollwert-Wechsel schließt, fällt aus dem Urteil.
 3. Ein Gerät, das **beide** Bedingungen (3b und 3c) erfüllt, trägt den
@@ -360,7 +426,7 @@ tatsächlich zwei Stunden brauchen.
 | Risiko | Gegenmaßnahme |
 |---|---|
 | **Die 80 % sind geraten** und treffen die beiden Fälle nicht | T0 misst `ventil_min`/`ventil_max` der betroffenen Geräte, bevor die Zahl feststeht |
-| **G1 (Absenkung) erzeugt eine Fehlalarm-Welle jeden Abend** — und zwar genau die Sorte, die 20e-b gerade beseitigt hat | Zweite T0-Messung zur Absenkung ist Pflicht-Stop. Fällt sie schlecht aus, wird das Fenster für 3c verlängert statt die Schwelle verschoben |
+| **G1 (Absenkung) erzeugt eine Fehlalarm-Welle jeden Abend** — und zwar genau die Sorte, die 20e-b gerade beseitigt hat | **Ungemessen** (Messung B entfällt, §6). Es trägt: das Übergangsfenster schützt sich selbst, der G1-Test in T5, und AK 1b als Gegenprobe im Betrieb. Tritt es ein, wird das **Fenster** für 3c verlängert und nicht die Schwelle verschoben — und die Messung ist jederzeit nachholbar, weil `sensor_reading` keine Retention hat |
 | **Eine Kachel für zwei Sorten** — ein Anstieg ist nicht mehr deutbar, ohne in die Liste zu sehen | Entscheidung des Hoteliers (§5), und der Preis ist klein: die Sorte steht am Gerät, und der Handgriff ist derselbe. Wird die Zahl größer als eine Handvoll, lohnt die Aufteilung — dann mit Zahlen |
 | **3c macht 3b scheinbar überflüssig**, und jemand baut es ab | Die Abgrenzungs-Tabelle aus §2 gehört in Modul-Docstring und RUNBOOK: ein abgenommener Kopf, dessen letzte Stellung „zu" war, meldet **zu** — den findet nur 3b |
 | **Vorrang falsch gewählt** | Als Test festgehalten, nicht als Reihenfolge von `elif`-Zweigen (§5.23) |
