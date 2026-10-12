@@ -275,6 +275,12 @@ ORDER BY ueber_soll DESC;"
 Die Abfrage rechnet die vorgeschlagenen Werte nach (80 % / 2,0 K / 6
 Messwerte) und liest keine Einstellungen.
 
+**Die Bäder 53/54 mitlesen.** Der Hotelier nennt sie als Fälle für den
+Techniker. Tauchen sie in Abfrage A auf, ist das ein zweiter Beleg für die
+Regel; tauchen sie **nicht** auf, obwohl sie defekt sind, sagt
+`ventil_min`/`ventil_max`, woran es liegt — und das ist vor der Reparatur
+zu klären, danach nicht mehr.
+
 **Was die Ausgabe entscheidet:**
 
 * **Zwei Zeilen, nämlich 027 und 100** → der Vorschlag trifft, Werte
@@ -329,17 +335,40 @@ tatsächlich zwei Stunden brauchen.
 | **T2** | Vorrangregel 3c vor 3b, im Docstring ausgesprochen und per Test an einem Gerät geprüft, das beide erfüllt. Dazu der Test „3 und 3c schließen sich aus" | 0,75 h |
 | **T3** | Einstellungen `VALVE_OPEN_MIN_PCT` (80) und `VALVE_NOT_CLOSING_DELTA_K` (2.0), Muster AE-73, mit Start-Validator (Delta > 0, Prozent 0..100, und **Delta kleiner als `ROOM_TOO_WARM_DELTA_K`** — sonst wäre 3c nie die engere Aussage) | 0,75 h |
 | **T4** | Schema (`valve_state` erweitern, Spiegel-Test greift automatisch), Frontend-Spiegel, Badge-Etikett „Ventil schließt nicht" und Hinweistext, `statusScore`-Rang **5** (gleiche Stufe wie „Zimmer zu warm" — dieselbe Wirkung, Energieverlust; Gleichstand löst die alphabetische Zweitsortierung). **Keine** neue Kachel: 3c zählt in „Ventil prüfen", und das Feld wird von `valve_stuck_count` in `valve_check_count` umbenannt (§5) | 1,75 h |
-| **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (Absenkung, ein Messwert unter der Schwelle fällt das Urteil); G2/G3 nach T0-Entscheidung; Vorrang; **der Datenstand vom 10.10. als Testwand** (027 gemeldet, 100 gemeldet, sonst keiner) | 2 h |
+| **T5** | Tests: beide Bedingungen einzeln und zusammen; G1 (Absenkung, ein Messwert unter der Schwelle fällt das Urteil); G2/G3 nach T0-Entscheidung; Vorrang; **der Datenstand vom 10.10. als Testwand** — und zwar aus den **echten Zahlen** von Abfrage A (`ueber_soll`, `ventil_min`/`ventil_max` je Gerät), weil dieser Test seit dem 12.10. die Stelle von AK 1 einnimmt. Die Ausgabe von A gehört deshalb aufbewahrt und in den Test-Docstring übernommen, wie die T0-Aggregate in 20e-b | 2,25 h |
 | **T6** | RUNBOOK §10t (gemeinsamer Handgriff, Abgrenzungs-Tabelle aus §2), AE-74 um 3c erweitern, STATUS | 1 h |
-| **Summe** | | **8,25 h** |
+| **Summe** | | **8,5 h** |
 | **T7** *(optional)* | `lowMotorConsumption` persistieren: Migration (additiv, nullable), Subscriber, im Hinweistext als „Motor läuft ohne Widerstand". **Nicht** als Bedingung | 1 h |
 
 ---
 
 ## 8. Akzeptanzkriterien
 
-1. **027/110 und 100/405 werden gemeldet, sonst keiner** (Live-Abnahme des
-   Hoteliers, bei laufendem Kessel).
+1. **027/110 und 100/405 werden gemeldet, sonst keiner** — belegt über
+   **Abfrage A auf dem festen Fenster 10.10. 09:30–11:30 UTC**, nicht über
+   eine Live-Abnahme.
+
+   **Grund (Entscheidung des Hoteliers, 12.10.):** 027, 100 und die Bäder
+   53/54 übernimmt der Techniker. Sind die Ventile vor dem 3c-Deploy
+   repariert, gibt es den Defekt nicht mehr zu finden — eine Live-Abnahme
+   wäre dann nicht „erfüllt", sondern **unmöglich**.
+
+   Das geht, weil die Daten bleiben: `sensor_reading` hat **keine
+   Retention-Policy** (B-17-2 betrifft `event_log`, und dort ist Retention
+   selbst offen). Das feste Fenster ist damit dauerhaft nachrechenbar —
+   **und wer später eine Retention auf `sensor_reading` einführt, löscht
+   diesen Beleg.** Gehört in den Backlog-Eintrag.
+
+   **Was dieser Beleg nicht kann, und das gehört dazu:** er zeigt, dass die
+   Regel die beiden Fälle in historischen Daten findet. Dass sie sie im
+   Betrieb findet, zeigt erst der nächste echte Defekt. Dieselbe Lage wie
+   bei AK 1b in 20e-b — belegt ist dann, dass die Regel rechnet, nicht dass
+   sie wacht. Kein Grund, es anders zu machen; ein Grund, es so zu
+   schreiben.
+
+1b. **Nach dem Deploy live: keine Fehlalarme.** Mit repariertem Bestand ist
+   das die einzige Richtung, die am Haus noch prüfbar ist — die Kachel
+   „Ventil prüfen" darf durch 3c nicht ansteigen.
 2. Bei **Nachtabsenkung** entsteht kein Hinweis — ein Gerät, das nach dem
    Sollwert-Wechsel schließt, fällt aus dem Urteil.
 3. Ein Gerät, das **beide** Bedingungen (3b und 3c) erfüllt, trägt den
