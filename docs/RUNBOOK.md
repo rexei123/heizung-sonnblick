@@ -3905,6 +3905,38 @@ am nächsten Tag.
    mitgezogen; in einem Zimmer, in dem ein anderer Heizkörper heizt, kann der
    gemessene Ist-Wert weit unter der Raumtemperatur liegen.
 
+### Ein Gerät im Lager kann „Ventil prüfen" tragen
+
+**Das ist bekannt und akzeptiert** (Entscheidung vom 12.10.2026), und es ist
+kein Fehler — aber es sieht beim ersten Mal wie einer aus.
+
+Regel 3 und Regel 3c sind Aussagen über das **Gerät**, nicht über ein
+Zimmer: „Sollwert liegt über Ist, Ventil meldet zu" und „Zimmer über Soll,
+Ventil meldet offen". Beide gelten deshalb auch für Geräte **ohne
+Zuordnung** — Pool und Lager. Am Tisch ist genau das die Auskunft, die ein
+Eingangstest braucht.
+
+**Die Folge:** ein Gerät, das mit eingelegten Batterien im kalten Lager
+liegt, meldet womöglich Sollwert 18 °C bei einem Ist von 10 °C und ein
+geschlossenes Ventil. Das erfüllt Regel 3, und die Kachel „Ventil prüfen"
+zählt es mit.
+
+| Lage | Kachel |
+|---|---|
+| Lager, **Batterien drin** | kann als „Ventil prüfen" erscheinen |
+| Lager, **Batterien raus** | verschwindet — ohne Messwerte gibt es kein Urteil („unbekannt“) |
+| Stillgelegt (`retired_at`) | verschwindet aus Liste und Kacheln |
+
+**Was zu tun ist: nichts.** Wer ein Gerät im Lager in der Kachel findet,
+prüft die Spalte Zimmer — ist sie leer, liegt es im Pool und der Hinweis
+betrifft kein Zimmer. Die Alternative wäre, Regel 3 auf zugeordnete Geräte
+zu beschränken, und damit verlöre der Eingangstest am Tisch sein
+brauchbarstes Kriterium.
+
+**Nicht verwechseln mit „Zimmer zu warm":** der Hinweis gilt **nur** für
+Geräte mit Zuordnung (Sprint 20e-c). Ein Zimmer, das es nicht gibt, kann
+nicht zu warm sein.
+
 ### Wenn ein Hinweis zu oft kommt
 
 Das ist kein Kosmetikproblem. Ein Hinweis, den man nach zwei Wochen übergeht,
