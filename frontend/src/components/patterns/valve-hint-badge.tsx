@@ -77,6 +77,11 @@ interface ValveHintBadgeProps {
   valveReferenz?: ValveReferenz | null;
   valveReferenzMedianC?: number | null;
   valveReferenzDeltaK?: number | null;
+  /**
+   * Gemeldete Ventilstellung in Prozent (`latest_reading.valve_position`).
+   * Für Regel 3c; `null` oder fehlend lässt den Satz weiter funktionieren.
+   */
+  valvePositionPct?: number | null;
   variant?: Variant;
 }
 
@@ -90,6 +95,14 @@ interface HintDaten {
   refName: string | null;
   /** Median der Referenzmenge („20,0 °C") oder `null`. */
   refMedian: string | null;
+  /**
+   * Gemeldete Ventilstellung als Text („100 % offen") oder `null`.
+   *
+   * Nur Regel 3c braucht sie, und sie ist die Hälfte der Aussage: ohne die
+   * Zahl steht dort „meldet trotzdem offen", und das klingt nach einer
+   * Vermutung statt nach einer Messung.
+   */
+  offenheit: string | null;
 }
 
 interface HintConfig {
@@ -117,7 +130,10 @@ const REFERENZ_WORT: Record<ValveReferenz, string | null> = {
   keine: null,
 };
 
-const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
+const CONFIG: Record<
+  "ventil_klemmt_zu" | "ventil_schliesst_nicht" | "zimmer_zu_warm",
+  HintConfig
+> = {
   ventil_klemmt_zu: {
     label: "Ventil prüfen",
     icon: "build",
@@ -129,6 +145,21 @@ const CONFIG: Record<"ventil_klemmt_zu" | "zimmer_zu_warm", HintConfig> = {
     hint: ({ delta }) =>
       `Soll liegt${delta ? ` ${delta}` : ""} über Ist, Ventil meldet trotzdem zu. ` +
       `Ventil klemmt oder ist nicht kalibriert.`,
+  },
+  ventil_schliesst_nicht: {
+    label: "Ventil schließt nicht",
+    icon: "heat",
+    // Rot wie „Zimmer zu warm": die Wirkung ist dieselbe, Energie läuft
+    // gegen das Fenster. Gelb ist für „Ventil prüfen" reserviert, wo ein
+    // Zimmer nicht warm wird — Komfort statt Verbrauch.
+    badgeClass: "bg-danger-soft text-danger",
+    // Der Satz nennt **beide** gemessenen Größen, weil erst sie zusammen
+    // die Aussage tragen: über dem Sollwert ist eine Temperatur, „meldet
+    // trotzdem offen" ist der Defekt. Und er nennt beide Ursachen statt zu
+    // raten — ein nicht kalibriertes Gerät meldet dieselbe Lage.
+    hint: ({ delta, offenheit }) =>
+      `Zimmer liegt${delta ? ` ${delta}` : ""} über Soll, Gerät meldet trotzdem ` +
+      `${offenheit ?? "offen"}. Ventil fährt nicht zu oder ist nicht kalibriert.`,
   },
   zimmer_zu_warm: {
     label: "Zimmer zu warm",
@@ -187,12 +218,19 @@ function formatMedian(c: unknown): string | null {
   return `${c.toFixed(1).replace(".", ",")} °C`;
 }
 
+/** „100 % offen" — total wie `formatDelta`, aus demselben Grund. */
+function formatOffenheit(p: unknown): string | null {
+  if (typeof p !== "number" || !Number.isFinite(p)) return null;
+  return `${Math.round(p)} % offen`;
+}
+
 export function ValveHintBadge({
   valveState,
   valveDeltaK,
   valveReferenz,
   valveReferenzMedianC,
   valveReferenzDeltaK,
+  valvePositionPct,
   variant = "compact",
 }: ValveHintBadgeProps) {
   // Positiv formuliert statt als Ausschlussliste, und das ist nicht Kosmetik:
@@ -223,6 +261,7 @@ export function ValveHintBadge({
     refDelta: formatDelta(valveReferenzDeltaK),
     refName,
     refMedian: formatMedian(valveReferenzMedianC),
+    offenheit: formatOffenheit(valvePositionPct),
   });
 
   const pill = (

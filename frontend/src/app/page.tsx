@@ -114,9 +114,9 @@ function buildCards(data: DashboardKpi): CardConfig[] {
     {
       // Sprint 20e (T7): dieselbe Achse wie der gelbe ValveHintBadge.
       label: "Ventil prüfen",
-      value: data.valve_stuck_count,
+      value: data.valve_check_count,
       icon: "build",
-      tone: data.valve_stuck_count > 0 ? "warning-soft" : "neutral",
+      tone: data.valve_check_count > 0 ? "warning-soft" : "neutral",
     },
     {
       // Sprint 20e (T10): der Ersatz-Melder für Layer 4 Detached. Rot, nicht

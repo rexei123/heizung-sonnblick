@@ -33,6 +33,8 @@ function toMessage(e: unknown): string {
  *   health_state silent               -> 4  (meldet sich nicht — Tausch-Ausloeser)
  *   valve_state zimmer_zu_warm        -> 5  (einziger Melder fuer ein
  *                                            abgefallenes Geraet, AE-74)
+ *   valve_state ventil_schliesst_nicht-> 5  (dieselbe Wirkung: Energie
+ *                                            laeuft gegen das Fenster)
  *   valve_state ventil_klemmt_zu      -> 3  ("Ventil pruefen")
  *   battery_state kritisch            -> 2  (Spannung niedrig — Information)
  *   battery_state warn                -> 1  (Information)
@@ -154,7 +156,11 @@ function statusScore(d: Device): number {
   if (d.retired_at !== null) return 6;
 
   let ventil = 0;
-  if (d.valve_state === "zimmer_zu_warm") ventil = RANG_ZIMMER_ZU_WARM;
+  // 20e-c: beide Hinweise derselben Wirkung teilen den Rang. Gleichstand
+  // loest die alphabetische Zweitsortierung, und das ist richtig — welcher
+  // der beiden zuerst steht, ist keine Betriebsentscheidung.
+  if (d.valve_state === "zimmer_zu_warm" || d.valve_state === "ventil_schliesst_nicht")
+    ventil = RANG_ZIMMER_ZU_WARM;
   else if (d.valve_state === "ventil_klemmt_zu") ventil = 3;
 
   let battery = 0;
@@ -334,6 +340,7 @@ function DeviceRow({ device: d }: { device: Device }) {
           valveReferenz={d.valve_referenz}
           valveReferenzMedianC={d.valve_referenz_median_c}
           valveReferenzDeltaK={d.valve_referenz_delta_k}
+          valvePositionPct={d.latest_reading?.valve_position ?? null}
         />
       </td>
       <td className="px-4 py-3" data-testid="device-battery-cell">

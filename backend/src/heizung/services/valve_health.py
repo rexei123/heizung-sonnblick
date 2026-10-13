@@ -100,7 +100,13 @@ from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
 
-ValveState = Literal["ok", "ventil_klemmt_zu", "zimmer_zu_warm", "unbekannt"]
+ValveState = Literal[
+    "ok",
+    "ventil_klemmt_zu",
+    "ventil_schliesst_nicht",
+    "zimmer_zu_warm",
+    "unbekannt",
+]
 
 # Worauf das relative Urteil von Regel 3b fusst (Sprint 20e-b).
 #
@@ -155,6 +161,8 @@ class ValveSchwellen:
     rel_delta_k: Decimal
     rel_delta_all_k: Decimal
     ref_min_rooms: int
+    open_min_pct: int
+    not_closing_delta_k: Decimal
 
 
 def valve_schwellen() -> ValveSchwellen:
@@ -171,6 +179,8 @@ def valve_schwellen() -> ValveSchwellen:
         rel_delta_k=settings.room_rel_delta_k,
         rel_delta_all_k=settings.room_rel_delta_all_k,
         ref_min_rooms=settings.ref_min_rooms,
+        open_min_pct=settings.valve_open_min_pct,
+        not_closing_delta_k=settings.valve_not_closing_delta_k,
     )
 
 
@@ -378,6 +388,18 @@ async def valve_verdicts(
     # Ventil-Bedingung, siehe Modul-Docstring — sie haette den Hauptfall
     # verloren.
     zu_warm = SensorReading.temperature >= SensorReading.setpoint + schwellen.too_warm_delta_k
+    # Regel 3c (20e-b-c): das Geraet meldet weit offen, obwohl das Zimmer
+    # ueber seinem **eigenen** Sollwert liegt. Ein funktionierendes Vicki
+    # schliesst in dieser Lage.
+    #
+    # Der Sollwert kommt vom Geraet und nicht aus der Engine — das ist eine
+    # Entscheidung: mit dem Engine-Sollwert saehe ein nicht angekommener
+    # Downlink wie ein defekter Antrieb aus, und der Handgriff waere je
+    # nach Ursache ein anderer.
+    schliesst_nicht = and_(
+        SensorReading.valve_position >= schwellen.open_min_pct,
+        SensorReading.temperature >= SensorReading.setpoint + schwellen.not_closing_delta_k,
+    )
     # Regel 3b, zweite Bedingung (20e-b): auch ueber vergleichbaren Zimmern.
     # Gegen ``NULL`` (Stufe 3 der Kette) ergibt der Vergleich ``NULL``, und
     # ``bool_and`` darueber ebenfalls — also kein Urteil, kein Hinweis.
@@ -390,6 +412,15 @@ async def valve_verdicts(
             func.bool_and(klemmt_zu).label("klemmt_zu"),
             func.bool_and(zu_warm).label("zu_warm"),
             func.bool_and(ueber_referenz).label("ueber_referenz"),
+            func.bool_and(schliesst_nicht).label("schliesst_nicht"),
+            # Ohne gueltigen ``motorRange`` ist ``valve_position`` eine Zahl
+            # ohne Bedeutung — "80 % offen" sagt dann nichts. ``bool_or``,
+            # weil ein einziger Frame mit Fehler das Fenster entwertet.
+            func.bool_or(SensorReading.calibration_failed).label("kalib_fehler"),
+            # Traegt das Geraet eine Zone? Entscheidet ueber Regel 3b
+            # (siehe unten). Der Join kann keine Zeile verlieren:
+            # ``sensor_reading.device_id`` ist ein Fremdschluessel.
+            Device.heating_zone_id.is_not(None).label("hat_zone"),
             # Die knappsten gemessenen Abstaende, fuer die Diagnose-Zahl.
             # Im selben Durchgang, kein zweiter Roundtrip.
             func.min(SensorReading.setpoint - SensorReading.temperature).label(
@@ -403,6 +434,7 @@ async def valve_verdicts(
             gewaehlt.c.referenz.label("referenz"),
         )
         .select_from(SensorReading)
+        .join(Device, Device.id == SensorReading.device_id)
         # Cross-Join auf eine Ein-Zeilen-CTE: die Referenz gilt fuer alle
         # Geraete gleich. Kein Unterabfrage-je-Zeile, der Planer liest die
         # CTE einmal.
@@ -429,7 +461,12 @@ async def valve_verdicts(
         # Median und Referenz-Name stehen mit im GROUP BY, nicht in einem
         # ``max()``: sie sind je Lauf konstant, und ``max()`` ueber eine
         # Konstante waere ein Trick, den ein Leser erst entschluesseln muss.
-        .group_by(SensorReading.device_id, gewaehlt.c.median, gewaehlt.c.referenz)
+        .group_by(
+            SensorReading.device_id,
+            gewaehlt.c.median,
+            gewaehlt.c.referenz,
+            Device.heating_zone_id,
+        )
     )
 
     ergebnis: dict[int, ValveVerdict] = dict.fromkeys(ids, UNBEKANNT)
@@ -465,11 +502,43 @@ async def valve_verdicts(
                 referenz=referenz,
                 referenz_median_c=median,
             )
+        # Regel 3c **vor** 3b, und das ist eine ausgesprochene
+        # Vorrangregel — bis 20e-c brauchte diese Funktion keine, weil 3 und
+        # 3b sich ausschliessen (Modul-Docstring). 3c und 3b koennen
+        # dagegen beide zutreffen.
+        #
+        # 3c gewinnt, weil es die **spezifischere** Aussage ist: "das Geraet
+        # meldet offen, waehrend es schliessen muesste" nennt den
+        # Mechanismus, "das Zimmer ist zu warm, vermutlich ist der Kopf ab"
+        # nennt eine Vermutung. Der Hausmeister spart einen
+        # Diagnoseschritt.
+        #
+        # ``kalib_fehler`` schliesst 3c aus und laesst den Fall bewusst zu
+        # 3b durchfallen: das Zimmer ist dann trotzdem zu warm, und der
+        # Handgriff fuer eine gescheiterte Kalibrierung ist ein anderer
+        # (rekalibrieren, RUNBOOK §10e).
+        elif row.schliesst_nicht is True and row.kalib_fehler is not True:
+            ergebnis[device_id] = ValveVerdict(
+                state="ventil_schliesst_nicht",
+                samples=samples,
+                delta_k=row.min_ist_minus_soll,
+                referenz=referenz,
+                referenz_median_c=median,
+                referenz_delta_k=row.min_ueber_median if row.zu_warm is True else None,
+            )
         # Regel 3b ab 20e-b: **beide** Bedingungen, mit UND. Die zweite
         # fehlt, wenn die Referenzmenge zu klein war — dann ist
         # ``ueber_referenz`` NULL und das Urteil faellt auf "ok", nicht auf
         # den alten absoluten Hinweis. Siehe ``_referenz_cte``.
-        elif row.zu_warm is True and row.ueber_referenz is True:
+        #
+        # **Nur fuer Geraete mit Zone** (20e-c): ein Geraet im Pool sitzt in
+        # keinem Zimmer, also kann kein Zimmer zu warm sein. Es wuerde sonst
+        # gegen den Hausmedian verglichen, obwohl es auf einem Schreibtisch
+        # liegt — nicht falsch gerechnet, aber falsch benannt. Regel 3 und
+        # 3c bleiben dagegen fuer Pool-Geraete gueltig: beide sind Aussagen
+        # ueber das **Geraet** und damit genau das, was ein Eingangstest am
+        # Tisch wissen will.
+        elif row.zu_warm is True and row.ueber_referenz is True and row.hat_zone:
             ergebnis[device_id] = ValveVerdict(
                 state="zimmer_zu_warm",
                 samples=samples,

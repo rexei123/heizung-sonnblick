@@ -134,6 +134,7 @@ export default function DeviceDetailPage() {
                   valveReferenz={device.valve_referenz}
                   valveReferenzMedianC={device.valve_referenz_median_c}
                   valveReferenzDeltaK={device.valve_referenz_delta_k}
+                  valvePositionPct={device.latest_reading?.valve_position ?? null}
                   variant="detailed"
                 />
                 {device.heating_zone ? (

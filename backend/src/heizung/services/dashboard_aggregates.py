@@ -177,7 +177,7 @@ async def count_zones_window_open(session: AsyncSession) -> int:
 
 
 async def count_valve_alerts(session: AsyncSession) -> tuple[int, int]:
-    """Aktive Geraete mit Ventil-Hinweis: ``(klemmt_zu, zu_warm)``.
+    """Aktive Geraete mit Ventil-Hinweis: ``(ventil_pruefen, zu_warm)``.
 
     **Getrennt gezaehlt und nicht summiert.** Die beiden Hinweise bedeuten
     verschiedene Handgriffe: "Ventil klemmt zu" heisst Ventil pruefen oder
@@ -203,9 +203,17 @@ async def count_valve_alerts(session: AsyncSession) -> tuple[int, int]:
         .all()
     )
     verdicts = await valve_verdicts(session, device_ids)
-    klemmt = sum(1 for v in verdicts.values() if v.state == "ventil_klemmt_zu")
+    # 20e-c: die Kachel "Ventil pruefen" zaehlt **beide** Ventil-Befunde.
+    # Entscheidung des Hoteliers (12.10.2026): eine Zahl fuer den
+    # Tagesblick ("am Ventil ist etwas"), die Sorte steht am Geraet.
+    # Deshalb heisst das Feld seit 20e-c ``valve_check_count`` und nicht
+    # mehr ``valve_stuck_count`` — ein Name, der behauptet, nur klemmende
+    # Ventile zu zaehlen, waere falsch (§5.77).
+    ventil = sum(
+        1 for v in verdicts.values() if v.state in ("ventil_klemmt_zu", "ventil_schliesst_nicht")
+    )
     warm = sum(1 for v in verdicts.values() if v.state == "zimmer_zu_warm")
-    return klemmt, warm
+    return ventil, warm
 
 
 async def count_battery_low(session: AsyncSession) -> int:

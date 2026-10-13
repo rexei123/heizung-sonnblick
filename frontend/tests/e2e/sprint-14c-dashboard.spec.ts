@@ -19,7 +19,7 @@ interface Kpi {
   // Sprint 15d (AE-65): Zod verlangt den Key jetzt — ohne ihn wirft parse.
   battery_low_count: number;
   // Sprint 20e (T7/T10): Zod verlangt diese beiden ebenfalls.
-  valve_stuck_count: number;
+  valve_check_count: number;
   room_too_warm_count: number;
 }
 
@@ -33,7 +33,7 @@ const BASE_KPI: Kpi = {
   zones_window_open: 0,
   last_engine_tick: new Date(Date.now() - 60_000).toISOString(),
   battery_low_count: 0,
-  valve_stuck_count: 0,
+  valve_check_count: 0,
   room_too_warm_count: 0,
 };
 
@@ -94,8 +94,8 @@ test.describe("Sprint 14c Dashboard", () => {
     await expect(card).toContainText("3");
   });
 
-  test("Sprint 20e: Ventil-prüfen-Kachel zählt valve_stuck_count", async ({ page }) => {
-    await mockKpi(page, { valve_stuck_count: 2 });
+  test("Sprint 20e: Ventil-prüfen-Kachel zählt valve_check_count (beide Ventil-Befunde)", async ({ page }) => {
+    await mockKpi(page, { valve_check_count: 2 });
     await page.goto("/");
     const card = page.getByTestId("kpi-card").filter({ hasText: "Ventil prüfen" });
     await expect(card).toBeVisible();
