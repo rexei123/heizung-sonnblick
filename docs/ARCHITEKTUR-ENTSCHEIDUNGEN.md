@@ -4495,6 +4495,132 @@ statt sich auf die Kachel zu verlassen.
   hat, dass die Kachel stimmt. Ein e2e-Test hält den Übergangswert fest und
   fällt beim Heben — damit es jemand absichtlich tut.
 
+### Regel 3c „Ventil schließt nicht": gegen eine Zusicherung, nicht gegen die Umwelt (Sprint 20e-c)
+
+**Befund aus dem Kesseltest vom 10.10.2026.** Von den zwei offen klemmenden
+Köpfen meldete Regel 3b **einen**: 027/110 mit 7,2 K über Soll und 3,7 K
+über dem Median. 100/405 lag 3,1 K über dem Median, die Schwelle bei 3,5.
+
+**AK 1b war damit halb erfüllt, und die Ursache ist die Jahreszeit.** Im
+Herbst heben die heizenden Zimmer den Median auf ~21,5 °C, und der Abstand
+eines defekten Zimmers dazu schrumpft entsprechend. Im Winter läge derselbe
+Fall klar darüber. Die Schwelle zu senken ist kein Ausweg: 3,5 K steht
+dort, weil der knappste bekannte Fehlalarm bei genau 3,0 lag.
+
+**Entscheidung: eine zweite, unabhängige Regel statt einer anderen Zahl.**
+
+> `valve_position >= 80 %` **und** `temperature >= setpoint + 2 K`,
+> `bool_and` über dasselbe 2-h-Fenster.
+
+#### Warum diese Regel absolut sein darf
+
+§5.84 verlangt für einen Melder **gegen eine Umwelt** ein relatives
+Kriterium — und das ist hier nicht verletzt, sondern die andere Seite
+derselben Unterscheidung: **3c vergleicht das Gerät mit sich selbst.**
+Seiner eigenen Zielvorgabe und seiner eigenen gemeldeten Stellung. Ein
+funktionierendes Vicki, dessen Zimmer über dem eigenen Sollwert liegt,
+schließt.
+
+Wetter, Jahreszeit und Belegung fallen damit heraus. Kein Median, keine
+Rückfallkette, keine Mindestzahl an Referenzzimmern. 3c steht nicht gegen
+die Umwelt, sondern gegen eine **Zusicherung des Geräts**.
+
+**Der Sollwert kommt vom Gerät, nicht aus der Engine.** Das ist eine
+Entscheidung: mit dem Engine-Sollwert sähe ein nicht angekommener Downlink
+wie ein defekter Antrieb aus — zwei verschiedene Fehler unter einem
+Hinweis, und der Handgriff wäre je nach Ursache ein anderer.
+
+#### Die Zahlen sind gemessen, und sie sitzen nicht knapp
+
+Abfrage A, festes Fenster 10.10. 09:30–11:30 UTC, Kessel an:
+
+```
+ geraet | n  | ueber_soll | ventil_min | ventil_max | kalib | regel3c
+ 027    | 11 |        7.2 |        100 |        100 | f     | t
+ 100    |  8 |        6.1 |        100 |        100 | f     | t
+```
+
+Genau zwei, sonst keiner. 100 % gegen eine Marke von 80, 6,1 K gegen 2 K —
+**anders als bei `ROOM_REL_DELTA_K`, das auf einem gemessenen Wert lag, ist
+hier keine Zahl delikat.**
+
+**Festes Fenster und nicht `now()`**, weil am 10.10. um 13:50 Ortszeit ein
+`0x03` (Recalibrate) an beide Köpfe ging. Und seit dem 12.10. liegen sie
+ohne Batterie im Lager: **dieses Fenster ist der Beleg, und es gibt keinen
+anderen mehr.** Es trägt, weil `sensor_reading` keine Retention-Policy hat —
+wer eine einführt, löscht ein Akzeptanzkriterium (vermerkt an B-17-2).
+
+Was der Beleg nicht kann: er zeigt, dass die Regel die Fälle in
+**historischen** Daten findet. Dass sie sie im Betrieb findet, zeigt erst
+der nächste echte Defekt.
+
+#### Vorrang: 3c vor 3b, und erstmals eine Vorrangregel
+
+Bis 20e-c brauchte `valve_verdicts` keine — Regel 3 und 3b schließen sich
+über die Temperatur-Richtung aus, und der Modul-Docstring sagte das
+ausdrücklich. **3c und 3b können beide zutreffen.**
+
+3c gewinnt, weil es die **spezifischere** Aussage ist: „das Gerät meldet
+offen, während es schließen müsste" nennt den Mechanismus, „das Zimmer ist
+zu warm, vermutlich ist der Kopf ab" nennt eine Vermutung. Der Hausmeister
+spart einen Diagnoseschritt.
+
+Die Regel steht im Docstring **und** in einem Test an einem Gerät, das beide
+Bedingungen erfüllt — nicht in der Reihenfolge der `elif`-Zweige (§5.23).
+
+**`calibration_failed` schließt 3c aus und fällt bewusst zu 3b *durch*.**
+Ohne gültigen `motorRange` ist `valve_position` eine Zahl ohne Bedeutung,
+„80 % offen" sagt dann nichts. Das Zimmer ist aber trotzdem zu warm — bei
+einem Durchfall zu „ok" wäre eine gescheiterte Kalibrierung ein Weg, jeden
+Ventil-Hinweis stummzuschalten.
+
+#### Regel 3b nur mit Zone, 3 und 3c auch im Pool
+
+Dieselbe Mechanik, die 3c ohne Zone funktionieren lässt, hieß vorher: ein
+Pool-Gerät konnte den Hinweis „Zimmer zu warm" tragen. Es wurde gegen den
+Hausmedian verglichen, obwohl es auf einem Schreibtisch liegt — nicht
+falsch gerechnet, aber falsch benannt. **Seit dem 12.10. keine Theorie:**
+027 und 100 lagen da schon im Pool.
+
+| Regel | Aussage über | Pool-Gerät |
+|---|---|---|
+| 3 „Ventil prüfen" | das **Gerät** | ja |
+| 3c „Ventil schließt nicht" | das **Gerät** | ja |
+| 3b „Zimmer zu warm" | ein **Zimmer** | **nein** |
+
+Für 3 und 3c ist das kein Zugeständnis, sondern der Nutzen: am Tisch ist
+genau das die Auskunft, die ein Eingangstest braucht. Der Preis steht in
+RUNBOOK §10t — ein Gerät mit eingelegten Batterien im kalten Lager kann als
+„Ventil prüfen" erscheinen, und das ist akzeptiert.
+
+#### Keine eigene Kachel
+
+Meine Empfehlung war eine dritte Kachel. **Entschieden hat der Hotelier
+anders**, und zwar besser: 3c zählt in „Ventil prüfen", am Gerät trägt es
+ein eigenes Etikett. Der Mittelweg trennt zwei Fragen, die meine drei
+Varianten zusammengeworfen hatten — die **Kachel** ist eine Zahl für den
+Tagesblick, das **Etikett** unterscheidet die Sorte. Mein Einwand gegen
+„unter Ventil prüfen" (ein Etikett für zwei entgegengesetzte Symptome) traf
+das Etikett, nicht die Kachel.
+
+**Folge, die benannt gehört:** das Antwortfeld heißt seit 20e-c
+`valve_check_count` und nicht mehr `valve_stuck_count`. Ein Feld, das auch
+nicht-klemmende Fälle zählt und „stuck" heißt, wäre die nächste
+§5.77-Stelle.
+
+#### `lowMotorConsumption` ist nicht persistiert
+
+Der Codec dekodiert das Bit (`mclimate-vicki.js:175`), und der Hotelier hat
+es an beiden Köpfen gesehen — **im Backend existiert es nicht**: keine
+Spalte in `sensor_reading`, kein Leser. Der Flag stand in der
+ChirpStack-Oberfläche, nicht in unseren Daten.
+
+**Nicht als Bedingung**, und das ist eine Entscheidung: zwei Beobachtungen
+sind keine Grundlage für einen Torwächter, und die Bedeutung des Bits ist
+herstellerdefiniert (§5.21). Als Diagnose-Text im Hinweis wäre er wertvoll
+(„Motor läuft ohne Widerstand" schickt den Hausmeister an den Stift statt
+an das Gerät) — eigener Backlog-Punkt, nicht Teil von 20e-c.
+
 ### Kein Mailversand — bestätigt
 
 Gate-Entscheidung, hier als geltender Stand festgehalten: **Regel 3 und 3b

@@ -3817,8 +3817,54 @@ beiden Kacheln gehört deshalb in den Tagesablauf, so wie der Blick auf
 
 | Anzeige | Farbe | Was gemessen wurde | Was wahrscheinlich ist |
 |---|---|---|---|
-| **Zimmer zu warm** | rot | Ist-Temperatur liegt über zwei Stunden durchgehend deutlich über dem Sollwert | Thermostatkopf ist ab (das Ventil steht dann **offen**), oder das Ventil klemmt offen |
+| **Zimmer zu warm** | rot | Ist-Temperatur liegt über zwei Stunden durchgehend deutlich über dem Sollwert **und** über vergleichbaren Zimmern | Thermostatkopf ist ab (das Ventil steht dann **offen**), oder das Ventil klemmt offen |
+| **Ventil schließt nicht** | rot | Zimmer liegt über dem Sollwert, und das Gerät meldet über zwei Stunden durchgehend ein weit offenes Ventil | Der Antrieb fährt nicht zu, oder das Gerät ist nicht kalibriert |
 | **Ventil prüfen** | gelb | Sollwert liegt über zwei Stunden durchgehend deutlich über dem Ist, Ventil meldet trotzdem geschlossen | Ventil klemmt zu, oder das Gerät ist nicht kalibriert |
+
+**Zwei Etiketten, eine Kachel.** „Ventil schließt nicht" und „Ventil prüfen"
+zählen beide in die Dashboard-Kachel **„Ventil prüfen"**. Die Kachel ist eine
+Zahl für den Tagesblick — *am Ventil ist etwas*. Welche Sorte, steht am
+Gerät. Entscheidung vom 12.10.2026: eine Zahl weniger, und der Handgriff ist
+ohnehin derselbe.
+
+### „Ventil schließt nicht" — warum es diesen dritten Hinweis gibt
+
+**Weil „Zimmer zu warm" im Herbst nur die starken Fälle findet.** Am
+10.10.2026 lief der Kessel, und von den beiden Köpfen, die offen klemmten,
+meldete die Kachel **einen**: 027/110 mit 7,2 K über Soll und 3,7 K über dem
+Median. 100/405 lag nur 3,1 K über dem Median — die Schwelle liegt bei 3,5.
+
+Die Ursache ist die Jahreszeit: im Herbst heben die heizenden Zimmer den
+Median, und der Abstand eines defekten Zimmers dazu schrumpft. Im Winter
+läge derselbe Fall klar darüber.
+
+**„Ventil schließt nicht" umgeht das**, statt die Schwelle zu senken: es
+vergleicht das Gerät mit **sich selbst**. Ein funktionierendes Vicki, dessen
+Zimmer über dem **eigenen** Sollwert liegt, schließt — meldet es stattdessen
+zwei Stunden durchgehend ein weit offenes Ventil, arbeitet seine Regelung
+nicht. Das hängt an keiner Jahreszeit und an keiner Referenz.
+
+**Beide Hinweise ergänzen sich, keiner ersetzt den anderen:**
+
+| Lage | Gerät meldet | Wer findet es |
+|---|---|---|
+| Antrieb fährt nicht zu | **offen** | „Ventil schließt nicht" |
+| Kopf ab, letzte Stellung war offen | offen (veraltet) | „Ventil schließt nicht" |
+| Kopf ab, letzte Stellung war **zu** | zu | **nur** „Zimmer zu warm" |
+| Ventil klemmt, Antrieb meldet erfolgreich zu | zu | **nur** „Zimmer zu warm" |
+
+Die unteren zwei Zeilen sind der Grund, warum „Zimmer zu warm" bleibt, auch
+wenn es eine Weile still ist.
+
+**Der Handgriff ist derselbe** wie bei „Zimmer zu warm" (unten), mit einem
+Unterschied: bei „Ventil schließt nicht" **redet das Gerät**. Sitzt der Kopf
+also auf der Halterung, ist das Rekalibrieren (`0x03`, §10e) der erste
+Griff und nicht der zweite — der Antrieb muss den Ventilhub neu ausmessen,
+bevor der Heizungsmonteur gerufen wird.
+
+**Ein Gerät ohne Zimmer kann diesen Hinweis tragen** (Pool, Lager): es ist
+eine Aussage über das Gerät, nicht über ein Zimmer. „Zimmer zu warm"
+dagegen nicht — ein Zimmer, das es nicht gibt, kann nicht zu warm sein.
 
 Beide nennen den gemessenen Abstand in Kelvin, zum Beispiel „Ist liegt 6,2 K
 über Soll". Das ist der **knappste** Wert der zwei Stunden, nicht der
@@ -3953,6 +3999,8 @@ Oberfläche:
 | `VALVE_STUCK_OPENNESS_MAX` | `0` | bis zu welcher Ventilöffnung in Prozent „geschlossen" gilt |
 | `VALVE_WINDOW_H` | `2` | Fensterlänge beider Regeln in Stunden |
 | `ROOM_REL_DELTA_K` | `3.5` | ab wie viel Kelvin über dem Median der **nicht belegten** Zimmer (20e-b) |
+| `VALVE_OPEN_MIN_PCT` | `80` | ab welcher gemeldeten Ventilöffnung „Ventil schließt nicht" gilt (20e-c) |
+| `VALVE_NOT_CLOSING_DELTA_K` | `2.0` | ab wie viel Kelvin über dem **eigenen** Sollwert, dazu (20e-c) |
 | `ROOM_REL_DELTA_ALL_K` | `4.0` | dasselbe beim Rückfall auf **alle** Zimmer; darf nicht kleiner sein als der Wert darüber |
 | `REF_MIN_ROOMS` | `5` | wie viele Zimmer die Referenz mindestens braucht; darunter **kein** Hinweis |
 
@@ -3971,6 +4019,13 @@ Schwelle. Wer sie senkt, holt sich diesen Fall zurück.
 Fehlalarme, ist `ROOM_REL_DELTA_K` die Schraube — nicht
 `ROOM_TOO_WARM_DELTA_K`. Die erste geht mit dem Wetter mit, die zweite
 nicht.
+
+**Die beiden 20e-c-Werte sind gemessen und sitzen nicht knapp:** am
+10.10.2026 meldeten die zwei defekten Köpfe durchgehend **100 %** bei 7,2
+bzw. 6,1 K über dem Sollwert. Zwischen 80 und 100 liegen also 20 Punkte
+Luft, zwischen 2 und 6 K vier Kelvin. Ein Nachjustieren ist hier
+unwahrscheinlich nötig — und `VALVE_NOT_CLOSING_DELTA_K` muss **kleiner**
+bleiben als `ROOM_TOO_WARM_DELTA_K`, sonst startet die API nicht.
 
 Ändern wie bei den Batterie-Schwellen (§10q):
 
