@@ -69,6 +69,30 @@ MAX_VERSUCHE = 3
 # Stunden deckt drei Versuche im 30-Minuten-Abstand mit Reserve.
 ZAEHLER_TTL_S = 14400
 
+# Mindestalter des letzten erfolgreich gesendeten Downlinks, bevor der
+# Abgleich ueberhaupt fragt (Sprint 20f-c, B-20f-1).
+#
+# **Der Befund.** Geraet 008 bekam am 12.10.2026 um 06:48:23 und 06:49:45
+# zwei Downlinks mit demselben Sollwert und demselben ``reason`` — 82
+# Sekunden Abstand. Der erste war der normale Dispatch, der zweite der
+# Abgleich: beim naechsten Tick schwieg die Hysterese (``delta 0``), das
+# Geraet meldete aber noch den alten Wert, weil es den Downlink als Class-A-
+# Geraet erst im Fenster nach einem eigenen Uplink abholt.
+#
+# **Warum die Drosselung oben nicht gegriffen hat:** sie wird nur fuer
+# Geraete gesetzt, bei denen der Abgleich die Entscheidung erzwungen hat
+# (``abgleich_ids`` in ``engine_tasks``). Der normale Dispatch setzt sie
+# nicht. Sie deckt Abgleich gegen Abgleich, nicht Dispatch gegen ersten
+# Abgleich.
+#
+# **15 Minuten, und die Spanne ist eng.** Der regulaere Vicki-Uplink kommt
+# alle zehn Minuten; bis dahin hat das Geraet den Downlink mit hoher
+# Wahrscheinlichkeit abgeholt. Weniger als zehn waere ein einziger
+# Keep-alive-Abstand, mehr als 30 waere wirkungslos, weil dann ohnehin die
+# Drosselung greift. Konstante und keine Einstellung: das ist eine
+# Eigenschaft des LoRaWAN-Fensters, keine Betriebspraeferenz.
+ABGLEICH_MIN_ABSTAND_S = 900
+
 _DROSSEL = "engine:abgleich:drossel:{dev_eui}"
 _ZAEHLER = "engine:abgleich:versuche:{dev_eui}"
 
