@@ -58,7 +58,7 @@ _EXPECTED_KEYS = {
     # Dass dieser Test bei einer Schema-Erweiterung faellt, ist sein Zweck —
     # er ist ein Vertrag ueber die Antwort-Form, und eine Erweiterung soll
     # eine Entscheidung sein, keine Entdeckung.
-    "valve_stuck_count",
+    "valve_check_count",
     "room_too_warm_count",
 }
 

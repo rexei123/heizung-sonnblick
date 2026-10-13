@@ -35,7 +35,20 @@ export type BatteryHealthState = "ok" | "warn" | "kritisch" | "unbekannt";
  * Messwerte". Die beiden sind nicht dasselbe: ein Gerät, das schweigt, ist
  * kein Gerät, dessen Ventil in Ordnung ist.
  */
-export type ValveState = "ok" | "ventil_klemmt_zu" | "zimmer_zu_warm" | "unbekannt";
+export type ValveState =
+  | "ok"
+  | "ventil_klemmt_zu"
+  /**
+   * Sprint 20e-c: Gerät meldet weit offen, obwohl das Zimmer über seinem
+   * **eigenen** Sollwert liegt — ein funktionierendes Vicki schließt dann.
+   *
+   * Hat Vorrang vor `zimmer_zu_warm`, weil es den Mechanismus nennt statt
+   * einer Vermutung. Gilt auch für Geräte ohne Zuordnung: es ist eine
+   * Aussage über das Gerät, nicht über ein Zimmer.
+   */
+  | "ventil_schliesst_nicht"
+  | "zimmer_zu_warm"
+  | "unbekannt";
 
 /**
  * Worauf das relative Urteil von Regel 3b fußt (Sprint 20e-b). Spiegel zu
@@ -850,7 +863,7 @@ export interface DashboardKpi {
   // Getrennt, weil sie verschiedene Handgriffe bedeuten — eine gemeinsame
   // Zahl hätte den Hausmeister losgeschickt, ohne ihm zu sagen, was er
   // mitnehmen soll.
-  valve_stuck_count: number;
+  valve_check_count: number;
   room_too_warm_count: number;
 }
 

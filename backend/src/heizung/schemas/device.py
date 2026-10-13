@@ -203,7 +203,16 @@ class DeviceRead(BaseModel):
     # Konvention wie bei ``battery_state`` — die Schema-Schicht soll nicht
     # von der Service-Schicht abhaengen. Die Spiegelung gegen
     # ``valve_health.ValveState`` haelt ein Test fest.
-    valve_state: Literal["ok", "ventil_klemmt_zu", "zimmer_zu_warm", "unbekannt"] = "unbekannt"
+    valve_state: Literal[
+        "ok",
+        "ventil_klemmt_zu",
+        # 20e-c: Geraet meldet weit offen, obwohl das Zimmer ueber seinem
+        # eigenen Sollwert liegt. Hat Vorrang vor ``zimmer_zu_warm``, weil
+        # es den Mechanismus nennt statt einer Vermutung.
+        "ventil_schliesst_nicht",
+        "zimmer_zu_warm",
+        "unbekannt",
+    ] = "unbekannt"
     # Der gemessene Abstand zum Urteil, in Kelvin. Bei ``ok`` und
     # ``unbekannt`` ``None``. Der **knappste** Wert des Fensters, nicht der
     # Spitzenwert — siehe ``ValveVerdict``.

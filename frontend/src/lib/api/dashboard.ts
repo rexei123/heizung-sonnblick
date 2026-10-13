@@ -27,7 +27,7 @@ const dashboardKpiSchema = z.object({
   // Typecheck hat die beiden fehlenden Keys gemeldet, bevor die Kacheln
   // stumm „undefined" angezeigt hätten. Genau dafür steht der Zod-Spiegel
   // hier und nicht ein ``as DashboardKpi``.
-  valve_stuck_count: z.number(),
+  valve_check_count: z.number(),
   room_too_warm_count: z.number(),
 });
 

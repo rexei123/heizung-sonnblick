@@ -42,7 +42,10 @@ class DashboardKpiRead(BaseModel):
     # Sprint 20e (T7/T10): Ventil-Hinweise, getrennt gezaehlt. Siehe
     # ``dashboard_aggregates.count_valve_alerts`` fuer die Begruendung,
     # warum es zwei Zahlen sind und nicht eine.
-    valve_stuck_count: int = 0
+    # 20e-c: zaehlt beide Ventil-Befunde ("Ventil klemmt zu" und "Ventil
+    # schliesst nicht"). Hiess bis dahin ``valve_stuck_count`` — der Name
+    # haette nach der Erweiterung etwas Falsches behauptet (§5.77).
+    valve_check_count: int = 0
     room_too_warm_count: int = 0
 
     @field_serializer("avg_temperature_celsius")

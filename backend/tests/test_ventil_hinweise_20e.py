@@ -120,12 +120,36 @@ async def _purge(session: AsyncSession) -> None:
     await session.execute(sa_delete(RoomType).where(RoomType.name.like(f"{RAUM_PREFIX}%")))
 
 
-async def _device(session: AsyncSession) -> int:
+async def _device(session: AsyncSession, *, mit_zone: bool = False) -> int:
+    """Ein Geraet, auf Wunsch mit eigenem Zimmer und eigener Zone.
+
+    **Warum ``mit_zone`` seit 20e-c noetig ist.** Regel 3b gilt nur fuer
+    zugeordnete Geraete: ein Geraet im Pool sitzt in keinem Zimmer, also
+    kann kein Zimmer zu warm sein. Wer 3b prueft, braucht also eine Zone —
+    Regel 3 und 3c dagegen nicht, und genau deshalb bleibt die Vorgabe
+    ``False``: die Regel-3-Tests pruefen damit weiter mit, dass ein
+    Pool-Geraet beurteilt wird.
+    """
+    zone_id: int | None = None
+    if mit_zone:
+        suffix = uuid.uuid4().hex[:8]
+        raumtyp = RoomType(name=f"{RAUM_PREFIX}rt-{suffix[:4]}")
+        session.add(raumtyp)
+        await session.flush()
+        room = Room(number=f"{RAUM_PREFIX}u{suffix[:8]}", room_type_id=raumtyp.id)
+        session.add(room)
+        await session.flush()
+        # ``kind`` ist NOT NULL ohne Default (§5.49).
+        zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="z0")
+        session.add(zone)
+        await session.flush()
+        zone_id = zone.id
     device = Device(
         dev_eui=f"{EUI_PREFIX}{uuid.uuid4().hex[:8]}",
         kind=DeviceKind.THERMOSTAT,
         vendor=DeviceVendor.MCLIMATE,
         model="vicki",
+        heating_zone_id=zone_id,
     )
     session.add(device)
     await session.flush()
@@ -140,6 +164,7 @@ async def _fenster(
     ist: Decimal,
     ventil: int | None,
     anzahl: int = VALVE_MIN_SAMPLES,
+    kalib_fehler: bool | None = None,
 ) -> None:
     """``anzahl`` gleichartige Messwerte im Fenster, 10 min auseinander.
 
@@ -155,6 +180,7 @@ async def _fenster(
                 setpoint=soll,
                 temperature=ist,
                 valve_position=ventil,
+                calibration_failed=kalib_fehler,
             )
         )
     await session.flush()
@@ -290,7 +316,7 @@ async def test_regel3b_zimmer_deutlich_zu_warm(db_session: AsyncSession) -> None
     herausgedrueckt, das Ventil steht offen, das Zimmer heizt durch.
     """
     await _referenz_zimmer(db_session, ist=Decimal("20.0"))
-    device_id = await _device(db_session)
+    device_id = await _device(db_session, mit_zone=True)
     await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=0)
 
     verdict = (await valve_verdicts(db_session, [device_id], now=JETZT))[device_id]
@@ -317,7 +343,7 @@ async def test_regel3b_ventilstellung_ist_keine_bedingung(db_session: AsyncSessi
     Zweck abgedichtet.
     """
     await _referenz_zimmer(db_session, ist=Decimal("20.0"))
-    device_id = await _device(db_session)
+    device_id = await _device(db_session, mit_zone=True)
     await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=0)
 
     assert await _urteil(db_session, device_id) == "zimmer_zu_warm"
@@ -337,9 +363,9 @@ async def test_regel3b_an_der_schwelle(db_session: AsyncSession) -> None:
     # der Unterschied liegt also allein am Sollwert-Abstand, und genau das
     # soll dieser Test pruefen.
     await _referenz_zimmer(db_session, ist=Decimal("18.0"))
-    knapp_drueber = await _device(db_session)
+    knapp_drueber = await _device(db_session, mit_zone=True)
     await _fenster(db_session, knapp_drueber, soll=Decimal("18.0"), ist=Decimal("23.0"), ventil=50)
-    knapp_drunter = await _device(db_session)
+    knapp_drunter = await _device(db_session, mit_zone=True)
     await _fenster(db_session, knapp_drunter, soll=Decimal("18.0"), ist=Decimal("22.9"), ventil=50)
 
     assert await _urteil(db_session, knapp_drueber) == "zimmer_zu_warm"
@@ -482,7 +508,7 @@ async def test_beide_regeln_koennen_nicht_zugleich_zutreffen(db_session: AsyncSe
     await _referenz_zimmer(db_session, ist=Decimal("20.0"))
     kalt = await _device(db_session)
     await _fenster(db_session, kalt, soll=Decimal("22.0"), ist=Decimal("18.0"), ventil=0)
-    warm = await _device(db_session)
+    warm = await _device(db_session, mit_zone=True)
     await _fenster(db_session, warm, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=0)
 
     verdicts = await valve_verdicts(db_session, [kalt, warm], now=JETZT)
@@ -601,3 +627,92 @@ async def test_schema_spiegelt_die_referenz_werte() -> None:
     schema_werte = set(get_args(DeviceRead.model_fields["valve_referenz"].annotation))
     service_werte = set(get_args(ValveReferenz))
     assert schema_werte == service_werte
+
+
+# ---------------------------------------------------------------------------
+# 4. Regel 3c — Ventil schliesst nicht (Sprint 20e-c)
+# ---------------------------------------------------------------------------
+#
+# Vier Tests zur Mechanik. Die Grenzfaelle (Absenkung, Frostschutz,
+# Pool-Abgrenzung in der Breite) kommen mit T5.
+
+
+async def test_regel3c_trifft_auch_ohne_zone(db_session: AsyncSession) -> None:
+    """**Der Befund vom 10.10. in seiner Lage: ein Pool-Geraet.**
+
+    Die Koepfe 027 und 100 sind seit dem 12.10. nicht mehr zugeordnet, und
+    der Befund ist trotzdem einer. 3c braucht keine Zone, weil es nur
+    ``setpoint``, ``temperature`` und ``valve_position`` liest — alles vom
+    Geraet selbst (Brief G4).
+
+    Soll 18, Ist 24, Ventil 100 %: ein funktionierendes Vicki haette
+    geschlossen.
+    """
+    device_id = await _device(db_session)
+    await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=100)
+
+    assert await _urteil(db_session, device_id) == "ventil_schliesst_nicht"
+
+
+async def test_regel3c_braucht_beide_bedingungen(db_session: AsyncSession) -> None:
+    """Ventil weit offen allein ist kein Befund.
+
+    Ein Zimmer **unter** seinem Sollwert mit offenem Ventil ist ein Zimmer,
+    das heizt — der Normalfall. Ohne die Temperatur-Bedingung waere 3c ein
+    Hinweis fuer jeden heizenden Heizkoerper im Haus.
+    """
+    heizt = await _device(db_session)
+    await _fenster(db_session, heizt, soll=Decimal("22.0"), ist=Decimal("20.0"), ventil=100)
+    assert await _urteil(db_session, heizt) == "ok"
+
+    # Und die Gegenrichtung: warm, aber das Ventil meldet nicht offen.
+    # Das ist der Fall fuer 3b, nicht fuer 3c — und ohne Zone bleibt es ok.
+    warm_zu = await _device(db_session)
+    await _fenster(db_session, warm_zu, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=30)
+    assert await _urteil(db_session, warm_zu) == "ok"
+
+
+async def test_regel3c_gewinnt_gegen_3b(db_session: AsyncSession) -> None:
+    """**Die Vorrangregel, und sie ist neu.**
+
+    Bis 20e-c brauchte ``valve_verdicts`` keine: Regel 3 und 3b schliessen
+    sich ueber die Temperatur-Richtung aus. 3c und 3b koennen dagegen beide
+    zutreffen — hier tun sie es (24 ≥ 18+5 **und** 24 ≥ 20+3,5 **und**
+    100 % ≥ 80 **und** 24 ≥ 18+2).
+
+    3c gewinnt, weil es den Mechanismus nennt statt einer Vermutung. Ohne
+    diesen Test waere die Reihenfolge der ``elif``-Zweige eine stille
+    Entscheidung (§5.23).
+    """
+    await _referenz_zimmer(db_session, ist=Decimal("20.0"))
+    device_id = await _device(db_session, mit_zone=True)
+    await _fenster(db_session, device_id, soll=Decimal("18.0"), ist=Decimal("24.0"), ventil=100)
+
+    verdict = (await valve_verdicts(db_session, [device_id], now=JETZT))[device_id]
+    assert verdict.state == "ventil_schliesst_nicht"
+    # Die Referenz steht trotzdem im Verdict — sie erklaert die Lage mit.
+    assert verdict.referenz == "unbelegt"
+    assert verdict.referenz_delta_k == Decimal("4.000")
+
+
+async def test_kalibrierungsfehler_faellt_auf_3b_durch(db_session: AsyncSession) -> None:
+    """Gescheiterte Kalibrierung schliesst 3c aus — und nicht den Hinweis.
+
+    Ohne gueltigen ``motorRange`` ist ``valve_position`` eine Zahl ohne
+    Bedeutung, "100 % offen" sagt dann nichts. Das Zimmer ist aber
+    trotzdem zu warm, und der Fall faellt deshalb **bewusst** zu 3b durch
+    statt zu "ok" — sonst waere eine gescheiterte Kalibrierung ein Weg,
+    jeden Ventil-Hinweis stummzuschalten.
+    """
+    await _referenz_zimmer(db_session, ist=Decimal("20.0"))
+    device_id = await _device(db_session, mit_zone=True)
+    await _fenster(
+        db_session,
+        device_id,
+        soll=Decimal("18.0"),
+        ist=Decimal("24.0"),
+        ventil=100,
+        kalib_fehler=True,
+    )
+
+    assert await _urteil(db_session, device_id) == "zimmer_zu_warm"

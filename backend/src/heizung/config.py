@@ -240,6 +240,26 @@ class Settings(BaseSettings):
     # Heute nicht aktiv (44 unbelegte Zimmer am 08.10.), sondern fuer die
     # Hochsaison.
     ref_min_rooms: int = 5
+    # --- Regel 3c "Ventil schliesst nicht" (Sprint 20e-c, T3) ------------
+    #
+    # Ein funktionierendes Vicki, dessen Zimmer ueber dem **eigenen**
+    # Sollwert liegt, schliesst. Meldet es stattdessen ueber zwei Stunden
+    # durchgehend ein weit offenes Ventil, arbeitet seine Regelung nicht.
+    #
+    # **Warum diese Regel absolut sein darf, obwohl §5.84 fuer 3b ein
+    # relatives Kriterium verlangt:** 3c vergleicht das Geraet mit **sich
+    # selbst** — seiner eigenen Zielvorgabe und seiner eigenen gemeldeten
+    # Stellung. Wetter, Jahreszeit und Belegung fallen damit heraus. Es
+    # steht nicht gegen die Umwelt, sondern gegen eine Zusicherung des
+    # Geraets.
+    #
+    # **Gemessen am 10.10.2026** (festes Fenster 09:30-11:30 UTC, Kessel an):
+    # 027 und 100 melden durchgehend **100 %** bei 7,2 bzw. 6,1 K ueber dem
+    # Sollwert — sonst kein Geraet. Die Marken sitzen also nicht knapp, und
+    # das ist der Unterschied zu ROOM_REL_DELTA_K, das auf einem gemessenen
+    # Wert lag.
+    valve_open_min_pct: int = 80
+    valve_not_closing_delta_k: Decimal = Decimal("2.0")
     # --- Health-Altersschwellen (Sprint 20e, T6; Muster AE-73) ------------
     # Ab welchem Alter des juengsten Readings ein Geraet ``degraded`` und ab
     # wann ``silent`` ist (AE-53). In **Stunden**, weil das die Einheit ist,
@@ -396,6 +416,54 @@ class Settings(BaseSettings):
                 "REF_MIN_ROOMS muss mindestens 3 sein "
                 f"(ist: {self.ref_min_rooms}). Ein Median ueber zwei Werten ist "
                 "das Mittel dieser zwei."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _regel3c_schwellen_sind_sinnvoll(self) -> "Settings":
+        """20e-c T3: Regel 3c muss die **engere** Aussage bleiben.
+
+        Zwei Bedingungen, und beide haengen an mehr als Plausibilitaet.
+
+        **``VALVE_NOT_CLOSING_DELTA_K < ROOM_TOO_WARM_DELTA_K``.** 3c ist die
+        spezifischere Regel: sie verlangt zusaetzlich eine gemeldete
+        Ventilstellung und hat deshalb im Code Vorrang vor 3b. Waere ihr
+        Delta groesser, kaeme sie erst, wenn 3b schon gemeldet hat — der
+        Vorrang wuerde ins Leere greifen, und die zwei Regeln wuerden
+        einander verdecken, statt sich zu ergaenzen.
+
+        **``VALVE_OPEN_MIN_PCT > VALVE_STUCK_OPENNESS_MAX``.** Sonst gaebe es
+        Ventilstellungen, die gleichzeitig als "zu" (Regel 3) und als "weit
+        offen" (3c) gelten. Die beiden Regeln schliessen sich bisher ueber
+        die Temperatur-Richtung aus; diese Grenze haelt sie **auch** auf der
+        Ventil-Achse auseinander, damit der Ausschluss nicht an einer
+        einzigen Bedingung haengt.
+
+        Start-Fehler, nicht Warnung — wie bei allen anderen Schwellen.
+        """
+        if self.valve_not_closing_delta_k <= 0:
+            raise ValueError(
+                "VALVE_NOT_CLOSING_DELTA_K muss groesser als 0 sein "
+                f"(ist: {self.valve_not_closing_delta_k})."
+            )
+        if self.valve_not_closing_delta_k >= self.room_too_warm_delta_k:
+            raise ValueError(
+                "VALVE_NOT_CLOSING_DELTA_K muss kleiner als ROOM_TOO_WARM_DELTA_K sein "
+                f"({self.valve_not_closing_delta_k} >= {self.room_too_warm_delta_k}). "
+                "Regel 3c hat Vorrang vor 3b, weil sie die engere Aussage ist — mit "
+                "dem groesseren Delta kaeme sie erst, wenn 3b schon gemeldet hat."
+            )
+        if not 0 <= self.valve_open_min_pct <= 100:
+            raise ValueError(
+                "VALVE_OPEN_MIN_PCT ist eine Ventiloeffnung in Prozent und muss "
+                f"zwischen 0 und 100 liegen (ist: {self.valve_open_min_pct})."
+            )
+        if self.valve_open_min_pct <= self.valve_stuck_openness_max:
+            raise ValueError(
+                "VALVE_OPEN_MIN_PCT muss groesser als VALVE_STUCK_OPENNESS_MAX sein "
+                f"({self.valve_open_min_pct} <= {self.valve_stuck_openness_max}). "
+                "Sonst gilt dieselbe Ventilstellung gleichzeitig als 'zu' und als "
+                "'weit offen'."
             )
         return self
 
