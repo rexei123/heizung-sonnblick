@@ -30,6 +30,7 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.models.business_audit import BusinessAudit
@@ -691,7 +692,10 @@ async def test_abgleich_sendet_wenn_das_geraet_abweicht(
         device_health_states=["healthy"],
     )
     dev = devices[0]
-    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    # 20f-c: der Abgleich fragt erst, wenn der letzte Downlink alt genug
+    # ist. Ein funf Minuten alter Vorgaenger wuerde ihn blockieren — und
+    # genau das ist der Zweck der Aenderung, nicht ihr Nebeneffekt.
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18, age=timedelta(minutes=20))
     await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
 
     per_dev, _per_zone = await _dispatch_downlinks_per_zone(
@@ -779,7 +783,10 @@ async def test_abgleich_sendet_hoechstens_einmal_je_fenster(
         device_health_states=["healthy"],
     )
     dev = devices[0]
-    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    # 20f-c: der Abgleich fragt erst, wenn der letzte Downlink alt genug
+    # ist. Ein funf Minuten alter Vorgaenger wuerde ihn blockieren — und
+    # genau das ist der Zweck der Aenderung, nicht ihr Nebeneffekt.
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18, age=timedelta(minutes=20))
     await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
 
     for _ in range(3):
@@ -819,12 +826,28 @@ async def test_abgleich_gibt_nach_drei_versuchen_auf_und_meldet(
         device_health_states=["healthy"],
     )
     dev = devices[0]
-    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18)
+    # 20f-c: der Abgleich fragt erst, wenn der letzte Downlink alt genug
+    # ist. Ein funf Minuten alter Vorgaenger wuerde ihn blockieren — und
+    # genau das ist der Zweck der Aenderung, nicht ihr Nebeneffekt.
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18, age=timedelta(minutes=20))
     await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
 
     # Vier Fenster: drei Versuche plus einer, der nicht mehr gesendet wird.
+    #
+    # 20f-c: zwischen den Fenstern muss auch der **Downlink** altern, nicht
+    # nur die Redis-Sperre. Jeder Abgleich-Versuch schreibt einen neuen
+    # ControlCommand, und der Mindestabstand von 15 Minuten gilt dagegen
+    # genauso wie gegen einen normalen Dispatch. In der Wirklichkeit liegen
+    # die drei Versuche ohnehin eine halbe Stunde auseinander (Drosselung);
+    # hier wird dieselbe Zeit kuenstlich hergestellt.
     for _ in range(4):
         abgleich_redis.store.pop(engine_abgleich._drossel_key(dev.dev_eui), None)
+        await db_session.execute(
+            sa_update(ControlCommand)
+            .where(ControlCommand.device_id == dev.id)
+            .values(issued_at=datetime.now(tz=UTC) - timedelta(minutes=20))
+        )
+        await db_session.flush()
         await _dispatch_downlinks_per_zone(
             session=db_session,
             room_id=room.id,
@@ -929,3 +952,148 @@ async def test_reading_ohne_sollwert_belegt_keine_abweichung(
     )
 
     assert recorded == []
+
+
+# ---------------------------------------------------------------------------
+# Sprint 20f-c — kein Nachsenden, solange ein Downlink frisch ist (B-20f-1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abgleich_schweigt_direkt_nach_einem_dispatch(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """**Die Regressions-Wand fuer den Doppel-Downlink vom 12.10.2026.**
+
+    Geraet 008 bekam um 06:48:23 und 06:49:45 zwei Downlinks mit demselben
+    Sollwert und demselben ``reason`` — 82 Sekunden Abstand. Der erste war
+    der normale Dispatch, der zweite der Abgleich: beim naechsten Tick
+    schwieg die Hysterese (``delta 0``), das Geraet meldete aber noch den
+    alten Wert, weil es den Downlink als Class-A-Geraet erst im Fenster
+    nach einem eigenen Uplink abholt.
+
+    Die 30-Minuten-Drosselung griff nicht, weil sie nur fuer Geraete
+    gesetzt wird, bei denen der **Abgleich** gesendet hat. Sie deckt
+    Abgleich gegen Abgleich, nicht Dispatch gegen ersten Abgleich.
+
+    Gefahren wird genau diese Lage: Vorgaenger-Downlink 82 Sekunden alt,
+    Geraet meldet 20, Soll 18. **Kein zweiter Downlink.**
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="fc1")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18, age=timedelta(seconds=82))
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    per_dev, _per_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == [], "kein zweiter Downlink 82 Sekunden nach dem ersten"
+    assert per_dev[0]["status"] == "skipped_hysteresis"
+    assert "engine_abgleich" not in per_dev[0]["hysteresis_reason"]
+
+
+@pytest.mark.asyncio
+async def test_abgleich_an_der_grenze_von_15_minuten(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """14 Minuten schweigen, 16 Minuten senden.
+
+    Die Grenze knapp geprueft und nicht grosszuegig: ein Mindestabstand,
+    der in der Mitte gemessen wird, laesst offen, ob die Zahl ueberhaupt
+    die wirksame ist.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="fc2")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    await _insert_prior_cc(db_session, device_id=dev.id, setpoint_c=18, age=timedelta(minutes=14))
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+    assert recorded == [], "14 Minuten reichen nicht"
+
+    # Denselben Vorgaenger um weitere drei Minuten altern lassen.
+    await db_session.execute(
+        sa_update(ControlCommand)
+        .where(ControlCommand.device_id == dev.id)
+        .values(issued_at=datetime.now(tz=UTC) - timedelta(minutes=17))
+    )
+    await db_session.flush()
+
+    await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+    assert recorded == [(dev.dev_eui, 18)], "nach 17 Minuten holt der Abgleich nach"
+
+
+@pytest.mark.asyncio
+async def test_abgleich_greift_sofort_ohne_vorgaenger(
+    db_session: AsyncSession,
+    mock_send_setpoint: tuple[list[tuple[str, int]], dict[str, BaseException]],
+    abgleich_redis: _FakeRedis,
+) -> None:
+    """Noch nie erfolgreich gesendet: der Abgleich wartet **nicht**.
+
+    Das ist der Fall eines frisch montierten Geraets, das auf einem
+    Drehring-Wert steht. Es gibt keinen Downlink, auf dessen Abholung man
+    warten koennte — die Wartezeit waere hier eine Verzoegerung ohne Grund.
+
+    ``_last_command_for_device`` filtert auf ``sent_to_gateway_at IS NOT
+    NULL``; ein nicht gesendeter Befehl ist also ebenfalls "kein
+    Vorgaenger" und blockiert nicht.
+    """
+    recorded, _ = mock_send_setpoint
+    room, _ = await _make_room(db_session, marker="fc3")
+    _zone, devices = await _make_zone_with_devices(
+        db_session,
+        room=room,
+        zone_name="Schlafzimmer",
+        device_health_states=["healthy"],
+    )
+    dev = devices[0]
+    # Kein _insert_prior_cc: die Hysterese sieht keinen Vorgaenger und
+    # wuerde ohnehin senden. Deshalb meldet das Geraet hier den Soll — dann
+    # schweigt die Hysterese, und nur der Abgleich kann noch senden.
+    await _insert_reading(db_session, device_id=dev.id, setpoint_c=20)
+
+    per_dev, _per_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room.id,
+        target_setpoint_c=18,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    assert recorded == [(dev.dev_eui, 18)]
+    assert per_dev[0]["status"] == "sent"

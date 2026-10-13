@@ -3791,10 +3791,28 @@ der Notnagel. Er ist der Engine **nicht** bekannt: beim nächsten Takt sieht
 sie eine Abweichung und sendet ihren eigenen Wert — der Handgriff hält also
 höchstens eine Heizperiode lang.
 
+### Wie lange der Abgleich braucht
+
+**Bis zu 15 Minuten, und das ist seit dem 13.10.2026 Absicht.** Der
+Abgleich fragt erst, wenn der letzte erfolgreich gesendete Downlink
+mindestens so alt ist.
+
+Vorher sendete er beim nächsten Takt, also rund eine Minute nach einer
+Sollwert-Änderung — und das Gerät hatte den ersten Downlink da noch nicht
+abgeholt. Ein Vicki empfängt nur im Fenster nach einem eigenen Uplink
+(alle zehn Minuten), die zweite Sendung war also meist für nichts.
+Gemessen an Gerät 008: zwei Downlinks mit demselben Sollwert, 82 Sekunden
+auseinander.
+
+**Was Sie davon merken:** ein Gerät, das nach einer Montage-Drehung falsch
+steht, kann eine Viertelstunde falsch stehen, bevor die Engine nachsetzt.
+Wer nicht warten will, nimmt den Weg über die Oberfläche (oben) — der
+wirkt sofort.
+
 **Querverweise:** §5.0 (`docker compose` ohne `-f`), §10o (Batterie
-wechseln), §10h.4 (Eingangstest), AE-76 (die Entscheidung dahinter und was
-sie in Kauf nimmt), CLAUDE.md §5.76 (Wirkung überwachen statt Mechanik —
-genau das tut der Abgleich).
+wechseln), §10h.4 (Eingangstest), AE-76 (die Entscheidung dahinter, was
+sie in Kauf nimmt, und der Nachtrag zum Doppel-Downlink), CLAUDE.md §5.76
+(Wirkung überwachen statt Mechanik — genau das tut der Abgleich).
 
 ---
 

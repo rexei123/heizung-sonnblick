@@ -20,7 +20,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -578,6 +578,12 @@ async def _dispatch_downlinks_per_zone(
             session, room_id, heating_zone_id=zone.id
         )
 
+        # Ein Zeitstempel fuer den ganzen Lauf (Sprint 20f-c). Nicht je
+        # Geraet neu geholt: sonst koennte derselbe Tick fuer das erste und
+        # das letzte Geraet verschiedene Alter errechnen, und der
+        # Mindestabstand waere von der Laufzeit abhaengig.
+        jetzt = datetime.now(tz=UTC)
+
         # Per-Vicki-Hysterese-Check
         send_payloads: list[tuple[Device, ControlCommand, str]] = []
         # Sprint 20f (T3): welche Geraete senden wegen des Abgleichs? Nur fuer
@@ -636,12 +642,35 @@ async def _dispatch_downlinks_per_zone(
             # Nebenbedingung, sondern als Hauptbedingung.
             ist_wert = gemeldet.get(dev.id)
             abgleich_forced = False
+            # Sprint 20f-c (B-20f-1): vierte Bedingung — der letzte Downlink
+            # muss alt genug sein.
+            #
+            # Ohne sie entsteht ein Doppel-Downlink bei fast jeder
+            # Sollwert-Aenderung: der Tick nach dem Dispatch sieht die
+            # Hysterese schweigen (``delta 0``), das Geraet meldet aber noch
+            # den alten Wert, weil es den Downlink als Class-A-Geraet erst im
+            # Fenster nach einem eigenen Uplink abholt. Belegt an Geraet 008
+            # am 12.10.2026: 06:48:23 und 06:49:45, derselbe Sollwert,
+            # derselbe ``reason``.
+            #
+            # ``prev_at`` liegt oben schon in der Hand und stammt aus
+            # ``_last_command_for_device``, das auf
+            # ``sent_to_gateway_at IS NOT NULL`` filtert — ein nicht
+            # gesendeter Befehl blockiert den Abgleich also nicht.
+            #
+            # ``prev_at is None`` heisst "noch nie erfolgreich gesendet": dann
+            # greift der Abgleich sofort. Genau der Fall eines Geraets, das
+            # nach der Montage auf einem Drehring-Wert steht.
+            downlink_alt_genug = prev_at is None or (jetzt - prev_at) >= timedelta(
+                seconds=engine_abgleich.ABGLEICH_MIN_ABSTAND_S
+            )
             if (
                 not dev_decision.should_send
                 and not resync_forced
                 and aktiver_override is None
                 and ist_wert is not None
                 and ist_wert != zone_target_setpoint_c
+                and downlink_alt_genug
             ):
                 # Drosselung und Zaehler: hoechstens 1x/30 min je Geraet, nach
                 # drei erfolglosen Versuchen Schluss. Jeder Downlink ist eine

@@ -4169,6 +4169,93 @@ vermuten würde.**
   neu zu bewerten: der Abgleich deckt verlorene Downlinks teilweise ab,
   und dann wäre A ein Mechanismus ohne Anlass (§0 S6).
 
+## Nachtrag 12.10.2026 — der Abgleich erzeugte einen Doppel-Downlink
+
+**Befund des Hoteliers.** Gerät 008 bekam am 12.10.2026 zwei Downlinks mit
+demselben Sollwert und demselben `reason`:
+
+| Zeit (UTC) | Soll | `reason` | Herkunft |
+|---|---|---|---|
+| 06:48:23 | 18,00 | `vacant_setpoint` | normaler Dispatch |
+| 06:49:45 | 18,00 | `vacant_setpoint` | **Engine-Abgleich** |
+
+82 Sekunden Abstand. Das Gerät meldete noch 20 °C (Montage-Drehung), der
+erste Downlink war nicht abgeholt — Class A, es empfängt nur im Fenster
+nach einem eigenen Uplink.
+
+### Warum die Drosselung nicht gegriffen hat
+
+`darf_senden` setzt die Sperre per `SET NX`, aber gezählt und gesperrt wird
+nur für Geräte in `abgleich_ids` (`engine_tasks.py`, nach dem Senden). Der
+normale Dispatch landet dort **nicht**.
+
+> Die Drosselung deckt **Abgleich gegen Abgleich**. Sie deckt nicht
+> **Dispatch gegen ersten Abgleich**. Das war die ganze Lücke.
+
+**Das Ausmaß war begrenzt** — nach dem Abgleich-Downlink stand die Sperre
+und der Zähler auf 1, es kam kein dritter. Der Schaden war eine
+**Verdopplung** bei Sollwert-Änderungen, keine Schleife. Aber sie traf
+fast jede: in der Minute zwischen zwei Ticks holt ein Gerät den Downlink
+mit etwa einem Zehntel Wahrscheinlichkeit ab, also rund neun von zehn
+Änderungen. Bei zwei bis vier Änderungen je Gerät und Tag sind das grob
+200 bis 400 zusätzliche Downlinks pro Tag im Haus — Duty-Cycle und
+Batterie (§0 S4).
+
+### Warum `reason` in beiden Zeilen gleich ist
+
+`control_command.reason` ist der `CommandReason`-Enum aus der
+Engine-Entscheidung, und der Abgleich ist **kein** eigener Wert — §5.45
+hält fest, dass der Enum `length=30` mit DB-`CHECK` hat und
+Differenzierung in den Kontext gehört. Einen eigenen Reason gibt es nur
+beim Reboot-Re-Sync.
+
+Erkennbar ist der Abgleich in **`rule_context`**: dort steht
+`hysteresis_reason`, beim Abgleich mit Präfix `engine_abgleich:`. Wer
+`control_command` zur Diagnose liest, muss die Spalte mitnehmen —
+`reason` allein unterscheidet die beiden Zeilen nicht.
+
+### Die Maßnahme: ein Mindestabstand, kein zweiter Mechanismus
+
+`ABGLEICH_MIN_ABSTAND_S = 900`. Der Abgleich fragt erst, wenn der letzte
+**erfolgreich gesendete** Downlink mindestens 15 Minuten alt ist. Der Wert
+dafür liegt an der Stelle schon in der Hand (`prev_at` aus
+`_last_command_for_device`) — **kein neuer Zustand, keine neue Abfrage.**
+
+Fünfzehn Minuten, und die Spanne ist eng: der reguläre Uplink kommt alle
+zehn Minuten, bis dahin hat das Gerät den Downlink mit hoher
+Wahrscheinlichkeit abgeholt. Weniger als zehn wäre ein einziger
+Keep-alive-Abstand, mehr als 30 wirkungslos, weil dann ohnehin die
+Drosselung greift. Konstante und keine Einstellung: eine Eigenschaft des
+LoRaWAN-Fensters, keine Betriebspräferenz.
+
+**`prev_at is None` greift sofort.** Ein frisch montiertes Gerät, das auf
+einem Drehring-Wert steht, hat keinen Downlink, auf dessen Abholung man
+warten könnte. Und `_last_command_for_device` filtert auf
+`sent_to_gateway_at IS NOT NULL` — ein nicht gesendeter Befehl blockiert
+den Abgleich also nicht.
+
+**Nicht gewählt: die Sperre beim Dispatch mitsetzen.** Dasselbe Ergebnis
+über einen zweiten Weg, mit einem Redis-Schlüssel aus zwei Quellen und
+einem Zähler, der dabei nicht mitlaufen darf. Die Bedingung steht jetzt
+dort, wo sie gilt, und braucht nichts, was ausfallen kann.
+
+**Nicht gewählt: `acknowledged_at`.** Die Spalte existiert in
+`control_command` und **wird nirgends geschrieben** — `grep` findet außer
+der Modell-Definition keine Fundstelle. Eine Maßnahme darauf zu stellen
+heißt, sie erst zu bauen. Eine Spalte, die Bestätigung verspricht und keine
+liefert, ist die Klasse aus §5.77; sie zu füllen wäre fachlich richtig
+(der Subscriber weiß, wann ein Gerät den Wert meldet) und ist ein eigener
+Handgriff. **Backlog.**
+
+### Was die Maßnahme in Kauf nimmt
+
+Ein Gerät, das nach einer Montage-Drehung falsch steht, bleibt bis zu 15
+Minuten falsch statt 82 Sekunden. Vorher blieb es nach dem ersten
+Abgleich-Versuch ohnehin 30 Minuten (Drosselung), falls der Downlink nicht
+ankam — der Unterschied ist klein, der Nutzen ist die Hälfte der
+Downlinks.
+
+
 ## Verworfen
 
 - **Die Hysterese auf den gemeldeten Wert umstellen**, statt einen zweiten
