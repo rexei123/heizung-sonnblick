@@ -591,3 +591,92 @@ async def test_implausible_counter_threshold_triggers_silent(
         assert my_transitions[0]["reason"] == "implausible_readings_24h"
     finally:
         await _cleanup(db_session, room_id=room_id, device_ids=[dev_id])
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle-Filter (12.10.2026, §5.58)
+# ---------------------------------------------------------------------------
+
+
+async def test_stillgelegtes_geraet_wird_nicht_mitgerechnet(
+    db_session: AsyncSession,
+    pin_database_url: None,
+) -> None:
+    """Ein stillgelegtes Geraet ohne Messwerte erzeugt **keine** Flanke.
+
+    **Der Anlass war konkret.** Bis zum 12.10.2026 las dieser Lauf
+    ``select(Device)`` ohne Lifecycle-Filter — die Stelle, die §5.58
+    ausdruecklich benennt ("Health-Aggregation"). Fuer die Koepfe 027, 100
+    und 056, die zur Reparatur ins Lager gehen, waere die Batterie-Entnahme
+    damit als Funkstille-Alarm angekommen, und **Stilllegen haette nichts
+    geaendert**, weil retired Geraete mitgerechnet wurden.
+
+    Geprueft wird beides, denn nur zusammen ist es die Zusicherung:
+
+    1. kein Eintrag in ``silent_transitions`` — also keine Mail,
+    2. ``health_state`` bleibt auf dem Wert vom Stilllegen stehen. Ein
+       Zustand, der nicht mehr gemessen wird, soll nicht weiterlaufen.
+
+    Das Geraet startet auf ``healthy``: waere es schon ``silent``, waere der
+    Test auch ohne den Filter gruen (die Flanke verlangt
+    ``vorher != silent``). Genau so haette man sich die Zusicherung
+    erschlichen.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    room_id, zone_id = await _make_room_with_zone(db_session, suffix=suffix)
+    stillgelegt = await _add_device(
+        db_session,
+        zone_id=zone_id,
+        dev_eui_suffix=uuid.uuid4().hex[:8],
+        initial_health_state="healthy",
+    )
+    stillgelegt_id = stillgelegt.id
+    stillgelegt.retired_at = datetime.now(tz=UTC) - timedelta(hours=1)
+    # Kein Reading: ohne Filter waere das Geraet nach
+    # HEALTH_DEGRADED_MAX_AGE_H sofort ``silent`` und die Flanke da.
+    await db_session.commit()
+
+    try:
+        result = await health_tasks._compute_health_state_async()
+
+        eigene = [t for t in result["silent_transitions"] if t["device_id"] == stillgelegt_id]
+        assert eigene == [], "stillgelegtes Geraet darf keine Flanke erzeugen"
+
+        db_session.expire_all()
+        d = await db_session.get(Device, stillgelegt_id)
+        assert d is not None
+        assert d.health_state == "healthy", "der Zustand vom Stilllegen bleibt stehen"
+    finally:
+        await _cleanup(db_session, room_id=room_id, device_ids=[stillgelegt_id])
+
+
+async def test_zonen_id_steht_in_der_flanke(
+    db_session: AsyncSession,
+    pin_database_url: None,
+) -> None:
+    """Die Flanke traegt ``heating_zone_id`` — daran haengt der Mailversand.
+
+    ``health_alerts`` entscheidet damit, ob ein Uebergang jemanden weckt
+    (zugeordnet) oder nur im Log steht (Pool). Fehlt das Feld, meldet
+    ``health_alerts`` vorsichtshalber **doch** — aber dann waere die
+    Pool-Regel wirkungslos, und zwar unsichtbar. Deshalb hier gepinnt.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    room_id, zone_id = await _make_room_with_zone(db_session, suffix=suffix)
+    dev = await _add_device(
+        db_session,
+        zone_id=zone_id,
+        dev_eui_suffix=uuid.uuid4().hex[:8],
+        initial_health_state="healthy",
+    )
+    dev_id = dev.id
+    await db_session.commit()
+
+    try:
+        result = await health_tasks._compute_health_state_async()
+
+        eigene = [t for t in result["silent_transitions"] if t["device_id"] == dev_id]
+        assert len(eigene) == 1, "ohne Messwerte muss die Flanke entstehen"
+        assert eigene[0]["heating_zone_id"] == zone_id
+    finally:
+        await _cleanup(db_session, room_id=room_id, device_ids=[dev_id])
