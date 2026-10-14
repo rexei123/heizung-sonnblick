@@ -27,6 +27,8 @@ import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-c
 import { useOccupancyImportLog } from "@/lib/api/hooks-occupancy-import";
 import type { OccupancyImportStatus } from "@/lib/api/types";
 import { formatCalendarDate, formatDateTimeTz, formatRelative } from "@/lib/format";
+import { useAuth } from "@/contexts/auth-context";
+import { darfKonfigurationAendern } from "@/lib/auth/rechte";
 
 const STATUS_META: Record<OccupancyImportStatus, { label: string; cls: string }> = {
   green: { label: "Aktuell", cls: "bg-success-soft text-success" },
@@ -169,6 +171,13 @@ export default function ApiWebhooksPage() {
  */
 function ExpectedByForm() {
   const cfg = useGlobalConfig();
+  // Sprint 22 T4: die Seite bleibt fuer Mitarbeiter sichtbar und lesbar
+  // (Entscheidung des Hoteliers vom 14.10.2026, nachdem belegt war, dass
+  // dort nichts Vertrauliches steht: ein Zeit-Feld, Zeitpunkte, die
+  // mailparser-Request-ID und Zaehlwerte). Nur die Schwelle ist
+  // `require_admin` (`PATCH /global-config`, `api/v1/global_config.py:65`).
+  const { user } = useAuth();
+  const darfAendern = darfKonfigurationAendern(user);
   const updateMut = useUpdateGlobalConfig();
   const [value, setValue] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -209,9 +218,19 @@ function ExpectedByForm() {
           onChange={(e) => setValue(e.target.value)}
           className="px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
         />
-        <Button type="submit" variant="secondary" loading={updateMut.isPending}>
+        <Button
+          type="submit"
+          variant="secondary"
+          loading={updateMut.isPending}
+          disabled={!darfAendern}
+        >
           Speichern
         </Button>
+        {!darfAendern ? (
+          <span className="text-xs text-text-tertiary">
+            Änderungen sind Administratoren vorbehalten.
+          </span>
+        ) : null}
         {msg ? <span className="text-xs text-success">{msg}</span> : null}
         {err ? <span className="text-xs text-error">{err}</span> : null}
       </div>

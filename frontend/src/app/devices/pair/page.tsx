@@ -7,6 +7,8 @@
  * Erreichbar via CTA-Button auf /devices.
  */
 
+import type { Route } from "next";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 
@@ -27,6 +29,8 @@ import {
   useUpdateDevice,
 } from "@/lib/api/hooks";
 import { useHeatingZones, useRooms } from "@/lib/api/hooks-rooms";
+import { useAuth } from "@/contexts/auth-context";
+import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
 import type {
   ApiError,
   Device,
@@ -48,9 +52,42 @@ function toMessage(e: unknown): string {
 export default function DevicePairPage() {
   return (
     <Suspense fallback={<PairFallback />}>
-      <DevicePairPageInner />
+      <PairSchranke />
     </Suspense>
   );
+}
+
+/**
+ * Sprint 22 T5: eine Schranke am Eingang statt eines Gates an jedem der
+ * zwölf Steuerelemente.
+ *
+ * Diese Seite **ist** ein Schreibvorgang von vorne bis hinten (Gerät
+ * anlegen, Zimmer wählen, Zone zuordnen, benennen) — `POST /devices` und
+ * `PUT .../heating-zone` sind `require_admin` (`api/v1/devices.py:246`,
+ * `:412`). Es gibt hier nichts zu lesen, was nicht auf `/devices` steht.
+ *
+ * Der Weg hierher ist seit T5 ausgeblendet; die Schranke fängt den Fall
+ * ab, dass jemand die Adresse kennt oder ein Lesezeichen hat.
+ */
+function PairSchranke() {
+  const { user } = useAuth();
+  if (!darfGeraeteVerwalten(user)) {
+    return (
+      <div className="p-6 max-w-content mx-auto">
+        <h1 className="text-2xl font-medium text-text-primary">Gerät hinzufügen</h1>
+        <p className="text-sm text-text-secondary mt-2">
+          Geräte anlegen und zuordnen ist Administratoren vorbehalten.
+        </p>
+        <Link
+          href={"/devices" as Route}
+          className="text-sm text-primary hover:underline mt-4 inline-block"
+        >
+          Zur Geräteliste
+        </Link>
+      </div>
+    );
+  }
+  return <DevicePairPageInner />;
 }
 
 function PairFallback() {

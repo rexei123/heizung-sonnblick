@@ -87,24 +87,27 @@ ganzes aus.
 | **T3** | Heizzonen: Löschen und Anlegen gated, `zone-card` vollständig statt halb | 1 | 0,5 h |
 | **T4** | Raumtypen, Temperaturen & Zeiten, Hotel, API & Webhooks: lesbar, Speichern gesperrt mit Grund | 2 | 1,5 h |
 | **T5** | Zimmerübersicht, Thermostate-Label, „Gerät hinzufügen", Pairing-Seite | 2 | 1 h |
-| **T6** | Seitenleiste: „Benutzer" und „API & Webhooks" für Mitarbeiter ausblenden, Konfig-Seiten lesbar sichtbar | 3 | 0,5 h |
+| **T6** | Seitenleiste: „Benutzer" für Mitarbeiter ausblenden, Konfig-Seiten **und** „API & Webhooks" lesbar sichtbar | 3 | 0,5 h |
 | **T7** | Status-Feld: Beschriftung, Hinweis, Bestätigung — plus Sichtbarkeit angehaltener Zimmer (§3) | 3 | 1 h |
 | **T8** | e2e: beide Rollen über alle zehn Stellen | 1-3 | 1 h |
 | **T9** | Doku: Gate-Inventar ins RUNBOOK mit Datum und Commit, STATUS | 3 | 0,75 h |
 
 **Entscheidungen des Hoteliers vom 14.10.:** drei PRs (T1-T3 / T4-T5 /
-T6-T9), je mit §0.3-Frage; „Benutzer" **und** „API & Webhooks"
+T6-T9), je mit §0.3-Frage; in der Seitenleiste **nur „Benutzer"**
 ausblenden; Konfig-Seiten sichtbar und lesbar; Gate-Inventar ins RUNBOOK.
 
-**Zu „API & Webhooks": nichts Vertrauliches, trotzdem ausgeblendet.** Das
-Formular hat genau ein Feld (die Erwartungs-Uhrzeit des Imports, §5.79),
-die Liste zeigt Zeitpunkte, die mailparser-Request-ID und **Zählwerte** —
-keine Gästenamen, kein Token, keine URL. Der Hotelier hat sich trotzdem
-für Ausblenden entschieden; das ist zulässig, weil die Seite für einen
-Mitarbeiter nichts enthält, was er für seine Arbeit braucht. **Was das
-Ausblenden nicht leistet:** `alert_email` reist im `global-config`-Paket
-mit, angezeigt wird sie dort nicht — und dieselbe Antwort holt die
-Hotel-Seite, die sichtbar bleibt.
+**Zu „API & Webhooks": die Bedingung war „nichts Vertrauliches belegen",
+und das ist belegt.** Das Formular hat genau ein Feld (die
+Erwartungs-Uhrzeit des Imports, §5.79), die Liste zeigt Zeitpunkte, die
+mailparser-Request-ID und **Zählwerte** — keine Gästenamen, kein Token,
+keine URL; der Webhook-Token lebt nur in der `.env`. Die Seite bleibt
+deshalb sichtbar und lesbar (Entscheidung vom 14.10., nach dem Beleg): der
+Import-Status ist eine Mitarbeiter-Frage („ist die Liste von heute da?").
+
+**Die Grenze des Belegs, benannt:** `alert_email` reist im
+`global-config`-Paket mit, **angezeigt** wird sie dort nicht. Ausblenden
+hätte daran nichts geändert — dieselbe Antwort holt die Hotel-Seite, die
+ohnehin sichtbar bleibt.
 
 ---
 
@@ -139,7 +142,7 @@ Etikett in der Zimmerübersicht und in der Zimmer-Kopfzeile der Satz
 | **AK 1** | Als `mitarbeiter`: an keiner der zehn Stellen ein Schreib-Steuerelement | e2e, beide Rollen |
 | **AK 2** | Als `mitarbeiter`: Szenario-**Zustand** und Konfigurations-**Werte** bleiben lesbar | e2e + Sichtprobe |
 | **AK 3** | Als `admin`: alles unverändert vorhanden | e2e (jeder Test fährt beide Rollen) |
-| **AK 4** | Seitenleiste: „Benutzer" und „API & Webhooks" fehlen für `mitarbeiter` | e2e |
+| **AK 4** | Seitenleiste: „Benutzer" fehlt für `mitarbeiter`, „API & Webhooks" ist da und lesbar | e2e |
 | **AK 5** | Ein Zimmer auf „Gesperrt" trägt in Liste und Kopfzeile den Hinweis | Sichtprobe |
 | **AK 6** | Gate-Inventar im RUNBOOK, mit Datum und Commit | Durchsicht |
 

@@ -16,6 +16,12 @@ interface Props {
   onCancel?: () => void;
   submitting?: boolean;
   error?: string | null;
+  /**
+   * Sprint 22 T4: ohne Recht zum Speichern bleiben die Werte lesbar, der
+   * Knopf ist gesperrt und sagt warum. Gleiche Form wie `RoomForm`
+   * (Sprint 21 A2) — `POST`/`PATCH /room-types` sind `require_admin`.
+   */
+  readOnly?: boolean;
 }
 
 export function RoomTypeForm({
@@ -24,6 +30,7 @@ export function RoomTypeForm({
   onCancel,
   submitting = false,
   error,
+  readOnly = false,
 }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -208,7 +215,7 @@ export function RoomTypeForm({
           variant={initial ? "primary" : "add"}
           icon={initial ? undefined : "add"}
           loading={submitting}
-          disabled={!name.trim()}
+          disabled={readOnly || !name.trim()}
         >
           {initial ? "Aktualisieren" : "Anlegen"}
         </Button>

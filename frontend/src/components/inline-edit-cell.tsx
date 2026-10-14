@@ -38,6 +38,16 @@ interface Props<T extends string | number> {
   ariaLabel?: string;
   /** Optional: Toast-Callback fuer Save-Fehler. */
   onSaveError?: (message: string) => void;
+  /**
+   * Sprint 22 T4: ohne Recht zum Aendern wird der Wert als Text gerendert,
+   * nicht als Schaltflaeche.
+   *
+   * Entfernt statt gesperrt: diese Zelle **ist** die Schaltflaeche (Klick
+   * auf den Wert oeffnet das Eingabefeld). Eine gesperrte Variante waere
+   * ein Wert, der aussieht wie ein Knopf und nicht reagiert — schlechter
+   * als ein Wert, der wie ein Wert aussieht.
+   */
+  readOnly?: boolean;
 }
 
 function parseDraft<T extends string | number>(
@@ -76,6 +86,7 @@ export function InlineEditCell<T extends string | number>({
   format,
   ariaLabel,
   onSaveError,
+  readOnly = false,
 }: Props<T>) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>(() => String(value));
@@ -165,6 +176,10 @@ export function InlineEditCell<T extends string | number>({
         ) : null}
       </div>
     );
+  }
+
+  if (readOnly) {
+    return <span className="font-medium text-text-primary">{display}</span>;
   }
 
   return (

@@ -17,12 +17,20 @@ import {
   useUpdateRoomType,
 } from "@/lib/api/hooks-room-types";
 import type { ApiError, RoomType, RoomTypeCreate, RoomTypeUpdate } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { darfStammdatenAendern } from "@/lib/auth/rechte";
 
 type Mode = { kind: "list" } | { kind: "create" } | { kind: "edit"; id: number };
 
 export default function RoomTypesPage() {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const list = useRoomTypes();
+  // Sprint 22 T4: `POST`/`PATCH`/`DELETE /room-types` sind
+  // `require_admin` (`api/v1/room_types.py:56`, `:114`, `:145`). Die Liste
+  // und die Werte bleiben lesbar — ein Mitarbeiter darf wissen, welche
+  // Soll-Temperatur für einen Zimmertyp gilt.
+  const { user } = useAuth();
+  const darfAendern = darfStammdatenAendern(user);
   const createMut = useCreateRoomType();
   const updateMut = useUpdateRoomType(mode.kind === "edit" ? mode.id : 0);
   const deleteMut = useDeleteRoomType();
@@ -75,7 +83,7 @@ export default function RoomTypesPage() {
             Stammdaten für alle Zimmertypen mit Default-Sollwerten.
           </p>
         </div>
-        {mode.kind === "list" ? (
+        {mode.kind === "list" && darfAendern ? (
           <Button
             variant="add"
             icon="add"
@@ -118,14 +126,20 @@ export default function RoomTypesPage() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-medium text-text-primary">Raumtyp bearbeiten</h2>
-                <Button
-                  variant="destructive"
-                  icon="delete"
-                  onClick={() => setConfirmDelete(editingItem)}
-                  disabled={deleteMut.isPending}
-                >
-                  Löschen
-                </Button>
+                {darfAendern ? (
+                  <Button
+                    variant="destructive"
+                    icon="delete"
+                    onClick={() => setConfirmDelete(editingItem)}
+                    disabled={deleteMut.isPending}
+                  >
+                    Löschen
+                  </Button>
+                ) : (
+                  <span className="text-xs text-text-tertiary">
+                    Änderungen sind Administratoren vorbehalten.
+                  </span>
+                )}
               </div>
               <RoomTypeForm
                 initial={editingItem}
@@ -133,6 +147,7 @@ export default function RoomTypesPage() {
                 onCancel={() => setMode({ kind: "list" })}
                 submitting={updateMut.isPending}
                 error={error}
+                readOnly={!darfAendern}
               />
             </>
           ) : (

@@ -11,9 +11,15 @@ import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
 import { useGlobalConfig, useUpdateGlobalConfig } from "@/lib/api/hooks-global-config";
 import type { ApiError, GlobalConfig, GlobalConfigUpdate } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { darfKonfigurationAendern } from "@/lib/auth/rechte";
 
 export default function HotelSettingsPage() {
   const cfg = useGlobalConfig();
+  // Sprint 22 T4: `PATCH /global-config` ist `require_admin`
+  // (`api/v1/global_config.py:65`).
+  const { user } = useAuth();
+  const darfAendern = darfKonfigurationAendern(user);
   const updateMut = useUpdateGlobalConfig();
 
   const [hotelName, setHotelName] = useState("");
@@ -158,7 +164,17 @@ export default function HotelSettingsPage() {
           ) : null}
 
           <div className="flex justify-end">
-            <Button type="submit" variant="primary" loading={updateMut.isPending}>
+            {!darfAendern ? (
+              <span className="text-xs text-text-tertiary mr-3">
+                Änderungen sind Administratoren vorbehalten.
+              </span>
+            ) : null}
+            <Button
+              type="submit"
+              variant="primary"
+              loading={updateMut.isPending}
+              disabled={!darfAendern}
+            >
               Speichern
             </Button>
           </div>
