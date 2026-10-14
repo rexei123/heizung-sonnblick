@@ -4117,9 +4117,38 @@ Messwerten in zwei Stunden gibt es kein Urteil, sondern „unbekannt".
   sie erscheinen, und verschwinden genauso langsam. Für die Frage „läuft die
   Steuerung gerade" ist der Engine-Trace zuständig (§10l).
 
+### Die Kachel „Geräte online" zählt Zimmergeräte (ab 14.10.2026)
+
+**„101 von 101" heißt: jedes zugeordnete Gerät meldet sich.** Gezählt
+werden nur Geräte, die einer Heizzone zugeordnet sind — also die, von denen
+ein Zimmer abhängt. Darunter steht, wie viele im **Lager** liegen
+(„3 im Lager"); diese Zeile färbt die Kachel **nicht** und fehlt, wenn das
+Lager leer ist.
+
+Vorher zählte der Nenner das Lager mit: aus „101 von 101" wurde
+„101 von 104", und weil ein Ersatzteil ohne Batterie zu Recht nicht online
+ist, stand die Kachel **dauerhaft auf Gelb**. Eine Warnung, die immer
+leuchtet, sagt nichts mehr.
+
+**Gelb heißt jetzt wieder etwas:** ein zugeordnetes Gerät meldet sich
+nicht. Dann auf `/devices` nachsehen, Sortierung „Fehlerstatus" (§10r).
+
+**Der Preis, und er ist bewusst in Kauf genommen:** wer ein Gerät vom
+Zimmer löst und **kein** Ersatzgerät zuordnet, verschwindet aus Zähler
+**und** Nenner — die Kachel bleibt grün, obwohl der Heizkörper unversorgt
+ist. Vorher wäre er als „silent" im Nenner aufgefallen.
+
+> **Regel für den Tausch:** erst das Ersatzgerät zuordnen, dann das alte
+> lösen. Wer unterbrechen muss, schreibt sich das Zimmer auf — die Kachel
+> erinnert nicht daran.
+
+Sichtbar bleibt es trotzdem: `/devices` zeigt Geräte ohne Zone als
+„— Reserve-Pool", und das Zimmer hat im Reiter „Geräte" dann keine Zeile.
+
 **Querverweise:** §10e (Downlinks von Hand, inkl. Rekalibrieren), §10h.4
 (Eingangstest, Ventilkriterium), §10o (Batterie wechseln — dieselbe Form),
-§10q (Batterie-Schwellen ändern — dasselbe Vorgehen), AE-74 (die
+§10q (Batterie-Schwellen ändern — dasselbe Vorgehen), §10j (Tausch und
+Lösen — der Preis oben), §10r (zeigt die Oberfläche alles), AE-74 (die
 Entscheidung und die 5-K-Begründung).
 
 ---
