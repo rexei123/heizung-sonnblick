@@ -10,11 +10,96 @@ import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge
 import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
 
 type SortMode = "status" | "label";
+
+/**
+ * Die Fehler-Auswahl (Sprint 21 A3).
+ *
+ * **Warum im Client gefiltert wird.** `useDevices()` holt die ganze Liste
+ * (B-20c-1 hat das in Ordnung gebracht), also kostet Filtern und Zählen
+ * keine Abfrage. Ein serverseitiger Filter wäre ein zweiter Weg zu
+ * denselben Zeilen — und die Zahl in Klammern käme dann aus einer anderen
+ * Quelle als die Tabelle darunter (§5.53).
+ *
+ * **Die Zahlen kommen bewusst NICHT aus den Dashboard-Kacheln.** Die
+ * rechnen in `dashboard_aggregates` mit eigenen Abfragen. Zwei Zahlen aus
+ * zwei Quellen driften; hier gewinnt die Liste, aus der auch die Tabelle
+ * rendert. Dass Kachel und Auswahl sich dadurch um Sekunden unterscheiden
+ * können (verschiedene Abrufzeitpunkte), ist der Preis — die Alternative
+ * wäre, die Liste nach den Kachelzahlen zu biegen.
+ *
+ * Jede Bedingung spiegelt die Kachel, auf die sie verlinkt ist:
+ *
+ * | Auswahl | Kachel | Bedingung |
+ * |---|---|---|
+ * | `nicht-online` | „Geräte online" | zugeordnet **und** nicht `healthy`/`degraded` |
+ * | `batterie` | „Schwache Batterie" | `battery_state` `warn` oder `kritisch` |
+ * | `zu-warm` | „Zimmer zu warm" | `valve_state === "zimmer_zu_warm"` |
+ * | `ventil` | „Ventil prüfen" | `ventil_klemmt_zu` **oder** `ventil_schliesst_nicht` |
+ * | `lager` | (die Zeile an der Kachel) | keine Heizzone |
+ */
+type Zeige = "alle" | "nicht-online" | "batterie" | "zu-warm" | "ventil" | "lager";
+
+interface FilterEintrag {
+  wert: Zeige;
+  label: string;
+  passt: (d: Device) => boolean;
+}
+
+/**
+ * `nicht-online` heißt genau das Gegenteil von dem, was die Kachel
+ * „Geräte online" zählt — `_ONLINE_STATES` dort ist `healthy` und
+ * `degraded`, über **zugeordnete** Geräte (B-21-2).
+ *
+ * Deshalb steht hier nicht nur `silent`: ein Gerät mit unplausiblen
+ * Messwerten (`suspicious`) fehlt der Kachel ebenfalls im Zähler, und ein
+ * Klick, der es nicht zeigt, würde die Lücke unerklärt lassen. „Funkstille"
+ * steht als Wort des Betriebs im Label, weil das der häufige Fall ist.
+ */
+const FILTER: FilterEintrag[] = [
+  { wert: "alle", label: "Alle", passt: () => true },
+  {
+    wert: "nicht-online",
+    label: "Nicht online (Funkstille)",
+    passt: (d) =>
+      d.heating_zone_id !== null &&
+      d.health_state !== "healthy" &&
+      d.health_state !== "degraded",
+  },
+  {
+    wert: "batterie",
+    label: "Batterie niedrig",
+    passt: (d) => d.battery_state === "warn" || d.battery_state === "kritisch",
+  },
+  {
+    wert: "zu-warm",
+    label: "Zimmer zu warm",
+    passt: (d) => d.valve_state === "zimmer_zu_warm",
+  },
+  {
+    wert: "ventil",
+    label: "Ventil prüfen",
+    passt: (d) =>
+      d.valve_state === "ventil_klemmt_zu" || d.valve_state === "ventil_schliesst_nicht",
+  },
+  { wert: "lager", label: "Im Lager", passt: (d) => d.heating_zone_id === null },
+];
+
+const SORTIERUNG: { wert: SortMode; label: string }[] = [
+  { wert: "status", label: "Fehlerstatus" },
+  { wert: "label", label: "Bezeichnung" },
+];
 
 function toMessage(e: unknown): string {
   if (typeof e === "object" && e !== null && "detail" in e) {
@@ -195,18 +280,34 @@ function DevicesPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const sort: SortMode = params?.get("sort") === "label" ? "label" : "status";
+  // Sprint 21 A3: unbekannte Werte fallen auf "alle" zurueck. Ein Link mit
+  // einem Tippfehler zeigt dann die ganze Liste und nicht eine leere —
+  // eine leere Tabelle saehe aus wie "kein Geraet betroffen".
+  const zeige: Zeige =
+    FILTER.find((f) => f.wert === params?.get("zeige"))?.wert ?? "alle";
 
-  const setSort = (next: SortMode) => {
+  const setParam = (schluessel: "sort" | "zeige", wert: string, vorgabe: string) => {
     const usp = new URLSearchParams(params?.toString() ?? "");
-    if (next === "status") usp.delete("sort");
-    else usp.set("sort", next);
+    if (wert === vorgabe) usp.delete(schluessel);
+    else usp.set(schluessel, wert);
     const q = usp.toString();
     router.replace((q ? `/devices?${q}` : "/devices") as Route);
   };
 
+  // Zaehler je Auswahl, aus derselben Liste, aus der die Tabelle rendert.
+  const anzahl = (() => {
+    const werte = {} as Record<Zeige, number>;
+    for (const f of FILTER) werte[f.wert] = (data ?? []).filter(f.passt).length;
+    return werte;
+  })();
+
+  const gefiltert = (data ?? []).filter(
+    FILTER.find((f) => f.wert === zeige)?.passt ?? (() => true),
+  );
+
   const sorted = (() => {
     if (!data) return [];
-    const copy = [...data];
+    const copy = [...gefiltert];
     if (sort === "label") {
       copy.sort((a, b) => (a.label ?? a.dev_eui).localeCompare(b.label ?? b.dev_eui));
     } else {
@@ -228,14 +329,50 @@ function DevicesPageInner() {
             Übersicht aller LoRaWAN-Geräte (Thermostate, Sensoren) im System.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            icon="sort"
-            onClick={() => setSort(sort === "status" ? "label" : "status")}
-          >
-            Sortierung: {sort === "status" ? "Fehlerstatus" : "Bezeichnung"}
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Sprint 21 A3: zwei Auswahlfelder gleicher Bauform.
+              Vorher stand hier ein Knopf "Sortierung: Fehlerstatus" — er
+              **war** ein Umschalter (ein Klick wechselte auf Bezeichnung und
+              schrieb `?sort=label`), las sich aber wie eine Beschriftung,
+              weil er den Zustand zeigte statt der Handlung. Nicht einmal
+              sein Autor hat ihn als Auswahl erkannt. Entfernen haette bei
+              104 Geraeten die Suche nach Bezeichnung mitgenommen. */}
+          <label className="flex items-center gap-2 text-sm text-text-secondary">
+            Anzeigen
+            <Select
+              value={zeige}
+              onValueChange={(v) => setParam("zeige", v, "alle")}
+            >
+              <SelectTrigger className="w-[230px]" aria-label="Anzeigen">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FILTER.map((f) => (
+                  <SelectItem key={f.wert} value={f.wert}>
+                    {f.label} ({anzahl[f.wert]})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-text-secondary">
+            Sortieren
+            <Select
+              value={sort}
+              onValueChange={(v) => setParam("sort", v, "status")}
+            >
+              <SelectTrigger className="w-[160px]" aria-label="Sortieren">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORTIERUNG.map((o) => (
+                  <SelectItem key={o.wert} value={o.wert}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
           <Button
             variant="secondary"
             icon="refresh"
@@ -266,7 +403,25 @@ function DevicesPageInner() {
 
       {!isLoading && !error && data?.length === 0 ? <EmptyState /> : null}
 
-      {!isLoading && !error && data && data.length > 0 ? (
+      {/* Sprint 21 A3: eine leere **Auswahl** ist etwas anderes als eine
+          leere Datenbank. Der Unterschied gehoert hin, sonst liest sich
+          "keine Geraete" als Ausfall. */}
+      {!isLoading && !error && data && data.length > 0 && sorted.length === 0 ? (
+        <div className="bg-surface rounded-lg border border-border p-6 text-center">
+          <p className="text-sm text-text-secondary">
+            Kein Gerät in dieser Auswahl — das ist die gute Nachricht.
+          </p>
+          <button
+            type="button"
+            onClick={() => setParam("zeige", "alle", "alle")}
+            className="mt-2 text-sm text-primary hover:underline"
+          >
+            Alle Geräte zeigen
+          </button>
+        </div>
+      ) : null}
+
+      {!isLoading && !error && data && data.length > 0 && sorted.length > 0 ? (
         <DevicesTable devices={sorted} />
       ) : null}
     </div>
