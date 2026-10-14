@@ -73,8 +73,10 @@ export function RoomOverrideBlockToggle({ room, activeOverridesCount }: Props) {
 
   return (
     <div className="flex flex-col items-end gap-1">
+      {/* Sprint 21 A2: immer Umriss. Der primaere Knopf der Kopfzeile ist
+          "Temperatur aendern" — die Sperre ist der seltene Handgriff. */}
       <Button
-        variant={isBlocked ? "secondary" : "primary"}
+        variant="secondary"
         icon={isBlocked ? "lock" : "lock_open"}
         onClick={handleClick}
         loading={mut.isPending}

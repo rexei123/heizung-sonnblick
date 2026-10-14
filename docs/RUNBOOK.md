@@ -4513,3 +4513,66 @@ ist ein Grund zu warten, auch wenn das Fenster offen ist.
 **Querverweise:** CLAUDE.md §0.3 (die Frage vor jedem Merge, dort steht die
 Regel ebenfalls), §10p (Deploy-Sperre), §10u (Rückfall, wenn es schiefgeht),
 AE-77 §1 und Offen (der Neustart und seine Behebung).
+
+---
+
+## 10w. Wunschtemperatur setzen — und warum der Knopf manchmal grau ist
+
+**Seit 14.10.2026 (Sprint 21 A2).** Auf der Zimmerseite steht oben rechts
+der Knopf **„Temperatur ändern"**. Ein Klick führt in den Reiter
+„Übersteuerung", dort wird der Wert je Heizzone gesetzt.
+
+### Der Knopf ist grau — „nur bei belegtem Zimmer"
+
+Eine Wunschtemperatur gilt nur für ein **belegtes** Zimmer. Das ist keine
+Anzeige-Entscheidung, sondern die Regel dahinter: ein Übersteuern wird beim
+Check-out ohnehin aufgehoben, und in einem freien Zimmer würde es gegen die
+Absenkung arbeiten.
+
+**Vorher** ließ sich das Formular öffnen und ausfüllen — abgewiesen wurde
+erst nach „Anwenden". Der Grund steht jetzt davor.
+
+**Ein Sonderfall, der vorkommen kann:** Der Belegungs-Status wird einmal pro
+Minute nachgezogen. In der Minute direkt nach einem Check-in kann der Knopf
+noch grau sein, obwohl der Gast schon da ist. Dann hilft **Seite neu laden**,
+und wenn das nicht reicht, §10k (Status sofort synchronisieren). Umgekehrt
+gilt dasselbe: unmittelbar nach dem Check-out kann er noch aktiv sein — der
+Versuch wird dann mit einem Hinweis abgewiesen, und das ist richtig so.
+
+### Was „Übersteuerung sperren" daneben tut
+
+Derselbe Platz, aber nur als Umriss: der seltene Handgriff. Er verhindert,
+dass **Gäste** am Drehring übersteuern (und hebt bestehende Übersteuerungen
+auf). Nicht zu verwechseln mit dem grauen Knopf links davon — das ist der
+Belegungs-Status, keine Sperre.
+
+### „Zimmer löschen" ist umgezogen
+
+Es steht nicht mehr in der Kopfzeile, sondern im Reiter **Stammdaten**, unten
+im abgesetzten Abschnitt **„Gefahrenbereich"**. Der Bestätigungsdialog ist
+unverändert. Grund: eine Kopfzeile, in der die endgültigste Handlung einer von
+zwei Knöpfen ist, lädt zum Fehlgriff ein.
+
+### Was ein Mitarbeiter sieht und was nicht
+
+| Handgriff | Mitarbeiter | Administrator |
+|---|---|---|
+| Temperatur ändern (Übersteuerung) | ja | ja |
+| Übersteuerung sperren / freigeben | ja | ja |
+| Stammdaten speichern, Raumtyp ändern | **nein** | ja |
+| Zimmer löschen | **nein** | ja |
+| Gerät zuordnen, tauschen, stilllegen, lösen | **nein** | ja |
+
+Was ein Mitarbeiter nicht darf, wird ihm seit A2 auch nicht mehr angeboten.
+Die Stammdaten bleiben **lesbar**, nur der Speichern-Knopf ist gesperrt und
+sagt warum.
+
+**Wichtig für die Einordnung:** Das ist Bedienung, kein Zugangsschutz. Der
+Server weist dieselben Handlungen unabhängig davon ab, auch wenn jemand den
+Weg ohne Oberfläche findet (CLAUDE.md §5.30). Wer die Rollen-Zuordnung ändern
+will: Einstellungen → Benutzer (nur Administrator).
+
+**Querverweise:** §10k (`room.status` sofort synchronisieren — der
+Sonderfall oben), §10t (Ventil-Hinweise auf derselben Seite), CLAUDE.md
+§5.30 (Verstecken ist keine Beschränkung), §5.53 (zwei Wahrheiten beim
+Belegungs-Status), AE-58 (Übersteuerung nur in belegten Zimmern).

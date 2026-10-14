@@ -20,6 +20,7 @@ import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-blo
 import { RoomTypeInlineEditor } from "@/components/patterns/room-type-inline-editor";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useAuth } from "@/contexts/auth-context";
 import { useDetachDeviceZone, useDevices } from "@/lib/api/hooks";
 import { useRoomOverrides } from "@/lib/api/hooks-overrides";
 import {
@@ -29,6 +30,12 @@ import {
   useUpdateRoom,
 } from "@/lib/api/hooks-rooms";
 import type { ApiError, RoomCreate, RoomUpdate } from "@/lib/api/types";
+import {
+  darfGeraeteVerwalten,
+  darfStammdatenAendern,
+  darfTemperaturAendern,
+  darfUebersteuerungSperren,
+} from "@/lib/auth/rechte";
 
 type Tab = "stammdaten" | "zonen" | "geraete" | "engine" | "override";
 
@@ -45,6 +52,14 @@ export default function ZimmerDetailPage() {
     (o) =>
       o.revoked_at === null && new Date(o.expires_at).getTime() > Date.now(),
   ).length;
+  // Sprint 21 A2: Rollen aus einer Quelle (`lib/auth/rechte.ts`). Die
+  // Funktionen nennen das Server-Gate, das sie spiegeln — verstecken ist
+  // Bedienung, kein Zugangsschutz (CLAUDE.md §5.30).
+  const { user } = useAuth();
+  const darfTemperatur = darfTemperaturAendern(user);
+  const darfSperren = darfUebersteuerungSperren(user);
+  const darfStammdaten = darfStammdatenAendern(user);
+  const darfGeraete = darfGeraeteVerwalten(user);
   const [tab, setTab] = useState<Tab>("stammdaten");
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -122,6 +137,14 @@ export default function ZimmerDetailPage() {
     );
   }
 
+  // Sprint 21 A2: Hinweis, nicht Tor. `room.status` ist die persistierte
+  // Spalte; das Gate im Service rechnet mit `derive_room_status` ueber die
+  // aktiven Belegungen (§5.53). `sync_room_statuses` laeuft alle 60 s, das
+  // Fenster ist also hoechstens eine Minute lang offen — in dieser Minute
+  // ist der graue Knopf falsch. Genau deshalb bleibt die Behandlung von
+  // 409 ROOM_NOT_OCCUPIED im Formular stehen und wird nicht ersetzt.
+  const istBelegt = room.data.status === "occupied";
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-4">
@@ -136,7 +159,7 @@ export default function ZimmerDetailPage() {
         </Link>
       </div>
 
-      <header className="mb-6 flex items-center justify-between gap-4">
+      <header className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-medium text-text-primary">
             Zimmer {room.data.number}
@@ -145,19 +168,37 @@ export default function ZimmerDetailPage() {
             <p className="text-sm text-text-secondary mt-1">{room.data.display_name}</p>
           ) : null}
         </div>
+        {/* Sprint 21 A2: der haeufigste Handgriff ist jetzt der Hauptknopf
+            und der einzige primaere (Design-System: max. 1 je Region). Die
+            Sperre steht als Umriss daneben, "Zimmer loeschen" ist in die
+            Stammdaten gewandert. Eine Kopfzeile, in der die zerstoerendste
+            Handlung einer von zwei Knoepfen ist, laedt zum Fehlgriff ein —
+            und der haeufigste Handgriff lag drei Reiter weiter rechts. */}
         <div className="flex items-start gap-3">
-          <RoomOverrideBlockToggle
-            room={room.data}
-            activeOverridesCount={activeOverridesCount}
-          />
-          <Button
-            variant="destructive"
-            icon="delete"
-            onClick={() => setConfirmDelete(true)}
-            disabled={deleteMut.isPending}
-          >
-            Zimmer löschen
-          </Button>
+          {darfTemperatur ? (
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="primary"
+                icon="thermostat"
+                onClick={() => setTab("override")}
+                disabled={!istBelegt}
+                aria-describedby={istBelegt ? undefined : "temperatur-hinweis"}
+              >
+                Temperatur ändern
+              </Button>
+              {istBelegt ? null : (
+                <p id="temperatur-hinweis" className="text-xs text-text-tertiary">
+                  nur bei belegtem Zimmer
+                </p>
+              )}
+            </div>
+          ) : null}
+          {darfSperren ? (
+            <RoomOverrideBlockToggle
+              room={room.data}
+              activeOverridesCount={activeOverridesCount}
+            />
+          ) : null}
         </div>
       </header>
 
@@ -202,7 +243,28 @@ export default function ZimmerDetailPage() {
                 onSubmit={handleUpdate}
                 submitting={updateMut.isPending}
                 error={error}
+                readOnly={!darfStammdaten}
               />
+              {/* Sprint 21 A2: Loeschen steht hier und nicht in der
+                  Kopfzeile — abgesetzt, benannt, und nur fuer die Rolle,
+                  die es darf (`DELETE /rooms/{id}` ist `require_admin`). */}
+              {darfStammdaten ? (
+                <section className="mt-8 rounded-md border border-error bg-surface p-4">
+                  <h2 className="text-sm font-medium text-error">Gefahrenbereich</h2>
+                  <p className="text-xs text-text-secondary mt-1 mb-3">
+                    Löschen entfernt das Zimmer endgültig. Nur möglich, wenn keine
+                    aktiven Belegungen existieren.
+                  </p>
+                  <Button
+                    variant="destructive"
+                    icon="delete"
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={deleteMut.isPending}
+                  >
+                    Zimmer löschen
+                  </Button>
+                </section>
+              ) : null}
             </div>
           ) : tab === "zonen" ? (
             <HeatingZoneList roomId={id} onSwitchToOverrideTab={() => setTab("override")} />
@@ -211,6 +273,7 @@ export default function ZimmerDetailPage() {
               roomId={id}
               onReplaceClick={setOpenReplaceDialog}
               onRetireClick={setOpenRetireDialog}
+              darfVerwalten={darfGeraete}
             />
           ) : (
             <EngineDecisionPanel roomId={id} />
@@ -258,10 +321,18 @@ function DevicesInRoom({
   roomId,
   onReplaceClick,
   onRetireClick,
+  darfVerwalten,
 }: {
   roomId: number;
   onReplaceClick: (deviceId: number) => void;
   onRetireClick: (deviceId: number) => void;
+  /**
+   * Sprint 21 A2: Zuordnen, Tauschen, Stilllegen und Loesen sind alle
+   * `require_admin` (`api/v1/devices.py:473`, `api/v1/heating_zones.py`).
+   * Ohne das Recht bleibt die Liste lesbar und zeigt keine Handgriffe, die
+   * mit 403 enden.
+   */
+  darfVerwalten: boolean;
 }) {
   const zones = useHeatingZones(roomId);
   const allDevices = useDevices();
@@ -290,17 +361,19 @@ function DevicesInRoom({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-end">
-        <Link
-          href={`/devices/pair?room_id=${roomId}` as never}
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-        >
-          <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
-            add
-          </span>
-          Gerät zuordnen
-        </Link>
-      </div>
+      {darfVerwalten ? (
+        <div className="flex items-center justify-end">
+          <Link
+            href={`/devices/pair?room_id=${roomId}` as never}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+              add
+            </span>
+            Gerät zuordnen
+          </Link>
+        </div>
+      ) : null}
 
       {detachError ? (
         <p role="alert" className="text-sm text-error">
@@ -343,21 +416,25 @@ function DevicesInRoom({
                   >
                     Detail →
                   </Link>
-                  <ReplaceDeviceButton
-                    onClick={() => onReplaceClick(d.id)}
-                  />
-                  <RetireDeviceButton
-                    onClick={() => onRetireClick(d.id)}
-                  />
-                  <DetachButton
-                    onClick={() =>
-                      setDetachTarget({
-                        id: d.id,
-                        label: d.label ?? d.dev_eui,
-                        zoneName: zone?.name ?? "?",
-                      })
-                    }
-                  />
+                  {darfVerwalten ? (
+                    <>
+                      <ReplaceDeviceButton
+                        onClick={() => onReplaceClick(d.id)}
+                      />
+                      <RetireDeviceButton
+                        onClick={() => onRetireClick(d.id)}
+                      />
+                      <DetachButton
+                        onClick={() =>
+                          setDetachTarget({
+                            id: d.id,
+                            label: d.label ?? d.dev_eui,
+                            zoneName: zone?.name ?? "?",
+                          })
+                        }
+                      />
+                    </>
+                  ) : null}
                 </div>
               </li>
             );

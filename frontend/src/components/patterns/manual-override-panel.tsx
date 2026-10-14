@@ -86,6 +86,15 @@ interface ZoneCardProps {
    * (Doppel-Aktion mit Toggle-Off vermeiden).
    */
   overrideBlocked?: boolean;
+  /**
+   * Sprint 21 A2: Zimmer nicht belegt (`room.status !== "occupied"`) ->
+   * statt des Formulars ein Satz, der den Grund nennt. Das Gate bleibt im
+   * Service (409 `ROOM_NOT_OCCUPIED`, AE-58); das hier spart den Weg
+   * dorthin. Reihenfolge: aktiver Override > Sperre > nicht belegt >
+   * Formular — die Sperre ist der bewusste Handgriff eines Mitarbeiters und
+   * nennt sich deshalb zuerst.
+   */
+  roomNotOccupied?: boolean;
 }
 
 export function ManualOverrideZoneCard({
@@ -95,6 +104,7 @@ export function ManualOverrideZoneCard({
   lastEvalTime,
   activeOverride,
   overrideBlocked = false,
+  roomNotOccupied = false,
 }: ZoneCardProps) {
   return (
     <div className="bg-surface border border-border rounded-md p-5">
@@ -109,6 +119,11 @@ export function ManualOverrideZoneCard({
       ) : overrideBlocked ? (
         <p className="text-sm text-text-secondary italic">
           Übersteuerung gesperrt — bitte Mitarbeiter aufheben.
+        </p>
+      ) : roomNotOccupied ? (
+        <p className="text-sm text-text-secondary italic">
+          Zimmer ist nicht belegt — eine Wunschtemperatur ist ab dem Check-in
+          möglich.
         </p>
       ) : (
         <CreateOverrideForm
