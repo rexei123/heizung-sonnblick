@@ -71,6 +71,19 @@ Zonenname (Sprint 14e), die Benutzer-Seite (Redirect) — und die
 Mitarbeiter-Handlungen Belegungen und Übersteuerung, die sichtbar
 **bleiben**.
 
+**Nachtrag vom 14.10., beim Aufschreiben des Inventars für T9: es waren
+zwölf, nicht zehn.** Auf `/devices/[id]` tragen die **Bezeichnung** und die
+**Hardware-Nummer** je einen Stift, beide schreiben `PATCH /devices/{id}`
+(`require_admin`, `api/v1/devices.py:362`), und beide standen offen. In der
+Tabelle oben steht „Thermostate | Bezeichnung inline" — das las sich wie die
+Listen-Zelle allein, und genau so habe ich es gelesen.
+
+Gefunden wurden sie, weil das Inventar jede **Seite** gegen ihr Gate stellen
+musste statt diese Liste abzuarbeiten. **Eine Liste prüft, was jemand
+gefunden hat; ein Inventar prüft, was es gibt** — und der Unterschied fällt
+nicht auf, weil eine gute Liste wie ein Inventar aussieht. Gefixt in PR 3,
+mit zwei Tests über beide Rollen.
+
 **`zone-card.tsx` ist der Beleg, dass es knapp danebengehen kann:** dort
 gated `isAdmin` **nur** den Namens-Edit (Zeile 87), während „Zone löschen"
 achtzig Zeilen weiter unten offen stand. Ein halbes Gating sieht wie ein
