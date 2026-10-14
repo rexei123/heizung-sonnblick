@@ -356,11 +356,17 @@ async def test_dashboard_zaehler_sehen_alle_105(engine: AsyncEngine) -> None:
     """
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:
-        _, total_vorher = await agg.count_devices_online(session)
+        total_vorher = await agg.count_devices_pool(session)
 
     await _seed_devices(engine, 105)
 
     async with sessionmaker() as session:
-        _, total_nachher = await agg.count_devices_online(session)
+        total_nachher = await agg.count_devices_pool(session)
 
+    # Sprint 21 (B-21-2): ``_seed_devices`` legt **Pool**-Geraete an (ohne
+    # Zone, siehe dessen Docstring). Bis dahin landeten sie in
+    # ``count_devices_online``s Nenner — genau der Befund, den B-21-2
+    # behoben hat. Gezaehlt wird deshalb jetzt der Lagerbestand; die Aussage
+    # des Tests bleibt dieselbe: **die Kacheln zaehlen in der Datenbank,
+    # nicht in einer Seite.**
     assert total_nachher - total_vorher == 105

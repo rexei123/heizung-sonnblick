@@ -12,7 +12,10 @@ interface Kpi {
   rooms_total: number;
   avg_temperature_celsius: number | null;
   devices_online: number;
-  devices_total: number;
+  // Sprint 21 (B-21-2): Zod verlangt die beiden; `devices_total` gibt es
+  // nicht mehr.
+  devices_assigned: number;
+  devices_pool: number;
   active_overrides: number;
   zones_window_open: number;
   last_engine_tick: string | null;
@@ -28,7 +31,8 @@ const BASE_KPI: Kpi = {
   rooms_total: 30,
   avg_temperature_celsius: 21.4,
   devices_online: 4,
-  devices_total: 4,
+  devices_assigned: 4,
+  devices_pool: 0,
   active_overrides: 0,
   zones_window_open: 0,
   last_engine_tick: new Date(Date.now() - 60_000).toISOString(),
@@ -159,15 +163,44 @@ test.describe("Sprint 14c Dashboard", () => {
     await expect(tempCard).toContainText("–");
   });
 
-  test("devices_online < devices_total -> warning-Tone auf der Geraete-Kachel", async ({
+  test("devices_online < devices_assigned -> warning-Tone auf der Geraete-Kachel", async ({
     page,
   }) => {
-    await mockKpi(page, { devices_online: 3, devices_total: 4 });
+    await mockKpi(page, { devices_online: 3, devices_assigned: 4 });
     await page.goto("/");
     const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
     await expect(deviceCard).toBeVisible();
     await expect(deviceCard).toContainText("3");
     // Warning-Tone: Icon-Slot traegt text-warning.
     await expect(deviceCard.locator(".text-warning")).toHaveCount(1);
+  });
+
+  /**
+   * Sprint 21 (B-21-2) — die drei Zusagen der Kachel.
+   *
+   * Vorher zaehlte der Nenner Pool und Lager mit: aus "101 von 101" wurde
+   * "101 von 104", und weil ein Ersatzteil ohne Batterie korrekt "nicht
+   * online" ist, stand die Kachel **dauerhaft** auf Gelb. Eine Warnung, die
+   * immer leuchtet, warnt nicht (§5.79).
+   */
+  test("lager_steht_in_eigener_zeile_und_faerbt_die_kachel_nicht", async ({ page }) => {
+    await mockKpi(page, { devices_online: 101, devices_assigned: 101, devices_pool: 3 });
+    await page.goto("/");
+    const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
+
+    await expect(deviceCard).toContainText("von 101");
+    await expect(deviceCard).toContainText("3 im Lager");
+    // Entscheidend: kein Warning-Tone. Das Lager ist ein Normalzustand.
+    await expect(deviceCard.locator(".text-warning")).toHaveCount(0);
+  });
+
+  test("ohne_lagerbestand_bleibt_die_zweite_zeile_weg", async ({ page }) => {
+    // Eine Zeile "0 im Lager" waere Platz ohne Inhalt.
+    await mockKpi(page, { devices_online: 101, devices_assigned: 101, devices_pool: 0 });
+    await page.goto("/");
+    const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
+
+    await expect(deviceCard).toContainText("von 101");
+    await expect(deviceCard).not.toContainText("im Lager");
   });
 });

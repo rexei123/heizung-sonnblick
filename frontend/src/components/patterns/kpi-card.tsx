@@ -25,6 +25,19 @@ interface KpiCardProps {
   label: string;
   value: string | number;
   subValue?: string;
+  /**
+   * Zweite, kleinere Zeile unter `subValue` (Sprint 21, B-21-2).
+   *
+   * Für eine Nebenzahl, die die Kachel **nicht** färbt und nicht in ihren
+   * Zähler gehört — heute „3 im Lager" unter „101 von 101". Der Hotelier
+   * hat diese Form der dritten Kachel vorgezogen: eine Zahl weniger im
+   * Tagesblick, die Aufschlüsselung an der Stelle, wo man sie liest.
+   *
+   * Wird im Fehlerfall **nicht** gerendert — dann steht dort „Wert nicht
+   * verfügbar", und eine Nebenzahl neben einem fehlenden Hauptwert wäre
+   * eine Behauptung über Daten, die nicht angekommen sind.
+   */
+  note?: string;
   /** Material-Symbol-Name, z. B. "thermostat". */
   icon: string;
   tone?: KpiTone;
@@ -36,6 +49,7 @@ export function KpiCard({
   label,
   value,
   subValue,
+  note,
   icon,
   tone = "neutral",
   loading = false,
@@ -77,6 +91,9 @@ export function KpiCard({
           <p className="mt-0.5 text-xs text-warning">Wert nicht verfügbar</p>
         ) : subValue ? (
           <p className="mt-0.5 text-xs text-text-tertiary">{subValue}</p>
+        ) : null}
+        {!error && note ? (
+          <p className="mt-0.5 text-[11px] leading-tight text-text-tertiary">{note}</p>
         ) : null}
       </div>
     </div>

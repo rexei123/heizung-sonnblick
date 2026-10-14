@@ -31,14 +31,15 @@ async def get_dashboard_kpi(
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> DashboardKpiRead:
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
-    devices_online, devices_total = await agg.count_devices_online(session)
+    devices_online, devices_assigned = await agg.count_devices_online(session)
     valve_check, room_too_warm = await agg.count_valve_alerts(session)
     return DashboardKpiRead(
         rooms_occupied=rooms_occupied,
         rooms_total=rooms_total,
         avg_temperature_celsius=await agg.avg_room_temperature(session),
         devices_online=devices_online,
-        devices_total=devices_total,
+        devices_assigned=devices_assigned,
+        devices_pool=await agg.count_devices_pool(session),
         active_overrides=await agg.count_active_overrides(session),
         zones_window_open=await agg.count_zones_window_open(session),
         last_engine_tick=await agg.last_engine_tick(session),

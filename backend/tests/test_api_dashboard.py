@@ -49,7 +49,10 @@ _EXPECTED_KEYS = {
     "rooms_total",
     "avg_temperature_celsius",
     "devices_online",
-    "devices_total",
+    # Sprint 21 (B-21-2): ``devices_total`` hiess das Feld bis dahin und
+    # zaehlte Pool und Lager mit.
+    "devices_assigned",
+    "devices_pool",
     "active_overrides",
     "zones_window_open",
     "last_engine_tick",
@@ -181,7 +184,8 @@ async def test_dashboard_kpi_admin_200_schema(
         "rooms_occupied",
         "rooms_total",
         "devices_online",
-        "devices_total",
+        "devices_assigned",
+        "devices_pool",
         "active_overrides",
         "zones_window_open",
         "battery_low_count",
@@ -204,9 +208,21 @@ async def test_dashboard_kpi_mitarbeiter_allowed(
 async def test_dashboard_kpi_lifecycle_filter_excludes_retired(
     http_client: httpx.AsyncClient, users: dict[str, str], setup_engine: AsyncEngine
 ) -> None:
-    """retired Device erhoeht ``devices_total`` NICHT, aktives schon (§5.58)."""
+    """Stillgelegt zaehlt nirgends, Lager zaehlt **getrennt** (§5.58, B-21-2).
+
+    **Dieser Test hat mit Sprint 21 seine Aussage geschaerft, nicht nur sein
+    Feld umbenannt.** Vorher pruefte er, dass ein aktives Geraet
+    ``devices_total`` erhoeht — und das Geraet, das er dafuer anlegt, hat
+    **keine Heizzone**. Genau das war der Befund von B-21-2: ein Ersatzteil
+    im Lager hob den Nenner, und aus "101 von 101" wurde "101 von 104".
+
+    Geprueft wird jetzt beides: stillgelegt bleibt ueberall drausen, ein
+    Pool-Geraet erhoeht ``devices_pool`` und **nicht** ``devices_assigned``.
+    """
     await _login(http_client, users["admin"], users["password"])
-    baseline = (await http_client.get("/api/v1/dashboard/kpi")).json()["devices_total"]
+    vorher = (await http_client.get("/api/v1/dashboard/kpi")).json()
+    basis_zugeordnet = vorher["devices_assigned"]
+    basis_pool = vorher["devices_pool"]
 
     sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
     suffix = uuid.uuid4().hex[:8]
@@ -222,8 +238,11 @@ async def test_dashboard_kpi_lifecycle_filter_excludes_retired(
             )
         )
         await session.commit()
-    after_retired = (await http_client.get("/api/v1/dashboard/kpi")).json()["devices_total"]
-    assert after_retired == baseline, "retired Device darf devices_total nicht erhoehen"
+    nach_retired = (await http_client.get("/api/v1/dashboard/kpi")).json()
+    assert nach_retired["devices_assigned"] == basis_zugeordnet
+    assert nach_retired["devices_pool"] == basis_pool, (
+        "stillgelegt ist auch kein Lagerbestand — es ist aus dem Betrieb"
+    )
 
     async with sessionmaker() as session:
         session.add(
@@ -233,11 +252,16 @@ async def test_dashboard_kpi_lifecycle_filter_excludes_retired(
                 vendor=DeviceVendor.MCLIMATE,
                 model="vicki",
                 health_state="healthy",
+                # Keine Heizzone: ein Geraet im Pool, wie nach dem Einpairen
+                # und wie die Koepfe 027/100/056 seit dem 12.10.2026.
             )
         )
         await session.commit()
-    after_active = (await http_client.get("/api/v1/dashboard/kpi")).json()["devices_total"]
-    assert after_active == baseline + 1, "aktives Device muss devices_total erhoehen"
+    nach_pool = (await http_client.get("/api/v1/dashboard/kpi")).json()
+    assert nach_pool["devices_assigned"] == basis_zugeordnet, (
+        "ein Geraet ohne Zimmer darf den Nenner der Zimmer-Kachel nicht heben"
+    )
+    assert nach_pool["devices_pool"] == basis_pool + 1, "es gehoert in die Lager-Zahl"
 
     # Cleanup
     async with sessionmaker() as session:

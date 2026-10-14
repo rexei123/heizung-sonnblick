@@ -56,6 +56,14 @@ interface CardConfig {
   label: string;
   value: string | number;
   subValue?: string;
+  /**
+   * Zweite, kleinere Zeile (Sprint 21, B-21-2) — heute „N im Lager".
+   *
+   * Muss unten an `KpiCard` weitergereicht werden. Ein deklariertes Feld,
+   * das niemand übergibt, ist genau B-18-3: typseitig erlaubt, wortlos
+   * verworfen, und der Compiler kann es nicht melden.
+   */
+  note?: string;
   icon: string;
   tone: KpiTone;
 }
@@ -78,11 +86,21 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       tone: "neutral",
     },
     {
+      // Sprint 21 (B-21-2): Zähler und Nenner über **zugeordnete** Geräte.
+      // Vorher zählte der Nenner Pool und Lager mit — die Kachel stand
+      // damit dauerhaft auf Gelb, weil ein Ersatzteil ohne Batterie
+      // korrekt "nicht online" ist. Eine Warnung, die immer leuchtet,
+      // warnt nicht (§5.79).
+      //
+      // Das Lager steht als eigene, kleinere Zeile darunter und färbt
+      // nichts. Es erscheint nur, wenn es etwas zu sagen hat: eine Zeile
+      // "0 im Lager" ist Platz ohne Inhalt.
       label: "Geräte online",
       value: data.devices_online,
-      subValue: `von ${data.devices_total}`,
+      subValue: `von ${data.devices_assigned}`,
+      note: data.devices_pool > 0 ? `${data.devices_pool} im Lager` : undefined,
       icon: "device_thermostat",
-      tone: data.devices_online < data.devices_total ? "warning-soft" : "neutral",
+      tone: data.devices_online < data.devices_assigned ? "warning-soft" : "neutral",
     },
     {
       label: "Aktive Übersteuerungen",
@@ -163,6 +181,7 @@ export default function Home() {
                   label={c.label}
                   value={c.value}
                   subValue={c.subValue}
+                  note={c.note}
                   icon={c.icon}
                   tone={c.tone}
                 />
