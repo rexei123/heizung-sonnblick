@@ -11,6 +11,8 @@ import { RoomForm } from "@/components/patterns/room-form";
 import { Button } from "@/components/ui/button";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
+import { useAuth } from "@/contexts/auth-context";
+import { darfStammdatenAendern } from "@/lib/auth/rechte";
 import type {
   ApiError,
   Room,
@@ -48,6 +50,9 @@ export default function ZimmerPage() {
     status: filterStatus === "" ? undefined : filterStatus,
     floor: filterFloor.trim() === "" ? undefined : parseInt(filterFloor, 10),
   });
+  // Sprint 22 T5: `POST /rooms` ist `require_admin` (`api/v1/rooms.py:80`).
+  const { user } = useAuth();
+  const darfAendern = darfStammdatenAendern(user);
   const createMut = useCreateRoom();
 
   const handleCreate = async (payload: RoomCreate | RoomUpdate) => {
@@ -69,7 +74,7 @@ export default function ZimmerPage() {
             {list.data?.length ?? 0} Zimmer angezeigt.
           </p>
         </div>
-        {showCreate ? (
+        {!darfAendern ? null : showCreate ? (
           <Button variant="secondary" onClick={() => setShowCreate(false)}>
             Abbrechen
           </Button>

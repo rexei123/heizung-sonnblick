@@ -20,6 +20,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
 
 type SortMode = "status" | "label";
 
@@ -277,6 +279,10 @@ function DevicesSkeletonPage() {
 
 function DevicesPageInner() {
   const { data, isLoading, error, refetch, isFetching } = useDevices();
+  // Sprint 22 T5: `POST /devices` und `PUT .../heating-zone` sind
+  // `require_admin` (`api/v1/devices.py:246`, `:412`).
+  const { user } = useAuth();
+  const darfVerwalten = darfGeraeteVerwalten(user);
   const router = useRouter();
   const params = useSearchParams();
   const sort: SortMode = params?.get("sort") === "label" ? "label" : "status";
@@ -381,9 +387,11 @@ function DevicesPageInner() {
           >
             {isFetching ? "Aktualisiere…" : "Aktualisieren"}
           </Button>
-          <Button asChild variant="add" icon="add">
-            <Link href="/devices/pair">Gerät hinzufügen</Link>
-          </Button>
+          {darfVerwalten ? (
+            <Button asChild variant="add" icon="add">
+              <Link href="/devices/pair">Gerät hinzufügen</Link>
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -547,6 +555,12 @@ function ZuordnungCell({ device: d }: { device: Device }) {
  * Klick aufs Label oeffnet Input, Enter speichert, Esc bricht ab.
  */
 function LabelCell({ device: d }: { device: Device }) {
+  // Die Rolle wird hier selbst gelesen und nicht durch die Tabelle
+  // gereicht: die Zelle sitzt drei Komponenten unter der Seite, und ein
+  // Prop durch alle drei waere ein Weg, auf dem es verloren geht
+  // (B-18-3 ist genau diese Klasse).
+  const { user } = useAuth();
+  const darfAendern = darfGeraeteVerwalten(user);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.label ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -627,6 +641,10 @@ function LabelCell({ device: d }: { device: Device }) {
       >
         {display}
       </Link>
+      {/* Sprint 22 T5: `PATCH /devices/{id}` ist `require_admin`
+          (`api/v1/devices.py:370`). Der Name bleibt lesbar und verlinkt,
+          nur der Stift verschwindet. */}
+      {!darfAendern ? null : (
       <button
         type="button"
         onClick={() => {
@@ -641,6 +659,7 @@ function LabelCell({ device: d }: { device: Device }) {
           edit
         </span>
       </button>
+      )}
     </div>
   );
 }

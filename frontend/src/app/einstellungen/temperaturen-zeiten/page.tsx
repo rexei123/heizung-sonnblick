@@ -23,6 +23,8 @@ import {
   useUpdateGlobalRuleConfig,
 } from "@/lib/api/hooks-rule-configs";
 import type { RuleConfigGlobalUpdate } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { darfKonfigurationAendern } from "@/lib/auth/rechte";
 
 const tempValidator = (min: number, max: number) =>
   z.string().refine(
@@ -58,6 +60,11 @@ function formatMinutes(v: number): string {
 
 export default function TemperaturenZeitenPage() {
   const cfg = useGlobalRuleConfig();
+  // Sprint 22 T4: `PATCH /rule-configs/global` ist `require_admin`
+  // (`api/v1/rule_configs.py:79`). Die Werte bleiben lesbar — wer wissen
+  // will, ab wann abgesenkt wird, soll nachsehen koennen.
+  const { user } = useAuth();
+  const darfAendern = darfKonfigurationAendern(user);
   const updateMut = useUpdateGlobalRuleConfig();
   const scenariosQ = useScenarios();
   const summerActive = (scenariosQ.data ?? []).some(
@@ -161,6 +168,7 @@ export default function TemperaturenZeitenPage() {
               hint="Beginn des Nachtfensters (HH:MM, lokale Zeit)."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.night_start ?? "00:00:00"}
                 variant="time"
                 validator={timeValidator}
@@ -175,6 +183,7 @@ export default function TemperaturenZeitenPage() {
               hint="Ende des Nachtfensters. Über Mitternacht erlaubt."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.night_end ?? "06:00:00"}
                 variant="time"
                 validator={timeValidator}
@@ -189,6 +198,7 @@ export default function TemperaturenZeitenPage() {
               hint="Minuten vor Anreise, ab denen das Zimmer auf Belegt-Sollwert vorgeheizt wird."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.preheat_minutes_before_checkin ?? 90}
                 variant="number"
                 validator={preheatValidator}
@@ -210,6 +220,7 @@ export default function TemperaturenZeitenPage() {
               hint="Standard-Sollwert wenn Gast eingecheckt. Bereich 16–26 °C."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.t_occupied ?? "21.0"}
                 variant="decimal"
                 validator={tempValidator(16, 26)}
@@ -224,6 +235,7 @@ export default function TemperaturenZeitenPage() {
               hint="Sollwert wenn Zimmer unbelegt. Bereich 10–22 °C."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.t_vacant ?? "18.0"}
                 variant="decimal"
                 validator={tempValidator(10, 22)}
@@ -238,6 +250,7 @@ export default function TemperaturenZeitenPage() {
               hint="Sollwert im Nachtfenster bei belegtem Zimmer. Bereich 14–22 °C."
             >
               <InlineEditCell
+          readOnly={!darfAendern}
                 value={data.t_night ?? "19.0"}
                 variant="decimal"
                 validator={tempValidator(14, 22)}
