@@ -3417,6 +3417,71 @@ Vicki-Sensors, die zu den 5 K gefuehrt hat), §5.73 (der Gegenfall: absolute
 Schwellen, wo sie hingehoeren), AE-74 (die Entscheidung mit ihren Messungen),
 RUNBOOK §10t (was „ueber vergleichbaren Zimmern" fuer den Betrieb heisst).
 
+### 5.85 Ein Knopf, der seinen Zustand zeigt, liest sich wie eine Beschriftung (Sprint 21 A3)
+
+Auf `/devices` stand ein Knopf **„Sortierung: Fehlerstatus"**. Er war ein
+Umschalter mit zwei Zuständen: ein Klick wechselte auf „Bezeichnung" und
+schrieb `?sort=label` in die Adresse.
+
+**Erkannt hat ihn niemand** — der Hotelier hat im Sprint-21-Brief
+verlangt, ihn „als Beschriftung darzustellen oder zu entfernen", und ich
+habe das in den Brief übernommen, ohne den Code zu lesen. Entfernen hätte
+bei 104 Geräten die Suche nach Bezeichnung mitgenommen.
+
+Der Grund ist nicht die Farbe oder die Größe: **der Knopf zeigte den
+Zustand, nicht die Handlung.** „Sortierung: Fehlerstatus" ist eine
+Aussage. Ein Knopf verspricht etwas zu tun.
+
+**Regel:** Die Beschriftung eines Knopfes nennt die **Handlung**
+(„Nach Bezeichnung sortieren"). Wer den **Zustand** zeigen will, nimmt eine
+Form, die als wählbar gelesen wird — ein Auswahlfeld mit Beschriftung
+daneben („Sortieren: Fehlerstatus"), wie es A3 jetzt tut.
+
+**Die Probe:** die Beschriftung laut lesen. Kommt ein Satz heraus, der
+etwas *behauptet*, ist es keine Schaltfläche. Kommt eine Aufforderung
+heraus, stimmt es.
+
+**Querverweise:** §5.57 (Tabellen-Header ohne sichtbaren Text — dort fehlte
+die Bedeutung ganz, hier war die Handlung als Zustand getarnt), §5.77 (ein
+Schalter ohne Wirkung; hier der Gegenfall: eine Wirkung, deren Schalter
+nicht als solcher zu erkennen war).
+
+### 5.86 Eine fremde Abhilfe ist eine Behauptung, bis die Meldung weg ist (Sprint 21 A1)
+
+Recharts meldete `The width(-1) and height(-1) of chart should be greater
+than 0` und nannte in derselben Zeile die Abhilfe: „add a minWidth(200) or
+minHeight(288)". Genau diese beiden Werte hatte ich zu diesem Zeitpunkt
+**schon gesetzt** — die Bibliothek zählte meine eigene Konfiguration auf
+und warnte trotzdem, weil sie warnt, *bevor* sie die Mindestwerte anwendet.
+
+Dazu kam eine zweite Falle: die naheliegende Abhilfe („Mindesthöhe am
+Container") war seit Sprint 7 vorhanden (`h-72`). Wer sie einbaut, ohne
+nachzusehen, baut nichts und glaubt, etwas behoben zu haben.
+
+**Regel, drei Schritte und keiner davon optional:**
+
+1. **Vorher messen** und den **Wortlaut** festhalten. Eine Warnung, die man
+   nur vom Erzählen kennt, ist eine Behauptung (§5.68).
+2. Die Abhilfe einbauen — und zuerst prüfen, ob sie nicht schon da ist.
+3. **Nachher messen.** Ist die Meldung noch da, war die Abhilfe falsch,
+   nicht unvollständig. Dann hilft die Ursache, nicht mehr davon.
+
+Im Fall A1 war die Ursache, dass `ResponsiveContainer` seine Größe selbst
+messen wollte; die Hülle misst sie jetzt und übergibt Zahlen statt
+Prozente. Die Bibliothek wurde dafür nicht überredet, sondern an dieser
+Stelle nicht mehr gebraucht.
+
+**Und die Messung gehört in die Suite, nicht in eine Anleitung:** zwei
+e2e-Tests lesen die Konsole mit und fallen, wenn die Meldung
+zurückkommt (§5.82, dritter Teil — ein Diagnose-Schalter, der nichts
+kostet, gehört eingeschaltet).
+
+**Querverweise:** §5.68 (Behauptung vs. Befund), §5.83 (eine Zusicherung
+gilt nur auf der Ebene, auf der sie geprüft wurde — hier: „die Abhilfe ist
+dokumentiert" sagt nichts darüber, ob sie wirkt), §5.80 (dieselbe Familie
+bei Abhängigkeiten: zwei Dinge hatten sich geändert, gesehen habe ich
+eines).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
