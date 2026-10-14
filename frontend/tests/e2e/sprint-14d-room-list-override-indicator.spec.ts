@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 14d (R-A/R-B) — Playwright E2E fuer Aktiv-Indikator-Spalte in

@@ -1,14 +1,14 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-13, develop-HEAD `9ae69b7` (PR #302) + PR #303, der Sprint 20f-c abschließt. **AK 1b bleibt offen** und wird im Winter geprüft (§2ca, §2cb). Zuletzt abgeschlossen: **Sprint 20f-c (Mindestabstand im Engine-Abgleich, B-20f-1, AE-76)**, §2cc — der Abgleich erzeugte bei fast jeder Sollwert-Änderung einen zweiten Downlink. Davor: **Sprint 20e-c (Regel 3c „Ventil schließt nicht“, AE-74)**, §2cb — saisonunabhängiger Melder, weil er das Gerät mit sich selbst vergleicht. Davor: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Aktueller Sprint: 21 (Bedienung)**, §2cd — Brief auf develop (PR #304), **abgeschlossen am 14.10.2026** (A2, A1, T1, A3, T2, T3; T4 bleibt als B-18-3 im Backlog) — **die Sichtproben AK 1-9 stehen aus** (§5.67). Daneben: Release develop → main. **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** AK 1b (im Winter erneut prüfen), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-14, develop-HEAD `085c73f` (PR #312) + dieser PR, der Sprint 22 abschließt. **AK 1b bleibt offen** und wird im Winter geprüft (§2ca, §2cb). Zuletzt abgeschlossen: **Sprint 20f-c (Mindestabstand im Engine-Abgleich, B-20f-1, AE-76)**, §2cc — der Abgleich erzeugte bei fast jeder Sollwert-Änderung einen zweiten Downlink. Davor: **Sprint 20e-c (Regel 3c „Ventil schließt nicht“, AE-74)**, §2cb — saisonunabhängiger Melder, weil er das Gerät mit sich selbst vergleicht. Davor: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Zuletzt abgeschlossen: Sprint 22 (Rollen)**, §2ce — drei PRs (#311, #312 und dieser), keine Migration: zwölf Stellen in der Oberfläche boten Handlungen an, die der Server abweist (Befunde des Hoteliers vom 14.10.), das Gate-Inventar liegt in RUNBOOK §10z. Davor: **Sprint 21 (Bedienung)**, §2cd — abgeschlossen am 14.10.2026 (A2, A1, T1, A3, T2, T3; T4 bleibt als B-18-3 im Backlog) — **die Sichtproben AK 1-9 stehen aus** (§5.67). **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** Secrets-Rotation (B-18-2, 🔴, Fenster 20.-24.10.), AK 1b (im Winter erneut prüfen), Live-Verify aus 20c/20d, die Sichtproben zu Sprint 21 und 22, Tag `v0.3.0-heizperiode` **nach** der Abnahme 28.-30.10. **Nicht mehr auf der Liste:** „Release develop → main“ (es gibt keinen main-Strang, AE-67 — §2cd) und der Codec-Re-Paste (`mclimate-vicki.js` ist seit PR #262 unverändert, per `git log` geprüft am 14.10.).
 
 ---
 
 ## 1. Aktueller Stand
 
-**Stichtag:** 2026-10-13
+**Stichtag:** 2026-10-14
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **keiner** — Sprint 21 (Bedienung) ist am 14.10.2026 abgeschlossen (§2cd): A2, A1, T1, A3, T2, T3; T4 bleibt als B-18-3 im Backlog. **Die Sichtproben AK 1-9 stehen aus** (§5.67). Davor: 20f-c ist abgeschlossen (§2cc, B-20f-1, AE-76: der Engine-Abgleich wartet jetzt 15 Minuten, statt bei fast jeder Änderung einen zweiten Downlink zu erzeugen). Davor 20e-c (§2cb, AE-74; sieben PRs, keine Migration): Regel 3c „Ventil schließt nicht“ vergleicht das Gerät mit sich selbst und ist damit saisonunabhängig. **Sprint 21 (Bedienung)** ist **abgeschlossen**, §2cd — sechs PRs, keine Migration; offen sind die Sichtproben AK 1-9 und T4 (bleibt B-18-3). Davor 20e-b (§2ca, §5.84) und 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b ist halb erfüllt** — beim Kesseltest am 10.10. wurde 027/110 gemeldet, 100/405 nicht (3,1 K über dem Median gegen eine Schwelle von 3,5). Ursache ist die Eigenwärme im Herbst-Median, nicht die Schwelle; im Winter läge der Fall klar darüber. Daraus wurde **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, saisonunabhängig) — abgeschlossen am 13.10., §2cb. Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **keiner** — **Sprint 22 (Rollen)** ist am 14.10.2026 abgeschlossen (§2ce): drei PRs, keine Migration, zwölf Oberflächen-Stellen gegated, Gate-Inventar in RUNBOOK §10z; serverseitig war nichts offen. Davor am selben Tag Sprint 21 (Bedienung), §2cd: A2, A1, T1, A3, T2, T3; T4 bleibt als B-18-3 im Backlog. **Die Sichtproben AK 1-9 stehen aus** (§5.67). Davor: 20f-c ist abgeschlossen (§2cc, B-20f-1, AE-76: der Engine-Abgleich wartet jetzt 15 Minuten, statt bei fast jeder Änderung einen zweiten Downlink zu erzeugen). Davor 20e-c (§2cb, AE-74; sieben PRs, keine Migration): Regel 3c „Ventil schließt nicht“ vergleicht das Gerät mit sich selbst und ist damit saisonunabhängig. **Sprint 21 (Bedienung)** ist **abgeschlossen**, §2cd — sechs PRs, keine Migration; offen sind die Sichtproben AK 1-9 und T4 (bleibt B-18-3). Davor 20e-b (§2ca, §5.84) und 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b ist halb erfüllt** — beim Kesseltest am 10.10. wurde 027/110 gemeldet, 100/405 nicht (3,1 K über dem Median gegen eine Schwelle von 3,5). Ursache ist die Eigenwärme im Herbst-Median, nicht die Schwelle; im Winter läge der Fall klar darüber. Daraus wurde **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, saisonunabhängig) — abgeschlossen am 13.10., §2cb. Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5836,8 +5836,113 @@ abgeschlossener Sprint ohne Live-Verifikation sagt das):
 | 9 (T1) | „101 von 101" plus Lager-Zeile, **kein** Gelb bei allen online |
 
 **Nächster Sprint: offen.** Vor dem 01.11. steht ohnehin: Secrets-Rotation
-(B-18-2, 🔴), Codec-Re-Paste in ChirpStack (§5.22), Release develop → main,
-Tag `v0.3.0-heizperiode`, AK 1b im Winter.
+(B-18-2, 🔴), Codec-Re-Paste in ChirpStack (§5.22) — nur falls
+`mclimate-vicki.js` nach PR #262 geändert wurde, was per `git log` **nicht**
+der Fall ist —, Tag `v0.3.0-heizperiode` nach der Abnahme 28.-30.10., AK 1b
+im Winter.
+
+**Gestrichen am 14.10.2026: „Release develop → main".** Es gibt keinen
+main-Strang mehr — heizung-test **ist** die Produktion (AE-67, Promote am
+09.06.2026), `main` liegt 376 Commits zurück und es deployt nichts davon.
+Der Rückfallpunkt ist H-6 (RUNBOOK §10u, geübt am 09.10.), nicht ein
+main-Branch.
+
+## 2ce. Sprint 22 Rollen — abgeschlossen (2026-10-14)
+
+**Anlass: zwei Befunde des Hoteliers aus der Sichtprobe vom 14.10.**,
+angemeldet als `mitarbeiter`, nichts ausprobiert:
+
+- **Befund A:** Unter „Szenarien" war der Schalter „Sommermodus" sichtbar
+  und bedienbar — hotelweiter Frostschutz.
+- **Befund B:** Zimmer → Reiter „Heizzonen" zeigte „Zone löschen" und das
+  Formular „Neue Heizzone".
+
+**Beide waren Oberflächen-Fehler, keine Sicherheitslücken** — und das ist
+belegt, nicht angenommen: alle **33** schreibenden Endpunkte tragen ihr
+Gate (23 × `require_admin`, 6 × `require_mitarbeiter`, 1 ×
+`require_real_user`, 1 × Webhook-Token, 2 bewusst offen). Der Server weist
+beide Handlungen ab, auch über die Adresszeile. Was fehlte, war die
+Oberfläche: ein Knopf, der nach dem Klick mit 403 endet (§5.77 eine Ebene
+höher — hier wurde eine Wirkung **behauptet**, die es nicht gab).
+
+### Die Durchsicht fand zehn Lücken — und dann zwei weitere
+
+Die Tabelle aus dem Brief nennt zehn Stellen (Szenarien, Heizzonen 2 ×,
+Raumtypen, Temperaturen & Zeiten, Hotel, API & Webhooks, Zimmer anlegen,
+Geräte-Label, Pairing). Beim Aufschreiben des Inventars für T9 kamen
+**zwei weitere** dazu: auf `/devices/[id]` tragen die **Bezeichnung** und
+die **Hardware-Nummer** je einen Stift, beide schreiben
+`PATCH /devices/{id}` (`require_admin`), beide waren offen.
+
+Gefunden wurden sie nur, weil das Inventar jede **Seite** gegen ihr Gate
+stellen musste, statt die Liste aus dem Brief abzuarbeiten — dort stand
+„Thermostate: Bezeichnung inline", und das las sich wie die Listen-Zelle
+allein. Das ist derselbe Fehlertyp wie `zone-card.tsx`, wo `isAdmin` den
+Namens-Edit gated hat und „Zone löschen" achtzig Zeilen weiter unten offen
+stand: **ein halbes Gating sieht wie ein ganzes aus.**
+
+### Geliefert
+
+| | Inhalt |
+|---|---|
+| **T1** | `darfKonfigurationAendern` und `darfBenutzerVerwalten` in `lib/auth/rechte.ts`; `darfStammdatenAendern` auf Raumtypen und Heizzonen erweitert. Jede Funktion nennt ihr Gate mit Datei und Zeile |
+| **T2** | Szenarien: Zustand lesbar, Schalter nur für Admin |
+| **T3** | Heizzonen: Löschen **und** Anlegen gated; UI-Text „(eigene Regel-Logik in Sprint 9)" entfernt — die Logik gibt es nicht (§5.20) |
+| **T4** | Raumtypen, Temperaturen & Zeiten, Hotel, API & Webhooks: lesbar, Speichern gesperrt **mit Grund** |
+| **T5** | Zimmer anlegen, Geräte-Label, „Gerät hinzufügen", Pairing-Seite (Schranke am Eingang statt zwölf Gates innen) — plus der Nachtrag: beide Stifte auf der Geräte-Detailseite |
+| **T6** | Seitenleiste: **nur** „Benutzer" ausgeblendet. Konfig-Seiten bleiben sichtbar und lesbar |
+| **T7** | Status-Feld: „Status (automatisch aus Belegungen)", Hinweis, Bestätigung bei Reinigung/Gesperrt — plus Sichtbarkeit angehaltener Zimmer in Liste und Kopfzeile |
+| **T8** | Gemeinsame Test-Hülle `tests/e2e/fixtures.ts` (Standard: Admin) |
+| **T9** | Gate-Inventar in RUNBOOK §10z, mit Datum, Commit und Umfang |
+
+**Drei PRs: #311 (T1-T3), #312 (T4-T5), plus dieser (T6-T9).** Keine
+Migration, kein Backend-Code berührt — die Gates standen alle schon.
+
+### „API & Webhooks" bleibt sichtbar, und warum
+
+Die Bedingung des Hoteliers war „nichts Vertrauliches belegen". Belegt:
+ein Zeit-Feld, Zeitpunkte, die mailparser-Request-ID und Zählwerte — kein
+Token, keine URL, keine Gästenamen. **Die Grenze des Belegs, benannt:**
+`alert_email` reist im `global-config`-Paket mit, angezeigt wird sie dort
+nicht; Ausblenden hätte daran nichts geändert, weil dieselbe Antwort die
+Hotel-Seite holt. Entscheidung vom 14.10. nach dem Beleg: lesbar lassen.
+
+### T7 war mehr als eine Beschriftung
+
+`sync_room_status` leitet den Status alle 60 s aus den Belegungen ab —
+**außer** bei „Reinigung" und „Gesperrt" (`occupancy_service.py:242`).
+Das Feld ist also **halb** automatisch: drei Werte sind folgenlos, zwei
+halten den Abgleich an. Ein „Gesperrt" fror die Belegungs-Automatik für
+dieses Zimmer ein, lautlos, bis jemand sie zurückstellte. Deshalb heißt
+die Beschriftung jetzt, was sie ist, die zwei Ausnahmen verlangen eine
+Bestätigung, und ein angehaltenes Zimmer sagt das in der Liste („·
+Automatik angehalten") und in seiner Kopfzeile.
+
+### Vier Bestandstests waren gegen die Rolle blind
+
+`devices-pairing` (Sprint 21 A2), `szenarien` (T2), `temperaturen-zeiten`
+samt Warn-Banner und die 20c-Pairing-Auswahl mockten kein `/auth/me`:
+`user` bleibt dann `null`, und `null` darf nichts. Daraus wurde T8 — eine
+Hülle, die jeden Test standardmäßig als Admin anmeldet. **Bedingung des
+Hoteliers:** Rollen-Tests setzen ihre Rolle weiterhin ausdrücklich, beide
+Rollen je Prüfung. Die `sidebar`-Spec ist der Beleg, dass das nötig ist:
+sie fängt alle API-Aufrufe mit einem Catch-all ab und verdeckt damit die
+Hülle — sie prüft seither Admin (14 Einträge) und Mitarbeiter (13, ohne
+„Benutzer") getrennt.
+
+### Prüfung
+
+- `type-check`, `lint`: grün. e2e-Suite: **205 grün, 0 rot** — davon neun
+  in diesem PR (T7 sechs, Geräte-Detailseite zwei, die geteilte
+  Sidebar-Prüfung eine).
+- **Mutationsprobe** je Mechanismus (Abhilfe zurückgedreht, Lauf
+  beobachtet) — Ergebnis im PR-Text von #311, #312 und diesem PR.
+
+**Was dieser Sprint nicht ist: Zugangsschutz.** Ein ausgeblendeter Knopf
+ist Bedienung (§5.30). Die Gate-Spalte in RUNBOOK §10z ist die Antwort auf
+„konnte jemand das", die letzte Spalte nur auf „hat jemand das gesehen".
+
+---
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 

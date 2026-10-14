@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 14e T5 — Inline-Edit Stammdaten mit Role-Affordance + Confirm.

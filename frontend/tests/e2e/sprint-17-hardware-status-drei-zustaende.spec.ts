@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 /**
  * Sprint 17 (C9) — HardwareStatusBadge unterscheidet drei Zustände.

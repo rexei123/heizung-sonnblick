@@ -83,6 +83,23 @@ export function darfKonfigurationAendern(user: User | null): boolean {
 }
 
 /**
+ * Benutzer anlegen, ändern, zurücksetzen, löschen — **und sie sehen**.
+ *
+ * Gate: `require_admin` an allen Mutationen in `api/v1/users.py` (`:87`,
+ * `:132`, `:199`, `:228`) **und am Lesen** (`GET /users`). Das Lesen ist
+ * die Ausnahme von der Regel „GET darf jeder Angemeldete" und steht so
+ * in §5.30 begründet: die Liste trägt fremde E-Mail-Adressen, Rollen und
+ * Aktiv-Kennzeichen.
+ *
+ * Deshalb ist „Benutzer" der einzige Eintrag, den die Seitenleiste
+ * ausblendet (Sprint 22 T6) — dort gibt es für einen Mitarbeiter nichts
+ * zu lesen.
+ */
+export function darfBenutzerVerwalten(user: User | null): boolean {
+  return user?.role === "admin";
+}
+
+/**
  * Geräte einer Zone zuordnen, tauschen, lösen, stilllegen.
  *
  * Gate: `require_admin` an `DELETE /devices/{id}/heating-zone`

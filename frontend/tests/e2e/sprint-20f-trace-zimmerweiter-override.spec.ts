@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 20f (T6) — der Schicht-Trace sagt, auf welchen Geltungsbereich er

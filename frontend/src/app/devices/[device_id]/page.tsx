@@ -10,6 +10,8 @@ import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/contexts/auth-context";
+import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
 import { useDevice, useSensorReadings, useUpdateDevice } from "@/lib/api/hooks";
 import {
   formatDateTime,
@@ -318,6 +320,12 @@ interface InlineTextEditProps {
   displayClassName: string;
   /** Anzeige-Element im Display-Modus. "h1" fuer die Seiten-Headline. */
   as?: "h1" | "span";
+  /**
+   * Sprint 22: ohne Recht zum Speichern (`PATCH /devices/{id}` ist
+   * `require_admin`, `api/v1/devices.py:362`) verschwindet der Stift.
+   * Der Wert bleibt lesbar — er ist Betriebswissen.
+   */
+  readOnly?: boolean;
   /** null = Feld leeren. */
   onSave: (next: string | null) => Promise<void>;
 }
@@ -328,6 +336,7 @@ function InlineTextEdit({
   ariaLabel,
   displayClassName,
   as = "span",
+  readOnly = false,
   onSave,
 }: InlineTextEditProps) {
   const [editing, setEditing] = useState(false);
@@ -410,29 +419,37 @@ function InlineTextEdit({
       ) : (
         <span className={valueClass}>{value ?? emptyDisplay}</span>
       )}
-      <button
-        type="button"
-        onClick={() => {
-          setDraft(value ?? "");
-          setError(null);
-          setEditing(true);
-        }}
-        className="text-text-tertiary hover:text-primary"
-        aria-label={`${ariaLabel} bearbeiten`}
-        title={`${ariaLabel} bearbeiten`}
-      >
-        <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 16 }}>
-          edit
-        </span>
-      </button>
+      {/* Sprint 22 (Nachtrag zu T5): ohne Recht kein Stift. Hier wird
+          **entfernt statt gesperrt**, wie bei `InlineEditCell` — der
+          Stift ist die ganze Schaltflaeche, ein grauer Stift sieht aus
+          wie einer, der nicht reagiert. Der Wert selbst bleibt lesbar. */}
+      {readOnly ? null : (
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(value ?? "");
+            setError(null);
+            setEditing(true);
+          }}
+          className="text-text-tertiary hover:text-primary"
+          aria-label={`${ariaLabel} bearbeiten`}
+          title={`${ariaLabel} bearbeiten`}
+        >
+          <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 16 }}>
+            edit
+          </span>
+        </button>
+      )}
     </div>
   );
 }
 
 function DeviceLabelEdit({ device }: { device: Device }) {
   const updateMut = useUpdateDevice(device.id);
+  const { user } = useAuth();
   return (
     <InlineTextEdit
+      readOnly={!darfGeraeteVerwalten(user)}
       value={device.label}
       emptyDisplay={`Device ${device.id}`}
       ariaLabel="Bezeichnung"
@@ -445,8 +462,10 @@ function DeviceLabelEdit({ device }: { device: Device }) {
 
 function HardwareNumberEdit({ device }: { device: Device }) {
   const updateMut = useUpdateDevice(device.id);
+  const { user } = useAuth();
   return (
     <InlineTextEdit
+      readOnly={!darfGeraeteVerwalten(user)}
       value={device.hardware_number}
       emptyDisplay="Nicht erfasst"
       ariaLabel="Hardware-Nummer"

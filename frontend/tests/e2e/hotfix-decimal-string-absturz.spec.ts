@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 /**
  * Der Absturz vom 07.10.2026, als Test — mit der **echten** Serialisierung.

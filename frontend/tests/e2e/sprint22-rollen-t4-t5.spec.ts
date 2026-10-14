@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 22 T4+T5 — die übrigen acht Stellen aus der Durchsicht.
@@ -321,5 +321,82 @@ test.describe("Sprint 22 T5 — Stammdaten und Geräte", () => {
     await page.goto("/devices/pair");
 
     await expect(page.getByText(/ist Administratoren vorbehalten/)).toHaveCount(0);
+  });
+});
+
+/**
+ * Nachtrag zu T5, gefunden beim Gate-Inventar fuer T9 (14.10.2026).
+ *
+ * Die Durchsicht hatte zehn Stellen; dies sind die **elfte und
+ * zwoelfte**: auf `/devices/[id]` tragen die Bezeichnung und die
+ * Hardware-Nummer je einen Stift, beide schreiben
+ * `PATCH /devices/{id}` (`require_admin`, `api/v1/devices.py:362`),
+ * und beide waren offen. Dieselbe Klasse wie die Befunde des Hoteliers:
+ * nicht die Liste war das Problem, sondern die Seite daneben.
+ *
+ * Gefunden wurde es nur, weil das Inventar jede Seite gegen ihr Gate
+ * stellen musste statt die Liste aus dem Brief abzuarbeiten — dort
+ * stand „Thermostate: Bezeichnung inline", und das las sich wie die
+ * Listen-Zelle allein.
+ */
+async function mockGeraetDetail(page: Page) {
+  const json = (route: Route, body: unknown) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+
+  await page.route(/.*\/api\/v1\/devices\/42(\?.*)?$/, (r) => {
+    if (r.request().method() !== "GET") return r.fallback();
+    return json(r, { ...GERAET, hardware_number: "MDC5419731K6UF" });
+  });
+  await page.route(/.*\/api\/v1\/devices\/42\/sensor-readings(\?.*)?$/, (r) => json(r, []));
+  await page.route(/.*\/api\/v1\/devices\/.*\/hardware-status(\?.*)?$/, (r) =>
+    json(r, {
+      status: "active",
+      last_seen: NOW,
+      source: "window",
+      mounted_confirmed_at: NOW,
+      frames_in_window: 3,
+      window_minutes: 30,
+    }),
+  );
+}
+
+test.describe("Sprint 22 T5 (Nachtrag) — Geraete-Detailseite", () => {
+  test("detailseite_mitarbeiter_sieht_keine_stifte", async ({ page }) => {
+    const { schreibzugriffe } = await mockApi(page, "mitarbeiter");
+    await mockGeraetDetail(page);
+    await page.goto("/devices/42");
+    await rolleGeladen(page, "mitarbeiter");
+
+    // Die Werte bleiben lesbar — sie sind Betriebswissen.
+    await expect(page.getByRole("heading", { level: 1, name: "Vicki 101" })).toBeVisible();
+    await expect(page.getByTestId("hardware-number-row")).toContainText("MDC5419731K6UF");
+
+    // Die Stifte sind weg, nicht grau.
+    await expect(page.getByRole("button", { name: "Bezeichnung bearbeiten" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Hardware-Nummer bearbeiten" }),
+    ).toHaveCount(0);
+
+    expect(schreibzugriffe).toEqual([]);
+  });
+
+  test("detailseite_admin_behaelt_beide_stifte", async ({ page }) => {
+    await mockApi(page, "admin");
+    await mockGeraetDetail(page);
+    await page.goto("/devices/42");
+    await rolleGeladen(page, "admin");
+
+    await expect(page.getByRole("button", { name: "Bezeichnung bearbeiten" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Hardware-Nummer bearbeiten" }),
+    ).toBeVisible();
+
+    // Und der Stift tut, was er verspricht: das Feld oeffnet sich.
+    await page.getByRole("button", { name: "Bezeichnung bearbeiten" }).click();
+    await expect(page.getByRole("textbox")).toHaveValue("Vicki 101");
   });
 });

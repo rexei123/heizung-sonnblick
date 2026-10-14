@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 /**
  * Sprint 14a — /devices-Liste (3 Spalten) + /devices/[id]-Detail

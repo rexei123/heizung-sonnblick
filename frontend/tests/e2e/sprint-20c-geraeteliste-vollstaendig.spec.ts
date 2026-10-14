@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 /**
  * Sprint 20c (B-20c-1) — die Geräteliste darf nicht still abschneiden.
@@ -175,34 +175,7 @@ test.describe("Sprint 20c — Geräteliste über alle Seiten", () => {
   });
 });
 
-/**
- * Sprint 22 T5: die Pairing-Seite ist seither nur fuer `admin` erreichbar
- * (`POST /devices`, `PUT .../heating-zone` sind `require_admin`). Ohne
- * `/auth/me`-Mock bleibt `user` `null`, und die Seite zeigt dann die
- * Schranke statt des Assistenten.
- */
-const MOCK_ADMIN_22 = {
-  id: 1,
-  email: "chef@hotel.example.com",
-  role: "admin" as const,
-  is_active: true,
-  must_change_password: false,
-  created_at: "2026-05-01T10:00:00Z",
-  updated_at: "2026-10-14T06:00:00Z",
-  last_login_at: "2026-10-14T06:00:00Z",
-};
-
 test.describe("Sprint 20c — die Zuordnung sieht alle Pool-Geräte", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route(/.*\/api\/v1\/auth\/me(\?.*)?$/, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(MOCK_ADMIN_22),
-      }),
-    );
-  });
-
   test("Pairing-Auswahl listet alle 105 unzugeordneten Geräte", async ({
     page,
   }) => {

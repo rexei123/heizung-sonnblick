@@ -1,4 +1,4 @@
-import { test, expect, type ConsoleMessage, type Page, type Route } from "@playwright/test";
+import { test, expect, type ConsoleMessage, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 21 A1 — Playwright-E2E fuer den Verlauf-Reiter.

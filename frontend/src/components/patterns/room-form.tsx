@@ -8,6 +8,7 @@ import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type {
   Orientation,
   Room,
@@ -52,6 +53,24 @@ export function RoomForm({
     initial?.orientation ?? "",
   );
   const [status, setStatus] = useState<RoomStatus | "">(initial?.status ?? "");
+  const [bestaetigeAnhalten, setBestaetigeAnhalten] = useState<RoomStatus | null>(null);
+
+  /**
+   * Sprint 22 T7: „Reinigung" und „Gesperrt" nehmen das Zimmer aus der
+   * Automatik — und zwar lautlos, bis jemand sie zurückstellt. Dafür gibt
+   * es eine Bestätigung, wie im Gefahrenbereich.
+   *
+   * Die anderen drei Werte brauchen keine: sie werden binnen einer Minute
+   * überschrieben, die Eingabe ist also folgenlos (der Hinweis unter dem
+   * Feld sagt das).
+   */
+  const waehleStatus = (next: RoomStatus | "") => {
+    if (next === "cleaning" || next === "blocked") {
+      setBestaetigeAnhalten(next);
+      return;
+    }
+    setStatus(next);
+  };
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const handle = async (e: FormEvent) => {
@@ -160,12 +179,12 @@ export function RoomForm({
         {initial ? (
           <div>
             <label htmlFor="r-status" className="block text-sm font-medium text-text-primary mb-1">
-              Status (manuell)
+              Status (automatisch aus Belegungen)
             </label>
             <select
               id="r-status"
               value={status}
-              onChange={(e) => setStatus((e.target.value || "") as RoomStatus | "")}
+              onChange={(e) => waehleStatus((e.target.value || "") as RoomStatus | "")}
               className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
             >
               <option value="">—</option>
@@ -175,6 +194,18 @@ export function RoomForm({
               <option value="cleaning">Reinigung</option>
               <option value="blocked">Gesperrt</option>
             </select>
+            {/* Sprint 22 T7: das Feld ist **halb** automatisch, und das ist
+                der ganze Hinweis. `sync_room_status` leitet den Status alle
+                60 s aus den Belegungen ab — ausser bei „Reinigung" und
+                „Gesperrt", die gelten als manuell gesetzt
+                (`occupancy_service.py:242`). */}
+            <p className="text-xs text-text-tertiary mt-1">
+              Frei, Belegt und Reserviert werden laufend aus den Belegungen
+              gesetzt — eine Eingabe hier wird binnen einer Minute
+              überschrieben. <strong>Reinigung</strong> und{" "}
+              <strong>Gesperrt</strong> bleiben stehen und halten den
+              Abgleich für dieses Zimmer an.
+            </p>
           </div>
         ) : null}
       </div>
@@ -223,6 +254,26 @@ export function RoomForm({
           {initial ? "Aktualisieren" : "Anlegen"}
         </Button>
       </div>
+      <ConfirmDialog
+        open={bestaetigeAnhalten !== null}
+        title="Automatik anhalten?"
+        // Nicht `destructive`: hier wird nichts zerstoert, sondern ein
+        // Abgleich angehalten — umkehrbar durch Zuruecksetzen des Status.
+        // Rot an einer umkehrbaren Stelle entwertet Rot an der
+        // zerstoerenden (§5.79, derselbe Gedanke eine Ebene hoeher).
+        intent="primary"
+        message={
+          bestaetigeAnhalten === "blocked"
+            ? "Mit „Gesperrt“ wird dieses Zimmer nicht mehr automatisch aus den Belegungen gesetzt — bis der Status wieder auf Frei, Belegt oder Reserviert steht. Anreisen und Abreisen wirken dann nicht mehr auf den Status."
+            : "Mit „Reinigung“ wird dieses Zimmer nicht mehr automatisch aus den Belegungen gesetzt — bis der Status wieder auf Frei, Belegt oder Reserviert steht."
+        }
+        confirmLabel="Automatik anhalten"
+        onConfirm={() => {
+          if (bestaetigeAnhalten !== null) setStatus(bestaetigeAnhalten);
+          setBestaetigeAnhalten(null);
+        }}
+        onCancel={() => setBestaetigeAnhalten(null)}
+      />
     </form>
   );
 }

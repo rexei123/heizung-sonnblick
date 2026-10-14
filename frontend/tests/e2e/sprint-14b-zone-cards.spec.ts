@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 14b T8 — Zone-Karten im Heizzonen-Tab (/zimmer/[id]).
