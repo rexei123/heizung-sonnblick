@@ -5,10 +5,12 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
   type UseInfiniteQueryResult,
   type InfiniteData,
   type UseMutationResult,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 
 import { occupanciesApi } from "./occupancies";
@@ -26,6 +28,37 @@ const KEYS = {
 
 /** Seitengroesse der Belegungs-Liste. Wie der Server-Default. */
 export const BELEGUNGEN_SEITE = 100;
+
+/**
+ * Sprint 21 A1: Belegungen eines Zimmers in einem Zeitfenster — fuer die
+ * hinterlegten Baender im Verlauf.
+ *
+ * **Eine Seite genuegt hier, und das ist eine Rechnung, keine Hoffnung:**
+ * das groesste Fenster sind sieben Tage fuer **ein** Zimmer. Hundert
+ * Belegungen in sieben Tagen hiesse mehr als vierzehn Wechsel pro Tag in
+ * einem Zimmer. `order: "asc"` macht die Auswahl trotzdem deterministisch,
+ * damit im Grenzfall nicht eine zufaellige Haelfte gezeichnet wird
+ * (B-20c-1 ist die Lesson dazu: ein Client, der eine Seite fuer die
+ * Gesamtmenge nimmt, meldet nichts — er zeigt einfach weniger).
+ */
+export function useOccupanciesFenster(
+  roomId: number | null,
+  von: string | null,
+  bis: string | null,
+): UseQueryResult<OccupancyListResponse> {
+  const q: OccupancyListQuery = {
+    room_id: roomId ?? undefined,
+    from: von ?? undefined,
+    to: bis ?? undefined,
+    order: "asc",
+    limit: BELEGUNGEN_SEITE,
+  };
+  return useQuery<OccupancyListResponse>({
+    queryKey: KEYS.list(q),
+    queryFn: () => occupanciesApi.list(q),
+    enabled: roomId !== null && von !== null && bis !== null,
+  });
+}
 
 /**
  * Belegungen seitenweise, mit Gesamtzahl.

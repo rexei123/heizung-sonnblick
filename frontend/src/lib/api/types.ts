@@ -540,6 +540,67 @@ export interface OccupancyCreate {
  * Raumtypen. `order` steuert die Richtung der Sortierung nach
  * `(check_in, id)`.
  */
+/**
+ * Zimmer-Verlauf (Sprint 21 A1) — Spiegel zu `schemas/room_history.py`.
+ *
+ * `temperature` und `setpoint` sind **Zahlen**, nicht Zeichenketten: das
+ * Backend serialisiert `Decimal` per `field_serializer` auf `float`. Wer
+ * hier `string` schreibt, bekommt ein Diagramm, das auf 0 zeichnet (der
+ * Hotfix #272 war genau das) — und `null` heisst "in diesem Eimer kein
+ * Wert" und darf nicht zu 0 werden.
+ */
+export type RoomHistoryRange = "24h" | "7d";
+
+export interface RoomHistoryPoint {
+  /** Beginn des Eimers, UTC-ISO. */
+  t: string;
+  temperature: number | null;
+  setpoint: number | null;
+}
+
+export interface RoomHistoryZone {
+  zone_id: number;
+  name: string;
+  kind: HeatingZoneKind;
+  /** Leer heisst: Zone existiert, hat im Fenster aber nichts gemeldet. */
+  points: RoomHistoryPoint[];
+}
+
+/** Aufgeloestes Nachtfenster in Ortszeit (`timezone`), `HH:MM:SS`. */
+export interface RoomHistoryNightWindow {
+  start: string;
+  end: string;
+}
+
+/**
+ * Eine Absenkungs-Phase als **Zeitspanne** (UTC-ISO), vom Server schon auf
+ * das Fenster zugeschnitten.
+ *
+ * Der Unterschied zu `RoomHistoryNightWindow`: dort steht die
+ * Konfiguration (`22:00:00`), hier die tatsächlichen Phasen. Die
+ * Umrechnung Ortszeit → UTC samt Sommerzeit macht der Server mit
+ * `zoneinfo`, dieselbe Bibliothek wie die Engine (§5.65) — im Browser
+ * stünde sie ohne Testlauf.
+ */
+export interface RoomHistoryNightBand {
+  start: string;
+  end: string;
+}
+
+export interface RoomHistory {
+  room_id: number;
+  range: RoomHistoryRange;
+  bucket_minutes: number;
+  /** Halboffen: `>= range_from`, `< range_to`. UTC-ISO. */
+  range_from: string;
+  range_to: string;
+  /** Zone der `night_window`-Zeiten — ohne sie ist eine Uhrzeit nichts (§5.79). */
+  timezone: string;
+  night_window: RoomHistoryNightWindow | null;
+  night_bands: RoomHistoryNightBand[];
+  zones: RoomHistoryZone[];
+}
+
 export interface OccupancyListQuery {
   from?: string;
   to?: string;

@@ -10,6 +10,8 @@ CRUD:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,8 +27,16 @@ from heizung.models.room_type import RoomType
 from heizung.models.user import User
 from heizung.schemas.event_log import EventLogRead
 from heizung.schemas.room import RoomCreate, RoomOverrideBlockUpdate, RoomRead, RoomUpdate
+from heizung.schemas.room_history import (
+    HistoryPunkt,
+    HistoryZone,
+    NachtBand,
+    NachtFenster,
+    RoomHistoryRead,
+)
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
+from heizung.services.room_history import lade_verlauf
 
 INT4_MAX = 2_147_483_647
 
@@ -301,6 +311,66 @@ async def engine_trace(
         .limit(limit)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+@router.get(
+    "/{room_id}/history",
+    response_model=RoomHistoryRead,
+    summary="Verlauf eines Zimmers je Heizzone (Sprint 21 A1)",
+)
+async def room_history(
+    room_id: int = RoomIdPath,
+    bereich: Literal["24h", "7d"] = Query(default="24h", alias="range"),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> RoomHistoryRead:
+    """Ist-Temperatur und Sollwert je Heizzone, serverseitig zusammengefasst.
+
+    ``range=24h`` liefert Zehn-Minuten-Eimer (144 Punkte je Zone),
+    ``range=7d`` Stunden-Eimer (168). Die Zusammenfassung liegt hier und
+    nicht im Diagramm: eine Woche rohe Messwerte sind bei vier Geraeten
+    rund 4000 Zeilen je Zimmer.
+
+    Die Antwort traegt ``range_from``/``range_to`` (UTC, halboffen),
+    ``timezone`` und das aufgeloeste ``night_window`` in Ortszeit mit — die
+    Oberflaeche rechnet nichts davon selbst nach. Das Nachtfenster kommt
+    durch dieselbe Kette wie bei der Engine (``rules/config_resolve``),
+    sonst zeichnete die Anzeige ein Band, nach dem gar nicht geregelt wird.
+
+    Belegungs-Baender holt die Oberflaeche aus
+    ``GET /occupancies?room_id=&from=&to=`` — der Endpunkt existiert, und
+    ein zweiter Weg zu denselben Zeilen waere eine zweite Wahrheit fuer
+    nichts.
+    """
+    room = await _get_or_404(session, room_id)
+    verlauf = await lade_verlauf(session, room=room, bereich=bereich)
+    fenster = (
+        NachtFenster(start=verlauf.night_start, end=verlauf.night_end)
+        if verlauf.night_start is not None and verlauf.night_end is not None
+        else None
+    )
+    return RoomHistoryRead(
+        room_id=verlauf.room_id,
+        range=verlauf.bereich,
+        bucket_minutes=verlauf.bucket_minutes,
+        range_from=verlauf.von,
+        range_to=verlauf.bis,
+        timezone=verlauf.timezone,
+        night_window=fenster,
+        night_bands=[NachtBand(start=b.start, end=b.end) for b in verlauf.night_bands],
+        zones=[
+            HistoryZone(
+                zone_id=z.zone_id,
+                name=z.name,
+                kind=z.kind,
+                points=[
+                    HistoryPunkt(t=pt.t, temperature=pt.temperature, setpoint=pt.setpoint)
+                    for pt in z.points
+                ],
+            )
+            for z in verlauf.zones
+        ],
+    )
 
 
 @router.delete(

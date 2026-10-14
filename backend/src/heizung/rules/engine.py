@@ -31,12 +31,16 @@ from sqlalchemy.orm import joinedload
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, RoomStatus, RuleConfigScope
-from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.config_resolve import (
+    lade_rule_configs,
+    lade_zeitzone,
+    resolve_rule_field,
+)
 from heizung.rules.constants import (
     DEFAULT_HOTEL_TIMEZONE,
     FROST_PROTECTION_C,
@@ -246,20 +250,15 @@ def layer_base_target(ctx: _RoomContext) -> LayerStep:
 
 def _resolve_field(field_name: str, ctx: _RoomContext) -> Any:
     """Generische RuleConfig-Hierarchie ROOM > ROOM_TYPE > GLOBAL fuer ein
-    beliebiges Feld (Decimal, time, int)."""
-    by_scope: dict[RuleConfigScope, list[RuleConfig]] = {
-        RuleConfigScope.ROOM: [],
-        RuleConfigScope.ROOM_TYPE: [],
-        RuleConfigScope.GLOBAL: [],
-    }
-    for rc in ctx.rule_configs:
-        by_scope[rc.scope].append(rc)
-    for scope in (RuleConfigScope.ROOM, RuleConfigScope.ROOM_TYPE, RuleConfigScope.GLOBAL):
-        for rc in by_scope[scope]:
-            value = getattr(rc, field_name, None)
-            if value is not None:
-                return value
-    return None
+    beliebiges Feld (Decimal, time, int).
+
+    Sprint 21 A1: die Kette selbst liegt in ``rules/config_resolve`` — der
+    Verlauf-Endpunkt braucht dasselbe Nachtfenster, und zwei Nachbauten
+    waeren zwei Wahrheiten (§5.46 zum Modul-Ort, §5.53 zum Grund). Diese
+    Huelle bleibt, weil sie den Engine-Kontext kennt und die Aufrufer
+    unveraendert lesen.
+    """
+    return resolve_rule_field(ctx.rule_configs, field_name)
 
 
 def _is_in_night_window(now_local_time: time, night_start: time, night_end: time) -> bool:
@@ -919,17 +918,10 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     if room is None:
         return None
 
-    # Alle relevanten RuleConfigs ueber alle drei Scopes:
-    # GLOBAL immer, ROOM_TYPE wenn matching, ROOM nur fuer dieses Zimmer.
-    rc_stmt = select(RuleConfig).where(
-        (RuleConfig.scope == RuleConfigScope.GLOBAL)
-        | (
-            (RuleConfig.scope == RuleConfigScope.ROOM_TYPE)
-            & (RuleConfig.room_type_id == room.room_type_id)
-        )
-        | ((RuleConfig.scope == RuleConfigScope.ROOM) & (RuleConfig.room_id == room_id))
-    )
-    rule_configs = list((await session.execute(rc_stmt)).scalars().all())
+    # Alle relevanten RuleConfigs ueber alle drei Scopes — die Abfrage liegt
+    # seit Sprint 21 A1 in ``rules/config_resolve``, weil der
+    # Verlauf-Endpunkt dieselbe Hierarchie braucht.
+    rule_configs = await lade_rule_configs(session, room_id=room_id, room_type_id=room.room_type_id)
 
     # Sprint 9.7/9.16: Sommermodus-Flag. Sprint 9.16 (AE-49) hat die
     # Quelle von ``global_config.summer_mode_active`` (gedroppt) auf
@@ -948,11 +940,9 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     )
     next_occ = (await session.execute(next_occ_stmt)).scalar_one_or_none()
 
-    # B-10-4-Fix (AE-60): Hotel-Zeitzone aus GlobalConfig-Singleton lesen.
-    # Defensiver Fallback auf ``DEFAULT_HOTEL_TIMEZONE`` falls Row fehlt
-    # (frisches Setup vor Seed) oder ``timezone``-Spalte leer ist.
-    gc = await session.get(GlobalConfig, 1)
-    tz_name = gc.timezone if gc and gc.timezone else DEFAULT_HOTEL_TIMEZONE
+    # B-10-4-Fix (AE-60): Hotel-Zeitzone aus GlobalConfig-Singleton lesen,
+    # mit defensivem Fallback. Seit Sprint 21 A1 in ``rules/config_resolve``.
+    tz_name = await lade_zeitzone(session)
 
     return _RoomContext(
         room=room,

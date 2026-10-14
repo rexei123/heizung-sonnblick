@@ -1,17 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 
+import { ChartContainer } from "@/components/patterns/chart-container";
 import type { SensorReading } from "@/lib/api/types";
 
 interface Props {
@@ -56,9 +48,11 @@ export function SensorReadingsChart({ readings }: Props) {
   }
 
   return (
-    <div className="h-72 w-full" data-testid="sensor-readings-chart">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart
+    // Sprint 21 A1: gemeinsame Huelle. Die Hoehe ist dieselbe wie vorher
+    // (h-72 = 288 px); neu sind minWidth/minHeight am ResponsiveContainer,
+    // die die width(-1)-Warnung verursacht haben.
+    <ChartContainer testId="sensor-readings-chart">
+      <LineChart
           data={data}
           margin={{ top: 16, right: 24, bottom: 8, left: 0 }}
         >
@@ -112,8 +106,7 @@ export function SensorReadingsChart({ readings }: Props) {
             dot={false}
             connectNulls
           />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </LineChart>
+    </ChartContainer>
   );
 }

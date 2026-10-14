@@ -4,7 +4,15 @@
 
 import { alleSeiten } from "./alle-seiten";
 import { apiClient, queryString } from "./client";
-import type { EventLogEntry, Room, RoomCreate, RoomListQuery, RoomUpdate } from "./types";
+import type {
+  EventLogEntry,
+  Room,
+  RoomCreate,
+  RoomHistory,
+  RoomHistoryRange,
+  RoomListQuery,
+  RoomUpdate,
+} from "./types";
 
 const BASE = "/api/v1/rooms";
 
@@ -49,4 +57,15 @@ export const roomsApi = {
   // Sprint 12c (AE-58): Uebersteuerungs-Sperre togglen.
   patchOverrideBlockState: (id: number, blocked: boolean): Promise<Room> =>
     apiClient.patch<Room>(`${BASE}/${id}/override-block-state`, { blocked }),
+
+  /**
+   * Sprint 21 A1: Verlauf je Heizzone, serverseitig zusammengefasst.
+   *
+   * Keine Seiten-Logik und kein `alleSeiten`: die Antwort ist je Bereich
+   * nach oben gebunden (144 bzw. 168 Punkte je Zone), weil der Server in
+   * Eimer zusammenfasst. Das ist der Unterschied zu `list` oben — dort war
+   * eine Seite fuer die Gesamtmenge genommen worden (B-20c-1).
+   */
+  history: (id: number, range: RoomHistoryRange): Promise<RoomHistory> =>
+    apiClient.get<RoomHistory>(`${BASE}/${id}/history?range=${range}`),
 };
