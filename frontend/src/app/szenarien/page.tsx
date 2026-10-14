@@ -17,6 +17,8 @@ import {
   useScenarios,
 } from "@/lib/api/hooks-scenarios";
 import type { Scenario } from "@/lib/api/types";
+import { useAuth } from "@/contexts/auth-context";
+import { darfKonfigurationAendern } from "@/lib/auth/rechte";
 
 const SCENARIO_PRESENTATION: Record<
   string,
@@ -134,6 +136,12 @@ function ScenarioCardSlot({
 }) {
   const activate = useActivateScenario(scenario.code);
   const deactivate = useDeactivateScenario(scenario.code);
+  // Sprint 22 T2: Befund des Hoteliers vom 14.10.2026 — der
+  // Sommermodus-Schalter war fuer die Rolle `mitarbeiter` sichtbar und
+  // bedienbar. Serverseitig abgewiesen (`require_admin`), aber bis zum
+  // 403 glaubt man, gerade das Haus umgestellt zu haben.
+  const { user } = useAuth();
+  const darfSchalten = darfKonfigurationAendern(user);
   const presentation =
     SCENARIO_PRESENTATION[scenario.code] ?? DEFAULT_PRESENTATION;
 
@@ -168,6 +176,7 @@ function ScenarioCardSlot({
       deactivateConfirm={presentation.deactivateConfirm}
       onActivate={handleActivate}
       onDeactivate={handleDeactivate}
+      readOnly={!darfSchalten}
     />
   );
 }
