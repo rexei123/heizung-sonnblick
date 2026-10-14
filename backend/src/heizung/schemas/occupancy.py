@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from heizung.models.enums import OccupancySource
 
@@ -13,8 +13,28 @@ class OccupancyCreate(BaseModel):
     """Eingabe fuer POST /api/v1/occupancies."""
 
     room_id: int = Field(..., gt=0)
-    check_in: datetime = Field(..., description="Anreisedatum + Uhrzeit (timezone-aware)")
-    check_out: datetime = Field(..., description="Abreisedatum + Uhrzeit (timezone-aware)")
+    # Sprint 21 T3 (B-20f-2): ``AwareDatetime`` statt ``datetime``.
+    #
+    # Die Beschreibung sagte "timezone-aware" schon vorher — geprueft hat es
+    # nichts. Ein ``curl`` mit ``"2026-10-05T14:00:00"`` ohne ``Z`` wurde
+    # angenommen, und was der Wert dann bedeutet, entschied die Zeitzone der
+    # **Datenbanksitzung**: bei UTC-Session zwei Stunden daneben. Dieselbe
+    # Klasse wie der Import-Befund vom 26.09. (§5.79) — dort war der Wert
+    # falsch ausgelegt, hier war er gar nicht festgelegt.
+    #
+    # Die Oberflaeche war nie betroffen (``toISOString()`` schreibt ``Z``).
+    # Betroffen war der Weg ueber ``curl`` — **und genau den nutzen die
+    # RUNBOOK-Handgriffe** (§10d.6, §10h.8). Deren Beispiele tragen ``Z``.
+    #
+    # Eine Beschreibung, die eine Eigenschaft behauptet, die der Code nicht
+    # prueft, ist das eigentliche Problem (§5.20-Familie): sie wird gelesen
+    # wie eine Zusicherung.
+    check_in: AwareDatetime = Field(
+        ..., description="Anreisedatum + Uhrzeit, mit Zeitzone (z. B. 2026-10-15T07:00:00Z)"
+    )
+    check_out: AwareDatetime = Field(
+        ..., description="Abreisedatum + Uhrzeit, mit Zeitzone (z. B. 2026-10-18T16:00:00Z)"
+    )
     guest_count: int | None = Field(default=None, ge=1, le=20)
     source: OccupancySource = OccupancySource.MANUAL
     external_id: str | None = Field(

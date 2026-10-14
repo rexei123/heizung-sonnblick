@@ -20,6 +20,27 @@ import type { ApiError, Occupancy, OccupancyCreate } from "@/lib/api/types";
 
 type Range = "today" | "next7" | "all";
 
+/**
+ * Lässt sich diese Belegung noch stornieren? (Sprint 21 T2, B-20f-3)
+ *
+ * Nur bei laufenden und künftigen. Ein Storno nach der Abreise wirkt
+ * **nicht mehr auf die Regelung** — das Zimmer ist seit dem Check-out
+ * `VACANT` — und ändert nur die Historie. Eine Handlung anzubieten, die
+ * nichts tut, kostet beim nächsten Mal Vertrauen in die, die etwas tut
+ * (§5.77, eine Ebene höher).
+ *
+ * Geprüft wird nur hier, nicht am Server: sinnlos ist nicht gefährlich.
+ * Ein Server-Gate wäre eine neue Domain-Invariante und damit ein anderer
+ * Sprint (§5.51) — und es würde die Historie-Korrektur verbieten, die
+ * jemand bewusst will.
+ *
+ * `check_out` ist ein Zeitstempel mit Uhrzeit, also **kein** Fall für
+ * §5.74 (das betrifft date-only-Zeichenketten ohne Zone).
+ */
+function stornierbar(o: Occupancy, jetzt: number): boolean {
+  return o.is_active && new Date(o.check_out).getTime() > jetzt;
+}
+
 function startOfDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -214,6 +235,10 @@ interface ListProps {
 }
 
 function List({ list, loading, isError, roomNumber, onCancel, cancelPending }: ListProps) {
+  // Einmal je Rendern statt je Zeile: sonst entscheidet bei einer langen
+  // Liste jede Zeile gegen eine andere Uhr.
+  const jetzt = Date.now();
+
   if (loading) return <Box>Lade…</Box>;
   if (isError) return <Box error>Fehler beim Laden.</Box>;
   if (list.length === 0) return <Box>Keine Belegungen in diesem Zeitraum.</Box>;
@@ -243,14 +268,22 @@ function List({ list, loading, isError, roomNumber, onCancel, cancelPending }: L
               <td className="px-3 py-2 text-text-secondary">{o.guest_count ?? "—"}</td>
               <td className="px-3 py-2 text-text-tertiary">{o.source}</td>
               <td className="px-3 py-2 text-right">
-                <Button
-                  variant="destructive"
-                  icon="cancel"
-                  onClick={() => onCancel(o)}
-                  disabled={cancelPending}
-                >
-                  Stornieren
-                </Button>
+                {stornierbar(o, jetzt) ? (
+                  <Button
+                    variant="destructive"
+                    icon="cancel"
+                    onClick={() => onCancel(o)}
+                    disabled={cancelPending}
+                  >
+                    Stornieren
+                  </Button>
+                ) : (
+                  // Das Wort erklärt die fehlende Schaltfläche an der
+                  // Stelle, an der sie stand. Eine leere Zelle liesse die
+                  // Frage offen, und die Antwort stünde nur im
+                  // Abreise-Datum zwei Spalten weiter links.
+                  <span className="text-xs text-text-tertiary">abgereist</span>
+                )}
               </td>
             </tr>
           ))}
