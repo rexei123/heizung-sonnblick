@@ -191,18 +191,54 @@ async def test_count_rooms_occupied_delta(db_session: AsyncSession) -> None:
 
 
 async def test_count_devices_online_delta_and_lifecycle_filter(db_session: AsyncSession) -> None:
-    on0, total0 = await agg.count_devices_online(db_session)
+    on0, zugeordnet0 = await agg.count_devices_online(db_session)
     s = uuid.uuid4().hex[:8]
     room = await _mk_room(db_session, s, RoomStatus.VACANT)
     zone = await _mk_zone(db_session, room.id, s)
     await _mk_device(db_session, f"{s}1", zone_id=zone.id, health_state="healthy")
     await _mk_device(db_session, f"{s}2", zone_id=zone.id, health_state="degraded")
     await _mk_device(db_session, f"{s}3", zone_id=zone.id, health_state="silent")
-    # retired healthy: weder online noch total (Lifecycle-Filter §5.58)
+    # retired healthy: weder online noch zugeordnet (Lifecycle-Filter §5.58)
     await _mk_device(db_session, f"{s}4", zone_id=zone.id, health_state="healthy", retired=True)
-    on1, total1 = await agg.count_devices_online(db_session)
+    on1, zugeordnet1 = await agg.count_devices_online(db_session)
     assert on1 - on0 == 2, "healthy + degraded online, silent + retired nicht"
-    assert total1 - total0 == 3, "3 aktive (healthy+degraded+silent), retired ausgeschlossen"
+    assert zugeordnet1 - zugeordnet0 == 3, (
+        "3 aktive (healthy+degraded+silent), retired ausgeschlossen"
+    )
+
+
+async def test_count_devices_online_zaehlt_pool_geraete_nicht_mit(
+    db_session: AsyncSession,
+) -> None:
+    """**Die Testwand fuer B-21-2.**
+
+    Ein gesundes Geraet **ohne** Heizzone darf weder den Zaehler noch den
+    Nenner der Kachel "Geraete online" bewegen. Genau das tat es bis Sprint
+    21: ein Ersatzteil im Lager ist korrekt "nicht online", stand damit im
+    Nenner und nicht im Zaehler, und machte aus "101 von 101" ein
+    "101 von 104" — dazu eine dauerhaft gelbe Kachel fuer einen
+    Normalzustand (§5.79: ein Melder, der immer anschlaegt, meldet nichts).
+
+    Gefahren wird mit ``health_state="healthy"``, also dem Fall, der am
+    ehesten mitgezaehlt wuerde — ein stilles Lager-Geraet haette den Nenner
+    auch vorher nur im Nenner gehoben, ein gesundes zeigt beide Richtungen.
+    """
+    on0, zugeordnet0 = await agg.count_devices_online(db_session)
+    pool0 = await agg.count_devices_pool(db_session)
+    s = uuid.uuid4().hex[:8]
+
+    await _mk_device(db_session, f"{s}p1", zone_id=None, health_state="healthy")
+    await _mk_device(db_session, f"{s}p2", zone_id=None, health_state="silent")
+    # Stillgelegt und ohne Zone: gehoert auch nicht ins Lager, es ist aus
+    # dem Betrieb genommen.
+    await _mk_device(db_session, f"{s}p3", zone_id=None, health_state="healthy", retired=True)
+
+    on1, zugeordnet1 = await agg.count_devices_online(db_session)
+    pool1 = await agg.count_devices_pool(db_session)
+
+    assert on1 == on0, "ein Geraet ohne Zimmer ist kein Zimmergeraet"
+    assert zugeordnet1 == zugeordnet0, "und hebt auch den Nenner nicht"
+    assert pool1 - pool0 == 2, "beide aktiven gehoeren ins Lager, das stillgelegte nicht"
 
 
 async def test_count_active_overrides_excludes_revoked_and_expired(

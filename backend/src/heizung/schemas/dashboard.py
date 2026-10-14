@@ -25,8 +25,13 @@ class DashboardKpiRead(BaseModel):
     rooms_occupied: int
     rooms_total: int
     avg_temperature_celsius: Decimal | None
+    # Sprint 21 (B-21-2): beide Zahlen zaehlen **zugeordnete** Geraete, das
+    # Lager steht getrennt daneben. ``devices_total`` hiess das Feld bis
+    # dahin — ein Name, der "alle" sagt und nicht alle zaehlt, waere die
+    # naechste §5.77-Stelle, deshalb umbenannt statt umgedeutet.
     devices_online: int
-    devices_total: int
+    devices_assigned: int
+    devices_pool: int
     active_overrides: int
     zones_window_open: int
     last_engine_tick: datetime | None

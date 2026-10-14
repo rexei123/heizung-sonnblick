@@ -58,24 +58,64 @@ async def count_rooms_occupied(session: AsyncSession) -> tuple[int, int]:
 
 
 async def count_devices_online(session: AsyncSession) -> tuple[int, int]:
-    """``(online, gesamt_aktiv)``. Online = ``health_state IN (healthy, degraded)``.
+    """``(online, zugeordnet)`` — beide **nur** ueber Geraete mit Heizzone.
 
-    Beide Counts mit Lifecycle-Filter ``retired_at IS NULL`` (§5.58).
+    Online = ``health_state IN (healthy, degraded)``, Lifecycle-Filter
+    ``retired_at IS NULL`` (§5.58).
+
+    **Sprint 21 (B-21-2): die Zuordnung ist neu die Grenze.** Vorher zaehlte
+    der Nenner alle nicht stillgelegten Geraete, also Pool und Lager mit. Ein
+    Ersatzteil ohne Batterie ist korrekt "nicht online" — es stand damit im
+    Nenner und nicht im Zaehler, und aus "101 von 101" wurde "101 von 104".
+
+    Die Zahl beantwortet damit nicht mehr die Frage, fuer die sie da ist:
+    **ist ein Zimmer unversorgt?** Schlimmer, sie faerbte die Kachel dauerhaft
+    gelb (``online < total``), also eine Daueranzeige fuer einen
+    Normalzustand — ein Melder, der immer anschlaegt, meldet nichts (§5.79).
+
+    Die Grenze ist ``heating_zone_id IS NOT NULL`` und **nicht**
+    ``mounted_confirmed_at``: gefragt ist, ob ein Zimmer versorgt ist, und
+    versorgt ist es, sobald ein Geraet dafuer zustaendig ist. Die Montage ist
+    eine andere Frage und hat ihre eigene Spalte.
+
+    Was das kostet, steht in RUNBOOK §10t: ein zugeordnetes Geraet, das
+    jemand ins Lager legt **ohne** Ersatz zuzuordnen, verschwindet aus
+    Zaehler und Nenner — die Kachel bleibt gruen, obwohl ein Heizkoerper
+    unversorgt ist. Sichtbar bleibt es auf ``/devices``.
     """
+    zugeordnet_aktiv = (
+        select(func.count())
+        .select_from(Device)
+        .where(Device.retired_at.is_(None))
+        .where(Device.heating_zone_id.is_not(None))
+    )
     online = (
+        await session.execute(zugeordnet_aktiv.where(Device.health_state.in_(_ONLINE_STATES)))
+    ).scalar_one()
+    zugeordnet = (await session.execute(zugeordnet_aktiv)).scalar_one()
+    return online, zugeordnet
+
+
+async def count_devices_pool(session: AsyncSession) -> int:
+    """Geraete ohne Heizzone und nicht stillgelegt — Pool und Lager.
+
+    Eigene Funktion und kein drittes Element im Rueckgabewert von
+    ``count_devices_online``: die Zahl beantwortet eine andere Frage
+    ("wie viele Ersatzteile liegen da"), und ein Name, der "online" sagt und
+    Lagerbestand zurueckgibt, ist die naechste §5.77-Stelle.
+
+    Sie faerbt nichts. Ein Geraet im Lager ohne Batterie ist Normalzustand
+    (Entscheidung des Hoteliers vom 12.10.2026) — reparierbare Koepfe
+    stillzulegen waere endgueltig und falsch.
+    """
+    return (
         await session.execute(
             select(func.count())
             .select_from(Device)
             .where(Device.retired_at.is_(None))
-            .where(Device.health_state.in_(_ONLINE_STATES))
+            .where(Device.heating_zone_id.is_(None))
         )
     ).scalar_one()
-    total = (
-        await session.execute(
-            select(func.count()).select_from(Device).where(Device.retired_at.is_(None))
-        )
-    ).scalar_one()
-    return online, total
 
 
 async def count_active_overrides(session: AsyncSession) -> int:

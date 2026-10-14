@@ -913,8 +913,13 @@ export interface DashboardKpi {
   rooms_occupied: number;
   rooms_total: number;
   avg_temperature_celsius: number | null;
+  // Sprint 21 (B-21-2): beide Zahlen über **zugeordnete** Geräte, das
+  // Lager steht getrennt daneben. Hieß bis dahin `devices_total` und
+  // zählte Pool und Lager mit — ein Nenner, der nicht mehr sagte, ob ein
+  // Zimmer unversorgt ist.
   devices_online: number;
-  devices_total: number;
+  devices_assigned: number;
+  devices_pool: number;
   active_overrides: number;
   zones_window_open: number;
   last_engine_tick: string | null;
