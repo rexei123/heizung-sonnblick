@@ -24,9 +24,22 @@ interface Props {
   onCancel?: () => void;
   submitting?: boolean;
   error?: string | null;
+  /**
+   * Sprint 21 A2: ohne Recht zum Speichern (`PATCH /rooms/{id}` ist
+   * `require_admin`) bleibt das Formular lesbar, der Knopf ist gesperrt und
+   * sagt warum. Vorher fuehrte "Aktualisieren" fuer Mitarbeiter in ein 403.
+   */
+  readOnly?: boolean;
 }
 
-export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Props) {
+export function RoomForm({
+  initial,
+  onSubmit,
+  onCancel,
+  submitting,
+  error,
+  readOnly = false,
+}: Props) {
   const roomTypes = useRoomTypes();
 
   const [number, setNumber] = useState(initial?.number ?? "");
@@ -189,7 +202,12 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
         </div>
       ) : null}
 
-      <div className="flex gap-2 justify-end">
+      <div className="flex gap-2 justify-end items-center">
+        {readOnly ? (
+          <p className="text-xs text-text-tertiary mr-auto">
+            Stammdaten ändern ist Administratoren vorbehalten.
+          </p>
+        ) : null}
         {onCancel ? (
           <Button variant="secondary" onClick={onCancel}>
             Abbrechen
@@ -200,7 +218,7 @@ export function RoomForm({ initial, onSubmit, onCancel, submitting, error }: Pro
           variant={initial ? "primary" : "add"}
           icon={initial ? undefined : "add"}
           loading={submitting}
-          disabled={!number.trim() || roomTypeId === ""}
+          disabled={readOnly || !number.trim() || roomTypeId === ""}
         >
           {initial ? "Aktualisieren" : "Anlegen"}
         </Button>

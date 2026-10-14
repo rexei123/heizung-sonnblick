@@ -44,6 +44,14 @@ export function ManualOverridePanelList({ roomId }: Props) {
   // Page (gleicher roomId-Key) — kein zusaetzlicher Network-Request.
   const roomQuery = useRoom(roomId);
   const overrideBlocked = roomQuery.data?.guest_override_blocked === true;
+  // Sprint 21 A2: den Belegungs-Status *vor* dem Ausfuellen zeigen, nicht
+  // erst danach. Die Abweisung mit 409 ROOM_NOT_OCCUPIED bleibt — sie ist
+  // das Gate (§5.53: `room.status` ist die persistierte Spalte, der Service
+  // rechnet mit `derive_room_status`, dazwischen liegen bis zu 60 s).
+  // `undefined` heisst "noch nicht geladen" und blockiert nichts, sonst
+  // blitzt der Hinweis bei jedem Seitenaufruf kurz auf.
+  const nichtBelegt =
+    roomQuery.data !== undefined && roomQuery.data.status !== "occupied";
 
   const zones = useMemo(() => zonesQuery.data ?? [], [zonesQuery.data]);
   const overrides = useMemo(() => overridesQuery.data ?? [], [overridesQuery.data]);
@@ -98,6 +106,31 @@ export function ManualOverridePanelList({ roomId }: Props) {
         </div>
       ) : null}
 
+      {nichtBelegt && !overrideBlocked ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-3 rounded-md border border-border bg-surface p-4"
+        >
+          <span
+            className="material-symbols-outlined text-text-secondary"
+            style={{ fontSize: 22 }}
+            aria-hidden
+          >
+            person_off
+          </span>
+          <div>
+            <p className="text-sm font-medium text-text-primary">
+              Zimmer ist nicht belegt
+            </p>
+            <p className="text-xs text-text-secondary mt-1">
+              Eine Wunschtemperatur gilt nur für belegte Zimmer. Ab dem Check-in
+              ist sie wieder möglich.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {activeRoomScopeOverride ? (
         <ManualOverrideRoomCard
           roomId={roomId}
@@ -122,6 +155,7 @@ export function ManualOverridePanelList({ roomId }: Props) {
             lastEvalTime={lastEvalTime}
             activeOverride={findActiveOverride(overrides, zone.id)}
             overrideBlocked={overrideBlocked}
+            roomNotOccupied={nichtBelegt}
           />
         ))
       )}
