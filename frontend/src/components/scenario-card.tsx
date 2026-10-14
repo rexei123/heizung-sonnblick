@@ -32,6 +32,21 @@ interface Props {
   description: string | null;
   isActive: boolean;
   pending?: boolean;
+  /**
+   * Sprint 22 T2: ohne Recht zum Schalten bleibt der **Zustand** lesbar,
+   * der Schalter verschwindet, und der Grund steht daneben.
+   *
+   * Entfernt statt gesperrt: ein gesperrter Schalter sieht aus wie einer,
+   * den man zum Laufen bringen kann. Der Zustand steht ohnehin als Text
+   * links daneben („Aktiv für gesamtes Hotel" / „Inaktiv"), es geht also
+   * keine Information verloren.
+   *
+   * Das Gate liegt am Server (`require_admin`, `api/v1/scenarios.py:181`
+   * und `:213`) — ein Mitarbeiter bekam hier bisher 403, nachdem er den
+   * Bestätigungsdialog durchgeklickt hatte, in dem steht, dass das ganze
+   * Haus auf Frostschutz geht.
+   */
+  readOnly?: boolean;
   /** szenario-spezifische Texte fuer die Bestaetigungs-Dialoge. */
   activateConfirm: {
     title: string;
@@ -53,6 +68,7 @@ export function ScenarioCard({
   description,
   isActive,
   pending = false,
+  readOnly = false,
   activateConfirm,
   deactivateConfirm,
   onActivate,
@@ -107,12 +123,18 @@ export function ScenarioCard({
           <span className="text-xs text-text-tertiary">
             {isActive ? "Aktiv für gesamtes Hotel" : "Inaktiv"}
           </span>
-          <Switch
-            checked={isActive}
-            disabled={pending || pendingAction !== null}
-            onCheckedChange={handleSwitchChange}
-            aria-label={isActive ? `${name} deaktivieren` : `${name} aktivieren`}
-          />
+          {readOnly ? (
+            <span className="text-xs text-text-tertiary">
+              Schalten nur als Administrator
+            </span>
+          ) : (
+            <Switch
+              checked={isActive}
+              disabled={pending || pendingAction !== null}
+              onCheckedChange={handleSwitchChange}
+              aria-label={isActive ? `${name} deaktivieren` : `${name} aktivieren`}
+            />
+          )}
         </CardFooter>
       </Card>
 

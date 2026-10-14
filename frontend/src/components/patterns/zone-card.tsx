@@ -33,6 +33,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useDeleteHeatingZone, useUpdateHeatingZone } from "@/lib/api/hooks-rooms";
 import { SOURCE_LABEL } from "@/lib/overrides-display";
 import type { ApiError, Device, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
+import { darfStammdatenAendern } from "@/lib/auth/rechte";
 
 const KIND_LABEL: Record<HeatingZoneKind, string> = {
   bedroom: "Schlafzimmer",
@@ -56,7 +57,11 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Sprint 22 T3: aus `user?.role === "admin"` auf das Praedikat
+  // umgestellt, damit die Oberflaeche und die Gates eine Quelle haben
+  // (`lib/auth/rechte.ts`). Vorher stand der Vergleich an drei Stellen
+  // verstreut — und deckte hier nur den Namens-Edit, nicht das Loeschen.
+  const darfAendern = darfStammdatenAendern(user);
 
   const zoneDevices = devices.filter((d) => d.heating_zone_id === zone.id);
   // Sprint 14d FU-5: aktiver Zone-Override direkt aus HeatingZoneRead
@@ -84,7 +89,7 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
     >
       <div>
         <div className="flex items-center gap-2">
-          {isAdmin ? (
+          {darfAendern ? (
             <ZoneNameInlineEdit zone={zone} roomId={roomId} />
           ) : (
             <h3
@@ -160,15 +165,23 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
             </p>
           )}
         </div>
-        <Button
-          variant="destructive"
-          icon="delete"
-          onClick={() => setConfirmDelete(true)}
-          disabled={deleteMut.isPending}
-          data-testid={`zone-card-${zone.id}-delete-button`}
-        >
-          Zone löschen
-        </Button>
+        {/* Sprint 22 T3: Befund des Hoteliers vom 14.10.2026. `isAdmin`
+            gated bis dahin **nur** den Namens-Edit achtzig Zeilen weiter
+            oben — „Zone löschen" stand offen, und eine Zone zu löschen
+            nimmt dem Zimmer seine Regelung. Serverseitig abgewiesen
+            (`require_admin`, `api/v1/heating_zones.py:247`), aber erst nach
+            dem Bestätigungsdialog. */}
+        {darfAendern ? (
+          <Button
+            variant="destructive"
+            icon="delete"
+            onClick={() => setConfirmDelete(true)}
+            disabled={deleteMut.isPending}
+            data-testid={`zone-card-${zone.id}-delete-button`}
+          >
+            Zone löschen
+          </Button>
+        ) : null}
       </div>
 
       {error ? (

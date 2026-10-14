@@ -21,7 +21,38 @@ const BASE_SCENARIO = {
   updated_at: new Date().toISOString(),
 };
 
+/**
+ * Sprint 22 T2: der Sommermodus-Schalter erscheint nur fuer `admin`
+ * (`POST /scenarios/{code}/activate` ist `require_admin`,
+ * `api/v1/scenarios.py:181`). Ohne `/auth/me`-Mock bleibt `user` in den
+ * Tests `null`, und `null` darf nichts — der Schalter waere dann weg und
+ * dieser Test koennte ihn nicht klicken.
+ *
+ * Im Betrieb liefert `/me` auch bei `AUTH_ENABLED=false` einen Admin
+ * (den System-User); der Mock stellt also den Normalfall her.
+ */
+const MOCK_ADMIN = {
+  id: 1,
+  email: "chef@hotel.example.com",
+  role: "admin" as const,
+  is_active: true,
+  must_change_password: false,
+  created_at: "2026-05-01T10:00:00Z",
+  updated_at: "2026-10-14T06:00:00Z",
+  last_login_at: "2026-10-14T06:00:00Z",
+};
+
 test.describe("Sprint 9.16 Szenarien-UI", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route(/.*\/api\/v1\/auth\/me(\?.*)?$/, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(MOCK_ADMIN),
+      }),
+    );
+  });
+
   test("Card laedt, AlertDialog steuert Aktivieren+Toast", async ({ page }) => {
     let isActive = false;
 

@@ -47,12 +47,38 @@ export function darfUebersteuerungSperren(user: User | null): boolean {
 }
 
 /**
- * Zimmer-Stammdaten ändern, inklusive Raumtyp und Löschen.
+ * Stammdaten ändern: Zimmer, Raumtypen, Heizzonen.
  *
- * Gate: `require_admin` an `PATCH /rooms/{id}` (`api/v1/rooms.py:162`)
- * und `DELETE /rooms/{id}` (`:312`).
+ * Gates, alle `require_admin` — und alle nachgesehen, nicht vermutet:
+ * `POST /rooms` (`api/v1/rooms.py:80`), `PATCH /rooms/{id}` (`:172`),
+ * `DELETE /rooms/{id}` (`:383`); `POST`/`PATCH`/`DELETE /room-types`
+ * (`api/v1/room_types.py:56`, `:114`, `:145`); `POST`/`PATCH`/`DELETE`
+ * der Heizzonen (`api/v1/heating_zones.py:157`, `:200`, `:247`).
+ *
+ * Sprint 22 hat den Geltungsbereich erweitert: bis dahin stand hier nur
+ * `PATCH`/`DELETE /rooms`, obwohl dieselbe Rolle auch Raumtypen und
+ * Heizzonen entscheidet. Die Oberfläche hat das an drei Stellen nicht
+ * gewusst (Befund des Hoteliers, 14.10.2026).
  */
 export function darfStammdatenAendern(user: User | null): boolean {
+  return user?.role === "admin";
+}
+
+/**
+ * Hotelweite Schalter und Konfiguration ändern.
+ *
+ * Gates, alle `require_admin`: `POST /scenarios/{code}/activate` und
+ * `/deactivate` (`api/v1/scenarios.py:181`, `:213`),
+ * `PATCH /global-config` (`api/v1/global_config.py:65`),
+ * `PATCH /rule-configs/global` (`api/v1/rule_configs.py:79`).
+ *
+ * **Warum eigenes Prädikat und nicht `darfStammdatenAendern`:** die Rolle
+ * ist dieselbe, die Frage nicht. Ein Sommermodus fährt das **ganze Haus**
+ * auf Frostschutz; ein Raumtyp ist ein Datensatz. Würde das Haus je eine
+ * Rolle einführen, die Stammdaten pflegen darf, aber keine hotelweiten
+ * Schalter, hängt der Unterschied schon an der richtigen Stelle.
+ */
+export function darfKonfigurationAendern(user: User | null): boolean {
   return user?.role === "admin";
 }
 
