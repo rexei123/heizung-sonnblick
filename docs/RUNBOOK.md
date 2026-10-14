@@ -4682,3 +4682,69 @@ zwischen den beiden Handgriffen, und er fällt genau hier auf.
 ändern — der Sollwert-Sprung, den man danach im Verlauf sieht), CLAUDE.md
 §5.65 (Ortszeit gegen UTC), §5.71 (Class A: warum ein Downlink verzögert
 in der Treppe erscheint), AE-51 (eine Zone liest als Mittelwert).
+
+---
+
+## 10y. Nur die Geräte sehen, um die es geht (Sprint 21 A3)
+
+**Seit 14.10.2026.** Über der Geräteliste stehen zwei Auswahlfelder:
+
+| Feld | Was es tut |
+|---|---|
+| **Anzeigen** | filtert die Liste auf eine Fehlerart. Die Zahl in Klammern sagt, wie viele es sind |
+| **Sortieren** | Fehlerstatus (Vorgabe) oder Bezeichnung |
+
+Beide stehen in der Adresszeile — ein Link auf
+`/devices?zeige=ventil&sort=label` zeigt genau diese Ansicht wieder. Das
+ist der Weg, eine Ansicht per Nachricht weiterzugeben.
+
+### Die Einträge und was sie bedeuten
+
+| Eintrag | Zeigt |
+|---|---|
+| **Alle** | jedes aktive Gerät |
+| **Nicht online (Funkstille)** | **zugeordnete** Geräte, die sich nicht melden oder unplausible Werte schicken |
+| **Batterie niedrig** | Stufe „Batterie schwach" oder „Batterie niedrig" |
+| **Zimmer zu warm** | der rote Ventil-Hinweis (§10t) |
+| **Ventil prüfen** | „Ventil klemmt zu" **und** „Ventil schließt nicht" (§10t) |
+| **Im Lager** | Geräte ohne Zimmer — Pool und Ersatzteile |
+
+**„Nicht online" zeigt nur zugeordnete Geräte.** Ein Ersatzteil im Lager
+ohne Batterie meldet sich zu Recht nicht und steht unter „Im Lager", nicht
+hier. Das passt zur Kachel: die zählt seit T1 ebenfalls nur Zimmergeräte
+(§10t).
+
+### Die Kacheln sind Wege, nicht nur Zahlen
+
+Ein Klick auf **Geräte online**, **Schwache Batterie**, **Ventil prüfen**
+oder **Zimmer zu warm** öffnet die Liste mit der passenden Auswahl. Die
+klickbaren Kacheln heben sich beim Darüberfahren ab; die übrigen
+(Belegte Zimmer, Ø Raumtemperatur, Aktive Übersteuerungen, Fenster offen,
+Letzter Algorithmen-Lauf) führen nirgends hin, weil sich dort keine Zahl in
+eine Geräteliste auflöst.
+
+### Zwei Zahlen, die sich um Sekunden unterscheiden können
+
+Die Kachel rechnet in der Datenbank, die Auswahl zählt in der geladenen
+Liste. Beide fragen dasselbe, aber zu unterschiedlichen Zeitpunkten — nach
+einem Statuswechsel kann die Kachel „2" sagen und die Liste drei Zeilen
+zeigen, bis **Aktualisieren** gedrückt oder die Seite neu geladen ist.
+
+Das ist Absicht: die Zahl in Klammern kommt aus **derselben** Liste, aus
+der die Tabelle rendert. Käme sie aus der Kachel-Abfrage, stünden Zahl und
+Tabelle für verschiedene Datenstände, und das fiele niemandem auf.
+
+**Wenn der Unterschied bleibt** (nach Aktualisieren immer noch verschieden),
+ist das ein Befund und kein Anzeigefehler — dann §10r.
+
+### „Kein Gerät in dieser Auswahl"
+
+Steht das da, ist die Auswahl leer — **nicht** die Liste. Der Knopf „Alle
+Geräte zeigen" führt zurück. Eine Adresse mit einem unbekannten
+`?zeige=`-Wert zeigt ebenfalls alle Geräte, nicht nichts: eine leere
+Tabelle sähe aus wie „kein Gerät betroffen".
+
+**Querverweise:** §10t (die Hinweise selbst und die Kachel „Geräte
+online"), §10r (zeigt die Oberfläche alles — wenn die Zahlen dauerhaft
+auseinanderliegen), §10o (Batterie), CLAUDE.md §5.53 (zwei Quellen für
+eine Zahl).

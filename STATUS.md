@@ -1,6 +1,6 @@
 # Status-Bericht Heizungssteuerung Hotel Sonnblick
 
-**Stand:** 2026-10-13, develop-HEAD `9ae69b7` (PR #302) + PR #303, der Sprint 20f-c abschließt. **AK 1b bleibt offen** und wird im Winter geprüft (§2ca, §2cb). Zuletzt abgeschlossen: **Sprint 20f-c (Mindestabstand im Engine-Abgleich, B-20f-1, AE-76)**, §2cc — der Abgleich erzeugte bei fast jeder Sollwert-Änderung einen zweiten Downlink. Davor: **Sprint 20e-c (Regel 3c „Ventil schließt nicht“, AE-74)**, §2cb — saisonunabhängiger Melder, weil er das Gerät mit sich selbst vergleicht. Davor: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Aktueller Sprint: 21 (Bedienung)**, §2cd — Brief auf develop (PR #304), Reihenfolge A2 → A1 → T1 → A3 → Rest; **A2, A1 und T1 erledigt** (Zimmer-Kopfzeile samt Rollen; Verlauf-Reiter mit Nacht-Baendern aus dem Server; Kachel „Geräte online“ nur über zugeordnete Geräte). Daneben: Release develop → main. **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** AK 1b (im Winter erneut prüfen), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
+**Stand:** 2026-10-13, develop-HEAD `9ae69b7` (PR #302) + PR #303, der Sprint 20f-c abschließt. **AK 1b bleibt offen** und wird im Winter geprüft (§2ca, §2cb). Zuletzt abgeschlossen: **Sprint 20f-c (Mindestabstand im Engine-Abgleich, B-20f-1, AE-76)**, §2cc — der Abgleich erzeugte bei fast jeder Sollwert-Änderung einen zweiten Downlink. Davor: **Sprint 20e-c (Regel 3c „Ventil schließt nicht“, AE-74)**, §2cb — saisonunabhängiger Melder, weil er das Gerät mit sich selbst vergleicht. Davor: **Sprint 20e-b (Regel 3b misst das Wetter nicht mehr mit, AE-74, CLAUDE.md §5.84)**, §2ca — live bestätigt 10.10. 09:58: Dashboard-Kachel „Zimmer zu warm“ **0** statt 14-15. Davor: **Sprint 20g (H-6 Image-Pinning und Rückfallpunkt, AE-77)**, §2bz — PRs #277 (bauen oder umhängen), #281 (Pinning im Skript), #282 (RUNBOOK §10u, AE-77, Migrations-Regel), #283 (Pin-Wächter), #284 (Erinnerung), #285 (Revisions-Vorcheck im Entrypoint), #286 (Nachtrag aus der Übung); Migration 0028. Davor: **Sprint 20e (Montage-Status vereinfacht, AE-74)**, §2bx — PRs #264–#269 plus Hotfix #272 (Decimal als JSON-String) und #276/#278/#279 (Fehlerstatus-Sortierung, Schrift aus dem Repo, Batterie-Etikett); Migration 0027. Davor: **Sprint 20f-b (Phantom-Overrides durch Class-A-Latenz)**, §2by — live bestätigt 07.10. 22:00; **Sprint 20f (Gerät folgt immer der Engine, AE-76)**, §2bw — PRs #256–#259, Migrationen 0025 und 0026; **Sprint 20d** (§2bv), **20c** (§2bu), **20b** (§2bt), **20a** (§2br), **20** (§2bq). **Aktueller Sprint: 21 (Bedienung)**, §2cd — Brief auf develop (PR #304), Reihenfolge A2 → A1 → T1 → A3 → Rest; **A2, A1, T1 und A3 erledigt** (Zimmer-Kopfzeile samt Rollen; Verlauf-Reiter mit Nacht-Baendern aus dem Server; Kachel „Geräte online“ nur über zugeordnete Geräte; Fehler-Auswahl in der Geräteliste). **Offen: nur der optionale Rest T2-T4.** Daneben: Release develop → main. **Rückfall-Übung am 09.10. bestanden** (Ziel `cbfc3d4`, drei Minuten inkl. Rückweg, §2bz). **Offen vor dem 01.11.:** AK 1b (im Winter erneut prüfen), Codec-Re-Paste in ChirpStack (§5.22), Live-Verify aus 20c/20d, Release develop → main, Tag `v0.3.0-heizperiode`.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Stichtag:** 2026-10-13
 **Letzter Tag:** `v0.1.19k-room-status-sync` (Sprint 15g, `a26d781` = PR #225, gesetzt 2026-06-14, **live-verifiziert 14.06.2026** — Workaround „30 aktive Räume synchronisiert", Beat-Task `sync-room-statuses-every-60s` aktiv, Check-out-Transition 11:00 Vienna in DB bestätigt; §2bm). Davor: `v0.1.19j-belegungs-import-front` (Sprint 15f, `eb9e98a` = PR #216, gesetzt 2026-06-07 nach Live-Verify, §2bl). Davor: `v0.1.19i-belegungs-import` (Sprint 15e + 15e-1, `4fbf7d2` = PR #217, gesetzt 2026-06-07 nach Live-Verify, §2bk). Davor: `v0.1.19g-batterie-skala` (Sprint 15b, develop-HEAD `bfc2810` = PR #206 squash-Merge, gesetzt 2026-06-02 nach Live-Verify, §2bf). Davor: `v0.1.19f-fcnt-reboot-drift` (Sprint 15c, `45e7f6e`, §2be), `v0.1.19e-hygiene-rest` (Sprint 14e, `112b827`, §2bd), `v0.1.19d-override-sichtbarkeit` (Sprint 14d, `34ee75c`, §2bc), `v0.1.19c-cross-sicht-dashboard` (Sprint 14c, `278c2e7`, §2bb), `v0.1.19b-cross-sicht-zimmer-detail` (Sprint 14b, `a59b7aa`, §2ba), `v0.1.19a.1-cross-sicht-hotfix` (§2az), `v0.1.19a-cross-sicht-devices` (§2ay).
-**Aktueller Sprint:** **21 (Bedienung)**, §2cd — A2, A1 und T1 erledigt (14.10.), als nächstes A3 (Fehler-Auswahl in der Geräteliste, klickbare Kacheln). Davor: 20f-c ist abgeschlossen (§2cc, B-20f-1, AE-76: der Engine-Abgleich wartet jetzt 15 Minuten, statt bei fast jeder Änderung einen zweiten Downlink zu erzeugen). Davor 20e-c (§2cb, AE-74; sieben PRs, keine Migration): Regel 3c „Ventil schließt nicht“ vergleicht das Gerät mit sich selbst und ist damit saisonunabhängig. **Sprint 21 (Bedienung)** läuft, §2cd — A2, A1 und T1 erledigt, als Nächstes A3 (Fehler-Auswahl und klickbare Kacheln). Davor 20e-b (§2ca, §5.84) und 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b ist halb erfüllt** — beim Kesseltest am 10.10. wurde 027/110 gemeldet, 100/405 nicht (3,1 K über dem Median gegen eine Schwelle von 3,5). Ursache ist die Eigenwärme im Herbst-Median, nicht die Schwelle; im Winter läge der Fall klar darüber. Daraus wurde **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, saisonunabhängig) — abgeschlossen am 13.10., §2cb. Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
+**Aktueller Sprint:** **21 (Bedienung)**, §2cd — A2, A1, T1 und A3 erledigt (14.10.), Pflicht abgearbeitet; offen der optionale Rest T2-T4. Davor: 20f-c ist abgeschlossen (§2cc, B-20f-1, AE-76: der Engine-Abgleich wartet jetzt 15 Minuten, statt bei fast jeder Änderung einen zweiten Downlink zu erzeugen). Davor 20e-c (§2cb, AE-74; sieben PRs, keine Migration): Regel 3c „Ventil schließt nicht“ vergleicht das Gerät mit sich selbst und ist damit saisonunabhängig. **Sprint 21 (Bedienung)** läuft, §2cd — **die Pflicht ist fertig** (A2, A1, T1, A3); offen ist der optionale Rest T2-T4 und die Sichtproben. Davor 20e-b (§2ca, §5.84) und 20g (H-6, §2bz, AE-77, Migration 0028). Offen aus 20e-b: **AK 1b ist halb erfüllt** — beim Kesseltest am 10.10. wurde 027/110 gemeldet, 100/405 nicht (3,1 K über dem Median gegen eine Schwelle von 3,5). Ursache ist die Eigenwärme im Herbst-Median, nicht die Schwelle; im Winter läge der Fall klar darüber. Daraus wurde **Sprint 20e-c** (Regel 3c „Ventil schließt nicht“, saisonunabhängig) — abgeschlossen am 13.10., §2cb. Die **Rückfall-Übung** nach RUNBOOK §10u ist am 09.10. gelaufen und bestanden (Ziel `cbfc3d4`); offen aus 20g ist nur noch der Neustart bei unverändertem Digest (§2bz, nicht vor 20e-b). Zuletzt abgeschlossen davor: **Sprint 20e Montage-Status vereinfacht** (§2bx, AE-74) — der Montage-Status war ein **Zustand** (`attached_backplate` des letzten Frames) und ist jetzt ein **Nachweis** (`device.mounted_confirmed_at`, gesetzt bei `attached_backplate=true` **und** `valve_position > 0` in einem Frame). Backfill: 101 zugeordnete Geräte mit Nachweis, 0 ohne. Dazu Regel 3/3b (`services/valve_health.py`) als UI-Hinweis — „Ventil klemmt zu" und „Zimmer zu warm", ohne Mail —, weil Layer 4 mit Variante (a) ein abgefallenes Gerät mit Nachweis nicht mehr erkennt. Und davor: **Sprint 20f Gerät folgt immer der Engine** (§2bw, AE-76) — die Hysterese verglich den neuen Sollwert mit dem **letzten selbst gesendeten**, nicht mit dem, den das Gerät meldet (`rules/engine.py:815`). Geräte 048 und 057 standen deshalb nach einer Montage-Drehung auf 20 °C bei Engine-Soll 18 °C, ohne Override, und ein Mensch hat es per Queue behoben. Jetzt gleicht die Engine den **gemeldeten** Wert ab — außer bei aktivem Override, mit 1 Nachsendung je Gerät je 30 min und Schluss nach drei Versuchen (S4). Dazu: Codec dekodiert `0x28` samt eingebettetem Keepalive (die falschen Vor-Check-FAILs bei 038–044 sind behoben), `calibrationFailed` wird persistiert, `device_manual` als eigene Override-Quelle mit 4 h, und ein Override endet mit **jeder** Abreise. Davor: **Sprint 20d Paginierung Zimmer/Raumtypen/Belegungen** (§2bv, B-20c-2, AE-75, PR #255 gemergt)
 **Architektur-Refresh:** 2026-05-07 (`docs/ARCHITEKTUR-REFRESH-2026-05-07.md`)
 **Strategie-Refresh:** 2026-05-15 (`docs/STRATEGIE-REFRESH-2026-05-15.md`,
 Phasen 1-7 verbindlich, AE-51..AE-54)
@@ -5716,6 +5716,68 @@ die Regel dazu: erst zuordnen, dann lösen.
 
 **Backend 1253 grün, e2e 168 grün.** Offen: die Sichtprobe des Hoteliers
 (AK 9 im Brief) nach dem Deploy.
+
+### A3 erledigt: Fehler-Auswahl und klickbare Kacheln (2026-10-14)
+
+Dropdown **„Anzeigen"** mit Zahl je Eintrag (Alle · Nicht online
+(Funkstille) · Batterie niedrig · Zimmer zu warm · Ventil prüfen · Im
+Lager), die Auswahl steht in der URL (`?zeige=`), und vier
+Dashboard-Kacheln verlinken darauf. Dazu RUNBOOK §10y.
+
+**Gefiltert und gezählt wird im Client**, aus derselben Liste, aus der die
+Tabelle rendert — `useDevices()` holt ohnehin alles (B-20c-1). Die Zahlen
+kommen bewusst **nicht** aus den Dashboard-Aggregaten: zwei Zahlen aus zwei
+Quellen driften, und zwar unbemerkt (§5.53). Der Preis ist, dass Kachel und
+Auswahl sich um Sekunden unterscheiden können; die Alternative wäre, die
+Liste nach den Kachelzahlen zu biegen. Im RUNBOOK §10y steht, wann der
+Unterschied ein Befund ist.
+
+**„Nicht online" statt nur „Funkstille".** Die Kachel „Geräte online"
+zählt `healthy` und `degraded` über zugeordnete Geräte — ihr fehlen also
+auch `suspicious`-Geräte im Zähler. Ein Klick, der die nicht zeigt, ließe
+die Lücke unerklärt. Das Betriebswort steht in der Klammer, die Bedingung
+spiegelt die Kachel.
+
+**Der Sortier-Knopf wurde ein zweites Dropdown, nicht entfernt.** Die
+Prämisse des Briefs („ist keine Auswahl") hielt nicht: er **war** ein
+Umschalter und schrieb `?sort=label`. Er las sich wie eine Beschriftung,
+weil er den **Zustand** zeigte statt der Handlung — deshalb hat ihn nicht
+einmal sein Autor als Auswahl erkannt. Ihn zu entfernen hätte bei
+104 Geräten die Suche nach Bezeichnung mitgenommen.
+
+**Korrektur an meinem eigenen Brief (§4.3):** die Kacheln bekommen **keine**
+`href`-Eigenschaft an `KpiCard`. Das Repo hüllt eine klickbare Kachel seit
+Sprint 15f in einen `Link` (Belegungsliste) — ein zweiter Mechanismus für
+dasselbe wäre genau die Drift, gegen die der Rest des Sprints argumentiert.
+Sichtbar unterscheidbar bleibt es über die Hover-Umrandung (§5.57: Semantik,
+die nur beim Darüberfahren existiert, ist keine — hier ist die Handlung der
+Klick, der Hover nur ihre Ankündigung).
+
+**Zwei Fälle, die eine leere Tabelle falsch erklärt hätte:** eine leere
+Auswahl sagt es („Kein Gerät in dieser Auswahl") mit einem Weg zurück, und
+ein unbekanntes `?zeige=` fällt auf „Alle" zurück statt auf nichts.
+
+**Mutationsprobe:**
+
+| Mutation | Fällt |
+|---|---|
+| Zuordnungs-Bedingung aus „Nicht online" entfernt | 2 e2e (`zahl_in_klammern_stimmt_mit_der_tabelle`, `kachel_geraete_online_fuehrt_zu_nicht_online`) |
+| Rückfall auf „Alle" bei unbekanntem `?zeige=` entfernt | 1 e2e (`unbekannte_auswahl_zeigt_alle_statt_nichts`) |
+
+7 neue e2e-Tests, Suite **175 grün**. Offen: die Sichtprobe des Hoteliers
+(AK 7-8 im Brief) nach dem Deploy.
+
+### Stand des Sprints
+
+**A1, A2, A3 und T1 sind erledigt** — die Pflicht des Briefs ist damit
+abgearbeitet (13 h geschätzt). Offen bleibt nur der optionale Rest:
+
+- **T2** (B-20f-3) „Stornieren" an abgelaufenen Belegungen, ~0,5 h
+- **T3** (B-20f-2) `AwareDatetime` für `OccupancyCreate`, ~0,5 h
+- **T4** (B-18-3) Bestand der `Omit<>`-Erben prüfen, ~1 h
+
+Dazu die vier Sichtproben nach dem Deploy (AK 1-3 aus A1, AK 4-6 aus A2,
+AK 7-8 aus A3, AK 9 aus T1).
 
 ## 3. Offene Punkte (nicht blockierend, nicht kritisch)
 
