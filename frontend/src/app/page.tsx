@@ -13,6 +13,7 @@
  * Zeit-Anzeige lokalisiert (de-AT), Backend liefert UTC (§5.65).
  */
 
+import type { Route } from "next";
 import Link from "next/link";
 
 import { KpiCard, type KpiTone } from "@/components/patterns/kpi-card";
@@ -66,6 +67,21 @@ interface CardConfig {
   note?: string;
   icon: string;
   tone: KpiTone;
+  /**
+   * Ziel, wenn die Kachel anklickbar sein soll (Sprint 21 A3).
+   *
+   * Gerendert wird das wie bei der Belegungsliste-Kachel weiter unten: ein
+   * `Link` **um** die Karte. Mein Brief (§4.3) hatte dafuer eine neue
+   * `href`-Eigenschaft an `KpiCard` vorgesehen — das waere ein zweiter
+   * Mechanismus fuer etwas, das das Repo seit Sprint 15f schon kann.
+   *
+   * Nicht jede Kachel bekommt ein Ziel: „Belegte Zimmer", „Ø
+   * Raumtemperatur", „Aktive Übersteuerungen", „Fenster offen" und
+   * „Letzter Algorithmen-Lauf" fuehren nirgends hin, wo die Zahl sich
+   * aufloest. Eine Karte, die manchmal klickbar ist, muss das sichtbar
+   * unterscheiden — dafuer steht die Hover-Umrandung unten.
+   */
+  href?: string;
 }
 
 function buildCards(data: DashboardKpi): CardConfig[] {
@@ -101,6 +117,9 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       note: data.devices_pool > 0 ? `${data.devices_pool} im Lager` : undefined,
       icon: "device_thermostat",
       tone: data.devices_online < data.devices_assigned ? "warning-soft" : "neutral",
+      // Das Gegenteil dessen, was diese Kachel zaehlt: zugeordnet und
+      // nicht healthy/degraded. Die Auswahl dort heisst entsprechend.
+      href: "/devices?zeige=nicht-online",
     },
     {
       label: "Aktive Übersteuerungen",
@@ -128,6 +147,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       value: data.battery_low_count,
       icon: "battery_alert",
       tone: data.battery_low_count > 0 ? "warning-soft" : "neutral",
+      href: "/devices?zeige=batterie",
     },
     {
       // Sprint 20e (T7): dieselbe Achse wie der gelbe ValveHintBadge.
@@ -135,6 +155,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       value: data.valve_check_count,
       icon: "build",
       tone: data.valve_check_count > 0 ? "warning-soft" : "neutral",
+      href: "/devices?zeige=ventil",
     },
     {
       // Sprint 20e (T10): der Ersatz-Melder für Layer 4 Detached. Rot, nicht
@@ -145,6 +166,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       value: data.room_too_warm_count,
       icon: "local_fire_department",
       tone: data.room_too_warm_count > 0 ? "danger-soft" : "neutral",
+      href: "/devices?zeige=zu-warm",
     },
   ];
 }
@@ -175,17 +197,34 @@ export default function Home() {
             ? CARD_META.map((m) => (
                 <KpiCard key={m.label} error label={m.label} value="" icon={m.icon} />
               ))
-            : buildCards(kpiQ.data).map((c) => (
-                <KpiCard
-                  key={c.label}
-                  label={c.label}
-                  value={c.value}
-                  subValue={c.subValue}
-                  note={c.note}
-                  icon={c.icon}
-                  tone={c.tone}
-                />
-              ))}
+            : buildCards(kpiQ.data).map((c) => {
+                const karte = (
+                  <KpiCard
+                    label={c.label}
+                    value={c.value}
+                    subValue={c.subValue}
+                    note={c.note}
+                    icon={c.icon}
+                    tone={c.tone}
+                  />
+                );
+                // Sprint 21 A3: dieselbe Form wie die Belegungsliste-Kachel
+                // unten — ein Link um die Karte, kein zweiter Mechanismus.
+                // Die Hover-Umrandung ist die sichtbare Unterscheidung
+                // zwischen klickbar und nicht (§5.57: Semantik, die nur beim
+                // Darueberfahren existiert, ist keine).
+                return c.href ? (
+                  <Link
+                    key={c.label}
+                    href={c.href as Route}
+                    className="block rounded-lg ring-offset-background transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    {karte}
+                  </Link>
+                ) : (
+                  <div key={c.label}>{karte}</div>
+                );
+              })}
 
         {/* Sprint 15f (AE-66): Belegungsliste-Kachel — eigene Datenquelle
             (GET .../occupancy-import/log), klickbar zur Detailseite. */}
