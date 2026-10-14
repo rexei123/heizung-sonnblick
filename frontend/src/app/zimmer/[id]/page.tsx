@@ -2,7 +2,10 @@
 
 /**
  * Zimmer-Detail (Sprint 8.10, Sprint 8.15 Design-Fixes).
- * Tabs: Stammdaten / Heizzonen / Geräte.
+ * Tabs: Stammdaten / Heizzonen / Geräte / Verlauf / Engine / Übersteuerung.
+ *
+ * Sprint 21 A1: „Verlauf" rendert wie „Übersteuerung" ohne Karten-Rahmen —
+ * ein Diagramm bringt seinen eigenen mit.
  */
 
 import Link from "next/link";
@@ -16,6 +19,7 @@ import { ManualOverridePanelList } from "@/components/patterns/manual-override-p
 import { ReplaceDeviceDialog } from "@/components/patterns/replace-device-dialog";
 import { RetireDeviceDialog } from "@/components/patterns/retire-device-dialog";
 import { RoomForm } from "@/components/patterns/room-form";
+import { RoomHistoryChart } from "@/components/patterns/room-history-chart";
 import { RoomOverrideBlockToggle } from "@/components/patterns/room-override-block-toggle";
 import { RoomTypeInlineEditor } from "@/components/patterns/room-type-inline-editor";
 import { Button } from "@/components/ui/button";
@@ -37,7 +41,7 @@ import {
   darfUebersteuerungSperren,
 } from "@/lib/auth/rechte";
 
-type Tab = "stammdaten" | "zonen" | "geraete" | "engine" | "override";
+type Tab = "stammdaten" | "zonen" | "geraete" | "verlauf" | "engine" | "override";
 
 export default function ZimmerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -203,7 +207,7 @@ export default function ZimmerDetailPage() {
       </header>
 
       <div className="border-b border-border mb-4 flex gap-4 text-sm">
-        {(["stammdaten", "zonen", "geraete", "engine", "override"] as const).map((t) => (
+        {(["stammdaten", "zonen", "geraete", "verlauf", "engine", "override"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -220,15 +224,19 @@ export default function ZimmerDetailPage() {
                 ? "Heizzonen"
                 : t === "geraete"
                   ? "Geräte"
-                  : t === "engine"
-                    ? "Engine"
-                    : "Übersteuerung"}
+                  : t === "verlauf"
+                    ? "Verlauf"
+                    : t === "engine"
+                      ? "Engine"
+                      : "Übersteuerung"}
           </button>
         ))}
       </div>
 
       {tab === "override" ? (
         <ManualOverridePanelList roomId={id} />
+      ) : tab === "verlauf" ? (
+        <RoomHistoryChart roomId={id} />
       ) : (
         <div className="bg-surface border border-border rounded-md p-5">
           {tab === "stammdaten" ? (

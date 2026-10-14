@@ -19,6 +19,8 @@ import type {
   HeatingZoneUpdate,
   Room,
   RoomCreate,
+  RoomHistory,
+  RoomHistoryRange,
   RoomListQuery,
   RoomUpdate,
 } from "./types";
@@ -28,6 +30,8 @@ const ROOM_KEYS = {
   list: (q: RoomListQuery) => ["rooms", q] as const,
   one: (id: number) => ["room", id] as const,
   engineTrace: (id: number) => ["room", id, "engine-trace"] as const,
+  history: (id: number, range: RoomHistoryRange) =>
+    ["room", id, "history", range] as const,
 };
 
 /** Sprint 9.5/9.10: Engine-Pipeline-Trace fuer Decision-Panel.
@@ -40,6 +44,31 @@ export function useEngineTrace(roomId: number | null): UseQueryResult<EventLogEn
     queryFn: () => roomsApi.engineTrace(roomId as number, 50),
     enabled: roomId !== null,
     refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Sprint 21 A1: Verlauf eines Zimmers.
+ *
+ * `range` ist Teil des Query-Keys, nicht nur des Requests — sonst zeigt der
+ * Umschalter die alten Punkte des anderen Bereichs, bis der neue Abruf da
+ * ist, und 24 h sehen eine Sekunde lang wie 7 Tage aus.
+ *
+ * **Kein `refetchInterval`.** Ein Verlauf ist Vergangenheit; bei 7 Tagen
+ * aendert ein Zehn-Minuten-Eimer am rechten Rand das Bild nicht, und ein
+ * Abruf alle 30 s wuerde eine Aggregat-Abfrage pro Nutzer und Minute
+ * ausloesen. `refetchOnWindowFocus` reicht: wer zurueckkommt, sieht frische
+ * Daten.
+ */
+export function useRoomHistory(
+  roomId: number | null,
+  range: RoomHistoryRange,
+): UseQueryResult<RoomHistory> {
+  return useQuery<RoomHistory>({
+    queryKey: roomId ? ROOM_KEYS.history(roomId, range) : ["room", "history", "noop"],
+    queryFn: () => roomsApi.history(roomId as number, range),
+    enabled: roomId !== null,
     refetchOnWindowFocus: true,
   });
 }
