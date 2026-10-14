@@ -4576,3 +4576,80 @@ will: Einstellungen → Benutzer (nur Administrator).
 Sonderfall oben), §10t (Ventil-Hinweise auf derselben Seite), CLAUDE.md
 §5.30 (Verstecken ist keine Beschränkung), §5.53 (zwei Wahrheiten beim
 Belegungs-Status), AE-58 (Übersteuerung nur in belegten Zimmern).
+
+---
+
+## 10x. Den Verlauf eines Zimmers lesen (Sprint 21 A1)
+
+**Seit 14.10.2026.** Zimmerseite → Reiter **„Verlauf"**. Umschalter oben
+rechts: **24 Stunden** oder **7 Tage**.
+
+### Was die Linien sind
+
+| Linie | Bedeutung |
+|---|---|
+| **durchgezogen** | gemessene Ist-Temperatur der Zone |
+| **gestrichelt, gleiche Farbe** | Sollwert, den **die Geräte melden** |
+
+Je Heizzone ein Farbpaar. Zonen ohne Messwerte im Zeitraum stehen in der
+Legende, aber ohne Linie — „es gibt diese Zone, sie hat nichts gemeldet".
+
+**Der Sollwert ist eine Treppe, keine Rampe.** Er gilt bis zur nächsten
+Änderung; eine schräge Linie würde einen Übergang zeigen, den es nicht
+gab.
+
+**Der Sollwert kommt vom Gerät, nicht aus der Steuerung.** Das ist
+Absicht: ein Downlink, der nicht angekommen ist, bleibt damit **sichtbar**
+— die Treppe springt erst, wenn das Gerät den neuen Wert bestätigt. Wer
+wissen will, was die Steuerung *wollte*, sieht in den Reiter „Engine".
+
+### Was die hinterlegten Flächen sind
+
+| Fläche | Bedeutung |
+|---|---|
+| **blau hinterlegt** | Zimmer war belegt (Check-in bis Check-out) |
+| **grau hinterlegt** | Nachtabsenkung war aktiv |
+
+Stornierte Belegungen werden **nicht** hinterlegt — das Zimmer war dann
+nicht belegt, und die Fläche würde den Temperaturverlauf falsch erklären.
+
+Die Absenkungs-Zeiten stehen als Text über dem Diagramm („Absenkung
+22:00–06:00 Ortszeit"). Sie kommen aus derselben Konfiguration, nach der
+die Steuerung regelt (Einstellungen → Temperaturen & Zeiten), und sind in
+**Ortszeit** gezeichnet — auch über die Zeitumstellung hinweg.
+
+### Warum es keine Einzelmesswerte sind
+
+Der Verlauf ist **zusammengefasst**: 24 Stunden in Zehn-Minuten-Schritten,
+7 Tage in Stunden-Schritten. Der Text über dem Diagramm sagt, welcher
+Takt gilt.
+
+Bei vier Geräten und Zehn-Minuten-Uplinks sind eine Woche rund **4000**
+Messwerte je Zimmer. Ein Diagramm mit allen zeigt die Streuung der
+einzelnen Frames statt des Verlaufs. Wer einzelne Messwerte braucht:
+Geräteseite, Tabelle unter dem Diagramm.
+
+**Folge, die man kennen muss:** ein kurzer Ausschlag von wenigen Minuten
+kann im 7-Tage-Bild verschwinden. Bei Verdacht erst auf 24 Stunden
+umschalten, dann auf die Geräteseite.
+
+### Eine Grenze: nach einem Gerätetausch beginnt der Verlauf neu
+
+Beim Tausch (§10j) verliert der alte Kopf seine Zonen-Zuordnung — der neue
+übernimmt sie. Die Messwerte des alten Geräts sind damit **über das Zimmer
+nicht mehr erreichbar**: der Verlauf des Zimmers beginnt praktisch beim
+neuen Gerät.
+
+Die Zeilen sind **nicht gelöscht**, nur nicht mehr zugeordnet; über die
+Geräteseite des alten Kopfes sind sie noch da, solange er nicht
+stillgelegt und gelöscht ist.
+
+**Ein ohne Ersatz stillgelegtes Gerät** (§10j, „Stilllegen") behält seine
+Zuordnung und bleibt deshalb im Verlauf sichtbar. Das ist der Unterschied
+zwischen den beiden Handgriffen, und er fällt genau hier auf.
+
+**Querverweise:** §10j (Tausch und Stilllegen — die Grenze oben), §10t
+(Ventil-Hinweise: „Zimmer zu warm" hat hier ihr Bild), §10w (Temperatur
+ändern — der Sollwert-Sprung, den man danach im Verlauf sieht), CLAUDE.md
+§5.65 (Ortszeit gegen UTC), §5.71 (Class A: warum ein Downlink verzögert
+in der Treppe erscheint), AE-51 (eine Zone liest als Mittelwert).
