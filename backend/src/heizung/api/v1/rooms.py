@@ -36,7 +36,10 @@ from heizung.schemas.room_history import (
 )
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
+from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
+from heizung.services.referenzzone import referenzzonen_pro_zimmer
 from heizung.services.room_history import lade_verlauf
+from heizung.services.zone_aggregates import latest_mean_temp_per_zone
 
 INT4_MAX = 2_147_483_647
 
@@ -139,12 +142,30 @@ async def list_rooms(
     # Sprint 14d (R-A/R-D): EIN Batch-Aggregat fuer den Override-Indikator,
     # KEIN per-room-Lookup (kein N+1 wie devices._build_device_read).
     rooms_with_override = await override_service.get_rooms_with_active_override(session)
-    return [
-        RoomRead.model_validate(room).model_copy(
-            update={"has_active_override": room.id in rooms_with_override}
+
+    # Ist und Soll der Referenzzone (15.10.2026). Drei Aggregate fuer die
+    # ganze Seite, keine Abfrage je Zimmer — dieselbe Regel wie oben.
+    room_ids = [room.id for room in rooms]
+    referenzzonen = await referenzzonen_pro_zimmer(session, room_ids)
+    ist_pro_zone = await latest_mean_temp_per_zone(session, referenzzonen.values())
+    soll_pro_zimmer = await latest_hard_clamp_setpoint_per_room(session, room_ids)
+
+    def _mit_ist_und_soll(room: Room) -> RoomRead:
+        zone_id = referenzzonen.get(room.id)
+        # Zimmer ohne Referenzzone: kein Ist. Der Soll bleibt trotzdem, er
+        # haengt am Zimmer und nicht an der Zone — die Oberflaeche zeigt dann
+        # „–" nur in der Ist-Spalte.
+        ist = ist_pro_zone.get(zone_id) if zone_id is not None else None
+        return RoomRead.model_validate(room).model_copy(
+            update={
+                "has_active_override": room.id in rooms_with_override,
+                "reference_zone_id": zone_id,
+                "mean_temperature_c": ist,
+                "engine_setpoint_c": soll_pro_zimmer.get(room.id),
+            }
         )
-        for room in rooms
-    ]
+
+    return [_mit_ist_und_soll(room) for room in rooms]
 
 
 @router.get(
