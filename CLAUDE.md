@@ -148,10 +148,21 @@ sie vergessen wurde. Beides zusammen ist der Schutz; keines allein.
 Anlass war der Merge von Sprint 20 / PR A am 30.09.2026, bei dem die
 Frage zum ersten Mal gestellt wurde (Antwort: kein Lauf offen).
 
-### Merge-Fenster ab 01.11.2026
+### Merge-Fenster ab 18.10.2026
 
 **Merges nach `develop` nur werktags zwischen 10 und 12 Uhr. Doku-PRs
 werden gebündelt. Ausnahme: Hotfix, mit Begründung im PR-Text.**
+
+**Vorverlegt am 15.10.2026 vom 01.11. auf den 18.10.** Die erste Anreise
+ist Sonntag, 18.10.2026; der Kessel läuft seit dem 15.10. Das Datum hing
+nie am Kalender, sondern an der Frage, ob im Haus Gäste sind, wenn ein
+Deploy etwas bricht — und die ist ab dem 18.10. mit ja zu beantworten.
+
+**Für dieses eine Wochenende gilt zusätzlich:** bis Freitagabend
+(16.10.) sind alle offenen PRs gemergt, Abnahme ist Samstag 17.10.
+(RUNBOOK §10aa), danach **nur noch Hotfixes**. Kein neues Feature bis
+nach dem ersten Gäste-Wochenende — Entscheidung des Hoteliers vom
+15.10.2026.
 
 Der Grund ist eine Eigenschaft, die mit H-6 dazukam: jeder Commit trägt
 einen eigenen Image-Tag, und Compose entscheidet über einen Neustart auch
@@ -172,8 +183,9 @@ derselbe Preis für keinen Nutzen.
 
 Die Regel ist die Antwort auf eine **behebbare** Eigenschaft: referenziert
 die Compose-Datei die Images per Digest statt per Tag (AE-77 Offen,
-Variante 1, Backlog nach dem 01.11.), startet ein Doku-Merge nichts mehr
-neu, und die Regel schrumpft auf das, was ohnehin gilt. Wer sie liest,
+Variante 1, Backlog nach dem ersten Gäste-Wochenende), startet ein
+Doku-Merge nichts mehr neu, und die Regel schrumpft auf das, was ohnehin
+gilt. Wer sie liest,
 prüft also zuerst, ob sie noch nötig ist (§5.77).
 
 **Sie ersetzt nichts.** Die Frage nach einem laufenden Montage- oder
