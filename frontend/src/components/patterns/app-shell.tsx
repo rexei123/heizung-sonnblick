@@ -222,7 +222,14 @@ function SidebarFooter(): ReactNode {
           </button>
         </div>
       ) : null}
-      <div>v0.1.x · Test-Stage</div>
+      {/* Die Zeile stand bis 15.10.2026 als „v0.1.x · Test-Stage" da, und
+          beides war falsch: die Version war seit Sprint 9 nicht nachgezogen,
+          und „Test" liest das Personal als „das ist nicht das echte System".
+          Dieser Server **ist** die Produktion (AE-67, Promote 09.06.2026) —
+          `STAGE=test` bleibt serverseitig, weil daran Deploy-Pfade haengen,
+          aber es ist eine Angabe fuer den Betrieb und keine fuer den
+          Bildschirm. Die Version kommt aus `package.json` (next.config.mjs). */}
+      <div>v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
     </div>
   );
 }
