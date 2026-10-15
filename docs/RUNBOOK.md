@@ -4476,11 +4476,20 @@ Entscheidung hinter Pinning und Rückfallpunkt).
 
 ---
 
-## 10v. Wann gemergt wird — das Merge-Fenster ab 01.11.2026
+## 10v. Wann gemergt wird — das Merge-Fenster ab 18.10.2026
 
 **Regel:** Merges nach `develop` nur **werktags zwischen 10 und 12 Uhr**.
 Doku-PRs werden **gebündelt** und nicht einzeln gemergt. Ausnahme:
 **Hotfix**, mit Begründung im PR-Text.
+
+**Vorverlegt am 15.10.2026 vom 01.11. auf den 18.10.** Die erste Anreise ist
+Sonntag, 18.10.2026, der Kessel läuft seit dem 15.10. Das Datum hing nie am
+Kalender, sondern an der Frage, ob Gäste im Haus sind, wenn ein Deploy etwas
+bricht.
+
+**Für dieses eine Wochenende zusätzlich:** bis Freitagabend (16.10.) sind
+alle offenen PRs gemergt, Abnahme ist Samstag 17.10. (§10aa), danach **nur
+noch Hotfixes**.
 
 ### Warum es diese Regel gibt
 
@@ -4531,7 +4540,8 @@ ihn ist in sechs Wochen nicht mehr unterscheidbar, ob die Regel bewusst
 
 Sie ist die Antwort auf eine **behebbare** Eigenschaft, nicht auf ein Gesetz.
 Referenziert die Compose-Datei die Images per Digest statt per Tag (AE-77
-Offen, Variante 1, ~2 h, Backlog nach dem 01.11.), startet ein Doku-Merge
+Offen, Variante 1, ~2 h, Backlog nach dem ersten Gäste-Wochenende),
+startet ein Doku-Merge
 nichts mehr neu, und die Regel schrumpft auf das, was ohnehin gilt: §0.3 und
 die Deploy-Sperre.
 
@@ -4858,3 +4868,152 @@ Endpunkte absichern, nicht nur die mutierenden), §5.79 (ein Inventar gilt
 nur für den Stand, den es gesehen hat), §5.77 (ein Vermerk über den
 Code-Zustand verfällt), `docs/features/2026-10-14-sprint22-rollen.md` (der
 Sprint-Brief mit den zehn Lücken und ihren Tasks).
+
+---
+
+## 10aa. Abnahme vor den ersten Gästen — Checkliste (17.10.2026)
+
+**Anlass:** Erste Gäste ab Sonntag 18.10.2026, Kessel läuft seit 15.10.
+Diese Liste ist für **einen** Durchgang am Samstag gedacht, in dieser
+Reihenfolge, und sie dauert mit Abfragen rund 20 Minuten.
+
+**Jede Abfrage ist zum Kopieren fertig.** Sie enthalten keine Zugangsdaten
+— `$POSTGRES_USER` und `$POSTGRES_DB` kommen aus der `.env` auf dem Server.
+
+### Vorbereitung: einmal pro Sitzung
+
+**SSH (heizung-test, root):**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && echo "DB=$POSTGRES_DB USER=$POSTGRES_USER"
+```
+
+Zeigt die Zeile `DB=… USER=…`, ist alles geladen. Zeigt sie `DB= USER=`,
+liegt die `.env` nicht dort — dann nicht weiterraten, sondern melden.
+
+Alle folgenden Abfragen laufen über diese Hülle (das `-f` ist nicht
+optional, §5.78):
+
+```bash
+SQL() { docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "$1"; }
+```
+
+### Schritt 0 — Rückfallpunkt notieren (vor allem anderen)
+
+**SSH (heizung-test, root):**
+
+```bash
+cd /opt/heizung-sonnblick && git rev-parse --short HEAD && git log -1 --format='%ci %s'
+```
+
+**Diesen SHA aufschreiben.** Er ist der Stand, auf den RUNBOOK §10u
+zurückdreht, wenn am Wochenende etwas bricht. Ohne ihn fängt der Rückfall
+mit einer Suche an — und zwar in dem Moment, in dem niemand Zeit dafür hat.
+
+### Schritt 1 — Melden sich alle zugeordneten Geräte?
+
+**Soll: `still` = 0.** Geräte im Lager sind nicht dabei (sie haben keine
+Zone und sollen sich nicht melden).
+
+```bash
+SQL "SELECT count(*) AS zugeordnet, count(*) FILTER (WHERE letzte > now() - interval '30 minutes') AS frisch, count(*) FILTER (WHERE letzte IS NULL OR letzte <= now() - interval '30 minutes') AS still FROM (SELECT d.id, max(sr.time) AS letzte FROM device d LEFT JOIN sensor_reading sr ON sr.device_id = d.id WHERE d.retired_at IS NULL AND d.heating_zone_id IS NOT NULL GROUP BY d.id) t;"
+```
+
+Ist `still` grösser als 0, zeigt diese Abfrage **welche**:
+
+```bash
+SQL "SELECT r.number AS zimmer, z.name AS zone, d.id, d.label, max(sr.time) AS letzter_frame, now() - max(sr.time) AS abstand FROM device d JOIN heating_zone z ON z.id = d.heating_zone_id JOIN room r ON r.id = z.room_id LEFT JOIN sensor_reading sr ON sr.device_id = d.id WHERE d.retired_at IS NULL GROUP BY r.number, z.name, d.id, d.label HAVING max(sr.time) IS NULL OR max(sr.time) <= now() - interval '30 minutes' ORDER BY abstand DESC NULLS FIRST;"
+```
+
+**Was 30 Minuten bedeuten:** ein Vicki meldet sich von selbst etwa
+viertelstündlich. Ein Gerät, das 30 Minuten schweigt, hat zwei Takte
+verpasst. Drei Stunden sind die Schwelle, bei der getauscht wird (§10o) —
+am Abnahmetag ist jedes stille Gerät ein Befund, auch wenn es die drei
+Stunden noch nicht erreicht hat.
+
+### Schritt 2 — Sitzt jedes Gerät auf seinem Ventil?
+
+**Soll: `ohne_nachweis` = 0 und die zweite Abfrage leer.**
+
+```bash
+SQL "SELECT count(*) FILTER (WHERE mounted_confirmed_at IS NOT NULL) AS mit_nachweis, count(*) FILTER (WHERE mounted_confirmed_at IS NULL) AS ohne_nachweis FROM device WHERE retired_at IS NULL AND heating_zone_id IS NOT NULL;"
+```
+
+Der **Nachweis** (`mounted_confirmed_at`, Sprint 20e) ist einmalig: er wird
+gesetzt, sobald ein Frame `attached_backplate=true` **und** eine
+Ventilstellung über 0 zeigt. Er sagt „war montiert", nicht „ist montiert".
+Deshalb die zweite Abfrage — sie liest den **jüngsten** Frame:
+
+```bash
+SQL "SELECT r.number AS zimmer, d.id, d.label, j.time AS letzter_frame, j.attached_backplate FROM device d JOIN heating_zone z ON z.id = d.heating_zone_id JOIN room r ON r.id = z.room_id JOIN LATERAL (SELECT sr.time, sr.attached_backplate FROM sensor_reading sr WHERE sr.device_id = d.id AND sr.attached_backplate IS NOT NULL ORDER BY sr.time DESC LIMIT 1) j ON TRUE WHERE d.retired_at IS NULL AND j.attached_backplate IS FALSE ORDER BY r.number;"
+```
+
+Jede Zeile hier ist ein Gerät, das sich **gerade** als abgenommen meldet —
+Heizkörper offen, Zimmer heizt ungebremst. Das ist der Befund, für den es
+Regel 3b gibt (§10t).
+
+### Schritt 3 — Steht an jedem Gerät der Sollwert der Engine?
+
+**Soll: leer.** Die Abfrage zeigt nur Abweichungen ab 0,5 K.
+
+```bash
+SQL "WITH gemeldet AS (SELECT DISTINCT ON (device_id) device_id, setpoint, time FROM sensor_reading WHERE setpoint IS NOT NULL ORDER BY device_id, time DESC), gesendet AS (SELECT DISTINCT ON (device_id) device_id, target_setpoint, sent_to_gateway_at FROM control_command WHERE sent_to_gateway_at IS NOT NULL ORDER BY device_id, sent_to_gateway_at DESC) SELECT r.number AS zimmer, d.id, d.label, g.setpoint AS am_geraet, s.target_setpoint AS von_engine, g.setpoint - s.target_setpoint AS differenz, now() - s.sent_to_gateway_at AS seit_downlink FROM device d JOIN heating_zone z ON z.id = d.heating_zone_id JOIN room r ON r.id = z.room_id LEFT JOIN gemeldet g ON g.device_id = d.id LEFT JOIN gesendet s ON s.device_id = d.id WHERE d.retired_at IS NULL AND (g.setpoint IS NULL OR s.target_setpoint IS NULL OR abs(g.setpoint - s.target_setpoint) >= 0.5) ORDER BY r.number;"
+```
+
+**Wann eine Zeile hier harmlos ist:** `seit_downlink` unter 15 Minuten. Der
+Vicki holt seinen Befehl erst im Fenster nach einem eigenen Uplink ab, und
+der Engine-Abgleich wartet bewusst 15 Minuten, bevor er nachsendet
+(AE-76, §2cc). Dann die Abfrage in einer Viertelstunde wiederholen.
+
+**Wann sie ein Befund ist:** `seit_downlink` über 15 Minuten, oder
+`von_engine` leer (dem Gerät wurde noch nie etwas gesendet). Dann §10s.
+
+**Was diese Abfrage vergleicht, und was nicht:** „von Engine" ist der
+**zuletzt gesendete** Wert, nicht der gerade errechnete. Beide fallen im
+Normalfall zusammen; unmittelbar nach einem Belegungswechsel kann die
+Engine schon anders rechnen, als sie gesendet hat. Die Zeile im Zimmer
+(Reiter „Engine") zeigt den errechneten Wert.
+
+### Schritt 4 — Keine aktiven Übersteuerungen, keine Phantome
+
+**Soll: leer** (am Samstag ist noch kein Gast da, der eine wollen könnte).
+
+```bash
+SQL "SELECT mo.id, r.number AS zimmer, mo.heating_zone_id AS zone, mo.setpoint, mo.source, mo.created_at, mo.expires_at, mo.created_by FROM manual_override mo JOIN room r ON r.id = mo.room_id WHERE mo.revoked_at IS NULL AND mo.expires_at > now() ORDER BY mo.created_at DESC;"
+```
+
+**Eine Zeile mit `source = device` oder `device_manual` ist ein Phantom**,
+solange niemand am Rad gedreht hat: sie entsteht, wenn die Engine eine
+Abweichung als Gastwunsch liest (Sprint 20f-b). Aufheben geht in der
+Oberfläche, Zimmer → Übersteuerung → „Aufheben".
+
+Dazu die Gegenprobe, ob die Engine in den letzten 24 Stunden Drehungen
+**verworfen** hat — das ist der gesunde Fall und zeigt, dass das Gate
+greift:
+
+```bash
+SQL "SELECT count(*) AS verworfen_24h FROM event_log WHERE layer = 'manual_override_blocked' AND time > now() - interval '24 hours';"
+```
+
+### Schritt 5 — Die Oberfläche, mit eigenen Augen
+
+Nicht alles steht in der Datenbank. Am Dashboard (https://heizung.hoteltec.at):
+
+| Kachel / Stelle | Soll am 17.10. |
+|---|---|
+| **Geräte online** | „N von N" ohne Gelb, Lager-Zeile darunter |
+| **Zimmer zu warm** | 0 (Kessel läuft erst seit zwei Tagen, aber die Zimmer sind leer) |
+| **Ventil prüfen** | 0 |
+| **Schwache Batterie** | Zahl notieren — Zellen sind von September (§10h) |
+| **Letzter Algorithmen-Lauf** | jünger als zwei Minuten |
+| **Fußzeile** | Version ohne das Wort „Test" |
+| **Belegungen** | die Liste für Sonntag ist da (§10r.1) |
+
+### Was nach der Abnahme passiert
+
+1. **Tag setzen** (`v0.3.0-heizperiode`) — erst nach Ihrer Freigabe,
+   Pflicht-Stop 7.
+2. **Merge-Fenster gilt ab Sonntag 18.10.** — werktags 10 bis 12 Uhr
+   (§10v). Ab Freitagabend ohnehin nur noch Hotfixes.
+3. Der SHA aus Schritt 0 bleibt notiert, bis das erste Gäste-Wochenende
+   vorbei ist.
