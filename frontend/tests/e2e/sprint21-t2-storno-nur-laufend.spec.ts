@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 21 T2 (B-20f-3) — „Stornieren" nur bei laufenden und künftigen

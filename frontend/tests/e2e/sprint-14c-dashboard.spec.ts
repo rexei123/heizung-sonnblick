@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * Sprint 14c T7 — Frontend-Tests fuer das Dashboard ("/").

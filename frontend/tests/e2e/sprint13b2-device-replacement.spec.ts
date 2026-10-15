@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 13b.2 T8 — Playwright E2E fuer Device-Lifecycle-Workflow

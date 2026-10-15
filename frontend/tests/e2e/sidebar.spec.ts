@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { STANDARD_ADMIN, test, expect, type Page } from "./fixtures";
 
 /**
  * Sprint 9.13b — Sidebar-Migration auf 14 Eintraege in 5 Gruppen +
@@ -9,13 +9,38 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("Sprint 9.13b Sidebar-Migration", () => {
-  test("Desktop-Sidebar zeigt 14 Eintraege in 5 Gruppen", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+  /**
+   * Sprint 22 T6: die Seitenleiste hängt seit diesem Sprint an der Rolle
+   * — „Benutzer" sieht nur ein Administrator. Deshalb fahren beide
+   * Prüfungen ihre Rolle **ausdrücklich** (Bedingung des Hoteliers,
+   * 14.10.2026), und zwar **nach** dem `**\/api\/v1\/**`-Fang:
+   * Playwright trifft die zuletzt registrierte Route zuerst, der Fang
+   * würde `/auth/me` sonst mit `[]` beantworten und `user` bliebe `null`.
+   *
+   * Genau daran ist diese Datei zuerst gefallen: der Fang verdeckte die
+   * Admin-Hülle aus `fixtures.ts`, und ein `null`-Nutzer zählt 13 statt
+   * 14 Einträge. Der Standard der Hülle ersetzt also keine
+   * Rollen-Angabe, er ist nur der Normalfall für Tests, die von der
+   * Rolle nichts wissen wollen.
+   */
+  async function mitRolle(page: Page, rolle: "admin" | "mitarbeiter") {
     // Mock /devices weil layout via main wrappt — Page rendert auch ohne
     // Backend, aber TanStack-Query wuerde sonst Netzwerk versuchen.
     await page.route("**/api/v1/**", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
+    await page.route(/.*\/api\/v1\/auth\/me(\?.*)?$/, (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...STANDARD_ADMIN, role: rolle }),
+      }),
+    );
+  }
+
+  test("Desktop-Sidebar zeigt Admin 14 Eintraege in 5 Gruppen", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mitRolle(page, "admin");
 
     await page.goto("/");
 
@@ -28,9 +53,30 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
       await expect(nav.getByRole("heading", { level: 3, name: group })).toBeVisible();
     }
 
+    await expect(nav.getByRole("link", { name: "Benutzer" })).toBeVisible();
+
     // 14 Nav-Links
     const links = nav.getByRole("link");
     await expect(links).toHaveCount(14);
+  });
+
+  test("Desktop-Sidebar zeigt Mitarbeiter 13 Eintraege ohne Benutzer", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mitRolle(page, "mitarbeiter");
+
+    await page.goto("/");
+
+    const nav = page.getByRole("navigation", { name: "Hauptnavigation" });
+    await expect(nav).toBeVisible();
+
+    // Die Gruppe „Einstellungen" bleibt — sie verliert nur einen von
+    // sechs Einträgen. Eine Gruppe fällt erst weg, wenn sie leer würde.
+    await expect(
+      nav.getByRole("heading", { level: 3, name: "Einstellungen" }),
+    ).toBeVisible();
+
+    await expect(nav.getByRole("link", { name: "Benutzer" })).toHaveCount(0);
+    await expect(nav.getByRole("link")).toHaveCount(13);
   });
 
   test("Mobile-Sheet oeffnet sich via Hamburger und schliesst nach Navigation", async ({

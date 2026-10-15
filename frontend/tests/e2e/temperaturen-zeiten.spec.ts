@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * Sprint 9.14 T6 — Frontend-Tests fuer /einstellungen/temperaturen-zeiten.
@@ -18,38 +18,7 @@ const INITIAL = {
   updated_at: new Date().toISOString(),
 };
 
-/**
- * Sprint 22 T4: die Werte dieser Seite sind nur fuer `admin` editierbar
- * (`PATCH /rule-configs/global` ist `require_admin`,
- * `api/v1/rule_configs.py:79`). Ohne `/auth/me`-Mock bleibt `user` `null`,
- * und `null` darf nichts — die Zellen waeren dann read-only und dieser
- * Test koennte nicht klicken.
- *
- * Im Betrieb liefert `/me` auch bei `AUTH_ENABLED=false` einen Admin
- * (den System-User); der Mock stellt den Normalfall her.
- */
-const MOCK_ADMIN = {
-  id: 1,
-  email: "chef@hotel.example.com",
-  role: "admin" as const,
-  is_active: true,
-  must_change_password: false,
-  created_at: "2026-05-01T10:00:00Z",
-  updated_at: "2026-10-14T06:00:00Z",
-  last_login_at: "2026-10-14T06:00:00Z",
-};
-
 test.describe("Sprint 9.14 Globale Temperaturen + Zeiten", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route(/.*\/api\/v1\/auth\/me(\?.*)?$/, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(MOCK_ADMIN),
-      }),
-    );
-  });
-
 
   test("Page lädt mit beiden Tabs und Inline-Edit funktioniert", async ({ page }) => {
     let current = { ...INITIAL };

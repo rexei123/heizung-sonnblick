@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 12c.a — Playwright E2E fuer Block-Indikator-Spalte in

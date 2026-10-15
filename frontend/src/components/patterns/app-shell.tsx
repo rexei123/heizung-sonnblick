@@ -23,11 +23,27 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
+import { darfBenutzerVerwalten } from "@/lib/auth/rechte";
 
 interface NavItem {
   href: Route;
   label: string;
   icon: string;
+  /**
+   * Sprint 22 T6: Eintrag nur für Administratoren.
+   *
+   * **Genau ein Eintrag trägt das**, und zwar „Benutzer": dort gibt es für
+   * einen Mitarbeiter nichts zu lesen (fremde E-Mail-Adressen, Rollen,
+   * Aktiv-Kennzeichen — `GET /users` ist deshalb schon serverseitig
+   * `require_admin`, §5.30 nennt diese Ausnahme ausdrücklich).
+   *
+   * Die Konfigurations-Seiten bleiben bewusst **sichtbar**: ihre Werte sind
+   * Betriebswissen (ab wann wird abgesenkt, ist die Belegungsliste von
+   * heute da), und eine verschwundene Seite erzeugt die Frage „wo ist das
+   * hin" statt der Antwort „das darf ich nicht ändern". Seit T4 sagen sie
+   * das selbst.
+   */
+  nurAdmin?: boolean;
 }
 
 interface NavGroup {
@@ -79,7 +95,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/einstellungen/hotel", label: "Hotel", icon: "apartment" },
       { href: "/einstellungen/saison", label: "Saison", icon: "wb_sunny" },
-      { href: "/einstellungen/benutzer", label: "Benutzer", icon: "group" },
+      { href: "/einstellungen/benutzer", label: "Benutzer", icon: "group", nurAdmin: true },
       { href: "/einstellungen/api", label: "API & Webhooks", icon: "api" },
     ],
   },
@@ -103,10 +119,19 @@ function NavList({
   pathname: string;
   onNavigate?: () => void;
 }): ReactNode {
+  // Sprint 22 T6: Einträge mit `nurAdmin` fallen für alle anderen weg.
+  // Eine Gruppe, die dadurch leer würde, verschwindet mit — eine
+  // Überschrift ohne Einträge sieht aus wie ein Ladefehler.
+  const { user } = useAuth();
+  const sichtbar = NAV.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.nurAdmin || darfBenutzerVerwalten(user)),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <nav className="flex-1 overflow-y-auto p-2" aria-label="Hauptnavigation">
       <ul className="space-y-4">
-        {NAV.map((group) => (
+        {sichtbar.map((group) => (
           <li key={group.label}>
             <h3 className="px-3 mb-1 text-xs uppercase tracking-wider text-text-tertiary font-medium">
               {group.label}

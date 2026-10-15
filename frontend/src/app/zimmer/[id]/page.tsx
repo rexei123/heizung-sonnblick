@@ -171,6 +171,16 @@ export default function ZimmerDetailPage() {
           {room.data.display_name ? (
             <p className="text-sm text-text-secondary mt-1">{room.data.display_name}</p>
           ) : null}
+          {/* Sprint 22 T7: ein Zimmer, das aus der Automatik genommen ist,
+              darf das nicht nur in einem Auswahlfeld in den Stammdaten
+              stehen haben. */}
+          {room.data.status === "cleaning" || room.data.status === "blocked" ? (
+            <p className="text-sm text-warning mt-2" role="status">
+              Automatik angehalten (Status:{" "}
+              {room.data.status === "blocked" ? "Gesperrt" : "Reinigung"}) — Anreisen
+              und Abreisen setzen den Status nicht mehr.
+            </p>
+          ) : null}
         </div>
         {/* Sprint 21 A2: der haeufigste Handgriff ist jetzt der Hauptknopf
             und der einzige primaere (Design-System: max. 1 je Region). Die

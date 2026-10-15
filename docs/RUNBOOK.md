@@ -4748,3 +4748,113 @@ Tabelle sähe aus wie „kein Gerät betroffen".
 online"), §10r (zeigt die Oberfläche alles — wenn die Zahlen dauerhaft
 auseinanderliegen), §10o (Batterie), CLAUDE.md §5.53 (zwei Quellen für
 eine Zahl).
+
+---
+
+## 10z. Wer darf was — das Gate-Inventar (Sprint 22, 14.10.2026)
+
+**Geprüft am 14.10.2026 gegen `085c73f` (develop) für die Server-Seite und
+gegen Sprint 22 PR 1-3 für die Oberfläche. Umfang: alle 33 schreibenden
+Endpunkte in `backend/src/heizung/api/v1/` und alle 18 Seiten in
+`frontend/src/app/`. Endpunkte, die nach diesem Stand dazukommen, sind
+hier nicht erfasst** (CLAUDE.md §5.79: ein Inventar gilt nur für den
+Code-Stand, den es gesehen hat).
+
+**Anlass:** zwei Befunde aus Ihrer Sichtprobe vom 14.10. — als Mitarbeiter
+waren der Sommermodus-Schalter und „Zone löschen" sichtbar.
+
+### Das Wichtigste in zwei Sätzen
+
+**Serverseitig war und ist nichts offen.** Beide Befunde waren
+Oberflächen-Fehler: ein Knopf, der nach dem Klick mit „403 — keine
+Berechtigung" endet. Kein Mitarbeiter konnte den Sommermodus schalten oder
+eine Zone löschen; der Server weist das ab, auch wenn jemand die Adresse
+von Hand eingibt.
+
+### Die Zählung serverseitig
+
+| Gate | Anzahl | Was |
+|---|---|---|
+| `require_admin` | 23 | Stammdaten, Konfiguration, Szenarien, Geräte, Benutzer |
+| `require_mitarbeiter` | 6 | Belegungen (3), Übersteuerung setzen/aufheben, Sperre umschalten |
+| `require_real_user` | 1 | eigenes Passwort ändern |
+| `X-Webhook-Token` | 1 | `POST /integrations/occupancy-import` (mailparser) |
+| bewusst offen | 2 | `POST /auth/login`, `POST /auth/logout` |
+
+### Seite für Seite
+
+„Sieht Mitarbeiter" meint den Stand **nach** Sprint 22. „lesbar" heißt:
+die Seite und ihre Werte sind sichtbar, das Speichern ist gesperrt und
+nennt den Grund.
+
+| Seite | Knopf / Feld | Endpunkt | Gate | Sieht Mitarbeiter |
+|---|---|---|---|---|
+| **Dashboard** | — | — | — | ja, vollständig |
+| **Zimmerübersicht** | „Zimmer anlegen" | `POST /rooms` | admin | **nein** |
+| **Zimmer → Stammdaten** | „Aktualisieren" | `PATCH /rooms/{id}` | admin | lesbar |
+| **Zimmer → Stammdaten** | „Zimmer löschen" (Gefahrenbereich) | `DELETE /rooms/{id}` | admin | **nein** |
+| **Zimmer → Kopfzeile** | „Temperatur ändern" | `POST /rooms/{id}/overrides` | mitarbeiter | **ja**, bedienbar |
+| **Zimmer → Kopfzeile** | „Übersteuerung sperren" | `PATCH /rooms/{id}/override-block-state` | mitarbeiter | **ja**, bedienbar |
+| **Zimmer → Übersteuerung** | „Anwenden" / „Aufheben" | `POST`/`DELETE …/overrides` | mitarbeiter | **ja**, bedienbar |
+| **Zimmer → Heizzonen** | Zonenname (Stift) | `PATCH /heating-zones/{id}` | admin | **nein** |
+| **Zimmer → Heizzonen** | „Neue Heizzone" | `POST /heating-zones` | admin | **nein** |
+| **Zimmer → Heizzonen** | „Zone löschen" | `DELETE /heating-zones/{id}` | admin | **nein** |
+| **Zimmer → Geräte** | „Gerät zuordnen" / „Lösen" | `PUT`/`DELETE …/heating-zone` | admin | **nein** |
+| **Zimmer → Geräte** | „Tauschen" / „Stilllegen" | `POST …/replace/from-pool`, `…/retire` | admin | **nein** |
+| **Zimmer → Verlauf / Engine** | — | — | — | ja, vollständig |
+| **Belegungen** | Anlegen / Ändern / Stornieren | `POST`/`PATCH`/`DELETE /occupancies` | mitarbeiter | **ja**, bedienbar |
+| **Thermostate (Liste)** | Bezeichnung (Stift) | `PATCH /devices/{id}` | admin | **nein** |
+| **Thermostate (Liste)** | „Gerät hinzufügen" | → Pairing | admin | **nein** |
+| **Thermostate → Detail** | Bezeichnung (Stift) | `PATCH /devices/{id}` | admin | **nein** |
+| **Thermostate → Detail** | Hardware-Nummer (Stift) | `PATCH /devices/{id}` | admin | **nein** |
+| **Thermostate → Pairing** | ganzer Assistent | `POST /devices`, `PUT …/heating-zone`, `PATCH /devices/{id}` | admin | **nein** (Schranke am Eingang) |
+| **Szenarien** | „Sommermodus" ein/aus | `POST /scenarios/{code}/activate`/`deactivate` | admin | Zustand lesbar, Schalter **nein** |
+| **Raumtypen** | Anlegen / Ändern / Löschen | `POST`/`PATCH`/`DELETE /room-types` | admin | lesbar |
+| **Temperaturen & Zeiten** | Werte speichern | `PATCH /rule-configs/global` | admin | lesbar |
+| **Einstellungen → Hotel** | „Speichern" | `PATCH /global-config` | admin | lesbar |
+| **Einstellungen → API & Webhooks** | Erwartungs-Uhrzeit | `PATCH /global-config` | admin | lesbar (Import-Status ist eine Mitarbeiter-Frage) |
+| **Einstellungen → Benutzer** | Anlegen / Rolle / Passwort / Löschen | `POST`/`PATCH`/`DELETE /users`, `…/reset-password` | admin | **nein** — Seite ausgeblendet |
+| **Einstellungen → Saison** | — (in Vorbereitung) | — | — | ja, leer |
+| **Einstellungen → Gateway** | — (in Vorbereitung) | — | — | ja, leer |
+| **Profile** | — (in Vorbereitung) | — | — | ja, leer |
+| **Analyse → Temperaturverlauf** | — (in Vorbereitung) | — | — | ja, leer |
+| **Passwort ändern** | „Speichern" | `POST /auth/change-password` | real_user | **ja**, für das eigene Konto |
+| *(keine Seite)* | mailparser-Eingang | `POST /integrations/occupancy-import` | `X-Webhook-Token` | — |
+
+### Warum „Benutzer" die einzige ausgeblendete Seite ist
+
+Weil dort für einen Mitarbeiter **nichts zu lesen** ist: fremde
+E-Mail-Adressen, Rollen, Aktiv-Kennzeichen. Deshalb ist schon das Lesen
+serverseitig `require_admin` — die einzige Ausnahme von „sehen darf jeder
+Angemeldete".
+
+Die **Konfigurations-Seiten bleiben sichtbar und lesbar**, und das ist
+Absicht: ab wann wird abgesenkt, ist die Belegungsliste von heute
+angekommen — das ist Betriebswissen, und eine verschwundene Seite erzeugt
+die Frage „wo ist das hin?" statt der Antwort „das darf ich nicht ändern".
+Seit Sprint 22 sagen die Seiten das selbst.
+
+### Was dieses Inventar nicht ist
+
+**Kein Zugangsschutz.** Ein ausgeblendeter Knopf ist Bedienung. Abgewiesen
+wird serverseitig, und zwar auch dann, wenn jemand den Knopf nie gesehen
+hat (CLAUDE.md §5.30). Wenn Sie wissen wollen, ob jemand etwas **konnte**,
+ist die Antwort die Gate-Spalte — nicht die letzte.
+
+### Wenn Sie eine Stelle finden, die hier fehlt
+
+Dann ist das ein Befund und kein Versehen Ihrerseits. Zwei Fragen
+beantworten ihn:
+
+1. **Was passiert nach dem Klick?** Kommt „403" oder „keine Berechtigung",
+   ist es ein Oberflächen-Fehler wie die beiden vom 14.10. — unangenehm,
+   aber ohne Wirkung.
+2. **Passiert etwas?** Dann ist es ein fehlendes Gate, also S1: sofort
+   melden, nicht auf den nächsten Sprint warten.
+
+**Querverweise:** `frontend/src/lib/auth/rechte.ts` (jede Funktion nennt
+das Gate, das sie spiegelt, mit Datei und Zeile), CLAUDE.md §5.30 (alle
+Endpunkte absichern, nicht nur die mutierenden), §5.79 (ein Inventar gilt
+nur für den Stand, den es gesehen hat), §5.77 (ein Vermerk über den
+Code-Zustand verfällt), `docs/features/2026-10-14-sprint22-rollen.md` (der
+Sprint-Brief mit den zehn Lücken und ihren Tasks).

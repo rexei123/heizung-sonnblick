@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 14e T3 — ZoneCard-Header zeigt FU-1 Ist-Temp + FU-2 effektiven Setpoint.

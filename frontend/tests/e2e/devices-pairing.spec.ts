@@ -1,4 +1,4 @@
-import { test, expect, type Route } from "@playwright/test";
+import { test, expect, type Route } from "./fixtures";
 
 /**
  * Sprint 9.13a — Geraete-Pairing-Wizard + Detach-Button.
@@ -69,32 +69,7 @@ function mockJson(route: Route, body: unknown) {
   });
 }
 
-/**
- * Sprint 21 A2: Zuordnen, Tauschen, Stilllegen und Trennen sind
- * `require_admin` (`api/v1/devices.py:473`), und die Oberflaeche zeigt sie
- * seither nur der Rolle, die sie benutzen darf (`lib/auth/rechte.ts`).
- *
- * Dieser Mock ist deshalb kein Beiwerk: ohne `/auth/me` bleibt `user` in
- * den Tests `null`, und `null` darf nichts. Im Betrieb liefert `/me` auch
- * bei `AUTH_ENABLED=false` einen Admin (den System-User), der Mock stellt
- * also den normalen Fall her, nicht einen Sonderfall.
- */
-const MOCK_ADMIN = {
-  id: 1,
-  email: "chef@hotel.example.com",
-  role: "admin" as const,
-  is_active: true,
-  must_change_password: false,
-  created_at: "2026-05-01T10:00:00Z",
-  updated_at: "2026-05-14T10:00:00Z",
-  last_login_at: "2026-10-14T06:00:00Z",
-};
-
 test.describe("Sprint 9.13a Pairing-Wizard", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route(/.*\/api\/v1\/auth\/me(\?.*)?$/, (r) => mockJson(r, MOCK_ADMIN));
-  });
-
   test("/devices zeigt CTA „Gerät hinzufügen“ und führt zum Wizard", async ({
     page,
   }) => {

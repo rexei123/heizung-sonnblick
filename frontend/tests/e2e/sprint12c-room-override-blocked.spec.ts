@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 12c (AE-58) — Playwright E2E fuer Uebersteuerungs-Sperre pro Zimmer.

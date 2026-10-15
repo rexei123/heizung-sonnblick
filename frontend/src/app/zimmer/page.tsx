@@ -218,6 +218,13 @@ function RoomTable({ list, loading, error }: TableProps) {
               <td className="px-3 py-2 text-text-secondary">{r.orientation ?? "—"}</td>
               <td className="px-3 py-2">
                 <span className={STATUS_COLOR[r.status]}>{STATUS_LABEL[r.status]}</span>
+                {/* Sprint 22 T7: „Reinigung" und „Gesperrt" halten den
+                    Belegungs-Abgleich an (`occupancy_service.py:242`). Das
+                    stand bisher nirgends — ein angehaltenes Zimmer sah aus
+                    wie jedes andere. */}
+                {r.status === "cleaning" || r.status === "blocked" ? (
+                  <span className="ml-2 text-xs text-warning">· Automatik angehalten</span>
+                ) : null}
               </td>
               {/* Sprint 14d (R-B): EINE Zelle, drei exklusive Zustände —
                   gesperrt (Lock, 12c.a) > aktive Übersteuerung ("Aktiv") > leer.

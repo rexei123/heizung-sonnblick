@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 /**
  * Sprint 15f (AE-66) — Belegungs-Import-Sichtbarkeit.

@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 21 A3 — Fehler-Auswahl in der Geraeteliste, klickbare Kacheln.

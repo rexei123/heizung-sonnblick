@@ -303,6 +303,39 @@ In dieser Reihenfolge:
     **erweitern** ist additiv; sie zu **verengen** nicht.
 11. **Claude-Code-Workflow:** Datei-Edits, Code-Änderungen und Tests laufen in Claude Code. Lokale git-Operationen (status, diff, add, commit) ebenfalls erlaubt in Claude Code. Branch-Wechsel und git push immer in PowerShell. Bei jedem schreibenden Schritt: Diff reviewen, dann freigeben. Cowork-Mount-Quirks aus §5.2 sind historisch, gelten nicht mehr.
 
+12. **Fremde Prozesse bleiben unangetastet (ab 14.10.2026):** Prozesse, die
+    nicht zu diesem Repo gehören, werden **nie** beendet — auch nicht, wenn sie
+    hängen, Arbeitsspeicher fressen oder einen Port belegen, den dieses Projekt
+    gerade braucht. Keine Ausnahme bei `taskkill`, `kill`, `Stop-Process`,
+    `docker stop`. Stattdessen: **melden und fragen**, mit PID, Kommandozeile
+    und Startzeit.
+
+    Die Zugehörigkeit steht in der Kommandozeile bzw. im Arbeitsverzeichnis.
+    Alles, was nicht unter `C:\Users\User\dev\heizung-sonnblick` liegt, ist
+    fremd — insbesondere `C:\Users\User\hotelapp*` (eigene Projekte des
+    Hoteliers, teils mit eigener laufender Claude-Sitzung).
+
+    **Anlass:** Am 14.10.2026 habe ich während der Mutationsproben zu Sprint 22
+    sieben hängende node-Prozesse beendet, die ich für meine eigenen hielt. Sie
+    gehörten zu `C:\Users\User\hotelapp`. Der Auftrag lautete „laufende
+    Playwright-/Node-Prozesse beenden", und ich habe ihn auf Prozesse
+    angewandt, deren Herkunft ich **vorher gelesen hatte** — die
+    Kommandozeilen standen im Diagnose-Output — und trotzdem nicht geprüft
+    habe.
+
+    **Der Fehler ist nicht das Beenden, sondern die Zuordnung.** Ein hängender
+    Prozess sieht wie Müll aus, ganz gleich wem er gehört; die Frage „ist er
+    meiner" lässt sich nur an der Kommandozeile beantworten und muss **vor**
+    dem Befehl gestellt werden. Und sie ist nicht meine Frage: fremd heißt
+    fragen, auch wenn die Antwort offensichtlich scheint.
+
+    **Was gegen einen belegten Port stattdessen hilft:** einen anderen Port
+    nehmen. Die Mutationsproben laufen seither mit eigenem `next build` auf
+    Port 3123, statt sich um 3000 zu streiten — und das war ohnehin die bessere
+    Lösung, weil `playwright.config.ts` lokal `reuseExistingServer: true` hat
+    und ein geerbter Server den **alten** Build bedient (§5.55-Familie: ein
+    grüner Lauf, der nichts geprüft hat).
+
 ## 3.11 — gh pr create IMMER mit --base develop
 
 GitHub-Default für `gh pr create` ist `main`. Ohne explizites

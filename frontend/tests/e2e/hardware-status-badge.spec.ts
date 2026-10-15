@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 /**
  * Sprint 9.13c TC6 — Frontend-Tests fuer HardwareStatusBadge an drei

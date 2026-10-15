@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 /**
  * Sprint 15d (AE-65) — Batterie-Sichtbarkeit (PR2 Frontend).
