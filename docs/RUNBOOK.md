@@ -5017,3 +5017,51 @@ Nicht alles steht in der Datenbank. Am Dashboard (https://heizung.hoteltec.at):
    (§10v). Ab Freitagabend ohnehin nur noch Hotfixes.
 3. Der SHA aus Schritt 0 bleibt notiert, bis das erste Gäste-Wochenende
    vorbei ist.
+
+---
+
+## 10ac. Ist und Soll in der Zimmerübersicht (seit 15.10.2026)
+
+Die Liste zeigt je Zimmer zwei Temperaturen:
+
+| Spalte | Was dort steht |
+|---|---|
+| **Ist** | gemessen im **Schlafzimmer** — nicht im Bad (das läuft wärmer) und nicht im Kinderzimmer (oft unbelegt) |
+| **Soll** | der Wert, den die **Engine** gerade fährt: inklusive Vorheizen, Nachtabsenkung, Übersteuerung und Fenster-Sicherheit |
+
+**Bei den vier Suiten mit zwei Schlafzimmern (52, 54, 102, 202) ist es das
+linke** („Schlafzimmer L"). Die Regel steht im Programm
+(`services/referenzzone.py`), nicht in der Oberfläche — sie hängt an den
+Zonen-Namen aus der Zimmerliste des Hauses.
+
+### Die blaue Zahl
+
+Steht das **Ist** mehr als 2 °C unter dem Soll, wird es blau. **Das ist
+kein Alarm**, es kommt keine Mail, und es ist oft harmlos: ein Zimmer, in
+das gerade jemand eingecheckt hat, heizt erst hoch. Die Farbe sagt „hier
+lohnt ein Blick", nicht „hier ist etwas kaputt".
+
+**Wann ein Blick sich lohnt:** wenn dieselbe Zeile über Stunden blau
+bleibt. Dann weiter mit §10t (Ventil prüfen) oder §10s (Gerät steht auf
+einem falschen Wert).
+
+### Wenn „–" steht
+
+Kein Wert, drei mögliche Gründe — alle sehen in der Liste gleich aus:
+
+1. In der Referenzzone ist **kein Gerät** zugeordnet.
+2. Das Gerät hat sich länger **nicht gemeldet** oder liefert keine
+   Temperatur (dann steht es auch in der Geräteliste unter „Nicht online",
+   §10y).
+3. Beim **Soll**: die Engine hat für dieses Zimmer seit über einer Stunde
+   nichts gerechnet. Das ist ein Befund — §10l (Dead-Man-Checks).
+
+**Warum die Liste nicht sagt, welcher der drei Gründe gilt:** sie hat eine
+Spalte und drei Antworten. Das Zimmer selbst zeigt es (Reiter „Geräte" und
+„Engine"), und ein Rateversuch in der Übersicht wäre eine Zahl, die
+aussieht wie ein Befund.
+
+**Querverweise:** §10y (Geräteliste und ihre Filter), §10t (Ventil-Hinweise
+und „Zimmer zu warm"), §10s (falscher Wert am Gerät), §10w
+(Wunschtemperatur setzen), §10aa (Abnahme-Checkliste — dieselben Werte in
+SQL).
