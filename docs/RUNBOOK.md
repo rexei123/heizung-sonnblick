@@ -5065,3 +5065,64 @@ aussieht wie ein Befund.
 und „Zimmer zu warm"), §10s (falscher Wert am Gerät), §10w
 (Wunschtemperatur setzen), §10aa (Abnahme-Checkliste — dieselben Werte in
 SQL).
+
+---
+
+## 10ad. Anmeldung, Sitzungsdauer und Schichtwechsel (seit 16.10.2026)
+
+**Was sich geändert hat:** Wer eine Seite ohne gültige Anmeldung öffnet,
+landet jetzt auf dem Anmelde-Formular — und **nach** der Anmeldung wieder
+auf der Seite, die er eigentlich wollte. Vorher zeigte die Oberfläche in
+diesem Fall ihr leeres Gerüst mit „Wert nicht verfügbar" auf allen Kacheln
+und ohne Weg zur Anmeldung. Das sah aus wie eine defekte Anlage und war
+eine abgelaufene Sitzung.
+
+### Zwei Fristen, und sie bedeuten Verschiedenes
+
+| Frist | Wert | Was sie bewirkt |
+|---|---|---|
+| **Untätigkeit** | **15 Minuten** | kein Tastendruck, kein Klick, keine Berührung → automatische Abmeldung, ohne Vorwarnung |
+| **Sitzung insgesamt** | **12 Stunden** | danach ist die Anmeldung in jedem Fall abgelaufen, auch bei Benutzung |
+
+Mausbewegung zählt **nicht** als Tätigkeit (eine Pause am Schreibtisch
+verlängert die Sitzung nicht), ein Hintergrund-Tab auch nicht. Wer in
+einem Tab arbeitet, verlängert die Frist in allen offenen Tabs.
+
+### Der Punkt, der im Schichtbetrieb zählt
+
+**Ein geschlossenes Browser-Fenster ist keine Abmeldung.** Die Anmeldung
+gilt bis zu zwölf Stunden weiter. Wer am Empfangsrechner das Fenster
+schließt und nach Hause geht, hinterlässt eine gültige Sitzung: der
+nächste Dienst öffnet den Browser und ist **als die Vorgängerin
+angemeldet**. Jede Handlung steht dann im Protokoll unter dem falschen
+Namen — Belegungen, Temperaturen, Stammdaten.
+
+**Deshalb beim Schichtwechsel: „Abmelden" drücken** (unten links in der
+Seitenleiste). Das ist der einzige Weg, der die Zuordnung im Protokoll
+richtig hält; die 15-Minuten-Frist hilft dort nicht, weil sie den Browser
+nicht kennt, sondern nur offene Tabs.
+
+### Was wir nach dem ersten Gäste-Wochenende entscheiden
+
+Die 15 Minuten stammen aus einer Festlegung von Sprint 9.17 (AE-4, harter
+Schnitt ohne Warnhinweis). Ob sie für einen Empfang passen, ist eine
+Betriebsfrage und keine technische — **und sie ist messbar**: wie oft
+musste sich jemand tatsächlich neu anmelden? Nach dem Wochenende stehen
+drei Wege zur Wahl:
+
+1. **so lassen** — der Schmerz ist seit diesem Hotfix kleiner, weil man
+   nach der Anmeldung wieder auf derselben Seite landet;
+2. **Frist verlängern** (z. B. 60 Minuten) — eine Zahl in der
+   Oberflächen-Konfiguration, kein Umbau;
+3. **Vorwarnung einbauen** („Sie werden in einer Minute abgemeldet") —
+   das dreht eine Entscheidung von AE-4 um und braucht eine eigene
+   Begründung.
+
+**Erst die Zahl, dann die Frist** (§5.82: ein Vergleichswert, der jeder
+Messung nachgibt, vergleicht nichts).
+
+**Querverweise:** §10w (Wunschtemperatur setzen — dort hängt die Rolle
+dran), RUNBOOK §10z (Gate-Inventar: wer darf was),
+`frontend/src/lib/auth/routen.ts` (die Umleitung und ihre Prüfung),
+CLAUDE.md §5.20 (der Kommentar, der die Umleitung vier Monate lang
+behauptet hat).
