@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { darfBenutzerVerwalten } from "@/lib/auth/rechte";
+import { istOeffentlicheRoute } from "@/lib/auth/routen";
 
 interface NavItem {
   href: Route;
@@ -239,10 +240,12 @@ function SidebarFooter(): ReactNode {
  * im Forced-Change-Flow). Auf diesen Routen rendert AppShell ohne Sidebar,
  * sonst war beim Logout-Redirect die Navigation kurz auf /login sichtbar
  * (Befund 2026-05-15) und die Brand wuerde Hotelier-Daten leaken.
+ *
+ * Die Liste selbst liegt seit dem Hotfix vom 16.10.2026 in
+ * ``lib/auth/routen`` — der Anmelde-Waechter braucht genau dieselbe, und
+ * zwei Listen waeren eine zweite Wahrheit (§5.53).
  */
-function isPreLoginRoute(pathname: string): boolean {
-  return pathname === "/login" || pathname.startsWith("/auth/");
-}
+const isPreLoginRoute = istOeffentlicheRoute;
 
 export function AppShell({ children }: { children: ReactNode }): ReactNode {
   const pathname = usePathname() ?? "/";

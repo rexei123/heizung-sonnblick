@@ -6,7 +6,9 @@
  * Nach erfolgreichem Login:
  *  - ``must_change_password=true`` ⇒ Redirect auf
  *    ``/auth/change-password``
- *  - sonst ⇒ Dashboard (``/``)
+ *  - sonst ⇒ die Seite aus ``?next=`` (Hotfix 16.10.2026), sonst das
+ *    Dashboard (``/``). Der Parameter wird **geprueft**, nicht
+ *    uebernommen — siehe ``naechsteSeiteAus`` (offene Weiterleitung).
  *
  * Bei Fehler: generische Inline-Meldung „E-Mail oder Passwort falsch"
  * (kein User-Enumeration).
@@ -21,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { useAuth } from "@/contexts/auth-context";
 import type { ApiError } from "@/lib/api/types";
+import { naechsteSeiteAus } from "@/lib/auth/routen";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -37,9 +40,14 @@ export default function LoginPage() {
     try {
       const user = await login(email, password);
       if (user.must_change_password) {
+        // Der Passwort-Wechsel geht vor; ein offenes ``next`` faellt
+        // damit weg (nach dem Wechsel landet man auf dem Dashboard).
         router.replace("/auth/change-password");
       } else {
-        router.replace("/");
+        const suche =
+          typeof window === "undefined" ? "" : window.location.search;
+        const ziel = naechsteSeiteAus(new URLSearchParams(suche).get("next"));
+        router.replace(ziel as never);
       }
     } catch (e) {
       const err = e as ApiError;
