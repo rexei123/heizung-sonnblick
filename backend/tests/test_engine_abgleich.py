@@ -75,6 +75,18 @@ class _FakeRedis:
     def delete(self, key: str) -> int:
         return 1 if self.store.pop(key, None) is not None else 0
 
+    def getdel(self, key: str) -> str | None:
+        """Atomares Lesen-und-Loeschen, wie resync_flag.consume es nutzt.
+
+        Gehoert hier mit, obwohl engine_abgleich es nicht braucht:
+        beide Dienste holen ihren Client ueber dasselbe
+        redis_client.get_redis_client, eine Attrappe fuer den einen ist
+        also auch die des anderen. Fehlte die Methode, scheiterte jeder
+        Dispatch-Test mit AttributeError an einer Stelle, die mit
+        seiner Frage nichts zu tun hat.
+        """
+        return self.store.pop(key, None)
+
 
 @pytest.fixture
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:

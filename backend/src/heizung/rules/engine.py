@@ -128,6 +128,17 @@ class RuleResult:
     #: ``zone_overrides`` und wird im Dispatch zuerst geprueft.
     bad_setpoint_c: int | None = None
 
+    #: Die wirksamen Grenzen des Hard-Clamp fuer dieses Zimmer, ``(floor,
+    #: ceiling)`` (Hotfix 18.10.2026).
+    #:
+    #: Der Dispatch braucht sie, um zu erkennen, dass ein Geraet
+    #: **ausserhalb** der Grenzen steht: ein gekappter Drehrad-Override
+    #: aendert den Zielwert nicht, die Hysterese schweigt also, und das
+    #: Geraet bliebe auf dem Gastwert ueber der Obergrenze. Belegt am
+    #: 18.10.2026 in Zimmer 306 (Override 26 bei Obergrenze 25, zuletzt
+    #: gesendet 25 — kein Downlink).
+    clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C)
+
 
 @dataclass(frozen=True, slots=True)
 class HysteresisDecision:
@@ -832,6 +843,28 @@ async def layer_device_detached(
     )
 
 
+def clamp_grenzen(ctx: _RoomContext) -> tuple[int, int]:
+    """Die wirksamen Grenzen des Hard-Clamp fuer diesen Kontext.
+
+    ``(floor, ceiling)``, schon gegen die System-Grenzen verrechnet: der
+    Frostschutz hebt eine zu tiefe Raumtyp-Untergrenze an,
+    ``MAX_SETPOINT_C`` senkt eine zu hohe Obergrenze.
+
+    **Warum als Helfer und nicht dreimal inline:** dieselben vier Zeilen
+    standen in ``layer_clamp`` und im Zonen-Override-Clamp von
+    ``evaluate_room``, und der Hotfix vom 18.10.2026 braucht sie ein
+    drittes Mal — im Dispatch, um zu entscheiden, ob ein Geraet
+    **ausserhalb** der Grenzen steht. Drei Kopien derselben Rechnung sind
+    drei Stellen, an denen eine Grenze spaeter abweichen kann (§5.53).
+
+    ``ctx.room_type`` ist der Hebel: fuer Bad-Zonen laeuft derselbe Helfer
+    ueber den Kontext der Vorlage und liefert damit deren Grenzen.
+    """
+    rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
+    rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
+    return max(rt_min, MIN_SETPOINT_C), min(rt_max, MAX_SETPOINT_C)
+
+
 def layer_clamp(
     prev_setpoint_c: int,
     ctx: _RoomContext,
@@ -846,12 +879,9 @@ def layer_clamp(
     durchgereicht, wenn der Clamp den Wert nicht aenderte. Vorher hardcoded
     ``OCCUPIED_SETPOINT`` -> falsches UI-Label fuer alle nicht-Occupied-Status.
     """
-    rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
-    rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
-
-    # System-Frostschutz hat IMMER Vorrang vor room_type-Override.
-    floor = max(rt_min, MIN_SETPOINT_C)
-    ceiling = min(rt_max, MAX_SETPOINT_C)
+    # System-Frostschutz hat IMMER Vorrang vor room_type-Override —
+    # verrechnet in ``clamp_grenzen``.
+    floor, ceiling = clamp_grenzen(ctx)
 
     clamped = max(floor, min(ceiling, prev_setpoint_c))
     if clamped == prev_setpoint_c:
@@ -1141,6 +1171,10 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     # Sprint 9.7: Layer 0 Sommermodus-Fast-Path. Skip Layers 1-4 wenn aktiv.
     # Sprint 9.10d: Layer 0 ist always-on und liefert immer einen LayerStep —
     # die Fast-Path-Entscheidung steuert ``ctx.summer_mode_active`` direkt.
+    # Einmal fuer den ganzen Lauf — beide Rueckgabe-Pfade und der
+    # Zonen-Override-Clamp lesen dieselben Zahlen.
+    zimmer_grenzen = clamp_grenzen(ctx)
+
     summer = layer_summer_mode(ctx)
     if ctx.summer_mode_active:
         # Aktiver Pfad garantiert setpoint_c=FROST_PROTECTION_C.
@@ -1150,6 +1184,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
             setpoint_c=_require_setpoint(clamp),
             layers=(summer, clamp),
             base_reason=summer.reason,
+            clamp_grenzen_c=zimmer_grenzen,
         )
 
     base = layer_base_target(ctx)
@@ -1249,10 +1284,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
 
     # Sprint 12a T5: zone_overrides auf gleiche Range clampen wie setpoint_c.
     if zone_overrides:
-        rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
-        rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
-        floor = max(rt_min, MIN_SETPOINT_C)
-        ceiling = min(rt_max, MAX_SETPOINT_C)
+        floor, ceiling = zimmer_grenzen
         clamped_zone_overrides: dict[int, int] = {}
         for zone_id, sp in zone_overrides.items():
             clamped_sp = max(floor, min(ceiling, sp))
@@ -1312,6 +1344,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         base_reason=detached.reason,
         zone_overrides=zone_overrides,
         bad_setpoint_c=bad_setpoint_c,
+        clamp_grenzen_c=zimmer_grenzen,
     )
 
 
