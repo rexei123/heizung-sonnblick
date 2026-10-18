@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
+from heizung.models.enums import HeatingZoneKind
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.user import User
@@ -35,7 +36,10 @@ from heizung.schemas.heating_zone import (
 )
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
+from heizung.services.event_log import (
+    latest_hard_clamp_bad_setpoint_per_room,
+    latest_hard_clamp_setpoint_per_room,
+)
 from heizung.services.zone_aggregates import latest_mean_temp_per_zone
 
 
@@ -45,6 +49,7 @@ async def _build_zone_read(
     *,
     mean_temps: dict[int, Decimal | None] | None = None,
     engine_setpoints: dict[int, Decimal | None] | None = None,
+    bad_setpoints: dict[int, int | None] | None = None,
 ) -> HeatingZoneRead:
     """Sprint 14d FU-5 + 14e FU-1/FU-2: HeatingZoneRead + Anreicherungen.
 
@@ -76,6 +81,17 @@ async def _build_zone_read(
     if engine_setpoints is None:
         engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
     update["engine_setpoint_c"] = engine_setpoints.get(zone.room_id)
+
+    # Bad-Vorlage (18.10.2026): fuer Zonen mit ``kind=bathroom`` gilt der
+    # Bad-Zielwert, nicht der des Zimmers. Ohne diese Zeile zeigte die
+    # Bad-Karte 19, waehrend das Geraet 22 faehrt — und die Zimmerseite
+    # waere die zweite Wahrheit zur Engine (§5.53).
+    if zone.kind == HeatingZoneKind.BATHROOM:
+        if bad_setpoints is None:
+            bad_setpoints = await latest_hard_clamp_bad_setpoint_per_room(session, [zone.room_id])
+        bad_wert = bad_setpoints.get(zone.room_id)
+        if bad_wert is not None:
+            update["engine_setpoint_c"] = Decimal(bad_wert)
 
     return read.model_copy(update=update)
 
@@ -133,13 +149,24 @@ async def list_heating_zones(
     if not zones:
         return []
     # Sprint 14e FU-1/FU-2 (R-D): Aggregat-Batches einmal pro Liste, nicht
-    # pro Zone. ``engine_setpoint`` ist per Room und damit fuer alle Zonen
-    # desselben Zimmers identisch (AE-51 §4.2).
+    # pro Zone.
+    #
+    # Hier stand bis zum 18.10.2026: „``engine_setpoint`` ist per Room und
+    # damit fuer alle Zonen desselben Zimmers identisch (AE-51 §4.2)". Das
+    # gilt seit der Bad-Vorlage **nicht mehr** — Zonen mit
+    # ``kind=bathroom`` haben ihren eigenen Zielwert. Der Satz bleibt als
+    # Hinweis stehen, weil er sonst beim naechsten Umbau wieder als
+    # Eigenschaft gelesen wuerde (§5.77).
     mean_temps = await latest_mean_temp_per_zone(session, [z.id for z in zones])
     engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [room_id])
+    bad_setpoints = await latest_hard_clamp_bad_setpoint_per_room(session, [room_id])
     return [
         await _build_zone_read(
-            session, zone, mean_temps=mean_temps, engine_setpoints=engine_setpoints
+            session,
+            zone,
+            mean_temps=mean_temps,
+            engine_setpoints=engine_setpoints,
+            bad_setpoints=bad_setpoints,
         )
         for zone in zones
     ]

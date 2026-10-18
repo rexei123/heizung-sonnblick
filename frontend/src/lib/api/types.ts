@@ -420,6 +420,20 @@ export interface Room {
   // Sprint 14d (R-A, §5.63): Bool-Indikator „>= 1 aktive Übersteuerung".
   // Backend RoomRead befüllt es nur im Listen-Endpoint (sonst false).
   has_active_override: boolean;
+
+  // Ist und Soll der Referenzzone (15.10.2026, §5.63). Wie
+  // `has_active_override` befüllt **nur** der Listen-Endpoint diese drei
+  // Felder; Einzel-Responses liefern `null`.
+  //
+  // Welche Zone ein Zimmer vertritt, entscheidet das Backend
+  // (`services/referenzzone`: Schlafzimmer, bei zwei das linke, nie das
+  // Kinderzimmer) — hier wird nichts geraten, auch nicht aus den Namen.
+  /** Zone, aus der `mean_temperature_c` stammt; `null` = kein Schlafzimmer. */
+  reference_zone_id: number | null;
+  /** Ist: Zonen-Mittelwert über die gesunden Vickis der Referenzzone. */
+  mean_temperature_c: number | null;
+  /** Soll: jüngster HARD_CLAMP-Setpoint des Zimmers (1-h-Fenster). */
+  engine_setpoint_c: number | null;
 }
 
 // Sprint 12c (AE-58): Body fuer PATCH /rooms/{id}/override-block-state.

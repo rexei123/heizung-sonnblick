@@ -22,6 +22,25 @@ import { darfStammdatenAendern } from "@/lib/auth/rechte";
 
 type Mode = { kind: "list" } | { kind: "create" } | { kind: "edit"; id: number };
 
+/**
+ * Der Raumtyp, der die Bad-Zonen regelt (seit 18.10.2026).
+ *
+ * Das Backend findet ihn über seinen Namen (Einstellung
+ * `BAD_VORLAGE_ROOM_TYPE`, Vorgabe „Bad"). Hier steht derselbe Name als
+ * **Anzeige**-Entscheidung: die Seite kennzeichnet ihn, damit niemand ihn
+ * für einen vergessenen Raumtyp hält und löscht.
+ *
+ * Dass der Name an zwei Stellen steht, ist der Preis dafür, ihn nicht über
+ * einen weiteren Endpunkt auszuliefern. Er wirkt hier **nur** auf Text:
+ * stimmt er nicht mehr mit der Einstellung überein, fehlt ein Hinweis —
+ * die Regelung bleibt richtig. Die Gegenrichtung wäre schlimmer (§5.53).
+ */
+const BAD_VORLAGE_NAME = "Bad";
+
+function istBadVorlage(name: string): boolean {
+  return name === BAD_VORLAGE_NAME;
+}
+
 export default function RoomTypesPage() {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const list = useRoomTypes();
@@ -141,6 +160,18 @@ export default function RoomTypesPage() {
                   </span>
                 )}
               </div>
+              {istBadVorlage(editingItem.name) ? (
+                <p
+                  className="mb-4 text-sm text-info bg-info-soft border border-info rounded-md px-3 py-2"
+                  role="note"
+                >
+                  <strong>Vorlage für alle Bad-Zonen</strong> (
+                  <code>kind=bathroom</code>). Die Werte hier gelten für die
+                  Bäder aller Zimmer — nicht für Zimmer dieses Typs, dem keine
+                  zugeordnet sind. Eine Einstellung am einzelnen Zimmer geht
+                  weiterhin vor.
+                </p>
+              ) : null}
               <RoomTypeForm
                 initial={editingItem}
                 onSubmit={handleUpdate}
@@ -160,9 +191,14 @@ export default function RoomTypesPage() {
         open={confirmDelete !== null}
         title="Raumtyp löschen?"
         message={
-          confirmDelete
-            ? `„${confirmDelete.name}“ wird endgültig entfernt. Nur möglich, wenn keine Zimmer verknüpft sind.`
-            : ""
+          confirmDelete === null
+            ? ""
+            : istBadVorlage(confirmDelete.name)
+              ? // Dieser Raumtyp hat keine Zimmer — der Loeschen-Knopf ist
+                // also **nicht** gesperrt, und genau deshalb braucht es den
+                // Satz. Ohne ihn sieht er aus wie ein verwaister Eintrag.
+                `„${confirmDelete.name}“ ist die Vorlage für alle Bad-Zonen. Wird sie entfernt, folgen die Bäder wieder dem Zimmertyp — nachts also 19 °C statt 22 °C, im ganzen Haus. Nur möglich, wenn keine Zimmer verknüpft sind.`
+              : `„${confirmDelete.name}“ wird endgültig entfernt. Nur möglich, wenn keine Zimmer verknüpft sind.`
         }
         confirmLabel="Endgültig löschen"
         loading={deleteMut.isPending}
@@ -214,7 +250,14 @@ function RoomTypeList({ items, isLoading, isError, selectedId, onSelect }: ListP
               selectedId === rt.id ? "bg-surface-alt" : ""
             }`}
           >
-            <div className="font-medium text-text-primary text-sm">{rt.name}</div>
+            <div className="font-medium text-text-primary text-sm">
+              {rt.name}
+              {istBadVorlage(rt.name) ? (
+                <span className="ml-2 text-xs font-normal text-info">
+                  · Vorlage für Bad-Zonen
+                </span>
+              ) : null}
+            </div>
             <div className="text-xs text-text-tertiary mt-0.5">
               Belegt {rt.default_t_occupied}° · Frei {rt.default_t_vacant}°
               {!rt.is_bookable ? " · nicht buchbar" : ""}

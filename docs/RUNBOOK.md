@@ -5596,3 +5596,179 @@ Werte im Klartext.
 SHA — falls nicht ein Secret, sondern der Stand das Problem ist),
 §10aa (Abnahme-Checkliste, dieselben Prüf-Abfragen), §10l
 (Dead-Man-Checks), B-18-2 (der Anlass und die Werte-Liste).
+
+---
+
+## 10ac. Ist und Soll in der Zimmerübersicht (seit 15.10.2026)
+
+Die Liste zeigt je Zimmer zwei Temperaturen:
+
+| Spalte | Was dort steht |
+|---|---|
+| **Ist** | gemessen im **Schlafzimmer** — nicht im Bad (das läuft wärmer) und nicht im Kinderzimmer (oft unbelegt) |
+| **Soll** | der Wert, den die **Engine** gerade fährt: inklusive Vorheizen, Nachtabsenkung, Übersteuerung und Fenster-Sicherheit |
+
+**Bei den vier Suiten mit zwei Schlafzimmern (52, 54, 102, 202) ist es das
+linke** („Schlafzimmer L"). Die Regel steht im Programm
+(`services/referenzzone.py`), nicht in der Oberfläche — sie hängt an den
+Zonen-Namen aus der Zimmerliste des Hauses.
+
+### Die blaue Zahl
+
+Steht das **Ist** mehr als 2 °C unter dem Soll, wird es blau. **Das ist
+kein Alarm**, es kommt keine Mail, und es ist oft harmlos: ein Zimmer, in
+das gerade jemand eingecheckt hat, heizt erst hoch. Die Farbe sagt „hier
+lohnt ein Blick", nicht „hier ist etwas kaputt".
+
+**Wann ein Blick sich lohnt:** wenn dieselbe Zeile über Stunden blau
+bleibt. Dann weiter mit §10t (Ventil prüfen) oder §10s (Gerät steht auf
+einem falschen Wert).
+
+### Wenn „–" steht
+
+Kein Wert, drei mögliche Gründe — alle sehen in der Liste gleich aus:
+
+1. In der Referenzzone ist **kein Gerät** zugeordnet.
+2. Das Gerät hat sich länger **nicht gemeldet** oder liefert keine
+   Temperatur (dann steht es auch in der Geräteliste unter „Nicht online",
+   §10y).
+3. Beim **Soll**: die Engine hat für dieses Zimmer seit über einer Stunde
+   nichts gerechnet. Das ist ein Befund — §10l (Dead-Man-Checks).
+
+**Warum die Liste nicht sagt, welcher der drei Gründe gilt:** sie hat eine
+Spalte und drei Antworten. Das Zimmer selbst zeigt es (Reiter „Geräte" und
+„Engine"), und ein Rateversuch in der Übersicht wäre eine Zahl, die
+aussieht wie ein Befund.
+
+**Querverweise:** §10y (Geräteliste und ihre Filter), §10t (Ventil-Hinweise
+und „Zimmer zu warm"), §10s (falscher Wert am Gerät), §10w
+(Wunschtemperatur setzen), §10aa (Abnahme-Checkliste — dieselben Werte in
+SQL).
+
+---
+
+## 10ad. Anmeldung, Sitzungsdauer und Schichtwechsel (seit 16.10.2026)
+
+**Was sich geändert hat:** Wer eine Seite ohne gültige Anmeldung öffnet,
+landet jetzt auf dem Anmelde-Formular — und **nach** der Anmeldung wieder
+auf der Seite, die er eigentlich wollte. Vorher zeigte die Oberfläche in
+diesem Fall ihr leeres Gerüst mit „Wert nicht verfügbar" auf allen Kacheln
+und ohne Weg zur Anmeldung. Das sah aus wie eine defekte Anlage und war
+eine abgelaufene Sitzung.
+
+### Zwei Fristen, und sie bedeuten Verschiedenes
+
+| Frist | Wert | Was sie bewirkt |
+|---|---|---|
+| **Untätigkeit** | **15 Minuten** | kein Tastendruck, kein Klick, keine Berührung → automatische Abmeldung, ohne Vorwarnung |
+| **Sitzung insgesamt** | **12 Stunden** | danach ist die Anmeldung in jedem Fall abgelaufen, auch bei Benutzung |
+
+Mausbewegung zählt **nicht** als Tätigkeit (eine Pause am Schreibtisch
+verlängert die Sitzung nicht), ein Hintergrund-Tab auch nicht. Wer in
+einem Tab arbeitet, verlängert die Frist in allen offenen Tabs.
+
+### Der Punkt, der im Schichtbetrieb zählt
+
+**Ein geschlossenes Browser-Fenster ist keine Abmeldung.** Die Anmeldung
+gilt bis zu zwölf Stunden weiter. Wer am Empfangsrechner das Fenster
+schließt und nach Hause geht, hinterlässt eine gültige Sitzung: der
+nächste Dienst öffnet den Browser und ist **als die Vorgängerin
+angemeldet**. Jede Handlung steht dann im Protokoll unter dem falschen
+Namen — Belegungen, Temperaturen, Stammdaten.
+
+**Deshalb beim Schichtwechsel: „Abmelden" drücken** (unten links in der
+Seitenleiste). Das ist der einzige Weg, der die Zuordnung im Protokoll
+richtig hält; die 15-Minuten-Frist hilft dort nicht, weil sie den Browser
+nicht kennt, sondern nur offene Tabs.
+
+### Was wir nach dem ersten Gäste-Wochenende entscheiden
+
+Die 15 Minuten stammen aus einer Festlegung von Sprint 9.17 (AE-4, harter
+Schnitt ohne Warnhinweis). Ob sie für einen Empfang passen, ist eine
+Betriebsfrage und keine technische — **und sie ist messbar**: wie oft
+musste sich jemand tatsächlich neu anmelden? Nach dem Wochenende stehen
+drei Wege zur Wahl:
+
+1. **so lassen** — der Schmerz ist seit diesem Hotfix kleiner, weil man
+   nach der Anmeldung wieder auf derselben Seite landet;
+2. **Frist verlängern** (z. B. 60 Minuten) — eine Zahl in der
+   Oberflächen-Konfiguration, kein Umbau;
+3. **Vorwarnung einbauen** („Sie werden in einer Minute abgemeldet") —
+   das dreht eine Entscheidung von AE-4 um und braucht eine eigene
+   Begründung.
+
+**Erst die Zahl, dann die Frist** (§5.82: ein Vergleichswert, der jeder
+Messung nachgibt, vergleicht nichts).
+
+**Querverweise:** §10w (Wunschtemperatur setzen — dort hängt die Rolle
+dran), RUNBOOK §10z (Gate-Inventar: wer darf was),
+`frontend/src/lib/auth/routen.ts` (die Umleitung und ihre Prüfung),
+CLAUDE.md §5.20 (der Kommentar, der die Umleitung vier Monate lang
+behauptet hat).
+
+---
+
+## 10ae. Bad-Zonen haben eigene Werte (seit 18.10.2026)
+
+**Was sich geändert hat:** Bäder folgten bisher dem Zimmertyp — nachts also
+19 °C wie das Schlafzimmer. Seit dem 18.10. gilt für jede Zone mit der Art
+„Bad“ der **Raumtyp „Bad“** als Vorlage: belegt 22, frei 18, nachts 22,
+Grenzen 18 bis 25 °C.
+
+### Wo Sie die Bad-Werte ändern
+
+**Einstellungen → Raumtypen → „Bad“.** Dieser Raumtyp ist **keinem Zimmer**
+zugeordnet und sieht deshalb aus wie ein übriggebliebener Eintrag — er ist
+die Vorlage für alle Bäder im Haus. Die Seite kennzeichnet ihn, und beim
+Löschen kommt eine Warnung: ohne ihn folgen die Bäder wieder dem Zimmertyp.
+
+Die Werte wirken **beim nächsten Algorithmen-Lauf** (eine Minute), ohne
+Neustart.
+
+### Was Vorrang hat
+
+Von oben nach unten — das erste, was zutrifft, gewinnt:
+
+| Rang | Was | Wirkung aufs Bad |
+|---|---|---|
+| 1 | **Sommermodus** | Frostschutz, auch im Bad |
+| 2 | **Fenster offen** oder **Gerät abgenommen** | Sicherheitswert, auch im Bad |
+| 3 | **Übersteuerung für das Zimmer** | das Bad folgt dem Zimmerwert |
+| 4 | **Übersteuerung für die Bad-Zone** | dieser Wert |
+| 5 | **Einstellung am einzelnen Zimmer** | gilt auch fürs Bad |
+| 6 | **Raumtyp „Bad“** | die Vorlage |
+| 7 | hausweite Einstellung (Temperaturen & Zeiten) | nur, wo die Vorlage nichts sagt |
+
+**Die Grenzen der Vorlage halten in jedem Fall.** Stellt jemand am Zimmer
+17 °C ein, geht das Schlafzimmer auf 17 — das Bad bleibt bei **18**, seiner
+Untergrenze.
+
+**Die Zeiten kommen weiter vom Haus.** Nachtfenster und Vorheiz-Vorlauf
+stehen unter „Temperaturen & Zeiten“ und gelten für Bad und Schlafzimmer
+gleich; die Vorlage setzt nur **Temperaturen**.
+
+### Wo Sie es sehen
+
+- **Zimmer → Heizzonen:** die Bad-Karte zeigt ihren eigenen Sollwert (22),
+  die Schlafzimmer-Karte den des Zimmers (19).
+- **Zimmerübersicht:** unverändert — die Spalten „Ist“ und „Soll“ zeigen das
+  **Schlafzimmer** (§10ac), nie das Bad.
+- **Engine-Reiter:** der Bad-Wert steht im Trace der jüngsten Auswertung.
+
+### Was das für „Ventil prüfen“ und „Zimmer zu warm“ bedeutet
+
+**Nichts an den Regeln** — sie vergleichen jedes Gerät mit **seinem eigenen**
+gemeldeten Sollwert (§10t). Ein Bad mit Sollwert 22 schlägt bei „Zimmer zu
+warm“ erst ab 27 °C an, nicht ab 24.
+
+**Ein Nebeneffekt, der beobachtet werden sollte:** der Vergleichswert von
+Regel 3b ist der Median über **alle** vergleichbaren Zonen, Bäder und
+Schlafzimmer gemischt. Weil Bäder jetzt wärmer laufen, steigt dieser Median
+leicht — für Schlafzimmer wird 3b damit etwas unempfindlicher. Es entstehen
+keine Fehlalarme (3b braucht **beide** Bedingungen), aber die Kachel „Zimmer
+zu warm“ sollte in den nächsten Tagen beobachtet werden. Vergleichszahl vor
+der Änderung: aus §10aa Schritt 5.
+
+**Querverweise:** §10ac (Ist/Soll in der Übersicht), §10t (Ventil-Hinweise),
+§10w (Wunschtemperatur setzen), §10u (Rückfall),
+`backend/src/heizung/rules/badvorlage.py` (die Regel und ihre Begründung).

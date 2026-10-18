@@ -13,6 +13,7 @@ import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
 import { useAuth } from "@/contexts/auth-context";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
+import { formatTemperature } from "@/lib/format";
 import type {
   ApiError,
   Room,
@@ -154,6 +155,25 @@ export default function ZimmerPage() {
   );
 }
 
+/**
+ * „Das Zimmer ist deutlich kaelter als es sein soll" — die Bedingung der
+ * Hervorhebung (15.10.2026).
+ *
+ * **Mehr als 2 °C**, also echt groesser: bei genau 2,0 K bleibt die Zahl
+ * grau. Die Grenze ist eine Betriebsentscheidung des Hoteliers, keine
+ * Herleitung — und sie ist **kein Alarm**. Ein Zimmer kann aus guten
+ * Gruenden kalt sein (gerade angereist, Vorheizen laeuft noch), deshalb
+ * faerbt die Zelle und schickt keine Mail.
+ *
+ * Fehlt einer der beiden Werte, gibt es keinen Vergleich — und damit auch
+ * keine Hervorhebung. Eine Faerbung „weil nichts da ist" waere eine
+ * Aussage ueber ein Zimmer, ueber das wir nichts wissen.
+ */
+function zuKalt(ist: number | null, soll: number | null): boolean {
+  if (ist === null || soll === null) return false;
+  return soll - ist > 2;
+}
+
 interface TableProps {
   list: Room[];
   loading: boolean;
@@ -191,6 +211,10 @@ function RoomTable({ list, loading, error }: TableProps) {
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Etage</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Orient.</th>
             <th className="text-left px-3 py-2 font-medium text-text-secondary">Status</th>
+            {/* Ist und Soll der Referenzzone (15.10.2026). Sichtbarer
+                Header-Text, auch wenn die Spalte schmal ist (§5.57). */}
+            <th className="text-left px-3 py-2 font-medium text-text-secondary">Ist</th>
+            <th className="text-left px-3 py-2 font-medium text-text-secondary">Soll</th>
             {/* Sprint 12c.a: Block-Indikator-Spalte. Live-Verify-Befund 12c.a:
                 Header braucht sichtbaren Text — Tooltip allein ist semantisch
                 blind, weil er nur beim Hover greift. */}
@@ -225,6 +249,26 @@ function RoomTable({ list, loading, error }: TableProps) {
                 {r.status === "cleaning" || r.status === "blocked" ? (
                   <span className="ml-2 text-xs text-warning">· Automatik angehalten</span>
                 ) : null}
+              </td>
+              {/* Ist der Referenzzone. `formatTemperature` liefert „–" bei
+                  `null` — kein Gerät, kein Messwert oder kein Schlafzimmer
+                  sehen in der Zeile gleich aus, und das ist richtig: die
+                  Spalte sagt „kein Wert", nicht warum. Das Warum steht im
+                  Zimmer. */}
+              <td className="px-3 py-2">
+                <span
+                  className={
+                    zuKalt(r.mean_temperature_c, r.engine_setpoint_c)
+                      ? "text-info font-medium"
+                      : "text-text-secondary"
+                  }
+                  data-testid={`ist-${r.number}`}
+                >
+                  {formatTemperature(r.mean_temperature_c)}
+                </span>
+              </td>
+              <td className="px-3 py-2 text-text-secondary" data-testid={`soll-${r.number}`}>
+                {formatTemperature(r.engine_setpoint_c)}
               </td>
               {/* Sprint 14d (R-B): EINE Zelle, drei exklusive Zustände —
                   gesperrt (Lock, 12c.a) > aktive Übersteuerung ("Aktiv") > leer.
