@@ -221,6 +221,18 @@ class Settings(BaseSettings):
     # Westzimmer auffallen): ebenfalls 0 uebrig. Damit ist die
     # Himmelsrichtung als eigene Gruppe vom Tisch (Variante A, AE-74).
     room_rel_delta_k: Decimal = Decimal("3.5")
+
+    # --- Bad-Vorlage (18.10.2026) ---
+    # Name des Raumtyps, der die Zonen mit ``kind=bathroom`` regelt. Der
+    # Raumtyp existiert im Haus und traegt die Bad-Werte (belegt 22, frei 18,
+    # nachts 22, Grenzen 18/25); ihm sind keine Zimmer zugeordnet.
+    #
+    # **Warum konfigurierbar und nicht als Konstante:** der Name ist eine
+    # Betriebsentscheidung. Wer den Raumtyp umbenennt, soll den Baedern nicht
+    # ihre Vorlage nehmen muessen, und die Tests brauchen einen eigenen Namen,
+    # der nicht mit dem Bestand kollidiert. Leer heisst "keine Vorlage" — dann
+    # folgen Baeder dem Zimmertyp wie vor dem 18.10.2026.
+    bad_vorlage_room_type: str = "Bad"
     # Stufe 2 der Rueckfallkette, wenn zu wenige Zimmer unbelegt sind
     # (Hochsaison). Groesser, weil belegte Zimmer eine andere Population
     # sind: Gaeste stellen 22-24 °C ein, der Median liegt also hoeher und
