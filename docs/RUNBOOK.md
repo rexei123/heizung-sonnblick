@@ -5126,3 +5126,70 @@ dran), RUNBOOK §10z (Gate-Inventar: wer darf was),
 `frontend/src/lib/auth/routen.ts` (die Umleitung und ihre Prüfung),
 CLAUDE.md §5.20 (der Kommentar, der die Umleitung vier Monate lang
 behauptet hat).
+
+---
+
+## 10ae. Bad-Zonen haben eigene Werte (seit 18.10.2026)
+
+**Was sich geändert hat:** Bäder folgten bisher dem Zimmertyp — nachts also
+19 °C wie das Schlafzimmer. Seit dem 18.10. gilt für jede Zone mit der Art
+„Bad“ der **Raumtyp „Bad“** als Vorlage: belegt 22, frei 18, nachts 22,
+Grenzen 18 bis 25 °C.
+
+### Wo Sie die Bad-Werte ändern
+
+**Einstellungen → Raumtypen → „Bad“.** Dieser Raumtyp ist **keinem Zimmer**
+zugeordnet und sieht deshalb aus wie ein übriggebliebener Eintrag — er ist
+die Vorlage für alle Bäder im Haus. Die Seite kennzeichnet ihn, und beim
+Löschen kommt eine Warnung: ohne ihn folgen die Bäder wieder dem Zimmertyp.
+
+Die Werte wirken **beim nächsten Algorithmen-Lauf** (eine Minute), ohne
+Neustart.
+
+### Was Vorrang hat
+
+Von oben nach unten — das erste, was zutrifft, gewinnt:
+
+| Rang | Was | Wirkung aufs Bad |
+|---|---|---|
+| 1 | **Sommermodus** | Frostschutz, auch im Bad |
+| 2 | **Fenster offen** oder **Gerät abgenommen** | Sicherheitswert, auch im Bad |
+| 3 | **Übersteuerung für das Zimmer** | das Bad folgt dem Zimmerwert |
+| 4 | **Übersteuerung für die Bad-Zone** | dieser Wert |
+| 5 | **Einstellung am einzelnen Zimmer** | gilt auch fürs Bad |
+| 6 | **Raumtyp „Bad“** | die Vorlage |
+| 7 | hausweite Einstellung (Temperaturen & Zeiten) | nur, wo die Vorlage nichts sagt |
+
+**Die Grenzen der Vorlage halten in jedem Fall.** Stellt jemand am Zimmer
+17 °C ein, geht das Schlafzimmer auf 17 — das Bad bleibt bei **18**, seiner
+Untergrenze.
+
+**Die Zeiten kommen weiter vom Haus.** Nachtfenster und Vorheiz-Vorlauf
+stehen unter „Temperaturen & Zeiten“ und gelten für Bad und Schlafzimmer
+gleich; die Vorlage setzt nur **Temperaturen**.
+
+### Wo Sie es sehen
+
+- **Zimmer → Heizzonen:** die Bad-Karte zeigt ihren eigenen Sollwert (22),
+  die Schlafzimmer-Karte den des Zimmers (19).
+- **Zimmerübersicht:** unverändert — die Spalten „Ist“ und „Soll“ zeigen das
+  **Schlafzimmer** (§10ac), nie das Bad.
+- **Engine-Reiter:** der Bad-Wert steht im Trace der jüngsten Auswertung.
+
+### Was das für „Ventil prüfen“ und „Zimmer zu warm“ bedeutet
+
+**Nichts an den Regeln** — sie vergleichen jedes Gerät mit **seinem eigenen**
+gemeldeten Sollwert (§10t). Ein Bad mit Sollwert 22 schlägt bei „Zimmer zu
+warm“ erst ab 27 °C an, nicht ab 24.
+
+**Ein Nebeneffekt, der beobachtet werden sollte:** der Vergleichswert von
+Regel 3b ist der Median über **alle** vergleichbaren Zonen, Bäder und
+Schlafzimmer gemischt. Weil Bäder jetzt wärmer laufen, steigt dieser Median
+leicht — für Schlafzimmer wird 3b damit etwas unempfindlicher. Es entstehen
+keine Fehlalarme (3b braucht **beide** Bedingungen), aber die Kachel „Zimmer
+zu warm“ sollte in den nächsten Tagen beobachtet werden. Vergleichszahl vor
+der Änderung: aus §10aa Schritt 5.
+
+**Querverweise:** §10ac (Ist/Soll in der Übersicht), §10t (Ventil-Hinweise),
+§10w (Wunschtemperatur setzen), §10u (Rückfall),
+`backend/src/heizung/rules/badvorlage.py` (die Regel und ihre Begründung).

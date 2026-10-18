@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import Integer, select
 
 from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
@@ -122,3 +122,51 @@ async def log_inferred_window_event(
             },
         )
     )
+
+
+async def latest_hard_clamp_bad_setpoint_per_room(
+    session: AsyncSession,
+    room_ids: Iterable[int],
+) -> dict[int, int | None]:
+    """Pro Zimmer der Bad-Zielwert der juengsten ``HARD_CLAMP``-Zeile.
+
+    Quelle ist ``details->>'bad_setpoint_c'`` derselben Zeile, aus der
+    :func:`latest_hard_clamp_setpoint_per_room` ihren Wert nimmt — gleiche
+    Abfrageform, gleiches Frischefenster, gleiche Sortierung. Damit koennen
+    Zimmerwert und Bad-Wert nicht aus verschiedenen Auswertungen stammen.
+
+    ``None`` im Ergebnis heisst "dieses Zimmer hat keinen eigenen
+    Bad-Wert": entweder gibt es keine Vorlage, oder eine zimmerweite
+    Entscheidung hat gegriffen (Sommermodus, Uebersteuerung, Fenster,
+    Demontage). Die Bad-Karte zeigt dann den Zimmerwert, und das ist
+    richtig — die Engine fährt dort auch den Zimmerwert.
+
+    **Warum nicht in die bestehende Funktion gefaltet:** die liefert
+    ``Decimal`` aus einer Spalte, diese einen ``int`` aus JSONB. Ein
+    gemeinsamer Rueckgabetyp waere ein Tupel, das jeder Aufrufer
+    auspacken muss — zwei Funktionen mit je einer Bedeutung sind
+    billiger zu lesen.
+    """
+    ids = list(room_ids)
+    if not ids:
+        return {}
+
+    since = datetime.now(tz=UTC) - _HARD_CLAMP_FRESHNESS
+    stmt = (
+        select(
+            EventLog.room_id,
+            EventLog.details["bad_setpoint_c"].astext.cast(Integer).label("bad_setpoint_c"),
+        )
+        .where(EventLog.layer == EventLogLayer.HARD_CLAMP)
+        .where(EventLog.time > since)
+        .where(EventLog.room_id.in_(ids))
+        .distinct(EventLog.room_id)
+        .order_by(EventLog.room_id, EventLog.time.desc())
+    )
+    rows = (await session.execute(stmt)).all()
+    # Ausdrueckliche Umwandlung statt einer Typ-Zusicherung: dict(rows)
+    # braeuchte ein type: ignore, und eine Zusicherung, die von der
+    # installierten Paketfassung abhaengt, ist kein Typ-Wissen (§5.80).
+    # Das int() sagt zugleich, dass hier JSONB-Text durch einen Cast
+    # gekommen ist.
+    return {int(room_id): (int(wert) if wert is not None else None) for room_id, wert in rows}

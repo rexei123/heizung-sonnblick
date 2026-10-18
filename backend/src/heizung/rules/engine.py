@@ -36,6 +36,7 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.rule_config import RuleConfig
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.badvorlage import lade_bad_vorlage
 from heizung.rules.config_resolve import (
     lade_rule_configs,
     lade_zeitzone,
@@ -113,6 +114,19 @@ class RuleResult:
     layers: tuple[LayerStep, ...]
     base_reason: CommandReason
     zone_overrides: dict[int, int] = field(default_factory=dict)
+
+    #: Zielwert fuer Zonen mit ``kind=bathroom`` (18.10.2026).
+    #:
+    #: ``None`` heisst "kein eigener Bad-Wert" — die Baeder folgen dann
+    #: ``setpoint_c`` wie vor dem 18.10. Das ist der Fall, wenn es den
+    #: Raumtyp ``Bad`` nicht gibt **oder** eine zimmerweite Entscheidung
+    #: gegriffen hat (Sommermodus, Zimmer-Uebersteuerung, Fenster,
+    #: Demontage): Sicherheit und eine ausdrueckliche Gast-Wahl gelten im
+    #: Bad genauso.
+    #:
+    #: Eine Zonen-Uebersteuerung sticht auch diesen Wert aus — sie steht in
+    #: ``zone_overrides`` und wird im Dispatch zuerst geprueft.
+    bad_setpoint_c: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1039,6 +1053,80 @@ async def _last_command_for_device(
 # ---------------------------------------------------------------------------
 
 
+async def _bad_zielwert(
+    session: AsyncSession,
+    ctx: _RoomContext,
+    *,
+    now: datetime,
+) -> int | None:
+    """Der Zielwert fuer Bad-Zonen dieses Zimmers (18.10.2026).
+
+    Zweiter Durchlauf durch **Layer 1, 2 und 5** mit getauschtem Raumtyp:
+    Belegung, Vorheizen/Nachtabsenkung und die Grenzen der Vorlage. Die
+    uebrigen Layer sind zimmerweit und werden bewusst **nicht** erneut
+    gerechnet — wer sie neu rechnete, wuerde die Entscheidung des Zimmers
+    verdoppeln (Sommermodus) oder eine zweite Fenster-Pruefung erfinden.
+
+    ``None`` wenn es den Raumtyp ``Bad`` nicht gibt. Der Aufrufer
+    entscheidet, ob er ueberhaupt fragen darf (siehe
+    ``raumweit_eingegriffen`` in ``evaluate_room``).
+
+    Die Kette ist dieselbe wie fuer das Zimmer, nur mit der
+    ``room_type_id`` der Vorlage: ``ROOM`` (dieses Zimmer) vor
+    ``ROOM_TYPE`` (Bad) vor ``GLOBAL``. Eine Zimmer-Einstellung gewinnt
+    also weiterhin.
+    """
+    vorlage = await lade_bad_vorlage(session)
+    if vorlage is None:
+        return None
+
+    # Die Werte der Vorlage als ROOM_TYPE-Zeile in die Kette.
+    #
+    # **Warum das noetig ist, gemessen am 18.10.2026:** die Spalten eines
+    # Raumtyps (``default_t_*``) sind in der Auflösung der **letzte**
+    # Rueckfall — unter GLOBAL. Eine hausweite ``rule_config`` mit
+    # ``t_night`` sticht sie also aus, und das Bad bekaeme die
+    # Nachtabsenkung des Hauses statt ihrer eigenen. Die Vorlage waere
+    # damit genau fuer das Feld wirkungslos, um das es dem Betreiber geht
+    # (aufgefallen, weil ein fremder GLOBAL-Eintrag in der Test-Datenbank
+    # den Bad-Wert auf 19 zog — in der Gesamt-Suite rot, allein gruen).
+    #
+    # Deshalb treten die Spalten der Vorlage hier als ihre eigenen
+    # ROOM_TYPE-Werte auf: ``ROOM`` (dieses Zimmer) gewinnt weiter,
+    # ``GLOBAL`` verliert. Die Zeile ist **nicht** in der Session — sie
+    # wird nie gespeichert, sie ist nur die Form, in der die Kette den
+    # Wert lesen kann.
+    #
+    # Echte ``ROOM_TYPE``-Eintraege der Vorlage stehen **vor** ihr: wer
+    # der Vorlage eine ``rule_config`` gibt, soll damit ihre Spalten
+    # uebersteuern koennen — dieselbe Rangfolge wie beim Zimmer.
+    vorlage_kette = await lade_rule_configs(session, room_id=ctx.room.id, room_type_id=vorlage.id)
+    vorlage_kette.append(
+        RuleConfig(
+            scope=RuleConfigScope.ROOM_TYPE,
+            room_type_id=vorlage.id,
+            t_occupied=vorlage.default_t_occupied,
+            t_vacant=vorlage.default_t_vacant,
+            t_night=vorlage.default_t_night,
+        )
+    )
+
+    bad_ctx = _RoomContext(
+        room=ctx.room,
+        room_type=vorlage,
+        rule_configs=vorlage_kette,
+        summer_mode_active=ctx.summer_mode_active,
+        next_occupancy=ctx.next_occupancy,
+        timezone=ctx.timezone,
+    )
+    bad_base = layer_base_target(bad_ctx)
+    bad_temporal = layer_temporal(bad_base, bad_ctx, now=now)
+    bad_clamp = layer_clamp(
+        _require_setpoint(bad_temporal), bad_ctx, prev_reason=bad_temporal.reason
+    )
+    return _require_setpoint(bad_clamp)
+
+
 async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | None:
     """Engine-Eval fuer einen Raum.
 
@@ -1192,6 +1280,21 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
             extras=clamp_extras,
         )
 
+    # Bad-Zonen (18.10.2026): eigener Zielwert aus dem Raumtyp "Bad" —
+    # aber nur, wenn keine **zimmerweite** Entscheidung gegriffen hat.
+    #
+    # Die drei Bedingungen einzeln statt "hat sich der Wert geaendert":
+    # ein Zimmer-Override, der zufaellig denselben Wert setzt wie die
+    # Nachtabsenkung, wuerde sonst durchrutschen und das Bad auf 22
+    # stellen, obwohl der Gast 19 fuer das ganze Zimmer gewaehlt hat.
+    manual_extras = manual.extras or {}
+    raumweit_eingegriffen = (
+        manual_extras.get("source") is not None
+        or window.reason == CommandReason.WINDOW_OPEN
+        or detached.reason == CommandReason.DEVICE_DETACHED
+    )
+    bad_setpoint_c = None if raumweit_eingegriffen else await _bad_zielwert(session, ctx, now=now)
+
     layers_tuple: tuple[LayerStep, ...] = (
         summer,
         base,
@@ -1208,6 +1311,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         layers=layers_tuple,
         base_reason=detached.reason,
         zone_overrides=zone_overrides,
+        bad_setpoint_c=bad_setpoint_c,
     )
 
 

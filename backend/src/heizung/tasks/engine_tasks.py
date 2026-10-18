@@ -32,7 +32,7 @@ from heizung.celery_app import app
 from heizung.config import get_settings
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
-from heizung.models.enums import CommandReason, EventLogLayer
+from heizung.models.enums import CommandReason, EventLogLayer, HeatingZoneKind
 from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
@@ -254,6 +254,7 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 base_reason=result.base_reason,
                 eval_id=eval_id,
                 zone_overrides=result.zone_overrides,
+                bad_setpoint_c=result.bad_setpoint_c,
             )
             sent_devices = per_device_results
 
@@ -270,6 +271,14 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 if layer.layer == EventLogLayer.HARD_CLAMP:
                     base_details["downlink_per_device"] = per_device_results
                     base_details["downlink_zone_status"] = per_zone_status
+                    # Bad-Vorlage (18.10.2026): der Zielwert der Bad-Zonen
+                    # gehoert in den Trace, sonst zeigt das Panel 19 und die
+                    # Geraete fahren 22. ``None`` heisst "Baeder folgen dem
+                    # Zimmer" und wird bewusst mitgeschrieben — das
+                    # unterscheidet "keine Vorlage" von "Vorlage, Wert
+                    # zufaellig gleich" (§5.44: Aggregat in details, keine
+                    # PK-Migration).
+                    base_details["bad_setpoint_c"] = result.bad_setpoint_c
                 session.add(
                     EventLog(
                         room_id=room_id,
@@ -518,6 +527,7 @@ async def _dispatch_downlinks_per_zone(
     base_reason: CommandReason,
     eval_id: uuid.UUID,
     zone_overrides: dict[int, int] | None = None,
+    bad_setpoint_c: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
 
@@ -555,8 +565,26 @@ async def _dispatch_downlinks_per_zone(
 
     for zone in zones:
         # Sprint 12a T5: pro Zone den Zone-spezifischen Setpoint, sonst
-        # Room-Default.
-        zone_target_setpoint_c = zone_overrides.get(zone.id, target_setpoint_c)
+        # Room-Default. Seit 18.10.2026 dazwischen die Bad-Vorlage.
+        #
+        # Die Reihenfolge ist die Rangfolge: eine **Zonen-Uebersteuerung**
+        # ist eine ausdrueckliche Wahl fuer genau diese Zone und gewinnt;
+        # danach die **Bad-Vorlage** fuer Zonen mit ``kind=bathroom``;
+        # sonst der Zimmerwert.
+        #
+        # **Dieser eine Wert traegt alles**, was pro Geraet entschieden
+        # wird: die Hysterese bekommt ihn als ``new_setpoint_c``, der
+        # Engine-Abgleich vergleicht gegen ihn (20f T3), der
+        # ``ControlCommand`` speichert ihn, und der Downlink sendet ihn.
+        # Deshalb gibt es fuer das Bad **keine** zweite Vergleichsstelle —
+        # und damit auch kein Ping-Pong zwischen Abgleich (21) und
+        # Dispatch (22), wie es ein getrennter Pfad erzeugt haette.
+        if zone.id in zone_overrides:
+            zone_target_setpoint_c = zone_overrides[zone.id]
+        elif bad_setpoint_c is not None and zone.kind == HeatingZoneKind.BATHROOM:
+            zone_target_setpoint_c = bad_setpoint_c
+        else:
+            zone_target_setpoint_c = target_setpoint_c
         devices = await _get_zone_devices(session, zone.id)
         if not devices:
             per_zone_status.append(
@@ -824,7 +852,11 @@ async def _dispatch_downlinks_per_zone(
                 "downlink_failed_all_zone zone_id=%s room_id=%s setpoint_c=%s",
                 zone.id,
                 room_id,
-                target_setpoint_c,
+                # Der Wert **dieser** Zone. Bis 18.10.2026 stand hier der
+                # Zimmerwert — in der einen Meldung, die man bei einem
+                # Ausfall liest, haette das Bad damit eine falsche Zahl
+                # gezeigt.
+                zone_target_setpoint_c,
             )
 
     return per_device_results, per_zone_status
