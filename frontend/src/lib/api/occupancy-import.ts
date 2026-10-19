@@ -19,6 +19,9 @@ const importRowSchema = z.object({
   rooms_occupied: z.number(),
   rooms_closed: z.number(),
   conflicts: z.number(),
+  // Vorgabe 0: Audit-Zeilen von vor dem 19.10.2026 fuehren das Feld nicht,
+  // und ein fehlendes Feld darf das Protokoll nicht leer laufen lassen.
+  checkouts_changed: z.number().default(0),
   result: z.enum(["applied", "rejected"]),
 });
 

@@ -14,6 +14,7 @@ interface ImportRow {
   rooms_occupied: number;
   rooms_closed: number;
   conflicts: number;
+  checkouts_changed?: number;
   result: "applied" | "rejected";
 }
 
@@ -118,6 +119,7 @@ test.describe("Sprint 15f Import-Detailseite (/einstellungen/api)", () => {
       external_id: "ok-1",
       rooms_occupied: 4,
       rooms_closed: 1,
+      checkouts_changed: 2,
       conflicts: 0,
       result: "applied",
     },
@@ -157,6 +159,26 @@ test.describe("Sprint 15f Import-Detailseite (/einstellungen/api)", () => {
     await page.goto("/einstellungen/api");
     // Konflikt-Zeile + Rejected-Zeile = 2 hervorgehoben, die saubere nicht.
     await expect(page.locator("[data-testid=import-row].bg-warning-soft")).toHaveCount(2);
+  });
+
+  test("Spalte „Abreise geändert\" zeigt die Zahl, fehlendes Feld bleibt 0", async ({
+    page,
+  }) => {
+    // Die zweite und dritte Zeile liefern das Feld **nicht** — so sehen
+    // Audit-Zeilen von vor dem 19.10.2026 aus. Das Zod-Schema setzt 0 ein;
+    // ohne diese Vorgabe liefe das ganze Protokoll leer statt einer Spalte.
+    await mockImport(page, { status: "yellow", imports: ROWS });
+    await page.goto("/einstellungen/api");
+
+    // Bewusst ``getByText`` und nicht ``getByRole("columnheader")``:
+    // gemessen am 19.10.2026 meldet diese Seite **0** Spaltenkoepfe, fuer
+    // alle sieben Spalten, nicht nur fuer diese. Den ``th``-Elementen fehlt
+    // ``scope="col"`` (zurueckgestellter Punkt vom 15.10.). Die Ursache ist
+    // noch nicht belegt — hier steht die Messung, keine Erklaerung.
+    await expect(page.getByText("Abreise geändert")).toBeVisible();
+    const zeilen = page.getByTestId("import-row");
+    await expect(zeilen.nth(0).locator("td").nth(4)).toHaveText("2");
+    await expect(zeilen.nth(1).locator("td").nth(4)).toHaveText("0");
   });
 
   test("leere imports -> Leer-Hinweis", async ({ page }) => {

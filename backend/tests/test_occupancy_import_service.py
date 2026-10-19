@@ -40,6 +40,8 @@ from heizung.schemas.occupancy_import import (
 )
 from heizung.services.occupancy_import_service import (
     ACTION_APPLIED,
+    ACTION_CHECKOUT_CHANGED,
+    ACTION_CHECKOUT_SKIPPED,
     ACTION_CONFLICT,
     ACTION_REJECTED,
     ACTION_STALE,
@@ -48,6 +50,7 @@ from heizung.services.occupancy_import_service import (
     reconcile_from_import,
     run_freshness_check,
 )
+from heizung.services.occupancy_service import sync_room_status
 from tests.conftest import purge_test_data_by_prefix
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -870,3 +873,256 @@ async def test_alarmtext_nennt_die_faelligkeit_mit_kuerzel(
     assert "12:00" in body
     # Kuerzel plattformabhaengig (MESZ unter deutschem Locale, sonst CEST).
     assert ("MESZ" in body) or ("CEST" in body), body[:200]
+
+
+# ---------------------------------------------------------------------------
+# Abreise nachziehen (Freigabe Betreiber 19.10.2026)
+# ---------------------------------------------------------------------------
+#
+# Bis dahin hat Phase B1 ein Zimmer mit laufender pms-Belegung
+# **uebersprungen**. Eine Verlaengerung kam damit nie an: Zimmer 306 stand ab
+# dem gemeldeten (falschen) Abreisetag als frei, waehrend der Gast noch zwei
+# Wochen blieb — und die Listen vom 16., 17. und 18.10. trugen die richtige
+# Abreise laengst.
+#
+# ``now`` wird hier **ausdruecklich** uebergeben. Die Datei rechnet mit
+# Juni-Daten, die echte Uhr steht im Oktober — ohne das Argument faellt jede
+# Verlaengerung in die Regel "Abreise in der Vergangenheit", und der Test
+# pruefte etwas anderes als er soll (§5.59 in anderer Form: eine Zeitquelle,
+# die der Test nicht kontrolliert).
+
+#: Mitten im Aufenthalt (04.06.–06.06.), kurz nach dem Listeneingang 07:14.
+JUNI_JETZT = datetime(2026, 6, 6, 7, 30, tzinfo=UTC)
+
+
+async def _zimmer_mit_belegung(
+    session: AsyncSession, suffix: str, *, anreise: str, abreise: str
+) -> tuple[str, int, Occupancy]:
+    """Zimmer plus erste pms-Belegung, angelegt ueber den normalen Importweg.
+
+    Bewusst nicht per ``session.add``: so steht in ``check_in`` genau der
+    Wert, den ein echter Import geschrieben haette — und der Vergleich der
+    Anreise prueft dann die Sache und nicht meine Fixture.
+    """
+    num = _room_number(suffix)
+    room_id = await _seed_room(session, num)
+    await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, anreise, abreise)]),
+        now=JUNI_JETZT,
+    )
+    occ = (await _active_pms(session, room_id))[0]
+    return num, room_id, occ
+
+
+async def test_verlaengerung_zieht_die_abreise_nach(session: AsyncSession) -> None:
+    """Der Fall aus Zimmer 306: die Liste meldet eine spaetere Abreise."""
+    num, room_id, occ = await _zimmer_mit_belegung(
+        session, "306", anreise="04.06.2026", abreise="06.06.2026"
+    )
+    occ_id = occ.id
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "10.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.checkouts_changed == 1
+    assert room_id in outcome.affected_room_ids, "Engine muss neu bewerten"
+
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1, "keine zweite Belegung — dieselbe wird geaendert"
+    assert occs[0].id == occ_id
+    assert occs[0].check_out == datetime(2026, 6, 10, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+
+    audits = await _audits(session, ACTION_CHECKOUT_CHANGED)
+    assert len(audits) == 1
+    assert audits[0].old_value is not None
+    assert "2026-06-06" in str(audits[0].old_value["check_out"])
+    assert "2026-06-10" in str(audits[0].new_value["check_out"])
+    assert audits[0].new_value["richtung"] == "verlaengert"
+
+
+async def test_verkuerzung_zieht_die_abreise_nach(session: AsyncSession) -> None:
+    """Dieselbe Mechanik nach vorn — die Liste ist auch hier die Wahrheit."""
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "307", anreise="04.06.2026", abreise="10.06.2026"
+    )
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "08.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.checkouts_changed == 1
+    occs = await _active_pms(session, room_id)
+    assert occs[0].check_out == datetime(2026, 6, 8, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    audits = await _audits(session, ACTION_CHECKOUT_CHANGED)
+    assert audits[0].new_value["richtung"] == "verkuerzt"
+
+
+async def test_gleiche_abreise_schreibt_nichts(session: AsyncSession) -> None:
+    """Der Normalfall — und er muss **stumm** bleiben.
+
+    Ohne diese Pruefung schriebe jeder Tagesimport fuer jedes belegte Zimmer
+    eine Audit-Zeile, und das Protokoll waere nach einer Woche unlesbar.
+    """
+    num, room_id, occ = await _zimmer_mit_belegung(
+        session, "308", anreise="04.06.2026", abreise="10.06.2026"
+    )
+    vorher = occ.updated_at
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "10.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.checkouts_changed == 0
+    assert outcome.affected_room_ids == []
+    assert await _audits(session, ACTION_CHECKOUT_CHANGED) == []
+    assert await _audits(session, ACTION_CHECKOUT_SKIPPED) == []
+    occs = await _active_pms(session, room_id)
+    assert occs[0].updated_at == vorher, "die Zeile darf nicht angefasst werden"
+
+
+async def test_gaestewechsel_am_abreisetag_verlaengert_nicht(session: AsyncSession) -> None:
+    """Neuer Gast am Abreisetag — die fremde Belegung bleibt unberuehrt.
+
+    **Die wichtigste Pruefung dieses Blocks.** Die Liste liefert keine
+    Buchungs-ID; die einzige Handhabe ist die Anreise. Faellt dieser Test,
+    verlaengert ein Gaestewechsel die Buchung des Vorgaengers — das Zimmer
+    liefe auf die Daten eines Gastes, der abgereist ist.
+    """
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "309", anreise="04.06.2026", abreise="06.06.2026"
+    )
+
+    # Neue Buchung: Anreise am Abreisetag des Vorgaengers.
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "06.06.2026", "12.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.checkouts_changed == 0
+    occs = await _active_pms(session, room_id)
+    assert occs[0].check_out == datetime(2026, 6, 6, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
+    assert len(skipped) == 1
+    assert skipped[0].new_value["grund"] == "andere_anreise"
+
+
+async def test_abreise_in_der_vergangenheit_wird_nicht_angewendet(
+    session: AsyncSession,
+) -> None:
+    """Vorgabe des Betreibers: eine vergangene Abreise wird nur gemeldet."""
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "310", anreise="04.06.2026", abreise="10.06.2026"
+    )
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "05.06.2026")]),
+        now=JUNI_JETZT,  # 06.06. 07:30 — der 05.06. liegt dahinter
+    )
+
+    assert outcome.checkouts_changed == 0
+    occs = await _active_pms(session, room_id)
+    assert occs[0].check_out == datetime(2026, 6, 10, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
+    assert skipped[0].new_value["grund"] == "abreise_vergangen"
+
+
+async def test_manuelle_belegung_wird_nicht_angefasst(session: AsyncSession) -> None:
+    """Eine manual-Belegung bleibt unberuehrt — Konflikt wie bisher.
+
+    Der Fall von Zimmer 306 ab dem 18.10.: der Hotelier hat von Hand
+    nachgetragen. Die Liste darf daran nichts aendern, auch nicht die
+    Abreise.
+    """
+    num = _room_number("311")
+    room_id = await _seed_room(session, num)
+    manuell = Occupancy(
+        room_id=room_id,
+        check_in=datetime(2026, 6, 4, 14, 0, tzinfo=VIENNA).astimezone(UTC),
+        check_out=datetime(2026, 6, 20, 11, 0, tzinfo=VIENNA).astimezone(UTC),
+        source=OccupancySource.MANUAL,
+    )
+    session.add(manuell)
+    await session.flush()
+    unveraendert = manuell.check_out
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "10.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.conflicts == 1
+    assert outcome.checkouts_changed == 0
+    await session.refresh(manuell)
+    assert manuell.check_out == unveraendert
+    assert await _audits(session, ACTION_CHECKOUT_CHANGED) == []
+    assert len(await _audits(session, ACTION_CONFLICT)) == 1
+
+
+async def test_abreise_vor_der_anreise_wird_nicht_angewendet(session: AsyncSession) -> None:
+    """Abreise vor Anreise — ein Datenfehler der Liste, kein Aufenthalt.
+
+    Erreichbar, weil beide Daten mit Jahr kommen koennen: ``resolve_stay_dates``
+    dreht nur ein **fehlendes** Anreise-Jahr zurueck, zwei ausdrueckliche
+    Jahre werden uebernommen. Ohne diese Bedingung bekaeme die Belegung ein
+    Ende vor ihrem Anfang, und jede Statusableitung danach raet.
+    """
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "312", anreise="04.06.2026", abreise="10.06.2026"
+    )
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "02.06.2026")]),
+        now=datetime(2026, 6, 1, 7, 30, tzinfo=UTC),  # vor beiden Daten
+    )
+
+    assert outcome.checkouts_changed == 0
+    occs = await _active_pms(session, room_id)
+    assert occs[0].check_out == datetime(2026, 6, 10, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
+    assert skipped[0].new_value["grund"] == "abreise_vor_anreise"
+
+
+async def test_verlaengerung_macht_das_zimmer_sofort_wieder_belegt(
+    session: AsyncSession,
+) -> None:
+    """Genau die Lage aus Zimmer 306 — und der Grund fuer ``sync_room_status``.
+
+    Die Abreise ist bereits verstrichen (11:00), das Zimmer steht auf
+    ``vacant``, die Engine senkt ab. Dann kommt die Liste mit der richtigen,
+    spaeteren Abreise. Der Status muss **sofort** umspringen, nicht erst mit
+    dem Minutentakt von ``sync_active_rooms``: ``room.status`` ist die
+    Groesse, die Layer 1 liest (§5.53 — zwei Quellen, eine Wahrheit).
+
+    Eine Mutationsprobe ohne diesen Test liess das Entfernen von
+    ``sync_room_status`` unbemerkt durchgehen.
+    """
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "313", anreise="04.06.2026", abreise="06.06.2026"
+    )
+    nach_abreise = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
+    await sync_room_status(session, room_id, nach_abreise)
+    room = await session.get(Room, room_id)
+    assert room is not None
+    assert room.status == RoomStatus.VACANT, "Vorbedingung: Abreise ist durch"
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "04.06.2026", "10.06.2026")]),
+        now=nach_abreise,
+    )
+
+    assert outcome.checkouts_changed == 1
+    await session.refresh(room)
+    assert room.status == RoomStatus.OCCUPIED

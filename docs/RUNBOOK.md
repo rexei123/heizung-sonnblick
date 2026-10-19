@@ -5246,3 +5246,65 @@ Gäste-Wochenende. Dann dreht sich das Rad gar nicht erst höher.
 
 **Querverweise:** §10w (Wunschtemperatur setzen), §10ae (Bad-Zonen),
 §10t (Ventil-Hinweise), B-22-1 (Bereich am Gerät begrenzen).
+
+---
+
+## 10ag. Verlängerte Aufenthalte kommen jetzt an (seit 19.10.2026)
+
+**Was bis zum 19.10. passierte.** Verlängert ein Gast seinen Aufenthalt,
+steht das in der nächsten Tagesliste aus Casablanca. Unser Import hat das
+**ignoriert**: bestand für das Zimmer schon eine Belegung, wurde die Zeile
+übersprungen — ohne Hinweis, ohne Protokolleintrag. Das Zimmer galt ab dem
+ursprünglich gemeldeten Abreisetag als frei und wurde abgesenkt, während
+der Gast noch da war.
+
+Gefunden am 19.10. in **Zimmer 306**: Aufenthalt bis 04.11., im System bis
+18.10. Die Listen vom 16., 17. und 18.10. trugen die richtige Abreise —
+dreimal verworfen.
+
+**Seit dem 19.10.** zieht der Import die Abreise nach, in beide Richtungen:
+**verlängern und verkürzen**. Das Zimmer wird dabei sofort neu bewertet,
+nicht erst beim nächsten Minutentakt.
+
+### Was Sie im Protokoll sehen
+
+**Einstellungen → API & Webhooks**, Spalte **„Abreise geändert“**. Eine Zahl
+größer 0 heißt: so viele laufende Aufenthalte hat die Liste heute korrigiert.
+Jede Änderung steht einzeln im Audit, mit altem und neuem Datum.
+
+### Was der Import **nicht** anfasst
+
+| Lage | Verhalten |
+|---|---|
+| Sie haben die Belegung **von Hand** angelegt | unangetastet, Konflikt-Eintrag wie bisher — Ihre Eingabe gewinnt |
+| Die Liste meldet eine **andere Anreise** (neuer Gast im selben Zimmer) | keine Änderung, Eintrag „andere_anreise“ |
+| Abreise **in der Vergangenheit** | keine Änderung, Eintrag „abreise_vergangen“ |
+| Abreise **vor der Anreise** | keine Änderung, Eintrag „abreise_vor_anreise“ |
+
+Die zweite Zeile ist die wichtige: die Liste liefert **keine Buchungsnummer**,
+die einzige Handhabe ist die Anreise. Stimmt sie nicht überein, ist es eine
+andere Buchung — und dann wird nichts verlängert.
+
+### Wenn Sie von Hand nachgetragen haben
+
+Dann übernimmt der Import dieses Zimmer **nicht mehr**, solange Ihre Belegung
+läuft, und schreibt stattdessen jeden Tag einen Konflikt. Das ist richtig so
+und kein Fehler. Soll das PMS wieder führen, stornieren Sie Ihre Belegung
+(Zimmerseite → Belegungen); der nächste Import legt die richtige an.
+
+### Eine Lücke, die bleibt
+
+**Gästewechsel am selben Tag.** Reist morgens ein Gast ab und kommt
+nachmittags ein neuer ins selbe Zimmer, wird die neue Buchung an diesem Tag
+**noch nicht** übernommen — die alte Belegung belegt den Tag noch. Erst der
+Import am Folgetag legt sie an, dann rückwirkend und vollständig. Dazwischen
+gilt das Zimmer als frei und wird abgesenkt, etwa von 11:00 bis zum nächsten
+Morgen.
+
+Das ist derselbe Mechanismus, der 306 getroffen hat, nur an der anderen
+Kante — und er ist mit dieser Änderung **nicht** behoben. Betrifft es einen
+konkreten Anreisetag, tragen Sie das Zimmer von Hand nach (dann greift der
+Absatz darüber). Backlog **B-22-2**.
+
+**Querverweise:** §10ad (Belegungs-Import, Ampel und Schwelle), §10k
+(Status sofort synchronisieren), §10w (Wunschtemperatur).

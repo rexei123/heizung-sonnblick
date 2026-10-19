@@ -101,6 +101,7 @@ export default function ApiWebhooksPage() {
                       <th className="text-left px-6 py-2 font-medium">Listendatum</th>
                       <th className="text-left px-6 py-2 font-medium">Belegt</th>
                       <th className="text-left px-6 py-2 font-medium">Geschlossen</th>
+                      <th className="text-left px-6 py-2 font-medium">Abreise geändert</th>
                       <th className="text-left px-6 py-2 font-medium">Konflikte</th>
                       <th className="text-left px-6 py-2 font-medium">Ergebnis</th>
                     </tr>
@@ -126,6 +127,11 @@ export default function ApiWebhooksPage() {
                           </td>
                           <td className="px-6 py-2">{row.rooms_occupied}</td>
                           <td className="px-6 py-2 text-text-secondary">{row.rooms_closed}</td>
+                          <td
+                            className={`px-6 py-2 ${row.checkouts_changed > 0 ? "text-info" : "text-text-secondary"}`}
+                          >
+                            {row.checkouts_changed}
+                          </td>
                           <td
                             className={`px-6 py-2 ${row.conflicts > 0 ? "text-warning" : "text-text-secondary"}`}
                           >
