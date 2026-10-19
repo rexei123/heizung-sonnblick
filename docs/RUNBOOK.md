@@ -5249,7 +5249,7 @@ Gäste-Wochenende. Dann dreht sich das Rad gar nicht erst höher.
 
 ---
 
-## 10ag. Verlängerte Aufenthalte kommen jetzt an (seit 19.10.2026)
+## 10ag. Verlängerung und Gästewechsel kommen an (seit 19./20.10.2026)
 
 **Was bis zum 19.10. passierte.** Verlängert ein Gast seinen Aufenthalt,
 steht das in der nächsten Tagesliste aus Casablanca. Unser Import hat das
@@ -5277,13 +5277,17 @@ Jede Änderung steht einzeln im Audit, mit altem und neuem Datum.
 | Lage | Verhalten |
 |---|---|
 | Sie haben die Belegung **von Hand** angelegt | unangetastet, Konflikt-Eintrag wie bisher — Ihre Eingabe gewinnt |
-| Die Liste meldet eine **andere Anreise** (neuer Gast im selben Zimmer) | keine Änderung, Eintrag „andere_anreise“ |
+| Die Liste meldet eine **andere Anreise** und die Zeiträume überschneiden sich | keine Verlängerung, nichts angelegt, Eintrag „andere_anreise“ |
 | Abreise **in der Vergangenheit** | keine Änderung, Eintrag „abreise_vergangen“ |
 | Abreise **vor der Anreise** | keine Änderung, Eintrag „abreise_vor_anreise“ |
 
 Die zweite Zeile ist die wichtige: die Liste liefert **keine Buchungsnummer**,
 die einzige Handhabe ist die Anreise. Stimmt sie nicht überein, ist es eine
-andere Buchung — und dann wird nichts verlängert.
+andere Buchung — und dann wird **nichts verlängert**.
+
+Überschneiden sich die Zeiträume dabei **nicht** (der übliche Gästewechsel:
+alte Abreise 11:00, neue Anreise 14:00), wird die neue Buchung ganz normal
+angelegt. Siehe unten.
 
 ### Wenn Sie von Hand nachgetragen haben
 
@@ -5292,19 +5296,32 @@ läuft, und schreibt stattdessen jeden Tag einen Konflikt. Das ist richtig so
 und kein Fehler. Soll das PMS wieder führen, stornieren Sie Ihre Belegung
 (Zimmerseite → Belegungen); der nächste Import legt die richtige an.
 
-### Eine Lücke, die bleibt
+### Gästewechsel am selben Tag
 
-**Gästewechsel am selben Tag.** Reist morgens ein Gast ab und kommt
-nachmittags ein neuer ins selbe Zimmer, wird die neue Buchung an diesem Tag
-**noch nicht** übernommen — die alte Belegung belegt den Tag noch. Erst der
-Import am Folgetag legt sie an, dann rückwirkend und vollständig. Dazwischen
-gilt das Zimmer als frei und wird abgesenkt, etwa von 11:00 bis zum nächsten
-Morgen.
+Reist morgens ein Gast ab und kommt nachmittags ein neuer ins selbe Zimmer,
+wird die neue Buchung **sofort** übernommen — seit 20.10.2026. Beide
+Belegungen stehen nebeneinander: die alte endet um 11:00, die neue beginnt
+um 14:00.
 
-Das ist derselbe Mechanismus, der 306 getroffen hat, nur an der anderen
-Kante — und er ist mit dieser Änderung **nicht** behoben. Betrifft es einen
-konkreten Anreisetag, tragen Sie das Zimmer von Hand nach (dann greift der
-Absatz darüber). Backlog **B-22-2**.
+Dazwischen gilt das Zimmer als **reserviert**, nicht als frei. Das ist der
+Unterschied, auf den es ankommt: die Steuerung kennt die Anreise und kann
+vorheizen.
+
+**Vorher** belegte die abreisende Buchung den ganzen Listentag, die neue
+wurde übersprungen und erst am Folgetag angelegt — der neue Gast kam bis zum
+nächsten Vormittag in ein abgesenktes Zimmer, ohne Vorheizen.
+
+**Eine Einstellung, die das kippen würde:** die Uhrzeiten kommen nicht aus
+der Liste, sondern aus den hausweiten Einstellungen (Vorgabe Anreise 14:00,
+Abreise 11:00). Wer die Anreisezeit **vor** die Abreisezeit legt,
+überschneiden sich die beiden Buchungen am Wechseltag, und die neue wird mit
+dem Hinweis „andere_anreise“ abgewiesen statt angelegt. Die beiden Zeiten
+gehören in dieser Reihenfolge.
+
+**Echte Überschneidungen werden weiter abgewiesen.** Melden zwei Buchungen
+für dasselbe Zimmer sich überlappende Zeiträume, legt der Import nichts an
+und protokolliert — zwei Gäste gleichzeitig in einem Zimmer sind ein Fehler
+in der Liste, nicht etwas, das wir nachbauen.
 
 **Querverweise:** §10ad (Belegungs-Import, Ampel und Schwelle), §10k
 (Status sofort synchronisieren), §10w (Wunschtemperatur).

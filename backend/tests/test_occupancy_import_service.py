@@ -995,6 +995,14 @@ async def test_gaestewechsel_am_abreisetag_verlaengert_nicht(session: AsyncSessi
     Buchungs-ID; die einzige Handhabe ist die Anreise. Faellt dieser Test,
     verlaengert ein Gaestewechsel die Buchung des Vorgaengers — das Zimmer
     liefe auf die Daten eines Gastes, der abgereist ist.
+
+    **Angepasst am 20.10.2026 (B-22-2), und zwar absichtlich.** Bis dahin
+    stand hier zusaetzlich, dass **nichts** angelegt wird und ein
+    ``andere_anreise``-Eintrag faellt. Das war das Verhalten, das den neuen
+    Gast bis zum Folgetag ins abgesenkte Zimmer liess. Heute wird die neue
+    Buchung angelegt; unveraendert bleibt, was dieser Test im Kern prueft —
+    die **alte** Belegung wird nicht angefasst. Der Rest steht in
+    ``test_gaestewechsel_am_selben_tag_legt_die_neue_buchung_sofort_an``.
     """
     num, room_id, _ = await _zimmer_mit_belegung(
         session, "309", anreise="04.06.2026", abreise="06.06.2026"
@@ -1008,11 +1016,8 @@ async def test_gaestewechsel_am_abreisetag_verlaengert_nicht(session: AsyncSessi
     )
 
     assert outcome.checkouts_changed == 0
-    occs = await _active_pms(session, room_id)
+    occs = sorted(await _active_pms(session, room_id), key=lambda o: o.check_in)
     assert occs[0].check_out == datetime(2026, 6, 6, 11, 0, tzinfo=VIENNA).astimezone(UTC)
-    skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
-    assert len(skipped) == 1
-    assert skipped[0].new_value["grund"] == "andere_anreise"
 
 
 async def test_abreise_in_der_vergangenheit_wird_nicht_angewendet(
@@ -1126,3 +1131,123 @@ async def test_verlaengerung_macht_das_zimmer_sofort_wieder_belegt(
     assert outcome.checkouts_changed == 1
     await session.refresh(room)
     assert room.status == RoomStatus.OCCUPIED
+
+
+# ---------------------------------------------------------------------------
+# B-22-2: Gaestewechsel am selben Tag (20.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_gaestewechsel_am_selben_tag_legt_die_neue_buchung_sofort_an(
+    session: AsyncSession,
+) -> None:
+    """Abreise 11:00, Anreise 14:00, selbes Zimmer — beide stehen nebeneinander.
+
+    **Der Befund.** Bis zum 20.10.2026 verglich Phase B1 gegen den ganzen
+    **Listentag**. Die abreisende Belegung endet um 11:00, belegte den Tag
+    aber bis Mitternacht — die neue Buchung galt damit als "schon da", wurde
+    uebersprungen und erst vom Import am Folgetag angelegt. Der neue Gast kam
+    bis zum naechsten Vormittag in ein abgesenktes Zimmer.
+
+    Seit dem Vergleich gegen ``[check_in, check_out)`` der neuen Zeile
+    trennen sich die beiden: ``check_out > start`` ist fuer 11:00 gegen 14:00
+    falsch. Zwei Belegungen, keine Ueberlappung.
+
+    Geprueft wird **beides** — dass die neue Belegung entsteht und dass die
+    alte unberuehrt bleibt. Ohne den zweiten Teil koennte der Test auch dann
+    gruen sein, wenn die Zeile die fremde Buchung ueberschreibt.
+    """
+    num, room_id, alt = await _zimmer_mit_belegung(
+        session, "320", anreise="04.06.2026", abreise="06.06.2026"
+    )
+    alt_id, alt_check_out = alt.id, alt.check_out
+
+    # Der Listeneingang liegt am Wechseltag, vormittags — vor beiden Zeiten.
+    vormittags = datetime(2026, 6, 6, 5, 14, 15, tzinfo=UTC)
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "06.06.2026", "12.06.2026")]),
+        now=vormittags,
+    )
+
+    assert outcome.checkouts_changed == 0, "die fremde Buchung wird nicht verlaengert"
+    assert room_id in outcome.affected_room_ids
+
+    occs = sorted(await _active_pms(session, room_id), key=lambda o: o.check_in)
+    assert len(occs) == 2, f"alte und neue Belegung erwartet, waren: {len(occs)}"
+
+    assert occs[0].id == alt_id
+    assert occs[0].check_out == alt_check_out, "die abreisende Belegung bleibt, wie sie war"
+
+    assert occs[1].check_in == datetime(2026, 6, 6, 14, 0, tzinfo=VIENNA).astimezone(UTC)
+    assert occs[1].check_out == datetime(2026, 6, 12, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+
+    # Und sie beruehren sich nicht: 11:00 ist das Ende, 14:00 der Anfang.
+    assert occs[0].check_out <= occs[1].check_in
+
+
+async def test_gaestewechsel_zimmer_ist_am_nachmittag_wieder_belegt(
+    session: AsyncSession,
+) -> None:
+    """Die Wirkung, nicht die Mechanik: der Status folgt der Uhr.
+
+    Drei Zeitpunkte am Wechseltag — vormittags der alte Gast, mittags die
+    Luecke, nachmittags der neue. Genau die mittlere Stunde war vorher
+    **den ganzen Rest des Tages** lang, und in ihr hat die Engine abgesenkt.
+    """
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "321", anreise="04.06.2026", abreise="06.06.2026"
+    )
+    await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "06.06.2026", "12.06.2026")]),
+        now=datetime(2026, 6, 6, 5, 14, 15, tzinfo=UTC),
+    )
+    room = await session.get(Room, room_id)
+    assert room is not None
+
+    for augenblick, erwartet in [
+        (datetime(2026, 6, 6, 8, 0, tzinfo=UTC), RoomStatus.OCCUPIED),  # 10:00 Ortszeit
+        # 12:30 Ortszeit: zwischen Abreise und Anreise. **RESERVED**, nicht
+        # VACANT — es gibt eine bekannte naechste Belegung. Genau das ist
+        # der Gewinn: Layer 1 nimmt den Frei-Wert, aber Layer 2 kann
+        # vorheizen, weil die Anreise jetzt in der Datenbank steht. Vorher
+        # war das Zimmer ~24 h **vacant ohne naechste Belegung**, also ohne
+        # jedes Vorheizen.
+        (datetime(2026, 6, 6, 10, 30, tzinfo=UTC), RoomStatus.RESERVED),
+        (datetime(2026, 6, 6, 14, 0, tzinfo=UTC), RoomStatus.OCCUPIED),  # 16:00 Ortszeit
+    ]:
+        await sync_room_status(session, room_id, augenblick)
+        # **Kein** ``session.refresh``: ``sync_room_status`` aendert das
+        # ORM-Objekt, committet aber nicht (der Aufrufer traegt die
+        # Transaktion, §5.61). Ein Refresh liest die Zeile neu aus der
+        # Datenbank und wirft die Aenderung damit weg — der Test las dann
+        # den Stand vom Listeneingang und meldete ``occupied``.
+        assert room.status == erwartet, f"um {augenblick.isoformat()} erwartet {erwartet}"
+
+
+async def test_echte_ueberlappung_wird_weiter_abgewiesen(session: AsyncSession) -> None:
+    """Zwei Buchungen, die sich wirklich ueberschneiden — nichts wird angelegt.
+
+    Die Gegenprobe zur Lockerung: der schaerfere Vergleich darf nicht dazu
+    fuehren, dass zwei Gaeste gleichzeitig in einem Zimmer landen. Hier
+    laeuft die bestehende Belegung bis zum 10.06., die Liste bringt eine
+    neue Buchung ab dem 08.06. — die Fenster ueberschneiden sich, die
+    Anreise stimmt nicht, also wird abgewiesen und protokolliert.
+    """
+    num, room_id, _ = await _zimmer_mit_belegung(
+        session, "322", anreise="04.06.2026", abreise="10.06.2026"
+    )
+
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[_entry(num, "08.06.2026", "14.06.2026")]),
+        now=JUNI_JETZT,
+    )
+
+    assert outcome.checkouts_changed == 0
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1, "keine zweite, ueberlappende Belegung"
+    assert occs[0].check_out == datetime(2026, 6, 10, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+    skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
+    assert skipped[0].new_value["grund"] == "andere_anreise"

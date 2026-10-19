@@ -292,6 +292,45 @@ async def _active_manual_overlapping(
     return await session.scalar(stmt) is not None
 
 
+async def _nicht_angewendet(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    grund: str,
+    list_date: date,
+    request_ip: str | None,
+    alt_check_out: datetime | None = None,
+    check_out_liste: datetime | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Protokolliert eine Listen-Zeile, die **nicht** angewendet wurde.
+
+    Eine Stelle fuer alle Gruende, damit das Audit eine einzige Form hat und
+    die Betriebsdoku eine einzige Liste (RUNBOOK §10ag).
+    """
+    logger.warning(
+        "occupancy-import Zeile nicht angewendet (%s) room_id=%s check_out_liste=%s",
+        grund,
+        room_id,
+        check_out_liste.isoformat() if check_out_liste else "-",
+    )
+    neu: dict[str, Any] = {"grund": grund, "list_date": list_date}
+    if check_out_liste is not None:
+        neu["check_out_liste"] = check_out_liste
+    if extra:
+        neu.update(extra)
+    await record_business_action(
+        session,
+        user_id=None,
+        action=ACTION_CHECKOUT_SKIPPED,
+        target_type="room",
+        target_id=room_id,
+        old_value=None if alt_check_out is None else {"check_out": alt_check_out},
+        new_value=neu,
+        request_ip=request_ip,
+    )
+
+
 async def _abreise_nachziehen(
     session: AsyncSession,
     *,
@@ -335,52 +374,36 @@ async def _abreise_nachziehen(
 
     anreise_bestehend = bestehende.check_in.astimezone(tz).date()
     if anreise_bestehend != neu.entry_anreise:
-        logger.warning(
-            "occupancy-import abreise nicht nachgezogen (fremde Buchung) room_id=%s "
-            "anreise_system=%s anreise_liste=%s",
-            bestehende.room_id,
-            anreise_bestehend.isoformat(),
-            neu.entry_anreise.isoformat(),
-        )
-        await record_business_action(
+        await _nicht_angewendet(
             session,
-            user_id=None,
-            action=ACTION_CHECKOUT_SKIPPED,
-            target_type="room",
-            target_id=bestehende.room_id,
-            old_value={"occupancy_id": bestehende.id, "check_out": bestehende.check_out},
-            new_value={
-                "grund": "andere_anreise",
+            room_id=bestehende.room_id,
+            grund="andere_anreise",
+            list_date=list_date,
+            request_ip=request_ip,
+            alt_check_out=bestehende.check_out,
+            check_out_liste=neu.check_out,
+            extra={
                 "anreise_system": anreise_bestehend,
                 "anreise_liste": neu.entry_anreise,
-                "check_out_liste": neu.check_out,
-                "list_date": list_date,
             },
-            request_ip=request_ip,
         )
         return False
 
-    if neu.check_out <= now_utc or neu.check_out <= bestehende.check_in:
-        grund = "abreise_vergangen" if neu.check_out <= now_utc else "abreise_vor_anreise"
-        logger.warning(
-            "occupancy-import abreise nicht nachgezogen (%s) room_id=%s check_out_liste=%s",
-            grund,
-            bestehende.room_id,
-            neu.check_out.isoformat(),
-        )
-        await record_business_action(
+    # Nur noch die vergangene Abreise. Eine **umgedrehte** Zeile (Abreise vor
+    # Anreise) kommt hier nicht mehr an: seit B-22-2 vergleicht Phase B1
+    # gegen das Buchungsfenster, und ein umgedrehtes Fenster ueberlappt
+    # nichts — die Zeile wuerde also am Helfer vorbei bis zum Anlegen
+    # durchfallen. Sie wird deshalb **vor** dem Ueberlappungstest abgefangen
+    # (siehe dort). Aufgefallen ist das nur, weil der Test dazu schon stand.
+    if neu.check_out <= now_utc:
+        await _nicht_angewendet(
             session,
-            user_id=None,
-            action=ACTION_CHECKOUT_SKIPPED,
-            target_type="room",
-            target_id=bestehende.room_id,
-            old_value={"occupancy_id": bestehende.id, "check_out": bestehende.check_out},
-            new_value={
-                "grund": grund,
-                "check_out_liste": neu.check_out,
-                "list_date": list_date,
-            },
+            room_id=bestehende.room_id,
+            grund="abreise_vergangen",
+            list_date=list_date,
             request_ip=request_ip,
+            alt_check_out=bestehende.check_out,
+            check_out_liste=neu.check_out,
         )
         return False
 
@@ -553,6 +576,9 @@ async def reconcile_from_import(
         raise OccupancyImportRejectedError(unknown)
 
     target_room_ids = {r.room_id for r in resolved}
+    # Nur noch fuer Phase B2: "welche Belegungen galten an diesem Tag und
+    # fehlen jetzt in der Liste". Phase B1 rechnet seit B-22-2 mit dem
+    # Fenster der einzelnen Buchung (siehe dort).
     day_start_utc, day_end_utc = _local_day_bounds_utc(list_date, tz)
     affected: set[int] = set()
     rooms_occupied = 0
@@ -562,7 +588,53 @@ async def reconcile_from_import(
     # Phase B1: pro Listen-Zimmer anlegen, sofern noch keine aktive pms-
     # Belegung existiert und kein manual-Vorrang greift.
     for r in resolved:
-        bestehende = await _active_pms_overlapping(session, r.room_id, day_start_utc, day_end_utc)
+        # Zuerst die Plausibilitaet der Zeile selbst. **Vor** dem
+        # Ueberlappungstest, weil ein umgedrehtes Fenster nichts ueberlappt
+        # und sonst bis zum Anlegen durchfiele — eine Belegung, die vor ihrem
+        # Anfang endet, und jede Statusableitung danach raet.
+        #
+        # Das Zimmer bleibt dabei in ``target_room_ids``: eine kaputte Zeile
+        # darf **nicht** dazu fuehren, dass Phase B2 den laufenden Aufenthalt
+        # storniert, weil das Zimmer scheinbar nicht mehr in der Liste steht.
+        if r.check_out <= r.check_in:
+            await _nicht_angewendet(
+                session,
+                room_id=r.room_id,
+                grund="abreise_vor_anreise",
+                list_date=list_date,
+                request_ip=request_ip,
+                check_out_liste=r.check_out,
+                extra={"check_in_liste": r.check_in},
+            )
+            continue
+
+        # **Gegen das Fenster der Buchung, nicht gegen den Listentag**
+        # (B-22-2, 20.10.2026). Bis dahin stand hier ``day_start_utc,
+        # day_end_utc``, und das war die Ursache fuer den Gaestewechsel-Fall:
+        # die abreisende Belegung endet um 11:00, belegte den Listentag aber
+        # bis Mitternacht. Die neue Buchung galt damit als "schon da", wurde
+        # uebersprungen und erst am Folgetag angelegt — der neue Gast kam bis
+        # zum naechsten Vormittag in ein abgesenktes Zimmer.
+        #
+        # Mit ``[check_in, check_out)`` der **neuen** Zeile trennen sich die
+        # beiden sauber: ``check_out > start`` ist fuer 11:00 gegen 14:00
+        # falsch, es gibt keine Ueberlappung, und beide Belegungen stehen
+        # nebeneinander ohne sich zu beruehren. Die Ueberlappungs-Invariante
+        # bleibt also gewahrt — sie wird sogar schaerfer geprueft als vorher.
+        #
+        # Fuer Verlaengern und Verkuerzen aendert sich nichts: dort ist es
+        # dieselbe Buchung, die Fenster ueberlappen sich, ``bestehende`` wird
+        # gefunden und ``_abreise_nachziehen`` entscheidet wie bisher.
+        #
+        # **Eine Konfigurations-Falle, die dadurch sichtbar wird:** die
+        # Uhrzeiten kommen nicht aus der Liste, sondern aus ``global_config``
+        # (Vorgabe 14:00 / 11:00). Wer die Check-in-Zeit **vor** die
+        # Check-out-Zeit legt, laesst jeden Wechseltag ueberlappen — dann
+        # findet B1 die abreisende Belegung wieder, die Anreise stimmt nicht
+        # ueberein, und die neue Buchung wird mit ``andere_anreise``
+        # abgewiesen statt angelegt. Nicht abgefangen, weil die Einstellung
+        # dann auch fuer alles andere unsinnig waere; RUNBOOK §10ag nennt es.
+        bestehende = await _active_pms_overlapping(session, r.room_id, r.check_in, r.check_out)
         if bestehende is not None:
             rooms_occupied += 1
             # Seit 19.10.2026: die Abreise wird nachgezogen statt uebersprungen.
