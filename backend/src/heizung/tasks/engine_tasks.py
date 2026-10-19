@@ -37,6 +37,8 @@ from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.engine import (
+    MAX_SETPOINT_C,
+    MIN_SETPOINT_C,
     HysteresisDecision,
     _last_command_for_device,
     _last_command_for_room,
@@ -255,6 +257,7 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 eval_id=eval_id,
                 zone_overrides=result.zone_overrides,
                 bad_setpoint_c=result.bad_setpoint_c,
+                clamp_grenzen_c=result.clamp_grenzen_c,
             )
             sent_devices = per_device_results
 
@@ -528,6 +531,7 @@ async def _dispatch_downlinks_per_zone(
     eval_id: uuid.UUID,
     zone_overrides: dict[int, int] | None = None,
     bad_setpoint_c: int | None = None,
+    clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
 
@@ -579,6 +583,14 @@ async def _dispatch_downlinks_per_zone(
         # Deshalb gibt es fuer das Bad **keine** zweite Vergleichsstelle —
         # und damit auch kein Ping-Pong zwischen Abgleich (21) und
         # Dispatch (22), wie es ein getrennter Pfad erzeugt haette.
+        #
+        # **Die Grenzen folgen derselben Rangfolge** (Hotfix 18.10.2026) —
+        # und zwar nicht aus Symmetrie, sondern weil es die Grenzen sein
+        # muessen, gegen die der Wert tatsaechlich gekappt wurde. Layer 5
+        # kappt eine **Zonen**-Uebersteuerung gegen die Grenzen des
+        # Zimmers, nicht gegen die der Bad-Vorlage; wer hier die Vorlage
+        # nimmt, vergleicht gegen eine Grenze, die dieser Wert nie
+        # gesehen hat.
         if zone.id in zone_overrides:
             zone_target_setpoint_c = zone_overrides[zone.id]
         elif bad_setpoint_c is not None and zone.kind == HeatingZoneKind.BATHROOM:
@@ -692,10 +704,64 @@ async def _dispatch_downlinks_per_zone(
             downlink_alt_genug = prev_at is None or (jetzt - prev_at) >= timedelta(
                 seconds=engine_abgleich.ABGLEICH_MIN_ABSTAND_S
             )
+            # Hotfix 18.10.2026 — die dritte Bedingung war zu weit.
+            #
+            # Bis heute schaltete ein aktiver Override den Abgleich
+            # **vollstaendig** ab. Belegt in Zimmer 306: Obergrenze 25,
+            # Drehrad 07:37 auf 29 -> gekappt auf 25, zuletzt gesendet war
+            # 21, Delta 4 -> Downlink, Geraet auf 25. Drehrad 08:48 auf 26
+            # -> wieder gekappt auf 25, zuletzt gesendet ist jetzt **25**,
+            # Delta 0 -> die Hysterese schweigt. Und der Abgleich, der das
+            # haette fangen muessen, war wegen des Overrides aus. Das
+            # Geraet blieb auf 26, also **ueber der Obergrenze**, bis der
+            # Sechs-Stunden-Heartbeat daran vorbeikam.
+            #
+            # Die Kappung ist eine Zusicherung (Layer 5, §0 S4). Sie darf
+            # nicht davon abhaengen, ob sich der gekappte Wert gerade
+            # aendert.
+            #
+            # **Die Ausnahme bleibt, nur eng.** Ihr Grund ist unveraendert
+            # richtig: ein Gast-Override ist der Fall, in dem das Geraet
+            # absichtlich abweicht, und ein Abgleich auf "Geraet != Soll"
+            # wuerde den Gastwunsch jede halbe Stunde ueberschreiben. Was
+            # er **nicht** rechtfertigt, ist ein Geraet ausserhalb der
+            # Grenzen: dort ist nicht der Gastwunsch das Ziel, sondern die
+            # Grenze, und die hat der Gast nicht zur Wahl.
+            #
+            # Deshalb: kein Override -> wie bisher. Override aktiv -> nur,
+            # wenn der gemeldete Wert **ausserhalb** der Grenzen liegt.
+            # Innerhalb bleibt der Abgleich stumm, auch wenn das Geraet um
+            # ein Grad abweicht.
+            #
+            # **Es sind die Grenzen des Zimmers, auch fuer Bad-Zonen** — und
+            # das ist kein Versehen. Die Bad-Vorlage bringt eigene Grenzen
+            # mit (18/25), aber sie koennen hier nicht wirksam werden:
+            # ``override_service.get_active`` liefert fuer eine Zone auch
+            # **zimmerweite** Overrides, und ein zimmerweiter Override
+            # schaltet den Bad-Wert ohnehin ab (``raumweit_eingegriffen`` in
+            # ``evaluate_room``) — dann faehrt das Bad den Zimmerwert mit den
+            # Zimmer-Grenzen. Eine **zonen**-weite Uebersteuerung steht in
+            # ``zone_overrides`` und wird von Layer 5 ebenfalls gegen die
+            # Zimmer-Grenzen gekappt. Es bleibt kein Fall, in dem ein Bad
+            # gleichzeitig einen aktiven Override **und** seine eigenen
+            # Grenzen haette.
+            #
+            # Ein Parameter fuer die Vorlage-Grenzen war gebaut und ist
+            # wieder heraus: kein erreichbarer Fall (§0 S6). Wer Layer 5
+            # dahin aendert, dass Zonen-Overrides gegen die Grenzen der
+            # Vorlage gekappt werden, muss sie hier nachziehen — sonst
+            # vergleicht der Abgleich gegen eine Grenze, die dieser Wert
+            # nie gesehen hat.
+            if aktiver_override is None:
+                override_erlaubt_abgleich = True
+            else:
+                unten, oben = clamp_grenzen_c
+                override_erlaubt_abgleich = ist_wert is not None and not (unten <= ist_wert <= oben)
+
             if (
                 not dev_decision.should_send
                 and not resync_forced
-                and aktiver_override is None
+                and override_erlaubt_abgleich
                 and ist_wert is not None
                 and ist_wert != zone_target_setpoint_c
                 and downlink_alt_genug
@@ -706,11 +772,18 @@ async def _dispatch_downlinks_per_zone(
                 # ohne Grenze bei jedem Tick angefunkt.
                 if await asyncio.to_thread(engine_abgleich.darf_senden, dev.dev_eui):
                     abgleich_forced = True
+                    trotz_override = aktiver_override is not None
                     dev_decision = HysteresisDecision(
                         should_send=True,
                         reason=(
                             f"engine_abgleich: Geraet meldet {ist_wert}, "
-                            f"Soll {zone_target_setpoint_c} (was: {dev_decision.reason})"
+                            f"Soll {zone_target_setpoint_c}"
+                            + (
+                                f", ausserhalb der Grenzen {clamp_grenzen_c} trotz aktivem Override"
+                                if trotz_override
+                                else ""
+                            )
+                            + f" (was: {dev_decision.reason})"
                         ),
                     )
                     logger.info(

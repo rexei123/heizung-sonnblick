@@ -5739,9 +5739,16 @@ Von oben nach unten — das erste, was zutrifft, gewinnt:
 | 6 | **Raumtyp „Bad“** | die Vorlage |
 | 7 | hausweite Einstellung (Temperaturen & Zeiten) | nur, wo die Vorlage nichts sagt |
 
-**Die Grenzen der Vorlage halten in jedem Fall.** Stellt jemand am Zimmer
-17 °C ein, geht das Schlafzimmer auf 17 — das Bad bleibt bei **18**, seiner
-Untergrenze.
+**Die Grenzen der Vorlage halten gegen eine Einstellung am Zimmer.**
+Stellt jemand am Zimmer 17 °C ein, geht das Schlafzimmer auf 17 — das Bad
+bleibt bei **18**, seiner Untergrenze.
+
+**Nicht aber gegen eine Übersteuerung der Bad-Zone selbst** (Rang 4 oben):
+die wird gegen die Grenzen des **Zimmers** gekappt, nicht gegen die der
+Vorlage. Hier stand zunächst „in jedem Fall“ — das war zu weit gefasst,
+korrigiert am 18.10.2026 beim Bauen des Hotfix in §10af. Praktisch macht
+es heute keinen Unterschied, weil beide Obergrenzen 25 sind; wer die des
+Bades tiefer setzt, muss es wissen.
 
 **Die Zeiten kommen weiter vom Haus.** Nachtfenster und Vorheiz-Vorlauf
 stehen unter „Temperaturen & Zeiten“ und gelten für Bad und Schlafzimmer
@@ -5772,3 +5779,128 @@ der Änderung: aus §10aa Schritt 5.
 **Querverweise:** §10ac (Ist/Soll in der Übersicht), §10t (Ventil-Hinweise),
 §10w (Wunschtemperatur setzen), §10u (Rückfall),
 `backend/src/heizung/rules/badvorlage.py` (die Regel und ihre Begründung).
+
+---
+
+## 10af. Die Obergrenze gilt auch am Gerät (seit 18.10.2026)
+
+**Was ein Gast am Drehrad tun kann.** Das Vicki lässt sich bis 29 °C
+drehen — die Steuerung kappt den Wunsch auf die Obergrenze des Zimmertyps
+(Doppelzimmer und Suite 25, Bad 25 bei Untergrenze 18) und schickt die
+Grenze an das Gerät zurück. Das Zimmer heizt also auf 25, auch wenn am
+Rad 29 steht.
+
+**Was bis zum 18.10. schiefging.** Die Rückmeldung erfolgte nur, wenn sich
+der gekappte Wert dabei **änderte**. Zweimal hintereinander über die
+Grenze gedreht — erst 29, dann 26 — und das zweite Mal blieb ohne Folge:
+beide Male ist das Ziel 25, und die Steuerung sendet nur bei Änderung. Das
+Gerät blieb auf 26, über der Grenze, bis zum nächsten regelmäßigen Abgleich
+(bis zu sechs Stunden). Gefunden vom Betreiber am 18.10. in Zimmer 306.
+
+**Seit dem Hotfix** prüft die Steuerung bei jedem Lauf, ob das Gerät
+**außerhalb** der Grenzen steht, und zieht es zurück — höchstens einmal
+alle 15 Minuten je Gerät, und nach drei erfolglosen Versuchen mit einem
+Eintrag im Protokoll statt weiterer Funkversuche (jeder Downlink ist eine
+Motorbewegung).
+
+### Was das im Betrieb heißt
+
+- **Innerhalb der Grenzen bleibt der Gastwunsch unangetastet.** Dreht
+  jemand auf 23, bleibt es bei 23, auch wenn die Steuerung gerade 21
+  rechnen würde. Nur außerhalb greift sie ein.
+- **Nach unten gilt dasselbe.** Unter die Untergrenze gedreht (15 im
+  Zimmer, 18 im Bad) wird ebenso zurückgezogen — dort ist es
+  Frostschutz, nicht Sparsamkeit.
+- **Es dauert bis zu 15 Minuten.** Zwischen Drehen und Rückzug liegt
+  mindestens ein Lauf; am Rad steht der Gastwert weiter, am Ventil nicht.
+
+**Die Grenzen selbst** stehen unter Einstellungen → Raumtypen, je Typ
+(„Höchste Temperatur“ / „Tiefste Temperatur“). Bäder bekommen ihre eigenen
+über den Raumtyp „Bad“ (§10ae).
+
+**Noch offen:** das Drehrad lässt sich weiterhin über 25 drehen, die
+Steuerung korrigiert nur hinterher. Der Bereich lässt sich auch am Gerät
+selbst begrenzen (Vicki-Befehl `0x08`) — Backlog B-22-1, nach dem ersten
+Gäste-Wochenende. Dann dreht sich das Rad gar nicht erst höher.
+
+**Querverweise:** §10w (Wunschtemperatur setzen), §10ae (Bad-Zonen),
+§10t (Ventil-Hinweise), B-22-1 (Bereich am Gerät begrenzen).
+
+---
+
+## 10ag. Verlängerung und Gästewechsel kommen an (seit 19./20.10.2026)
+
+**Was bis zum 19.10. passierte.** Verlängert ein Gast seinen Aufenthalt,
+steht das in der nächsten Tagesliste aus Casablanca. Unser Import hat das
+**ignoriert**: bestand für das Zimmer schon eine Belegung, wurde die Zeile
+übersprungen — ohne Hinweis, ohne Protokolleintrag. Das Zimmer galt ab dem
+ursprünglich gemeldeten Abreisetag als frei und wurde abgesenkt, während
+der Gast noch da war.
+
+Gefunden am 19.10. in **Zimmer 306**: Aufenthalt bis 04.11., im System bis
+18.10. Die Listen vom 16., 17. und 18.10. trugen die richtige Abreise —
+dreimal verworfen.
+
+**Seit dem 19.10.** zieht der Import die Abreise nach, in beide Richtungen:
+**verlängern und verkürzen**. Das Zimmer wird dabei sofort neu bewertet,
+nicht erst beim nächsten Minutentakt.
+
+### Was Sie im Protokoll sehen
+
+**Einstellungen → API & Webhooks**, Spalte **„Abreise geändert“**. Eine Zahl
+größer 0 heißt: so viele laufende Aufenthalte hat die Liste heute korrigiert.
+Jede Änderung steht einzeln im Audit, mit altem und neuem Datum.
+
+### Was der Import **nicht** anfasst
+
+| Lage | Verhalten |
+|---|---|
+| Sie haben die Belegung **von Hand** angelegt | unangetastet, Konflikt-Eintrag wie bisher — Ihre Eingabe gewinnt |
+| Die Liste meldet eine **andere Anreise** und die Zeiträume überschneiden sich | keine Verlängerung, nichts angelegt, Eintrag „andere_anreise“ |
+| Abreise **in der Vergangenheit** | keine Änderung, Eintrag „abreise_vergangen“ |
+| Abreise **vor der Anreise** | keine Änderung, Eintrag „abreise_vor_anreise“ |
+
+Die zweite Zeile ist die wichtige: die Liste liefert **keine Buchungsnummer**,
+die einzige Handhabe ist die Anreise. Stimmt sie nicht überein, ist es eine
+andere Buchung — und dann wird **nichts verlängert**.
+
+Überschneiden sich die Zeiträume dabei **nicht** (der übliche Gästewechsel:
+alte Abreise 11:00, neue Anreise 14:00), wird die neue Buchung ganz normal
+angelegt. Siehe unten.
+
+### Wenn Sie von Hand nachgetragen haben
+
+Dann übernimmt der Import dieses Zimmer **nicht mehr**, solange Ihre Belegung
+läuft, und schreibt stattdessen jeden Tag einen Konflikt. Das ist richtig so
+und kein Fehler. Soll das PMS wieder führen, stornieren Sie Ihre Belegung
+(Zimmerseite → Belegungen); der nächste Import legt die richtige an.
+
+### Gästewechsel am selben Tag
+
+Reist morgens ein Gast ab und kommt nachmittags ein neuer ins selbe Zimmer,
+wird die neue Buchung **sofort** übernommen — seit 20.10.2026. Beide
+Belegungen stehen nebeneinander: die alte endet um 11:00, die neue beginnt
+um 14:00.
+
+Dazwischen gilt das Zimmer als **reserviert**, nicht als frei. Das ist der
+Unterschied, auf den es ankommt: die Steuerung kennt die Anreise und kann
+vorheizen.
+
+**Vorher** belegte die abreisende Buchung den ganzen Listentag, die neue
+wurde übersprungen und erst am Folgetag angelegt — der neue Gast kam bis zum
+nächsten Vormittag in ein abgesenktes Zimmer, ohne Vorheizen.
+
+**Eine Einstellung, die das kippen würde:** die Uhrzeiten kommen nicht aus
+der Liste, sondern aus den hausweiten Einstellungen (Vorgabe Anreise 14:00,
+Abreise 11:00). Wer die Anreisezeit **vor** die Abreisezeit legt,
+überschneiden sich die beiden Buchungen am Wechseltag, und die neue wird mit
+dem Hinweis „andere_anreise“ abgewiesen statt angelegt. Die beiden Zeiten
+gehören in dieser Reihenfolge.
+
+**Echte Überschneidungen werden weiter abgewiesen.** Melden zwei Buchungen
+für dasselbe Zimmer sich überlappende Zeiträume, legt der Import nichts an
+und protokolliert — zwei Gäste gleichzeitig in einem Zimmer sind ein Fehler
+in der Liste, nicht etwas, das wir nachbauen.
+
+**Querverweise:** §10ad (Belegungs-Import, Ampel und Schwelle), §10k
+(Status sofort synchronisieren), §10w (Wunschtemperatur).
