@@ -5020,6 +5020,585 @@ Nicht alles steht in der Datenbank. Am Dashboard (https://heizung.hoteltec.at):
 
 ---
 
+## 10ab. Secrets-Rotation Schritt für Schritt (B-18-2, Termin 20.10.2026, 10 Uhr)
+
+**Anlass:** Am 19.09.2026 war der Inhalt der `.env` von heizung-test in
+einem Screenshot sichtbar. Rotiert wird **nach** dem ersten
+Gäste-Wochenende, am Dienstag 20.10. um 10 Uhr, mit dem Hotelier am
+Rechner (Entscheidung vom 15.10.2026).
+
+**Warum nicht vorher:** die Rotation berührt die MQTT-Passwörter, und ein
+falscher Wert davon stoppt die Uplinks — also die Regelung. Am ersten
+Gastwochenende ist das der teuerste mögliche Zeitpunkt. Warum es
+überhaupt wartet, statt sofort zu laufen, steht in B-18-2: der Server ist
+nur über Tailscale und Basic-Auth erreichbar.
+
+**Dauer:** rund 90 Minuten für alle sieben Werte, davon etwa die Hälfte
+Wartezeit auf Prüfungen. Die Rotation ist **abbrechbar nach jedem Wert** —
+jeder Block steht für sich und hat seinen eigenen Rückweg.
+
+**§10g bleibt daneben stehen.** Dort liegt das One-Shot-Skript
+`rotate-secrets.sh` (drei Werte in einem Zug, Stack-Neustart am Ende).
+**Am 20.10. wird es nicht benutzt**, weil es genau das überspringt, was
+hier verlangt ist: die Prüfung zwischen den Schritten. Es bleibt der
+schnelle Weg für den Tag, an dem niemand zusieht.
+
+### Was ich nicht geprüft habe
+
+Diese Anleitung ist **aus dem Repo** geschrieben (`docker-compose.prod.yml`,
+`.env.example`, §10a, §10g), nicht am Server — ich habe keinen
+SSH-Zugang. Die Namen der Werte, die Dienste und die Reihenfolge stimmen
+mit dem Repo-Stand vom 15.10.2026 (`a670c3f`). **Ob die `.env` auf dem
+Server genau diese sieben Zeilen trägt, prüft Schritt 0.3** — und wenn
+nicht, wird nicht geraten, sondern gemeldet (§5.68).
+
+---
+
+### Schritt 0 — vor dem ersten Wert (zehn Minuten)
+
+**SSH (heizung-test, root):**
+
+**0.1 Rückfallpunkt notieren.**
+
+```bash
+cd /opt/heizung-sonnblick && git rev-parse --short HEAD
+```
+
+Aufschreiben. Dieser SHA ist der Stand, auf den §10u zurückdreht, falls
+etwas anderes als ein Secret schiefgeht.
+
+**0.2 Datenbank sichern** (zwei der Werte ändern DB-Passwörter):
+
+```bash
+/opt/heizung-sonnblick/infra/deploy/backup.sh && ls -lt /var/backups/heizung | head -3
+```
+
+Die jüngste Datei muss von heute sein. Ist sie es nicht: **abbrechen**
+und §10l (Dead-Man-Checks) nachgehen, nicht rotieren.
+
+**0.3 Bestand der `.env` prüfen — nur die Namen, keine Werte:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep -oE '^[A-Z_]+=' .env | tr -d '=' | sort
+```
+
+Erwartet werden mindestens diese sieben Namen:
+
+| Nr. | Name | Block |
+|---|---|---|
+| 1 | `SECRET_KEY` | A |
+| 2 | `POSTGRES_PASSWORD` | A |
+| 3 | `DATABASE_URL` (enthält Nr. 2) | A |
+| 4 | `CHIRPSTACK_DB_PASSWORD` | A |
+| 5 | `CHIRPSTACK_API_SECRET` | A |
+| 6 | `MQTT_HEIZUNG_PASSWORD` | B |
+| 7 | `MQTT_CHIRPSTACK_PASSWORD` | B |
+| 8 | `MQTT_GATEWAY_UG65_PASSWORD` | B |
+
+**Fehlt ein Name oder steht einer da, der hier nicht steht: melden, nicht
+weitermachen.** Besonders Nr. 8 — `.env.example` im Repo kennt diese
+Zeile **nicht**, §10a.1 setzt sie aber (Doku-Lücke, 15.10.2026
+gefunden). Wenn sie auf dem Server fehlt, läuft das Gateway womöglich
+ohne eigene Zugangsdaten, und das ist ein eigener Befund.
+
+**0.4 Backup der `.env` und der MQTT-Passwortdatei:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && TS=$(date -u +%Y%m%dT%H%M%SZ) && cp -p .env ".env.bak-pre-rotation-$TS" && chmod 600 ".env.bak-pre-rotation-$TS" && cp -p ../mosquitto/config/passwd "../mosquitto/config/passwd.bak-$TS" && echo "BACKUP=$TS"
+```
+
+**Den `TS`-Wert aufschreiben.** Jeder Rückweg unten greift auf diese zwei
+Dateien zu. Die Variable `$TS` bleibt in der Sitzung gültig — wer das
+Terminal schließt, braucht den Wert von Hand.
+
+**0.5 Deploy-Sperre setzen**, damit der Timer nicht mitten in der
+Rotation Container neu startet:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T redis redis-cli SET heizung:lock:inbound_test "secrets-rotation 20.10." EX 7200 && docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T redis redis-cli TTL heizung:lock:inbound_test
+```
+
+Erwartung: `OK`, dann eine Zahl um `7200`.
+
+**Der Schlüssel heißt `inbound_test`, und das ist hier bewusst
+zweckentfremdet** — `deploy-pull.sh` fragt genau diesen einen Schlüssel
+ab und überspringt seinen Lauf, solange er steht (§10p). Die Alternative
+wäre `systemctl stop heizung-deploy-pull.timer`, und die ist semantisch
+sauberer, hat aber das schlechtere Fehlerbild: ein gestoppter Timer muss
+**erinnert** werden, eine TTL erinnert sich selbst. Nach zwei Stunden
+verfällt die Sperre, auch wenn die Sitzung abbricht.
+
+**0.6 Ausgangsmessung** — damit später vergleichbar ist, was sich
+geändert hat:
+
+```bash
+SQL() { docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -tAc "$1"; }
+set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+SQL "SELECT max(time) AS juengster_frame, count(*) FILTER (WHERE time > now() - interval '15 minutes') AS frames_15min FROM sensor_reading;"
+```
+
+Die Zahl `frames_15min` ist der Vergleichswert für **jede** Prüfung in
+Block B. Aufschreiben.
+
+---
+
+### Block A — die vier Werte ohne Funk-Wirkung
+
+Reihenfolge innerhalb von A ist beliebig, die hier ist nach steigender
+Reichweite sortiert.
+
+#### A1 — `SECRET_KEY` (JWT-Signatur)
+
+**Wirkung:** alle angemeldeten Sitzungen werden ungültig. Das Personal
+muss sich neu anmelden — **vorher ankündigen**, sonst ist der erste
+Befund am Dienstagmittag „ich bin rausgeflogen".
+Keine Wirkung auf die Regelung.
+
+**Ändern und wirksam machen:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+NEU=$(openssl rand -hex 32)
+sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${NEU}|" .env
+unset NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate api
+```
+
+Der Wert erscheint **nie auf dem Bildschirm** und nicht in der History —
+die History speichert die getippte Zeile (`${NEU}`), nicht ihren Inhalt.
+
+**Prüfen** (von einem Rechner mit Zugang, nicht auf dem Server):
+
+```bash
+read -rsp "Passwort: " P; echo
+curl -s -o /dev/null -D - -w "status=%{http_code}\n" -X POST https://heizung.hoteltec.at/api/v1/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"hotelsonnblick@gmail.com\",\"password\":\"$P\"}" | grep -iE "set-cookie|status="
+unset P
+```
+
+Erwartung: `status=200` und eine `set-cookie`-Zeile. **Achtung:** §10g
+nennt hier noch `heizung-test.hoteltec.at` — diese Adresse wird seit dem
+Promote am 09.06.2026 nicht mehr bedient (AE-67). Richtig ist
+`heizung.hoteltec.at`.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+ALT=$(grep '^SECRET_KEY=' ".env.bak-pre-rotation-$TS" | cut -d= -f2-)
+sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${ALT}|" .env
+unset ALT
+docker compose -f docker-compose.prod.yml up -d --force-recreate api
+```
+
+#### A2 — `POSTGRES_PASSWORD` und `DATABASE_URL`
+
+**Wirkung:** API, Worker und Beat verlieren die Datenbank, bis sie neu
+starten. Rund 30 Sekunden ohne Engine-Tick — der nächste holt es nach
+(S2, idempotent).
+
+**Ändern:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+NEU=$(openssl rand -hex 32)
+docker compose -f docker-compose.prod.yml exec -T db psql -U "$POSTGRES_USER" -d postgres <<SQL
+ALTER USER ${POSTGRES_USER} WITH PASSWORD '${NEU}';
+SQL
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${NEU}|" .env
+sed -i "s|://${POSTGRES_USER}:[^@]*@|://${POSTGRES_USER}:${NEU}@|" .env
+unset NEU
+```
+
+Erwartung: `ALTER ROLE`. Die zweite `sed`-Zeile zieht
+`DATABASE_URL` nach — **beide Zeilen gehören zusammen**, eine allein
+hinterlässt einen Stand, der nicht startet.
+
+**Gegenprobe, dass das alte Passwort weg ist** (ohne Werte zu zeigen):
+
+```bash
+ALT=$(grep '^POSTGRES_PASSWORD=' ".env.bak-pre-rotation-$TS" | cut -d= -f2-); grep -c "$ALT" .env; unset ALT
+```
+
+Erwartung: `0`.
+
+**Wirksam machen:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d --force-recreate api celery_worker celery_beat
+```
+
+**Prüfen** (drei Dinge, in dieser Reihenfolge):
+
+```bash
+curl -s https://heizung.hoteltec.at/health
+set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+SQL "SELECT count(*) FROM room;"
+SQL "SELECT max(time) FROM event_log;"
+```
+
+Erwartung: `status: ok` mit `version 0.3.0`; eine Zimmerzahl; und ein
+`event_log`-Zeitpunkt, der **jünger als zwei Minuten** ist.
+
+**`/health` ist die API, nicht die Oberfläche** — Caddy leitet genau
+diesen Pfad an `api:8000` (`Caddyfile.test`, Matcher `@backend_health`);
+`/healthz` wäre der web-Container und würde über die Datenbank nichts
+sagen — das ist der
+Beleg, dass die Engine wieder rechnet, und nicht nur, dass die API
+antwortet (§5.76).
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+ALT=$(grep '^POSTGRES_PASSWORD=' ".env.bak-pre-rotation-$TS" | cut -d= -f2-)
+docker compose -f docker-compose.prod.yml exec -T db psql -U "$POSTGRES_USER" -d postgres <<SQL
+ALTER USER ${POSTGRES_USER} WITH PASSWORD '${ALT}';
+SQL
+cp -p ".env.bak-pre-rotation-$TS" .env
+unset ALT
+docker compose -f docker-compose.prod.yml up -d --force-recreate api celery_worker celery_beat
+```
+
+**Wichtig:** das `cp` setzt die **ganze** Datei zurück — also auch A1.
+Wer nur A2 zurückdrehen will, nimmt die beiden `sed`-Zeilen mit dem alten
+Wert statt des `cp`.
+
+#### A3 — `CHIRPSTACK_DB_PASSWORD`
+
+**Wirkung:** ChirpStack verliert seine Datenbank, bis es neu startet.
+Währenddessen werden **keine Uplinks verarbeitet** — die Geräte senden
+weiter, das Gateway puffert nicht. Rund eine Minute Datenlücke, keine
+Fehlsteuerung (die Engine rechnet mit dem letzten bekannten Stand).
+
+**Ändern und wirksam machen:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+NEU=$(openssl rand -hex 32)
+docker compose -f docker-compose.prod.yml exec -T chirpstack-postgres psql -U chirpstack -d postgres <<SQL
+ALTER USER chirpstack WITH PASSWORD '${NEU}';
+SQL
+sed -i "s|^CHIRPSTACK_DB_PASSWORD=.*|CHIRPSTACK_DB_PASSWORD=${NEU}|" .env
+unset NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack-init
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack
+```
+
+**Die beiden `up`-Aufrufe sind nicht austauschbar.** Die ChirpStack-Konfig
+wird von `chirpstack-init` mit `envsubst` gerendert und liegt in einem
+Named Volume — ohne den Init-Lauf liest ChirpStack die **alte**
+Konfiguration mit dem alten Passwort, und der Fehler sieht aus wie ein
+falsch gesetztes `ALTER USER`.
+
+**Prüfen:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs chirpstack --tail 30 | grep -iE "error|started|listen"
+```
+
+Erwartung: ein `Starting ChirpStack`/`listen`-Eintrag **nach** dem
+Neustart, keine `error`-Zeilen zur Datenbank. Dann die Wirkung, nicht die
+Mechanik:
+
+```bash
+set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+SQL "SELECT count(*) FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Erwartung: grösser als 0 innerhalb von fünf Minuten nach dem Neustart.
+Dazu in der ChirpStack-UI (https://cs-test.hoteltec.at): Gateway
+**online**, „Last seen" unter 30 Sekunden.
+
+**Rückweg:** wie A3, mit dem alten Wert:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+ALT=$(grep '^CHIRPSTACK_DB_PASSWORD=' ".env.bak-pre-rotation-$TS" | cut -d= -f2-)
+docker compose -f docker-compose.prod.yml exec -T chirpstack-postgres psql -U chirpstack -d postgres <<SQL
+ALTER USER chirpstack WITH PASSWORD '${ALT}';
+SQL
+sed -i "s|^CHIRPSTACK_DB_PASSWORD=.*|CHIRPSTACK_DB_PASSWORD=${ALT}|" .env
+unset ALT
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack-init chirpstack
+```
+
+#### A4 — `CHIRPSTACK_API_SECRET` (und damit `CHIRPSTACK_API_KEY`)
+
+**Wirkung, und das ist die unangenehmste im Block A:** mit diesem Wert
+signiert ChirpStack seine API-Token. Nach der Rotation sind **alle
+bestehenden API-Keys ungültig** — also auch `CHIRPSTACK_API_KEY` in der
+`.env`, den das Provisionierungs-Skript benutzt (§10h). Die Steuerung
+hängt nicht daran (Downlinks laufen über MQTT, §5.28), ein künftiger
+Geräte-Rollout schon.
+
+**Deshalb ist A4 zweiteilig und braucht die ChirpStack-UI.**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+NEU=$(openssl rand -hex 32)
+sed -i "s|^CHIRPSTACK_API_SECRET=.*|CHIRPSTACK_API_SECRET=${NEU}|" .env
+unset NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack-init
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack
+```
+
+**Prüfen, Teil 1:** in der ChirpStack-UI neu anmelden
+(https://cs-test.hoteltec.at). Dass die Anmeldung **nicht mehr ohne
+Neu-Login geht**, ist der Beleg, dass der Wert gewirkt hat.
+
+**Prüfen, Teil 2 — neuen API-Key erzeugen:** UI → Tenants → Hotel
+Sonnblick → API Keys → Add. Den neuen Wert in die `.env` eintragen:
+
+```bash
+sudo nano /opt/heizung-sonnblick/infra/deploy/.env   # Zeile CHIRPSTACK_API_KEY=
+```
+
+Danach ist nichts neu zu starten — den Key liest nur das
+Provisionierungs-Skript, nicht ein Dienst.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+ALT=$(grep '^CHIRPSTACK_API_SECRET=' ".env.bak-pre-rotation-$TS" | cut -d= -f2-)
+sed -i "s|^CHIRPSTACK_API_SECRET=.*|CHIRPSTACK_API_SECRET=${ALT}|" .env
+unset ALT
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack-init chirpstack
+```
+
+Der alte API-Key gilt danach wieder — ein inzwischen erzeugter neuer
+nicht mehr. Wer zurückdreht, trägt also auch `CHIRPSTACK_API_KEY` aus
+dem Backup zurück.
+
+---
+
+### Block B — die drei MQTT-Werte, einzeln
+
+**Hier hängt die Regelung dran.** Jeder der drei Werte lebt an **zwei**
+Stellen: in der `.env` (für den Dienst, der sich anmeldet) und als
+bcrypt-Hash in `infra/mosquitto/config/passwd` (für Mosquitto, das die
+Anmeldung prüft). **Beide müssen zusammenpassen**, sonst meldet sich der
+Dienst nicht mehr an — und das Fehlerbild ist still: keine Uplinks, keine
+Fehlermeldung in der Oberfläche, nur eine Kachel, die langsam altert.
+
+**Deshalb nach jedem der drei Werte: fünf Minuten warten und die
+Frame-Zahl aus Schritt 0.6 gegenprüfen.** Ohne diese Pause ist die
+Prüfung wertlos, weil ein Vicki sich nur etwa viertelstündlich meldet.
+
+Die Passwortdatei ist in den Container **nur lesend** eingehängt; geändert
+wird sie über ein Wegwerf-Mosquitto mit Schreibrechten auf das
+Host-Verzeichnis (so hat §10a.1 sie auch angelegt).
+
+#### B1 — `MQTT_HEIZUNG_PASSWORD` (API, Worker, Beat)
+
+```bash
+cd /opt/heizung-sonnblick
+NEU=$(openssl rand -hex 32)
+docker run --rm -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd -b /conf/passwd heizung-api "$NEU"
+sed -i "s|^MQTT_HEIZUNG_PASSWORD=.*|MQTT_HEIZUNG_PASSWORD=${NEU}|" infra/deploy/.env
+unset NEU
+chmod 0640 infra/mosquitto/config/passwd
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto api celery_worker celery_beat
+```
+
+**Prüfen:**
+
+```bash
+sleep 300
+set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min, max(time) AS juengster FROM sensor_reading;"
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs api --tail 40 | grep -iE "mqtt|auth|refused"
+```
+
+Erwartung: `frames_5min` grösser als 0 und `juengster` von jetzt; in den
+Logs **kein** `Connection Refused` und kein `not authorised`. Dazu der
+Container-Status:
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "mosquitto|api|celery"
+```
+
+`mosquitto` muss `healthy` sein — sein Healthcheck meldet sich selbst mit
+`heizung-api` an, prüft also genau diesen Wert.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick
+cp -p "infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+chmod 0640 infra/mosquitto/config/passwd
+ALT=$(grep '^MQTT_HEIZUNG_PASSWORD=' "infra/deploy/.env.bak-pre-rotation-$TS" | cut -d= -f2-)
+sed -i "s|^MQTT_HEIZUNG_PASSWORD=.*|MQTT_HEIZUNG_PASSWORD=${ALT}|" infra/deploy/.env
+unset ALT
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto api celery_worker celery_beat
+```
+
+**Achtung:** das `cp` der Passwortdatei setzt **alle drei** MQTT-User
+zurück. Wer B1 zurückdreht, nachdem B2 schon gelaufen ist, muss B2
+danach erneut setzen — oder gleich beide Werte aus dem Backup
+zurückschreiben.
+
+#### B2 — `MQTT_CHIRPSTACK_PASSWORD` (ChirpStack-Server)
+
+```bash
+cd /opt/heizung-sonnblick
+NEU=$(openssl rand -hex 32)
+docker run --rm -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd -b /conf/passwd chirpstack "$NEU"
+sed -i "s|^MQTT_CHIRPSTACK_PASSWORD=.*|MQTT_CHIRPSTACK_PASSWORD=${NEU}|" infra/deploy/.env
+unset NEU
+chmod 0640 infra/mosquitto/config/passwd
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto chirpstack-init
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate chirpstack
+```
+
+Wieder zwei `up`-Aufrufe: der Wert steht in der **gerenderten**
+`region_eu868.toml`, nicht in der Umgebung von ChirpStack selbst.
+
+**Prüfen:** wie B1, fünf Minuten warten, dann Frame-Zahl. Zusätzlich die
+Gegenrichtung — ein Downlink muss ankommen:
+
+```bash
+SQL "SELECT count(*) FROM control_command WHERE sent_to_gateway_at > now() - interval '10 minutes';"
+```
+
+Erwartung grösser als 0, sobald die Engine das nächste Mal etwas zu senden
+hat. **Wenn gerade nichts zu senden ist, ist eine 0 kein Befund** — dann
+die ChirpStack-UI öffnen, ein Gerät wählen, LoRaWAN-Frames-Tab: dort
+müssen Uplinks laufen.
+
+**Rückweg:** wie B1, mit `chirpstack` als User und
+`chirpstack-init chirpstack` im `up`.
+
+#### B3 — `MQTT_GATEWAY_UG65_PASSWORD` (das Gateway selbst)
+
+**Der riskanteste Schritt, und der einzige, der Hardware anfasst.** Das
+UG65 meldet sich mit diesem Wert bei Mosquitto an. Zwischen dem Ändern der
+Passwortdatei und dem Neustart des Gateways **kommen keine Uplinks** —
+diese Lücke ist unvermeidbar und dauert so lange wie der UG65-Reboot
+(etwa zwei Minuten).
+
+**Reihenfolge ist hier anders: erst das Gateway vorbereiten, dann die
+Datei.** Wer die Datei zuerst ändert, hat ein Gateway, das sich nicht
+mehr anmelden kann, und muss es unter Zeitdruck umkonfigurieren.
+
+1. **Wert erzeugen und notieren** (dieser eine muss sichtbar sein — er
+   wird in der Weboberfläche des Gateways getippt):
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. **UG65-Weboberfläche** (LAN-IP, §10a.2): Application → Packet
+   Forwarder → ID 1 → Edit → Password = der neue Wert → **Save, aber noch
+   kein Reboot**.
+
+3. **Passwortdatei und `.env` auf den neuen Wert setzen:**
+
+   ```bash
+   cd /opt/heizung-sonnblick
+   docker run --rm -it -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd /conf/passwd gateway-ug65
+   # fragt den Wert zweimal ab — hier den aus Schritt 1 eintippen
+   sudo nano infra/deploy/.env     # Zeile MQTT_GATEWAY_UG65_PASSWORD=
+   chmod 0640 infra/mosquitto/config/passwd
+   docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
+   ```
+
+4. **UG65 rebooten:** System → Reboot.
+
+5. **Prüfen** — zuerst direkt am MQTT-Strom, dann an den Daten:
+
+   ```bash
+   set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+   docker exec deploy-mosquitto-1 mosquitto_sub -h 127.0.0.1 -p 1883 -u heizung-api -P "$MQTT_HEIZUNG_PASSWORD" -t 'eu868/gateway/+/event/stats' -C 1 -W 120
+   ```
+
+   Erwartung: **eine** Stats-Nachricht innerhalb von zwei Minuten. Kommt
+   keine, ist das Gateway nicht angemeldet → Rückweg. Dann:
+
+   ```bash
+   SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min FROM sensor_reading;"
+   ```
+
+   und in der ChirpStack-UI: Gateway **online**, „Last seen" unter 30 s.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick
+cp -p "infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+chmod 0640 infra/mosquitto/config/passwd
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
+```
+
+Dazu in der UG65-Oberfläche das **alte** Passwort wieder eintragen (aus
+`.env.bak-pre-rotation-$TS`, Zeile `MQTT_GATEWAY_UG65_PASSWORD`) und
+erneut rebooten. **Dieser Rückweg dauert am längsten** — rechnen Sie mit
+zehn Minuten, in denen keine Uplinks kommen. Die Regelung läuft
+weiter, sie rechnet mit dem letzten bekannten Stand (S5).
+
+---
+
+### Schritt 9 — Abschluss
+
+**9.1 Deploy-Sperre lösen** (sonst wartet der nächste Deploy bis zu zwei
+Stunden):
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T redis redis-cli DEL heizung:lock:inbound_test
+```
+
+**9.2 Nachlauf, 30 Minuten später** — die Prüfung, die alle Einzelschritte
+zusammenfasst:
+
+```bash
+set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+SQL "SELECT count(DISTINCT device_id) AS geraete_30min, count(*) AS frames_30min FROM sensor_reading WHERE time > now() - interval '30 minutes';"
+SQL "SELECT max(time) FROM event_log;"
+```
+
+`geraete_30min` muss in der Größenordnung der zugeordneten Geräte liegen
+(§10aa Schritt 1 hat die Zahl), `event_log` jünger als zwei Minuten.
+
+**9.3 Deploy-Timer einmal zusehen:**
+
+```bash
+journalctl -u heizung-deploy-pull -n 20 --no-pager | tail -5
+```
+
+Erwartung: ein `status=success`-Lauf **nach** dem Lösen der Sperre. Das
+ist der Beleg, dass 9.1 gewirkt hat — und nicht nur, dass der Befehl
+`1` zurückgegeben hat.
+
+**9.4 Aufräumen, sieben Tage später** (nicht am 20.10.):
+
+```bash
+cd /opt/heizung-sonnblick
+ls -la infra/deploy/.env.bak-pre-rotation-* infra/mosquitto/config/passwd.bak-*
+# Erst löschen, wenn die Rotation eine Woche gehalten hat:
+# rm infra/deploy/.env.bak-pre-rotation-<TS> infra/mosquitto/config/passwd.bak-<TS>
+```
+
+Sieben Tage, weil verzögerte Fehler erst beim nächsten Anmelden auffallen
+(§10g). Länger ist eigenes Risiko: die Backups tragen die **alten**
+Werte im Klartext.
+
+### Was bewusst nicht mitrotiert wird
+
+| Wert | Warum nicht |
+|---|---|
+| `OCCUPANCY_IMPORT_TOKEN` | Er lebt zur Hälfte bei **mailparser**. Wird er hier geändert und dort nicht, kommt die Tagesliste nicht mehr an, und das fällt erst am nächsten Morgen auf. Eigener Termin, mit der mailparser-Oberfläche offen. Im Screenshot vom 19.09. war diese Zeile **nicht** unter den benannten acht — wenn Sie unsicher sind, ob sie sichtbar war, gehört sie dazu. |
+| `MQTT_GATEWAY_BRIDGE_PASSWORD` | Steht in der Compose-Datei mit Leer-Vorgabe (`:-`), wird also womöglich gar nicht benutzt. Vor einer Rotation erst klären, ob der Basic-Station-Pfad aktiv ist — ein Wert, den niemand liest, zu drehen, kostet nur Risiko. |
+| `CHIRPSTACK_API_KEY` | Fällt mit A4 ohnehin weg und wird dort neu erzeugt. |
+
+**Querverweise:** §10g (das One-Shot-Skript und seine Verify-Routine),
+§10a (das MQTT-Auth-Setup, aus dem die Passwortdatei stammt), §10a.2
+(UG65-Oberfläche), §10p (Deploy-Sperre), §10u (Rückfall auf einen
+SHA — falls nicht ein Secret, sondern der Stand das Problem ist),
+§10aa (Abnahme-Checkliste, dieselben Prüf-Abfragen), §10l
+(Dead-Man-Checks), B-18-2 (der Anlass und die Werte-Liste).
+
+---
+
 ## 10ac. Ist und Soll in der Zimmerübersicht (seit 15.10.2026)
 
 Die Liste zeigt je Zimmer zwei Temperaturen:
