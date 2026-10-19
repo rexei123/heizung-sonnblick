@@ -964,6 +964,8 @@ export interface OccupancyImportLogRow {
   rooms_occupied: number;
   rooms_closed: number;
   conflicts: number;
+  /** Laufende Belegungen, deren Abreise die Liste geaendert hat (seit 19.10.2026). */
+  checkouts_changed: number;
   result: OccupancyImportResult;
 }
 

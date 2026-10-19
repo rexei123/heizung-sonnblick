@@ -132,6 +132,9 @@ class OccupancyImportLogRow(BaseModel):
     rooms_occupied: int
     rooms_closed: int
     conflicts: int
+    #: Laufende Belegungen, deren Abreise die Liste geaendert hat
+    #: (seit 19.10.2026). Vorgabe 0 fuer aeltere Audit-Zeilen.
+    checkouts_changed: int = 0
     result: str  # "applied" | "rejected"
 
 

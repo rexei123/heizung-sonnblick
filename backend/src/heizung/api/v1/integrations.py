@@ -78,6 +78,7 @@ async def import_occupancy(
         "status": "applied",
         "rooms_occupied": outcome.rooms_occupied,
         "rooms_closed": outcome.rooms_closed,
+        "checkouts_changed": outcome.checkouts_changed,
         "conflicts": outcome.conflicts,
     }
 

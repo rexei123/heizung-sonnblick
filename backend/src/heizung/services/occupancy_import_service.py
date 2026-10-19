@@ -43,6 +43,7 @@ from heizung.services.business_audit_service import record_business_action
 from heizung.services.occupancy_service import (
     cancel_occupancy_record,
     create_occupancy_record,
+    sync_room_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,10 @@ ACTION_APPLIED = "OCCUPANCY_IMPORT_APPLIED"
 ACTION_REJECTED = "OCCUPANCY_IMPORT_REJECTED"
 ACTION_CONFLICT = "OCCUPANCY_IMPORT_CONFLICT"
 ACTION_STALE = "OCCUPANCY_IMPORT_STALE"
+#: Abreise einer laufenden pms-Belegung auf den Listenwert gezogen (19.10.2026).
+ACTION_CHECKOUT_CHANGED = "OCCUPANCY_IMPORT_CHECKOUT_CHANGED"
+#: Die Liste wollte die Abreise aendern, es wurde **nicht** angewendet.
+ACTION_CHECKOUT_SKIPPED = "OCCUPANCY_IMPORT_CHECKOUT_SKIPPED"
 TARGET_TYPE = "occupancy_import"
 
 DEFAULT_CHECKIN_LOCAL = time(14, 0)
@@ -89,6 +94,8 @@ class ImportOutcome:
     rooms_occupied: int = 0
     rooms_closed: int = 0
     conflicts: int = 0
+    #: Laufende Belegungen, deren Abreise auf den Listenwert gezogen wurde.
+    checkouts_changed: int = 0
     external_id: str = ""
     list_date: date | None = None
     affected_room_ids: list[int] = field(default_factory=list)
@@ -285,6 +292,129 @@ async def _active_manual_overlapping(
     return await session.scalar(stmt) is not None
 
 
+async def _abreise_nachziehen(
+    session: AsyncSession,
+    *,
+    bestehende: Occupancy,
+    neu: _Resolved,
+    tz: ZoneInfo,
+    now_utc: datetime,
+    list_date: date,
+    request_ip: str | None,
+) -> bool:
+    """Zieht ``check_out`` einer laufenden pms-Belegung auf den Listenwert.
+
+    Gibt ``True`` zurueck, wenn tatsaechlich geaendert wurde.
+
+    **Warum es das gibt (Befund 19.10.2026, Zimmer 306).** Phase B1 hat eine
+    bestehende Belegung bis dahin uebersprungen. Eine Verlaengerung kam damit
+    nie an: die Liste vom 16., 17. und 18.10. trug laengst die richtige
+    Abreise, und wir haben sie dreimal verworfen. Das Zimmer galt ab dem
+    gemeldeten (falschen) Abreisetag als frei und wurde abgesenkt, waehrend
+    der Gast noch zwei Wochen blieb.
+
+    **Dieselbe Buchung — woran?** Die Liste liefert **keine Buchungs-ID**
+    (``OccupancyImportEntry``: Zimmer, Anreise, Abreise, Aufenthaltstyp —
+    ``schemas/occupancy_import.py``). Es bleibt die **Anreise**, und die
+    reicht: zwei Buchungen desselben Zimmers mit gleichem Anreisetag gibt es
+    nicht. Verglichen wird der **Kalendertag in Ortszeit**, nicht der
+    Zeitstempel — sonst wuerde eine geaenderte Standard-Check-in-Zeit in
+    ``global_config`` jede laufende Belegung als fremd erscheinen lassen.
+
+    Das ist genau die Bedingung, die einen **Gaestewechsel am Abreisetag**
+    abfaengt: die neue Buchung bringt eine neue Anreise mit, die Anreise
+    stimmt nicht ueberein, und die fremde Belegung bleibt unangetastet.
+
+    **Was nicht angewendet wird** (Vorgabe des Betreibers): eine Abreise in
+    der Vergangenheit oder vor der Anreise. Beides waere ein Datenfehler in
+    der Liste, und die teure Richtung ist hier, einem laufenden Aufenthalt
+    das Ende vorzuziehen.
+    """
+    if bestehende.check_out == neu.check_out:
+        return False
+
+    anreise_bestehend = bestehende.check_in.astimezone(tz).date()
+    if anreise_bestehend != neu.entry_anreise:
+        logger.warning(
+            "occupancy-import abreise nicht nachgezogen (fremde Buchung) room_id=%s "
+            "anreise_system=%s anreise_liste=%s",
+            bestehende.room_id,
+            anreise_bestehend.isoformat(),
+            neu.entry_anreise.isoformat(),
+        )
+        await record_business_action(
+            session,
+            user_id=None,
+            action=ACTION_CHECKOUT_SKIPPED,
+            target_type="room",
+            target_id=bestehende.room_id,
+            old_value={"occupancy_id": bestehende.id, "check_out": bestehende.check_out},
+            new_value={
+                "grund": "andere_anreise",
+                "anreise_system": anreise_bestehend,
+                "anreise_liste": neu.entry_anreise,
+                "check_out_liste": neu.check_out,
+                "list_date": list_date,
+            },
+            request_ip=request_ip,
+        )
+        return False
+
+    if neu.check_out <= now_utc or neu.check_out <= bestehende.check_in:
+        grund = "abreise_vergangen" if neu.check_out <= now_utc else "abreise_vor_anreise"
+        logger.warning(
+            "occupancy-import abreise nicht nachgezogen (%s) room_id=%s check_out_liste=%s",
+            grund,
+            bestehende.room_id,
+            neu.check_out.isoformat(),
+        )
+        await record_business_action(
+            session,
+            user_id=None,
+            action=ACTION_CHECKOUT_SKIPPED,
+            target_type="room",
+            target_id=bestehende.room_id,
+            old_value={"occupancy_id": bestehende.id, "check_out": bestehende.check_out},
+            new_value={
+                "grund": grund,
+                "check_out_liste": neu.check_out,
+                "list_date": list_date,
+            },
+            request_ip=request_ip,
+        )
+        return False
+
+    alt_check_out = bestehende.check_out
+    bestehende.check_out = neu.check_out
+    await session.flush()
+    # Der Status haengt an der Abreise: eine Verkuerzung auf heute kann das
+    # Zimmer sofort frei machen, eine Verlaengerung es belegt halten.
+    await sync_room_status(session, bestehende.room_id, now_utc)
+    await record_business_action(
+        session,
+        user_id=None,
+        action=ACTION_CHECKOUT_CHANGED,
+        target_type="room",
+        target_id=bestehende.room_id,
+        old_value={"occupancy_id": bestehende.id, "check_out": alt_check_out},
+        new_value={
+            "occupancy_id": bestehende.id,
+            "check_out": neu.check_out,
+            "check_in": bestehende.check_in,
+            "richtung": "verlaengert" if neu.check_out > alt_check_out else "verkuerzt",
+            "list_date": list_date,
+        },
+        request_ip=request_ip,
+    )
+    logger.info(
+        "occupancy-import abreise nachgezogen room_id=%s alt=%s neu=%s",
+        bestehende.room_id,
+        alt_check_out.isoformat(),
+        neu.check_out.isoformat(),
+    )
+    return True
+
+
 async def _record_summary(
     session: AsyncSession,
     *,
@@ -297,6 +427,7 @@ async def _record_summary(
     conflicts: int,
     result: str,
     request_ip: str | None,
+    checkouts_changed: int = 0,
     extra: dict[str, Any] | None = None,
 ) -> None:
     new_value: dict[str, Any] = {
@@ -306,6 +437,7 @@ async def _record_summary(
         "rooms_occupied": rooms_occupied,
         "rooms_closed": rooms_closed,
         "conflicts": conflicts,
+        "checkouts_changed": checkouts_changed,
         "result": result,
     }
     if extra:
@@ -425,12 +557,28 @@ async def reconcile_from_import(
     affected: set[int] = set()
     rooms_occupied = 0
     conflicts = 0
+    checkouts_changed = 0
 
     # Phase B1: pro Listen-Zimmer anlegen, sofern noch keine aktive pms-
     # Belegung existiert und kein manual-Vorrang greift.
     for r in resolved:
-        if await _active_pms_overlapping(session, r.room_id, day_start_utc, day_end_utc):
+        bestehende = await _active_pms_overlapping(session, r.room_id, day_start_utc, day_end_utc)
+        if bestehende is not None:
             rooms_occupied += 1
+            # Seit 19.10.2026: die Abreise wird nachgezogen statt uebersprungen.
+            # Vorher endete die Zeile hier mit ``continue``, und eine
+            # Verlaengerung kam nie an (Befund Zimmer 306).
+            if await _abreise_nachziehen(
+                session,
+                bestehende=bestehende,
+                neu=r,
+                tz=tz,
+                now_utc=now_utc,
+                list_date=list_date,
+                request_ip=request_ip,
+            ):
+                checkouts_changed += 1
+                affected.add(r.room_id)
             continue
         if await _active_manual_overlapping(session, r.room_id, r.check_in, r.check_out):
             conflicts += 1
@@ -477,6 +625,7 @@ async def reconcile_from_import(
         rooms_occupied=rooms_occupied,
         rooms_closed=rooms_closed,
         conflicts=conflicts,
+        checkouts_changed=checkouts_changed,
         result="applied",
         request_ip=request_ip,
     )
@@ -496,6 +645,7 @@ async def reconcile_from_import(
         rooms_occupied=rooms_occupied,
         rooms_closed=rooms_closed,
         conflicts=conflicts,
+        checkouts_changed=checkouts_changed,
         external_id=payload.id,
         list_date=list_date,
         affected_room_ids=sorted(affected),
@@ -560,6 +710,9 @@ def _audit_to_logrow(audit: BusinessAudit) -> OccupancyImportLogRow:
         rooms_occupied=nv["rooms_occupied"],
         rooms_closed=nv["rooms_closed"],
         conflicts=nv["conflicts"],
+        # ``.get`` mit Vorgabe: Audit-Zeilen von vor dem 19.10.2026 kennen
+        # das Feld nicht, und das Protokoll muss sie weiter anzeigen koennen.
+        checkouts_changed=int(nv.get("checkouts_changed", 0)),
         result=nv["result"],
     )
 
