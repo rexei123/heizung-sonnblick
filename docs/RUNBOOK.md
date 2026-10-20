@@ -5904,3 +5904,91 @@ in der Liste, nicht etwas, das wir nachbauen.
 
 **Querverweise:** §10ad (Belegungs-Import, Ampel und Schwelle), §10k
 (Status sofort synchronisieren), §10w (Wunschtemperatur).
+
+---
+
+## 10ai. Drei Belegungslisten pro Tag (seit 20.10.2026)
+
+**Was sich geändert hat.** Casablanca schickt die Liste jetzt **dreimal
+täglich: 08:30, 15:30, 19:30**. Der bisherige Versand um 10:38 entfällt.
+Zweck: ein Zimmerwechsel an der Rezeption ist innerhalb von zwei Stunden
+im System, statt erst am nächsten Morgen.
+
+Drei Listen statt einer verändern zwei Annahmen, die vorher nie geprüft
+werden mussten. Beide sind abgefangen.
+
+### Die 08:30-Liste kommt vor den Abreisen
+
+Abreise ist um 11:00. Führt Casablanca die Abreisenden morgens schon
+nicht mehr auf, dann heißt ihr Fehlen in der 08:30-Liste **nicht**, dass
+das Zimmer leer ist — der Gast frühstückt noch.
+
+**Deshalb gilt seit dem 20.10.:** eine Belegung, deren Abreise auf den
+**Listentag** fällt, wird nicht storniert. Sie endet ohnehin von selbst um
+11:00. Dasselbe für eine Abreise, die schon vorbei ist.
+
+**Der Preis, und er ist bewusst bezahlt:** eine echte **Frühabreise am
+Abreisetag** wird nicht vorgezogen. Reist der Gast um 09:00 ab, heizt das
+Zimmer bis 11:00 weiter. Zweieinhalb Stunden Komfortwärme gegen
+zweieinhalb Stunden Absenkung bei einem anwesenden Gast — die Richtung
+ist eindeutig.
+
+**Eine Abreise an einem früheren Tag storniert weiterhin.** Dort ist der
+Gast sicher weg, und das Zimmer soll nicht bis zum ursprünglich
+gemeldeten Abreisetag heizen.
+
+### Eine verspätete Liste wird abgewiesen
+
+Mail und mailparser garantieren die Reihenfolge nicht. Trifft die
+08:30-Liste **nach** der 15:30-Liste ein, würde sie den älteren Stand
+erneut anwenden: Zimmer stornieren, die die neuere gerade angelegt hat,
+und eine nachgezogene Abreise zurückdrehen.
+
+Der Import vergleicht deshalb den Eingangszeitstempel mit dem der
+bereits angewandten Listen **desselben Tages**. Ist die neue nicht
+jünger, wird sie abgewiesen und als `OCCUPANCY_IMPORT_OUTDATED`
+protokolliert — ohne etwas zu ändern.
+
+**Gleicher Zeitstempel zählt als nicht jünger.** Das ist der Fall einer
+Doppel-Zustellung derselben Liste unter neuer mailparser-Kennung; sie
+läuft an der normalen Doppel-Erkennung vorbei, weil die auf Kennung
+**und** Tag zusammen prüft.
+
+### Was Sie im Protokoll sehen
+
+**Einstellungen → API & Webhooks.** Pro Tag stehen dort jetzt **drei**
+Zeilen statt einer. Normal ist:
+
+| Spalte | Erwartung |
+|---|---|
+| Belegt | die Zahl der belegten Zimmer, bei jeder Liste ähnlich |
+| Geschlossen | meist **0**. Eine Zahl größer 0 heißt: ein Gast ist vorzeitig abgereist, und zwar vor seinem gemeldeten Abreisetag |
+| Abreise geändert | größer 0, wenn eine Verlängerung oder Verkürzung kam (§10ag) |
+| Konflikte | größer 0 nur, wenn eine Belegung von Hand angelegt wurde (§10ag) |
+
+**„Geschlossen“ wird deutlich seltener als vorher.** Das ist die
+beabsichtigte Wirkung, kein Ausfall: bis zum 20.10. hätte jede
+Nachmittagsliste die Abreisen des Vormittags als „geschlossen“ gezählt,
+obwohl sie regulär zu Ende gegangen waren.
+
+**Eine Zeile mit dem Ergebnis `outdated`** heißt, eine Liste kam aus der
+Reihenfolge. Einmal ist das ein Mail-Stau. Täglich wäre es ein Befund für
+den Versand.
+
+### Die Ampel bleibt, hat aber eine blinde Stelle
+
+Der Wächter fragt: **kam heute überhaupt eine Liste?** Das stimmt
+weiterhin, und die Schwelle (Einstellungen → API & Webhooks) passt zum
+ersten Versand um 08:30.
+
+**Was er nicht merkt:** wenn die Listen um 15:30 und 19:30 ausfallen,
+bleibt die Ampel grün — die erste des Tages war ja da. Das
+Zwei-Stunden-Versprechen wäre dann gebrochen, ohne dass jemand es sieht.
+Eine Überwachung auf den **Abstand** zwischen zwei Listen ist als
+nächster Schritt vorgemerkt (Schwelle 3 h); bis dahin ist die Spalte
+„Eingegangen“ im Protokoll die Antwort — stehen dort drei Zeiten, hat es
+funktioniert.
+
+**Querverweise:** §10ag (Verlängerung und Gästewechsel), §10ad
+(Belegungs-Import, Ampel und Schwelle), §10k (Status sofort
+synchronisieren).

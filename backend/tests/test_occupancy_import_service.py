@@ -43,6 +43,7 @@ from heizung.services.occupancy_import_service import (
     ACTION_CHECKOUT_CHANGED,
     ACTION_CHECKOUT_SKIPPED,
     ACTION_CONFLICT,
+    ACTION_OUTDATED,
     ACTION_REJECTED,
     ACTION_STALE,
     OccupancyImportRejectedError,
@@ -230,8 +231,16 @@ async def test_previously_pms_now_missing_is_closed(session: AsyncSession) -> No
     )
     await session.flush()
 
+    # ``now`` im Aufenthalt (04.06.-07.06.), wie bei
+    # ``test_empty_list_closes_all_pms``: ohne das rechnet der Test gegen die
+    # echte Wanduhr, und seit dem 20.10. verschont Phase B2 eine bereits
+    # beendete Belegung. Der Aufenthalt reicht **ueber** den Listentag
+    # hinaus, also ist das Fehlen in der Liste eine Aussage und das Storno
+    # richtig — genau das soll der Test pruefen.
     outcome = await reconcile_from_import(
-        session, payload=_payload(entries=[_entry(kept, "06.06.2026", "08.06.2026")])
+        session,
+        payload=_payload(entries=[_entry(kept, "06.06.2026", "08.06.2026")]),
+        now=datetime(2026, 6, 6, 7, 30, tzinfo=UTC),
     )
 
     assert outcome.rooms_closed == 1
@@ -326,7 +335,16 @@ async def test_empty_list_closes_all_pms(session: AsyncSession) -> None:
     )
     await session.flush()
 
-    outcome = await reconcile_from_import(session, payload=_payload(entries=[]))
+    # ``now`` ausdruecklich **im** Aufenthalt (04.06.-07.06.). Ohne das
+    # rechnet der Test gegen die echte Wanduhr, die Abreise liegt dann
+    # Monate zurueck, und seit dem 20.10. verschont Phase B2 eine bereits
+    # beendete Belegung — der Test pruefte dann etwas anderes als er soll
+    # (§5.59 in anderer Form).
+    outcome = await reconcile_from_import(
+        session,
+        payload=_payload(entries=[]),
+        now=datetime(2026, 6, 6, 7, 30, tzinfo=UTC),
+    )
 
     assert outcome.status == "applied"
     assert outcome.rooms_closed == 1
@@ -906,9 +924,16 @@ async def _zimmer_mit_belegung(
     """
     num = _room_number(suffix)
     room_id = await _seed_room(session, num)
+    # **Eingang 05:00, nicht der Vorgabewert.** Seit dem Mehrfachversand
+    # (20.10.2026) weist der Import eine Liste ab, die nicht **neuer** ist
+    # als eine bereits angewandte desselben Tages. Die Tests darunter
+    # schicken ihre zweite Liste mit dem Vorgabewert (07:14) — der Aufbau
+    # muss davor liegen, sonst gilt die zweite Liste als veraltet.
     await reconcile_from_import(
         session,
-        payload=_payload(entries=[_entry(num, anreise, abreise)]),
+        payload=_payload(
+            received_at="2026-06-06 05:00:00", entries=[_entry(num, anreise, abreise)]
+        ),
         now=JUNI_JETZT,
     )
     occ = (await _active_pms(session, room_id))[0]
@@ -1251,3 +1276,268 @@ async def test_echte_ueberlappung_wird_weiter_abgewiesen(session: AsyncSession) 
     assert occs[0].check_out == datetime(2026, 6, 10, 11, 0, tzinfo=VIENNA).astimezone(UTC)
     skipped = await _audits(session, ACTION_CHECKOUT_SKIPPED)
     assert skipped[0].new_value["grund"] == "andere_anreise"
+
+
+# ---------------------------------------------------------------------------
+# Mehrfachversand (ab 20.10.2026: 08:30, 15:30, 19:30)
+# ---------------------------------------------------------------------------
+#
+# Drei Listen pro Tag aendern zwei Annahmen, die bei einer Liste um 10:38
+# nie geprueft werden mussten:
+#
+#   1. Die Reihenfolge der Zustellung ist nicht garantiert. Eine **aeltere**
+#      Liste, die nach einer neueren eintrifft, wuerde den aelteren Stand
+#      erneut anwenden.
+#   2. Die 08:30-Liste kommt **vor** den Abreisen um 11:00. Fuehrt Casablanca
+#      die Abreisenden dort nicht mehr, waere das Zimmer ab 08:30 frei —
+#      mit dem Gast darin.
+
+#: Der Listentag dieser Tests. 06.06. ist der Tag, auf dem die uebrige
+#: Datei rechnet; ``_payload`` setzt ``received_at`` darauf.
+TAG = date(2026, 6, 6)
+
+
+def _eingang(hh: int, mm: int) -> str:
+    """``received_at`` wie mailparser es liefert: UTC, ohne Zeitzonen-Angabe.
+
+    08:30 Ortszeit im Sommer sind 06:30 UTC. Die Tests rechnen bewusst mit
+    den echten Versandzeiten des Hauses, damit der Listentag stimmt und
+    nicht zufaellig am UTC-Datum kippt (§5.79).
+    """
+    return f"2026-06-06 {hh:02d}:{mm:02d}:00"
+
+
+async def test_zweite_liste_desselben_tages_wird_angewandt(session: AsyncSession) -> None:
+    """Der Normalfall des Mehrfachversands: 15:30 nach 08:30, beide gelten.
+
+    Die Gegenprobe zur Reihenfolge-Wache darunter — ohne diesen Test koennte
+    sie **jede** zweite Liste abweisen und waere trotzdem gruen.
+    """
+    num = _room_number("401")
+    room_id = await _seed_room(session, num)
+
+    erste = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(6, 30), entries=[]),
+        now=datetime(2026, 6, 6, 6, 35, tzinfo=UTC),
+    )
+    zweite = await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at=_eingang(13, 30), entries=[_entry(num, "06.06.2026", "10.06.2026")]
+        ),
+        now=datetime(2026, 6, 6, 13, 35, tzinfo=UTC),
+    )
+
+    assert erste.status == "applied"
+    assert zweite.status == "applied", "die spaetere Liste muss durchgehen"
+    assert len(await _active_pms(session, room_id)) == 1
+
+
+async def test_veraltete_liste_desselben_tages_wird_abgewiesen(
+    session: AsyncSession,
+) -> None:
+    """08:30 trifft **nach** 15:30 ein — nichts wird angewandt.
+
+    Der teure Fall: die alte Liste wuerde Zimmer stornieren, die die neuere
+    gerade angelegt hat, und eine nachgezogene Abreise wieder
+    zurueckdrehen. Geprueft wird deshalb **beides** — die Antwort und dass
+    die Belegung der neueren Liste unberuehrt bleibt.
+    """
+    num = _room_number("402")
+    room_id = await _seed_room(session, num)
+
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at=_eingang(13, 30), entries=[_entry(num, "06.06.2026", "10.06.2026")]
+        ),
+        now=datetime(2026, 6, 6, 13, 35, tzinfo=UTC),
+    )
+
+    nachzuegler = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(6, 30), entries=[]),
+        now=datetime(2026, 6, 6, 13, 40, tzinfo=UTC),
+    )
+
+    assert nachzuegler.status == "outdated"
+    assert nachzuegler.rooms_closed == 0
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1, "die leere Nachzuegler-Liste darf nichts stornieren"
+    assert await _audits(session, ACTION_OUTDATED) != []
+
+
+async def test_gleicher_eingang_zaehlt_nicht_als_neuer(session: AsyncSession) -> None:
+    """Dieselbe Uhrzeit unter neuer Kennung: abgewiesen.
+
+    Eine Doppel-Zustellung derselben Liste bekommt von mailparser eine neue
+    ``id`` und laeuft damit an der Idempotenz vorbei (die prueft Kennung
+    **und** Tag gemeinsam). Ohne ``<=`` wuerde sie erneut angewandt.
+    """
+    num = _room_number("403")
+    await _seed_room(session, num)
+
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at=_eingang(6, 30), entries=[_entry(num, "06.06.2026", "10.06.2026")]
+        ),
+        now=datetime(2026, 6, 6, 6, 35, tzinfo=UTC),
+    )
+    zwilling = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(6, 30), entries=[]),
+        now=datetime(2026, 6, 6, 6, 40, tzinfo=UTC),
+    )
+
+    assert zwilling.status == "outdated"
+
+
+async def test_liste_am_abreisetag_laesst_den_gast_im_haus(session: AsyncSession) -> None:
+    """**Der Fall des Betreibers (Zimmer 208, 21.10. 08:30).**
+
+    Abreisetag, 08:30, das Zimmer fehlt in der Liste — die Belegung bleibt
+    **aktiv bis 11:00**, und ``rooms_closed`` ist 0.
+
+    Ohne diese Ausnahme waere das Zimmer ab 08:30 als frei geregelt und
+    abgesenkt, mit dem Gast darin, zweieinhalb Stunden lang. Die
+    08:30-Liste kommt vor den Abreisen; fuehrt Casablanca die Abreisenden
+    dort nicht mehr, ist ihr Fehlen **kein** Beleg dafuer, dass niemand
+    mehr im Zimmer ist.
+    """
+    num = _room_number("208")
+    room_id = await _seed_room(session, num)
+
+    # Aufenthalt 04.06. bis **06.06.** — der 06.06. ist der Listentag.
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at="2026-06-04 06:30:00", entries=[_entry(num, "04.06.2026", "06.06.2026")]
+        ),
+        now=datetime(2026, 6, 4, 6, 35, tzinfo=UTC),
+    )
+    occ = (await _active_pms(session, room_id))[0]
+    assert occ.check_out == datetime(2026, 6, 6, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+
+    # 08:30 Ortszeit am Abreisetag, Zimmer **fehlt** in der Liste.
+    morgens = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(6, 30), entries=[]),
+        now=datetime(2026, 6, 6, 6, 35, tzinfo=UTC),
+    )
+
+    assert morgens.rooms_closed == 0, "nichts stornieren, der Gast ist noch da"
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1
+    assert occs[0].cancelled_at is None, "die Belegung endet von selbst, nicht durch Storno"
+    assert occs[0].check_out == datetime(2026, 6, 6, 11, 0, tzinfo=VIENNA).astimezone(UTC)
+
+
+async def test_abreise_an_einem_fruheren_tag_wird_weiter_storniert(
+    session: AsyncSession,
+) -> None:
+    """Die Gegenprobe: eine Belegung, die **ueber** den Listentag hinausreicht.
+
+    Hier ist das Fehlen in der Liste eine Aussage — der Gast ist vorzeitig
+    weg, und das Zimmer soll nicht bis zum urspruenglichen Abreisetag
+    heizen. Ohne diesen Test koennte die Ausnahme oben **jede** Stornierung
+    verhindern und waere trotzdem gruen (§5.55).
+    """
+    num = _room_number("404")
+    room_id = await _seed_room(session, num)
+
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at="2026-06-04 06:30:00", entries=[_entry(num, "04.06.2026", "12.06.2026")]
+        ),
+        now=datetime(2026, 6, 4, 6, 35, tzinfo=UTC),
+    )
+
+    morgens = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(6, 30), entries=[]),
+        now=datetime(2026, 6, 6, 6, 35, tzinfo=UTC),
+    )
+
+    assert morgens.rooms_closed == 1
+    occs = await _active_pms(session, room_id)
+    assert occs == [], "die Belegung ist storniert"
+
+
+async def test_abgeschlossener_aufenthalt_wird_nicht_nachtraeglich_storniert(
+    session: AsyncSession,
+) -> None:
+    """15:30-Liste, Abreise war um 11:00: kein Storno.
+
+    Ein Storno wuerde den Aufenthalt als **abgebrochen** markieren, obwohl
+    er regulaer zu Ende ging — und er verschwindet damit aus dem
+    Zimmer-Verlauf (das Diagramm filtert ``cancelled_at``). Bei einer Liste
+    pro Tag um 10:38 konnte das nicht auftreten; mit der 15:30-Liste
+    traefe es **jede** Abreise des Tages.
+    """
+    num = _room_number("405")
+    room_id = await _seed_room(session, num)
+
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at="2026-06-04 06:30:00", entries=[_entry(num, "04.06.2026", "06.06.2026")]
+        ),
+        now=datetime(2026, 6, 4, 6, 35, tzinfo=UTC),
+    )
+
+    nachmittags = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(13, 30), entries=[]),
+        now=datetime(2026, 6, 6, 13, 35, tzinfo=UTC),
+    )
+
+    assert nachmittags.rooms_closed == 0
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1
+    assert occs[0].cancelled_at is None
+
+
+async def test_spaet_verarbeitete_liste_storniert_keinen_beendeten_aufenthalt(
+    session: AsyncSession,
+) -> None:
+    """Der einzige Fall, in dem Punkt 3 **allein** greift — und er ist echt.
+
+    Eine Liste vom 06.06. wird erst am 10.06. verarbeitet (Mail-Stau). Der
+    Aufenthalt endete am 08.06., also **nach** dem Listentag und **vor**
+    jetzt. Damit greift die Listentag-Regel (3b) nicht, die
+    Vergangenheits-Regel (3) schon: der Aufenthalt ist vorbei, ein Storno
+    würde ihn als abgebrochen markieren und aus dem Zimmer-Verlauf
+    entfernen.
+
+    **Dieser Test existiert, weil eine Mutationsprobe Punkt 3 als
+    ungeprüft gemeldet hat** — 3b deckte ihn in allen anderen Fällen mit
+    ab. Ohne diesen Fall wäre die Bedingung Zierde gewesen, und niemand
+    hätte gemerkt, wenn sie wegfällt (§5.55).
+
+    Die Reihenfolge-Wache greift hier nicht: der Aufbau legt eine Liste
+    vom **04.06.** ein, dies ist der **06.06.** — ein anderer Listentag.
+    """
+    num = _room_number("406")
+    room_id = await _seed_room(session, num)
+
+    await reconcile_from_import(
+        session,
+        payload=_payload(
+            received_at="2026-06-04 06:30:00", entries=[_entry(num, "04.06.2026", "08.06.2026")]
+        ),
+        now=datetime(2026, 6, 4, 6, 35, tzinfo=UTC),
+    )
+
+    spaet = await reconcile_from_import(
+        session,
+        payload=_payload(received_at=_eingang(17, 30), entries=[]),
+        now=datetime(2026, 6, 10, 8, 0, tzinfo=UTC),
+    )
+
+    assert spaet.rooms_closed == 0
+    occs = await _active_pms(session, room_id)
+    assert len(occs) == 1
+    assert occs[0].cancelled_at is None, "ein beendeter Aufenthalt wird nicht storniert"
