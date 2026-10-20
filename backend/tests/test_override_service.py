@@ -73,13 +73,24 @@ def test_compute_expires_at_frontend_checkout_with_next() -> None:
     assert result == next_co
 
 
-def test_compute_expires_at_device_with_next() -> None:
+def test_compute_expires_at_device_ignoriert_den_checkout() -> None:
+    """``device`` laeuft 24 h, auch wenn ein Check-out mitgegeben wird.
+
+    **Geaendert am 20.10.2026 (Fix A), und zwar absichtlich.** Vorher stand
+    hier ``result == next_co``: der Ablauf war der Check-out, bei einem
+    langen Aufenthalt bis zu sieben Tage. Die Entscheidung des Betreibers
+    vom 19.10. ersetzt das durch 24 Stunden.
+
+    Der Test gibt ``next_checkout_at`` **trotzdem** mit — damit faellt auf,
+    wenn jemand den Zweig versehentlich wieder daran haengt. Ein Test, der
+    das Argument weglaesst, koennte das nicht sehen.
+    """
     now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
     next_co = datetime(2026, 5, 8, 11, 0, tzinfo=UTC)
     result = override_service.compute_expires_at(
         OverrideSource.DEVICE, now, next_checkout_at=next_co
     )
-    assert result == next_co
+    assert result == now + timedelta(hours=24)
 
 
 def test_compute_expires_at_caps_when_next_checkout_too_far() -> None:
@@ -101,20 +112,42 @@ def test_compute_expires_at_frontend_checkout_without_next_raises() -> None:
         override_service.compute_expires_at(OverrideSource.FRONTEND_CHECKOUT, now)
 
 
-def test_compute_expires_at_device_without_next_raises() -> None:
+def test_compute_expires_at_device_braucht_keinen_checkout() -> None:
+    """``device`` ohne ``next_checkout_at`` — kein Fehler mehr.
+
+    **Umgedreht am 20.10.2026 (Fix A).** Vorher war das ein ``ValueError``:
+    ``device`` lief bis zum Check-out, und ohne Check-out war der Aufruf ein
+    Vertragsbruch. Mit 24 Stunden braucht der Zweig den Wert nicht, also
+    ist der Aufruf gueltig.
+
+    Die Pflicht bleibt dort, wo sie hingehoert: ``frontend_checkout`` wirft
+    weiterhin (siehe
+    ``test_compute_expires_at_frontend_checkout_without_next_raises``).
+    """
     now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
-    with pytest.raises(ValueError, match="next_checkout_at darf nicht None sein"):
-        override_service.compute_expires_at(OverrideSource.DEVICE, now)
+    assert override_service.compute_expires_at(OverrideSource.DEVICE, now) == now + timedelta(
+        hours=24
+    )
 
 
-def test_compute_expires_at_hard_max_caps_device() -> None:
-    """Sprint 12a T2: HARD_MAX (7 Tage) gilt auch fuer DEVICE bei langem checkout."""
+def test_hard_max_greift_nicht_mehr_fuer_device() -> None:
+    """Der 7-Tage-Deckel ist fuer ``device`` ohne Wirkung — 24 h liegt darunter.
+
+    **Ersetzt den Test von Sprint 12a T2** (dort: HARD_MAX kappt ``device``
+    bei langem Check-out). Seit Fix A kann ``device`` den Deckel nicht mehr
+    erreichen. Der Deckel selbst ist **nicht** weg: er gilt weiter fuer
+    ``frontend_checkout``, und genau das prueft
+    ``test_compute_expires_at_caps_when_next_checkout_too_far``.
+
+    Dieser Test haelt fest, dass ein ferner Check-out am Ergebnis nichts
+    aendert — waere der Zweig wieder am Check-out, stuende hier 7 Tage.
+    """
     now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
     far_checkout = now + timedelta(days=14)
     result = override_service.compute_expires_at(
         OverrideSource.DEVICE, now, next_checkout_at=far_checkout
     )
-    assert result == now + timedelta(days=7)
+    assert result == now + timedelta(hours=24)
 
 
 # ---------------------------------------------------------------------------
@@ -780,29 +813,35 @@ async def test_create_allows_when_blocked_false(db_session: AsyncSession, room_i
 # Ablauf von vier Stunden.
 
 
-def test_compute_expires_at_device_manual_vier_stunden() -> None:
-    """Vier Stunden, wie ``frontend_4h`` — aber aus anderem Grund.
+def test_compute_expires_at_device_manual_vierundzwanzig_stunden() -> None:
+    """Die Gast-Drehung laeuft 24 h.
 
-    Bei ``frontend_4h`` waehlt die Rezeption die Dauer. Hier ist sie die
-    Folge daraus, dass die Drehung **belegt** ist und nicht geraten: wer
-    sicher weiss, dass ein Mensch gedreht hat, braucht die Absicherung "im
-    Zweifel bis zum Check-out halten" nicht.
+    **Geaendert am 20.10.2026 (Fix A): vorher vier Stunden.** Die
+    Entscheidung des Betreibers vom 19.10. setzt eine Dauer fuer beide
+    Drehrad-Quellen und fuer die 24-Stunden-Wahl der Rezeption — keine
+    4-Stunden-Regel, keine Nacht-Sonderregel.
+
+    Was damit **entfaellt**, ist die Begruendung, die hier stand: die Dauer
+    war die Folge daraus, dass die Drehung belegt und nicht geraten ist. Die
+    Unterscheidung zwischen ``device`` und ``device_manual`` bleibt (Audit
+    und Vorrang-Reihenfolge), aber sie entscheidet nicht mehr ueber den
+    Ablauf.
     """
     now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 
     result = override_service.compute_expires_at(OverrideSource.DEVICE_MANUAL, now)
 
-    assert result == now + timedelta(hours=4)
+    assert result == now + timedelta(hours=24)
 
 
 def test_compute_expires_at_device_manual_braucht_kein_checkout() -> None:
-    """Ohne ``next_checkout_at`` — im Gegensatz zu ``device``.
+    """Ohne ``next_checkout_at`` — der Uplink-Pfad darf nicht werfen.
 
-    ``device`` und ``frontend_checkout`` werfen ohne Check-out-Zeitpunkt
-    (``ValueError``, weil das OCCUPIED-Gate ihn garantiert haette).
-    ``device_manual`` haengt nicht daran, und dieser Test haelt das fest:
-    sonst waere der neue Wert in der falschen Verzweigung gelandet und haette
-    an einer Stelle geworfen, die mitten im Uplink-Pfad liegt.
+    Nur ``frontend_checkout`` haengt noch am Check-out-Zeitpunkt und wirft
+    ohne ihn (vor Fix A galt das auch fuer ``device``). Dieser Test haelt
+    fest, dass die Drehrad-Quelle nicht daran haengt: sonst wuerde ein
+    Aufruf mitten im Uplink-Pfad werfen, und zwar genau dann, wenn kein
+    Gast eingetragen ist.
     """
     now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 
@@ -810,7 +849,7 @@ def test_compute_expires_at_device_manual_braucht_kein_checkout() -> None:
         OverrideSource.DEVICE_MANUAL, now, next_checkout_at=None
     )
 
-    assert result == now + timedelta(hours=4)
+    assert result == now + timedelta(hours=24)
 
 
 async def test_get_active_device_manual_schlaegt_device(
@@ -1163,3 +1202,91 @@ async def test_bereits_beendete_behalten_ihren_grund(
 
     await db_session.refresh(frueher)
     assert frueher.revoked_reason == "auto_revoke_on_checkout"
+
+
+# ---------------------------------------------------------------------------
+# Fix A (20.10.2026) — ein Test je Fall der Betreiber-Vorgabe
+# ---------------------------------------------------------------------------
+
+
+def test_compute_expires_at_frontend_24h() -> None:
+    """Die neue Wahl der Rezeption: 24 Stunden ab jetzt."""
+    now = datetime(2026, 10, 20, 9, 30, tzinfo=UTC)
+
+    result = override_service.compute_expires_at(OverrideSource.FRONTEND_24H, now)
+
+    assert result == now + timedelta(hours=24)
+
+
+def test_compute_expires_at_frontend_24h_ignoriert_den_checkout() -> None:
+    """Auch mit Check-out-Zeitpunkt bleiben es 24 Stunden.
+
+    „24 Stunden" und „bis Check-out" sind zwei **getrennte** Wahlmoeglichkeiten.
+    Wuerde die erste still am Check-out gekappt, waere die Auswahl eine
+    Scheinwahl, sobald der Gast am selben Tag abreist.
+    """
+    now = datetime(2026, 10, 20, 9, 30, tzinfo=UTC)
+    checkout_heute = datetime(2026, 10, 20, 9, 0, tzinfo=UTC) + timedelta(hours=2)
+
+    result = override_service.compute_expires_at(
+        OverrideSource.FRONTEND_24H, now, next_checkout_at=checkout_heute
+    )
+
+    assert result == now + timedelta(hours=24)
+
+
+def test_historische_quellen_behalten_ihre_dauer() -> None:
+    """``frontend_4h`` und ``frontend_midnight`` rechnen weiter wie vorher.
+
+    Sie sind seit Fix A **nicht mehr waehlbar**, bleiben aber als Werte
+    erhalten — die Historie braucht ihre Etiketten. Dieser Test haelt fest,
+    dass niemand sie „bei der Gelegenheit" auf 24 h umdeutet: ein alter
+    Eintrag war eine Vier-Stunden-Entscheidung und bleibt eine (§5.77 — ein
+    Name, der etwas anderes behauptet als er tut).
+    """
+    now = datetime(2026, 10, 20, 9, 30, tzinfo=UTC)
+    config = GlobalConfig(id=1, timezone="Europe/Vienna")
+
+    assert override_service.compute_expires_at(OverrideSource.FRONTEND_4H, now) == now + timedelta(
+        hours=4
+    )
+
+    mitternacht = override_service.compute_expires_at(
+        OverrideSource.FRONTEND_MIDNIGHT, now, hotel_config=config
+    )
+    lokal = mitternacht.astimezone(ZoneInfo("Europe/Vienna"))
+    assert (lokal.hour, lokal.minute) == (23, 59)
+
+
+async def test_jede_drehung_beginnt_die_24_stunden_neu(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Zwei Drehungen hintereinander: die zweite gilt, mit frischer Frist.
+
+    Die Vorgabe lautet „jedes neue Drehen startet neu 24 h". Das ist **keine
+    zusaetzliche Mechanik**: jede Drehung legt einen neuen Eintrag an, und
+    ``get_active`` nimmt bei gleicher Quelle den juengsten
+    (``created_at DESC``). Dieser Test haelt es fest, damit niemand eine
+    Verlaengerungs-Logik dazubaut — und damit auffaellt, wenn die Sortierung
+    einmal kippt.
+    """
+    erste = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+    zweite = erste + timedelta(hours=5)
+
+    for augenblick, wert in ((erste, Decimal("23")), (zweite, Decimal("25"))):
+        await override_service.create(
+            db_session,
+            room_id=room_id,
+            setpoint=wert,
+            source=OverrideSource.DEVICE_MANUAL,
+            expires_at=override_service.compute_expires_at(
+                OverrideSource.DEVICE_MANUAL, augenblick
+            ),
+        )
+        await db_session.commit()
+
+    aktiv = await override_service.get_active(db_session, room_id)
+
+    assert aktiv is not None
+    assert aktiv.setpoint == Decimal("25.0"), "die juengste Drehung gilt"
+    assert aktiv.expires_at == zweite + timedelta(hours=24), "Frist ab der zweiten Drehung"

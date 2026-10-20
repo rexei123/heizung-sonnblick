@@ -39,7 +39,7 @@ const ROOM = {
 };
 
 interface ZoneActiveOverrideFixture {
-  source: "device" | "frontend_4h" | "frontend_midnight" | "frontend_checkout";
+  source: "device" | "frontend_24h" | "frontend_checkout";
   setpoint_celsius: number;
   started_at: string;
   expires_at: string;
@@ -118,7 +118,7 @@ const HW_STATUS = { status: "active" as const, last_seen: NOW, source: "window" 
 // Sprint 14d FU-5: aktiver Zone-Override jetzt aus HeatingZoneRead.active_override.
 // Form spiegelt DeviceActiveOverride (setpoint_celsius: number, expires_at: ISO).
 const ZONE_ACTIVE_OVERRIDE: ZoneActiveOverrideFixture = {
-  source: "frontend_4h",
+  source: "frontend_24h",
   setpoint_celsius: 21,
   started_at: NOW,
   expires_at: FUTURE,

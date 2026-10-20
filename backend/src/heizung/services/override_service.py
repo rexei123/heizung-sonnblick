@@ -219,22 +219,50 @@ def compute_expires_at(
 ) -> datetime:
     """Default-Ablauf je Quelle, anschliessend 7-Tage-Hard-Cap.
 
-    - ``frontend_4h``        -> ``now + 4 h``
-    - ``frontend_midnight``  -> ``heute 23:59`` Hotel-Timezone (aus
-      ``hotel_config.timezone``, sonst Europe/Vienna).
-    - ``frontend_checkout``  -> ``next_checkout_at`` falls gesetzt,
-      sonst ``now + 7 Tage``.
-    - ``device``             -> identisch zu ``frontend_checkout``.
+    **Stand 20.10.2026 (Fix A, Entscheidung des Betreibers):**
+
+    - ``device`` und ``device_manual`` -> ``now + 24 h``. Jede Drehung legt
+      einen neuen Eintrag an, die 24 Stunden beginnen also neu.
+    - ``frontend_24h``       -> ``now + 24 h``
+    - ``frontend_checkout``  -> ``next_checkout_at`` (Pflicht, siehe unten)
+    - ``frontend_4h``        -> ``now + 4 h`` — **historisch**, nicht mehr
+      waehlbar. Der Zweig bleibt, damit ein Altbestand oder ein alter
+      Aufrufer nicht still auf einen anderen Wert faellt.
+    - ``frontend_midnight``  -> ``heute 23:59`` Hotel-Timezone —
+      **historisch**, wie oben.
+
+    **Was sich geaendert hat, und was das kostet.** ``device`` lief vorher
+    bis zum Check-out (bei einem langen Aufenthalt bis zu 7 Tage),
+    ``device_manual`` vier Stunden. Beide bekommen jetzt 24 Stunden. Fuer den
+    Gast heisst das: wer am Rad dreht, behaelt seinen Wert einen Tag, danach
+    regelt die Engine wieder. Fuer lange Aufenthalte ist das eine spuerbare
+    Verkuerzung, fuer ``device_manual`` eine Verlaengerung.
+
+    **Die Abreise beendet den Override trotzdem** — mit 24 h kann er den
+    Check-out ueberleben, und dann greift
+    ``override_pms_hook.auto_revoke_on_checkout``. Vorher war der Check-out
+    bei ``device`` meist schon das Ablaufdatum selbst; jetzt ist der Haken
+    die einzige Stelle, die ihn beendet.
 
     ``hotel_config`` ist eine ``GlobalConfig``-Singleton-Instanz; der
     Parameter heisst ``hotel_config`` (Plan-Wording), Typ ist projekt-
     seitig ``GlobalConfig``. Multi-Hotel kommt erst Sprint 11+.
     """
-    if source in (OverrideSource.FRONTEND_4H, OverrideSource.DEVICE_MANUAL):
-        # Sprint 20f (T2): ``device_manual`` teilt die vier Stunden mit
-        # ``frontend_4h``. Begruendung in ``OverrideSource``: die Vicki hat die
-        # Drehung ausdruecklich gemeldet, es ist kein abgeleiteter Befund —
-        # also braucht der Wert nicht bis zum Check-out gehalten zu werden.
+    if source in (
+        OverrideSource.FRONTEND_24H,
+        OverrideSource.DEVICE,
+        OverrideSource.DEVICE_MANUAL,
+    ):
+        # Fix A (20.10.2026): ein Ablauf fuer die Gast-Drehung und fuer die
+        # 24-Stunden-Wahl der Rezeption. ``next_checkout_at`` wird hier
+        # **nicht** gelesen — ein Override darf den Check-out ueberschreiten,
+        # beendet wird er dann vom Check-out-Haken.
+        raw = now + timedelta(hours=24)
+    elif source == OverrideSource.FRONTEND_4H:
+        # Historisch (bis Fix A waehlbar, seither nicht mehr). Der Zweig
+        # bleibt mit seinem **alten** Wert: wer eine Bestandszeile neu
+        # berechnet oder einen alten Aufrufer hat, soll vier Stunden
+        # bekommen und nicht stillschweigend etwas anderes.
         raw = now + timedelta(hours=4)
     elif source == OverrideSource.FRONTEND_MIDNIGHT:
         tz_name = hotel_config.timezone if hotel_config is not None else DEFAULT_TIMEZONE
@@ -242,7 +270,7 @@ def compute_expires_at(
         local_now = now.astimezone(tz)
         local_midnight = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
         raw = local_midnight.astimezone(UTC)
-    elif source in (OverrideSource.FRONTEND_CHECKOUT, OverrideSource.DEVICE):
+    elif source == OverrideSource.FRONTEND_CHECKOUT:
         # Sprint 12a T2 (AE-58): Fallback-Pfad ``now+7d`` entfaellt. Mit
         # vorgeschaltetem OCCUPIED-Gate (siehe ``create``) gibt es immer
         # eine aktive Belegung, also liefert ``next_active_checkout`` einen

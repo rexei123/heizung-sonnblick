@@ -288,9 +288,11 @@ test.describe("Sprint 12b — Pro-Zone-Override-Panels", () => {
     await page.getByRole("button", { name: "Anwenden" }).first().click();
 
     await expect.poll(() => postedBody).not.toBeNull();
+    // Fix A (20.10.2026): die Vorauswahl der Rezeption ist "24 Stunden".
+    // Vorher stand hier "frontend_4h" — diese Dauer ist nicht mehr waehlbar.
     expect(postedBody).toMatchObject({
       setpoint: "21",
-      source: "frontend_4h",
+      source: "frontend_24h",
       heating_zone_id: ZONE_BEDROOM.id,
     });
 

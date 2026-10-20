@@ -245,8 +245,8 @@ async def test_fport2_outside_tolerance_returns_uplink(session: AsyncSession) ->
 
 async def test_handle_uplink_creates_device_override(session: AsyncSession) -> None:
     """Voller Stack: Room + HeatingZone + Device + Occupancy. Drehknopf-Diff
-    erkennen -> ManualOverride mit ``source=device`` und ``next_checkout_at``
-    aus aktiver Belegung als ``expires_at``."""
+    erkennen -> ManualOverride mit ``source=device_manual`` und **24 h** als
+    ``expires_at`` (Fix A, 20.10.2026)."""
     short = _unique_short()
     rt = RoomType(name=f"t99-{short}")
     session.add(rt)
@@ -292,18 +292,22 @@ async def test_handle_uplink_creates_device_override(session: AsyncSession) -> N
     # Aufruf steht fuer eine **gemeldete** Drehung (0x28).
     assert override.source == OverrideSource.DEVICE_MANUAL
     assert override.setpoint == Decimal("23.0")
-    # Sprint 20f-b: **vier Stunden, nicht bis zum Check-out.**
+    # **24 Stunden, nicht bis zum Check-out** (Fix A, 20.10.2026).
     #
-    # Der lange Ablauf gehoerte zum abgeleiteten Pfad: wer nur vermutet, dass
-    # jemand gedreht hat, haelt den Wert im Zweifel lange, um einen echten
-    # Gastwunsch nicht zu verlieren. Eine **gemeldete** Drehung braucht diese
-    # Absicherung nicht — und der lange Ablauf war genau das, was die
-    # Phantom-Overrides vom 05.10. bis zum Check-out stehen liess.
+    # Vorher standen hier vier Stunden (Sprint 20f-b), davor der Check-out.
+    # Die Begruendung von 20f-b bleibt richtig — der lange Ablauf gehoerte
+    # zum abgeleiteten Pfad und hat die Phantom-Overrides vom 05.10. bis zum
+    # Check-out stehen lassen. Die Entscheidung des Betreibers vom 19.10.
+    # setzt die Dauer jetzt einheitlich auf 24 h, fuer Gast und fuer die
+    # 24-Stunden-Wahl der Rezeption.
     #
     # ``next_checkout`` bleibt im Setup: die Belegung macht das Zimmer
-    # OCCUPIED, und ohne das greift das Gate aus AE-58.
-    assert abs((override.expires_at - (now + timedelta(hours=4))).total_seconds()) < 1
-    assert override.expires_at < next_checkout
+    # OCCUPIED, und ohne das greift das Gate aus AE-58. Der Vergleich damit
+    # ist **weg** — mit 24 h kann der Override den Check-out ueberschreiten,
+    # und das ist beabsichtigt: beendet wird er dann von
+    # ``auto_revoke_on_checkout``. Ein ``expires_at < next_checkout`` waere
+    # hier eine Zusicherung, die nicht mehr gilt.
+    assert abs((override.expires_at - (now + timedelta(hours=24))).total_seconds()) < 1
     assert override.reason == "auto: Handverstellung am Drehrad (0x28 gemeldet)"
 
 

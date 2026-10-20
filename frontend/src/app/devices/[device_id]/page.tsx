@@ -607,9 +607,10 @@ function WindowBackplateCard({
 const OVERRIDE_SOURCE_LABEL: Record<OverrideSource, string> = {
   device_manual: "Drehring am Thermostat",
   device: "Drehring am Thermostat (vermutet, alt)",
-  frontend_4h: "Rezeption (4 h)",
-  frontend_midnight: "Rezeption (bis Mitternacht)",
+  frontend_24h: "Rezeption (24 h)",
   frontend_checkout: "Rezeption (bis Check-out)",
+  frontend_4h: "Rezeption (4 h, alt)",
+  frontend_midnight: "Rezeption (bis Mitternacht, alt)",
 };
 
 /** D5: Override-Status read-only (AE-61) — keine Aktion auf Geräte-Seite. */

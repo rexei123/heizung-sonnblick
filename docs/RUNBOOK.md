@@ -825,10 +825,13 @@ curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
 
 Erlaubte `source`-Werte:
 
-- `device` — vom System bei Auto-Detect (siehe AE-45) — manuell nicht setzen
-- `frontend_4h` — Standard-Frontend-Override, 4 h Gültigkeit
-- `frontend_midnight` — gültig bis 00:00
+- `device_manual` — vom System bei einer gemeldeten Drehung (AE-45,
+  Sprint 20f) — manuell nicht setzen, 24 h Gültigkeit
+- `frontend_24h` — Auswahl der Rezeption, 24 h Gültigkeit
 - `frontend_checkout` — gültig bis Check-out der aktiven Belegung
+- `device`, `frontend_4h`, `frontend_midnight` — **historisch**, werden
+  nicht mehr neu angelegt (§10ah). Die Werte bleiben erlaubt, damit
+  Bestandszeilen lesbar bleiben.
 
 `setpoint` muss ganzzahlig sein (Vicki-Hardware-Constraint, Dezimalstellen werden mit 422 abgelehnt).
 
@@ -908,7 +911,9 @@ Sprint 12a hat das Override-Modell konsolidiert (AE-58): Override existiert nur 
      https://heizung-test.hoteltec.at/api/v1/occupancies/<id>
    ```
 
-   `sync_room_status` wechselt automatisch `OCCUPIED → VACANT`. Wenn kein Folge-Checkin innerhalb 4 h ansteht, triggert `auto_revoke_on_checkout` (`revoke_all_active_overrides`) — der Wartungs-Override wird sauber revokiert, Audit-Spur bleibt. Raum laeuft anschliessend auf globalen Einstellungen.
+   `sync_room_status` wechselt automatisch `OCCUPIED → VACANT`, und `auto_revoke_on_checkout` (`revoke_all_active_overrides`) widerruft den Wartungs-Override — Audit-Spur bleibt, Raum laeuft anschliessend auf globalen Einstellungen.
+
+   **Korrigiert am 20.10.2026:** hier stand „wenn kein Folge-Checkin innerhalb 4 h ansteht". Dieses Gnaden-Fenster ist mit **Sprint 20f (T5)** entfallen — ein Override endet seither mit **jeder** Abreise, ohne Ausnahme. Der Satz hat die alte Bedingung vier Monate lang als geltend beschrieben (§5.77).
 
 **Begruendung:** Eine Override-Quelle weniger (AE-29 entfaellt), eine konsistente Lifecycle-Logik (Override + Belegung sind gekoppelt), saubere Audit-Spur in `occupancy` + `manual_override` + `business_audit` statt eines parallelen `manual_setpoint_event`-Pfads. Referenz: `docs/ARCHITEKTUR-ENTSCHEIDUNGEN.md` AE-58.
 
@@ -3715,7 +3720,7 @@ gibt keine Übersteuerung, sendet sie nach.
 
 | Lage | Was passiert | Wie lange |
 |---|---|---|
-| Zimmer **belegt**, Gast hat am Rad gedreht | Gastwert bleibt | **4 h**, oder bis zur Abreise |
+| Zimmer **belegt**, Gast hat am Rad gedreht | Gastwert bleibt | **24 h**, oder bis zur Abreise (§10ah) |
 | Zimmer **nicht belegt** (Montage, Leerstand) | Engine holt den Sollwert zurück | **spätestens 45 min** |
 
 Die 45 Minuten sind der schlechteste Fall: bis zu 30 Minuten Sperre plus
@@ -5904,3 +5909,72 @@ in der Liste, nicht etwas, das wir nachbauen.
 
 **Querverweise:** §10ad (Belegungs-Import, Ampel und Schwelle), §10k
 (Status sofort synchronisieren), §10w (Wunschtemperatur).
+
+---
+
+## 10ah. Wie lange eine Übersteuerung gilt (seit 20.10.2026)
+
+**Zwei Dauern, und das ist die ganze Regel.**
+
+| Wer | Wie lange |
+|---|---|
+| **Gast** dreht am Rad | **24 Stunden** ab der Drehung |
+| **Rezeption** wählt „24 Stunden“ | 24 Stunden ab dem Setzen |
+| **Rezeption** wählt „Bis Check-out“ | bis zur Abreise des Gastes |
+
+**Jedes neue Drehen beginnt die 24 Stunden neu.** Dreht ein Gast am Montag
+um 18:00 und am Dienstag um 09:00, gilt sein Wert bis Mittwoch 09:00.
+
+**Die Abreise beendet jede Übersteuerung**, auch eine, deren 24 Stunden noch
+nicht um sind. Der nächste Gast bekommt das Zimmer auf den hausweiten
+Einstellungen, nicht auf der Wunschtemperatur seines Vorgängers.
+
+**Die Grenzen gelten weiter.** Eine Übersteuerung wird auf die Grenzen des
+Raumtyps gekappt (Doppelzimmer und Suite 15 bis 25 °C, Bad 18 bis 25 °C) —
+auch am Gerät, seit §10af.
+
+### Was sich geändert hat
+
+| | vorher | jetzt |
+|---|---|---|
+| Gast dreht am Rad | 4 Stunden | **24 Stunden** |
+| Auswahl der Rezeption | 4 Stunden · bis Mitternacht · bis Check-out | **24 Stunden · bis Check-out** |
+
+**Für lange Aufenthalte ist das eine Verkürzung, die man kennen sollte.**
+Davor gab es eine Fassung, in der ein Drehrad-Wert bis zum Check-out hielt —
+bei einem Zwei-Wochen-Gast also bis zu sieben Tage. Wer heute dreht, hat
+seinen Wert einen Tag; danach regelt die Steuerung wieder nach Belegung und
+Nachtabsenkung. Beschwert sich ein Gast, dass „es wieder umgestellt wurde“,
+ist das die Erklärung — und die Rezeption kann „Bis Check-out“ setzen.
+
+### In freien Zimmern geht es nicht
+
+Das Formular ist dort gesperrt, und das bleibt so: eine Wunschtemperatur
+ohne Gast würde beim Check-out ohnehin aufgehoben und arbeitet bis dahin
+gegen die Absenkung. „Bis Check-out“ weist der Server zusätzlich ab, wenn
+keine Belegung läuft (§10w nennt den Sonderfall in der Minute nach einem
+Check-in).
+
+### In der Historie
+
+Der Reiter „Übersteuerung“ zeigt jetzt, **wie** eine Übersteuerung geendet
+hat:
+
+| Text | Bedeutung |
+|---|---|
+| „abgelaufen“ | die Frist war um |
+| „mit der Abreise beendet“ | der Gast ist ausgezogen |
+| „manuell aufgehoben“ | jemand hat sie von Hand beendet |
+
+**Vorher stand bei jeder beendeten Übersteuerung „manuell aufgehoben“** —
+also beim Normalfall die falsche Aussage. Wer den Verlauf eines Zimmers
+gelesen hat, musste annehmen, das Personal habe ständig eingegriffen.
+
+**Alte Einträge bleiben lesbar.** „4 Stunden (Mitarbeiter, alt)“ und „Bis
+Mitternacht (Mitarbeiter, alt)“ tauchen in der Historie weiter auf — sie
+sind nur nicht mehr wählbar. Das „alt“ ist der Hinweis darauf, dass diese
+Dauer damals gegolten hat und heute nicht mehr gesetzt werden kann.
+
+**Querverweise:** §10w (Wunschtemperatur setzen, und warum der Knopf grau
+ist), §10af (die Obergrenze gilt auch am Gerät), §10t (Ventil-Hinweise),
+AE-58 (Override-Modell), AE-45 (Drehrad-Erkennung).

@@ -48,7 +48,7 @@ interface ZoneFixture {
   created_at: string;
   updated_at: string;
   active_override?: {
-    source: "device" | "frontend_4h" | "frontend_midnight" | "frontend_checkout";
+    source: "device" | "frontend_24h" | "frontend_checkout";
     setpoint_celsius: number;
     started_at: string;
     expires_at: string;
@@ -124,7 +124,7 @@ test.describe("Sprint 14e — ZoneCard-Header (FU-1 + FU-2)", () => {
         mean_temperature_c: 21.0,
         engine_setpoint_c: 21.0,
         active_override: {
-          source: "frontend_4h",
+          source: "frontend_24h",
           setpoint_celsius: 23.0,
           started_at: NOW,
           expires_at: FUTURE,
@@ -141,7 +141,7 @@ test.describe("Sprint 14e — ZoneCard-Header (FU-1 + FU-2)", () => {
     // Source-Badge sichtbar (Gast/Mitarbeiter erkennbar).
     const src = page.getByTestId("zone-card-201-soll-source");
     await expect(src).toBeVisible();
-    await expect(src).toContainText("4 Stunden (Mitarbeiter)");
+    await expect(src).toContainText("24 Stunden (Mitarbeiter)");
   });
 
   test("Null-Werte rendern als Em-Dash (R2)", async ({ page }) => {
