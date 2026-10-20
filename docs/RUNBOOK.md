@@ -5043,20 +5043,48 @@ jeder Block steht für sich und hat seinen eigenen Rückweg.
 hier verlangt ist: die Prüfung zwischen den Schritten. Es bleibt der
 schnelle Weg für den Tag, an dem niemand zusieht.
 
-### Was ich nicht geprüft habe
+### Am Server geprüft am 20.10.2026 — drei Abweichungen
 
-Diese Anleitung ist **aus dem Repo** geschrieben (`docker-compose.prod.yml`,
-`.env.example`, §10a, §10g), nicht am Server — ich habe keinen
-SSH-Zugang. Die Namen der Werte, die Dienste und die Reihenfolge stimmen
-mit dem Repo-Stand vom 15.10.2026 (`a670c3f`). **Ob die `.env` auf dem
-Server genau diese sieben Zeilen trägt, prüft Schritt 0.3** — und wenn
-nicht, wird nicht geraten, sondern gemeldet (§5.68).
+Diese Anleitung war zuerst **aus dem Repo** geschrieben
+(`docker-compose.prod.yml`, `.env.example`, §10a, §10g), nicht am Server.
+Schritt 0.3 wurde am Morgen des 20.10. vor der Rotation ausgeführt und hat
+drei Abweichungen gezeigt. Alle drei sind unten eingearbeitet; was hier
+steht, ist der **gemessene** Stand, nicht der vermutete:
+
+| Befund | Folge für diese Anleitung |
+|---|---|
+| `MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` **nicht**. Das Gateway läuft über Basic Station gegen `chirpstack-gateway-bridge`, nicht mit eigenen MQTT-Zugangsdaten. | **Schritt B3 entfällt vollständig.** |
+| Die Bridge meldet sich bei Mosquitto als User **`chirpstack`** an (`MQTT_GATEWAY_BRIDGE_USER=chirpstack`), und `MQTT_GATEWAY_BRIDGE_PASSWORD` ist **derselbe Wert** wie `MQTT_CHIRPSTACK_PASSWORD`. | **B2 setzt beide Zeilen gemeinsam** und erzeugt die Bridge mit ihrem Init-Sidecar neu. Sonst stoppen **alle** Uplinks. |
+| `CHIRPSTACK_API_KEY` existiert in der Server-`.env` **nicht**. | **A4 Teil 2 schreibt nichts in die `.env`.** Der Key wird nur beim Provisionieren gebraucht und dort in der Umgebung mitgegeben. |
+
+**Die zweite Zeile ist die gefährlichste**, und sie wäre bei der alten
+Fassung mit hoher Wahrscheinlichkeit zugeschlagen: B2 hätte den
+Mosquitto-Hash für `chirpstack` neu gesetzt und `MQTT_CHIRPSTACK_PASSWORD`
+nachgezogen, die Bridge hätte aber weiter mit dem **alten** Passwort
+angeklopft — abgewiesen, keine Uplinks, und der Fehler sieht aus wie ein
+Gateway-Ausfall. Dass sie sich denselben Mosquitto-User teilen, stand
+nirgends; `.env.example` nennt `MQTT_GATEWAY_BRIDGE_USER` ohne Vorgabe,
+und die Bridge-Zeile stand in der Tabelle „bewusst nicht mitrotiert" mit
+der Begründung, sie werde „womöglich gar nicht benutzt" (§5.77 — ein
+Vermerk, der mehr behauptete, als er wusste).
 
 ---
 
 ### Schritt 0 — vor dem ersten Wert (zehn Minuten)
 
 **SSH (heizung-test, root):**
+
+**0.0 Sitzung gegen Verbindungsabbrüche sichern.** Die Rotation läuft
+rund 90 Minuten über Tailscale, und `$TS` aus Schritt 0.4 lebt nur in
+dieser Shell — reißt die Verbindung, ist der Rückweg ohne den Wert
+mühsamer.
+
+```bash
+tmux new -s rotation
+```
+
+Bricht die Verbindung ab: neu verbinden und `tmux attach -t rotation`. Die
+Sitzung läuft weiter, `$TS` ist noch gesetzt. Am Ende `exit`.
 
 **0.1 Rückfallpunkt notieren.**
 
@@ -5093,13 +5121,25 @@ Erwartet werden mindestens diese sieben Namen:
 | 5 | `CHIRPSTACK_API_SECRET` | A |
 | 6 | `MQTT_HEIZUNG_PASSWORD` | B |
 | 7 | `MQTT_CHIRPSTACK_PASSWORD` | B |
-| 8 | `MQTT_GATEWAY_UG65_PASSWORD` | B |
+| 8 | `MQTT_GATEWAY_BRIDGE_PASSWORD` (gleicher Wert wie Nr. 7) | B |
+
+Dazu `MQTT_GATEWAY_BRIDGE_USER` — **kein** Geheimnis, sondern der
+Benutzername, und er steht auf `chirpstack`. Er wird **nicht** geändert;
+er ist nur der Beleg dafür, dass Nr. 7 und Nr. 8 denselben Mosquitto-User
+betreffen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep '^MQTT_GATEWAY_BRIDGE_USER=' .env
+```
+
+Erwartung: `MQTT_GATEWAY_BRIDGE_USER=chirpstack`. **Steht dort etwas
+anderes, ist B2 unten falsch** — dann melden und nicht rotieren, denn dann
+braucht die Bridge einen eigenen Hash.
 
 **Fehlt ein Name oder steht einer da, der hier nicht steht: melden, nicht
-weitermachen.** Besonders Nr. 8 — `.env.example` im Repo kennt diese
-Zeile **nicht**, §10a.1 setzt sie aber (Doku-Lücke, 15.10.2026
-gefunden). Wenn sie auf dem Server fehlt, läuft das Gateway womöglich
-ohne eigene Zugangsdaten, und das ist ein eigener Befund.
+weitermachen.** `MQTT_GATEWAY_UG65_PASSWORD` gehört **nicht** dazu — steht
+die Zeile wider Erwarten doch da, ist sie ein Überrest, und dann gehört
+sie geprüft statt rotiert (am 20.10. war sie nicht vorhanden).
 
 **0.4 Backup der `.env` und der MQTT-Passwortdatei:**
 
@@ -5167,18 +5207,23 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate api
 Der Wert erscheint **nie auf dem Bildschirm** und nicht in der History —
 die History speichert die getippte Zeile (`${NEU}`), nicht ihren Inhalt.
 
-**Prüfen** (von einem Rechner mit Zugang, nicht auf dem Server):
+**Prüfen — im Browser, nicht in der Shell.** Ein `curl` mit Passwort in
+der Kommandozeile ist unter PowerShell zusätzlich fehleranfällig
+(Anführungszeichen, `read -rsp` gibt es dort nicht), und die Anmeldung ist
+genau das, was geprüft werden soll:
 
-```bash
-read -rsp "Passwort: " P; echo
-curl -s -o /dev/null -D - -w "status=%{http_code}\n" -X POST https://heizung.hoteltec.at/api/v1/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"hotelsonnblick@gmail.com\",\"password\":\"$P\"}" | grep -iE "set-cookie|status="
-unset P
-```
+1. `https://heizung.hoteltec.at` öffnen. Erwartung: Sie landen auf
+   **`/login`** — die alte Sitzung ist ungültig, und genau das ist der
+   Beleg, dass der neue Wert gewirkt hat (§10ad).
+2. Anmelden. Erwartung: Dashboard mit Kennzahlen, Konto und Rolle in der
+   Seitenleiste.
+3. Die Fußzeile zeigt die Version. Steht dort „Wert nicht verfügbar" auf
+   allen Kacheln, ist nicht der `SECRET_KEY` das Problem, sondern der
+   `api`-Container — dann §10l.
 
-Erwartung: `status=200` und eine `set-cookie`-Zeile. **Achtung:** §10g
-nennt hier noch `heizung-test.hoteltec.at` — diese Adresse wird seit dem
-Promote am 09.06.2026 nicht mehr bedient (AE-67). Richtig ist
-`heizung.hoteltec.at`.
+**Achtung:** §10g nennt hier noch `heizung-test.hoteltec.at` — diese
+Adresse wird seit dem Promote am 09.06.2026 nicht mehr bedient (AE-67).
+Richtig ist `heizung.hoteltec.at`.
 
 **Rückweg:**
 
@@ -5346,15 +5391,17 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack
 (https://cs-test.hoteltec.at). Dass die Anmeldung **nicht mehr ohne
 Neu-Login geht**, ist der Beleg, dass der Wert gewirkt hat.
 
-**Prüfen, Teil 2 — neuen API-Key erzeugen:** UI → Tenants → Hotel
-Sonnblick → API Keys → Add. Den neuen Wert in die `.env` eintragen:
+**Prüfen, Teil 2 — nichts in die `.env`.** Am 20.10. geprüft: die Zeile
+`CHIRPSTACK_API_KEY` existiert auf dem Server **nicht**, und das ist
+stimmig. Der Wert wird ausschliesslich von
+`infra/chirpstack/provision_devices.py` aus der **Umgebung** gelesen
+(Zeile 737; das Skript bricht ab, wenn er fehlt). Weder das Backend
+(`config.py` kennt ihn nicht) noch ein Container braucht ihn.
 
-```bash
-sudo nano /opt/heizung-sonnblick/infra/deploy/.env   # Zeile CHIRPSTACK_API_KEY=
-```
-
-Danach ist nichts neu zu starten — den Key liest nur das
-Provisionierungs-Skript, nicht ein Dienst.
+**Was stattdessen gilt:** vor dem **nächsten** Provisionieren einen neuen
+Key in der UI erzeugen (Tenants → Hotel Sonnblick → API Keys → Add) und
+ihn für diesen einen Lauf in der Umgebung mitgeben, nicht in die `.env`
+schreiben. Heute ist nichts zu tun und nichts neu zu starten.
 
 **Rückweg:**
 
@@ -5367,14 +5414,21 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack-init
 ```
 
 Der alte API-Key gilt danach wieder — ein inzwischen erzeugter neuer
-nicht mehr. Wer zurückdreht, trägt also auch `CHIRPSTACK_API_KEY` aus
-dem Backup zurück.
+nicht mehr. In der `.env` ist dazu nichts zu tun (siehe Teil 2); wer das
+Provisionieren in der Zwischenzeit benutzt hat, braucht danach wieder den
+alten Key in der Umgebung.
 
 ---
 
-### Block B — die drei MQTT-Werte, einzeln
+### Block B — die MQTT-Werte, in zwei Schritten
 
-**Hier hängt die Regelung dran.** Jeder der drei Werte lebt an **zwei**
+**Hier hängt die Regelung dran.** Es sind **zwei** Schritte für **zwei**
+Mosquitto-User: `heizung-api` (B1) und `chirpstack` (B2). Der dritte
+Schritt der alten Fassung — das UG65 mit eigenen Zugangsdaten — **entfällt**
+(Befund 20.10., siehe oben): das Gateway spricht Basic Station gegen
+`chirpstack-gateway-bridge`, und die Bridge meldet sich als `chirpstack` an.
+
+Jeder Wert lebt an **zwei**
 Stellen: in der `.env` (für den Dienst, der sich anmeldet) und als
 bcrypt-Hash in `infra/mosquitto/config/passwd` (für Mosquitto, das die
 Anmeldung prüft). **Beide müssen zusammenpassen**, sonst meldet sich der
@@ -5397,9 +5451,24 @@ NEU=$(openssl rand -hex 32)
 docker run --rm -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd -b /conf/passwd heizung-api "$NEU"
 sed -i "s|^MQTT_HEIZUNG_PASSWORD=.*|MQTT_HEIZUNG_PASSWORD=${NEU}|" infra/deploy/.env
 unset NEU
-chmod 0640 infra/mosquitto/config/passwd
+chown --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+chmod --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+stat -c '%u:%g %a %n' infra/mosquitto/config/passwd
 docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto api celery_worker celery_beat
 ```
+
+**Die zwei `--reference`-Zeilen sind nicht Kosmetik.** `mosquitto_passwd`
+läuft hier in einem Container **als root**, und die Datei gehört danach
+`root:root`. Mosquitto läuft als **1883** und kann sie dann nicht mehr
+lesen — die Anmeldung schlägt für **alle** User fehl, nicht nur für den
+gerade geänderten. Das Fehlerbild ist dasselbe wie bei einem falschen
+Passwort, die Ursache eine andere.
+
+`stat` muss **`1883:1883 640`** zeigen. Zeigt es etwas anderes: nicht
+weitermachen, sondern die Rechte aus dem Backup
+(`passwd.bak-$TS`) wiederherstellen. Das `--reference` nimmt genau diese
+Datei als Vorlage, weil sie vor dem ersten Eingriff kopiert wurde und
+damit den richtigen Stand trägt.
 
 **Prüfen:**
 
@@ -5426,29 +5495,59 @@ docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "mosquitto|api|celery"
 ```bash
 cd /opt/heizung-sonnblick
 cp -p "infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
-chmod 0640 infra/mosquitto/config/passwd
+stat -c '%u:%g %a %n' infra/mosquitto/config/passwd
 ALT=$(grep '^MQTT_HEIZUNG_PASSWORD=' "infra/deploy/.env.bak-pre-rotation-$TS" | cut -d= -f2-)
 sed -i "s|^MQTT_HEIZUNG_PASSWORD=.*|MQTT_HEIZUNG_PASSWORD=${ALT}|" infra/deploy/.env
 unset ALT
 docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto api celery_worker celery_beat
 ```
 
-**Achtung:** das `cp` der Passwortdatei setzt **alle drei** MQTT-User
-zurück. Wer B1 zurückdreht, nachdem B2 schon gelaufen ist, muss B2
-danach erneut setzen — oder gleich beide Werte aus dem Backup
-zurückschreiben.
+**Achtung:** das `cp` der Passwortdatei setzt **beide** MQTT-User zurück
+(`heizung-api` und `chirpstack`). Wer B1 zurückdreht, nachdem B2 schon
+gelaufen ist, muss B2 danach erneut setzen — oder gleich beide Werte aus
+dem Backup zurückschreiben. `cp -p` erhält Eigentümer und Rechte, ein
+`stat` danach kostet nichts.
 
-#### B2 — `MQTT_CHIRPSTACK_PASSWORD` (ChirpStack-Server)
+#### B2 — `MQTT_CHIRPSTACK_PASSWORD` **und** `MQTT_GATEWAY_BRIDGE_PASSWORD`
+
+**Zwei `.env`-Zeilen, ein Mosquitto-User, ein Wert.** ChirpStack und die
+Gateway-Bridge melden sich **beide** als `chirpstack` an
+(`MQTT_GATEWAY_BRIDGE_USER=chirpstack`, in Schritt 0.3 geprüft). Es gibt
+deshalb nur **einen** bcrypt-Hash, aber **zwei** Stellen, die ihn lesen.
+
+**Wer nur eine der beiden Zeilen setzt, stoppt alle Uplinks.** Die Bridge
+bekommt ihre Zugangsdaten nicht direkt aus der Umgebung, sondern über
+`chirpstack-gateway-bridge-init`, das die TOML mit `envsubst` rendert
+(`docker-compose.prod.yml`, Zeilen 111-130). **Der Init-Sidecar muss also
+mitlaufen**, sonst behält die Bridge die alte Datei — und wird abgewiesen.
 
 ```bash
 cd /opt/heizung-sonnblick
 NEU=$(openssl rand -hex 32)
 docker run --rm -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd -b /conf/passwd chirpstack "$NEU"
 sed -i "s|^MQTT_CHIRPSTACK_PASSWORD=.*|MQTT_CHIRPSTACK_PASSWORD=${NEU}|" infra/deploy/.env
+sed -i "s|^MQTT_GATEWAY_BRIDGE_PASSWORD=.*|MQTT_GATEWAY_BRIDGE_PASSWORD=${NEU}|" infra/deploy/.env
 unset NEU
-chmod 0640 infra/mosquitto/config/passwd
+chown --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+chmod --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+stat -c '%u:%g %a %n' infra/mosquitto/config/passwd
+```
+
+**Vor dem Neustart prüfen, dass beide Zeilen gleich sind** — ohne den Wert
+zu zeigen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && [ "$(grep '^MQTT_CHIRPSTACK_PASSWORD=' .env | cut -d= -f2-)" = "$(grep '^MQTT_GATEWAY_BRIDGE_PASSWORD=' .env | cut -d= -f2-)" ] && echo "GLEICH" || echo "VERSCHIEDEN - NICHT NEU STARTEN"
+```
+
+Erst bei `GLEICH` weiter:
+
+```bash
+cd /opt/heizung-sonnblick
 docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto chirpstack-init
 docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate chirpstack
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate chirpstack-gateway-bridge-init
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate chirpstack-gateway-bridge
 ```
 
 Wieder zwei `up`-Aufrufe: der Wert steht in der **gerenderten**
@@ -5466,75 +5565,48 @@ hat. **Wenn gerade nichts zu senden ist, ist eine 0 kein Befund** — dann
 die ChirpStack-UI öffnen, ein Gerät wählen, LoRaWAN-Frames-Tab: dort
 müssen Uplinks laufen.
 
-**Rückweg:** wie B1, mit `chirpstack` als User und
-`chirpstack-init chirpstack` im `up`.
-
-#### B3 — `MQTT_GATEWAY_UG65_PASSWORD` (das Gateway selbst)
-
-**Der riskanteste Schritt, und der einzige, der Hardware anfasst.** Das
-UG65 meldet sich mit diesem Wert bei Mosquitto an. Zwischen dem Ändern der
-Passwortdatei und dem Neustart des Gateways **kommen keine Uplinks** —
-diese Lücke ist unvermeidbar und dauert so lange wie der UG65-Reboot
-(etwa zwei Minuten).
-
-**Reihenfolge ist hier anders: erst das Gateway vorbereiten, dann die
-Datei.** Wer die Datei zuerst ändert, hat ein Gateway, das sich nicht
-mehr anmelden kann, und muss es unter Zeitdruck umkonfigurieren.
-
-1. **Wert erzeugen und notieren** (dieser eine muss sichtbar sein — er
-   wird in der Weboberfläche des Gateways getippt):
-
-   ```bash
-   openssl rand -hex 32
-   ```
-
-2. **UG65-Weboberfläche** (LAN-IP, §10a.2): Application → Packet
-   Forwarder → ID 1 → Edit → Password = der neue Wert → **Save, aber noch
-   kein Reboot**.
-
-3. **Passwortdatei und `.env` auf den neuen Wert setzen:**
-
-   ```bash
-   cd /opt/heizung-sonnblick
-   docker run --rm -it -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd /conf/passwd gateway-ug65
-   # fragt den Wert zweimal ab — hier den aus Schritt 1 eintippen
-   sudo nano infra/deploy/.env     # Zeile MQTT_GATEWAY_UG65_PASSWORD=
-   chmod 0640 infra/mosquitto/config/passwd
-   docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
-   ```
-
-4. **UG65 rebooten:** System → Reboot.
-
-5. **Prüfen** — zuerst direkt am MQTT-Strom, dann an den Daten:
-
-   ```bash
-   set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
-   docker exec deploy-mosquitto-1 mosquitto_sub -h 127.0.0.1 -p 1883 -u heizung-api -P "$MQTT_HEIZUNG_PASSWORD" -t 'eu868/gateway/+/event/stats' -C 1 -W 120
-   ```
-
-   Erwartung: **eine** Stats-Nachricht innerhalb von zwei Minuten. Kommt
-   keine, ist das Gateway nicht angemeldet → Rückweg. Dann:
-
-   ```bash
-   SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min FROM sensor_reading;"
-   ```
-
-   und in der ChirpStack-UI: Gateway **online**, „Last seen" unter 30 s.
-
-**Rückweg:**
+**Rückweg — und der ist hier länger als bei B1**, weil zwei Zeilen und
+zwei zusätzliche Container dranhängen. Ein Rückweg, der nur eine der
+beiden Zeilen zurückdreht, stoppt die Uplinks genauso wie ein halber
+Vorwärtsschritt:
 
 ```bash
 cd /opt/heizung-sonnblick
 cp -p "infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
-chmod 0640 infra/mosquitto/config/passwd
-docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
+stat -c '%u:%g %a %n' infra/mosquitto/config/passwd
+ALT=$(grep '^MQTT_CHIRPSTACK_PASSWORD=' "infra/deploy/.env.bak-pre-rotation-$TS" | cut -d= -f2-)
+sed -i "s|^MQTT_CHIRPSTACK_PASSWORD=.*|MQTT_CHIRPSTACK_PASSWORD=${ALT}|" infra/deploy/.env
+sed -i "s|^MQTT_GATEWAY_BRIDGE_PASSWORD=.*|MQTT_GATEWAY_BRIDGE_PASSWORD=${ALT}|" infra/deploy/.env
+unset ALT
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto chirpstack-init chirpstack chirpstack-gateway-bridge-init chirpstack-gateway-bridge
 ```
 
-Dazu in der UG65-Oberfläche das **alte** Passwort wieder eintragen (aus
-`.env.bak-pre-rotation-$TS`, Zeile `MQTT_GATEWAY_UG65_PASSWORD`) und
-erneut rebooten. **Dieser Rückweg dauert am längsten** — rechnen Sie mit
-zehn Minuten, in denen keine Uplinks kommen. Die Regelung läuft
-weiter, sie rechnet mit dem letzten bekannten Stand (S5).
+`stat` muss `1883:1883 640` zeigen — `cp -p` erhält Eigentümer und Rechte
+des Backups, und das Backup stammt von vor dem ersten Eingriff.
+
+**Danach dieselbe Prüfung wie vorwärts:** Uplinks zählen. Ein Rückweg,
+den niemand nachgemessen hat, ist eine Hoffnung.
+
+#### B3 entfällt (Befund 20.10.2026)
+
+Hier stand ein dritter Schritt für `MQTT_GATEWAY_UG65_PASSWORD` — das
+UG65 sollte sich mit eigenen Zugangsdaten bei Mosquitto anmelden. **Die
+Zeile existiert auf dem Server nicht**, und sie wird auch nicht
+gebraucht: das Gateway spricht **Basic Station** gegen
+`chirpstack-gateway-bridge` (Caddy macht die WSS-Termination davor,
+`docker-compose.prod.yml` Zeilen 132-147), und die Bridge meldet sich
+als `chirpstack` an — also mit dem Wert aus **B2**.
+
+**Damit entfällt auch die einzige Funk-Lücke der alten Fassung.** Dort
+stand, zwischen dem Ändern des Hashes und dem UG65-Reboot sei eine
+Unterbrechung unvermeidbar. Sie ist es nicht — es gibt keinen
+Gateway-Reboot in dieser Rotation. Was in B2 kurz unterbrochen wird,
+ist die Bridge, und die kommt mit ihrem Neustart von selbst zurück.
+
+**Der Mosquitto-User `gateway-ug65` ist verwaist** (kein Dienst meldet
+sich damit an). Er wird hier **nicht** angefasst — ihn zu entfernen ist
+eine eigene Aufräum-Aufgabe mit eigenem Rückweg, nicht Teil einer
+Rotation unter Zeitdruck. Backlog **B-22-3**.
 
 ---
 
@@ -5587,8 +5659,8 @@ Werte im Klartext.
 | Wert | Warum nicht |
 |---|---|
 | `OCCUPANCY_IMPORT_TOKEN` | Er lebt zur Hälfte bei **mailparser**. Wird er hier geändert und dort nicht, kommt die Tagesliste nicht mehr an, und das fällt erst am nächsten Morgen auf. Eigener Termin, mit der mailparser-Oberfläche offen. Im Screenshot vom 19.09. war diese Zeile **nicht** unter den benannten acht — wenn Sie unsicher sind, ob sie sichtbar war, gehört sie dazu. |
-| `MQTT_GATEWAY_BRIDGE_PASSWORD` | Steht in der Compose-Datei mit Leer-Vorgabe (`:-`), wird also womöglich gar nicht benutzt. Vor einer Rotation erst klären, ob der Basic-Station-Pfad aktiv ist — ein Wert, den niemand liest, zu drehen, kostet nur Risiko. |
-| `CHIRPSTACK_API_KEY` | Fällt mit A4 ohnehin weg und wird dort neu erzeugt. |
+| `CHIRPSTACK_API_KEY` | Existiert auf dem Server **nicht** (geprüft 20.10.). Wird nur von `provision_devices.py` aus der Umgebung gelesen, nicht von einem Dienst. A4 macht die bestehenden Keys ungültig; ein neuer wird beim nächsten Provisionieren erzeugt und dort mitgegeben. |
+| `MQTT_GATEWAY_BRIDGE_USER` | Kein Geheimnis, sondern der Benutzername (`chirpstack`). Er wird in Schritt 0.3 **geprüft**, nicht geändert — er ist die Begründung dafür, dass B2 zwei Zeilen setzt. |
 
 **Querverweise:** §10g (das One-Shot-Skript und seine Verify-Routine),
 §10a (das MQTT-Auth-Setup, aus dem die Passwortdatei stammt), §10a.2
