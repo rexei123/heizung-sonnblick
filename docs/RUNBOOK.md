@@ -6666,6 +6666,15 @@ keinen Neustart.
 
 #### C5.1 — zuerst prüfen, ob überhaupt ein eigenes Passwort gesetzt ist
 
+> **Am 21.10.2026 bereits ausgeführt: `admin`/`admin` wurde abgewiesen**
+> („Invalid username or password“) — es ist ein eigenes Passwort
+> gesetzt, und C5.2 ist am 27.10. eine normale Rotation.
+>
+> Die Prüfung bleibt trotzdem stehen, und sie wird am 27.10. **wiederholt**.
+> Sie kostet eine Minute, und sie beantwortet eine Frage über den Zustand
+> **an diesem Tag** — ein Befund vom 21.10. gilt für den 21.10. (§5.79).
+> Wer sie überspringt, weil sie einmal gut ausging, hat sie nicht gemacht.
+
 **Privates Browserfenster**, `https://cs-test.hoteltec.at`, und der
 Reihe nach versuchen:
 
