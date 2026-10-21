@@ -53,6 +53,9 @@ ACTION_APPLIED = "OCCUPANCY_IMPORT_APPLIED"
 ACTION_REJECTED = "OCCUPANCY_IMPORT_REJECTED"
 ACTION_CONFLICT = "OCCUPANCY_IMPORT_CONFLICT"
 ACTION_STALE = "OCCUPANCY_IMPORT_STALE"
+#: Eine Liste, die **älter** ist als eine bereits angewandte desselben
+#: Tages. Seit dem Mehrfachversand (20.10.2026) möglich.
+ACTION_OUTDATED = "OCCUPANCY_IMPORT_OUTDATED"
 #: Abreise einer laufenden pms-Belegung auf den Listenwert gezogen (19.10.2026).
 ACTION_CHECKOUT_CHANGED = "OCCUPANCY_IMPORT_CHECKOUT_CHANGED"
 #: Die Liste wollte die Abreise aendern, es wurde **nicht** angewendet.
@@ -536,6 +539,48 @@ async def reconcile_from_import(
             status="already_processed", external_id=payload.id, list_date=list_date
         )
 
+    # **Reihenfolge-Wache** (Mehrfachversand, 20.10.2026).
+    #
+    # Seit dem 20.10. kommen drei Listen pro Tag (08:30, 15:30, 19:30). Damit
+    # ist die Zustellreihenfolge von Mail und mailparser nicht mehr
+    # garantiert — und eine **ältere** Liste, die nach einer neueren
+    # eintrifft, würde den älteren Stand erneut anwenden: Phase B2 storniert
+    # Zimmer, die die neuere Liste gerade angelegt hat, und
+    # ``_abreise_nachziehen`` zieht eine Abreise wieder **zurück** (der
+    # Nachzug kennt keine Richtung, er folgt der Liste).
+    #
+    # Bei **einer** Liste pro Tag konnte das nicht auftreten: zwei Listen
+    # desselben Tages gab es nicht. Die Idempotenz oben faengt es nicht, sie
+    # prueft ``external_id`` **und** ``list_date`` gemeinsam — und eine
+    # zweite Mail hat eine andere Kennung.
+    #
+    # Gleicher Zeitstempel zaehlt als **nicht neuer**: dann ist es eine
+    # Doppel-Zustellung derselben Liste unter neuer Kennung, und die
+    # aelteste Entscheidung darf nicht wiederholt werden.
+    neuester = await _neuester_eingang_fuer_listentag(session, list_date, now_utc)
+    if neuester is not None and received_at_utc <= neuester:
+        logger.warning(
+            "occupancy-import veraltet: list_date=%s eingang=%s, bereits angewandt bis %s",
+            list_date.isoformat(),
+            received_at_utc.isoformat(),
+            neuester.isoformat(),
+        )
+        await _record_summary(
+            session,
+            action=ACTION_OUTDATED,
+            external_id=payload.id,
+            list_date=list_date,
+            received_at_utc=received_at_utc,
+            rooms_occupied=0,
+            rooms_closed=0,
+            conflicts=0,
+            result="outdated",
+            request_ip=request_ip,
+            extra={"bereits_angewandt_bis": neuester},
+        )
+        await session.commit()
+        return ImportOutcome(status="outdated", external_id=payload.id, list_date=list_date)
+
     # Phase A: alle Zimmernummern aufloesen (atomar — unbekannte -> REJECT).
     resolved: list[_Resolved] = []
     unknown: list[str] = []
@@ -684,6 +729,50 @@ async def reconcile_from_import(
     for occ in await _all_active_pms_overlapping(session, day_start_utc, day_end_utc):
         if occ.room_id in target_room_ids:
             continue
+
+        # **Belegungen, die von selbst enden, werden nicht storniert**
+        # (Mehrfachversand, 20.10.2026). Zwei Gruende, und der zweite ist der
+        # teure.
+        #
+        # 1. ``check_out`` liegt schon hinter uns. Dann ist der Aufenthalt
+        #    vorbei; ein Storno wuerde ihn als **abgebrochen** markieren,
+        #    obwehl er regulaer zu Ende ging — und er verschwindet damit aus
+        #    dem Zimmer-Verlauf (``room-history-chart.tsx`` filtert
+        #    ``cancelled_at``). Bei einer Liste pro Tag um 10:38 trat das nie
+        #    auf: die abreisenden Zimmer standen dort noch drin, und 11:00
+        #    war noch nicht.
+        #
+        # 2. ``check_out`` fällt auf den **Listentag**. Das ist der Fall, der
+        #    einen Gast betrifft, der noch im Haus ist: die 08:30-Liste kommt
+        #    **vor** den Abreisen um 11:00. Fuehrt Casablanca die Abreisenden
+        #    dort nicht mehr, waere das Zimmer ab 08:30 als frei geregelt —
+        #    abgesenkt, mit jemandem darin, zweieinhalb Stunden lang.
+        #
+        # **Der Preis, ausdruecklich in Kauf genommen** (Entscheidung des
+        # Betreibers vom 20.10.): eine echte **Fruehabreise am Abreisetag**
+        # wird nicht vorgezogen. Reist der Gast um 09:00 ab und fehlt in der
+        # Liste, heizt das Zimmer bis 11:00 weiter. Zweieinhalb Stunden
+        # Komfortwaerme gegen zweieinhalb Stunden Absenkung bei einem
+        # anwesenden Gast — die Richtung ist eindeutig.
+        #
+        # Eine Abreise an einem **frueheren** Tag storniert weiterhin: dort
+        # ist der Gast sicher weg, und das Zimmer soll nicht bis zum
+        # urspruenglichen Abreisetag heizen.
+        if occ.check_out <= now_utc:
+            logger.info(
+                "occupancy-import B2 verschont room_id=%s (Abreise %s liegt zurueck)",
+                occ.room_id,
+                occ.check_out.isoformat(),
+            )
+            continue
+        if occ.check_out.astimezone(tz).date() == list_date:
+            logger.info(
+                "occupancy-import B2 verschont room_id=%s (Abreise %s am Listentag)",
+                occ.room_id,
+                occ.check_out.isoformat(),
+            )
+            continue
+
         await cancel_occupancy_record(session, occ, now=now_utc)
         rooms_closed += 1
         affected.add(occ.room_id)
@@ -751,6 +840,43 @@ async def _last_applied_received_at(session: AsyncSession) -> datetime | None:
         return None
     raw = _nv(audit).get("received_at")
     return datetime.fromisoformat(raw) if isinstance(raw, str) else None
+
+
+async def _neuester_eingang_fuer_listentag(
+    session: AsyncSession, list_date: date, now_utc: datetime
+) -> datetime | None:
+    """Der jüngste ``received_at`` der bereits angewandten Läufe **dieses** Tages.
+
+    Unterscheidet sich von :func:`_last_applied_received_at` genau darin: der
+    liefert den letzten Erfolg überhaupt (für die Ampel), dieser den letzten
+    Erfolg **zu diesem Listentag**. Für die Ampel ist der Tag gleichgültig,
+    für die Reihenfolge nicht.
+
+    ``None`` heisst "zu diesem Tag wurde noch nichts angewandt".
+    """
+    stmt = (
+        select(BusinessAudit)
+        .where(
+            and_(
+                BusinessAudit.action == ACTION_APPLIED,
+                BusinessAudit.ts >= now_utc - _IDEMPOTENCY_LOOKBACK,
+            )
+        )
+        .order_by(desc(BusinessAudit.ts))
+    )
+    iso = list_date.isoformat()
+    neuester: datetime | None = None
+    for audit in (await session.execute(stmt)).scalars().all():
+        nv = _nv(audit)
+        if nv.get("list_date") != iso:
+            continue
+        raw = nv.get("received_at")
+        if not isinstance(raw, str):
+            continue
+        eingang = datetime.fromisoformat(raw)
+        if neuester is None or eingang > neuester:
+            neuester = eingang
+    return neuester
 
 
 async def _applied_exists_for_list_date(

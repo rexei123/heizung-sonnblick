@@ -72,8 +72,14 @@ async def import_occupancy(
     for room_id in outcome.affected_room_ids:
         _evaluate_room_task.delay(room_id)
 
-    if outcome.status == "already_processed":
-        return {"status": "already_processed"}
+    # Beides ist **kein** Fehler, sondern ein erwarteter Zustand, und beides
+    # antwortet deshalb mit 200: mailparser soll nicht wiederholen.
+    #
+    # ``already_processed`` = dieselbe Liste zweimal zugestellt.
+    # ``outdated``          = eine **aeltere** Liste desselben Tages, nach
+    #                         einer neueren eingetroffen (Mehrfachversand).
+    if outcome.status in ("already_processed", "outdated"):
+        return {"status": outcome.status}
     return {
         "status": "applied",
         "rooms_occupied": outcome.rooms_occupied,
