@@ -701,8 +701,10 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 
 ### 10c.1 UI-Re-Paste
 
-1. Browser → `https://heizung-test.hoteltec.at/chirpstack/`
-2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API).
+1. Browser → `https://cs-test.hoteltec.at`
+2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API; Passwort-Rotation: §10ab Teil 2, C5).
+
+   > **Korrigiert am 21.10.2026.** Hier stand `https://heizung-test.hoteltec.at/chirpstack/` — zweifach falsch: der Host wird seit dem Promote am 09.06.2026 nicht mehr bedient (AE-67), und den Pfad `/chirpstack/` routet **keine** Caddy-Regel. Die Oberfläche liegt auf einer eigenen Subdomain (`CHIRPSTACK_HOSTNAME`, AE-243).
 3. **Tenants → Hotel Sonnblick → Device Profiles → Heizung**.
 4. Tab **Codec** öffnen.
 5. Bestehenden JS-Code komplett markieren und löschen.
@@ -6371,7 +6373,7 @@ cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
 | Wert | Warum |
 |---|---|
 | `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:339`), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
-| ChirpStack-**UI-Passwort** (`admin`) | Ist kein `.env`-Wert, sondern liegt in der ChirpStack-Datenbank. Wird in der ChirpStack-Oberfläche geändert, nicht hier. Eigener Handgriff, eigener Termin. |
+| `CHIRPSTACK_BASIC_AUTH_HASH` — **Entscheidung vom 21.10.** | Es bleibt bei **keiner** zusätzlichen Basic-Auth vor ChirpStack. Der Wert verschwindet aus Compose und `.env.example`, der Kommentar in `Caddyfile.test` wird korrigiert — eigener kleiner PR **nach** diesem (B-22-4). |
 | `CHIRPSTACK_API_SECRET`, MQTT-Werte, DB-Passwörter, `SECRET_KEY` | Teil 1, am 20.10. erledigt. |
 | `PIN_SHA` | Kein Geheimnis, sondern der Rückfallpunkt (§10u). |
 
@@ -6644,7 +6646,83 @@ Handgriff, der sich selbst rückgängig macht.
 
 ---
 
-### C5 — Server-Neustart (apt-Updates)
+### C5 — ChirpStack-Admin-Passwort (UI-Login)
+
+**Das ist der Wert, der die ChirpStack-Oberfläche wirklich schützt.** Es
+gibt davor **keine** Basic-Auth (siehe „Was in diesem Teil nicht
+vorkommt“) — wer `https://cs-test.hoteltec.at` aufruft, sieht das
+Login-Formular von ChirpStack, und nur dieses Passwort steht zwischen dem
+Internet und der Geräteverwaltung.
+
+**Wirkung bei einem Fehlschlag:** keine auf die Regelung. Downlinks laufen
+über MQTT, nicht über die API (§5.28). Was ein falsches Passwort kostet,
+ist der Zugang zur Oberfläche — also der Codec-Re-Paste (§10c) und das
+Provisionieren (§10h).
+
+**Der Wert liegt nicht in der `.env`.** Er steht in der
+ChirpStack-Datenbank; kein Container, kein Compose-Eintrag und kein
+Init-Sidecar setzt ihn. Deshalb gibt es hier auch kein `ENV_NEU` und
+keinen Neustart.
+
+#### C5.1 — zuerst prüfen, ob überhaupt ein eigenes Passwort gesetzt ist
+
+**Privates Browserfenster**, `https://cs-test.hoteltec.at`, und der
+Reihe nach versuchen:
+
+| Benutzer | Passwort |
+|---|---|
+| `admin` | `admin` |
+
+**Kommt man damit hinein, ist das ein eigener Befund und nicht Teil der
+Rotation.** Dann war die Geräteverwaltung so lange mit dem Vorgabewert
+erreichbar, wie der Host öffentlich ist — das gehört festgehalten
+(wann wurde der Host angelegt, wer kannte ihn), bevor es überschrieben
+wird. **Erst melden, dann ändern**, und zwar sofort: ein funktionierender
+Vorgabewert ist nichts, womit man bis zum nächsten Termin wartet.
+
+Geht es **nicht**, ist ein eigenes Passwort gesetzt, und C5.2 ist eine
+normale Rotation.
+
+#### C5.2 — neues Passwort setzen
+
+**Neuen Wert erzeugen**, mindestens 24 Zeichen:
+
+```bash
+openssl rand -base64 24
+```
+
+**Vor dem Ändern in den Passwort-Manager legen.** Kein Zettel, keine
+Shell-History, keine Mail an sich selbst. Der Wert ist nach dem Setzen
+nicht mehr auslesbar — ChirpStack speichert ihn als Hash, und es gibt
+keinen Weg zurück ausser dem nächsten Ändern.
+
+**Ändern in der Oberfläche:** angemeldet als `admin` → Benutzer-Verwaltung
+→ `admin` → Passwort ändern. **Die Beschriftungen können je
+ChirpStack-Version abweichen** — was zählt, ist die Prüfung darunter,
+nicht der Klickweg. Wer die Stelle nicht findet, bricht ab und meldet;
+geraten wird hier nichts.
+
+**Prüfen — in dieser Reihenfolge:**
+
+1. **Abmelden**, dann mit dem **neuen** Passwort anmelden. Erwartung:
+   geht.
+2. Im **privaten** Fenster mit dem **alten** Passwort versuchen.
+   Erwartung: geht **nicht**. Geht es noch, wurde nicht gespeichert —
+   und man hätte es ohne diesen zweiten Schritt nicht gemerkt, weil die
+   erste Prüfung in einer Sitzung läuft, die ohnehin schon angemeldet
+   ist.
+3. Ein Blick auf **Gateways**: „Last seen“ unter 30 Sekunden. Das
+   Passwort hat mit dem Funkweg nichts zu tun, aber wenn man ohnehin
+   drin ist, kostet der Blick nichts.
+
+**Rückweg:** das alte Passwort in der Oberfläche wieder setzen — man
+braucht es dafür aus dem Passwort-Manager. **Steht es dort nicht, gibt es
+keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
+„vorher in den Passwort-Manager“ oben und nicht hier.
+
+---
+
+### C6 — Server-Neustart (apt-Updates)
 
 **Letzter Block, nach allen Werten.** Begründung: ein Neustart prüft
 beiläufig, ob alles, was in dieser Rotation geändert wurde, einen
