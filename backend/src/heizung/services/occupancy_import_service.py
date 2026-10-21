@@ -818,6 +818,66 @@ async def reconcile_from_import(
 # ---------------------------------------------------------------------------
 
 
+#: Fenster für die gemessene Eingangszeit. Sieben Tage sind lang genug, dass
+#: ein einzelner ausgefallener Tag nichts verschiebt, und kurz genug, dass
+#: eine Umstellung des Versands binnen einer Woche sichtbar wird.
+_EINGANGSZEIT_FENSTER = timedelta(days=7)
+
+
+async def _frueheste_listenzeit(
+    session: AsyncSession, tz: ZoneInfo, now_utc: datetime
+) -> time | None:
+    """Früheste **Tageszeit**, zu der in den letzten sieben Tagen eine Liste kam.
+
+    Antwortet die Frage, die der Hilfetext auf der API-Seite stellt: wann
+    trifft die erste Liste des Tages ein? Bis zum 20.10.2026 stand dort eine
+    feste Uhrzeit (``10:38``) — seit dem Mehrfachversand (08:30, 15:30,
+    19:30) war sie falsch, und beim nächsten Wechsel des Versands wäre sie
+    es wieder (§5.77: eine Zahl im Text, die niemand nachzieht).
+
+    Gezählt wird jede Liste, die **eingetroffen** ist: angewandt, abgewiesen
+    (unbekannte Zimmernummer) **oder veraltet**. Alle drei sind angekommen;
+    für die Frage "wann kommt Post" ist es unerheblich, ob sie brauchbar war.
+
+    **Die veralteten gehören ausdrücklich dazu**, und das ist nicht
+    Vollständigkeit um ihrer selbst willen: eine verspätete 08:30-Liste wird
+    genau deshalb abgewiesen, weil sie **zu spät** eintraf — und sie ist
+    dabei die **früheste** des Tages. Wer sie wegliesse, würde die Zahl
+    systematisch nach hinten verschieben, und zwar in dem Fall, in dem der
+    Versand ohnehin schon stolpert. Ein Test hält das fest; aufgefallen ist
+    es, weil er zuerst 15:30 statt 08:30 gemeldet hat.
+
+    Genommen wird das **Minimum** über die Tageszeiten, nicht der jüngste
+    Wert: gesucht ist, wie früh man mit Post rechnen kann. Ein einzelner
+    Ausreißer nach vorn zieht die Zahl damit für sieben Tage mit — das ist
+    der Preis dafür, dass ein ausgefallener Nachmittagsversand sie **nicht**
+    verschiebt.
+
+    ``None`` heißt "in sieben Tagen kam keine Liste". Das ist kein Fehler,
+    sondern der Zustand eines frisch aufgesetzten Systems; der Hilfetext
+    sagt dann, dass noch keine da war.
+    """
+    stmt = (
+        select(BusinessAudit)
+        .where(
+            and_(
+                BusinessAudit.action.in_([ACTION_APPLIED, ACTION_REJECTED, ACTION_OUTDATED]),
+                BusinessAudit.ts >= now_utc - _EINGANGSZEIT_FENSTER,
+            )
+        )
+        .order_by(desc(BusinessAudit.ts))
+    )
+    frueheste: time | None = None
+    for audit in (await session.execute(stmt)).scalars().all():
+        raw = _nv(audit).get("received_at")
+        if not isinstance(raw, str):
+            continue
+        lokal = datetime.fromisoformat(raw).astimezone(tz).time()
+        if frueheste is None or lokal < frueheste:
+            frueheste = lokal
+    return frueheste
+
+
 async def _recent_import_audits(session: AsyncSession, limit: int) -> list[BusinessAudit]:
     stmt = (
         select(BusinessAudit)
@@ -933,6 +993,7 @@ async def get_import_log(
 
     imports = [_audit_to_logrow(a) for a in await _recent_import_audits(session, limit=30)]
     last_success_at = await _last_applied_received_at(session)
+    frueheste = await _frueheste_listenzeit(session, tz, now_utc)
     today_local = now_utc.astimezone(tz).date()
     today_received = await _applied_exists_for_list_date(session, today_local, now_utc)
 
@@ -948,6 +1009,9 @@ async def get_import_log(
         last_success_at=last_success_at,
         expected_by_local=_fmt_hhmm(expected_t),
         expected_by_local_label=fmt_local_time(expected_t, tz, now_utc),
+        first_list_local_label=(
+            None if frueheste is None else fmt_local_time(frueheste, tz, now_utc)
+        ),
         today_received=today_received,
         imports=imports,
     )

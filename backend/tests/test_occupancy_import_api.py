@@ -249,6 +249,10 @@ async def test_log_endpoint_returns_shape(
         # Anzeige. Zwei Felder, weil ein Eingabefeld den nackten Wert
         # braucht und ein Satz fuer den Menschen die Einheit.
         "expected_by_local_label",
+        # Seit 21.10.2026: die **gemessene** fruehste Eingangszeit der
+        # letzten sieben Tage, fuer den Hilfetext unter dem Schwellen-Feld.
+        # ``null`` ist ein gueltiger Wert ("noch keine Liste").
+        "first_list_local_label",
         "today_received",
         "imports",
     }
