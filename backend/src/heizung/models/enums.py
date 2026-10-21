@@ -162,40 +162,58 @@ class ScenarioScope(enum.StrEnum):
 class OverrideSource(enum.StrEnum):
     """Quelle einer Manual-Override-Aktion (Sprint 9.9 Engine Layer 3).
 
+    **Ablauf, Stand 20.10.2026 (Fix A, Entscheidung des Betreibers).**
+
     ``device``        Drehring-Drehung am Vicki, erkannt ueber Setpoint-Diff
                       ``last_engine_setpoint`` vs. ``target_temperature`` aus
-                      Periodic-Report. Default-Ablauf: PMS-Check-Out, sonst
-                      now + 7 Tage (Hard-Cap).
-    ``frontend_4h``   Rezeption setzt im UI "fuer 4 Stunden". Ablauf now + 4 h.
-    ``frontend_midnight``  Rezeption setzt "bis Mitternacht". Ablauf heute
-                      23:59 lokal.
-    ``frontend_checkout``  Rezeption setzt "bis Check-Out". Ablauf wie ``device``.
+                      Periodic-Report (AE-45). Ablauf **24 h**.
     ``device_manual``  Handverstellung am Drehrad, **ausdruecklich** gemeldet
                       ueber einen ``0x28``-Frame (FW >= 3.5, Sprint 20f T1/T2).
-                      Ablauf **4 h**, zusaetzlich endet er mit der Abreise.
+                      Ablauf **24 h**.
+    ``frontend_24h``  Rezeption setzt "fuer 24 Stunden". Ablauf now + 24 h.
+    ``frontend_checkout``  Rezeption setzt "bis Check-out". Ablauf
+                      ``next_checkout_at``.
+    ``frontend_4h``   **Historisch.** Rezeption setzte "fuer 4 Stunden",
+                      Ablauf now + 4 h. Seit Fix A nicht mehr waehlbar.
+    ``frontend_midnight``  **Historisch.** Rezeption setzte "bis
+                      Mitternacht", Ablauf heute 23:59 lokal. Seit Fix A
+                      nicht mehr waehlbar.
 
-    **Warum ``device_manual`` neben ``device`` steht und es nicht ersetzt.**
-    ``device`` ist ein *abgeleiteter* Befund: der gemeldete Sollwert weicht vom
-    letzten Engine-Send ab, also hat vermutlich jemand gedreht (AE-45). Das
-    kann auch ein Reboot-Drift oder ein verlorener Downlink sein — deshalb der
-    lange Ablauf bis zum Check-out, der im Zweifel den Gastwunsch schuetzt.
+    **Jede Drehung beginnt die 24 Stunden neu**, weil jede Drehung einen
+    **neuen** Eintrag anlegt und Layer 3 den juengsten nimmt. Das ist keine
+    zusaetzliche Mechanik, sondern eine Eigenschaft des Modells — und sie
+    gehoert hierher, damit niemand sie fuer eine Luecke haelt und eine
+    Verlaengerungs-Logik dazubaut.
 
-    ``device_manual`` ist eine *Meldung des Geraets*: die Vicki sagt selbst,
-    dass am Rad gedreht wurde. Kein Rateschritt. Daraus folgt der **kuerzere**
-    Ablauf: wer sicher weiss, dass ein Mensch gedreht hat, braucht die
-    Absicherung "im Zweifel lange halten" nicht und kann nach vier Stunden
-    wieder regeln lassen.
+    **Die Abreise beendet jeden Override**, unabhaengig vom Ablauf
+    (``override_pms_hook.auto_revoke_on_checkout``). Mit 24 h kann ein
+    Override den Check-out jetzt **ueberleben**, und damit ist dieser Haken
+    nicht mehr Beiwerk, sondern die einzige Stelle, die ihn dann beendet.
 
-    In der Vorrang-Reihenfolge liegt ``device_manual`` deshalb **ueber**
-    ``device`` (die ausdrueckliche Meldung schlaegt die Vermutung) und
-    **unter** allen ``frontend_*`` (Mitarbeiter schlaegt Gast, AE-58).
+    **Warum ``device`` und ``device_manual`` weiter getrennt sind, obwohl
+    beide 24 h bekommen.** Der Unterschied war nie nur der Ablauf: ``device``
+    ist ein *abgeleiteter* Befund (kann auch Reboot-Drift oder ein verlorener
+    Downlink sein), ``device_manual`` eine *Meldung des Geraets*. Im Audit
+    sind das verschiedene Aussagen, und die Vorrang-Reihenfolge nutzt sie:
+    ``device_manual`` liegt **ueber** ``device`` (die ausdrueckliche Meldung
+    schlaegt die Vermutung) und **unter** allen ``frontend_*`` (Mitarbeiter
+    schlaegt Gast, AE-58). Sie zusammenzulegen, weil zufaellig derselbe
+    Ablauf gilt, wuerde diese Unterscheidung wegwerfen.
+
+    **Was Fix A geaendert hat und was nicht.** Geaendert: der Ablauf von
+    ``device`` (vorher bis Check-out, bis zu 7 Tage Hard-Cap) und von
+    ``device_manual`` (vorher 4 h). Nicht geaendert: Bestandszeilen — ein
+    vorhandener Eintrag behaelt sein ``expires_at``.
     """
 
     DEVICE = "device"
     DEVICE_MANUAL = "device_manual"
+    FRONTEND_24H = "frontend_24h"
+    FRONTEND_CHECKOUT = "frontend_checkout"
+    #: Historisch, seit Fix A (20.10.2026) nicht mehr waehlbar. Bleibt als
+    #: Wert erhalten, weil die Historie ihre Etiketten braucht.
     FRONTEND_4H = "frontend_4h"
     FRONTEND_MIDNIGHT = "frontend_midnight"
-    FRONTEND_CHECKOUT = "frontend_checkout"
 
 
 class EventLogLayer(enum.StrEnum):

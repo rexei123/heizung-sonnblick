@@ -843,19 +843,19 @@ export type CommandReason =
 export type OverrideSource =
   | "device"
   | "device_manual"
+  | "frontend_24h"
+  | "frontend_checkout"
+  /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */
   | "frontend_4h"
-  | "frontend_midnight"
-  | "frontend_checkout";
+  /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */
+  | "frontend_midnight";
 
 /**
  * Quellen, die das Frontend selbst anlegen darf. ``device``-Overrides
  * werden ausschliesslich vom Backend ``device_adapter`` aus Vicki-
  * Uplinks erzeugt.
  */
-export type FrontendOverrideSource =
-  | "frontend_4h"
-  | "frontend_midnight"
-  | "frontend_checkout";
+export type FrontendOverrideSource = "frontend_24h" | "frontend_checkout";
 
 /**
  * Spiegelt ``ManualOverrideResponse`` aus
