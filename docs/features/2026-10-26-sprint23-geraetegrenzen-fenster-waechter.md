@@ -9,7 +9,7 @@ selbst zulässt; T2 schaltet einen Algorithmus im Gerät ein, der
 eigenständig das Ventil schließt. Beides ist nicht durch einen Rückweg in
 der Datenbank zu heilen.
 
-**Gesamtaufwand:** 11–16 h über drei Tasks, plus 48 h Beobachtung in T1
+**Gesamtaufwand:** 13–18 h über drei Tasks, plus 48 h Beobachtung in T1
 und 72 h in T2, die nebenher laufen.
 
 ---
@@ -137,7 +137,34 @@ gehen über denselben gestaffelten Pfad wie der Neustart-Resync: Flag
 setzen, der nächste Tick je Gerät sendet. Rechnung: bei einem Uplink
 alle ~10 min ist das Haus in rund einer Stunde durch.
 
-**T1.5 — Rollout** (1 h Arbeit, 48 h Wartezeit). Erst **ein** Gerät: 306
+**T1.5 — Anzeige auf der Geräteseite** (2 h). Unter den übrigen
+Gerätewerten:
+
+> **Grenzen am Gerät:** 15–25 °C (bestätigt heute, 09:14)
+
+und ohne Antwort:
+
+> **Grenzen am Gerät:** nicht bestätigt
+
+**Quelle ist die `0x15`-Antwort, nicht das, was wir gesendet haben.** Das
+ist der ganze Punkt: `control_command` sagt, was wir wollten,
+`sensor_reading` sagt, was am Gerät steht. Eine Anzeige, die das
+Gesendete zeigt, wäre eine Zusicherung ohne Deckung — und zwar genau
+die, die wir vor Sprint 20f für den Sollwert hatten.
+
+**Keine neue Spalte.** Die dekodierten Felder liegen in `sensor_reading`
+(T1.1); gelesen wird die **jüngste Zeile, die sie führt**, und ihr
+`time` ist der Bestätigungszeitpunkt. Dieselbe Form wie
+`battery_voltage_median` (AE-72): read-time abgeleitet, nichts
+persistiert, keine zweite Wahrheit.
+
+**`nicht bestätigt` heißt nicht `falsch`.** Es heißt, dass noch keine
+Antwort kam — bei einem Class-A-Gerät ganz normal, solange es nicht
+gesendet hat. Der Text sagt das, damit niemand daraus einen Fehler liest.
+Erst wenn der Abgleich **dreimal** erfolglos gefragt hat, ist es ein
+Befund, und dafür gibt es den Zähler aus `engine_abgleich` schon.
+
+**T1.6 — Rollout** (1 h Arbeit, 48 h Wartezeit). Erst **ein** Gerät: 306
 Schlafzimmer. Nach 48 h prüfen:
 
 1. `0x15` liefert 15/25 (Abgleich bestätigt, was gesendet wurde).
@@ -149,6 +176,38 @@ Schlafzimmer. Nach 48 h prüfen:
 
 Erst danach alle Geräte, gestaffelt.
 
+### Der Pflicht-Stop vor dem ersten Rollout, als Versuch
+
+**Aufbau:** ein Gerät mit Grenzen **15/25** (also 306 Schlafzimmer nach
+T1.6 Schritt 1). Dann ein Downlink mit **10 °C** — der Frostschutzfall,
+und zugleich der Wert, der am weitesten **unter** der unteren Grenze liegt.
+
+**Die Frage:** übernimmt das Gerät die 10?
+
+| Ergebnis | Bedeutung | Konsequenz |
+|---|---|---|
+| Gerät meldet **10** | die Hersteller-Aussage stimmt, Downlinks überschreiten die Grenze | Rollout frei |
+| Gerät meldet **15** | das Gerät kappt auch Downlinks | **Stop.** Der Task wird neu geschnitten |
+| Gerät meldet **gar nichts** | Downlink verloren oder nicht bestätigt | wiederholen; bleibt es dabei, ist es ein Funkbefund und kein Grenzbefund |
+
+**Warum der Frostschutzfall und nicht ein beliebiger Wert.** Wenn das
+Gerät Downlinks kappt, ist die teuerste Richtung **nach unten**: ein
+Sommermodus- oder Fenster-Frostschutz von 10 °C würde an einer
+Untergrenze von 15 hängenbleiben, und ein Bad mit 18 würde im Winter bei
+offenem Fenster auf 18 weiterheizen. Nach oben wäre eine Kappung
+ärgerlich, nach unten ist sie ein Sicherheitsmangel.
+
+**Geprueft wird am gemeldeten Sollwert, nicht am Protokoll.** Was wir
+gesendet haben, steht in `control_command` — was das Gerät daraus
+gemacht hat, steht in `sensor_reading.setpoint` des nächsten Uplinks.
+Nur das zweite beantwortet die Frage (derselbe Unterschied, der Sprint
+20f zugrunde liegt).
+
+**Danach den Wert wieder zurückstellen** — 10 °C in einem belegten
+Zimmer ist kein Zustand, den man über Nacht stehen lässt. Der Versuch
+gehört in ein **freies** Zimmer, oder in die Minuten vor dem nächsten
+Engine-Tick, der den regulären Wert ohnehin wiederherstellt.
+
 ### Risiken
 
 | Risiko | Einschätzung |
@@ -158,7 +217,7 @@ Erst danach alle Geräte, gestaffelt.
 | Codec-Re-Paste vergessen | `0x15` bleibt undekodiert, der Abgleich ist blind und sendet **nicht** (fail-closed). Kein Schaden, aber eine stille Wirkungslosigkeit — deshalb ein Test, der die dekodierten Felder in `sensor_reading` erwartet |
 | Grenzen „verschwinden" nach einem Neustart unbemerkt | genau dagegen ist der `0x15`-Abgleich. Vorher war das der Grund für das wöchentliche Nachsenden |
 
-**Aufwand T1: 7–9 h** plus 48 h Beobachtung.
+**Aufwand T1: 9–11 h** plus 48 h Beobachtung (die Anzeige kam am 22.10. dazu).
 
 ---
 
@@ -230,6 +289,38 @@ Sollwert. Was gewinnt? Die Doku sagt dazu nichts. **Das ist der Kern des
 Tests**, nicht ein Nebenaspekt — wenn das Gerät unsere Downlinks in
 diesem Fenster verwirft, entsteht genau die Lage, gegen die der
 Engine-Abgleich (20f T3) gebaut ist, und er würde alle 15 min nachsenden.
+
+### Abbruchkriterium (Vorgabe des Betreibers, 22.10.)
+
+**Löst die Onboard-Erkennung in der Testwoche auch nur ein einziges Mal
+durch eine eigene Absenkung aus — Nacht, Check-out, Fenster-Sicherheit —
+wird sie auf allen Testgeräten abgeschaltet** (`0x45` mit
+`enabled = 0`), der Befund dokumentiert, und **in derselben Woche nicht
+nachjustiert.**
+
+**Warum kein Nachjustieren.** Die naheliegende Reaktion wäre, das Delta
+hochzudrehen, bis es ruhig ist. Das ist derselbe Zug, den §5.82 als
+Fehler benennt: den Melder leiser stellen, statt die Ursache zu
+verstehen. Und die Ursache wäre hier bekannt und unveränderlich — der
+Sensor sitzt am Heizkörper, und unsere Absenkung kühlt ihn. Ein
+größeres Delta verschiebt nur, wie stark die Absenkung sein muss.
+
+**Ein einziges Auftreten genügt**, und das ist strenger als es klingt:
+ein Fehlalarm bedeutet, dass Layer 4 ein Zimmer auf den Sicherheitswert
+zieht, während niemand ein Fenster geöffnet hat — bei einem belegten
+Zimmer in der Nacht. Eine Erkennung, die das kann, ist schlechter als
+keine; die Backend-Logik liefert heute schon einen brauchbaren Befund
+ohne diesen Nebenwirkung.
+
+**Dokumentiert wird**, bei welcher Gelegenheit es auslöste (Uhrzeit,
+Zone, `event_log`-Zeile, Temperaturverlauf der zehn Minuten davor) —
+nicht nur die Tatsache. Ohne den Verlauf ist beim nächsten Versuch
+wieder alles offen.
+
+**Der Rückweg ist derselbe Befehl**: `0x45 00 …` schaltet aus, `0x46`
+bestätigt es. Kein Neustart, keine Datenbankänderung — das ist der Grund,
+warum dieser Task überhaupt mit einem so scharfen Kriterium arbeiten
+kann.
 
 ### Testplan
 
@@ -331,13 +422,16 @@ steht in **beiden** Testplänen — ein weiterer Grund, sie zu trennen.
 
 ## Pflicht-Stops
 
-1. **Nach T1.2**, bevor ein `0x08` an ein Gerät geht: der Beleg, dass ein
-   Downlink die Gerätegrenze überschreiten darf. Hersteller-Aussage ist
-   keine Messung.
-2. **Nach T1.5**, vor dem Rollout auf alle Geräte: die vier Prüfungen aus
+1. **Nach T1.2**, bevor ein `0x08` an mehr als ein Gerät geht: der
+   Versuch mit Grenze 15/25 und Downlink **10 °C** — übernimmt das
+   Gerät die 10? Aufbau und die drei möglichen Ergebnisse stehen in T1.
+   Hersteller-Aussage ist keine Messung.
+2. **Nach T1.6**, vor dem Rollout auf alle Geräte: die vier Prüfungen aus
    48 h Beobachtung.
 3. **Nach T2 Schritt 4**, vor dem Festschreiben des Parameters: ob die
-   Nachtabsenkung einen Fehlalarm erzeugt.
+   Nachtabsenkung einen Fehlalarm erzeugt. **Ein einziges Auftreten
+   beendet den Task für diese Woche** (Abbruchkriterium, siehe T2) —
+   kein Nachjustieren.
 4. **Vor jedem Merge:** §0.3.
 
 **Querverweise:** B-22-1 (0x08), B-9.11y-1 (Fenster-Test ohne
