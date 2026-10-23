@@ -5717,3 +5717,126 @@ sie den Entwurf entscheidet.
   Ebene, auf der sie geprüft wurde.
 - **§0 S4** — Hardware-Schutz: jeder Downlink ist Sendezeit, und jedes
   Schalten ist Relaisverschleiß.
+
+## 9. Nachtrag Sprint 24 (23.10.2026): was gebaut wurde und was entschieden
+
+Die Notiz oben war eine Aufwandsschätzung. Dieser Abschnitt hält fest,
+was der Sprint tatsächlich gebaut hat, **welche offenen Punkte des
+Briefs wie entschieden wurden** und was offen bleibt. Entscheidungsregel
+des Briefs: wo er offen ist, die **sicherere und kleinere** Lösung, mit
+Begründung hier.
+
+### 9.1 Gebaut
+
+| Paket | Stand |
+|---|---|
+| **A** Codec 16ASPM | gebaut, 78 Tests. Eigene Minimal-Implementierung, nicht der offizielle Codec |
+| **B** Befehlsschicht, `DeviceKind.RELAY`, Zeitreihe `relay_reading` | gebaut, Migration 0030 |
+| **C** Wächter, zwei Strategien, Bestätigung, Alarm | Entscheidungslogik gebaut, 19 Tests. Der **Orchestrator** (Celery-Task) fehlt |
+| **D** Zweipunktregler je Zone | gebaut, 24 Tests |
+| **E** Fühler-Rolle „nur messen" | gebaut, 7 Tests, inkl. Pflichttest des Nachtrags |
+| **S4** zwei Rücklesungen, Schutz-Sperre | gebaut, 18 Tests |
+| **F** Sollwerte je Zone, Übersteuerung S6 | **nicht gebaut**, Befund siehe 9.4 |
+| **G** Oberfläche | **nicht gebaut** |
+
+### 9.2 Korrekturen an dieser Notiz selbst
+
+**Der Keepalive ist nicht in jedem Uplink.** Abschnitt 3 oben stützte
+sich auf die Beschreibung des offiziellen Dekoders, der die letzten
+zwölf Bytes bedingungslos als Keepalive liest. Die Protokoll-Seite sagt
+es anders: „If the combined length exceeds the LoRaWAN MAC payload
+limit, the keep-alive packet will be omitted and only the command
+responses will be sent." Der Codec dieses Sprints parst deshalb die
+Antworten **von vorn** mit bekannten Längen und behandelt genau dann
+einen Zwölf-Byte-Rest als Keepalive, wenn einer übrig bleibt. Der
+offizielle Dekoder liest in diesem Fall Unsinn.
+
+**`fPort` ist belegt:** Downlinks gehen auf 1, 2 oder 4–224; der
+Uplink-fPort ist nicht dokumentiert. Die offene Frage aus Abschnitt 5 ist
+damit beantwortet — fPort 1 wie beim Vicki, und das Routing läuft über
+`bytes[0]` (§5.21).
+
+**Der offizielle Dekoder hat zwei Fehler**, die dieser Codec nicht
+übernimmt: das signierte `<< 24` beim Energiezähler (ab 0x80000000
+negativ) und das bedingungslose Abschneiden des Keepalive-Schwanzes.
+
+### 9.3 Entschiedene offene Punkte
+
+Jeder dieser Punkte war im Brief offen; die Entscheidung steht im Code
+und hier.
+
+| Frage | Entscheidung | Begründung |
+|---|---|---|
+| Istwert fehlt — was tut der Regler? | **AUS** | „Letzten Zustand halten" heizt bei ausgefallenem Fühler dauerhaft weiter, und zwar unbemerkt, weil sich nichts mehr ändert. Ein kaltes Zimmer ist ein Beschwerdefall, ein Panel ohne Rückmeldung ein Sicherheitsfall |
+| Bricht der Zwangs-AUS die Mindestlaufzeit? | **ja** | Sonst wäre S5 bis zu zehn Minuten lang unwahr, und eine Sicherheitsaussage mit einem Neun-Minuten-Loch ist keine |
+| Schaltzustand unbekannt (`None`) | **nicht als AUS lesen** | Der erste Befehl würde sonst ein Relais einschalten, von dem wir nicht wissen, ob es schon heizt |
+| Offener Befehl gegen neuen Wunsch | **offener Befehl zuerst** | Sonst überlagern sich bei einem pendelnden Regler zwei unbestätigte Befehle, und am Ende gilt keiner nachvollziehbar |
+| Drehung am Fühler-Rad | **nur Log, keine `event_log`-Zeile** | Abweichung vom Off-Pipeline-Muster (§5.52) mit Grund: dort wird eine Handlung **abgewiesen**, die Wirkung gehabt hätte. Hier ist nichts abgewiesen — das Gerät hat kein Ventil |
+| Gehäusetemperatur-Alarm bei 40 oder 60 °C | **40** | Die Datenblätter widersprechen sich. Bei einem Gerät, das 1600 W schaltet und in einem Hohlraum sitzt, kostet ein Alarm zu früh einen Blick und ein Alarm zu spät ein Panel |
+| `last_state` bei einer Rücklesung | **ein Nein, kein „noch nicht"** | Es ist die Hersteller-Vorgabe und genau der Zustand, den die Provisionierung beseitigen soll. Ein bestandener Vermerk von gestern wird deshalb ausdrücklich **gelöscht** |
+| Welche Schutzauslösung sperrt? | **jede, auch eine unbekannte** | Lieber eine Sperre zu viel. Der Rohwert landet im Feld |
+| Sprintnummer und Branch | **24**, Branch `feat/sprint24-ir-pilot` | Der Brief nannte `05-aktueller-stand.md` und `feature/<sprint>-`; die Datei gibt es in diesem Repo nicht (der Stand steht in `STATUS.md`, §0.2 Rang 4), und das Branch-Muster ist `feat/sprintN-<slug>` (Goldene Regel 2). Der Abweichung folgt die Hausform, weil sie für jeden Leser die erwartbare ist |
+
+### 9.4 Paket F: der Befund, und warum nichts gebaut wurde
+
+**Die Frage:** zwei Zonen im selben Zimmer brauchen dauerhaft
+verschiedene Sollwerte (Eingang 19 °C, Hinten 21 °C, je Tag und Nacht).
+Der Brief verlangt, zuerst die bestehenden Mechanismen zu prüfen.
+
+**Geprüft, und keiner trägt:**
+
+| Mechanismus | Auflösung | Zonen-Ebene? |
+|---|---|---|
+| `RuleConfigScope` | `ROOM > ROOM_TYPE > GLOBAL` | **nein** |
+| `ScenarioScope` | `ROOM > ROOM_TYPE > GLOBAL` | **nein** |
+| `room_type.default_t_*` | hängt am `room_type_id` des **Zimmers** | nein |
+| Zonen-Übersteuerung | zeitlich befristet, kein Dauerzustand | nein |
+
+Die Engine rechnet **einen** Sollwert je Zimmer. Das ist kein Versehen,
+sondern der Entwurf — und die **Bad-Vorlage** vom 18.10. ist die
+vorhandene Antwort auf genau diese Klasse von Problem: ein zweiter
+Durchlauf über die Layer 1, 2 und 5 mit **getauschtem Raumtyp**, ohne
+neue Schicht, ohne Spalte, ohne Migration, und die Zuordnung läuft über
+den Namen des Raumtyps aus den Settings.
+
+**Der minimale Weg ist deshalb nicht ein Sollwert je Zone, sondern die
+Verallgemeinerung der Bad-Vorlage** von „`bathroom` → Raumtyp `Bad`" auf
+eine Zuordnung „Zonen-Art → Vorlage-Raumtyp". Für das Beispiel heißt
+das: Eingang als `hallway`, Hinten als `living`, und je ein Raumtyp mit
+den gewünschten Werten.
+
+**Gebaut wurde es trotzdem nicht, und das ist eine Entscheidung nach der
+Regel des Briefs.** Die Verallgemeinerung greift in
+`engine.evaluate_room` ein, und diese Funktion läuft für **jedes**
+Zimmer, auch für jedes Gästezimmer. Der Brief nennt als harten Stopp,
+dass sich das Verhalten der Gästezimmer nicht ändern darf; ein Eingriff
+an dieser Stelle ist genau der Kandidat dafür. Er braucht einen eigenen
+Durchgang mit Layer-2-Bestandstests als Akzeptanzkriterium — so wie die
+Bad-Vorlage ihn am 18.10. hatte („alle bestehenden Layer-4-Tests grün
+**ohne** Anpassung", §5.47) — und nicht die letzte Stunde eines langen
+Sprints.
+
+**Was das für den Pilot bedeutet:** die beiden Zonen können bis dahin
+nicht dauerhaft verschiedene Sollwerte haben. Für einen Pilot mit **einer**
+Zone ist das kein Hindernis; für zwei ist es eines, und es gehört vor dem
+zweiten Panel geschlossen.
+
+### 9.5 Was offen bleibt, und was das kostet
+
+| Offen | Folge |
+|---|---|
+| **C-Orchestrator** (Celery-Task, der die Entscheidungen ausführt) | Der Wächter **entscheidet** korrekt und wird von 19 Tests gehalten, aber niemand ruft ihn. Ohne diesen Task schaltet kein Relais |
+| **Paket F** | siehe 9.4 |
+| **Paket G** (Oberfläche) | Inbetriebnahme und Freigabe nach einer Schutzauslösung gehen nur über die Datenbank. **Das ist kein Dauerzustand:** S3 verlangt, dass nur ein Admin das Kennzeichen setzt, und ein SQL-Zugang ist keine Rollenprüfung |
+| **Protokollierung der Schutz-Sperre im Uplink-Pfad** | `setze_schutz_sperre` ist gebaut und getestet, der Aufruf aus dem Subscriber fehlt. Eine Schutzauslösung wird heute dekodiert, aber nicht gespeichert |
+| **E2E-Szenarien 1–7 des Briefs** | Die Bausteine sind einzeln geprüft; die sieben Abläufe als Ganzes nicht |
+| **T3.0** („previous state") | Pflicht-Stopp am Gerät, siehe RUNBOOK §10aj Schritt 3. Bis dahin bleibt `REFRESH` gesperrt |
+| **Einheit der Gehäusetemperatur** | Gestützte Annahme (die Doku nennt bei `0x60` und `0x72`/`0x73` ausdrücklich °C), nicht belegt. Pflicht-Prüfung am Gerät |
+
+**Die ehrliche Zusammenfassung:** die Sicherheitszusicherungen S1, S2,
+S3, S4, S5 und S7 sind **in der Entscheidungsschicht** umgesetzt und
+durch Mutationsproben abgesichert. Was fehlt, ist der Weg von dieser
+Schicht zum Gerät (der Orchestrator) und der Weg von ihr zum Menschen
+(die Oberfläche). S6 ist nicht umgesetzt, S8 ist erfüllt — die volle
+Suite ist grün, und kein bestehender Test wurde in seiner Erwartung
+geändert.
