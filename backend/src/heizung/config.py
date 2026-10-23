@@ -170,6 +170,53 @@ class Settings(BaseSettings):
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
 
+    # --- Zweipunktregler fuer Relais-Zonen (Sprint 24, Paket D) -----------
+    # EIN bei ``ist <= soll - relay_ein_delta_k``, AUS bei
+    # ``ist >= soll + relay_aus_delta_k``. Dazwischen liegt das Totband,
+    # und in ihm passiert nichts.
+    #
+    # **Warum die beiden Deltas verschieden sind.** Ein Infrarotpanel
+    # heizt die Flaeche, nicht die Luft, und es hat keine Traegheit nach
+    # dem Abschalten — anders als ein Heizkoerper, der weiter abgibt.
+    # Nach oben braucht es deshalb weniger Abstand (0,3 K) als nach unten
+    # (0,5 K). Ein symmetrisches Totband waere nach oben zu gross: die
+    # Flaeche kuehlt sofort, die Zone ueberschwingt kaum.
+    #
+    # ``Decimal``, nicht ``float``: verglichen wird gegen ``Numeric(5,2)``
+    # aus der Datenbank, und 0.3 hat in IEEE-754 keine exakte
+    # Darstellung. Dieselbe Begruendung wie bei den Batterie-Grenzen.
+    #
+    # Nach dem Feldtest nachjustieren — dafuer stehen sie hier und nicht
+    # als Konstante im Code (AE-73-Muster).
+    relay_ein_delta_k: Decimal = Decimal("0.5")
+    relay_aus_delta_k: Decimal = Decimal("0.3")
+
+    # Mindestlaufzeit und Mindestpause in Minuten. Sie halten das Takten
+    # klein; die Akzeptanzgrenze des Feldtests ist drei Zyklen je Stunde
+    # je Geraet, und zehn Minuten je Richtung ergeben hoechstens drei.
+    #
+    # Sie schlagen die Schwellen — ausser bei einem Zwangs-AUS, wenn der
+    # Istwert fehlt (S5). Ohne diese Ausnahme waere die Zusicherung
+    # „Fuehler weg, Relais aus" bis zu zehn Minuten lang nicht wahr.
+    relay_min_lauf_min: int = 10
+    relay_min_pause_min: int = 10
+
+    # Versatz zwischen dem Einschalten zweier Relais derselben Zone, in
+    # Minuten. Zieht den Einschaltstrom mehrerer 1600-W-Panels
+    # auseinander. Gilt **nur** beim Einschalten: ein gestaffeltes AUS
+    # wuerde den Zwangs-AUS verzoegern.
+    relay_einschalt_versatz_min: int = 2
+
+    # Laufzeit des Relais-Timers in Sekunden, je Waechter-Strategie.
+    # ``expire_and_resend`` ist die Vorgabe und nimmt 30 min:
+    # das Relais faellt nach Ablauf von selbst ab, und erst der gemeldete
+    # Wechsel loest ein neues Setzen aus. ``refresh`` nimmt 15 min und
+    # frischt alle 5 min auf — kuerzere Abschaltzeit, aber abhaengig von
+    # einer Doku-Luecke (AE-78 §4), deshalb nicht die Vorgabe.
+    relay_timer_expire_s: int = 1800
+    relay_timer_refresh_s: int = 900
+    relay_refresh_intervall_s: int = 300
+
     # --- Ventil-Hinweise, Regel 3 und 3b (Sprint 20e, T7/T10) -------------
     # Zwei Hinweise aus demselben Fenster ueber ``sensor_reading``, beide
     # read-time abgeleitet (``services/valve_health.py``):
