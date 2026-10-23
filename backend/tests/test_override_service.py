@@ -1270,11 +1270,29 @@ async def test_jede_drehung_beginnt_die_24_stunden_neu(
     Verlaengerungs-Logik dazubaut — und damit auffaellt, wenn die Sortierung
     einmal kippt.
     """
-    erste = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
-    zweite = erste + timedelta(hours=5)
+    # **Zeitpunkte relativ zur echten Uhr, nicht absolut.**
+    #
+    # Hier stand `datetime(2026, 10, 20, 8, 0)`. Der Test war am Merge-Tag
+    # gruen und zwei Tage spaeter rot: `get_active` filtert auf
+    # `expires_at > now()` mit der **echten** Wanduhr, und ein Ablauf vom
+    # 21.10. liegt am 22.10. in der Vergangenheit — kein aktiver Override,
+    # `assert aktiv is not None` faellt.
+    #
+    # Das ist die §5.59-Familie, nur eine Ebene hoeher: dort waren es
+    # Fixtures, die an `freeze_time` vorbeirechnen, hier ist es der Test
+    # selbst, der mit einer anderen Uhr rechnet als die Funktion, die er
+    # prueft. Beides heilt dieselbe Regel: **eine Uhr pro Test**, und wenn
+    # die gepruefte Funktion die Wanduhr nimmt, nimmt der Test sie auch.
+    #
+    # `freeze_time` waere der andere Weg, hier aber der schlechtere: die
+    # `room_id`-Fixture legt ihre Belegung mit `datetime.now` an und wird
+    # **vor** dem Test-Body ausgewertet — eingefrorene Zeit im Body wuerde
+    # das OCCUPIED-Gate reissen.
+    zweite = datetime.now(tz=UTC)
+    erste = zweite - timedelta(hours=5)
 
     for augenblick, wert in ((erste, Decimal("23")), (zweite, Decimal("25"))):
-        await override_service.create(
+        eintrag = await override_service.create(
             db_session,
             room_id=room_id,
             setpoint=wert,
@@ -1283,7 +1301,28 @@ async def test_jede_drehung_beginnt_die_24_stunden_neu(
                 OverrideSource.DEVICE_MANUAL, augenblick
             ),
         )
-        await db_session.commit()
+        # **`created_at` ausdruecklich setzen, und kein `commit`.**
+        #
+        # `get_active` sortiert bei gleicher Quelle nach `created_at DESC`.
+        # `created_at` ist ein `server_default` auf `now()`, und das ist in
+        # Postgres die **Transaktionszeit** — zwei Zeilen in einer
+        # Transaktion bekommen denselben Wert, und welche gewinnt, ist
+        # offen. Darum stand hier ein `commit` je Durchlauf.
+        #
+        # Das war der falsche Weg: `db_session` raeumt per `rollback` auf,
+        # ein `commit` schreibt die Zeilen **endgueltig** — samt dem Zimmer
+        # aus der Fixture. In CI faellt das nicht auf (frische Datenbank je
+        # Lauf), lokal sammeln sie sich, und `cleanup_expired` zaehlt
+        # **global**: einen Tag spaeter sind die Reste abgelaufen und
+        # `test_cleanup_expired_marks_only_expired` meldet mehr als eine
+        # Zeile. §5.39 — ein DB-Test gegen eine globale Funktion braucht
+        # entweder Aufraeumen oder einen Filter auf eigene IDs.
+        #
+        # Explizite Zeitstempel sind hier beides zugleich: die Sortierung
+        # haengt nicht mehr an der Transaktionszeit, und ohne `commit`
+        # raeumt der Rollback alles weg.
+        eintrag.created_at = augenblick
+        await db_session.flush()
 
     aktiv = await override_service.get_active(db_session, room_id)
 
