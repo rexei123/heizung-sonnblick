@@ -62,6 +62,39 @@ class Orientation(enum.StrEnum):
 class DeviceKind(enum.StrEnum):
     THERMOSTAT = "thermostat"
     SENSOR = "sensor"
+    # Sprint 24: Schaltaktor. Stellt, misst aber keine Raumtemperatur —
+    # den Istwert liefert in derselben Zone ein Thermostat mit der Rolle
+    # "nur messen" (``Device.measure_only``).
+    #
+    # Die Spalte ``device.kind`` ist ``VARCHAR(20)`` **ohne**
+    # CHECK-Beschraenkung (am Schema geprueft, AE-78 §1) — dieser Wert
+    # braucht deshalb keine Migration. Das ist der Gegenfall zu
+    # ``OverrideSource``, wo eine CHECK liegt und ein neuer Wert ohne
+    # Migration beim ersten Insert scheitert (§5.45, Migration 0029).
+    RELAY = "relay"
+
+
+class WatchdogStrategy(enum.StrEnum):
+    """Wie ein Relais eingeschaltet gehalten wird (S2, Sprint 24).
+
+    ``EXPIRE_AND_RESEND`` ist die **Vorgabe**: ein ``0x57`` geht nur
+    heraus, wenn der zuletzt **bestaetigte** Zustand AUS ist. Laeuft der
+    Timer ab, meldet das Geraet den Wechsel, und erst danach wird bei
+    Bedarf neu gesetzt. Damit haengt die Sicherheit nicht an der
+    Bedeutung von „previous state" — die Doku definiert sie nicht
+    (AE-78 §4), und ein Nachsetzen auf ein laufendes EIN koennte den
+    Rueckfallzustand auf EIN festschreiben.
+
+    ``REFRESH`` setzt den Timer periodisch neu, waehrend das Relais EIN
+    ist. Das ist die kuerzere Abschaltzeit und die riskantere Variante;
+    sie ist gebaut, aber je Geraet zu waehlen und **standardmaessig
+    aus**. Sie darf erst benutzt werden, wenn die Messung T3.0 ergeben
+    hat, dass „previous state" der dauerhafte Zustand ist und nicht der
+    unmittelbar vorhergehende.
+    """
+
+    EXPIRE_AND_RESEND = "expire_and_resend"
+    REFRESH = "refresh"
 
 
 class DeviceVendor(enum.StrEnum):

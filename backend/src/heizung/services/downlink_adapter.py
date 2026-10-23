@@ -232,6 +232,42 @@ async def get_open_window_detection(dev_eui: str) -> str:
     return await send_raw_downlink(dev_eui, bytes([VICKI_OW_GET_COMMAND]))
 
 
+# --- Kindersicherung (Sprint 24, Paket E / S7) -----------------------------
+#
+# Hersteller-Doku, Abschnitt „Child lock", abgerufen 23.10.2026:
+# ``0x07 01`` sperrt das Drehrad, ``0x07 00`` gibt es frei; ``0x14``
+# liest den Zustand, und das Geraet meldet ihn ausserdem im Keepalive
+# ueber das 0x80-Bit („A 0x80 flag in the keep-alive means the rotary
+# encoder is disabled").
+#
+# **Warum ein Fuehler-Geraet sie braucht.** Eine unmontierte Vicki liegt
+# im Raum und hat ein drehbares Rad. Ohne Sperre verstellt der erste
+# Gast, der sie findet, einen Sollwert, den niemand umsetzt — das Geraet
+# bekommt keine Downlinks mehr (S7), also bleibt die Drehung ohne
+# Wirkung und erzeugt nur Verwirrung an der Anzeige des Geraets. Die
+# Sperre ist deshalb Teil der Provisionierung, nicht eine Option.
+VICKI_CHILD_LOCK_SET = 0x07
+VICKI_CHILD_LOCK_GET = 0x14
+
+
+async def set_child_lock(dev_eui: str, enabled: bool) -> str:
+    """Sendet ``0x07`` — Drehrad sperren oder freigeben.
+
+    ``confirmed=True``: das ist ein Provisionierungs-Schritt, und ein
+    verlorener Frame wuerde eine Sperre vortaeuschen, die nicht sitzt.
+    Die Bestaetigung des Stacks sagt, dass der Frame ankam — ob die
+    Einstellung sitzt, sagt erst das 0x80-Bit im naechsten Keepalive
+    (``sensor_reading.child_lock``). S7 verlangt beides.
+    """
+    payload = bytes([VICKI_CHILD_LOCK_SET, 0x01 if enabled else 0x00])
+    return await send_raw_downlink(dev_eui, payload, confirmed=True)
+
+
+async def get_child_lock(dev_eui: str) -> str:
+    """Sendet ``0x14`` — Vicki antwortet mit dem naechsten Keepalive."""
+    return await send_raw_downlink(dev_eui, bytes([VICKI_CHILD_LOCK_GET]))
+
+
 async def send_setpoint(dev_eui: str, setpoint_c: int) -> str:
     """Publiziert einen Setpoint-Downlink (0x51).
 

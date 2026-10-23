@@ -6870,3 +6870,176 @@ hoch, kommen sie mit.
 §10l (Dead-Man-Checks und Alarme), §10p (Deploy-Sperre), §10u (Rückfall
 auf einen Stand), §10ai (die drei Belegungslisten — Fenster für C2),
 §10a.1 (legt `gateway-ug65` an; Lücke zu C4).
+
+---
+
+## 10aj. Infrarot-Pilot: Relais in Betrieb nehmen (Sprint 24, vorbereitet)
+
+**Noch nicht ausgeführt.** Dieser Abschnitt ist die Anleitung für den
+ersten 16ASPM. Nichts davon ist auf einem Server oder an einem Gerät
+passiert — der Sprint hat Code und Doku gebaut, und zwar ausdrücklich
+ohne ChirpStack-Änderung und ohne Downlink an ein echtes Gerät.
+
+**Die Reihenfolge ist nicht beliebig.** Jeder Schritt setzt voraus, dass
+der vorige gehalten hat, und zwei Schritte sind Pflicht-Stopps: ohne sie
+darf kein Relais eine Last schalten.
+
+### Schritt 1 — Codec und Geräteprofil in ChirpStack
+
+**Je Server von Hand in der Oberfläche.** Es gibt keinen automatischen
+Weg; ein Repo-Codec ist **nicht** der ChirpStack-Stand (§5.22, hat beim
+Vicki zwei Sprints Verifikationsarbeit gekostet).
+
+1. ChirpStack-Oberfläche → Device profiles → **Add device profile**
+   - Name: `MClimate 16ASPM`
+   - Region: **EU868**
+   - MAC version / Regional parameters: wie beim Vicki-Profil
+   - **Device-supports class C: an.** Das ist der Unterschied zum Vicki.
+     Ohne diesen Schalter stellt ChirpStack Downlinks in die
+     Warteschlange, statt sie sofort zu senden, und der Wächter
+     verlässt sich auf die sofortige Zustellung.
+2. Tab **Codec** → Payload codec: `JavaScript functions`
+3. Inhalt von `infra/chirpstack/codecs/mclimate-16aspm.js` **vollständig**
+   einfügen. Nicht ergänzen, nicht mischen — die Datei ist in sich
+   geschlossen.
+4. Speichern.
+
+**Prüfung, und sie ist nicht optional:** sobald das erste Gerät
+angemeldet ist, im **Events-Tab** einen Uplink öffnen. Der
+`object`-Block muss `report_type`, `relayState` und `power_W` zeigen.
+Steht dort nichts, ist der Codec nicht gelaufen — bei der Goja-Engine
+heißt das meist ein Syntaxfehler, und sie meldet ihn nicht an der
+Oberfläche.
+
+### Schritt 2 — Test-Relais **ohne Last** anmelden
+
+Ein 16ASPM auf dem Tisch, **keine** angeschlossene Last. Alles Weitere
+passiert an diesem Gerät, bis es sich bewährt hat.
+
+Danach die Firmware lesen (`0x04`). **Unter Firmware 1.4 ist der Pilot
+mit diesem Gerät beendet:** die Timer-Befehle `0x55`–`0x58` und der
+Schaltgrund `0x54` kommen erst ab 1.4, und ohne Timer ist S1 („EIN nur
+befristet") nicht erfüllbar. Ein solches Gerät darf nicht in Betrieb
+genommen werden.
+
+### Schritt 3 — PFLICHT-STOPP: was bedeutet „previous state"?
+
+**Der Versuch, der den Wächter-Entwurf entscheidet** (AE-78 §4). Ohne
+Last, am Tisch:
+
+```
+1. 0xC1 00                   Relais AUS, Ausgangszustand
+2. 0x57 01 00 3C             EIN für 60 s
+3. nach ~20 s: 0x57 01 00 3C erneut EIN für 60 s
+4. beobachten (0xB1, Keepalive, 0x54)
+```
+
+| Beobachtung | Bedeutung | Folge |
+|---|---|---|
+| fällt bei **~80 s** ab | „previous state" ist der dauerhafte Zustand | `REFRESH` darf freigegeben werden |
+| bleibt **EIN** | „previous state" ist der Zustand vor dem Befehl | `REFRESH` bleibt gesperrt, `EXPIRE_AND_RESEND` ist der einzige Weg |
+
+**Ergebnis in AE-78 eintragen.** Es ist die Antwort auf eine Frage, die
+die Hersteller-Doku offen lässt, und sie wird nicht noch einmal
+gemessen.
+
+`0x54` ist dabei das Beweismittel: es unterscheidet Timer-Ablauf
+(`radio_timer`) von Befehl (`radio_set_or_flip`), Taster
+(`manual_button`) und Schutzauslösung.
+
+### Schritt 4 — PFLICHT-STOPP: die zwei Rücklesungen
+
+**Beide, nicht eine** (S4). Das Gerät hat zwei voneinander unabhängige
+Wege, von selbst wieder EIN zu werden, und bei beiden ist die
+Hersteller-Vorgabe `last_state`:
+
+| Setzen | Rücklesen | Erwartung |
+|---|---|---|
+| `0x5E 02` | `0x5F` → `02` | AUS nach Stromrückkehr |
+| `0x59 01` | `0x5A` → `01` | AUS nach Erholung vom Überhitzungsschutz |
+
+**Achtung auf die Bytes:** AUS ist bei `0x5E` die **`02`**, bei `0x59`
+die **`01`**. Dieselbe Bedeutung, verschiedene Werte, und `0x59` kennt
+überhaupt kein „ON". Wer die Zuordnung überträgt, sendet einen
+undokumentierten Wert und erfährt es nicht.
+
+**Der zweite Weg ist der unauffälligere und deshalb der wichtigere.** Die
+Doku sagt zur Erholung ausdrücklich, das Relais sei „returned to its
+previous state after recovering from the protection event", und die
+Erholung passiert **von selbst**. Ein Panel, das wegen Hitze abgeschaltet
+hat, käme nach dem Abkühlen zurück, ohne dass jemand etwas gesendet hat.
+
+**Ohne beide bestätigten Rücklesungen lässt sich „in Betrieb genommen"
+nicht setzen.** Die Prüfung sitzt im Backend
+(`services/relay_service.nimm_in_betrieb`), nicht im Formular — sie gilt
+also auch für die API und für jedes Skript.
+
+### Schritt 5 — Stromausfalltest, weiter ohne Last
+
+`0x5E 02` ist gesetzt, Relais per Timer EIN, dann **Strom weg und
+zurück**. Erwartung: das Relais ist **AUS**.
+
+Kommt es EIN zurück, hat die Einstellung nicht gesessen, und `0x5F` hat
+dann vorher etwas anderes gemeldet — in diesem Fall ist der Befund die
+Abweichung zwischen Rücklesung und Verhalten, und das ist ein eigener
+Pflicht-Stopp.
+
+### Schritt 6 — Fühler-Vicki unmontiert, 24 Stunden
+
+Eine Vicki in den Raum legen, **nicht** montieren, Rolle „nur messen"
+setzen und die Kindersicherung (`0x07 01`) — danach mit `0x14` oder am
+`child_lock`-Feld des nächsten Keepalives nachsehen, dass sie sitzt.
+
+Nach 24 Stunden prüfen:
+
+- Messwerte kommen und sind plausibel
+- `health_state` bleibt `healthy`
+- die bekannten Motorfehler (Geräte 027, 056, 100) stehen als
+  `calibration_failed` in den Zeilen und haben den `health_state`
+  **nicht** verschlechtert
+
+Der letzte Punkt ist der, auf den es ankommt: ein Fühler, der aus dem
+Zonen-Aggregat fällt, nimmt der Zone ihren Istwert, und dann schaltet
+der Regler nach S5 alles ab — in einem Raum, dessen Fühler einwandfrei
+**messen**.
+
+### Schritt 7 — erst jetzt: Relais mit Last
+
+Reihenfolge: Last anschließen → Provisionierung wiederholen (die
+Einstellungen überleben einen Austausch nicht zwangsläufig) → beide
+Rücklesungen → **dann** „in Betrieb genommen" setzen. Erst mit diesem
+Kennzeichen gehen überhaupt Schaltbefehle an das Gerät (S3).
+
+### Schritt 8 — Feldtest, drei Wochen
+
+| Kriterium | Grenze |
+|---|---|
+| Temperatur in der Zone | ± 0,7 K um den Sollwert |
+| Schaltzyklen | höchstens 3 pro Stunde und Gerät |
+| Wächter-Ausfalltest | Server anhalten → Relais fällt ab, Gerät meldet AUS |
+| Erreichbarkeit | kein Gerät länger als 15 min unbemerkt offline |
+
+Die Schaltzyklen stehen in `device.switch_cycles`; die Mindestlaufzeit
+und Mindestpause von je 10 Minuten lassen rechnerisch höchstens drei
+Zyklen je Stunde zu. Mehr heißt, dass eine der beiden Zeiten nicht
+greift.
+
+**Der Wächter-Ausfalltest gehört in die Mitte des Feldtests, nicht an
+sein Ende.** Er ist die einzige Prüfung, die zeigt, dass die ganze
+Konstruktion ihren Zweck erfüllt — und wenn er scheitert, will man das
+nicht nach drei Wochen Betrieb erfahren.
+
+### Was in diesem Abschnitt **nicht** vorkommt
+
+| Punkt | Warum |
+|---|---|
+| Sollwerte je Zone für nicht buchbare Räume | Paket F: gebaut ist **nichts**. Der Befund und der Vorschlag stehen in AE-78 — weder `RuleConfigScope` noch `ScenarioScope` haben eine Zonen-Ebene |
+| Übersteuerung in nicht buchbaren Räumen (S6) | ebenfalls Paket F, nicht gebaut |
+| Oberfläche (Paket G) | nicht gebaut. Bis dahin laufen Inbetriebnahme und Freigabe über die Datenbank, und das ist **kein** Dauerzustand: S3 verlangt, dass nur ein Admin das Kennzeichen setzt, und ein SQL-Zugang ist keine Rollenprüfung |
+| Leistungstakt, Lastmanagement, Energiereports | ausdrücklich nicht im Sprint-Umfang |
+
+**Querverweise:** AE-78 (die Architektur-Notiz mit allen belegten
+Hersteller-Angaben und den offenen Punkten), §5.21 (Codec-Routing über
+`bytes[0]`), §5.22 (Codec-Re-Paste je Server), §5.28 (Downlinks über
+MQTT), §0 S4 (Hardware-Schutz), §10h (Pairing-Ablauf beim Vicki, als
+Vorlage für Schritt 2).

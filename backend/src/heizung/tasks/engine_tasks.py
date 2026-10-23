@@ -407,9 +407,26 @@ async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]
 
     Reihenfolge ``id ASC`` (Helper-Default) fuer deterministisches
     Verhalten in Tests + Trace.
+
+    **Sprint 24 (Paket E, S7): ``measure_only`` fliegt heraus.** Ein
+    Thermostat in der Rolle „nur messen" liegt unmontiert im Raum und
+    liefert den Istwert; es hat kein Ventil, das etwas bewirken koennte.
+    Ein Sollwert-Downlink an so ein Geraet waere Funkverkehr und
+    Batterieverbrauch ohne jede Wirkung — und er wuerde auf der
+    Geraeteanzeige einen Sollwert zeigen, den niemand umsetzt.
+
+    **Warum hier und nicht in ``get_active_devices_for_zone``.** Der
+    Helper beantwortet „welche Geraete gehoeren zu dieser Zone"; das ist
+    auch fuer die Anzeige und fuer das Istwert-Aggregat die richtige
+    Antwort, und dort sollen die Fuehler **mitkommen**. Die Frage „welche
+    Geraete werden angesteuert" ist eine andere, und sie gehoert in die
+    Engine-Funktion — dieselbe Trennung, die der ``health_state``-Filter
+    schon macht.
+
+    Das ist die Stelle, die Mutationsprobe M7 angreift.
     """
     active_devices = await get_active_devices_for_zone(session, zone_id)
-    return [d for d in active_devices if d.health_state == "healthy"]
+    return [d for d in active_devices if d.health_state == "healthy" and not d.measure_only]
 
 
 # Sprint 20f (T3): Audit-Aktion, wenn der Abgleich aufgibt. Eigener Name, kein

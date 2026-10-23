@@ -108,6 +108,29 @@ class SensorReading(Base):
     # ``attached_backplate`` und ``broken_sensor``.
     calibration_failed: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Sprint 24 (Paket E, Migration 0030): Vicki ``childLock``
+    # (``status8 & 0x80``). Derselbe Fall wie ``calibration_failed`` vor
+    # Sprint 20f: der Codec setzt das Bit seit Sprint 6.8
+    # (``mclimate-vicki.js:177``) und es wurde bis hierher bei jedem
+    # Frame verworfen.
+    #
+    # Warum es jetzt zaehlt: S7 verlangt, dass die Kindersicherung an
+    # einem Fuehler-Geraet bei der Provisionierung gesetzt **und
+    # verifiziert** wird. Ohne persistierten Wert ist die Verifikation
+    # nicht moeglich — man koennte den Befehl senden und nie erfahren, ob
+    # er angekommen ist. Eine Zusicherung, die man nicht nachsehen kann,
+    # ist keine.
+    #
+    # Die Hersteller-Doku nennt das Bit ausdruecklich als Quelle: „A 0x80
+    # flag in the keep-alive means the rotary encoder is disabled".
+    #
+    # NULL = Feld nicht im Payload, NICHT identisch mit False. Anders als
+    # bei ``open_window`` ist hier **False** der Befund (Rad offen, obwohl
+    # es gesperrt sein sollte) und True der gewuenschte Zustand — die
+    # Drei-Zustands-Regel gilt trotzdem: NULL heisst „diese Zeile sagt
+    # nichts darueber".
+    child_lock: Mapped[bool | None] = mapped_column(Boolean)
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)

@@ -14,8 +14,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     func,
 )
@@ -118,6 +120,87 @@ class Device(Base):
     mounted_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- Sprint 24 (Migration 0030): Infrarot-Pilot, Relais und Fuehler ---
+
+    # S3: ohne dieses Kennzeichen erhaelt ein Relais **keine**
+    # Schaltbefehle, nur Lese- und Konfigurationsbefehle. Gesetzt wird es
+    # ausschliesslich von einem Admin in der Oberflaeche, und zwar erst
+    # nach der Provisionierung (S4) — ohne verifizierten Zustand nach
+    # Stromrueckkehr ist es nicht setzbar.
+    #
+    # Eine Lebenszyklus-Tatsache wie ``mounted_confirmed_at``, kein
+    # Zustand: ein Relais, das einmal in Betrieb genommen wurde, bleibt
+    # es, bis jemand es ausdruecklich zuruecknimmt. Der Grund fuer ein
+    # Datum statt eines Schalters ist derselbe wie dort — wer spaeter
+    # fragt, wann das Panel scharf wurde, hat eine Antwort.
+    commissioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # S7 / Paket E: ein Thermostat in der Rolle **nur messen**. Es
+    # bekommt keine Sollwert-Downlinks, und eine Drehung am Rad erzeugt
+    # keinen Override. Gedacht fuer eine unmontierte Vicki, die in einem
+    # Raum mit Relais-Heizung nur den Istwert liefert.
+    #
+    # Nicht ``kind``, sondern ein eigenes Feld: das Geraet **ist** ein
+    # Thermostat, es wird nur anders verwendet. Ein eigener ``kind``-Wert
+    # haette jede bestehende Abfrage nach ``thermostat`` stillschweigend
+    # um dieses Geraet verkuerzt — auch die, die es mitzaehlen wollen.
+    measure_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+
+    # S2 / Paket C: Waechter-Strategie je Relais. Vorgabe ist
+    # ``expire_and_resend``; ``refresh`` ist gebaut, aber bewusst nicht
+    # die Vorgabe (Begruendung im Enum-Docstring).
+    watchdog_strategy: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="expire_and_resend"
+    )
+
+    # S4 (Nachtrag 23.10.): die **zwei** Ruecklesungen, ohne die ein
+    # Relais nicht in Betrieb genommen werden darf. Beide tragen den
+    # Zeitpunkt der **Bestaetigung durch das Geraet**, nicht den des
+    # Sendens — ein bestaetigter Downlink sagt, dass der Frame ankam,
+    # nicht dass die Einstellung sitzt.
+    #
+    # Warum zwei und nicht einer: das Geraet hat zwei voneinander
+    # unabhaengige Wege, von selbst wieder EIN zu werden.
+    #
+    #   0x5E  nach Stromrueckkehr        Vorgabe: last_state
+    #   0x59  nach Ueberhitzungs-Erholung Vorgabe: last_state
+    #
+    # Die Doku sagt zur Erholung ausdruecklich, das Relais sei „returned
+    # to its previous state after recovering from the protection event" —
+    # ein Relais, das wegen Hitze abgeschaltet hat, kaeme nach dem
+    # Abkuehlen also von selbst zurueck, und zwar ohne jeden Befehl von
+    # uns. Deshalb reicht die eine Ruecklesung nicht.
+    power_return_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    overheating_recovery_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    # S4 (Nachtrag 23.10.): Sperre nach einer Schutzauslösung. Gesetzt
+    # vom Uplink-Pfad, geloescht **nur** von einem Admin.
+    #
+    # Das Geraet erholt sich bei Ueberhitzung und Ueberspannung von
+    # selbst (laut Doku nach einer Minute bei Spannung). Genau deshalb
+    # braucht es hier eine Sperre: ohne sie waere der Vorfall nach einer
+    # Minute unsichtbar, der Regler schaltete wieder ein, und ein
+    # Panel mit einem echten Fehler ginge in eine Schleife aus
+    # Abschalten und Wiedereinschalten. Die Sperre macht aus einem
+    # selbstheilenden Geraetezustand einen Befund, der jemanden braucht.
+    protection_tripped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Art der Auslösung als Marke des Codecs (``overheating``,
+    # ``overvoltage``, ``overcurrent``, ``overpower``). String und kein
+    # Enum: die Liste steht in der Firmware, und ein unbekannter Wert
+    # soll als Rohwert ankommen statt die Sperre zu verhindern.
+    protection_kind: Mapped[str | None] = mapped_column(String(20))
+
+    # Paket C: Zahl der Schaltvorgaenge, hochgezaehlt bei jedem
+    # **bestaetigten** Wechsel nach EIN. Ein Relais hat eine endliche
+    # Zahl mechanischer Schaltungen, und die Akzeptanzgrenze des
+    # Feldtests ist in Zyklen je Stunde formuliert — ohne Zaehler ist sie
+    # nicht pruefbar.
+    switch_cycles: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
