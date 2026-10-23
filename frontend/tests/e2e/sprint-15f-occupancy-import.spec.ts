@@ -33,6 +33,29 @@ const KPI = {
   room_too_warm_count: 0,
 };
 
+/**
+ * `ExpectedByForm` rendert nur mit geladener Konfiguration (`if (!cfg.data)
+ * return null`). Ohne diesen Mock bleibt der Hilfetext unsichtbar, und ein
+ * Test darauf schlaegt an der falschen Stelle fehl — genau so ist es beim
+ * ersten Lauf passiert.
+ */
+const GLOBAL_CONFIG = {
+  id: 1,
+  hotel_name: "Hotel Sonnblick",
+  timezone: "Europe/Vienna",
+  default_checkin_time: "14:00:00",
+  default_checkout_time: "11:00:00",
+  summer_mode_starts_on: null,
+  summer_mode_ends_on: null,
+  alert_email: "chef@hotel.example.com",
+  alert_device_offline_minutes: 60,
+  occupancy_import_expected_by_local: "12:00:00",
+  created_at: "2026-10-21T06:00:00Z",
+  updated_at: "2026-10-21T06:00:00Z",
+  last_mail_attempt_at: null,
+  last_mail_error: null,
+};
+
 function logPayload(partial: Record<string, unknown>): string {
   return JSON.stringify({
     status: "green",
@@ -42,6 +65,10 @@ function logPayload(partial: Record<string, unknown>): string {
     // Kachel rendert gar nicht — der Mock muss die Antwortform vollstaendig
     // abbilden (§5.64).
     expected_by_local_label: "12:00 MESZ",
+    // Seit 21.10.2026: die gemessene Eingangszeit. `null` ist ein gültiger
+    // Wert ("noch keine Liste"), deshalb hier ein Vorgabewert, den die
+    // Tests einzeln überschreiben.
+    first_list_local_label: "08:30 MESZ",
     today_received: true,
     imports: [],
     ...partial,
@@ -55,6 +82,13 @@ async function mockKpi(page: Page): Promise<void> {
 }
 
 async function mockImport(page: Page, partial: Record<string, unknown>): Promise<void> {
+  await page.route(/.*\/api\/v1\/global-config(\?.*)?$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(GLOBAL_CONFIG),
+    });
+  });
   await page.route("**/api/v1/integrations/occupancy-import/log", async (route) => {
     await route.fulfill({
       status: 200,
@@ -179,6 +213,33 @@ test.describe("Sprint 15f Import-Detailseite (/einstellungen/api)", () => {
     const zeilen = page.getByTestId("import-row");
     await expect(zeilen.nth(0).locator("td").nth(4)).toHaveText("2");
     await expect(zeilen.nth(1).locator("td").nth(4)).toHaveText("0");
+  });
+
+  test("Hilfetext nennt die **gemessene** Eingangszeit, nicht eine feste", async ({
+    page,
+  }) => {
+    // Bis zum 20.10.2026 stand im Hilfetext „gegen 10:38". Mit dem
+    // Mehrfachversand (08:30, 15:30, 19:30) war das falsch — und beim
+    // nächsten Wechsel wäre es wieder falsch. Die Zahl kommt jetzt aus den
+    // Daten der letzten sieben Tage.
+    await mockImport(page, { status: "green", first_list_local_label: "08:30 MESZ" });
+    await page.goto("/einstellungen/api");
+
+    await expect(
+      page.getByText(/Die erste Liste des Tages kam zuletzt gegen/),
+    ).toBeVisible();
+    await expect(page.getByText("08:30 MESZ")).toBeVisible();
+    await expect(page.getByText(/10:38/)).toHaveCount(0);
+  });
+
+  test("ohne Liste in sieben Tagen steht der Satz ohne Lücke da", async ({ page }) => {
+    // Der Zustand eines frisch aufgesetzten Systems. Ohne diesen Zweig
+    // stünde dort „kam zuletzt gegen" und danach nichts.
+    await mockImport(page, { status: "red", first_list_local_label: null });
+    await page.goto("/einstellungen/api");
+
+    await expect(page.getByText(/Bisher ist noch keine Liste eingetroffen/)).toBeVisible();
+    await expect(page.getByText(/kam zuletzt gegen/)).toHaveCount(0);
   });
 
   test("leere imports -> Leer-Hinweis", async ({ page }) => {

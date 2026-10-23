@@ -6307,6 +6307,22 @@ nächster Schritt vorgemerkt (Schwelle 3 h); bis dahin ist die Spalte
 „Eingegangen“ im Protokoll die Antwort — stehen dort drei Zeiten, hat es
 funktioniert.
 
+**Der Hilfetext unter dem Schwellen-Feld nennt keine feste Uhrzeit mehr.**
+Dort stand „Die Liste kommt derzeit gegen 10:38“ — mit dem
+Mehrfachversand falsch, und beim nächsten Wechsel wieder. Jetzt steht dort
+die **gemessene** früheste Eingangszeit der letzten sieben Tage („Die erste
+Liste des Tages kam zuletzt gegen 08:30 …“), mit Zeitzonen-Kürzel.
+Gezählt wird jede Liste, die eingetroffen ist — angewandt, abgewiesen oder
+veraltet: eine verspätete 08:30-Liste ist angekommen und ist die früheste
+des Tages, sie darf die Zahl nicht nach hinten verschieben. Kam in sieben
+Tagen keine, sagt der Text das.
+
+**Eine Eigenschaft, die man kennen sollte:** genommen wird das **Minimum**,
+nicht der jüngste Wert — gesucht ist, wie früh man mit Post rechnen kann.
+Ein einzelner Ausreißer nach vorn (eine Liste um 04:00) zieht die Zahl
+damit für sieben Tage mit. Das ist der Preis dafür, dass ein ausgefallener
+Nachmittagsversand sie **nicht** verschiebt.
+
 **Querverweise:** §10ag (Verlängerung und Gästewechsel), §10ad
 (Belegungs-Import, Ampel und Schwelle), §10k (Status sofort
 synchronisieren).

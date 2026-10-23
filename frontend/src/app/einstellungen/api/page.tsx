@@ -177,6 +177,10 @@ export default function ApiWebhooksPage() {
  */
 function ExpectedByForm() {
   const cfg = useGlobalConfig();
+  // Derselbe Hook wie oben auf der Seite — TanStack Query liefert aus dem
+  // Cache, es entsteht keine zweite Abfrage. Bewusst kein Prop: der Wert
+  // gehoert zu diesem Satz und nicht in die Signatur der Seite.
+  const log = useOccupancyImportLog();
   // Sprint 22 T4: die Seite bleibt fuer Mitarbeiter sichtbar und lesbar
   // (Entscheidung des Hoteliers vom 14.10.2026, nachdem belegt war, dass
   // dort nichts Vertrauliches steht: ein Zeit-Feld, Zeitpunkte, die
@@ -242,8 +246,26 @@ function ExpectedByForm() {
       </div>
       <p className="mt-2 text-xs text-text-tertiary">
         Ist bis zu dieser Uhrzeit keine Liste eingetroffen, geht eine Warnung an die
-        Alarm-Adresse. Die Liste kommt derzeit gegen 10:38 — der Wert sollte spürbar
-        dahinter liegen, sonst warnt das System, bevor die Liste fällig ist.
+        Alarm-Adresse.{" "}
+        {/*
+          Gemessen, nicht geschrieben: hier stand bis zum 20.10.2026 „gegen
+          10:38“. Seit dem Mehrfachversand (08:30, 15:30, 19:30) war das
+          falsch, und beim nächsten Wechsel wäre es wieder falsch — eine Zahl
+          im Text zieht niemand nach (§5.77).
+        */}
+        {log.data?.first_list_local_label ? (
+          <>
+            Die erste Liste des Tages kam zuletzt gegen{" "}
+            <strong>{log.data.first_list_local_label}</strong> — der Wert sollte
+            spürbar dahinter liegen, sonst warnt das System, bevor die Liste fällig
+            ist.
+          </>
+        ) : (
+          <>
+            Bisher ist noch keine Liste eingetroffen — der Wert lässt sich erst
+            beurteilen, wenn eine da war.
+          </>
+        )}
       </p>
     </form>
   );

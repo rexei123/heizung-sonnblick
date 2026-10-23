@@ -29,6 +29,9 @@ const occupancyImportLogSchema = z.object({
   status: z.enum(["green", "yellow", "red"]),
   last_success_at: z.string().nullable(),
   expected_by_local: z.string(),
+  // `.default(null)`: ein Frontend, das kurz neuer ist als die API (rollender
+  // Deploy), soll die Seite trotzdem rendern und den Satz weglassen.
+  first_list_local_label: z.string().nullable().default(null),
   // Dieselbe Zeit mit Kuerzel ("12:00 MESZ"). Muss hier stehen, sonst
   // strippt Zod das Feld still aus der Antwort (§5.64).
   expected_by_local_label: z.string(),
