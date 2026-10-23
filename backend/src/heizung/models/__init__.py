@@ -21,12 +21,14 @@ from heizung.models.enums import (
     RuleConfigScope,
     ScenarioScope,
     UserRole,
+    WatchdogStrategy,
 )
 from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.occupancy import Occupancy
+from heizung.models.relay_reading import RelayReading
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.rule_config import RuleConfig
@@ -54,6 +56,7 @@ __all__ = [
     "OccupancySource",
     "Orientation",
     "OverrideSource",
+    "RelayReading",
     "Room",
     "RoomStatus",
     "RoomType",
@@ -66,4 +69,5 @@ __all__ = [
     "SensorReading",
     "User",
     "UserRole",
+    "WatchdogStrategy",
 ]

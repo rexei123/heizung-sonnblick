@@ -14,8 +14,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     func,
 )
@@ -118,6 +120,48 @@ class Device(Base):
     mounted_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- Sprint 24 (Migration 0030): Infrarot-Pilot, Relais und Fuehler ---
+
+    # S3: ohne dieses Kennzeichen erhaelt ein Relais **keine**
+    # Schaltbefehle, nur Lese- und Konfigurationsbefehle. Gesetzt wird es
+    # ausschliesslich von einem Admin in der Oberflaeche, und zwar erst
+    # nach der Provisionierung (S4) — ohne verifizierten Zustand nach
+    # Stromrueckkehr ist es nicht setzbar.
+    #
+    # Eine Lebenszyklus-Tatsache wie ``mounted_confirmed_at``, kein
+    # Zustand: ein Relais, das einmal in Betrieb genommen wurde, bleibt
+    # es, bis jemand es ausdruecklich zuruecknimmt. Der Grund fuer ein
+    # Datum statt eines Schalters ist derselbe wie dort — wer spaeter
+    # fragt, wann das Panel scharf wurde, hat eine Antwort.
+    commissioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # S7 / Paket E: ein Thermostat in der Rolle **nur messen**. Es
+    # bekommt keine Sollwert-Downlinks, und eine Drehung am Rad erzeugt
+    # keinen Override. Gedacht fuer eine unmontierte Vicki, die in einem
+    # Raum mit Relais-Heizung nur den Istwert liefert.
+    #
+    # Nicht ``kind``, sondern ein eigenes Feld: das Geraet **ist** ein
+    # Thermostat, es wird nur anders verwendet. Ein eigener ``kind``-Wert
+    # haette jede bestehende Abfrage nach ``thermostat`` stillschweigend
+    # um dieses Geraet verkuerzt — auch die, die es mitzaehlen wollen.
+    measure_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+
+    # S2 / Paket C: Waechter-Strategie je Relais. Vorgabe ist
+    # ``expire_and_resend``; ``refresh`` ist gebaut, aber bewusst nicht
+    # die Vorgabe (Begruendung im Enum-Docstring).
+    watchdog_strategy: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="expire_and_resend"
+    )
+
+    # Paket C: Zahl der Schaltvorgaenge, hochgezaehlt bei jedem
+    # **bestaetigten** Wechsel nach EIN. Ein Relais hat eine endliche
+    # Zahl mechanischer Schaltungen, und die Akzeptanzgrenze des
+    # Feldtests ist in Zyklen je Stunde formuliert — ohne Zaehler ist sie
+    # nicht pruefbar.
+    switch_cycles: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
