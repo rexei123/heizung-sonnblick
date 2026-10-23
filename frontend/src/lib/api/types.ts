@@ -974,6 +974,12 @@ export interface OccupancyImportLog {
   last_success_at: string | null; // UTC ISO-8601 oder null ("noch nie")
   expected_by_local: string; // "HH:MM" (Ortszeit, ohne Einheit — fuer Formulare)
   expected_by_local_label: string; // "12:00 MESZ" — fuer die Anzeige
+  /**
+   * Früheste Tageszeit, zu der in den letzten sieben Tagen eine Liste kam,
+   * mit Zeitzonen-Kürzel ("08:30 MESZ"). `null` = in sieben Tagen keine.
+   * Gemessen, nicht konfiguriert — siehe Backend-Schema.
+   */
+  first_list_local_label: string | null;
   today_received: boolean;
   imports: OccupancyImportLogRow[]; // letzte 30, neueste zuerst
 }
