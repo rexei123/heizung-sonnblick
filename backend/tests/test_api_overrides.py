@@ -40,6 +40,7 @@ from heizung.db import get_session
 from heizung.main import app
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from tests.test_override_quellen_spiegel import frontend_waehlbare_dauern
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -227,6 +228,76 @@ async def test_post_unknown_room_returns_404(http_client: httpx.AsyncClient) -> 
         json={"setpoint": "22.0", "source": "frontend_4h"},
     )
     assert resp.status_code == 404, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Jede waehlbare Dauer legt wirklich einen Override an (22.10.2026)
+# ---------------------------------------------------------------------------
+#
+# **Der Test, der am 20.10. gefehlt hat.** Oben steht seit Sprint 9.9 genau
+# ein 201-Test fuer den POST-Weg, und der nimmt ``frontend_4h`` — einen Wert,
+# der seit Fix A **nicht mehr waehlbar** ist und trotzdem funktioniert. Die
+# neue Vorauswahl ``frontend_24h`` hat kein Test angelegt, und sie war die,
+# die 422 lieferte.
+#
+# Die Faelle kommen deshalb nicht aus einer Liste hier, sondern aus
+# ``FRONTEND_SOURCES`` im Panel. Waechst der Dialog um eine Dauer, waechst
+# dieser Test mit — und ``ERWARTETE_FRIST`` erzwingt, dass jemand sagt,
+# welche Frist dabei herauskommen soll.
+
+#: Erwartetes Fenster je Dauer, gegen den Zeitpunkt **vor** der Anfrage.
+#: ``frontend_checkout`` zielt auf das ``check_out`` der ``room_id``-Fixture
+#: (``now + 2 Tage``).
+ERWARTETE_FRIST: dict[str, tuple[timedelta, timedelta]] = {
+    "frontend_24h": (timedelta(hours=23, minutes=55), timedelta(hours=24, minutes=5)),
+    "frontend_checkout": (timedelta(days=1, hours=23), timedelta(days=2, hours=1)),
+}
+
+
+def test_erwartete_frist_deckt_jede_waehlbare_dauer() -> None:
+    """Ohne diese Zusicherung koennte eine neue Dauer lautlos ungeprueft bleiben.
+
+    ``pytest.mark.parametrize`` wuerde sie zwar mit anlegen, aber der
+    Plausibilitaets-Teil unten greift nur auf Eintraege in
+    ``ERWARTETE_FRIST`` zu — eine fehlende Dauer bekaeme also einen Test,
+    der nur noch ``201`` prueft. Das ist genau die halbe Pruefung, die bei
+    Fix A nicht aufgefallen ist.
+    """
+    fehlen = [d for d in frontend_waehlbare_dauern() if d not in ERWARTETE_FRIST]
+    assert fehlen == [], f"ohne erwartetes Frist-Fenster: {fehlen}"
+
+
+@pytest.mark.parametrize("dauer", frontend_waehlbare_dauern())
+async def test_post_jede_waehlbare_dauer_legt_an(
+    http_client: httpx.AsyncClient, room_id: int, dauer: str
+) -> None:
+    """POST mit jeder im Dialog waehlbaren Dauer -> 201 und plausible Frist."""
+    vorher = datetime.now(tz=UTC)
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{room_id}/overrides",
+        json={"setpoint": "22", "source": dauer, "reason": "Dauer-Test"},
+    )
+
+    assert resp.status_code == 201, f"{dauer}: {resp.text}"
+    body = resp.json()
+    assert body["source"] == dauer
+    assert body["room_id"] == room_id
+    assert Decimal(body["setpoint"]) == Decimal("22")
+    assert body["revoked_at"] is None
+
+    frist = datetime.fromisoformat(body["expires_at"])
+    untere, obere = ERWARTETE_FRIST[dauer]
+    assert untere < frist - vorher < obere, (
+        f"{dauer}: Frist {frist.isoformat()} liegt {frist - vorher} in der Zukunft, "
+        f"erwartet zwischen {untere} und {obere}"
+    )
+
+    # Und er ist danach wirklich abrufbar — ein 201 auf eine Zeile, die
+    # niemand liest, waere kein Beleg (§5.86: nachher messen).
+    liste = await http_client.get(f"/api/v1/rooms/{room_id}/overrides")
+    assert liste.status_code == 200, liste.text
+    assert [o["source"] for o in liste.json()] == [dauer]
 
 
 # ---------------------------------------------------------------------------
