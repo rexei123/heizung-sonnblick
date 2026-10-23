@@ -5345,3 +5345,375 @@ lief"), weil die meisten Merges keine Migration mitbringen.
 - **§0.3** — ein Merge nach develop ist ein Deploy. Die Deploy-Sperre
   (Phase 0) läuft unverändert **vor** allem Neuen, auch vor einem Rückfall.
 - **RUNBOOK §10u** — der Handgriff, Schritt für Schritt.
+
+---
+
+# AE-78 — Relais-Aktoren als eigene Befehlsschicht, EIN nur auf Zeit (MClimate 16ASPM)
+
+**Stand 23.10.2026.** Entscheidung des Betreibers: die Relais sprechen
+LoRaWAN, das Gerät ist das **MClimate 16A Switch & Power Meter (16ASPM)**,
+Class C. Diese Notiz beziffert den Aufwand und hält fest, was an
+Hersteller-Angaben **belegt** ist und was nicht. **Kein Code, keine
+Migration, keine Umstellung** — der Umsetzungsbeschluss steht aus.
+
+## 1. Was ohne Änderung trägt
+
+Der Funkweg ist derselbe, und er ist vollständig vorhanden:
+
+| Stufe | Beleg |
+|---|---|
+| Gerät → LoRaWAN → UG65 im Hotel | — |
+| UG65 wählt **hinaus** (Basics Station über WSS) | `infra/caddy/Caddyfile.test:92-97` |
+| Bridge nimmt an | `infra/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml:14-17` |
+| Bridge → MQTT | ebd. `:44` (`tcp://mosquitto:1883`) |
+| Broker | `infra/deploy/docker-compose.prod.yml:44-62` (`eclipse-mosquitto:2`) |
+| Backend abonniert Uplinks | `config.py:73` (`application/+/device/+/event/up`), `services/mqtt_subscriber.py:715` |
+| Backend sendet Downlinks | `services/downlink_adapter.py:157` `send_raw_downlink`, Topic aus `config.py:83` |
+
+**Es gibt keinen Aufruf vom Server in das Hotelnetz, und es braucht
+keinen.** Das ist keine Einschränkung, die umgangen werden muss, sondern
+die Architektur (AE-48, §5.28).
+
+Ebenso tragen ohne Änderung: die Zuordnung Zone→Geräte als 1:n
+(`models/heating_zone.py:71`), der Lifecycle-Filter
+(`services/device_service.py:57`, `retired_at IS NULL`), der
+Health-Filter und die Reihenfolge (`tasks/engine_tasks.py:399`), die
+parallele Zustellung mit Fehlerbehandlung je Gerät
+(`tasks/engine_tasks.py:525`) und das Audit je Gerät über
+`ControlCommand`.
+
+**Ein gemessener Nebenbefund:** `DeviceKind` und `DeviceVendor` liegen in
+der Datenbank als `VARCHAR(20)` **ohne CHECK-Constraint** — am laufenden
+Schema nachgesehen, nicht aus dem Modell geschlossen:
+
+```
+kind    | character varying(20) | not null
+vendor  | character varying(20) | not null
+Check constraints:
+    "ck_device_health_state" CHECK (health_state = ANY (...))
+```
+
+Ein neuer Wert `relay` braucht damit **keine Migration**. Das ist der
+Gegenfall zu `OverrideSource`, der eine CHECK trägt — genau die, die am
+20.10. eine Migration gekostet hat (0029). Nach Analogie hätte man es
+falsch geraten; deshalb steht hier der `psql`-Auszug und nicht eine
+Einschätzung.
+
+## 2. Was nicht trägt: die Steuergröße
+
+Die Pipeline rechnet durchgehend in **°C als Ganzzahl** — Layer 1 bis 5,
+Kappung, Zielwert. Ein Relais kennt ein und aus.
+
+Und die vorhandene Hysterese ist **nicht** die, die ein Relais braucht:
+
+```python
+# rules/engine.py:908 ff.
+delta = abs(new_setpoint_c - prev_setpoint_c)
+if delta >= HYSTERESIS_C:
+    return HysteresisDecision(should_send=True, reason=f"delta={delta}")
+```
+
+Sie vergleicht **gesendete Sollwerte** gegeneinander und ist eine
+**Sendesperre zum Batteriesparen** (AE-32), zusammen mit dem
+Sechs-Stunden-Heartbeat. Ein Zweipunktregler braucht die Hysterese auf
+`Ist − Soll`, dazu eine Mindestlauf- und Mindestpausenzeit gegen
+Relaisverschleiß und Kessel-Takten. Das sind **zwei verschiedene
+Mechanismen auf zwei verschiedenen Größen**, und sie dürfen nicht in eine
+Funktion fallen: ein 16ASPM ist netzbetrieben, bei ihm gibt es keinen
+Batteriegrund für eine Sendesperre, und ein Vicki hat keine
+Mindestpausenzeit.
+
+Ebenfalls nicht übertragbar: die Befehlsbytes
+(`_encode_setpoint_payload:72`, `0x51`). Der **Transport**
+(`send_raw_downlink`) ist wiederverwendbar, die **Befehlsschicht** nicht
+— genau die Trennung, die AE-48 als Hybrid angelegt hat.
+
+## 3. Belegte Hersteller-Angaben
+
+Quelle: MClimate-Doku zum 16ASPM, Abschnitte „Relay state" und „Commands
+cheat sheet", **abgerufen 23.10.2026**:
+`https://docs.mclimate.eu/mclimate-lorawan-devices/devices/mclimate-16a-switch-and-power-meter-lorawan-16aspm/`
+
+| Befehl | Richtung | FW | Inhalt |
+|---|---|---|---|
+| `0x57` | Server | ≥1.4 | **Set relay timer in seconds.** Byte 1: `00` AUS / `01` EIN. Bytes 2–3: Dauer, Bits [15:8] und [7:0]. Bereich 1…65 535 s, 1-s-Auflösung. Beispiel der Doku: `0x57000003` = „Turn off the relay for 3 seconds" |
+| `0x58` | beide | ≥1.4 | Get relay timer in seconds |
+| `0x55` / `0x56` | Server / beide | ≥1.4 | Timer in Millisekunden, 50…65 535 ms |
+| `0xC1` | Server | alle | **Set relay state.** Byte 1: `00` AUS / `01` EIN. Beispiel `0xC101` |
+| `0xB1` | beide | alle | Get relay state. Byte 1: `00` aus / `01` ein |
+| `0xF1` | Server | ≥1.5 | Flip relay state |
+| `0x5D` | Gerät | alle | Manual relay state change (Taster am Gerät) |
+| `0x5E` / `0x5F` | Server / beide | alle | **Relay state after return of power supply.** Byte 1: `00` Last state (**Vorgabe**), `01` EIN, `02` AUS. Beispiel `0x5E02` |
+| `0x54` | beide | ≥1.4 | Get relay state change reason |
+| `0x01` | Gerät | alle | Keep-alive |
+| `0x02` / `0x12` | Server / beide | alle | Keep-alive-Periode setzen / lesen |
+| `0x1C` / `0x1D` | Server / beide | alle | Funk-Wächter-Parameter setzen / lesen |
+| `0x1E`–`0x25` | Server / beide | alle | Schwellen für Überhitzung, Überspannung, Überstrom, Überlast |
+| `0x59` / `0x5A` | Server / beide | ≥1.1 | Relaiszustand nach Überhitzungs-Erholung |
+| `0x70`–`0x73` | beide | ≥1.1 | Erholungs-Ereignisse der vier Schutzfunktionen |
+| `0xA5` | Server | ≥1.3 | Restart device |
+
+**Der Timer wird abgebrochen** durch `0xC1`, durch den Taster am Gerät
+oder durch **jede** Schutzauslösung — wörtlich: „setting the relay state
+with command C1, manually (via the button) or by triggering any of the
+protections."
+
+**Keepalive-Inhalt** (aus dem Hersteller-Dekoder, `handleKeepalive`):
+interne Temperatur (`bytes[1]`), Energie (4 Bytes, `/1000` → kWh),
+Leistung (2 Bytes, W), Netzspannung (1 Byte, V), Netzstrom (2 Bytes, mA),
+Relaiszustand (Byte 11, `0x01` = EIN). Damit sind alle vier vom Betreiber
+verlangten Größen vorhanden.
+
+### Was die Doku **nicht** sagt
+
+Das ist der wichtigere Teil der Liste, und es steht hier, damit niemand
+die Lücken später für geprüft hält (§5.83):
+
+1. **Was „previous state" ist.** Die Seite sagt „After the timer expires,
+   the relay automatically returns to its previous state" und definiert
+   den Begriff nicht.
+2. **Was passiert, wenn ein Timer-Befehl eintrifft, während ein Timer
+   läuft.** Nicht erwähnt — weder ersetzen noch verlängern noch abweisen.
+3. **Die Vorgabe der Keepalive-Periode.** Nicht angegeben.
+4. **Class C.** Auf den gelesenen Seiten nicht erwähnt. Dass das Gerät
+   Class C ist, ist Angabe des Betreibers, nicht dieser Doku.
+5. **Die Einheit der internen Temperatur.** Der Dekoder liest ein Byte,
+   die Seite nennt keine Einheit.
+
+## 4. Der Befund, der den Wächter-Entwurf entscheidet
+
+Der Entwurf lautet: EIN **nur** über `0x57` mit 15 Minuten, Auffrischung
+alle 5 Minuten, damit ein stummer Server das Relais von selbst abfallen
+lässt. Die Sicherheitseigenschaft hängt vollständig an Lücke 2 oben.
+
+**Zwei mögliche Bedeutungen, mit entgegengesetztem Ergebnis:**
+
+| Bedeutung von „previous state" | Folge der Auffrischung |
+|---|---|
+| **(a)** Zustand unmittelbar **vor diesem** Timer-Befehl | Die zweite Auffrischung findet das Relais **EIN** und schreibt EIN als Rückfallzustand fest. Nach Ablauf bleibt es **EIN — dauerhaft.** Der Wächter ist damit nicht nur wirkungslos, er **erzeugt** den Zustand, den er verhindern soll |
+| **(b)** Der dauerhafte, per `0xC1`/Taster gesetzte Zustand | Die Auffrischung ist harmlos, der Entwurf trägt |
+
+**Bei (a) ist der Entwurf nicht reparierbar durch häufigeres
+Auffrischen** — jede Auffrischung verschlimmert es. Er müsste dann
+anders aussehen: `0xC1 00` (AUS) vor jedem neuen `0x57 01`, was zwei
+Downlinks je Auffrischung kostet und ein kurzes Flackern erzeugt, oder
+eine ganz andere Mechanik.
+
+**Deshalb ist die Messung am echten Gerät Vorbedingung für T3 und nicht
+Teil davon.** Konkret, und so billig, dass es keinen Grund gibt sie zu
+verschieben:
+
+```
+1. 0xC1 00                 Relais AUS, Ausgangszustand
+2. 0x57 01 00 3C           EIN für 60 s
+3. nach ~20 s: 0x57 01 00 3C   erneut EIN für 60 s
+4. beobachten (0xB1 / Keepalive / 0x54):
+   fällt es bei ~80 s ab  -> Bedeutung (b), Entwurf trägt
+   bleibt es EIN          -> Bedeutung (a), Entwurf neu schneiden
+```
+
+`0x54` („relay state change reason") liefert dabei den Grund der
+Änderung und ist das eigentliche Beweismittel — es unterscheidet
+Timer-Ablauf von Befehl, Taster und Schutzauslösung.
+
+### Der eigene Funk-Wächter des Geräts ist **kein** Ersatz
+
+`0x1C` setzt „device radio communication watch-dog parameters". Nach den
+Handbüchern **anderer** MClimate-Geräte führt dieser Wächter einen
+**Neustart des Geräts** aus, wenn über eine Frist kein Downlink kam —
+nicht ein Abschalten des Relais. **Für das 16ASPM ist das nicht
+belegt**; die 16ASPM-Seite dazu habe ich nicht gelesen, und eine Angabe
+aus dem Handbuch eines anderen Geräts ist keine Angabe über dieses
+(§5.79).
+
+Falls es zutrifft, ist es sogar gefährlich: ein Neustart trifft auf
+`0x5E` = `00` „Last state" (**die Vorgabe**), und das Relais käme in dem
+Zustand zurück, in dem es war — bei EIN also **EIN, ohne Server**.
+
+### `0x5E = 02` ist eine Provisionierungs-Pflicht, keine Reaktion
+
+Der Auftrag lautet „Zustand nach Stromrückkehr = AUS setzen und per
+Abfrage verifizieren". Die Doku bietet dafür etwas Besseres als eine
+Reaktion: `0x5E 02` stellt **im Gerät** ein, dass es nach Stromrückkehr
+AUS ist. Das wirkt auch dann, wenn der Server den Stromausfall gar nicht
+mitbekommt — und bei einem Hausstromausfall ist genau das der
+Normalfall, weil Gateway und Server dieselbe Störung sehen.
+
+Die Verifikation per `0x5F` (Einstellung) und `0xB1` (Zustand) bleibt
+trotzdem, und zwar als Teil der Provisionierung: **die Vorgabe ist „Last
+state"**, ein nicht konfiguriertes Relais kommt also nach einem
+Stromausfall in seinem alten Zustand zurück.
+
+## 5. Aufwand
+
+Je Aufgabe 1–3 h, ohne Wartezeiten.
+
+### T1 — ChirpStack und Codec (7 h)
+
+| | Aufgabe | h |
+|---|---|---|
+| T1.1 | Geräteprofil **Class C** in ChirpStack, je Server **von Hand** in der Oberfläche; RUNBOOK-Abschnitt mit dem Ablauf und der Prüfung am Events-Tab (§5.22) | 2 |
+| T1.2 | Uplink-Codec `infra/chirpstack/codecs/mclimate-16aspm.js`: Keepalive `0x01`, Antworten `0xB1`/`0x58`/`0x54`/`0x5F`, Schutz-Ereignisse; Node-Test nach dem Muster von `test-mclimate-vicki.js` | 3 |
+| T1.3 | Downlink-Abschnitt des Codecs als **Spiegel** der Python-Kodierer plus Drift-Test gegen identische Erwartungs-Bytes (AE-48) | 2 |
+
+**Risiko:** der Codec ist **nicht** automatisch live — er muss je Server
+von Hand in die Oberfläche (§5.22, hat schon einmal zwei Sprints
+Verifikationsarbeit gekostet). Das Routing nach `bytes[0]` statt nach
+fPort ist beim Vicki Pflicht (§5.21) und gilt hier genauso.
+
+**Offen:** der **fPort** für 16ASPM-Downlinks. Der Vicki nutzt fPort 1
+(`downlink_adapter.py:120`); für das 16ASPM steht er in den gelesenen
+Abschnitten nicht. Vor T1.3 zu klären, sonst wird der Spiegel gegen eine
+Annahme gebaut.
+
+### T2 — Befehlsschicht (9 h)
+
+| | Aufgabe | h |
+|---|---|---|
+| T2.1 | `services/relay_adapter.py`: `send_relay_on_for(dev_eui, sekunden)`, `send_relay_off`, `query_relay_state`, `set_state_after_power_return` — alle über `send_raw_downlink`, keine eigene MQTT-Verbindung | 3 |
+| T2.2 | Keepalive auswerten und ablegen. **Eigene Tabelle `relay_reading`** (Leistung, Energie, Spannung, Strom, interne Temperatur, Relaiszustand) plus Migration — `sensor_reading` führt Temperatur, Sollwert, Ventil, Batterie und passt nicht | 3 |
+| T2.3 | Provisionierung: `0x5E 02` setzen, mit `0x5F` verifizieren, in den Pairing-Ablauf einhängen | 2 |
+| T2.4 | `DeviceKind.RELAY` plus `model`/`vendor`; **keine Migration** (§1), Spiegel-Test über alle Enum-Werte nach dem Muster von `test_override_quellen_spiegel.py` | 1 |
+
+**Zu T2.2, eine Entscheidung:** Energie ist ein **Zähler**, kein
+Messwert. Er läuft über und wird von `0x26` („Clear accumulated energy")
+zurückgesetzt. Wer ihn wie eine Temperatur behandelt, bekommt bei jedem
+Überlauf einen negativen Verbrauch. Das gehört in den Entwurf der
+Tabelle, nicht in eine spätere Fehlersuche.
+
+### T3 — Wächter (6 h, **gesperrt** bis T3.0)
+
+| | Aufgabe | h |
+|---|---|---|
+| T3.0 | **Messung am echten Gerät** nach §4. Pflicht-Stop: ohne Ergebnis wird T3.1 nicht gebaut | 1 |
+| T3.1 | Celery-Task: Auffrischung alle 5 min, Timer 15 min, **gestaffelt** über das Fenster (Downlink-Sendezeit, §0 S4) | 3 |
+| T3.2 | Melder, wenn die Auffrischung ausfällt — auf die **Wirkung**, nicht auf den Takt: „ein Relais ist seit mehr als 10 min nicht aufgefrischt" (§5.76) | 2 |
+
+**Risiko, das vor T3.1 zu rechnen ist:** Downlink-Sendezeit. Class C
+heißt, dass die Downlinks sofort gehen, aber das Gateway hat eine
+Sendezeit-Grenze, und es bedient schon 104 Vickis. 20 Relais alle 5 min
+sind 4 Downlinks je Minute **zusätzlich**. Das ist zu messen, nicht zu
+schätzen — und es ist der Grund, warum der Timer eher 15 als 5 Minuten
+ist.
+
+### T4 — Zweipunktregler je Zone (8 h)
+
+| | Aufgabe | h |
+|---|---|---|
+| T4.1 | `rules/zweipunkt.py` als **reine Funktion**: Eingang Ist (`Decimal`), Soll, letzter Schaltzeitpunkt, letzter Zustand; Hysterese auf `Ist − Soll`, Mindestlauf und Mindestpause je 10 min; Ausgang EIN/AUS/unverändert mit Grund | 3 |
+| T4.2 | Einbindung je Zone, getrennt von `hysteresis_decision`; Spur im Audit mit Grund (`details`-JSONB, keine neue PK — §5.44) | 3 |
+| T4.3 | Tests: beide Hysterese-Ränder, Mindestlauf, Mindestpause, Vorrang der Mindestzeiten gegen die Hysterese, fehlender Istwert; dazu Mutationsproben | 2 |
+
+**Entwurfs-Vorgaben, die aus dem Bestand folgen:**
+
+- **`Decimal`, nicht `float`** — wie das Zonen-Aggregat
+  (`rules/aggregation.py`, `ROUND_HALF_EVEN`, 0,1 °C).
+- **Kein Layer, kein `LayerStep`.** Der Regler sitzt **hinter** Layer 5:
+  er nimmt den fertigen Sollwert und das Ist und entscheidet über einen
+  Schaltzustand. Das ist dieselbe Stellung wie die Hysterese, und die ist
+  bewusst kein Layer (§5.23).
+- **Was bei fehlendem Istwert geschieht, ist eine Entscheidung und keine
+  Programmierfrage.** Ohne Ist kann ein Zweipunktregler nicht regeln. Die
+  sichere Antwort ist AUS; die Antwort „letzter Zustand halten" ist die
+  gefährliche, weil sie bei ausgefallenem Fühler dauerhaft heizt. Gehört
+  in den Umsetzungs-Brief, nicht in den Code.
+
+### T5 — Fühler: es gibt keinen
+
+**Befund, am Code und an den Daten:**
+
+- `DeviceKind.SENSOR` existiert als Enum-Wert (`models/enums.py:64`) und
+  hat **keinen einzigen Konsumenten** im Backend — `grep` über
+  `backend/src/heizung/` findet ausschließlich die Definition.
+- Es gibt **einen** Codec im Repo: `infra/chirpstack/codecs/` enthält
+  `mclimate-vicki.js` und dessen Test, nichts weiter.
+- Es gibt **eine** Hersteller-Doku-Kopie: `docs/vendor/mclimate-vicki`.
+- In den Gerätedaten stehen ausschließlich Thermostate (lokale Test-Datenbank,
+  23.10.2026):
+
+  ```
+     kind    |  vendor  | model | count
+  ------------+----------+-------+-------
+   thermostat | mclimate | Vicki |     3
+   thermostat | mclimate | vicki |     1
+  ```
+
+  Die zwei Schreibweisen von `model` sind Test-Daten und kein
+  Produktionsbefund — hier unverändert wiedergegeben, weil eine
+  geglättete Abfrage-Ausgabe kein Beleg ist.
+
+- `backend/src/heizung/drivers/__init__.py` ist ein **leeres Paket** mit
+  dem Text „Wird in Sprint 3 befüllt. Treiber: MClimate Vicki, Milesight
+  WT102, Mock-Thermostat." Wir sind bei Sprint 22/23. Das ist **§5.20**:
+  ein aspirativer Kommentar, der eine Treiber-Abstraktion verspricht, die
+  es nicht gibt — und wer eine Relais-Schicht „in die vorhandene
+  Abstraktion einhängen" will, baut auf nichts. Der WT102 ist zudem ein
+  **Thermostat**, kein Raumfühler.
+
+**Antwort auf die Frage: kein LoRaWAN-Raumfühler ist integriert.** Typ,
+Meldeintervall und Eignung sind daher nicht zu melden, sondern zu
+entscheiden. Das ist **kein Task à 1–3 h**, sondern ein eigener kleiner
+Sprint: Auswahl, Beschaffung, Pairing, Codec, Ablage, Einbindung in das
+Zonen-Aggregat — in der Größenordnung von T1 und T2 zusammen.
+
+**Und es ist die Vorbedingung für T4**, nicht eine Ergänzung. Ein
+Zweipunktregler ohne Istwert ist kein Regler. In einer Zone **mit** Vicki
+liefert das vorhandene Aggregat den Istwert
+(`rules/aggregation.py:61`) — in einer Zone **ohne** Vicki gibt es
+keinen, und genau solche Zonen sind der Anlass für ein Relais.
+
+**Hinweis zur Reihenfolge, der sich daraus ergibt:** die erste
+Inbetriebnahme sollte eine Zone sein, die **beides** hat — Vicki als
+Fühler, Relais als Stellglied. Dann ist T4 ohne T5 messbar, und der
+Fühler-Sprint folgt, wenn der Regler sich bewährt hat.
+
+## 6. Summe und Reihenfolge
+
+| Block | h | Bemerkung |
+|---|---|---|
+| T1 ChirpStack und Codec | 7 | fPort offen |
+| T2 Befehlsschicht | 9 | keine Migration für `DeviceKind`, eine für `relay_reading` |
+| T3 Wächter | 6 | **gesperrt** bis zur Messung T3.0 |
+| T4 Zweipunktregler | 8 | braucht einen Istwert, siehe T5 |
+| **Summe** | **30** | ohne Fühler |
+| T5 Fühler | eigener Sprint | nichts integriert |
+
+**Reihenfolge:** T3.0 (die Messung, 1 h, beantwortet die Frage, die alles
+andere formt) → T1 → T2 → T4 → T3.1/T3.2. Der Wächter kommt **zuletzt**,
+weil er die Befehlsschicht braucht; seine **Messung** kommt zuerst, weil
+sie den Entwurf entscheidet.
+
+## 7. Pflicht-Stops
+
+1. **Nach T3.0**, vor jedem Wächter-Code: welche Bedeutung hat „previous
+   state"? Bei (a) wird T3 neu geschnitten, nicht nachjustiert.
+2. **Vor T1.3**: der fPort für 16ASPM-Downlinks, belegt und nicht
+   angenommen.
+3. **Vor dem ersten `0x57` an ein Gerät mit angeschlossener Last**: der
+   Versuch am unbelasteten Relais. Ein Relais schaltet Netzspannung, und
+   ein hängendes EIN ist kein Trace-Eintrag, sondern ein heizender
+   Heizkörper.
+4. **Vor dem Rollout auf mehr als ein Relais**: die Downlink-Sendezeit
+   gemessen, zusammen mit dem laufenden Vicki-Verkehr.
+5. **Vor T4 im Betrieb**: die Entscheidung, was bei fehlendem Istwert
+   geschieht.
+
+## 8. Querverweise
+
+- **AE-48** — Downlinks über MQTT, Hybrid aus rohem Versand und
+  typisierten Hüllen. Die Trennung, auf der T2 aufsetzt.
+- **AE-51** — Zone-Aggregat: lesen als Mittelwert, schreiben symmetrisch.
+  Liefert den Istwert für T4, soweit ein Vicki in der Zone hängt.
+- **AE-32** — Hysterese und Heartbeat. Die Sendesperre, von der der
+  Zweipunktregler getrennt bleibt.
+- **§5.21** — Codec-Routing über `bytes[0]`, nicht über fPort.
+- **§5.22** — der Codec wird von Hand in ChirpStack eingesetzt, je
+  Server.
+- **§5.28** — Downlinks laufen über MQTT, nicht über gRPC.
+- **§5.20** — `drivers/__init__.py` verspricht eine Abstraktion, die es
+  nicht gibt.
+- **§5.79 / §5.83** — die Angabe aus dem Handbuch eines anderen Geräts
+  ist keine Angabe über dieses, und eine Zusicherung gilt nur auf der
+  Ebene, auf der sie geprüft wurde.
+- **§0 S4** — Hardware-Schutz: jeder Downlink ist Sendezeit, und jedes
+  Schalten ist Relaisverschleiß.
