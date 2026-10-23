@@ -9,7 +9,7 @@ selbst zulässt; T2 schaltet einen Algorithmus im Gerät ein, der
 eigenständig das Ventil schließt. Beides ist nicht durch einen Rückweg in
 der Datenbank zu heilen.
 
-**Gesamtaufwand:** 13–18 h über drei Tasks, plus 48 h Beobachtung in T1
+**Gesamtaufwand:** 18–23 h über drei Tasks, plus 48 h Beobachtung in T1
 und 72 h in T2, die nebenher laufen.
 
 ---
@@ -176,6 +176,105 @@ Schlafzimmer. Nach 48 h prüfen:
 
 Erst danach alle Geräte, gestaffelt.
 
+### T1.7 — zwei Anzeigefehler in der Übersteuerungs-Historie (2–3 h)
+
+**Beleg des Betreibers:** Zimmer 306, 21./22.10., **12 Drehungen in 16
+Stunden**. Beide Fehler sind in dieser Historie unmittelbar sichtbar.
+
+#### (a) Gekappte Übersteuerungen zeigen den Gastwert
+
+Die Historie zeigt „30 °C, aktiv“, wirksam sind 25 °C. Der
+Gastwunsch steht in `manual_override.setpoint`, gekappt wird in Layer 5
+— die Historie liest den ungekappten Wert und behauptet damit eine
+Wirkung, die es nicht gibt.
+
+**Soll:** „30 °C → begrenzt auf 25 °C“, und zwar an **allen drei**
+Stellen: Historie, Zonen-Karte, Übersteuerungs-Karte.
+
+**Woher die Grenze kommt, ist die eigentliche Frage.** Sie steht nicht am
+Override, sondern am Raumtyp, und seit dem Hotfix vom 18.10. liegt sie als
+`RuleResult.clamp_grenzen_c` im Engine-Ergebnis. Die Anzeige leitet sie
+**read-time** ab (`clamp_grenzen(ctx)`) und persistiert **nichts** —
+dieselbe Form wie `battery_voltage_median` (AE-72, §5.73). Ein zweites
+Feld am Override wäre eine zweite Wahrheit, die beim ersten
+Grenzen-Wechsel auseinanderläuft.
+
+**Und deshalb gilt die Anzeige nur für den aktiven Fall.** Eine
+Bestandszeile von vorgestern gegen die **heutigen** Grenzen zu rechnen
+würde eine Vergangenheit behaupten, die so nicht war. Abgelaufene Zeilen
+zeigen weiter den gespeicherten Wert.
+
+#### (b) `revoked_reason` wird falsch gedeutet — und zwar zweimal
+
+Die heutige Zuordnung in `manual-override-panel.tsx`:
+
+```tsx
+const grund = override.revoked_reason ?? "";
+if (grund.startsWith("auto")) {
+  return <span …>{grund.includes("checkout") ? "mit der Abreise beendet" : "abgelaufen"}</span>;
+}
+return <span …>manuell aufgehoben</span>;
+```
+
+**Alle Werte, die der Quellcode schreibt** — per `grep` erhoben, nicht aus
+dem Gedächtnis:
+
+| Wert | Geschrieben in | Bedeutung | Heutige Anzeige |
+|---|---|---|---|
+| `superseded` | `override_service.py:487` | von einer neueren Drehung derselben Zone verdrängt | **„manuell aufgehoben“ — falsch** |
+| `auto_revoke_on_checkout` | `override_pms_hook.py:102` über `revoke_all_active_overrides` | Abreise | „mit der Abreise beendet“ — richtig |
+| `room_override_blocked` | `api/v1/rooms.py:287` über `revoke_all_active_overrides` | Mitarbeiter hat das Zimmer gesperrt | **„manuell aufgehoben“ — falsch** |
+| `auto: expired` | `override_service.py:718` (`cleanup_expired`) | Tages-Aufräumung abgelaufener Einträge | „abgelaufen“ — richtig |
+| Freitext oder `NULL` | `override_service.py:646` über `api/v1/overrides.py:242` | Aufhebung über die Oberfläche, Grund optional (max. 500 Zeichen) | „manuell aufgehoben“ — richtig |
+
+**Es sind zwei von fünf, nicht einer.** Der Auftrag nannte `superseded`;
+`room_override_blocked` fällt in dieselbe Lücke, weil die Prüfung auf das
+Wortanfang-Muster `auto` beide verfehlt. Dass die Erhebung einen zweiten
+Fall gefunden hat, ist der Grund für die Vorgabe „per grep, nicht aus
+der Erinnerung“ — aus dem Gedächtnis hätte ich einen Wert korrigiert
+und den anderen stehen lassen.
+
+**Soll:**
+
+| Wert | Text |
+|---|---|
+| `superseded` | „ersetzt (neue Drehung)“ |
+| `auto_revoke_on_checkout` | „mit der Abreise beendet“ |
+| `room_override_blocked` | „durch Zimmersperre beendet“ |
+| `auto: expired` | „abgelaufen“ |
+| `NULL` oder leer | „manuell aufgehoben“ |
+| **alles andere** | **der Rohwert**, unverändert |
+
+**Warum der Rohwert und nicht „manuell aufgehoben“.** Vorgabe des
+Betreibers, und sie ist richtig: ein unbekannter Wert ist entweder ein
+neuer Code, den jemand im Backend eingeführt hat, oder ein Freitext aus
+der Oberfläche. Im ersten Fall ist „manuell aufgehoben“ eine
+**falsche Tatsachenbehauptung**, im zweiten ist der Rohwert genau das,
+was der Mitarbeiter hingeschrieben hat. Beides ist mit dem Rohwert
+richtig bedient, und ein Auffangwert, der schweigt, hätte diesen Fehler
+gar nicht entstehen lassen.
+
+**Keine Zuordnung über Textmuster mehr.** `startsWith("auto")` war der
+Fehler, nicht eine seiner Zweige: `superseded` und
+`room_override_blocked` sind beide automatische Vorgänge, deren Namen
+nicht mit `auto` beginnen. Die neue Zuordnung ist eine **Tabelle mit
+genauen Schlüsseln**.
+
+**Spiegel-Test, Pflicht.** Wie bei den Override-Quellen (#330): ein Test
+hält die Tabelle im Frontend gegen die Konstanten im Backend. Die vier
+Codes stehen dort bereits als Konstanten oder Literale
+(`REVOKE_REASON_SUPERSEDED`, `REVOKE_REASON_CHECKOUT`,
+`"room_override_blocked"`, `"auto: expired"`); die beiden letzten gehören
+im Zuge dieses Tasks ebenfalls zu Konstanten gemacht, sonst prüft der
+Spiegel gegen eine Zeichenkette, die jemand beim Umbenennen übersieht.
+
+**Ein Nebenbefund aus der Erhebung:** `test_override_service.py:382`
+erwartet `auto: guest checked out` — eine Zeichenkette, die **kein**
+Aufrufer im Quellcode schreibt (der Haken schreibt
+`auto_revoke_on_checkout`). Der Test gibt sich den Grund selbst mit und
+ist damit nicht falsch, aber er dokumentiert einen Wert, den es nicht
+gibt. Im Zuge des Tasks mitziehen.
+
 ### Der Pflicht-Stop vor dem ersten Rollout, als Versuch
 
 **Aufbau:** ein Gerät mit Grenzen **15/25** (also 306 Schlafzimmer nach
@@ -217,7 +316,8 @@ Engine-Tick, der den regulären Wert ohnehin wiederherstellt.
 | Codec-Re-Paste vergessen | `0x15` bleibt undekodiert, der Abgleich ist blind und sendet **nicht** (fail-closed). Kein Schaden, aber eine stille Wirkungslosigkeit — deshalb ein Test, der die dekodierten Felder in `sensor_reading` erwartet |
 | Grenzen „verschwinden" nach einem Neustart unbemerkt | genau dagegen ist der `0x15`-Abgleich. Vorher war das der Grund für das wöchentliche Nachsenden |
 
-**Aufwand T1: 9–11 h** plus 48 h Beobachtung (die Anzeige kam am 22.10. dazu).
+**Aufwand T1: 11–14 h** plus 48 h Beobachtung. T1.5 (Anzeige am Gerät)
+und T1.7 (Historie) kamen am 22.10. dazu.
 
 ---
 
@@ -240,6 +340,42 @@ Codec dekodiert — anders als bei T1 fehlt hier nichts.
 
 **Werkszustand: ausgeschaltet.** Das ist der Befund aus §5.27, und er ist
 der Grund, warum `openWindow` seit Sprint 9.11 immer `false` meldet.
+
+### Was das Delta bedeutet — belegt und unbelegt
+
+**Vorbedingung des Betreibers (22.10.):** bevor aus dem 306-Verlauf
+geschlossen wird, die Erkennung „hätte nicht ausgelöst“, ist die
+Semantik des Deltas zu belegen. Das ist geschehen, und das Ergebnis ist
+**zur Hälfte negativ**.
+
+Quelle: Hersteller-Seite „Open window detection“,
+`https://docs.mclimate.eu/mclimate-lorawan-devices/devices/mclimate-vicki-lorawan/vicki-lorawan-device-communication-protocol/open-window-detection`,
+**abgerufen 22.10.2026**.
+
+| Frage | Antwort |
+|---|---|
+| Interne Messrate der Erkennung | **belegt:** „The detection algorithm takes readings every 1 minute“ |
+| Bezugsgröße des Vergleichs | **nicht belegt.** Die Seite sagt nur „a sudden drop in temperature“ und „if the temperature dropped more than the threshold value, the valve is closed“. Gegen **welchen** Vorwert verglichen wird, steht nicht da |
+| Messrate im Verhältnis zur Senderate | **nicht belegt.** Die Seite nennt die Messrate, zum Sendeintervall sagt sie nichts |
+| Byte-Format | belegt und deckungsgleich mit der Repo-Kopie: Byte 1 Bit 0 ein/aus (Vorgabe **aus**), Byte 2 Dauer in 5-Minuten-Schritten (Vorgabe 10 min), Byte 3 Delta × 10 (Vorgabe 1,0 °C, Minimum 0,2 °C) |
+
+Im Abschnitt zu den 0,1-Grad-Befehlen steht „A new temperature value is
+obtained every minute“ mit einem Vergleich gegen den Vorwert — das
+**deutet** auf ein Ein-Minuten-Fenster, die Seite schreibt es aber nicht
+hin.
+
+**Warum diese Lücke die ganze Schlussfolgerung trägt.** Der 306-Verlauf
+hat rund **0,22 K/min**:
+
+| Annahme über das Fenster | Abfall im Fenster | Bei Delta 1,0 |
+|---|---|---|
+| **pro Minute** | 0,22 K | löst **nicht** aus |
+| über 20 Minuten | 4,4 K | löst aus |
+
+Die Aussage kippt also vollständig an einem Punkt, den die Doku offen
+lässt. Deshalb steht in diesem Brief **nicht**, die Onboard-Erkennung
+hätte das Fenster in 306 nicht erkannt. Sie ist **unbelegt**, und sie wird
+nicht durch Lesen entschieden, sondern durch die Messung in T2.5.
 
 ### Parameter-Vorschlag
 
@@ -273,6 +409,42 @@ möglich, dass 1.0 °C am Heizkörper-Sensor zu grob ist. Dann ist die
 Antwort **nicht** automatisch ein kleinerer Wert, sondern die Frage, ob
 die Geräteerkennung überhaupt etwas beiträgt, das die Backend-Logik nicht
 schon hat.
+
+### T2.5 — Delta 0,2 als Messung, auf **einem** Gerät (Vorgabe 23.10.)
+
+Weil die Bezugsgröße unbelegt ist, wird sie **gemessen** statt
+angenommen: `0x45` mit **Delta 0,2** (dem Minimum) auf **genau einem**
+Gerät — **306 Schlafzimmer**, weil für dieses Zimmer ein dokumentierter
+Verlauf vorliegt.
+
+**Was die Messung beantwortet.** Bei 0,2 K löst die Erkennung aus, sobald
+im Bezugsfenster 0,2 K fehlen. Aus dem **Zeitpunkt** der Auslösung im
+Verhältnis zum Verlauf lässt sich die Bezugsgröße rückwärts bestimmen:
+schlägt sie bei einem Abfall von 0,22 K/min schon nach einer Minute an,
+ist das Fenster eine Minute; braucht sie Minuten, ist es länger.
+
+**Delta 0,2 ist ein Messwert, kein Betriebswert.** Es ist der
+empfindlichste mögliche Wert und wird mit Fehlalarmen antworten — das ist
+der Zweck. Er bleibt **nicht** stehen.
+
+**Ein Gerät, nicht drei.** Die Begründung ist dieselbe wie beim
+Pflicht-Stop in T1: ein Fehlalarm zieht über Layer 4 ein Zimmer auf den
+Sicherheitswert, und das soll bei einer Messung höchstens **ein** Zimmer
+treffen. Die drei Geräte aus dem Testplan bekommen den **vorsichtigen**
+Wert; 306 Schlafzimmer bekommt zusätzlich die Messung, zeitlich davor.
+
+**Das Abbruchkriterium gilt vollständig und ohne Ausnahme für die
+Messung.** Löst die Erkennung bei Delta 0,2 durch unsere eigene
+Absenkung aus — und bei diesem Wert ist das zu **erwarten** —, dann wird
+sie auf **allen** Testgeräten abgeschaltet, und die Testwoche ist
+beendet. Das ist nicht widersprüchlich, sondern der Preis: wer messen
+will, wo die Schwelle liegt, riskiert, die Woche damit zu beenden.
+Deshalb steht die Messung **am Anfang** des Testfensters und nicht in der
+Mitte.
+
+**Die Absenkung beginnt um 20:00** (siehe Rahmen unten) — die Messung
+gehört also in den Vormittag, mit mindestens einem vollen Tag Abstand zur
+nächsten Absenkung, sonst ist nicht zu unterscheiden, was ausgelöst hat.
 
 ### Wechselwirkung mit der Engine
 
@@ -322,6 +494,136 @@ bestätigt es. Kein Neustart, keine Datenbankänderung — das ist der Grund,
 warum dieser Task überhaupt mit einem so scharfen Kriterium arbeiten
 kann.
 
+**Rahmen (Betreiberentscheidung 22.10.): die Nachtabsenkung bleibt
+20:00–06:00.** Sie wird für diesen Sprint **nicht** verschoben, auch nicht
+versuchsweise — eine verschobene Absenkung hätte den Testfall gegen den
+306-Verlauf unvergleichbar gemacht.
+
+**Für das Abbruchkriterium gilt die Absenkung ab 20:00.** Das ist keine
+Formalie: löst die Erkennung um 20:05 aus, ist das ein Treffer des
+Kriteriums und kein Zufall, und die Testwoche endet. Wer die Absenkung
+erst ab 22:00 rechnet, hätte zwei Stunden, in denen ein Fehlalarm als
+„unklar“ durchgeht — und genau so werden Kriterien weich.
+
+### Testfall mit Realdaten: Zimmer 306 (Vorgabe 22.10.)
+
+**Beobachtung des Betreibers.** Am 22.10. gegen 06:00 wurde in 306
+gelüftet, bei geöffnetem Fenster:
+
+| Zone | Von | Nach | Dauer | Gradient |
+|---|---|---|---|---|
+| Schlafzimmer | 25 °C | 18,5 °C | ~30 min | ~0,217 K/min |
+| Bad | 25 °C | 20 °C | ~30 min | ~0,167 K/min |
+
+Dazu am 21.10. gegen 16:30 ein **kurzes** Lüften mit rund **−2 K**.
+
+**Was dieser Verlauf wert ist.** Er ist der einzige belegte Fall eines
+**echten** offenen Fensters an unserer Hardware, mit zwei Zonen
+gleichzeitig und mit einem zweiten, schwächeren Ereignis als
+Gegenprobe. Jede Schwelle, die wir wählen — am Gerät oder im Backend —
+muss gegen diesen Verlauf gehalten werden, und zwar in **beide**
+Richtungen: sie muss beim Lüften anschlagen und bei der Nachtabsenkung
+schweigen.
+
+**Der Verlauf ist noch nicht exportiert, und ich kann ihn nicht
+exportieren** — diese Sitzung hat keinen SSH-Zugang. Die Zahlen oben sind
+**Angaben des Betreibers**, keine aus der Datenbank gelesenen Werte, und
+sie sind hier als solche gekennzeichnet (§5.68). Fertige Abfrage für den
+Export:
+
+```sql
+-- SSH (heizung-test, root)
+SET TIME ZONE 'Europe/Vienna';
+SELECT sr.time, hz.name AS zone, d.dev_eui,
+       sr.temperature, sr.setpoint, sr.valve_position, sr.open_window
+  FROM sensor_reading sr
+  JOIN device d       ON d.id = sr.device_id
+  JOIN heating_zone hz ON hz.id = d.heating_zone_id
+  JOIN room r          ON r.id = hz.room_id
+ WHERE r.number = '306'
+   AND sr.time >= '2026-10-21 16:00'
+   AND sr.time <  '2026-10-22 08:00'
+ ORDER BY hz.name, sr.time;
+```
+
+Dazu der Engine-Blick auf dieselbe Spanne, damit unsere **eigenen**
+Sollwert-Änderungen im Verlauf sichtbar sind — ohne sie ist ein Abfall
+nicht zuzuordnen:
+
+```sql
+SET TIME ZONE 'Europe/Vienna';
+SELECT cc.created_at, d.dev_eui, cc.setpoint_celsius, cc.reason, cc.detail
+  FROM control_command cc
+  JOIN device d ON d.id = cc.device_id
+  JOIN heating_zone hz ON hz.id = d.heating_zone_id
+  JOIN room r ON r.id = hz.room_id
+ WHERE r.number = '306'
+   AND cc.created_at >= '2026-10-21 16:00'
+   AND cc.created_at <  '2026-10-22 08:00'
+ ORDER BY cc.created_at;
+```
+
+**Wie er Testfall wird.** Die exportierten Zeilen gehen als Fixture in
+den Sprint (CSV oder ein Python-Literal, keine Live-Abfrage im Test) und
+tragen **drei** Abschnitte: das Lüften am 22.10., das kurze Lüften am
+21.10. und — das ist der wichtigste — eine **Nachtabsenkung ohne
+Lüften**. Der dritte fehlt in der Beobachtung und ist mit zu exportieren;
+ohne ihn prüft der Testfall nur die eine Richtung.
+
+### Plan B — nur dokumentiert, nicht gebaut
+
+**Ausdrücklich keine Entscheidung.** Der Betreiber hat am 22.10.
+festgehalten: Plan B bleibt Plan B, und ob er kommt, wird **nach** dem
+T2-Test entschieden, nicht vorher. Dieser Abschnitt hält den Entwurf
+fest, damit er im Entscheidungsmoment nicht erst erdacht werden muss.
+
+**Der Entwurf:** serverseitige Fenstererkennung aus dem
+Temperaturgradienten.
+
+| Teil | Wert |
+|---|---|
+| Auslöser | Abfall **≥ 3 K in 20 min** in einer Zone |
+| Sperre | **nicht** innerhalb von 30 min nach einer eigenen Sollwert-Senkung in derselben Zone |
+| Reaktion | Ventil 20 min zu |
+
+**Was er besser kann als die Geräteerkennung:** er kennt unsere eigenen
+Sollwert-Änderungen. Genau das ist die Schwäche, die T2 beim Gerät
+vermutet — der Vicki-Sensor sitzt am Heizkörper und sieht unsere
+Absenkung als Abfall, und er kann nicht wissen, dass wir sie verursacht
+haben. Die 30-Minuten-Sperre ist deshalb nicht ein Detail, sondern der
+ganze Grund für Plan B.
+
+**Was er nicht kann:** schnell sein. 20 Minuten Fenster heißt, dass die
+Erkennung im besten Fall nach 20 Minuten greift, während das Gerät nach
+einer Minute messen kann. Plan B ist die **gründlichere**, nicht die
+schnellere Lösung — und bei einem offenen Fenster im Winter sind 20
+Minuten Heizen aus dem Fenster heraus.
+
+**Gegen den 306-Verlauf gerechnet, soweit die Angaben reichen:**
+
+| Fall | Abfall in 20 min | ≥ 3 K? |
+|---|---|---|
+| Lüften 22.10., Schlafzimmer (0,217 K/min) | ~4,3 K | **ja** |
+| Lüften 22.10., Bad (0,167 K/min) | ~3,3 K | **ja**, aber knapp |
+| Kurzes Lüften 21.10. (−2 K insgesamt) | < 3 K | **nein** |
+
+Das Bad liegt mit 3,3 K rund 10 % über der Schwelle. **Eine Schwelle, die
+einen bekannten Fall so knapp trifft, ist keine Schwelle, sondern ein
+Zufall** (§5.84). Vor einem Bau wäre sie an mehr als einem Verlauf zu
+prüfen — und der dritte Abschnitt des Testfalls (Nachtabsenkung ohne
+Lüften) entscheidet, ob 3 K überhaupt über der Absenkung liegt. **Das ist
+heute nicht bekannt**, und ohne diese Zahl ist Plan B nicht
+entscheidungsreif.
+
+Dass das kurze Lüften **nicht** anschlägt, ist übrigens kein Mangel: zwei
+Kelvin bei geschlossenem Fenster nach fünf Minuten sind kein Fall, bei
+dem ein Ventil zufahren muss.
+
+**Regressionstest, falls gebaut:** derselbe 306-Verlauf als Fixture, drei
+Zusicherungen — greift beim Lüften am 22.10., greift **nicht** bei der
+Nachtabsenkung, greift **nicht** beim kurzen Lüften am 21.10. Die mittlere
+ist die, die den Entwurf trägt.
+
 ### Testplan
 
 Drei Geräte: **105, 110, 306 Schlafzimmer**. Je Gerät:
@@ -337,8 +639,10 @@ Drei Geräte: **105, 110, 306 Schlafzimmer**. Je Gerät:
    `open_window` **false** bleibt. Das ist der Fehlalarm-Test, und er ist
    der wichtigere der beiden.
 
-**Aufwand T2: 3–5 h** plus 72 h Beobachtung (zwei Nächte, damit die
-Absenkung zweimal gemessen ist).
+**Aufwand T2: 5–7 h** plus 72 h Beobachtung (zwei Nächte, damit die
+Absenkung zweimal gemessen ist). T2.5 Delta-Messung und der
+Realdaten-Testfall kamen am 22./23.10. dazu; Plan B ist reine
+Dokumentation und kostet in diesem Sprint nichts.
 
 ### Risiken
 
@@ -428,11 +732,20 @@ steht in **beiden** Testplänen — ein weiterer Grund, sie zu trennen.
    Hersteller-Aussage ist keine Messung.
 2. **Nach T1.6**, vor dem Rollout auf alle Geräte: die vier Prüfungen aus
    48 h Beobachtung.
-3. **Nach T2 Schritt 4**, vor dem Festschreiben des Parameters: ob die
+3. **Vor T2.5**, der Messung mit Delta 0,2: sie geht an **ein** Gerät
+   (306 Schlafzimmer), am Vormittag, mit einem Tag Abstand zur nächsten
+   Absenkung. Bei diesem Wert ist ein Fehlalarm zu **erwarten** — er
+   beendet die Testwoche nach dem Abbruchkriterium, und das ist der Preis
+   der Messung, kein Widerspruch.
+4. **Nach T2 Schritt 4**, vor dem Festschreiben des Parameters: ob die
    Nachtabsenkung einen Fehlalarm erzeugt. **Ein einziges Auftreten
    beendet den Task für diese Woche** (Abbruchkriterium, siehe T2) —
-   kein Nachjustieren.
-4. **Vor jedem Merge:** §0.3.
+   kein Nachjustieren. Die Absenkung gilt **ab 20:00**.
+5. **Vor einer Entscheidung über Plan B**: der dritte Abschnitt des
+   306-Testfalls (Nachtabsenkung **ohne** Lüften). Ohne diese Zahl ist
+   nicht bekannt, ob 3 K über der eigenen Absenkung liegen, und Plan B
+   ist nicht entscheidungsreif.
+6. **Vor jedem Merge:** §0.3.
 
 **Querverweise:** B-22-1 (0x08), B-9.11y-1 (Fenster-Test ohne
 Drehrad-Störung), B-17-5 (FW < 4.2), AE-47 (Hardware-First bei der
