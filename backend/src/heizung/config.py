@@ -217,6 +217,29 @@ class Settings(BaseSettings):
     relay_timer_refresh_s: int = 900
     relay_refresh_intervall_s: int = 300
 
+    # Alarmschwelle fuer die **Gehaeusetemperatur** des Relais, in der
+    # Einheit des Keepalive-Bytes.
+    #
+    # **Bewusst konservativ: 40.** Die Datenblaetter widersprechen sich
+    # (40 gegen 60 °C als zulaessige Umgebungs-/Gehaeusetemperatur), und
+    # bei einem Geraet, das 1600 W schaltet und in einem Hohlraum sitzt,
+    # ist die niedrigere Zahl die richtige Wahl: ein Alarm zu frueh
+    # kostet einen Blick, ein Alarm zu spaet kostet ein Panel.
+    #
+    # **Das ist nicht der Ueberhitzungsschutz des Geraets.** Der liegt
+    # nach Hersteller-Vorgabe bei 85 °C Auslösung und 70 °C Erholung
+    # (FW >= 1.4, Befehl 0x1E) und schaltet das Relais selbst ab. Diese
+    # Schwelle hier warnt **vorher**, damit niemand erst durch das
+    # Abschalten erfaehrt, dass es heiss wird.
+    #
+    # **Die Einheit des Keepalive-Bytes ist nicht dokumentiert.** Dafuer
+    # spricht, dass die Doku beim Ueberhitzungs-Ereignis (0x60 Byte 2)
+    # und bei den Erholungs-Meldungen (0x72/0x73) ausdruecklich °C nennt.
+    # Die Annahme ist also gestuetzt, aber nicht belegt — sie steht als
+    # Pflicht-Pruefung am Geraet in der Inbetriebnahme-Checkliste
+    # (AE-78).
+    relay_gehaeusetemperatur_alarm: int = 40
+
     # --- Ventil-Hinweise, Regel 3 und 3b (Sprint 20e, T7/T10) -------------
     # Zwei Hinweise aus demselben Fenster ueber ``sensor_reading``, beide
     # read-time abgeleitet (``services/valve_health.py``):

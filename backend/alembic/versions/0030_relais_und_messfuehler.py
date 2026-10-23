@@ -79,6 +79,32 @@ def upgrade() -> None:
         ),
     )
 
+    # S4 (Nachtrag 23.10.): die zwei Ruecklesungen und die Sperre nach
+    # einer Schutzauslösung. Begruendung im Modell — kurz: das Geraet hat
+    # **zwei** Wege, von selbst wieder EIN zu werden (Stromrueckkehr und
+    # Erholung vom Ueberhitzungsschutz), und bei beiden ist die
+    # Hersteller-Vorgabe ``last_state``.
+    op.add_column(
+        "device",
+        sa.Column("power_return_verified_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.add_column(
+        "device",
+        sa.Column(
+            "overheating_recovery_verified_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+    )
+    op.add_column(
+        "device",
+        sa.Column("protection_tripped_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.add_column(
+        "device",
+        sa.Column("protection_kind", sa.String(length=20), nullable=True),
+    )
+
     # Die Strategie ist eine geschlossene Liste, und sie wird vom
     # Waechter als Verzweigung gelesen. Ein Tippfehler waere dort ein
     # stiller Rueckfall auf den else-Zweig — deshalb eine CHECK, anders
@@ -139,6 +165,10 @@ def downgrade() -> None:
     op.drop_table("relay_reading")
     op.drop_column("sensor_reading", "child_lock")
     op.drop_constraint("ck_device_watchdog_strategy", "device", type_="check")
+    op.drop_column("device", "protection_kind")
+    op.drop_column("device", "protection_tripped_at")
+    op.drop_column("device", "overheating_recovery_verified_at")
+    op.drop_column("device", "power_return_verified_at")
     op.drop_column("device", "switch_cycles")
     op.drop_column("device", "watchdog_strategy")
     op.drop_column("device", "measure_only")

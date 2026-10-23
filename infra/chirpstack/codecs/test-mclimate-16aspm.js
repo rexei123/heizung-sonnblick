@@ -254,6 +254,120 @@ check('leere Eingabe meldet einen Fehler', encodeDownlink({ data: {} }).errors.l
 
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Nachtrag S4 (23.10.2026): Erholung vom Ueberhitzungsschutz und die
+// Schutz-Ereignisse.
+// ---------------------------------------------------------------------------
+
+// 0x5A — und die Falle: AUS ist hier 0x01, bei 0x5E ist AUS 0x02.
+check(
+    '0x5A Vorgabe ist last_state',
+    decodeUplink({ bytes: hex('5a00'), fPort: 1 }).data.stateAfterOverheatingRecovery,
+    'last_state'
+);
+check(
+    '0x5A auf AUS gesetzt (0x01, NICHT 0x02)',
+    decodeUplink({ bytes: hex('5a01'), fPort: 1 }).data.stateAfterOverheatingRecovery,
+    'off'
+);
+check(
+    '0x5A mit 0x02 ist undokumentiert und wird als solches gemeldet',
+    decodeUplink({ bytes: hex('5a02'), fPort: 1 }).data.stateAfterOverheatingRecovery,
+    'unknown_2'
+);
+
+// Derselbe Wortsinn, verschiedene Bytes -- genau das soll dieser Test
+// festhalten, damit niemand die Werte von 0x5E uebernimmt.
+check(
+    'AUS nach Stromrueckkehr ist 0x5E 02',
+    encodeDownlink({ data: { state_after_power_return: 'off' } }).bytes,
+    [0x5e, 0x02]
+);
+check(
+    'AUS nach Ueberhitzung ist 0x59 01',
+    encodeDownlink({ data: { state_after_overheating_recovery: 'off' } }).bytes,
+    [0x59, 0x01]
+);
+check(
+    'last_state nach Ueberhitzung ist 0x59 00',
+    encodeDownlink({ data: { state_after_overheating_recovery: 'last_state' } }).bytes,
+    [0x59, 0x00]
+);
+check(
+    '0x59 kennt kein ON -- unbekannter Wert wird abgewiesen',
+    encodeDownlink({ data: { state_after_overheating_recovery: 'on' } }).bytes,
+    []
+);
+check(
+    'Erholungszustand lesen',
+    encodeDownlink({ data: { get_state_after_overheating_recovery: true } }).bytes,
+    [0x5a]
+);
+
+// Schutz-Ereignisse. Beispiele der Hersteller-Doku.
+var ov = decodeUplink({ bytes: hex('60053c'), fPort: 1 });
+check('0x60 Art', ov.data.protection, 'overheating');
+check('0x60 Zaehler', ov.data.protectionEventCount, 5);
+check('0x60 Temperatur', ov.data.protectionTemperatureC, 60);
+
+var uv = decodeUplink({ bytes: hex('61030104'), fPort: 1 });
+check('0x61 Art', uv.data.protection, 'overvoltage');
+check('0x61 Zaehler', uv.data.protectionEventCount, 3);
+check('0x61 Spannung 260 V', uv.data.protectionVoltageV, 260);
+
+var oc = decodeUplink({ bytes: hex('62031952'), fPort: 1 });
+check('0x62 Strom 6482 mA', oc.data.protectionCurrentMa, 6482);
+
+var op = decodeUplink({ bytes: hex('630307d0'), fPort: 1 });
+check('0x63 Leistung 2000 W', op.data.protectionPowerW, 2000);
+
+// Erholungs-Ereignisse.
+check(
+    '0x70 Laufzeit 42 s',
+    decodeUplink({ bytes: hex('70002a'), fPort: 1 }).data.protectionRuntimeS,
+    42
+);
+check(
+    '0x71 Laufzeit 26 s',
+    decodeUplink({ bytes: hex('71001a'), fPort: 1 }).data.protectionRuntimeS,
+    26
+);
+check(
+    '0x72 Geraetetemperatur 62 °C',
+    decodeUplink({ bytes: hex('723e'), fPort: 1 }).data.protectionTemperatureC,
+    62
+);
+check(
+    '0x73 Geraetetemperatur 47 °C',
+    decodeUplink({ bytes: hex('732f'), fPort: 1 }).data.protectionTemperatureC,
+    47
+);
+
+// Das Vorzeichen-Bit ab FW 1.3. Ohne seine Behandlung wuerde aus -2 °C
+// eine 130 °C -- und ein Alarm, der nichts mit der Lage zu tun hat.
+check(
+    '0x72 negative Temperatur (Vorzeichen-Bit)',
+    decodeUplink({ bytes: hex('7282'), fPort: 1 }).data.protectionTemperatureC,
+    -2
+);
+
+// Ueberhitzungs-Schwellen des Geraets (Vorgabe FW >= 1.4: 85/70 °C).
+var sch = decodeUplink({ bytes: hex('1f5546'), fPort: 1 });
+check('0x1F Auslöseschwelle 85 °C', sch.data.overheatingTriggerC, 85);
+check('0x1F Erholungsschwelle 70 °C', sch.data.overheatingRecoveryC, 70);
+
+// Ein Schutz-Ereignis kommt laut Doku mit dem Keepalive.
+var mitKa = decodeUplink({
+    bytes: hex('60053c' + '0117000003e80640e61b5800'),
+    fPort: 1
+});
+check('Schutz-Ereignis plus Keepalive: Art', mitKa.data.protection, 'overheating');
+check('Schutz-Ereignis plus Keepalive: Relais aus', mitKa.data.relayState, 'OFF');
+check('Schutz-Ereignis plus Keepalive: Kennzeichen', mitKa.data.keepalive_included, true);
+
+// -------------------------------------------------------------------------
+
 if (failures.length > 0) {
     console.error(failures.length + ' Fehlschlag/Fehlschlaege:\n');
     failures.forEach(function (f) { console.error('  ' + f + '\n'); });

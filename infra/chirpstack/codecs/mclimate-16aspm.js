@@ -88,12 +88,33 @@ function decodeUplink(input) {
 function responseLength(code) {
     if (code === 0xb1) { return 2; }
     if (code === 0x54) { return 2; }
+    if (code === 0x5a) { return 2; }
     if (code === 0x5f) { return 2; }
     if (code === 0x12) { return 2; }
     if (code === 0x58) { return 4; }
     if (code === 0x5d) { return 2; }
     if (code === 0x04) { return 5; }
+    // Schutz-Ereignisse: Zaehler plus Messwert.
+    if (code === 0x60) { return 3; }   // Ueberhitzung: Zaehler + °C
+    if (code === 0x61) { return 4; }   // Ueberspannung: Zaehler + V (16 Bit)
+    if (code === 0x62) { return 4; }   // Ueberstrom: Zaehler + mA (16 Bit)
+    if (code === 0x63) { return 4; }   // Ueberlast: Zaehler + W (16 Bit)
+    // Erholungs-Ereignisse (FW >= 1.1).
+    if (code === 0x70) { return 3; }   // Ueberhitzung: Laufzeit in s
+    if (code === 0x71) { return 3; }   // Ueberspannung: Laufzeit in s
+    if (code === 0x72) { return 2; }   // Ueberstrom: Geraetetemperatur
+    if (code === 0x73) { return 2; }   // Ueberlast: Geraetetemperatur
+    if (code === 0x1f) { return 3; }   // Ueberhitzungs-Schwellen
     return -1;
+}
+
+// 0x72/0x73 melden die Geraetetemperatur. Ab FW 1.3 ist das oberste Bit
+// von Byte 1 ein Vorzeichen, die unteren sieben Bits der Wert — ein
+// vorzeichenloses Lesen wuerde aus -2 °C eine 130 °C machen und einen
+// Alarm ausloesen, der nichts mit der Lage zu tun hat.
+function signedTemp(value) {
+    var betrag = value & 0x7f;
+    return (value & 0x80) !== 0 ? -betrag : betrag;
 }
 
 function relayStateName(value) {
@@ -215,8 +236,48 @@ function decodeCommandResponses(bytes) {
             data.relayChangeReasonCode = bytes[i + 1];
         } else if (code === 0x5f) {
             data.stateAfterPowerReturn = powerReturnStateName(bytes[i + 1]);
+        } else if (code === 0x5a) {
+            // Zustand nach Erholung vom Ueberhitzungsschutz.
+            //
+            // **Achtung: AUS ist hier 0x01, bei 0x5E ist AUS 0x02.**
+            // Dieselbe Bedeutung, verschiedene Bytes, und 0x59 kennt
+            // ueberhaupt kein "ON". Wer die Werte von 0x5E uebernimmt,
+            // setzt mit 0x02 einen undokumentierten Wert.
+            data.stateAfterOverheatingRecovery =
+                bytes[i + 1] === 0x01 ? 'off' : (bytes[i + 1] === 0x00 ? 'last_state' : 'unknown_' + bytes[i + 1]);
         } else if (code === 0x12) {
             data.keepAlivePeriod_min = bytes[i + 1];
+        } else if (code === 0x1f) {
+            data.overheatingTriggerC = bytes[i + 1];
+            data.overheatingRecoveryC = bytes[i + 2];
+        } else if (code === 0x60) {
+            data.protection = 'overheating';
+            data.protectionEventCount = bytes[i + 1];
+            data.protectionTemperatureC = bytes[i + 2];
+        } else if (code === 0x61) {
+            data.protection = 'overvoltage';
+            data.protectionEventCount = bytes[i + 1];
+            data.protectionVoltageV = (bytes[i + 2] * 256) + bytes[i + 3];
+        } else if (code === 0x62) {
+            data.protection = 'overcurrent';
+            data.protectionEventCount = bytes[i + 1];
+            data.protectionCurrentMa = (bytes[i + 2] * 256) + bytes[i + 3];
+        } else if (code === 0x63) {
+            data.protection = 'overpower';
+            data.protectionEventCount = bytes[i + 1];
+            data.protectionPowerW = (bytes[i + 2] * 256) + bytes[i + 3];
+        } else if (code === 0x70) {
+            data.protectionRecovered = 'overheating';
+            data.protectionRuntimeS = (bytes[i + 1] * 256) + bytes[i + 2];
+        } else if (code === 0x71) {
+            data.protectionRecovered = 'overvoltage';
+            data.protectionRuntimeS = (bytes[i + 1] * 256) + bytes[i + 2];
+        } else if (code === 0x72) {
+            data.protectionRecovered = 'overcurrent';
+            data.protectionTemperatureC = signedTemp(bytes[i + 1]);
+        } else if (code === 0x73) {
+            data.protectionRecovered = 'overpower';
+            data.protectionTemperatureC = signedTemp(bytes[i + 1]);
         } else if (code === 0x5d) {
             // Manuelle Umschaltung am Taster. Das Geraet meldet den neuen
             // Zustand von selbst — fuer S3 ist das der Nachweis, dass
@@ -290,6 +351,24 @@ function encodeDownlink(input) {
 
     if (data.get_state_after_power_return === true) {
         return { bytes: [0x5f], fPort: 1, errors: errors };
+    }
+
+    // 0x59 — Zustand nach Erholung vom Ueberhitzungsschutz.
+    // Nur zwei Werte, und AUS ist hier 0x01 (nicht 0x02 wie bei 0x5E).
+    if (typeof data.state_after_overheating_recovery === 'string') {
+        var ohMode = data.state_after_overheating_recovery;
+        if (ohMode === 'last_state') {
+            return { bytes: [0x59, 0x00], fPort: 1, errors: errors };
+        }
+        if (ohMode === 'off') {
+            return { bytes: [0x59, 0x01], fPort: 1, errors: errors };
+        }
+        errors.push('state_after_overheating_recovery muss last_state|off sein');
+        return { bytes: [], fPort: 1, errors: errors };
+    }
+
+    if (data.get_state_after_overheating_recovery === true) {
+        return { bytes: [0x5a], fPort: 1, errors: errors };
     }
 
     if (typeof data.keepalive_period_min === 'number') {

@@ -54,6 +54,8 @@ CMD_VERSION_GET = 0x04
 CMD_CHANGE_REASON_GET = 0x54
 CMD_TIMER_SECONDS_SET = 0x57
 CMD_TIMER_SECONDS_GET = 0x58
+CMD_OVERHEATING_RECOVERY_SET = 0x59
+CMD_OVERHEATING_RECOVERY_GET = 0x5A
 CMD_POWER_RETURN_SET = 0x5E
 CMD_POWER_RETURN_GET = 0x5F
 CMD_RELAY_STATE_GET = 0xB1
@@ -147,6 +149,28 @@ def zustand_nach_stromrueckkehr_payload(modus: str) -> bytes:
     return bytes([CMD_POWER_RETURN_SET, werte[modus]])
 
 
+def zustand_nach_ueberhitzung_payload(modus: str) -> bytes:
+    """``0x59 <modus>`` — Zustand nach Erholung vom Ueberhitzungsschutz.
+
+    **AUS ist hier ``0x01``, nicht ``0x02``.** Bei ``0x5E`` ist AUS die
+    ``0x02``; dieser Befehl kennt nur zwei Werte und gar kein „ON". Wer
+    die Zuordnung von ``0x5E`` uebernimmt, sendet mit ``0x02`` einen
+    Wert, den die Doku nicht fuehrt — und erfaehrt es nicht, weil ein
+    unbekannter Parameter nichts meldet.
+
+    Deshalb ist die Zuordnung hier eine eigene Tabelle und nicht die von
+    ``zustand_nach_stromrueckkehr_payload`` wiederverwendet. Zwei
+    aehnliche Befehle mit verschiedenen Werten sind genau die Stelle, an
+    der eine geteilte Tabelle Schaden anrichtet.
+    """
+    werte = {"last_state": 0x00, "off": 0x01}
+    if modus not in werte:
+        raise RelayCommandError(
+            f"modus muss einer von {sorted(werte)} sein, ist {modus!r} (0x59 kennt kein 'on')"
+        )
+    return bytes([CMD_OVERHEATING_RECOVERY_SET, werte[modus]])
+
+
 def keepalive_periode_payload(minuten: int) -> bytes:
     """``0x02 <minuten>`` — Keepalive-Periode des Geraets.
 
@@ -225,6 +249,29 @@ async def setze_zustand_nach_stromrueckkehr(dev_eui: str, modus: str = "off") ->
 async def frage_zustand_nach_stromrueckkehr(dev_eui: str) -> str:
     """``0x5F`` — die Einstellung zurueckleasen (S4)."""
     return await send_raw_downlink(dev_eui, bytes([CMD_POWER_RETURN_GET]))
+
+
+async def setze_zustand_nach_ueberhitzung(dev_eui: str, modus: str = "off") -> str:
+    """``0x59`` — was das Relais nach der Erholung vom Ueberhitzungsschutz tut.
+
+    **Der zweite Weg, auf dem ein Relais von selbst wieder EIN wird**, und
+    deshalb Teil von S4 (Nachtrag 23.10.). Die Doku zur Erholung:
+    das Relais sei „returned to its previous state after recovering from
+    the protection event", und die Vorgabe von ``0x59`` ist
+    ``last_state``. Ein Relais, das wegen Hitze abgeschaltet hat, kaeme
+    nach dem Abkuehlen also zurueck, ohne dass wir etwas gesendet haben.
+    """
+    payload = zustand_nach_ueberhitzung_payload(modus)
+    topic = await send_raw_downlink(dev_eui, payload, confirmed=True)
+    logger.info(
+        "ueberhitzungs-erholungszustand gesetzt dev_eui=%s modus=%s", dev_eui.lower(), modus
+    )
+    return topic
+
+
+async def frage_zustand_nach_ueberhitzung(dev_eui: str) -> str:
+    """``0x5A`` — die Einstellung zurueckleasen (S4)."""
+    return await send_raw_downlink(dev_eui, bytes([CMD_OVERHEATING_RECOVERY_GET]))
 
 
 async def setze_keepalive_periode(dev_eui: str, minuten: int) -> str:
