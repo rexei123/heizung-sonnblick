@@ -305,6 +305,11 @@ def _map_to_reading(uplink: ChirpStackUplink, device_id: int) -> dict[str, Any]:
         # dieser Stelle nichts, und der Wert wurde bei jedem Frame
         # verworfen. NULL wenn das Feld fehlt — nur True ist ein Befund.
         "calibration_failed": obj.get("calibrationFailed"),
+        # Sprint 24 (Paket E, Migration 0030): childLock durchreichen. Der
+        # Codec setzt das Bit seit Sprint 6.8, bis hierher stand an dieser
+        # Stelle nichts. S7 braucht es, um die Kindersicherung an einem
+        # Fuehler-Geraet nach dem Setzen nachsehen zu koennen.
+        "child_lock": obj.get("childLock"),
         "raw_payload": uplink.data,
     }
 

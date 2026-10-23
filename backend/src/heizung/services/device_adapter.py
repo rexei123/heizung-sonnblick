@@ -212,6 +212,20 @@ async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:
     return room_id
 
 
+async def _device_measure_only(session: AsyncSession, device_id: int) -> bool:
+    """Ob das Geraet die Rolle „nur messen" traegt (Sprint 24, S7).
+
+    Ein unbekanntes Geraet ergibt ``False`` — dann laufen die uebrigen
+    Gates wie bisher, und das Fehlen wird dort behandelt
+    (``_device_room_id`` liefert ``None``). Hier ``True`` zurueckzugeben
+    waere die falsche sichere Richtung: ein unbekanntes Geraet soll
+    nicht lautlos als Fuehler gelten.
+    """
+    stmt = select(Device.measure_only).where(Device.id == device_id).limit(1)
+    treffer: bool | None = await session.scalar(stmt)
+    return bool(treffer)
+
+
 async def _device_zone_id(session: AsyncSession, device_id: int) -> int | None:
     """``Device.heating_zone_id`` direkt. ``None`` wenn nicht zugeordnet
     ODER retired.
@@ -322,6 +336,32 @@ async def handle_uplink_for_override(
         kein Room-Mapping, Reboot-Gate-Skip, Block-Gate-Skip,
         OCCUPIED-Gate-Skip, Window-Gate-Skip.
     """
+    # Gate (pre-m): Fuehler-Rolle (Sprint 24, Paket E, S7). Ein Geraet mit
+    # ``measure_only`` liefert nur den Istwert; eine Drehung an seinem Rad
+    # erzeugt **keinen** Override.
+    #
+    # **Vor** allen anderen Gates und vor ``detect_user_override``: die
+    # Antwort haengt an keiner anderen Bedingung, und so entfaellt auch
+    # die Abfrage nach dem letzten gesendeten Sollwert. Ein Geraet in
+    # dieser Rolle bekommt ohnehin keine Sollwert-Downlinks
+    # (``engine_tasks._get_zone_devices``), der Vergleich „Uplink gegen
+    # letzten Engine-Wert" waere also ein Vergleich gegen nichts und
+    # wuerde jede Drehung als Gastwunsch lesen.
+    #
+    # **Nur ein Log-Eintrag, keine ``event_log``-Zeile.** Das ist die
+    # Abweichung vom Off-Pipeline-Muster (§5.52), und zwar bewusst: dort
+    # wird eine Handlung **abgewiesen**, die jemand wollte und die
+    # Wirkung gehabt haette. Hier ist nichts abgewiesen — das Geraet hat
+    # kein Ventil. Eine Zeile je Drehung waere ein Protokoll ueber ein
+    # drehbares Rad, das im Zimmer liegt. Begruendung in AE-78.
+    if await _device_measure_only(session, device_id):
+        logger.info(
+            "device-override skip: device_id=%s hat die Rolle 'nur messen' (uplink_setpoint=%s)",
+            device_id,
+            uplink_target_temp,
+        )
+        return None
+
     user_setpoint = await detect_user_override(
         session,
         device_id=device_id,

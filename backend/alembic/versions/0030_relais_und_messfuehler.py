@@ -91,6 +91,16 @@ def upgrade() -> None:
         "watchdog_strategy IN ('expire_and_resend', 'refresh')",
     )
 
+    # Paket E / S7: der Codec setzt ``childLock`` seit Sprint 6.8 und der
+    # Wert wurde bis hierher bei jedem Frame verworfen — dieselbe Lage wie
+    # bei ``calibration_failed`` vor Sprint 20f (Migration 0025). Ohne
+    # persistierten Wert ist die Kindersicherung nach dem Setzen nicht
+    # nachsehbar, und S7 verlangt die Verifikation.
+    op.add_column(
+        "sensor_reading",
+        sa.Column("child_lock", sa.Boolean(), nullable=True),
+    )
+
     op.create_table(
         "relay_reading",
         sa.Column("time", sa.DateTime(timezone=True), nullable=False),
@@ -127,6 +137,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_relay_reading_device_time", table_name="relay_reading")
     op.drop_table("relay_reading")
+    op.drop_column("sensor_reading", "child_lock")
     op.drop_constraint("ck_device_watchdog_strategy", "device", type_="check")
     op.drop_column("device", "switch_cycles")
     op.drop_column("device", "watchdog_strategy")
