@@ -287,7 +287,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     const withOverride = {
       ...ASSIGNED_DEVICE,
       active_override: {
-        source: "frontend_4h",
+        source: "frontend_24h",
         setpoint_celsius: 21.5,
         started_at: iso(60 * 60 * 1000),
         expires_at: iso(-3 * 60 * 60 * 1000),
@@ -299,7 +299,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     const card = page.getByTestId("override-card");
     await expect(card).toContainText("Override aktiv");
     await expect(card).toContainText("21.5 °C");
-    await expect(card).toContainText("Rezeption (4 h)");
+    await expect(card).toContainText("Rezeption (24 h)");
   });
 
   test("Ventilstellung-Defensive: Out-of-Range -> nicht verfügbar", async ({ page }) => {

@@ -15,10 +15,29 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from heizung.models.enums import OverrideSource
 
+#: Quellen, die der Create-Endpoint annimmt.
+#:
+#: **``frontend_24h`` hat hier vom 20. bis 22.10.2026 gefehlt.** Fix A (#324)
+#: hat den Wert eingefuehrt und das Panel darauf umgestellt, ohne diesen
+#: ``Literal`` nachzuziehen. Pydantic hat die Anfrage damit mit 422 abgewiesen,
+#: bevor ein Service sie sah — und die Fehlermeldung zaehlte drei Werte auf,
+#: von denen keiner im Dialog steht:
+#:
+#:     Input should be 'frontend_4h', 'frontend_midnight' or 'frontend_checkout'
+#:
+#: ``test_override_quellen_spiegel.py`` haelt diese Liste seither gegen
+#: ``FRONTEND_SOURCES`` im Panel, und ``test_api_overrides.py`` legt fuer jede
+#: waehlbare Dauer einen Override ueber den echten Endpoint an.
+#:
+#: ``frontend_4h`` und ``frontend_midnight`` bleiben **angenommen**, obwohl
+#: sie seit Fix A nicht mehr waehlbar sind. Sie zu entfernen waere eine
+#: Verengung der API-Oberflaeche und eine eigene Entscheidung — kein Teil
+#: eines Hotfixes, der eine abgewiesene Vorauswahl reparieren soll.
 FrontendOverrideSource = Literal[
+    "frontend_24h",
+    "frontend_checkout",
     "frontend_4h",
     "frontend_midnight",
-    "frontend_checkout",
 ]
 
 

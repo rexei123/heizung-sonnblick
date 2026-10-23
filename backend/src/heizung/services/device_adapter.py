@@ -36,13 +36,12 @@ from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, OverrideSource, RoomStatus
 from heizung.models.event_log import EventLog
-from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service, resync_flag
-from heizung.services.occupancy_service import derive_room_status, next_active_checkout
+from heizung.services.occupancy_service import derive_room_status
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -465,14 +464,17 @@ async def handle_uplink_for_override(
     # ``OverrideSource.DEVICE`` bleibt im Enum und in der DB-Beschraenkung:
     # Bestandszeilen tragen den Wert, und sie umzudeuten waere eine
     # Behauptung (§5.68). Neu angelegt wird er nicht mehr.
-    next_checkout = await next_active_checkout(session, room_id, now=received_at)
-    hotel_config = await session.get(GlobalConfig, 1)
-
+    # Fix A (20.10.2026): ``device_manual`` laeuft 24 h ab der Drehung. Der
+    # naechste Check-out und die Hotel-Zeitzone werden dafuer nicht mehr
+    # gebraucht und deshalb nicht mehr geholt — zwei Abfragen je Drehung, die
+    # in kein Ergebnis mehr eingegangen waeren.
+    #
+    # Dass der Override den Check-out jetzt **ueberleben** kann, ist kein
+    # Versehen: beendet wird er dann von
+    # ``override_pms_hook.auto_revoke_on_checkout``.
     expires_at = override_service.compute_expires_at(
         OverrideSource.DEVICE_MANUAL,
         received_at,
-        next_checkout_at=next_checkout,
-        hotel_config=hotel_config,
     )
 
     return await override_service.create(

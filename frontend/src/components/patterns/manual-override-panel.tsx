@@ -36,11 +36,18 @@ import type {
 } from "@/lib/api/types";
 import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
-const FRONTEND_SOURCES: FrontendOverrideSource[] = [
-  "frontend_4h",
-  "frontend_midnight",
-  "frontend_checkout",
-];
+/**
+ * Die Auswahl der Rezeption, seit Fix A (20.10.2026) zwei Einträge.
+ *
+ * `frontend_4h` und `frontend_midnight` sind **absichtlich** nicht dabei:
+ * sie bleiben als Werte erhalten, damit die Historie ihre Etiketten behält,
+ * sind aber nicht mehr wählbar (Entscheidung des Betreibers vom 19.10.).
+ *
+ * „Bis Check-out" ist nur in einem **belegten** Zimmer sinnvoll; der Server
+ * weist es sonst mit 422 ab (`api/v1/overrides.py`). Das Formular selbst ist
+ * in freien Zimmern bereits gesperrt — diese Sperre bleibt, wie sie ist.
+ */
+const FRONTEND_SOURCES: FrontendOverrideSource[] = ["frontend_24h", "frontend_checkout"];
 
 /**
  * Sprint 12b: Zone-Kind-Labels + Material-Symbols-Icons. Quelle der
@@ -306,7 +313,7 @@ function CreateOverrideForm({
 }: CreateFormProps) {
   const createMut = useCreateRoomOverride(roomId);
   const [setpoint, setSetpoint] = useState("21");
-  const [source, setSource] = useState<FrontendOverrideSource>("frontend_4h");
+  const [source, setSource] = useState<FrontendOverrideSource>("frontend_24h");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -545,6 +552,19 @@ function SourceBadge({ source, className }: { source: OverrideSource; className?
 
 function StatusBadge({ override }: { override: ManualOverride }) {
   if (override.revoked_at !== null) {
+    // Der Aufräum-Task und der Check-out-Haken setzen beide `revoked_at` —
+    // mit einem Grund, der mit „auto" beginnt (`auto: expired` bzw.
+    // `auto_revoke_on_checkout`). Ohne diese Unterscheidung stand hier für
+    // **jeden** abgelaufenen Override „manuell aufgehoben", also für den
+    // Normalfall die falsche Aussage (Befund 19.10.2026).
+    const grund = override.revoked_reason ?? "";
+    if (grund.startsWith("auto")) {
+      return (
+        <span className="text-xs text-text-tertiary">
+          {grund.includes("checkout") ? "mit der Abreise beendet" : "abgelaufen"}
+        </span>
+      );
+    }
     return <span className="text-xs text-text-tertiary">manuell aufgehoben</span>;
   }
   if (new Date(override.expires_at) <= new Date()) {
