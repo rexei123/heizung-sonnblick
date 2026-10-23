@@ -417,11 +417,23 @@ async def create(
 #   1  device_manual    ausdrueckliche Meldung des Geraets (0x28)
 #   2  device           abgeleiteter Befund — wird seit 20f-b nicht mehr
 #                       angelegt, Bestandszeilen tragen ihn noch
+#
+# **Der Tisch muss vollstaendig sein.** ``create`` liest ihn mit
+# ``_QUELLEN_RANG[source]`` — ein fehlender Eintrag ist kein stiller
+# Vorgabewert, sondern ein ``KeyError`` und damit ein 500 an der Rezeption.
+# Genau das ist am 21.10.2026 passiert: Fix A hat ``frontend_24h``
+# eingefuehrt und hier nicht ergaenzt, und das war die **Vorauswahl** der
+# Dauer. Deshalb haelt ``test_quellen_rang_kennt_jede_override_quelle``
+# die Vollstaendigkeit fest; der naechste neue Wert faellt in CI auf und
+# nicht im Haus. Ein ``.get(source, 0)`` waere die schlechtere Antwort —
+# es haette den Fehler verdeckt und einer neuen Quelle stillschweigend
+# den staerksten Rang gegeben.
 _QUELLEN_RANG: dict[OverrideSource, int] = {
     OverrideSource.DEVICE: 2,
     OverrideSource.DEVICE_MANUAL: 1,
     OverrideSource.FRONTEND_4H: 0,
     OverrideSource.FRONTEND_MIDNIGHT: 0,
+    OverrideSource.FRONTEND_24H: 0,
     OverrideSource.FRONTEND_CHECKOUT: 0,
 }
 

@@ -149,5 +149,12 @@ class OccupancyImportLogResponse(BaseModel):
     # den Menschen braucht die Einheit. Am 26.09.2026 stand hier eine
     # Ortszeit-Schwelle neben einem UTC-Eingang, beide ohne Kennzeichnung.
     expected_by_local_label: str
+    #: Früheste Tageszeit, zu der in den letzten sieben Tagen eine Liste kam,
+    #: mit Zeitzonen-Kürzel ("08:30 MESZ"). ``None`` = in sieben Tagen keine.
+    #:
+    #: **Gemessen, nicht konfiguriert.** Der Hilfetext auf der API-Seite nannte
+    #: bis zum 20.10.2026 eine feste Uhrzeit; mit dem Mehrfachversand war sie
+    #: falsch. Eine Zahl, die aus den Daten kommt, veraltet nicht (§5.77).
+    first_list_local_label: str | None = None
     today_received: bool
     imports: list[OccupancyImportLogRow]

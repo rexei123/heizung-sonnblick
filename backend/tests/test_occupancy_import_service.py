@@ -11,7 +11,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -1541,3 +1541,177 @@ async def test_spaet_verarbeitete_liste_storniert_keinen_beendeten_aufenthalt(
     occs = await _active_pms(session, room_id)
     assert len(occs) == 1
     assert occs[0].cancelled_at is None, "ein beendeter Aufenthalt wird nicht storniert"
+
+
+# ---------------------------------------------------------------------------
+# Gemessene Eingangszeit fuer den Hilfetext (21.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_frueheste_listenzeit_nimmt_die_erste_des_tages(
+    session: AsyncSession,
+) -> None:
+    """Zwei Listen, 08:30 und 15:30 Ortszeit — ausgewiesen wird 08:30.
+
+    Der Hilfetext auf der API-Seite nannte bis zum 20.10.2026 eine **feste**
+    Uhrzeit (``10:38``). Mit dem Mehrfachversand war sie falsch, und beim
+    naechsten Wechsel waere sie es wieder. Gesucht ist deshalb das Minimum
+    ueber die Tageszeiten der letzten sieben Tage: wie frueh kann man mit
+    Post rechnen.
+
+    Geprueft wird **beides** — dass 08:30 gewinnt und dass eine Einheit
+    dransteht. Eine Uhrzeit ohne Einheit neben der Schwelle daneben war
+    genau der Fehler vom 26.09. (§5.79). Das Kuerzel selbst ist **nicht**
+    festgenagelt: ``%Z`` liefert je nach Plattform-Locale "MESZ" oder
+    "CEST", und beides ist eindeutig genug (siehe ``tz_abbrev``).
+    """
+    num = _room_number("601")
+    await _seed_room(session, num)
+
+    # In der Reihenfolge des Eintreffens: 06:30 UTC = 08:30 MESZ,
+    # 13:30 UTC = 15:30 MESZ. Beide werden angewandt.
+    for eingang, stunde in (("2026-06-06 06:30:00", 7), ("2026-06-06 13:30:00", 14)):
+        await reconcile_from_import(
+            session,
+            payload=_payload(received_at=eingang, entries=[]),
+            now=datetime(2026, 6, 6, stunde, 0, tzinfo=UTC),
+        )
+
+    antwort = await get_import_log(session, expected_by_local=time(12, 0))
+
+    assert antwort.first_list_local_label is not None
+    uhrzeit, _, kuerzel = antwort.first_list_local_label.partition(" ")
+    assert uhrzeit == "08:30", antwort.first_list_local_label
+    assert kuerzel, "ohne Einheit ist die Zahl eine Einladung zum Missverstaendnis"
+
+
+async def test_frueheste_listenzeit_zaehlt_eine_verspaetete_liste_mit(
+    session: AsyncSession,
+) -> None:
+    """Die 08:30-Liste trifft **nach** der 15:30 ein — und zaehlt trotzdem.
+
+    **Der Fall, der diesen Test wertvoll macht.** Eine verspaetete Liste
+    wird von der Reihenfolge-Wache abgewiesen (``OCCUPANCY_IMPORT_OUTDATED``,
+    siehe §10ai) — sie ist aber **angekommen**, und sie ist die frueheste
+    des Tages. Wer sie bei der Messung weglaesst, verschiebt die
+    ausgewiesene Zeit systematisch nach hinten, und zwar genau dann, wenn
+    der Versand ohnehin stolpert.
+
+    Dieser Test ist aus einem Fehlschlag entstanden: die erste Fassung
+    schickte die Listen in umgekehrter Reihenfolge und meldete 15:30. Das
+    war kein Testfehler allein — die Messung zaehlte veraltete Listen
+    wirklich nicht mit.
+    """
+    await reconcile_from_import(
+        session,
+        payload=_payload(received_at="2026-06-06 13:30:00", entries=[]),
+        now=datetime(2026, 6, 6, 14, 0, tzinfo=UTC),
+    )
+    nachzuegler = await reconcile_from_import(
+        session,
+        payload=_payload(received_at="2026-06-06 06:30:00", entries=[]),
+        now=datetime(2026, 6, 6, 14, 5, tzinfo=UTC),
+    )
+    assert nachzuegler.status == "outdated", "Vorbedingung: sie wurde abgewiesen"
+
+    antwort = await get_import_log(session, expected_by_local=time(12, 0))
+
+    assert antwort.first_list_local_label is not None
+    assert antwort.first_list_local_label.startswith("08:30"), antwort.first_list_local_label
+
+
+async def test_frueheste_listenzeit_ohne_daten_ist_none(session: AsyncSession) -> None:
+    """Ohne Liste in sieben Tagen: ``None``, und die Seite sagt es.
+
+    Der Zustand eines frisch aufgesetzten Systems — kein Fehler. Ohne
+    diesen Test waere der leere Fall erst im Browser aufgefallen, und zwar
+    als Satz mit einer Luecke darin.
+    """
+    antwort = await get_import_log(session, expected_by_local=time(12, 0))
+
+    assert antwort.first_list_local_label is None
+
+
+async def test_frueheste_listenzeit_zaehlt_auch_abgewiesene_listen(
+    session: AsyncSession,
+) -> None:
+    """Eine abgewiesene Liste ist **angekommen** und zaehlt mit.
+
+    Fuer die Frage "wann kommt Post" ist es unerheblich, ob die Liste
+    brauchbar war — sie war da. Dieselbe Menge zeigt auch die Tabelle
+    daneben, und zwei verschiedene Mengen fuer dieselbe Seite waeren eine
+    zweite Wahrheit (§5.53).
+    """
+    unbekannt = _room_number("602")  # absichtlich **nicht** angelegt
+
+    with pytest.raises(OccupancyImportRejectedError):
+        await reconcile_from_import(
+            session,
+            payload=_payload(
+                received_at="2026-06-06 06:30:00",
+                entries=[_entry(unbekannt, "06.06.2026", "08.06.2026")],
+            ),
+            now=datetime(2026, 6, 6, 6, 35, tzinfo=UTC),
+        )
+
+    antwort = await get_import_log(session, expected_by_local=time(12, 0))
+
+    assert antwort.first_list_local_label is not None
+    assert antwort.first_list_local_label.startswith("08:30")
+
+
+async def test_frueheste_listenzeit_ignoriert_alte_eintraege(
+    session: AsyncSession,
+) -> None:
+    """Eine Liste von vor acht Tagen zaehlt **nicht** mehr mit.
+
+    Das Fenster ist der Grund, warum die Zahl einer Umstellung des Versands
+    folgt: kaeme der 10:38-Eingang von vor drei Wochen weiter mit, stuende
+    er fuer immer im Hilfetext — genau der Zustand, aus dem diese Aenderung
+    entstanden ist.
+
+    **Dieser Test existiert, weil eine Mutationsprobe das Fenster als
+    ungeprueft gemeldet hat.** Die uebrigen Tests legen ihre Zeilen frisch
+    an und laufen damit immer innerhalb. Ohne diesen Fall waere die
+    Bedingung Zierde gewesen (§5.55).
+
+    Die alte Zeile wird direkt eingefuegt, nicht ueber den Import: dessen
+    Audit-Zeitstempel kommt aus der Datenbank (``server_default``) und
+    laesst sich nicht vordatieren.
+    """
+    jetzt = datetime.now(tz=UTC)
+    session.add(
+        BusinessAudit(
+            ts=jetzt - timedelta(days=8),
+            user_id=None,
+            action=ACTION_APPLIED,
+            target_type="occupancy_import",
+            target_id=None,
+            old_value=None,
+            new_value={
+                "external_id": "alt-1",
+                "list_date": "2026-06-06",
+                # 04:30 UTC = 06:30 Ortszeit — frueher als alles andere.
+                "received_at": "2026-06-06T04:30:00+00:00",
+                "rooms_occupied": 0,
+                "rooms_closed": 0,
+                "conflicts": 0,
+                "result": "applied",
+            },
+        )
+    )
+    await session.commit()
+
+    # Dazu eine Liste von heute, 06:30 UTC = 08:30 Ortszeit.
+    await reconcile_from_import(
+        session,
+        payload=_payload(received_at="2026-06-06 06:30:00", entries=[]),
+        now=datetime(2026, 6, 6, 7, 0, tzinfo=UTC),
+    )
+
+    antwort = await get_import_log(session, expected_by_local=time(12, 0))
+
+    assert antwort.first_list_local_label is not None
+    assert antwort.first_list_local_label.startswith("08:30"), (
+        f"06:30 von vor acht Tagen darf nicht mitzaehlen, war: {antwort.first_list_local_label}"
+    )

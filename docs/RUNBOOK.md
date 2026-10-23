@@ -590,7 +590,7 @@ sudo docker run --rm -v "$PWD/infra/mosquitto/config:/conf" \
 sudo chmod 0640 infra/mosquitto/config/passwd
 
 # 4. Mosquitto + abhaengige Container neu starten
-sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate \
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate --no-deps \
   mosquitto chirpstack chirpstack-gateway-bridge api
 
 # 5. Verifikation: Auth aktiv?
@@ -631,7 +631,7 @@ Falls Auth-Setup einen Container blockiert: temporaer auf alte anonymous-Konfig 
 ```bash
 sudo nano infra/deploy/docker-compose.prod.yml
 # Zeile entfernen: command: mosquitto -c /mosquitto/config/mosquitto.prod.conf
-sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate mosquitto
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate --no-deps mosquitto
 ```
 
 Zurueck-Schalten ohne Skript-Lauf: einmalig manuell. Nicht committen — der naechste deploy-pull bringt die Auth-Konfig zurueck.
@@ -660,7 +660,7 @@ sudo nano /opt/heizung-sonnblick/infra/deploy/.env
 
 ```bash
 cd /opt/heizung-sonnblick
-sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate caddy
+sudo docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate --no-deps caddy
 sudo docker compose -f infra/deploy/docker-compose.prod.yml logs caddy --tail 10
 ```
 
@@ -701,8 +701,10 @@ Single-User, kein Logout, kein Audit-Trail. Browser-Native-Auth-Dialog ist UX-ma
 
 ### 10c.1 UI-Re-Paste
 
-1. Browser → `https://heizung-test.hoteltec.at/chirpstack/`
-2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API).
+1. Browser → `https://cs-test.hoteltec.at`
+2. Login mit dem ChirpStack-Admin-User (separat von der Heizung-API; Passwort-Rotation: §10ab Teil 2, C5).
+
+   > **Korrigiert am 21.10.2026.** Hier stand `https://heizung-test.hoteltec.at/chirpstack/` — zweifach falsch: der Host wird seit dem Promote am 09.06.2026 nicht mehr bedient (AE-67), und den Pfad `/chirpstack/` routet **keine** Caddy-Regel. Die Oberfläche liegt auf einer eigenen Subdomain (`CHIRPSTACK_HOSTNAME`, AE-243).
 3. **Tenants → Hotel Sonnblick → Device Profiles → Heizung**.
 4. Tab **Codec** öffnen.
 5. Bestehenden JS-Code komplett markieren und löschen.
@@ -6305,6 +6307,566 @@ nächster Schritt vorgemerkt (Schwelle 3 h); bis dahin ist die Spalte
 „Eingegangen“ im Protokoll die Antwort — stehen dort drei Zeiten, hat es
 funktioniert.
 
+**Der Hilfetext unter dem Schwellen-Feld nennt keine feste Uhrzeit mehr.**
+Dort stand „Die Liste kommt derzeit gegen 10:38“ — mit dem
+Mehrfachversand falsch, und beim nächsten Wechsel wieder. Jetzt steht dort
+die **gemessene** früheste Eingangszeit der letzten sieben Tage („Die erste
+Liste des Tages kam zuletzt gegen 08:30 …“), mit Zeitzonen-Kürzel.
+Gezählt wird jede Liste, die eingetroffen ist — angewandt, abgewiesen oder
+veraltet: eine verspätete 08:30-Liste ist angekommen und ist die früheste
+des Tages, sie darf die Zahl nicht nach hinten verschieben. Kam in sieben
+Tagen keine, sagt der Text das.
+
+**Eine Eigenschaft, die man kennen sollte:** genommen wird das **Minimum**,
+nicht der jüngste Wert — gesucht ist, wie früh man mit Post rechnen kann.
+Ein einzelner Ausreißer nach vorn (eine Liste um 04:00) zieht die Zahl
+damit für sieben Tage mit. Das ist der Preis dafür, dass ein ausgefallener
+Nachmittagsversand sie **nicht** verschiebt.
+
 **Querverweise:** §10ag (Verlängerung und Gästewechsel), §10ad
 (Belegungs-Import, Ampel und Schwelle), §10k (Status sofort
 synchronisieren).
+
+---
+
+## 10ab Teil 2. Zweite Rotation und Server-Neustart (Termin 27.10.2026, 10 Uhr)
+
+**Anlass:** Teil 1 (20.10.) hat die sieben Werte rotiert, an denen die
+Steuerung hängt. Was übrig blieb, steht hier: die Werte, die neben der
+Steuerung liegen, dazu der Server-Neustart für die ausstehenden
+apt-Updates.
+
+**Dauer:** rund 60 Minuten, davon die Hälfte Wartezeit. Abbrechbar nach
+jedem Block.
+
+**Was aus Teil 1 unverändert gilt** — nicht erneut erklärt, aber
+genauso Pflicht:
+
+| | |
+|---|---|
+| **Die Env-Falle** | `ENV_NEU` vor **jedem** `docker compose`, auch in den Rückwegen |
+| **`--no-deps`** | an jedem `force-recreate` |
+| **Init-Sidecars ohne `-d`** | Exit-Code sichtbar |
+| **`tmux`** | Schritt 0.0 von Teil 1, inklusive `escape-time 50` |
+| **Backup zuerst** | Schritt 0.2 und 0.4 von Teil 1 |
+
+### Schritt 0.3 — was auf dem Server wirklich steht
+
+**Teil 1 hat gezeigt, warum dieser Schritt nicht übersprungen wird:** drei
+von acht Annahmen waren falsch, und eine hat zwei Minuten Uplinks
+gekostet. Hier dasselbe, für die Werte von Teil 2.
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep -oE '^[A-Z_]+=' .env | tr -d '=' | sort | grep -E 'SMTP|TOKEN|BASIC_AUTH|STAGE|HOSTNAME'
+```
+
+Erwartet, am 20.10. in der Namensliste bestätigt:
+
+| Name | Block |
+|---|---|
+| `SMTP_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_SECURITY` | C1 |
+| `OCCUPANCY_IMPORT_TOKEN` | C2 |
+| `HOTEL_BASIC_AUTH_HASH` | C3 |
+| `STAGE`, `PUBLIC_HOSTNAME` | nur lesen, nicht ändern |
+
+**Zwei Werte prüfen, nicht rotieren:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
+```
+
+- **`STAGE`** entscheidet, welche Caddy-Datei gilt
+  (`Caddyfile.${STAGE}`, `docker-compose.prod.yml:338`). Davon hängt C3
+  ab. Steht dort etwas anderes als `test` oder `main`, bricht der
+  Caddy-Start — dann melden, nicht rotieren.
+- **`SMTP_ENABLED`** entscheidet, ob C1 überhaupt etwas tut. Steht dort
+  `false`, versendet der Mailer nichts (`config.py:108`, Vorgabe
+  `False`), und ein neues Passwort wäre ein Wert ohne Wirkung. Dann C1
+  **überspringen** und als Befund melden.
+
+### Was in diesem Teil **nicht** vorkommt
+
+| Wert | Warum |
+|---|---|
+| `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:339`), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
+| `CHIRPSTACK_BASIC_AUTH_HASH` — **Entscheidung vom 21.10.** | Es bleibt bei **keiner** zusätzlichen Basic-Auth vor ChirpStack. Der Wert verschwindet aus Compose und `.env.example`, der Kommentar in `Caddyfile.test` wird korrigiert — eigener kleiner PR **nach** diesem (B-22-4). |
+| `CHIRPSTACK_API_SECRET`, MQTT-Werte, DB-Passwörter, `SECRET_KEY` | Teil 1, am 20.10. erledigt. |
+| `PIN_SHA` | Kein Geheimnis, sondern der Rückfallpunkt (§10u). |
+
+**Zur ersten Zeile, weil sie eine Erwartung widerlegt.** Der Auftrag
+lautete „Basic-Auth Heizung **und** ChirpStack“. Die Heizung hat eine
+(C3). ChirpStack hat **keine** Basic-Auth über Caddy — die Oberfläche
+schützt ihr eigenes Login-Formular, und die Basic-Station-Routen
+(`/router*`) sind absichtlich offen, weil das UG65 sich über seine DevEUI
+an der Bridge ausweist (Kommentar ab `Caddyfile.test:85`).
+
+Der Kommentar in Zeile 5 behauptet trotzdem, der ChirpStack-Host sei „mit
+Basic-Auth (CHIRPSTACK_BASIC_AUTH_HASH, bcrypt)" geschützt. Das ist
+§5.77 in Reinform: ein Vermerk, der mehr behauptet, als die Datei hält —
+und diesmal in der **sicherheitsrelevanten** Richtung. Wer ihn liest,
+hält einen Host für geschützt, der es nicht ist. **B-22-4** im Backlog:
+Kommentar korrigieren oder die Regel nachtragen, je nachdem, was gewollt
+ist. Hier wird es **nicht** nebenbei entschieden.
+
+---
+
+### C1 — die SMTP-Zugangsdaten
+
+**Wirkung:** nur der Mailversand (Alarme aus §10l, der
+Belegungs-Wächter). **Keine** Wirkung auf die Regelung. Von allen Werten
+dieser Rotation der harmloseste — und der einzige, dessen Fehlschlag man
+erst merkt, wenn ein Alarm ausbleibt.
+
+**Neues Passwort beim Anbieter erzeugen**, dann:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+sudo nano .env        # Zeile SMTP_PASSWORD=
+ENV_NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps api celery_worker celery_beat
+```
+
+**Warum `nano` und nicht `sed`:** Mail-Passwörter von Anbietern enthalten
+oft Sonderzeichen, und `sed`-Ersetzungen mit `&`, `|` oder `\` schreiben
+dann etwas anderes hinein, als man gemeint hat. Bei einem Wert, den man
+nicht sieht, fällt das erst beim Versand auf.
+
+**Prüfen — mit einer echten Mail über den echten Pfad:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T api python - <<'PY'
+from heizung.services.mailer import send_mail
+r = send_mail(recipient=None, subject="Rotation Teil 2 — Probe", body="Wenn diese Mail ankommt, stimmt SMTP_PASSWORD.")
+print("ok" if r.ok else f"FEHLER: {r.error}")
+PY
+```
+
+`recipient=None` nimmt die Alarm-Adresse aus `global_config` — dieselbe,
+die ein echter Alarm nehmen würde. Erwartung: `ok`, und die Mail kommt an.
+
+**Dazu der Zustand, den die Oberfläche zeigt** (Einstellungen → API &
+Webhooks):
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT last_mail_attempt_at, last_mail_ok_at, last_mail_error FROM global_config WHERE id = 1;"
+```
+
+`last_mail_ok_at` muss von jetzt sein und `last_mail_error` leer. Steht
+dort ein Fehler, ist er die Diagnose — der Mailer wirft nicht, er meldet.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+sudo nano .env        # alten Wert aus .env.bak-pre-rotation-$TS eintragen
+ENV_NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps api celery_worker celery_beat
+```
+
+Der alte Wert steht in `.env.bak-pre-rotation-$TS` (Teil 1, Schritt 0.4 —
+für Teil 2 ein **neues** Backup anlegen, der Zeitstempel ist ein anderer).
+
+---
+
+### C2 — `OCCUPANCY_IMPORT_TOKEN`, gleichzeitig mit mailparser
+
+**Das ist der einzige Block mit einem Zeitfenster.** Der Wert lebt zur
+Hälfte bei **mailparser**: er steht dort als Header `X-Webhook-Token` am
+Webhook. Wird er hier geändert und dort nicht, kommt die Belegungsliste
+nicht mehr an — der Endpunkt antwortet 401 und nimmt nichts entgegen
+(`api/v1/integrations.py:33-48`, fail-closed).
+
+**Fenster: nach der 08:30-Liste, fertig vor 15:30.**
+
+Seit dem 20.10. kommen drei Listen (08:30, 15:30, 19:30 — §10ai). Die
+08:30 ist durch, die nächste kommt um 15:30: dazwischen kostet ein
+falsches Token nichts. Der Termin um 10:00 liegt bequem darin. **Vor
+08:30 oder nach 15:30 wird dieser Block nicht angefasst** — dann fehlt
+eine Liste, und das merkt man erst am Belegungsstand.
+
+> Die frühere Vorgabe lautete „nicht vor 10:38“. Sie stammt aus der Zeit
+> der **einen** Tagesliste und ist seit dem Mehrfachversand ohne Sinn.
+
+**Reihenfolge, und sie ist nicht beliebig:**
+
+1. **Neues Token erzeugen** (noch nichts eintragen):
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   Den Wert sichtbar lassen — er wird an **zwei** Stellen gebraucht.
+
+2. **Bei mailparser eintragen**: Webhook-Einstellung, Header
+   `X-Webhook-Token`. **Noch nicht speichern.**
+
+3. **Auf dem Server eintragen und wirksam machen:**
+
+   ```bash
+   cd /opt/heizung-sonnblick/infra/deploy
+   sudo nano .env        # Zeile OCCUPANCY_IMPORT_TOKEN=
+   ENV_NEU
+   docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps api
+   ```
+
+4. **Dann** bei mailparser speichern.
+
+**Warum in dieser Reihenfolge:** zwischen Schritt 3 und 4 ist das Fenster
+zu, in dem beide Seiten verschiedene Werte haben. Umgekehrt — erst
+mailparser, dann Server — wäre es genauso lang; entscheidend ist, dass es
+**mitten im Fenster** liegt und nicht am Rand.
+
+**Prüfen:** mailparser hat einen Knopf, der den Webhook erneut schickt
+(„Reprocess“/„Send test“). Danach muss eine Zeile im Protokoll stehen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT ts, action, new_value->>'result' AS ergebnis FROM business_audit WHERE target_type = 'occupancy_import' ORDER BY ts DESC LIMIT 3;"
+```
+
+Erwartung: eine neue Zeile. `result` darf `already_processed` oder
+`outdated` sein — **beides ist Erfolg**, es heißt, das Token hat gepasst
+und der Lauf ist bis zur Idempotenz-Prüfung gekommen. Ein **401** taucht
+hier gar nicht auf; kommt keine Zeile dazu, stimmt das Token nicht.
+
+Ohne mailparser-Knopf: bis 15:30 warten, dann muss die Liste da sein.
+**Das ist der Grund für das Fenster** — ein falsches Token fällt so
+spätestens um 15:30 auf und nicht erst am nächsten Morgen.
+
+**Rückweg:** altes Token aus dem Backup an **beiden** Stellen
+zurücktragen, `api` neu erzeugen. Ein halber Rückweg ist derselbe Fehler
+wie ein halber Vorwärtsschritt.
+
+---
+
+### C3 — `HOTEL_BASIC_AUTH_HASH` (Basic-Auth der Heizung)
+
+**Wirkung:** die Abfrage von Benutzername und Passwort **vor** der
+Anmeldemaske. Sie liegt vor der Anwendung; ein falscher Hash sperrt
+**alle** aus, auch das Personal. Die Regelung läuft weiter — sie braucht
+die Oberfläche nicht.
+
+**Zwei Fallen, beide schon im Repo vermerkt:**
+
+**1. Der Hash enthält `$`, und die müssen in der `.env` verdoppelt
+werden.** `docker-compose.prod.yml:340` sagt es: „bcrypt-Hash, doppelte
+`$$` in `.env` wegen Compose-Interpolation". `caddy hash-password` gibt
+`$2a$14$…` aus; in die `.env` gehört `$$2a$$14$$…`.
+
+**2. Deshalb kein `sed` und kein doppelt gequotetes Echo.** In der Shell
+ist `$$` die Prozessnummer — `sed -i "s|…|…=$$2a…|"` schreibt eine Zahl
+hinein. Hier wird mit `nano` gearbeitet, und der Wert wird von Hand
+verdoppelt.
+
+```bash
+docker run --rm caddy:2-alpine caddy hash-password --plaintext 'DAS-NEUE-PASSWORT'
+```
+
+Ausgabe notieren, **jedes `$` verdoppeln**, dann:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+sudo nano .env        # Zeile HOTEL_BASIC_AUTH_HASH= , mit $$
+ENV_NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps caddy
+```
+
+**Vor dem Neustart die Verdopplung prüfen** — ohne den Wert zu zeigen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && grep '^HOTEL_BASIC_AUTH_HASH=' .env | grep -c '\$\$2a\$\$'
+```
+
+Erwartung **1**. Steht dort 0, fehlt die Verdopplung, und Caddy bekommt
+einen zerstückelten Hash.
+
+**Prüfen:**
+
+1. `https://heizung.hoteltec.at` im Browser, **privates Fenster** (das
+   normale hat die alten Zugangsdaten gespeichert). Erwartung: Abfrage
+   erscheint, neues Passwort wird angenommen, danach die Anmeldemaske.
+2. Das **alte** Passwort muss abgewiesen werden. Wird es noch
+   angenommen, hat Caddy die alte Konfiguration — dann wurde der
+   Container nicht neu erzeugt.
+
+**Die Healthchecks sind davon nicht betroffen, und das ist geprüft:**
+`/health` und `/healthz` werden in `Caddyfile.test` **vor** dem
+`basicauth`-Block behandelt (Zeilen 29 und 35 gegen 47) und bleiben
+öffentlich. Der Docker-Healthcheck des `api`-Containers geht ohnehin
+intern auf `localhost:8000/health`, gar nicht über Caddy.
+
+**Rückweg:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+sudo nano .env        # alten Hash aus dem Backup, mit $$
+ENV_NEU
+docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps caddy
+```
+
+Der alte Hash steht im Backup **schon verdoppelt** — er wird
+unverändert zurückkopiert, nicht erneut verdoppelt.
+
+---
+
+### C4 — den verwaisten Mosquitto-User `gateway-ug65` entfernen (B-22-3)
+
+**Befund vom 20.10.:** der User steht in
+`infra/mosquitto/config/passwd`, aber **kein Dienst meldet sich damit
+an**. Das UG65 spricht Basic Station gegen `chirpstack-gateway-bridge`,
+und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).
+
+**Erst belegen, dann entfernen.** Ein User, den niemand braucht, ist
+schnell gesagt und schwer zurückgeholt:
+
+```bash
+grep -ri "gateway-ug65" /opt/heizung-sonnblick/infra/ | grep -v "config/passwd"
+```
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto --since 168h 2>&1 | grep -ci "gateway-ug65"
+```
+
+Erwartung: der erste Befehl findet **nur** Kommentare oder nichts, der
+zweite **0**. Findet der zweite etwas, meldet sich doch jemand damit an —
+dann **abbrechen** und melden.
+
+```bash
+cd /opt/heizung-sonnblick
+docker run --rm -v "$PWD/infra/mosquitto/config:/conf" eclipse-mosquitto:2 mosquitto_passwd -D /conf/passwd gateway-ug65
+chown --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+chmod --reference="infra/mosquitto/config/passwd.bak-$TS" infra/mosquitto/config/passwd
+stat -c '%u:%g %a %n' infra/mosquitto/config/passwd
+ENV_NEU
+docker compose -f infra/deploy/docker-compose.prod.yml up -d --force-recreate --no-deps mosquitto
+```
+
+`stat` muss **`1883:1883 640`** zeigen — dieselbe Falle wie in Teil 1:
+`mosquitto_passwd` läuft im Container als root, und eine `root:root`-Datei
+sperrt **alle** MQTT-User aus, nicht nur den entfernten.
+
+**Prüfen:** Uplinks zählen (wie B1/B2 in Teil 1) und
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto --since 4m | grep -ci "not authorised"
+```
+
+Erwartung **0** nach dem Neustart.
+
+**Rückweg:** `passwd` aus dem Backup zurückkopieren, `stat` prüfen,
+`mosquitto` neu erzeugen. Der User ist damit wieder da.
+
+**Danach die Doku-Lücke schließen:** §10a.1 legt diesen User beim
+Einrichten an. Solange das so steht, kommt er beim nächsten Neuaufbau
+zurück. Gehört in denselben PR wie die Entfernung — sonst ist es ein
+Handgriff, der sich selbst rückgängig macht.
+
+---
+
+### C5 — ChirpStack-Admin-Passwort (UI-Login)
+
+**Das ist der Wert, der die ChirpStack-Oberfläche wirklich schützt.** Es
+gibt davor **keine** Basic-Auth (siehe „Was in diesem Teil nicht
+vorkommt“) — wer `https://cs-test.hoteltec.at` aufruft, sieht das
+Login-Formular von ChirpStack, und nur dieses Passwort steht zwischen dem
+Internet und der Geräteverwaltung.
+
+**Wirkung bei einem Fehlschlag:** keine auf die Regelung. Downlinks laufen
+über MQTT, nicht über die API (§5.28). Was ein falsches Passwort kostet,
+ist der Zugang zur Oberfläche — also der Codec-Re-Paste (§10c) und das
+Provisionieren (§10h).
+
+**Der Wert liegt nicht in der `.env`.** Er steht in der
+ChirpStack-Datenbank; kein Container, kein Compose-Eintrag und kein
+Init-Sidecar setzt ihn. Deshalb gibt es hier auch kein `ENV_NEU` und
+keinen Neustart.
+
+#### C5.1 — zuerst prüfen, ob überhaupt ein eigenes Passwort gesetzt ist
+
+> **Am 21.10.2026 bereits ausgeführt: `admin`/`admin` wurde abgewiesen**
+> („Invalid username or password“) — es ist ein eigenes Passwort
+> gesetzt, und C5.2 ist am 27.10. eine normale Rotation.
+>
+> Die Prüfung bleibt trotzdem stehen, und sie wird am 27.10. **wiederholt**.
+> Sie kostet eine Minute, und sie beantwortet eine Frage über den Zustand
+> **an diesem Tag** — ein Befund vom 21.10. gilt für den 21.10. (§5.79).
+> Wer sie überspringt, weil sie einmal gut ausging, hat sie nicht gemacht.
+
+**Privates Browserfenster**, `https://cs-test.hoteltec.at`, und der
+Reihe nach versuchen:
+
+| Benutzer | Passwort |
+|---|---|
+| `admin` | `admin` |
+
+**Kommt man damit hinein, ist das ein eigener Befund und nicht Teil der
+Rotation.** Dann war die Geräteverwaltung so lange mit dem Vorgabewert
+erreichbar, wie der Host öffentlich ist — das gehört festgehalten
+(wann wurde der Host angelegt, wer kannte ihn), bevor es überschrieben
+wird. **Erst melden, dann ändern**, und zwar sofort: ein funktionierender
+Vorgabewert ist nichts, womit man bis zum nächsten Termin wartet.
+
+Geht es **nicht**, ist ein eigenes Passwort gesetzt, und C5.2 ist eine
+normale Rotation.
+
+#### C5.2 — neues Passwort setzen
+
+**Neuen Wert erzeugen**, mindestens 24 Zeichen:
+
+```bash
+openssl rand -base64 24
+```
+
+**Vor dem Ändern in den Passwort-Manager legen.** Kein Zettel, keine
+Shell-History, keine Mail an sich selbst. Der Wert ist nach dem Setzen
+nicht mehr auslesbar — ChirpStack speichert ihn als Hash, und es gibt
+keinen Weg zurück ausser dem nächsten Ändern.
+
+**Ändern in der Oberfläche:** angemeldet als `admin` → Benutzer-Verwaltung
+→ `admin` → Passwort ändern. **Die Beschriftungen können je
+ChirpStack-Version abweichen** — was zählt, ist die Prüfung darunter,
+nicht der Klickweg. Wer die Stelle nicht findet, bricht ab und meldet;
+geraten wird hier nichts.
+
+**Prüfen — in dieser Reihenfolge:**
+
+1. **Abmelden**, dann mit dem **neuen** Passwort anmelden. Erwartung:
+   geht.
+2. Im **privaten** Fenster mit dem **alten** Passwort versuchen.
+   Erwartung: geht **nicht**. Geht es noch, wurde nicht gespeichert —
+   und man hätte es ohne diesen zweiten Schritt nicht gemerkt, weil die
+   erste Prüfung in einer Sitzung läuft, die ohnehin schon angemeldet
+   ist.
+3. Ein Blick auf **Gateways**: „Last seen“ unter 30 Sekunden. Das
+   Passwort hat mit dem Funkweg nichts zu tun, aber wenn man ohnehin
+   drin ist, kostet der Blick nichts.
+
+**Rückweg:** das alte Passwort in der Oberfläche wieder setzen — man
+braucht es dafür aus dem Passwort-Manager. **Steht es dort nicht, gibt es
+keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
+„vorher in den Passwort-Manager“ oben und nicht hier.
+
+---
+
+### C6 — Server-Neustart (apt-Updates)
+
+**Letzter Block, nach allen Werten.** Begründung: ein Neustart prüft
+beiläufig, ob alles, was in dieser Rotation geändert wurde, einen
+Kaltstart übersteht. Umgekehrt — zuerst neu starten, dann rotieren —
+hätte man am Ende zwei ungeprüfte Zustände.
+
+**Vorher:**
+
+```bash
+cat /var/run/reboot-required 2>/dev/null; cat /var/run/reboot-required.pkgs 2>/dev/null
+```
+
+```bash
+sudo apt-get update && sudo apt-get -y upgrade && sudo apt-get -y autoremove
+```
+
+```bash
+cd /opt/heizung-sonnblick && git rev-parse --short HEAD && docker compose -f infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}\t{{.Status}}'
+```
+
+**Diesen Stand abschreiben** — er ist die Vergleichsliste für danach.
+
+**Die Deploy-Sperre vor dem Neustart lösen:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T redis redis-cli DEL heizung:lock:inbound_test
+```
+
+Sonst steht sie bis zum TTL-Ablauf weiter und der Deploy-Timer
+überspringt seine Läufe — nach einem Neustart genau die Zeit, in der man
+ihn beobachten will (§10p).
+
+```bash
+sudo reboot
+```
+
+### Prüfliste nach dem Neustart
+
+**Erst warten.** Der Stack braucht nach einem Kaltstart ein bis zwei
+Minuten, bis alle Healthchecks greifen. Wer zu früh sieht, sieht
+`starting` und hält es für einen Fehler.
+
+**1. Alle Dienste laufen — ohne Handgriff:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}\t{{.Status}}'
+```
+
+Erwartung: jeder Dienst `Up`, und wo ein Healthcheck definiert ist,
+`healthy`. **Kein `docker compose up` von Hand** — die Container haben
+`restart: always` bzw. `restart: "no"` für die Init-Sidecars, sie müssen
+von selbst kommen. Wer hier nachhilft, hat die Prüfung nicht gemacht,
+sondern übersprungen.
+
+Die Init-Sidecars (`chirpstack-init`,
+`chirpstack-gateway-bridge-init`) stehen danach auf `Exited (0)` — das
+ist ihr Soll, kein Fehler.
+
+**2. Frames kommen an** (etwa 50 in fünf Minuten bei rund 100 Geräten):
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT count(*) AS frames_5min, max(time) AS juengster FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Deutlich weniger als 50 ist ein Befund: dann läuft der Funkweg nicht
+vollständig (Gateway, Bridge, Mosquitto, Subscriber — in dieser
+Reihenfolge prüfen).
+
+**3. Die Engine rechnet wieder:**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT max(time) AS juengste_auswertung FROM event_log;"
+```
+
+Erwartung: nicht älter als zwei Minuten. Ist der Wert alt, läuft
+`celery_beat` nicht — und das ist der Fall, in dem die Steuerung
+stillsteht, ohne dass ein Container rot ist (§10l).
+
+**4. Gateway online:** ChirpStack-UI (`https://cs-test.hoteltec.at`),
+Gateways → „Last seen“ unter 30 Sekunden.
+
+**5. Deploy-Timer läuft:**
+
+```bash
+systemctl list-timers heizung-deploy-pull --no-pager; journalctl -u heizung-deploy-pull -n 10 --no-pager | tail -4
+```
+
+Erwartung: der Timer ist `active` und der jüngste Lauf `status=success`.
+Steht dort ein Fehler, ist §5.7 der erste Verdacht (`safe.directory`).
+
+**6. Die Oberfläche:** `https://heizung.hoteltec.at` im privaten Fenster
+— Basic-Auth mit dem **neuen** Passwort aus C3, Anmeldung, Dashboard mit
+Zahlen. Steht dort „Wert nicht verfügbar“, ist der `api`-Container nicht
+bereit.
+
+### Rückweg, wenn SSH nicht wiederkommt
+
+**Nach drei Minuten ohne SSH nicht weiter warten.** Die
+**Hetzner-Konsole** (Cloud Console → Server → „Console“) gibt ein Bild
+der Textkonsole, auch wenn Netzwerk oder Tailscale nicht hochkommen. Dort
+anmelden und nachsehen:
+
+```bash
+systemctl --failed
+journalctl -b -p err --no-pager | tail -40
+ip a; systemctl status tailscaled --no-pager | tail -10
+```
+
+**Die häufigste Ursache ist nicht der Server, sondern der Weg dorthin:**
+`tailscaled` startet, braucht aber Netz, und die Konsole zeigt, ob das
+Interface da ist. Hilft das nicht, liegt in der Hetzner-Konsole auch der
+Weg zum Rettungssystem — das ist dann aber kein Rotations-Rückweg mehr,
+sondern §10u mit einem Snapshot.
+
+**Was der Neustart nicht kaputt machen kann:** die rotierten Werte. Sie
+stehen in der `.env` auf der Platte, nicht im Speicher. Kommt der Server
+hoch, kommen sie mit.
+
+**Querverweise:** §10ab (Teil 1, die sieben Werte und die Env-Falle),
+§10l (Dead-Man-Checks und Alarme), §10p (Deploy-Sperre), §10u (Rückfall
+auf einen Stand), §10ai (die drei Belegungslisten — Fenster für C2),
+§10a.1 (legt `gateway-ug65` an; Lücke zu C4).
