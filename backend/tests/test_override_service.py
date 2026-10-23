@@ -1329,3 +1329,108 @@ async def test_jede_drehung_beginnt_die_24_stunden_neu(
     assert aktiv is not None
     assert aktiv.setpoint == Decimal("25.0"), "die juengste Drehung gilt"
     assert aktiv.expires_at == zweite + timedelta(hours=24), "Frist ab der zweiten Drehung"
+
+
+# ---------------------------------------------------------------------------
+# Hotfix 22.10.2026 — die Rangfolge kannte "frontend_24h" nicht
+# ---------------------------------------------------------------------------
+#
+# Fix A (#324, live seit 21.10. 11:37) hat ``OverrideSource.FRONTEND_24H``
+# eingefuehrt: Enum-Wert, Migration 0029, ``compute_expires_at``, Frontend.
+# Nicht ergaenzt wurde ``_QUELLEN_RANG`` — und ``create`` liest den Tisch mit
+# einem harten ``[source]``-Zugriff. Folge: ``KeyError`` statt Override, und
+# weil nichts den faengt, ein 500 an der Rezeption. Betroffen war die
+# **Vorauswahl** der Dauer, also der haeufigste Weg.
+#
+# Warum kein Test das gefangen hat: die Fix-A-Tests pruefen
+# ``compute_expires_at`` (rein, ohne DB) und das Frontend pruefen e2e-Tests
+# gegen **nachgebildete** Antworten. Den Weg dazwischen — Rezeption waehlt
+# 24 h, Service legt an — hat keiner von beiden betreten.
+
+
+def test_quellen_rang_kennt_jede_override_quelle() -> None:
+    """Jeder Enum-Wert braucht einen Rang — sonst ist ``create`` ein 500.
+
+    Der eigentliche Fehler war nicht die fehlende Zeile, sondern dass sie
+    fehlen **konnte**, ohne dass etwas rot wurde. Dieser Test ist der
+    Spiegel (§5.63): er haelt nicht ein Verhalten fest, sondern die
+    Vollstaendigkeit einer Zuordnung gegen ihre Quelle.
+
+    Wer eine neue Quelle einfuehrt, bekommt hier einen Fehlschlag mit dem
+    Namen des fehlenden Werts — und muss sich entscheiden, welchen Rang sie
+    hat. Das ist die Frage, die bei Fix A nicht gestellt wurde.
+    """
+    ohne_rang = [q.value for q in OverrideSource if q not in override_service._QUELLEN_RANG]
+
+    assert ohne_rang == [], (
+        f"ohne Rang in _QUELLEN_RANG: {ohne_rang} — "
+        "create() wirft darauf KeyError (500), kein stiller Vorgabewert"
+    )
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+async def test_rezeption_24h_wird_angelegt_und_schlaegt_den_gast(
+    db_session: AsyncSession, room_id: int
+) -> None:
+    """Der Weg, der live 500 geliefert hat — bis zum angelegten Eintrag.
+
+    Drei Zusicherungen am selben Aufruf, weil sie zusammen erst den Rang
+    festnageln und nicht nur seine Anwesenheit:
+
+    1. Der Eintrag entsteht ueberhaupt. Das war der Fehler.
+    2. Er verdraengt den Gast-Override derselben Zone (AE-58).
+    3. **Und der Gast holt ihn danach nicht zurueck.** Die dritte ist die
+       eigentliche: die Mutationsprobe hat gezeigt, dass Rang ``1`` die
+       ersten beiden erfuellt — aber mit Rang 1 duerfte eine Drehung am Rad
+       die Rezeption verdraengen, und damit waere AE-58 ueber den Umweg des
+       Stapel-Abbaus ausgehebelt. Ohne diesen Schritt haette der Test einen
+       falschen Rang gruen gemeldet.
+    """
+    now = datetime.now(tz=UTC)
+    gast = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("26.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=override_service.compute_expires_at(OverrideSource.DEVICE_MANUAL, now),
+    )
+
+    rezeption = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("21.0"),
+        source=OverrideSource.FRONTEND_24H,
+        expires_at=override_service.compute_expires_at(OverrideSource.FRONTEND_24H, now),
+    )
+
+    assert rezeption.id is not None, "vor dem Hotfix kam hier ein KeyError"
+
+    await db_session.refresh(gast)
+    assert gast.revoked_at is not None, "Mitarbeiter schlaegt Gast (AE-58)"
+    assert gast.revoked_reason == override_service.REVOKE_REASON_SUPERSEDED
+
+    aktiv = await override_service.get_active(db_session, room_id)
+    assert aktiv is not None
+    assert aktiv.id == rezeption.id
+    assert aktiv.setpoint == Decimal("21.0")
+
+    # Jetzt dreht der Gast am Rad. Das darf die Rezeption nicht beenden.
+    spaetere_drehung = await override_service.create(
+        db_session,
+        room_id=room_id,
+        setpoint=Decimal("28.0"),
+        source=OverrideSource.DEVICE_MANUAL,
+        expires_at=override_service.compute_expires_at(
+            OverrideSource.DEVICE_MANUAL, now + timedelta(minutes=5)
+        ),
+    )
+
+    await db_session.refresh(rezeption)
+    assert rezeption.revoked_at is None, (
+        "eine Drehung am Rad darf die Rezeption nicht verdraengen (AE-58) — "
+        "genau das passiert, wenn frontend_24h nicht Rang 0 hat"
+    )
+    nach_der_drehung = await override_service.get_active(db_session, room_id)
+    assert nach_der_drehung is not None
+    assert nach_der_drehung.id == rezeption.id, "Mitarbeiter bleibt vorn"
+    assert nach_der_drehung.id != spaetere_drehung.id
