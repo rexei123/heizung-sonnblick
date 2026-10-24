@@ -29,6 +29,11 @@ const BASE_DEVICE: Device = {
   dev_eui: "0011223344556677",
   app_eui: null,
   kind: "thermostat",
+  // Sprint 24c: Rolle und Kindersicherungs-Status. Der Server
+  // liefert beide immer, also gehoeren sie in jede Fixture --
+  // optional zu machen waere eine Unwahrheit ueber die API.
+  measure_only: false,
+  child_lock_state: "ausstehend" as const,
   vendor: "mclimate",
   model: "Vicki",
   label: "101",

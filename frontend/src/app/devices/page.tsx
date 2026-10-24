@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { FuehlerBadge } from "@/components/patterns/fuehler-badge";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
 import { useAuth } from "@/contexts/auth-context";
@@ -641,6 +642,10 @@ function LabelCell({ device: d }: { device: Device }) {
       >
         {display}
       </Link>
+      {/* Sprint 24c: ein Fuehler sieht in der Liste aus wie ein normales
+          Thermostat. Ohne Kennzeichnung sucht jemand eine
+          Ventilstellung, die es nie geben wird. */}
+      {d.measure_only && <FuehlerBadge />}
       {/* Sprint 22 T5: `PATCH /devices/{id}` ist `require_admin`
           (`api/v1/devices.py:370`). Der Name bleibt lesbar und verlinkt,
           nur der Stift verschwindet. */}

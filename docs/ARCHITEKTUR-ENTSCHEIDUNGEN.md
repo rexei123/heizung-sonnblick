@@ -5986,3 +5986,126 @@ Rollenprüfung. Kein einziger davon hätte eine Fehlermeldung erzeugt.
 | **Einheit der Gehäusetemperatur** | gestützte Annahme (die Doku nennt bei `0x60` und `0x72`/`0x73` °C), nicht belegt. Die Warnschwelle 40 ist in dieser Einheit gemeint |
 | **Zonenstatus bei gemischten Zonen** | Eine Zone mit Relais **und** Fühler ist `healthy`, sobald beide frisch melden. Ob das die Aussage ist, die der Hotelier erwartet, zeigt der Feldtest — eine Zone, deren **Relais** stumm ist, heißt dann `degraded`, und das ist richtig |
 | **Mail beim Schutz-Alarm** | `emit_relay_protection_alert` schreibt einen Logeintrag, kein Versand. Dieselbe Trennung wie bei `emit_health_alert`: der Logeintrag darf nie ausfallen, weil eine Mail nicht zugestellt werden konnte. Der Versandweg ist vorhanden (`services/mailer.py`) und nicht angeschlossen |
+
+## 11. Nachtrag Sprint 24c (24.10.2026): der Umschalter in der Oberfläche
+
+Sprint 24b hat die Rolle „nur messen" gebaut und in Engine, Dispatch und
+Geräte-Sicherheit verdrahtet — gesetzt werden konnte sie nur über die
+API. 24c bringt sie in die Oberfläche. Die Entscheidungen, die dabei
+gefallen sind, und ein Befund, der die Abnahme des Pilots betrifft.
+
+### 11.1 Bestätigungsdialog statt Schalter
+
+Das Umschalten hat drei Folgen, und keine ist am Schalter zu sehen: das
+Gerät bekommt keine Sollwerte mehr, eine Drehung am Rad erzeugt keine
+Übersteuerung, und es zählt nicht mehr für die Geräte-Sicherheit — ein
+abgenommenes Gerät löst dann keinen Frostschutz aus. Wer das nicht
+weiß, hält es für eine Anzeige-Einstellung. Der Dialog nennt alle drei
+im Klartext; die e2e-Probe prüft genau diese drei Sätze, damit sie nicht
+beim nächsten Umbau zu „Sind Sie sicher?" schrumpfen.
+
+### 11.2 Die Kindersicherung gehört zum Umschalten, nicht daneben
+
+Ein Fühler liegt unmontiert im Raum und hat ein drehbares Rad. Ohne
+Sperre verstellt der erste Gast, der ihn findet, einen Sollwert, den
+niemand umsetzt — und der Gast sieht eine Reaktion, die nicht kommt.
+Der Downlink geht deshalb **mit** dem Umschalten hinaus, nicht als
+zweiter Handgriff.
+
+Der Zustand hat **drei** Werte, und die Unterscheidung ist der ganze
+Grund für den dritten: `ausstehend` (nichts gehört),
+`bestaetigt` (das Gerät meldet den gewollten Zustand) und
+`fehlgeschlagen` (es meldet das Gegenteil). Wäre „nichts gehört" wie
+„Rad frei" behandelt, stünde direkt nach jedem Umschalten ein roter
+Befund auf der Geräteseite — bei einem Funkgerät der Normalfall, und
+damit ein Melder, dem nach einer Woche niemand mehr glaubt (§5.79).
+
+Die Ableitung ist **symmetrisch**: ohne Rolle ist ein freies Rad
+`bestaetigt`. Ohne diese Symmetrie bräuchte der Dienst zwei Regeln, und
+die zweite würde beim ersten Umbau vergessen.
+
+Die Abfrage nimmt die jüngste Meldung, **die das Feld führt**
+(`child_lock IS NOT NULL` in der `WHERE`-Klausel, nicht im Nachhinein).
+Eine reine Befehlsantwort ohne das Feld darf eine Bestätigung davor
+nicht verdecken — sonst zeigte die Geräteseite nach jedem Antwort-Frame
+wieder „ausstehend".
+
+### 11.3 Der Zustand wird abgeleitet, nicht gespeichert
+
+`child_lock_state` ist read-time aus `sensor_reading.child_lock`
+abgeleitet, wie `battery_state` und `valve_state` (§5.73). Keine
+Spalte, keine Migration, kein zweiter Schreibpfad. Die Abfrage läuft
+**einmal für alle Geräte des Requests** (`DISTINCT ON`), nicht je Zeile
+— die Geräteliste rendert 104 Zeilen.
+
+### 11.4 Die Historie darf jeder Angemeldete lesen
+
+Die Handgriffe an einem Gerät werden seit 24b auditiert, lagen aber nur
+in der Datenbank: wer wissen wollte, wer eine Rolle gesetzt hat,
+brauchte einen SQL-Zugang. `GET /devices/{id}/audit` ist deshalb für
+jeden angemeldeten Nutzer lesbar, obwohl die Handgriffe selbst
+Admin-Sache sind. Eine Rollensperre auf dem **Lesen** nähme die
+Nachvollziehbarkeit genau dort weg, wo sie gebraucht wird. Unbekannte
+Aktionen erscheinen als ihr Rohwert und nicht als „unbekannt" — eine
+falsche Beschriftung ist schlechter als eine rohe.
+
+### 11.5 Der Befund: `room_type.default_t_*` steht **unter** GLOBAL
+
+**Gemessen am 24.10.2026, nicht gefolgert.** Das Abschlusskriterium des
+Sprints lautete: „der Engine-Trace der Zone zeigt danach den
+Raumtyp-Sollwert statt 10 °C". Der zugehörige Test war einzeln grün und
+in der vollen Suite rot — mit **18 °C** statt der erwarteten 21 bzw. 19.
+
+Die Ursache ist nicht Testverschmutzung, sondern die Auflösungskette
+selbst. `ROOM > ROOM_TYPE > GLOBAL` meint **`rule_config`-Zeilen**; die
+Spalten `room_type.default_t_occupied/_vacant/_night` sind die Vorgabe
+**unterhalb** von GLOBAL (`_resolve_t(...) or ctx.room_type.default_t_*`
+in `rules/engine.py`). Die hausweite Zeile aus `seed.py` trägt
+`t_vacant = 18.0`, und ein nicht buchbares Zimmer ist nie belegt — also
+gewinnt 18.
+
+**Folge für den Pilot:** Die Rolle wirkt wie gebaut — der Frostschutz
+ist weg, das Zimmer heizt. Aber es heizt auf den hausweiten
+Frei-Sollwert, nicht auf den Wert seines Raumtyps. Für eine Bar im
+Winter ist das vermutlich zu kalt.
+
+**Und es gibt heute keinen Hebel in der Oberfläche.** Die API kennt nur
+`GET`/`PATCH /api/v1/rule-configs/global`; Zeilen im Scope `ROOM_TYPE`
+oder `ROOM` kann sie nicht anlegen. Der hausweite Wert gilt für jedes
+freie Zimmer, also auch für die Gästezimmer, und ist damit kein Mittel
+für zwei Allgemeinflächen. Eine Übersteuerung ist ebenfalls keiner: sie
+setzt ein belegtes Zimmer voraus (AE-58), und ein nicht buchbares
+Zimmer ist nie belegt — das ist der offene Punkt S6.
+
+**Entschieden:** Der Prüfpunkt in RUNBOOK §10aj Schritt 6a ist **nicht
+mehr eine Zahl**, sondern „nicht mehr 10 °C, Grund `vacant_setpoint`
+statt `frost_protection`". Die Tabelle mit 21/19 ist ersetzt; sie hätte
+den Betreiber nach einem Fehler suchen lassen, den es nicht gibt
+(§5.79). Ein Editor für Sollwerte je Raumtyp ist die offene Aufgabe —
+sie gehört in einen eigenen Sprint und nicht in einen Eingriff in die
+Datenbank.
+
+**Was im Test davon bleibt:** `test_measure_only_trace.py` legt seinem
+Raumtyp eine eigene `rule_config`-Zeile an — damit prüft es, was der
+Betreiber einstellen **muss**, statt einer Vorgabe, die in der Kette
+überstimmt wird. `test_ohne_raumtyp_eintrag_gilt_der_hausweite_wert`
+hält die andere Richtung fest, damit der Befund nicht wieder verloren
+geht.
+
+### 11.6 Ein Leck, das die volle Suite von der Reihenfolge abhängig machte
+
+`tests/test_api_read_endpoints_auth.py` legt die hausweite
+`rule_config`-Zeile an, wenn sie fehlt, und hat sie **nicht** wieder
+abgeräumt. Jeder Engine-Test danach im selben Lauf bekam damit den
+Frei-Sollwert 18 statt der Raumtyp-Vorgabe — unsichtbar, solange kein
+Test auf dieser Vorgabe stand. Behoben nach dem Muster, das
+`test_api_rule_configs.py` schon richtig macht: nur abräumen, was hier
+entstanden ist (§5.39).
+
+### 11.7 Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Sollwert je Raumtyp in der Oberfläche** | ohne ihn heizen die Allgemeinflächen auf den hausweiten Frei-Sollwert (18 °C). Eigener Sprint; bis dahin ist der Prüfpunkt die Begründung im Trace, nicht die Zahl |
+| **S6** (Übersteuerung in nicht buchbaren Räumen) | unverändert offen, mit M6 und M8 — und jetzt zusätzlich der einzige Weg, der einen Wert *nur* für ein Zimmer setzen würde |
+| **Bestätigung der Kindersicherung** | kommt mit dem Keepalive; wie lange das dauert, zeigt erst der Betrieb an 027 und 056 |

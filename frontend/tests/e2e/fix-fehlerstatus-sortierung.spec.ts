@@ -38,6 +38,11 @@ function makeDevice(
     dev_eui: `00112233445566${id.toString().padStart(2, "0")}`,
     app_eui: null,
     kind: "thermostat",
+    // Sprint 24c: Rolle und Kindersicherungs-Status. Der Server
+    // liefert beide immer, also gehoeren sie in jede Fixture --
+    // optional zu machen waere eine Unwahrheit ueber die API.
+    measure_only: false,
+    child_lock_state: "ausstehend" as const,
     vendor: "mclimate",
     model: "Vicki",
     label,

@@ -10,6 +10,8 @@ import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
+import { DeviceAuditList } from "@/components/patterns/device-audit-list";
+import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
 import { useAuth } from "@/contexts/auth-context";
 import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
@@ -241,7 +243,16 @@ export default function DeviceDetailPage() {
                 Ventil. Die Relais-Karte traegt stattdessen Zustand,
                 Leistung, Zaehler, Sperren und die Handgriffe. */}
             {device.kind === "relay" && <RelayCard deviceId={device.id} />}
+            {/* Sprint 24c: die Rolle. Fuer ein Relais gibt sie die
+                Komponente selbst nicht aus -- ein Relais misst nicht. */}
+            <MeasureOnlyToggle device={device} />
           </section>
+
+          {/* Sprint 24c: die Handgriffe an diesem Geraet. Vor dem
+              Verlauf-Diagramm, weil sie erklaeren, warum der Verlauf
+              aussieht, wie er aussieht -- eine Rolle, die vor zwei
+              Stunden gesetzt wurde, ist die Antwort auf einen Knick. */}
+          <DeviceAuditList deviceId={device.id} />
 
           <section className="bg-surface rounded-lg border border-border p-6">
             <header className="flex items-center justify-between mb-4">

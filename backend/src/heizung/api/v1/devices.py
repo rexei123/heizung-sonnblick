@@ -18,14 +18,17 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
+from heizung.models.business_audit import BusinessAudit
 from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
@@ -46,6 +49,11 @@ from heizung.schemas.device import (
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service
 from heizung.services.battery_health import BatteryVerdict, battery_verdicts
+from heizung.services.child_lock import (
+    child_lock_state,
+    child_lock_verdict,
+    child_lock_verdicts,
+)
 from heizung.services.device_service import (
     assign_zone,
     get_device_with_relations,
@@ -105,6 +113,7 @@ async def _build_device_read(
     device: Device,
     verdict: BatteryVerdict,
     ventil: ValveVerdict,
+    kindersicherung: bool | None,
 ) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
     + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
@@ -126,6 +135,13 @@ async def _build_device_read(
     wuerde genau den Fehler zulassen, den er verdeckt — eine Liste, die
     stillschweigend "unbekannt" fuer jedes Geraet ausgibt, weil jemand das
     Argument vergessen hat.
+
+    ``kindersicherung`` ebenso (Sprint 24c): der gemeldete Sperr-Zustand
+    kommt aus **einer** Abfrage fuer alle Geraete des Requests
+    (``child_lock_verdicts``). ``None`` heisst hier "keine Zeile, die das
+    Feld fuehrt" -- und ist nicht dasselbe wie "Rad frei". Deshalb
+    ``bool | None`` und kein ``bool``: ein Default ``False`` wuerde eine
+    ausstehende Bestaetigung als Fehlschlag anzeigen.
 
     ``ventil`` ebenso (Sprint 20e, T7/T10): das Ventil-Urteil kommt aus dem
     2-h-Fenster, auch in einer Query fuer alle Geraete
@@ -174,6 +190,12 @@ async def _build_device_read(
             # demselben Verdict, damit sie nicht auseinanderlaufen.
             "valve_state": ventil.state,
             "valve_delta_k": ventil.delta_k,
+            # Sprint 24c: gewollt gegen gemeldet, in einer reinen Funktion.
+            # ``measure_only`` kommt ueber ``model_validate`` mit und wird
+            # hier nur gelesen, nicht gesetzt.
+            "child_lock_state": child_lock_state(
+                measure_only=device.measure_only, gemeldet=kindersicherung
+            ),
             # 20e-b: gegen was 3b verglichen hat. Vollstaendig durchgereicht,
             # nicht nur bei ``zimmer_zu_warm`` — wer wissen will, warum ein
             # warmes Zimmer *keinen* Hinweis traegt, braucht die Referenz
@@ -227,6 +249,7 @@ async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRe
         device,
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
+        await child_lock_verdict(session, device_id),
     )
 
 
@@ -303,7 +326,79 @@ async def list_devices(
     # Sprint 20e (T7/T10): dieselbe Form fuer die Ventil-Hinweise — eine
     # Aggregat-Query fuer die ganze Seite, vor der Schleife.
     ventile = await valve_verdicts(session, ids)
-    return [await _build_device_read(session, d, verdicts[d.id], ventile[d.id]) for d in devices]
+    # Sprint 24c: dieselbe Form -- eine Abfrage fuer die ganze Seite.
+    sperren = await child_lock_verdicts(session, ids)
+    return [
+        await _build_device_read(session, d, verdicts[d.id], ventile[d.id], sperren[d.id])
+        for d in devices
+    ]
+
+
+class DeviceAuditEintrag(BaseModel):
+    """Eine Zeile der Geraete-Historie (Sprint 24c).
+
+    **Nur die Felder, die ein Mensch liest.** ``request_ip`` und die
+    vollstaendigen JSONB-Werte bleiben draussen: die Historie soll sagen,
+    *wer wann was* getan hat, und nicht ein Protokoll fuer die
+    Fehlersuche sein. Wer mehr braucht, liest ``business_audit`` direkt.
+
+    ``benutzer`` ist die E-Mail-Adresse und ``None``, wenn der Eintrag
+    von einem Systempfad kommt (``user_id IS NULL``). Das ist eine
+    Aussage und kein fehlender Wert -- die Oberflaeche schreibt dafuer
+    "System".
+    """
+
+    ts: datetime
+    action: str
+    benutzer: str | None
+    alt: Any | None
+    neu: Any | None
+
+
+@router.get(
+    "/{device_id}/audit",
+    response_model=list[DeviceAuditEintrag],
+    summary="Historie der Handgriffe an einem Geraet",
+)
+async def get_device_audit(
+    device_id: int = DeviceIdPath,
+    limit: int = Query(default=20, ge=1, le=100),
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[DeviceAuditEintrag]:
+    """Die juengsten Audit-Eintraege zu diesem Geraet, neueste zuerst.
+
+    **Lesen darf jeder angemeldete Nutzer.** Die Historie ist der
+    Gegenpol zu den Admin-Handgriffen: wer sie nicht ausfuehren darf,
+    soll trotzdem sehen koennen, dass und von wem sie ausgefuehrt wurden.
+    Eine Rollensperre auf dem Lesen wuerde die Nachvollziehbarkeit genau
+    dort wegnehmen, wo sie gebraucht wird.
+
+    Gefiltert auf ``target_type = 'device'`` und diese ``target_id``.
+    Eintraege, die ein Geraet nur **mittelbar** betreffen (etwa ein
+    Zonen-Umbau), tauchen hier nicht auf -- sie tragen eine andere
+    ``target_id``, und sie hier mitzufuehren waere eine Vermutung
+    darueber, was zusammengehoert.
+    """
+    stmt = (
+        select(BusinessAudit, User.email)
+        .outerjoin(User, User.id == BusinessAudit.user_id)
+        .where(BusinessAudit.target_type == "device")
+        .where(BusinessAudit.target_id == device_id)
+        .order_by(BusinessAudit.ts.desc())
+        .limit(limit)
+    )
+    zeilen = (await session.execute(stmt)).all()
+    return [
+        DeviceAuditEintrag(
+            ts=eintrag.ts,
+            action=eintrag.action,
+            benutzer=email,
+            alt=eintrag.old_value,
+            neu=eintrag.new_value,
+        )
+        for eintrag, email in zeilen
+    ]
 
 
 @router.get(
@@ -330,7 +425,11 @@ async def list_pool_devices(
     pool_ids = [d.id for d in pool]
     verdicts = await battery_verdicts(session, pool_ids)
     ventile = await valve_verdicts(session, pool_ids)
-    return [await _build_device_read(session, d, verdicts[d.id], ventile[d.id]) for d in pool]
+    sperren = await child_lock_verdicts(session, pool_ids)
+    return [
+        await _build_device_read(session, d, verdicts[d.id], ventile[d.id], sperren[d.id])
+        for d in pool
+    ]
 
 
 @router.get(
@@ -356,6 +455,7 @@ async def get_device(
         device,
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
+        await child_lock_verdict(session, device_id),
     )
 
 

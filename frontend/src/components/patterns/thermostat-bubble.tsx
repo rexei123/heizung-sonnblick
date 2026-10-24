@@ -15,6 +15,7 @@
 import Link from "next/link";
 
 import { BatteryBadge } from "@/components/patterns/battery-badge";
+import { FuehlerBadge } from "@/components/patterns/fuehler-badge";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { formatTemperature } from "@/lib/format";
 import type { Device } from "@/lib/api/types";
@@ -31,6 +32,7 @@ export function ThermostatBubble({ device }: { device: Device }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-text-primary text-sm truncate">{name}</span>
+          {device.measure_only && <FuehlerBadge />}
           <HardwareStatusBadge
             deviceId={device.id}
             isPool={device.heating_zone_id === null}
