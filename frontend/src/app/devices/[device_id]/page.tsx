@@ -10,6 +10,7 @@ import { ValveHintBadge } from "@/components/patterns/valve-hint-badge";
 import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart";
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
+import { RelayCard } from "@/components/patterns/relay-card";
 import { useAuth } from "@/contexts/auth-context";
 import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
 import { useDevice, useSensorReadings, useUpdateDevice } from "@/lib/api/hooks";
@@ -234,6 +235,12 @@ export default function DeviceDetailPage() {
             />
             <WindowBackplateCard reading={snapshot} />
             <OverrideCard override={device.active_override} />
+            {/* Sprint 24b: nur fuer Relais. Die Vicki-Kacheln darueber
+                (Ist, Soll, Ventil, Fenster) sagen bei einem 16ASPM
+                nichts — es misst keine Raumtemperatur und hat kein
+                Ventil. Die Relais-Karte traegt stattdessen Zustand,
+                Leistung, Zaehler, Sperren und die Handgriffe. */}
+            {device.kind === "relay" && <RelayCard deviceId={device.id} />}
           </section>
 
           <section className="bg-surface rounded-lg border border-border p-6">

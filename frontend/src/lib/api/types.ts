@@ -9,7 +9,20 @@
  * via openapi-typescript automatisch.
  */
 
-export type DeviceKind = "thermostat" | "sensor";
+/**
+ * Spiegel zu ``DeviceKind`` in ``backend/src/heizung/models/enums.py``.
+ *
+ * ``relay`` kam mit Sprint 24 und hat hier gefehlt — §5.63, derselbe
+ * Fall wie ``device_manual`` in Sprint 20f. Diesmal hat der Typ es
+ * gefangen: die Relais-Karte verglich gegen ``"relay"``, und ``tsc``
+ * meldete „types have no overlap". Ohne diesen Vergleich wäre die Lücke
+ * stumm geblieben — ein Relais hätte auf der Geräteseite die
+ * Vicki-Kacheln gezeigt (Ist, Soll, Ventil), die bei ihm alle leer sind.
+ *
+ * ``sensor`` hat bis heute **keinen Konsumenten** im Backend (AE-78
+ * §9.5): es ist kein Raumfühler integriert.
+ */
+export type DeviceKind = "thermostat" | "sensor" | "relay";
 
 export type DeviceVendor = "mclimate" | "milesight" | "manual";
 

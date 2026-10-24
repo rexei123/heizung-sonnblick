@@ -32,16 +32,20 @@ ist. Alles andere waere eine Zusicherung ohne Deckung.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from heizung.auth.dependencies import require_admin
+from heizung.auth.dependencies import require_admin, require_user
+from heizung.config import get_settings
 from heizung.db import get_session
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
+from heizung.models.relay_reading import RelayReading
 from heizung.models.user import User
 from heizung.services import downlink_adapter, relay_adapter, relay_service
 from heizung.services.business_audit_service import record_business_action
@@ -101,6 +105,99 @@ async def _relais_oder_404(session: AsyncSession, device_id: int) -> Device:
             detail=f"device_id={device_id} ist kein Relais (kind={geraet.kind})",
         )
     return geraet
+
+
+class RelaisStand(BaseModel):
+    """Alles, was die Zonen- und Geraeteansicht ueber ein Relais zeigt.
+
+    **Ein Schema fuer beide Ansichten.** Zwei Schemata fuer dieselben
+    Werte waeren zwei Stellen zum Nachziehen, und beim ersten neuen Feld
+    laufen sie auseinander.
+
+    Die Messwerte kommen aus der **jüngsten** ``relay_reading``-Zeile und
+    sind ``None``, wenn es keine gibt — nicht ``0``. Eine 0 bei der
+    Leistung waere eine Behauptung ueber ein Geraet, von dem wir nichts
+    gehoert haben.
+    """
+
+    device_id: int
+    dev_eui: str
+    label: str | None
+    firmware_version: str | None
+    last_seen_at: datetime | None
+
+    # Lebenszyklus und Sperren
+    commissioned_at: datetime | None
+    power_return_verified: bool
+    overheating_recovery_verified: bool
+    protection_tripped_at: datetime | None
+    protection_kind: str | None
+    switch_cycles: int
+    watchdog_strategy: str
+    darf_schalten: bool
+
+    # Jüngste Meldung
+    relay_on: bool | None
+    power_w: int | None
+    energy_wh: int | None
+    internal_temperature_raw: int | None
+    gehaeusetemperatur_alarm: bool
+    reading_time: datetime | None
+    change_reason: str | None
+
+
+@router.get(
+    "/devices/{device_id}/relay",
+    response_model=RelaisStand,
+    summary="Stand eines Relais (Lebenszyklus, Sperren, jüngste Meldung)",
+)
+async def lies_relais(
+    device_id: int = DeviceIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> RelaisStand:
+    """Lesen darf jeder angemeldete Nutzer; handeln nur ein Admin.
+
+    Die Gehaeusetemperatur-Warnung wird **read-time** abgeleitet und
+    nicht gespeichert (AE-72-Muster): die Schwelle steht in den Settings
+    und ist verstellbar, ein persistiertes Kennzeichen waere beim ersten
+    Nachjustieren falsch.
+    """
+    geraet = await _relais_oder_404(session, device_id)
+    zeile = (
+        await session.execute(
+            select(RelayReading)
+            .where(RelayReading.device_id == device_id)
+            .order_by(RelayReading.time.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    schwelle = get_settings().relay_gehaeusetemperatur_alarm
+    temperatur = zeile.internal_temperature_raw if zeile is not None else None
+
+    return RelaisStand(
+        device_id=geraet.id,
+        dev_eui=geraet.dev_eui,
+        label=geraet.label,
+        firmware_version=geraet.firmware_version,
+        last_seen_at=geraet.last_seen_at,
+        commissioned_at=geraet.commissioned_at,
+        power_return_verified=geraet.power_return_verified_at is not None,
+        overheating_recovery_verified=geraet.overheating_recovery_verified_at is not None,
+        protection_tripped_at=geraet.protection_tripped_at,
+        protection_kind=geraet.protection_kind,
+        switch_cycles=geraet.switch_cycles,
+        watchdog_strategy=geraet.watchdog_strategy,
+        darf_schalten=relay_service.darf_schalten(geraet),
+        relay_on=zeile.relay_on if zeile is not None else None,
+        power_w=zeile.power_w if zeile is not None else None,
+        energy_wh=zeile.energy_wh if zeile is not None else None,
+        internal_temperature_raw=temperatur,
+        gehaeusetemperatur_alarm=temperatur is not None and temperatur >= schwelle,
+        reading_time=zeile.time if zeile is not None else None,
+        change_reason=zeile.change_reason if zeile is not None else None,
+    )
 
 
 @router.post(
