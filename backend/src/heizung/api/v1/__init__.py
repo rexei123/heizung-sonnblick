@@ -10,6 +10,7 @@ from heizung.api.v1.heating_zones import router as heating_zones_router
 from heizung.api.v1.integrations import router as integrations_router
 from heizung.api.v1.occupancies import router as occupancies_router
 from heizung.api.v1.overrides import router as overrides_router
+from heizung.api.v1.relays import router as relays_router
 from heizung.api.v1.room_types import router as room_types_router
 from heizung.api.v1.rooms import router as rooms_router
 from heizung.api.v1.rule_configs import router as rule_configs_router
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
 router.include_router(users_router)
 router.include_router(devices_router)
+router.include_router(relays_router)
 router.include_router(room_types_router)
 router.include_router(rooms_router)
 router.include_router(heating_zones_router)

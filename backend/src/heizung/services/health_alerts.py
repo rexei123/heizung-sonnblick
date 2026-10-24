@@ -117,6 +117,27 @@ def emit_health_alert(
     )
 
 
+def emit_relay_protection_alert(nutzlast: dict[str, Any]) -> None:
+    """Ein Alarm fuer eine Schutzausloesung am Relais (Sprint 24b, S4).
+
+    **Eigene Funktion und nicht ``emit_health_alert``.** Dort sind die
+    Stufen ``2`` und ``3`` und die Gruende ``offline_24h`` /
+    ``implausible_readings_24h`` **verbindlich** aus AE-53; ein dritter
+    Grund mit einer dritten Bedeutung wuerde die Auswertung
+    aufweichen, die auf genau diesen beiden Strings sitzt. Und der
+    Vorfall ist etwas anderes: nicht ein Geraet, das nicht mehr meldet,
+    sondern eines, das **selbst abgeschaltet hat**.
+
+    Wie dort gilt: nur ein Logeintrag, kein Versand. Der Logeintrag darf
+    nie ausfallen, weil eine Mail nicht zugestellt werden konnte.
+
+    Der Alarm ist **nicht** die Sperre. Die sitzt in
+    ``device.protection_tripped_at`` und haelt die Zone aus, bis ein
+    Admin sie aufhebt — ein Alarm allein wuerde nichts verhindern.
+    """
+    logger.warning("relay_protection_alert", extra=dict(nutzlast))
+
+
 @dataclass(frozen=True, slots=True)
 class SammelmailErgebnis:
     """Was ein Lauf von ``handle_silent_transitions`` hinterlassen hat.
