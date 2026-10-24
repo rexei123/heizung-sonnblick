@@ -3,6 +3,23 @@
 /**
  * Raumtyp-Form (Sprint 8.9, Sprint 8.15 Design-Fixes).
  * Universell für Anlegen + Bearbeiten.
+ *
+ * **Sprint 24d: die Felder heißen jetzt, was sie bedeuten.** Bei einem
+ * nicht buchbaren Raumtyp — einem Allgemeinbereich wie Bar, Rezeption
+ * oder Spa — gibt es kein „Belegt": der Bereich hat keinen Gast und
+ * keinen Check-in. Er hat **Betrieb** und **Nacht**. Intern ist „Betrieb"
+ * der Frei-Wert, weil ein nie belegtes Zimmer ohnehin diesen Zweig der
+ * Engine nimmt; „Belegt" zieht der Server beim Speichern gleich mit
+ * (`_betrieb_gleichziehen`), damit nicht ein unsichtbarer Wert in der
+ * Spalte zurückbleibt.
+ *
+ * **Und ein Feld sagt jetzt, dass es nichts tut.** „Langzeit-Absenkung
+ * nach Stunden" (`treat_unoccupied_as_vacant_after_hours`) hat im ganzen
+ * Repo keinen Konsumenten — nachgesehen, nicht vermutet: kein Treffer in
+ * `rules/`, `services/`, `tasks/`. Es stand seit Sprint 8 als normales
+ * Eingabefeld da. Ein Schalter ohne Wirkung ist schlimmer als kein
+ * Schalter (§5.77), und das Gegenmittel ist nicht, ihn zu verstecken,
+ * sondern ihn zu beschriften.
  */
 
 import { useState, type FormEvent } from "react";
@@ -56,13 +73,19 @@ export function RoomTypeForm({
       : "",
   );
 
+  // Sprint 24d: Allgemeinbereich — „Betrieb" statt „Belegt"/„Frei".
+  const istBereich = !isBookable;
+
   const handle = async (e: FormEvent) => {
     e.preventDefault();
     const payload: RoomTypeCreate | RoomTypeUpdate = {
       name: name.trim(),
       description: description.trim() || null,
       is_bookable: isBookable,
-      default_t_occupied: parseFloat(tOccupied),
+      // Bei einem Bereich ist „Betrieb" (= der Frei-Wert) beides. Der
+      // Server zieht es ohnehin gleich; es hier mitzusenden hält die
+      // Antwort frei von einer Überraschung.
+      default_t_occupied: parseFloat(istBereich ? tVacant : tOccupied),
       default_t_vacant: parseFloat(tVacant),
       default_t_night: parseFloat(tNight),
       max_temp_celsius: maxTemp.trim() === "" ? null : parseFloat(maxTemp),
@@ -125,32 +148,45 @@ export function RoomTypeForm({
 
       <fieldset className="border border-border rounded-md p-3 space-y-3">
         <legend className="text-sm font-medium text-text-primary px-1">
-          Standardtemperaturen (°C)
+          {istBereich ? "Sollwerte des Bereichs (°C)" : "Standardtemperaturen (°C)"}
         </legend>
 
-        <div className="grid grid-cols-3 gap-3">
-          <TempField
-            id="rt-t-occupied"
-            label="Belegt"
-            value={tOccupied}
-            onChange={setTOccupied}
-            required
-          />
+        <div
+          className={istBereich ? "grid grid-cols-2 gap-3" : "grid grid-cols-3 gap-3"}
+          data-testid="rt-sollwerte"
+          data-bereich={istBereich ? "true" : "false"}
+        >
+          {istBereich ? null : (
+            <TempField
+              id="rt-t-occupied"
+              label="Belegt"
+              value={tOccupied}
+              onChange={setTOccupied}
+              required
+            />
+          )}
           <TempField
             id="rt-t-vacant"
-            label="Frei"
+            label={istBereich ? "Betrieb" : "Frei"}
             value={tVacant}
             onChange={setTVacant}
             required
           />
           <TempField
             id="rt-t-night"
-            label="Nacht"
+            label={istBereich ? "Absenkung" : "Nacht"}
             value={tNight}
             onChange={setTNight}
             required
           />
         </div>
+
+        {istBereich ? (
+          <p className="text-xs text-text-tertiary" data-testid="rt-bereich-hinweis">
+            Allgemeinbereich: kein Check-in, keine Belegung. „Betrieb" gilt
+            während der Betriebszeit des Zimmers, „Absenkung" außerhalb.
+          </p>
+        ) : null}
       </fieldset>
 
       <fieldset className="border border-border rounded-md p-3 space-y-3">
@@ -180,7 +216,10 @@ export function RoomTypeForm({
             htmlFor="rt-long-vacant"
             className="block text-sm font-medium text-text-primary mb-1"
           >
-            Langzeit-Absenkung nach Stunden
+            Langzeit-Absenkung nach Stunden{" "}
+            <span className="text-text-tertiary font-normal">
+              (wirkt noch nicht)
+            </span>
           </label>
           <input
             id="rt-long-vacant"
@@ -192,6 +231,13 @@ export function RoomTypeForm({
             placeholder="z.B. 24"
             className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
           />
+          {/* Sprint 24d: nachgesehen und nicht vermutet — das Feld hat in
+              `rules/`, `services/` und `tasks/` keinen Konsumenten. Es
+              wird gespeichert und von niemandem gelesen. Stehenlassen
+              ohne Hinweis wäre der Fehler aus §5.77. */}
+          <p className="text-xs text-text-tertiary mt-1" data-testid="rt-langzeit-hinweis">
+            Wird gespeichert, aber von der Regelung noch nicht gelesen.
+          </p>
         </div>
       </fieldset>
 

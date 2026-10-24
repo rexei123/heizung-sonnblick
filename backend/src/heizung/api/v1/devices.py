@@ -50,6 +50,7 @@ from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service
 from heizung.services.battery_health import BatteryVerdict, battery_verdicts
 from heizung.services.child_lock import (
+    Sperrmeldung,
     child_lock_state,
     child_lock_verdict,
     child_lock_verdicts,
@@ -113,7 +114,7 @@ async def _build_device_read(
     device: Device,
     verdict: BatteryVerdict,
     ventil: ValveVerdict,
-    kindersicherung: bool | None,
+    kindersicherung: Sperrmeldung | None,
 ) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
     + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
@@ -140,8 +141,14 @@ async def _build_device_read(
     kommt aus **einer** Abfrage fuer alle Geraete des Requests
     (``child_lock_verdicts``). ``None`` heisst hier "keine Zeile, die das
     Feld fuehrt" -- und ist nicht dasselbe wie "Rad frei". Deshalb
-    ``bool | None`` und kein ``bool``: ein Default ``False`` wuerde eine
-    ausstehende Bestaetigung als Fehlschlag anzeigen.
+    ``Sperrmeldung | None`` und kein ``bool``: ein Default ``False`` wuerde
+    eine ausstehende Bestaetigung als Fehlschlag anzeigen.
+
+    Seit Sprint 24d traegt die Meldung ihre **Zeit** mit. Sie wird gegen
+    ``device.child_lock_commanded_at`` gehalten: eine Meldung von vor dem
+    Befehl ist keine Antwort darauf, sondern der Zustand davor. Ohne
+    diesen Vergleich stand direkt nach dem Umschalten ein roter Befund auf
+    der Geraeteseite (Befund des Betreibers, 24.10.2026).
 
     ``ventil`` ebenso (Sprint 20e, T7/T10): das Ventil-Urteil kommt aus dem
     2-h-Fenster, auch in einer Query fuer alle Geraete
@@ -194,7 +201,10 @@ async def _build_device_read(
             # ``measure_only`` kommt ueber ``model_validate`` mit und wird
             # hier nur gelesen, nicht gesetzt.
             "child_lock_state": child_lock_state(
-                measure_only=device.measure_only, gemeldet=kindersicherung
+                measure_only=device.measure_only,
+                gemeldet=kindersicherung.gesperrt if kindersicherung is not None else None,
+                gemeldet_um=kindersicherung.gemeldet_um if kindersicherung is not None else None,
+                befehl_um=device.child_lock_commanded_at,
             ),
             # 20e-b: gegen was 3b verglichen hat. Vollstaendig durchgereicht,
             # nicht nur bei ``zimmer_zu_warm`` — wer wissen will, warum ein

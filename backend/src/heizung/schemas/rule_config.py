@@ -70,3 +70,19 @@ class RuleConfigGlobalUpdate(BaseModel):
                 "(Nullfenster sonst); ueber Mitternacht ist erlaubt."
             )
         return self
+
+
+class HausstandardNutzung(BaseModel):
+    """Wie oft ein hausweiter Wert wirklich zum Tragen kommt (Sprint 24d).
+
+    Ein hausweiter Wert sieht aus wie eine Einstellung fuer das ganze Haus
+    und ist eine **Vorgabe fuer den Rest** — fuer alles, was nichts
+    eigenes sagt. Ohne diese Zahlen ist nicht zu sehen, ob eine Aenderung
+    dort 45 Zimmer bewegt oder keines.
+    """
+
+    feld: str
+    gesetzt: bool
+    raumtypen_nutzen: int
+    raumtypen_eigen: int
+    zimmer_eigen: int

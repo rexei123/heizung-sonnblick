@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from heizung.models.enums import OverrideSource
 
@@ -33,9 +33,15 @@ from heizung.models.enums import OverrideSource
 #: sie seit Fix A nicht mehr waehlbar sind. Sie zu entfernen waere eine
 #: Verengung der API-Oberflaeche und eine eigene Entscheidung — kein Teil
 #: eines Hotfixes, der eine abgewiesene Vorauswahl reparieren soll.
+#:
+#: ``frontend_bereich`` kam mit Sprint 24d dazu: die Uebersteuerung eines
+#: Allgemeinbereichs (Bar, Rezeption, Spa). Sie braucht keine Belegung und
+#: traegt ihre Dauer in ``dauer_minuten`` — bei allen anderen Quellen steckt
+#: die Dauer im Namen.
 FrontendOverrideSource = Literal[
     "frontend_24h",
     "frontend_checkout",
+    "frontend_bereich",
     "frontend_4h",
     "frontend_midnight",
 ]
@@ -55,6 +61,14 @@ class ManualOverrideCreate(BaseModel):
         description="Override-Quelle. 'device' ist intern reserviert "
         "(device_adapter) und im Create-Schema bewusst nicht erlaubt.",
     )
+    dauer_minuten: int | None = Field(
+        default=None,
+        ge=1,
+        le=24 * 60,
+        description="Dauer in Minuten. Pflicht fuer 'frontend_bereich', "
+        "Hoechstmass 1440 (24 h). Bei allen anderen Quellen steckt die "
+        "Dauer im Namen der Quelle und dieses Feld bleibt leer.",
+    )
     reason: str | None = Field(default=None, max_length=500)
     heating_zone_id: int | None = Field(
         default=None,
@@ -64,6 +78,37 @@ class ManualOverrideCreate(BaseModel):
         "demselben Raum wie der Pfad-Parameter angehoeren — sonst 404 "
         "invalid_zone.",
     )
+
+    @model_validator(mode="after")
+    def _dauer_passt_zur_quelle(self) -> ManualOverrideCreate:
+        """Die Dauer ist Pflicht fuer einen Bereich und sonst verboten.
+
+        **Beide Richtungen, und die zweite ist die wichtigere.** Ohne
+        Dauer waere die Uebersteuerung eines Bereichs unbefristet — eine
+        Bar, die durchheizt, bemerkt niemand (Mutationsprobe M6). Und ein
+        ``dauer_minuten`` an einer Quelle, die ihre Dauer im Namen traegt,
+        waere ein Feld, das der Aufrufer setzt und das wirkungslos
+        verfaellt; genau die Sorte Schalter, aus der dieser Sprint
+        entstanden ist (§5.77).
+
+        Das Hoechstmass von 24 Stunden steht als ``le`` am Feld und
+        zusaetzlich im Dienst (``override_service.compute_expires_at``) —
+        nicht aus Misstrauen gegen Pydantic, sondern weil der Dienst auch
+        von einem Aufrufer erreichbar ist, der nicht durch dieses Schema
+        kommt (Mutationsprobe M8).
+        """
+        braucht_dauer = self.source == "frontend_bereich"
+        if braucht_dauer and self.dauer_minuten is None:
+            raise ValueError(
+                "dauer_minuten ist Pflicht fuer die Quelle 'frontend_bereich' "
+                "— eine Bereichs-Uebersteuerung ohne Ablauf gibt es nicht."
+            )
+        if not braucht_dauer and self.dauer_minuten is not None:
+            raise ValueError(
+                f"dauer_minuten gilt nur fuer 'frontend_bereich'; die Quelle "
+                f"'{self.source}' traegt ihre Dauer im Namen."
+            )
+        return self
 
     @field_validator("setpoint", mode="after")
     @classmethod

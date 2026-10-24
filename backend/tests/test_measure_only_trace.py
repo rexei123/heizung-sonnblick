@@ -15,23 +15,22 @@ einem Raumtyp mit engen Grenzen täte sie das auch.
 **Mutationsprobe M16** greift hier an: Rolle gesetzt, aber die
 Geräte-Sicherheit filtert weiter → der Trace bleibt bei 10 °C.
 
-**Befund vom 24.10.2026, gemessen und nicht gefolgert.** Die erste
-Fassung dieses Tests hat sich auf ``room_type.default_t_vacant``
-verlassen und war einzeln grün, in der vollen Suite rot mit 18 °C. Die
-Ursache ist keine Testverschmutzung, sondern die Auflösungskette selbst:
-``ROOM > ROOM_TYPE > GLOBAL`` meint **``rule_config``**-Zeilen, und die
-Spalten ``room_type.default_t_*`` stehen **unter** GLOBAL. Die hausweite
-GLOBAL-Zeile aus ``seed.py`` trägt ``t_vacant = 18.0`` — ein nicht
-buchbares Zimmer ist nie belegt, nimmt also den Frei-Sollwert und
-bekommt im Haus **18 °C**, nicht den Wert seines Raumtyps.
+**Nachtrag vom 24.10.2026, und eine Korrektur in eigener Sache.** Die
+erste Fassung dieses Tests war einzeln grün und in der vollen Suite rot
+mit 18 °C. Ich habe daraus geschlossen, die Bereiche heizten **im Haus**
+auf den hausweiten Frei-Sollwert — und das war falsch: die 18 °C kamen
+aus dem Seed der **Test**-Datenbank. In der Produktion trägt die
+hausweite Zeile für „Belegt" und „Frei" ``NULL``, die Kette fällt dort
+also auf die Spalte des Raumtyps durch, und Bar und Rezeption fahren 21
+bzw. 19 °C. Eine korrelierte Beobachtung für einen Befund genommen, ohne
+die andere Variable zu prüfen (§5.68).
 
-Die Zimmer bekommen ihren eigenen Sollwert deshalb erst über einen
-``rule_config``-Eintrag im Scope ``ROOM_TYPE`` (oder ``ROOM``). Genau
-den legt die Hülle unten an — sie bildet damit ab, was der Betreiber
-im Haus einstellen muss, statt eine Vorgabe zu prüfen, die in der Kette
-überstimmt wird. ``test_ohne_raumtyp_eintrag_gilt_der_hausweite_wert``
-hält die andere Richtung fest, damit der Befund nicht wieder verloren
-geht.
+Seit Sprint 24d stehen die Spalten eines **nicht buchbaren** Raumtyps
+ohnehin auf ROOM_TYPE-Rang (``rules.engine.bereichs_kette``) und schlagen
+damit auch einen gesetzten Hausstandard. Die Hülle unten legt deshalb
+**wahlweise** zusätzlich eine ``rule_config``-Zeile an — beide Wege
+müssen zum selben Sollwert führen, und ``test_ohne_raumtyp_eintrag...``
+hält genau das fest.
 """
 
 from __future__ import annotations
@@ -236,22 +235,22 @@ async def test_die_schicht_fuehrt_den_fuehler_nicht_als_abgenommen(
     assert detached[0].detail == "no_devices_in_zone"
 
 
-async def test_ohne_raumtyp_eintrag_gilt_der_hausweite_wert(db_session: AsyncSession) -> None:
-    """**Der Befund vom 24.10.2026, als Test festgehalten.**
+async def test_ohne_raumtyp_eintrag_gilt_die_spalte(db_session: AsyncSession) -> None:
+    """**Beide Wege führen zum selben Wert** (Sprint 24d).
 
     Dasselbe Zimmer mit Fühler-Rolle, aber **ohne** ``rule_config``-Zeile
-    im Scope ``ROOM_TYPE``. Dann greift die hausweite GLOBAL-Zeile, und
-    die Spalte ``room_type.default_t_vacant`` bleibt unbenutzt — sie steht
-    in der Kette darunter.
+    im Scope ``ROOM_TYPE``. Seit 24d stehen die Spalten eines nicht
+    buchbaren Raumtyps selbst auf diesem Rang — der hausweite Wert
+    verliert also auch dann, wenn er gesetzt ist.
 
-    Der Test behauptet keine konkrete Zahl aus dem Haus: er setzt den
-    hausweiten Frei-Sollwert selbst auf einen Wert, der sich vom Raumtyp
-    unterscheidet, und prüft, **welcher von beiden gewinnt**. Die Sitzung
-    wird am Ende zurückgerollt, der Stand des Hauses bleibt unberührt.
+    Der Test setzt den hausweiten Frei-Sollwert ausdrücklich auf etwas
+    anderes, damit er die **Rangfolge** prüft und nicht die Einstellung
+    des Hauses. Die Sitzung wird zurückgerollt; der Stand des Hauses
+    bleibt unberührt.
 
-    Ohne diesen Test sieht die Hülle oben nach Umstand aus, und der
-    nächste, der sie vereinfacht, baut die Rotfärbung vom 24.10. wieder
-    ein — diesmal ohne den Befund daneben.
+    In der ersten Fassung (24c) erwartete dieser Test hier den hausweiten
+    Wert. Das war die Rangfolge **vor** diesem Sprint, und sie galt für
+    Bereiche genauso wie für Gästezimmer.
     """
     hausweit = 16
     assert hausweit != BAR_SOLL, "sonst prüft der Test nicht, welcher Scope gewinnt"
@@ -282,7 +281,7 @@ async def test_ohne_raumtyp_eintrag_gilt_der_hausweite_wert(db_session: AsyncSes
     ergebnis = await evaluate_room(db_session, room_id)
 
     assert ergebnis is not None
-    assert ergebnis.setpoint_c == hausweit, (
-        "die hausweite rule_config-Zeile schlaegt room_type.default_t_vacant"
+    assert ergebnis.setpoint_c == BAR_SOLL, (
+        "die Spalte eines Allgemeinbereichs schlaegt den Hausstandard"
     )
     assert ergebnis.setpoint_c != FROST_PROTECTION_C, "die Rolle wirkt trotzdem"

@@ -31,6 +31,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
 import { useDeleteHeatingZone, useUpdateHeatingZone } from "@/lib/api/hooks-rooms";
+import { formatRelative } from "@/lib/format";
 import { SOURCE_LABEL } from "@/lib/overrides-display";
 import type { ApiError, Device, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
@@ -40,6 +41,7 @@ const KIND_LABEL: Record<HeatingZoneKind, string> = {
   bathroom: "Bad",
   living: "Wohnen",
   hallway: "Flur",
+  common_area: "Allgemeinbereich",
   other: "Sonstige",
 };
 
@@ -99,7 +101,8 @@ export function ZoneCard({ zone, devices, roomId, onDeleted, onSwitchToOverrideT
               {zone.name}
             </h3>
           )}
-          <ZoneHealthBadge healthState={zone.health_state} variant="compact" />
+          <ZoneHealthBadge healthState={zone.health_state} variant="compact" luecke={zone.geraete_luecke}
+        />
         </div>
         <p className="text-xs text-text-tertiary mt-0.5">
           {KIND_LABEL[zone.kind]}
@@ -319,6 +322,18 @@ function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
         <dd className="tabular-nums text-text-primary">
           {meanTemp == null ? "—" : `${meanTemp.toFixed(1)} °C`}
         </dd>
+        {/* Sprint 24d: der Stand neben dem Wert. Eine Messung ohne Zeit ist
+            nicht von einer aktuellen zu unterscheiden — und seit 24c kann
+            die jüngste Meldung eines Fühlers eine Befehlsantwort ohne
+            Temperatur sein, der angezeigte Wert also älter. */}
+        {meanTemp != null && zone.mean_temperature_at != null ? (
+          <dd
+            className="text-xs text-text-tertiary"
+            data-testid={`zone-card-${zone.id}-ist-stand`}
+          >
+            {formatRelative(zone.mean_temperature_at)}
+          </dd>
+        ) : null}
       </div>
       <div
         className="flex items-baseline gap-2"

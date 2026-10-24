@@ -26,7 +26,13 @@ from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.user import User
 from heizung.schemas.event_log import EventLogRead
-from heizung.schemas.room import RoomCreate, RoomOverrideBlockUpdate, RoomRead, RoomUpdate
+from heizung.schemas.room import (
+    BetriebszeitUpdate,
+    RoomCreate,
+    RoomOverrideBlockUpdate,
+    RoomRead,
+    RoomUpdate,
+)
 from heizung.schemas.room_history import (
     HistoryPunkt,
     HistoryZone,
@@ -34,7 +40,7 @@ from heizung.schemas.room_history import (
     NachtFenster,
     RoomHistoryRead,
 )
-from heizung.services import override_service
+from heizung.services import betriebszeit, override_service, raumtyp_regel
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
 from heizung.services.referenzzone import referenzzonen_pro_zimmer
@@ -61,6 +67,35 @@ async def _get_or_404(session: AsyncSession, room_id: int) -> Room:
             detail=f"Zimmer {room_id} nicht gefunden",
         )
     return room
+
+
+async def _als_read(session: AsyncSession, room: Room) -> RoomRead:
+    """Ein Zimmer mit der Bereichs-Marke (Sprint 24d).
+
+    Eine Abfrage auf den Raumtyp statt der Beziehung: ein Lazy-Load auf
+    ``room.room_type`` endet unter asyncpg in ``MissingGreenlet``, und die
+    Liste loest das ohnehin gebuendelt (§5.38).
+    """
+    buchbar = await session.scalar(
+        select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+    )
+    ist_bereich = buchbar is False
+    # Die Betriebszeit nur fuer einen Bereich lesen: bei einem
+    # Gaestezimmer waere dieselbe Zeile das Nacht-Fenster, und sie unter
+    # dem Namen „Betriebszeit" auszuliefern hiesse, zwei Dinge gleich zu
+    # nennen, die verschieden gemeint sind.
+    zeit = (
+        await betriebszeit.lade(session, room.id)
+        if ist_bereich
+        else betriebszeit.Betriebszeit(von=None, bis=None)
+    )
+    return RoomRead.model_validate(room).model_copy(
+        update={
+            "ist_allgemeinbereich": ist_bereich,
+            "betriebszeit_von": zeit.von,
+            "betriebszeit_bis": zeit.bis,
+        }
+    )
 
 
 async def _ensure_room_type_exists(session: AsyncSession, room_type_id: int) -> None:
@@ -143,6 +178,10 @@ async def list_rooms(
     # KEIN per-room-Lookup (kein N+1 wie devices._build_device_read).
     rooms_with_override = await override_service.get_rooms_with_active_override(session)
 
+    # Sprint 24d: welche Raumtypen Allgemeinbereiche sind — eine Abfrage
+    # fuer die ganze Seite, nicht eine je Zeile.
+    bereich_typen = await raumtyp_regel.nicht_buchbare_typ_ids(session)
+
     # Ist und Soll der Referenzzone (15.10.2026). Drei Aggregate fuer die
     # ganze Seite, keine Abfrage je Zimmer — dieselbe Regel wie oben.
     room_ids = [room.id for room in rooms]
@@ -155,13 +194,15 @@ async def list_rooms(
         # Zimmer ohne Referenzzone: kein Ist. Der Soll bleibt trotzdem, er
         # haengt am Zimmer und nicht an der Zone — die Oberflaeche zeigt dann
         # „–" nur in der Ist-Spalte.
-        ist = ist_pro_zone.get(zone_id) if zone_id is not None else None
+        zonen_ist = ist_pro_zone.get(zone_id) if zone_id is not None else None
+        ist = zonen_ist.mittel if zonen_ist is not None else None
         return RoomRead.model_validate(room).model_copy(
             update={
                 "has_active_override": room.id in rooms_with_override,
                 "reference_zone_id": zone_id,
                 "mean_temperature_c": ist,
                 "engine_setpoint_c": soll_pro_zimmer.get(room.id),
+                "ist_allgemeinbereich": room.room_type_id in bereich_typen,
             }
         )
 
@@ -177,8 +218,8 @@ async def get_room(
     room_id: int = RoomIdPath,
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> Room:
-    return await _get_or_404(session, room_id)
+) -> RoomRead:
+    return await _als_read(session, await _get_or_404(session, room_id))
 
 
 @router.patch(
@@ -237,6 +278,71 @@ async def update_room(
         ) from e
     await session.refresh(room)
     return room
+
+
+@router.patch(
+    "/{room_id}/betriebszeit",
+    response_model=RoomRead,
+    summary="Betriebszeit eines Allgemeinbereichs setzen (Admin, mit Audit)",
+)
+async def set_betriebszeit(
+    payload: BetriebszeitUpdate,
+    room_id: int = RoomIdPath,
+    admin: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> RoomRead:
+    """Setzt oder loescht die Betriebszeit — nur bei einem Bereich.
+
+    **Warum der Endpunkt auf einen nicht buchbaren Raumtyp besteht.**
+    Intern sind es die Grenzen des Nacht-Fensters. An einem Gaestezimmer
+    wuerde dieselbe Eingabe die Nachtabsenkung dieses Zimmers umstellen —
+    unter einem Namen, der etwas anderes sagt. Das waere ein Schalter, der
+    etwas anderes tut, als auf ihm steht.
+
+    ``require_admin``, weil die Betriebszeit zu den Stammdaten gehoert
+    (dieselbe Rolle wie Zimmer, Raumtypen und Heizzonen; `rechte.ts`
+    spiegelt das als ``darfStammdatenAendern``).
+    """
+    room = await _get_or_404(session, room_id)
+    buchbar = await session.scalar(
+        select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+    )
+    if buchbar is not False:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Betriebszeiten gibt es nur fuer Allgemeinbereiche "
+                "(Raumtyp nicht buchbar). Ein Gaestezimmer folgt dem "
+                "Nachtfenster seines Raumtyps."
+            ),
+        )
+
+    try:
+        von = betriebszeit.parse_uhrzeit(payload.von) if payload.von is not None else None
+        bis = betriebszeit.parse_uhrzeit(payload.bis) if payload.bis is not None else None
+        vorher = await betriebszeit.lade(session, room_id)
+        neu = await betriebszeit.setze(session, room_id, von=von, bis=bis)
+    except betriebszeit.BetriebszeitError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
+
+    await record_business_action(
+        session,
+        user_id=admin.id,
+        action="ROOM_OPERATING_HOURS_SET",
+        target_type="room",
+        target_id=room_id,
+        old_value={
+            "von": vorher.von.isoformat() if vorher.von else None,
+            "bis": vorher.bis.isoformat() if vorher.bis else None,
+        },
+        new_value={
+            "von": neu.von.isoformat() if neu.von else None,
+            "bis": neu.bis.isoformat() if neu.bis else None,
+        },
+    )
+    await session.commit()
+    await session.refresh(room)
+    return await _als_read(session, room)
 
 
 @router.patch(

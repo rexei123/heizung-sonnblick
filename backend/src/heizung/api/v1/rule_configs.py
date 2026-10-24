@@ -23,7 +23,12 @@ from heizung.db import get_session
 from heizung.models.enums import RuleConfigScope
 from heizung.models.rule_config import RuleConfig
 from heizung.models.user import User
-from heizung.schemas.rule_config import RuleConfigGlobalRead, RuleConfigGlobalUpdate
+from heizung.schemas.rule_config import (
+    HausstandardNutzung,
+    RuleConfigGlobalRead,
+    RuleConfigGlobalUpdate,
+)
+from heizung.services import raumtyp_regel
 from heizung.services.config_audit_service import record_config_change
 
 router = APIRouter(prefix="/rule-configs", tags=["rule-configs"])
@@ -54,6 +59,36 @@ async def _get_global_or_404(session: AsyncSession) -> RuleConfig:
             detail="rule_config_global_not_found",
         )
     return rc
+
+
+@router.get(
+    "/global/nutzung",
+    response_model=list[HausstandardNutzung],
+    summary="Je Feld: wer nimmt den Hausstandard, wer hat seinen eigenen Wert",
+)
+async def global_nutzung(
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[HausstandardNutzung]:
+    """Die Zahl neben dem Feld, damit die Seite eine Aussage macht.
+
+    **Die Route steht vor ``/global``** — nicht aus Not, sondern weil
+    ``/global`` ein fester Pfad ohne Platzhalter ist und beide sich damit
+    nicht in die Quere kommen. Die Reihenfolge ist trotzdem bewusst
+    gewaehlt: wer hier eine dynamische Route einfuegt, soll sie hinter
+    beiden sehen.
+    """
+    befunde = await raumtyp_regel.hausstandard_nutzung(session)
+    return [
+        HausstandardNutzung(
+            feld=b.feld,
+            gesetzt=b.gesetzt,
+            raumtypen_nutzen=b.raumtypen_nutzen,
+            raumtypen_eigen=b.raumtypen_eigen,
+            zimmer_eigen=b.zimmer_eigen,
+        )
+        for b in befunde
+    ]
 
 
 @router.get(

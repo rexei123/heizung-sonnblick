@@ -8,6 +8,7 @@
 import { useState } from "react";
 
 import { RoomTypeForm } from "@/components/patterns/room-type-form";
+import { SollwertWirksamkeit } from "@/components/patterns/sollwert-wirksamkeit";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -172,6 +173,7 @@ export default function RoomTypesPage() {
                   weiterhin vor.
                 </p>
               ) : null}
+              <SollwertWirksamkeit roomTypeId={editingItem.id} />
               <RoomTypeForm
                 initial={editingItem}
                 onSubmit={handleUpdate}

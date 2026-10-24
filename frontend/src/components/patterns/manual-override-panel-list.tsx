@@ -50,8 +50,15 @@ export function ManualOverridePanelList({ roomId }: Props) {
   // rechnet mit `derive_room_status`, dazwischen liegen bis zu 60 s).
   // `undefined` heisst "noch nicht geladen" und blockiert nichts, sonst
   // blitzt der Hinweis bei jedem Seitenaufruf kurz auf.
+  // Sprint 24d (S6): ein Allgemeinbereich hat keine Belegung, und das
+  // Belegungs-Gate gilt dort nicht. Ohne diese Zeile stuende in der Bar
+  // "Zimmer ist nicht belegt ... ab dem Check-in" — ein Satz ueber einen
+  // Check-in, den es dort nie gibt.
+  const istBereich = roomQuery.data?.ist_allgemeinbereich === true;
   const nichtBelegt =
-    roomQuery.data !== undefined && roomQuery.data.status !== "occupied";
+    roomQuery.data !== undefined &&
+    roomQuery.data.status !== "occupied" &&
+    !istBereich;
 
   const zones = useMemo(() => zonesQuery.data ?? [], [zonesQuery.data]);
   const overrides = useMemo(() => overridesQuery.data ?? [], [overridesQuery.data]);
@@ -156,6 +163,7 @@ export function ManualOverridePanelList({ roomId }: Props) {
             activeOverride={findActiveOverride(overrides, zone.id)}
             overrideBlocked={overrideBlocked}
             roomNotOccupied={nichtBelegt}
+            istBereich={istBereich}
           />
         ))
       )}

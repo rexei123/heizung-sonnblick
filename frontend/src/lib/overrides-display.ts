@@ -33,6 +33,9 @@ export const SOURCE_LABEL: Record<OverrideSource, string> = {
   device: "Drehknopf, vermutet (alt)",
   frontend_24h: "24 Stunden (Mitarbeiter)",
   frontend_checkout: "Bis Check-out (Mitarbeiter)",
+  // Sprint 24d: die Dauer steht hier **nicht** im Etikett, weil sie je
+  // Eintrag verschieden ist — sie steht als Endzeit daneben.
+  frontend_bereich: "Allgemeinbereich (Mitarbeiter)",
   frontend_4h: "4 Stunden (Mitarbeiter, alt)",
   frontend_midnight: "Bis Mitternacht (Mitarbeiter, alt)",
 };
@@ -42,6 +45,7 @@ export const SOURCE_ICON: Record<OverrideSource, string> = {
   device: "tune",
   frontend_24h: "schedule",
   frontend_checkout: "logout",
+  frontend_bereich: "storefront",
   frontend_4h: "schedule",
   frontend_midnight: "bedtime",
 };

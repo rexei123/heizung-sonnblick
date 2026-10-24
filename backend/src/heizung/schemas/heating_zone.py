@@ -73,6 +73,24 @@ class HeatingZoneRead(BaseModel):
     # healthy Vicki mit Temperatur in der Zone.
     mean_temperature_c: Decimal | None = None
 
+    # Sprint 24d: **wann** dieser Mittelwert gemessen wurde.
+    #
+    # Der Anlass ist ein Befund des Betreibers vom 24.10.2026: die Karte
+    # zeigte „—", weil die Abfrage die juengste Zeile je Geraet nahm — und
+    # eine Befehlsantwort fuehrt keine Temperatur. Der Filter sitzt jetzt
+    # in der Abfrage; der Zeitstempel steht daneben, damit ein alter
+    # Messwert als alter zu erkennen ist und nicht als aktueller.
+    mean_temperature_at: datetime | None = None
+
+    # Sprint 24d: was der Zone fehlt, falls ihr etwas fehlt.
+    #
+    # ``health_state == "no_device"`` sagte „Kein Geraet" auch dort, wo
+    # ein Fuehler zugeordnet ist und nur das Stellglied fehlt (Befund des
+    # Betreibers, 24.10.2026). Das Kennzeichen hatte recht und sagte das
+    # Falsche — es liess nach einer Zuordnung suchen, die gerade gemacht
+    # worden war. ``None`` heisst: nichts fehlt.
+    geraete_luecke: Literal["kein_fuehler", "kein_stellglied", "beides"] | None = None
+
     # Sprint 14e FU-2: zuletzt von der Engine als HARD_CLAMP-Setpoint geschriebener
     # Wert fuer das Zimmer dieser Zone (AE-55 P1; alle Zonen eines Zimmers teilen
     # den Wert, AE-51 §4.2). Quelle: ``event_log.setpoint_out`` der juengsten

@@ -7023,49 +7023,57 @@ den ganzen Raum.
 2. **Kindersicherung nachsehen.** Sie ist erst mit dem nächsten
    Keepalive bestätigt; bis dahin steht sie als nicht bestätigt. Wer es
    genauer braucht: `sensor_reading.child_lock` der jüngsten Zeile.
-3. **Schicht-Trace des Zimmers öffnen.** Erwartung nach dem Setzen:
+3. **Schicht-Trace des Zimmers öffnen.** Erwartung **während der
+   Betriebszeit**:
 
-   | Zimmer | Zone | Soll im Trace |
-   |---|---|---|
-   | Bar | Barbereich | **18 °C** |
-   | Rezeption | Eingang | **18 °C** |
+   | Zimmer | Raumtyp | Soll im Trace | Grund |
+   |---|---|---|---|
+   | Bar | Raum intern | **21 °C** | Betrieb-Sollwert |
+   | Rezeption | Raum mit Exit | **19 °C** | Betrieb-Sollwert |
 
    Steht dort weiter 10 °C, ist die Rolle nicht angekommen — dann führt
    der Layer Geräte-Sicherheit das Gerät noch unter `detached_devices`,
    und das ist der Prüfpunkt.
 
-   **Warum 18 und nicht 21 bzw. 19.** Hier stand bis zum 24.10.2026 eine
-   Tabelle mit den Sollwerten der beiden Raumtypen (21 °C für „Raum
-   intern", 19 °C für „Raum mit Exit"). Das war falsch, und zwar
-   gemessen und nicht vermutet: die Auflösungskette
-   `ROOM > ROOM_TYPE > GLOBAL` meint **`rule_config`-Zeilen**, und die
-   Spalten `room_type.default_t_occupied/_vacant/_night` stehen
-   **unterhalb** von GLOBAL. Die hausweite Zeile trägt einen
-   Frei-Sollwert von 18 °C, ein nicht buchbares Zimmer ist nie belegt —
-   also gewinnt 18.
+   **Außerhalb der Betriebszeit** steht dort der Absenkwert des Raumtyps
+   und als Grund „Absenkung". Das ist kein Fehler, sondern der Zweck von
+   Schritt 6b.
 
-   Wer die Tabelle von vorher benutzt, sucht nach einem Fehler, den es
-   nicht gibt. Der Prüfpunkt ist deshalb **nicht** eine bestimmte Zahl,
-   sondern: **der Trace zeigt nicht mehr 10 °C und nennt als Grund
-   `vacant_setpoint` statt `frost_protection`.**
+   **Berichtigung zweier Fassungen dieser Stelle.** Hier stand am
+   24.10.2026 zuerst 21/19 (richtig), dann für einige Stunden 18/18 mit
+   der Begründung, der hausweite Frei-Sollwert überstimme den Raumtyp
+   (falsch). Die 18 kam aus meiner Test-Datenbank; in der Produktion
+   trägt die hausweite Zeile für „Belegt" und „Frei" **keinen** Wert, und
+   der Raumtyp gewinnt. Seit Sprint 24d gewinnt er bei einem
+   Allgemeinbereich auch dann, wenn dort einer eingetragen wird.
 
-4. **Wenn 18 °C für die Allgemeinfläche zu kalt ist** — und im Winter
-   ist es das für eine Bar wahrscheinlich —, gibt es heute **einen**
-   Hebel in der Oberfläche: den hausweiten Frei-Sollwert unter
-   Einstellungen → Temperaturen & Zeiten. Der gilt aber für **jedes**
-   freie Zimmer, also auch für die Gästezimmer, und ist damit kein
-   Mittel für zwei Allgemeinflächen.
+### Schritt 6b — Betriebszeiten eintragen (Bar, Rezeption)
 
-   Was fehlt, ist ein Sollwert **je Raumtyp**. Die Datenbank kann das
-   (`rule_config` mit `scope = 'room_type'`), die API nicht: es gibt nur
-   `GET`/`PATCH /api/v1/rule-configs/global`. Bis das nachgezogen ist,
-   ist eine Zeile je Pilot-Raumtyp ein Eingriff in der Datenbank — also
-   nichts, was aus dieser Anleitung heraus passieren soll. **Erst
-   melden, dann entscheiden.**
+**Der Handgriff, der die Bereiche nachts abkühlen lässt.** Ohne ihn
+heizen sie rund um die Uhr auf ihren Betrieb-Sollwert — das ist richtig
+und teuer.
 
-   Eine Übersteuerung ist kein Ausweg: sie setzt ein belegtes Zimmer
-   voraus (AE-58), und ein nicht buchbares Zimmer ist nie belegt. Der
-   Punkt steht als S6/M6/M8 offen.
+Je Zimmer: **Zimmerseite → Reiter Stammdaten → Betriebszeit**.
+
+| Zimmer | von | bis |
+|---|---|---|
+| Rezeption | `07:00` | `22:00` |
+| Bar | `15:00` | `24:00` |
+
+`24:00` ist erlaubt und bedeutet Mitternacht. Beide Felder leer heißt
+„keine Betriebszeit" — dann gilt, was Raumtyp oder Haus vorgeben.
+
+**Prüfen, nicht glauben:** nach dem Speichern den Schicht-Trace des
+Zimmers öffnen. Innerhalb der Betriebszeit steht dort der Betrieb-
+Sollwert, außerhalb der Absenkwert und als Grund „Absenkung". Wer es
+genau wissen will, prüft zur Grenze hin — eine Minute vor und eine nach
+der Öffnung.
+
+**Was dabei nicht passieren darf:** Die Felder erscheinen nur bei einem
+Zimmer mit **nicht buchbarem** Raumtyp. Stehen sie bei einem Gästezimmer,
+ist etwas anderes kaputt — dann melden, nicht ausfüllen: intern sind es
+die Grenzen des Nachtfensters, und an einem Gästezimmer würde dieselbe
+Eingabe die Nachtabsenkung dieses Zimmers umstellen.
 
 **Warum beides zusammen gehört.** Die Rolle nimmt das Gerät aus der
 Geräte-Sicherheit **und** aus dem Sollwert-Dispatch. Ohne sie heizt der

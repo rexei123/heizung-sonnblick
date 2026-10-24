@@ -56,6 +56,50 @@ const LAYER_LABEL: Record<EventLogLayer, string> = {
   hard_clamp: "Sicherheits-Limit",
 };
 
+/**
+ * Die Quelle eines Sollwerts, wie der Trace sie seit Sprint 24d mitführt
+ * (`details.sollwert_quelle`).
+ *
+ * **Warum das in der Tabelle steht.** Bis zum 24.10.2026 nannte der Trace
+ * den Wert und nicht seine Herkunft — und genau daran war nicht zu sehen,
+ * warum ein Zimmer 18 °C bekommt, wenn auf seiner Raumtyp-Seite 21 steht.
+ * Die Antwort lag in der Rangfolge der `rule_config`-Zeilen, und die ist
+ * nirgends sichtbar gewesen.
+ */
+const QUELLE_LABEL: Record<string, string> = {
+  zimmer: "Zimmer",
+  raumtyp: "Raumtyp",
+  global: "hausweit",
+  raumtyp_vorgabe: "Raumtyp (Vorgabe)",
+};
+
+/**
+ * Der Grund eines Schritts, mit der Bereichs-Lesart.
+ *
+ * Ein Allgemeinbereich ist nicht „frei" — er hat **Betrieb**. Die Marke
+ * dafür steht in `details.betriebsbereich` und nicht in einem eigenen
+ * `CommandReason`: der Enum trägt einen DB-CHECK auf zwei Tabellen und ist
+ * auf 30 Zeichen begrenzt (§5.45), ein neuer Wert wäre eine Migration für
+ * eine Beschriftung.
+ */
+function grundText(reason: CommandReason | null, details: Record<string, unknown> | null): string {
+  if (reason === null) return "—";
+  const istBereich = details?.["betriebsbereich"] === true;
+  if (istBereich && reason === "vacant_setpoint") return "Betrieb-Sollwert";
+  // Außerhalb der Betriebszeit ist bei einem Bereich genau das, was bei
+  // einem Gästezimmer die Nacht ist — aber „Nachtabsenkung" wäre für eine
+  // Bar um 01:00 eine Aussage über die Uhrzeit und nicht über den Betrieb.
+  if (istBereich && reason === "night_setback") return "Absenkung";
+  return REASON_LABEL[reason];
+}
+
+/** Die Herkunft als Zusatz, falls der Schritt sie mitführt. */
+function quelleText(details: Record<string, unknown> | null): string | null {
+  const rohe = details?.["sollwert_quelle"];
+  if (typeof rohe !== "string") return null;
+  return QUELLE_LABEL[rohe] ?? rohe;
+}
+
 const REASON_LABEL: Record<CommandReason, string> = {
   occupied_setpoint: "Belegt-Sollwert",
   vacant_setpoint: "Frei-Sollwert",
@@ -180,7 +224,16 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
       </div>
       {baseEntry?.reason ? (
         <p className="mt-2 text-base text-text-secondary">
-          Grund: <strong className="text-text-primary">{REASON_LABEL[baseEntry.reason]}</strong>
+          Grund:{" "}
+          <strong className="text-text-primary" data-testid="trace-grund">
+            {grundText(baseEntry.reason, baseEntry.details ?? null)}
+          </strong>
+          {quelleText(baseEntry.details ?? null) !== null ? (
+            <span className="text-text-tertiary" data-testid="trace-quelle">
+              {" "}
+              · Sollwert aus: {quelleText(baseEntry.details ?? null)}
+            </span>
+          ) : null}
         </p>
       ) : null}
       <p
@@ -237,7 +290,13 @@ function LayerTrace({ entries, zones }: { entries: EventLogEntry[]; zones: Heati
                 )}
               </td>
               <td className="px-4 py-2 text-text-secondary">
-                {e.reason ? REASON_LABEL[e.reason] : "—"}
+                {grundText(e.reason ?? null, e.details ?? null)}
+                {quelleText(e.details ?? null) !== null ? (
+                  <span className="text-text-tertiary text-xs">
+                    {" "}
+                    ({quelleText(e.details ?? null)})
+                  </span>
+                ) : null}
               </td>
               <td className="px-4 py-2 text-sm text-text-tertiary">
                 {e.layer === "manual_override" ? (
@@ -508,7 +567,10 @@ function HistoryList({ groups }: { groups: EvalGroup[] }) {
               <span className="text-base">
                 {sp !== null ? <strong>{sp}°C</strong> : <span>—</span>}
                 {base?.reason ? (
-                  <span className="text-text-secondary"> · {REASON_LABEL[base.reason]}</span>
+                  <span className="text-text-secondary">
+                    {" "}
+                    · {grundText(base.reason, base.details ?? null)}
+                  </span>
                 ) : null}
               </span>
               <span className="text-sm text-text-tertiary">{formatRelative(g.time)}</span>

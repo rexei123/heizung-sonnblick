@@ -32,7 +32,7 @@ ist. Alles andere waere eine Zusicherung ohne Deckung.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -423,6 +423,14 @@ async def setze_messrolle(
         await downlink_adapter.set_child_lock(geraet.dev_eui, payload.measure_only)
         await downlink_adapter.get_child_lock(geraet.dev_eui)
         gesendet = True
+        # Sprint 24d: der Zeitpunkt des Befehls. Ohne ihn ist die juengste
+        # Meldung — die vom Keepalive **davor** — nicht von einer
+        # Ablehnung zu unterscheiden, und die Geraeteseite zeigte direkt
+        # nach dem Umschalten einen roten Befund (Befund des Betreibers,
+        # 24.10.2026). Gesetzt wird der Zeitpunkt des **Sendens**, nicht
+        # der einer Bestaetigung: genau danach ist jede aeltere Meldung
+        # ueberholt.
+        geraet.child_lock_commanded_at = datetime.now(tz=UTC)
 
     await record_business_action(
         session,

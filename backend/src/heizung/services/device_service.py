@@ -118,14 +118,23 @@ async def get_device_with_relations(session: AsyncSession, device_id: int) -> De
 
 
 async def get_latest_reading(session: AsyncSession, device_id: int) -> SensorReading | None:
-    """Juengster ``sensor_reading``-Frame eines Geraets (D2/D5).
+    """Juengster ``sensor_reading``-Frame **mit Temperatur** (D2/D5).
 
     Quelle fuer die Diagnose-Kacheln Ventilstellung / Fenster / Backplate.
     ``None`` falls noch keine Messung vorliegt.
+
+    **Sprint 24d: der Filter auf die Temperatur ist neu, und er stammt aus
+    einem Befund.** Eine Befehlsantwort ist auch ein ``sensor_reading`` —
+    sie fuehrt die Antwort und sonst nichts. Seit 24c erzeugt das Setzen
+    der Kindersicherung solche Frames (``0x14``), und danach zeigte die
+    Geraeteseite durchgaengig „—": Temperatur, Ventilstellung, Fenster,
+    Montage. Ein Geraet, das gerade erst geantwortet hat, sah aus wie
+    eines, das nie gemessen hat.
     """
     stmt = (
         select(SensorReading)
         .where(SensorReading.device_id == device_id)
+        .where(SensorReading.temperature.is_not(None))
         .order_by(SensorReading.time.desc())
         .limit(1)
     )

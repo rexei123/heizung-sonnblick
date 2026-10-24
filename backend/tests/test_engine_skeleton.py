@@ -44,13 +44,25 @@ def _make_room_type(
     night: float = 19.0,
     min_c: float | None = None,
     max_c: float | None = None,
+    bookable: bool = True,
 ) -> SimpleNamespace:
+    """Der Doppelgaenger des Raumtyps.
+
+    ``is_bookable`` kam mit Sprint 24d dazu, weil der Trace seither sagt,
+    ob ein Zimmer ein Allgemeinbereich ist. Das Feld **gehoert in den
+    Doppelgaenger und nicht hinter ein ``getattr``-Standardwert im
+    Produktionscode**: ein fehlendes Attribut im Doppelgaenger ist ein
+    Fehler im Doppelgaenger, und ein Standardwert im Code haette ihn
+    verdeckt — genau die Sorte stiller Rueckfall, die in Sprint 24b
+    dreimal Zeit gekostet hat.
+    """
     return SimpleNamespace(
         default_t_occupied=Decimal(str(occupied)),
         default_t_vacant=Decimal(str(vacant)),
         default_t_night=Decimal(str(night)),
         min_temp_celsius=Decimal(str(min_c)) if min_c is not None else None,
         max_temp_celsius=Decimal(str(max_c)) if max_c is not None else None,
+        is_bookable=bookable,
     )
 
 
