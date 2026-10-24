@@ -214,7 +214,15 @@ async def setup(setup_engine: AsyncEngine) -> AsyncIterator[_Setup]:
             .where(RuleConfig.season_id.is_(None))
         )
         rc = (await session.execute(rc_stmt)).scalar_one_or_none()
-        if rc is None:
+        # **Nur wieder abraeumen, was hier entstanden ist** (§5.39). Die
+        # Zeile ist hausweit und steht in der Aufloesungskette ueber
+        # ``room_type.default_t_*`` — bleibt sie stehen, bekommt jeder
+        # spaetere Engine-Test im Lauf den Frei-Sollwert 18 statt des
+        # Raumtyp-Werts. Genau das ist am 24.10.2026 passiert und hat
+        # ``test_measure_only_trace.py`` in der vollen Suite rot gemacht,
+        # waehrend es einzeln gruen war.
+        rc_hier_erzeugt = rc is None
+        if rc_hier_erzeugt:
             session.add(
                 RuleConfig(
                     scope=RuleConfigScope.GLOBAL,
@@ -266,6 +274,13 @@ async def setup(setup_engine: AsyncEngine) -> AsyncIterator[_Setup]:
                 text('DELETE FROM "user" WHERE email LIKE :p'),
                 {"p": f"%-{suffix}@test.example.com"},
             )
+            if rc_hier_erzeugt:
+                await session.execute(
+                    text(
+                        "DELETE FROM rule_config WHERE scope = 'global' "
+                        "AND room_type_id IS NULL AND room_id IS NULL AND season_id IS NULL"
+                    )
+                )
             await session.commit()
 
 

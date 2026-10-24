@@ -245,6 +245,24 @@ class DeviceRead(BaseModel):
     retired_at: datetime | None
     retired_reason: str | None
     replaced_by_device_id: int | None
+    # Sprint 24c: die Rolle „nur messen" (Spalte, Migration 0030) und der
+    # Zustand der Kindersicherung (read-time abgeleitet).
+    #
+    # ``measure_only`` ist ein ORM-Attribut und kommt über
+    # ``model_validate`` mit; der Default steht hier nur, damit ein
+    # Schema-Aufbau ohne Gerät (Tests) nicht scheitert.
+    measure_only: bool = False
+    # ``bestaetigt`` / ``ausstehend`` / ``fehlgeschlagen`` — der Vergleich
+    # zwischen gewollter und gemeldeter Sperre (``services/child_lock``).
+    # Inline-``Literal`` wie bei ``valve_state``, aus demselben Grund: die
+    # Schema-Schicht hängt nicht von der Service-Schicht ab. Ein Test hält
+    # die Spiegelung gegen ``child_lock.ChildLockState`` fest.
+    #
+    # Der Default ist ``ausstehend`` und nicht ``bestaetigt``: wer das
+    # Argument im Zusammenbau vergisst, soll eine Sperre **nicht**
+    # fälschlich als bestätigt sehen.
+    child_lock_state: Literal["bestaetigt", "ausstehend", "fehlgeschlagen"] = "ausstehend"
+
     last_seen_at: datetime | None
     firmware_version: str | None = None
     health_state: Literal["healthy", "degraded", "silent", "suspicious"]

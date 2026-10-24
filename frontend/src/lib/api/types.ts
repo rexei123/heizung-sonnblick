@@ -173,6 +173,23 @@ export interface Device {
   battery_state: BatteryHealthState;
   // Sprint 20e (T7/T10): Ventil-Hinweis plus der gemessene Abstand in
   // Kelvin, der zum Urteil gehört (knappster Wert des Fensters).
+  /**
+   * Sprint 24c: Rolle „nur messen". Spiegel zu ``device.measure_only``.
+   *
+   * Ein Gerät mit dieser Rolle misst und stellt nicht: es bekommt keine
+   * Sollwerte, eine Drehung am Rad erzeugt keine Übersteuerung, und es
+   * zählt nicht für die Geräte-Sicherheit.
+   */
+  measure_only: boolean;
+  /**
+   * Zustand der Kindersicherung, read-time abgeleitet
+   * (``services/child_lock``). Vergleicht den **gewollten** mit dem
+   * **gemeldeten** Zustand.
+   *
+   * ``ausstehend`` ist kein Fehler — die Bestätigung kommt mit dem
+   * nächsten Keepalive. Nur ``fehlgeschlagen`` ist ein Befund.
+   */
+  child_lock_state: "bestaetigt" | "ausstehend" | "fehlgeschlagen";
   valve_state: ValveState;
   valve_delta_k: number | null;
   // Sprint 20e-b: gegen was Regel 3b verglichen hat — Referenzmenge, deren

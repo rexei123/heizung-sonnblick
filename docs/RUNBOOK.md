@@ -7025,14 +7025,47 @@ den ganzen Raum.
    genauer braucht: `sensor_reading.child_lock` der jüngsten Zeile.
 3. **Schicht-Trace des Zimmers öffnen.** Erwartung nach dem Setzen:
 
-   | Zimmer | Raumtyp | Soll im Trace |
+   | Zimmer | Zone | Soll im Trace |
    |---|---|---|
-   | Bar | Raum intern | **21 °C** |
-   | Rezeption | Raum mit Exit | **19 °C** |
+   | Bar | Barbereich | **18 °C** |
+   | Rezeption | Eingang | **18 °C** |
 
    Steht dort weiter 10 °C, ist die Rolle nicht angekommen — dann führt
    der Layer Geräte-Sicherheit das Gerät noch unter `detached_devices`,
    und das ist der Prüfpunkt.
+
+   **Warum 18 und nicht 21 bzw. 19.** Hier stand bis zum 24.10.2026 eine
+   Tabelle mit den Sollwerten der beiden Raumtypen (21 °C für „Raum
+   intern", 19 °C für „Raum mit Exit"). Das war falsch, und zwar
+   gemessen und nicht vermutet: die Auflösungskette
+   `ROOM > ROOM_TYPE > GLOBAL` meint **`rule_config`-Zeilen**, und die
+   Spalten `room_type.default_t_occupied/_vacant/_night` stehen
+   **unterhalb** von GLOBAL. Die hausweite Zeile trägt einen
+   Frei-Sollwert von 18 °C, ein nicht buchbares Zimmer ist nie belegt —
+   also gewinnt 18.
+
+   Wer die Tabelle von vorher benutzt, sucht nach einem Fehler, den es
+   nicht gibt. Der Prüfpunkt ist deshalb **nicht** eine bestimmte Zahl,
+   sondern: **der Trace zeigt nicht mehr 10 °C und nennt als Grund
+   `vacant_setpoint` statt `frost_protection`.**
+
+4. **Wenn 18 °C für die Allgemeinfläche zu kalt ist** — und im Winter
+   ist es das für eine Bar wahrscheinlich —, gibt es heute **einen**
+   Hebel in der Oberfläche: den hausweiten Frei-Sollwert unter
+   Einstellungen → Temperaturen & Zeiten. Der gilt aber für **jedes**
+   freie Zimmer, also auch für die Gästezimmer, und ist damit kein
+   Mittel für zwei Allgemeinflächen.
+
+   Was fehlt, ist ein Sollwert **je Raumtyp**. Die Datenbank kann das
+   (`rule_config` mit `scope = 'room_type'`), die API nicht: es gibt nur
+   `GET`/`PATCH /api/v1/rule-configs/global`. Bis das nachgezogen ist,
+   ist eine Zeile je Pilot-Raumtyp ein Eingriff in der Datenbank — also
+   nichts, was aus dieser Anleitung heraus passieren soll. **Erst
+   melden, dann entscheiden.**
+
+   Eine Übersteuerung ist kein Ausweg: sie setzt ein belegtes Zimmer
+   voraus (AE-58), und ein nicht buchbares Zimmer ist nie belegt. Der
+   Punkt steht als S6/M6/M8 offen.
 
 **Warum beides zusammen gehört.** Die Rolle nimmt das Gerät aus der
 Geräte-Sicherheit **und** aus dem Sollwert-Dispatch. Ohne sie heizt der
