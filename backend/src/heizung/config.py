@@ -240,6 +240,18 @@ class Settings(BaseSettings):
     # (AE-78).
     relay_gehaeusetemperatur_alarm: int = 40
 
+    # Wie lange der Waechter auf die Bestaetigung eines Schaltbefehls
+    # wartet, bevor er ihn wiederholt. Class C heisst, dass der Downlink
+    # sofort zugestellt wird -- 60 s sind also reichlich und lassen Raum
+    # fuer einen verlorenen Uplink.
+    relay_bestaetigungs_frist_s: int = 60
+
+    # Nach so vielen erfolglosen Versuchen kommt der Alarm und kein
+    # weiterer Downlink. Dieselbe Begruendung wie beim Engine-Abgleich
+    # (Sprint 20f T3): ein Geraet an der Funkgrenze wuerde sonst bei
+    # jedem Tick angefunkt, und jeder Downlink ist Sendezeit (§0 S4).
+    relay_max_versuche: int = 3
+
     # --- Ventil-Hinweise, Regel 3 und 3b (Sprint 20e, T7/T10) -------------
     # Zwei Hinweise aus demselben Fenster ueber ``sensor_reading``, beide
     # read-time abgeleitet (``services/valve_health.py``):

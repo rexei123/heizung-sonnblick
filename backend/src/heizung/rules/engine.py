@@ -695,11 +695,41 @@ async def layer_device_detached(
     # waere room-scope-N+1).
     # Sprint 20e (T4): ``mounted_confirmed_at`` kommt als dritte Spalte mit —
     # dieselbe Query, keine zusaetzliche Rundreise.
+    # Sprint 24b (Paket 4): Geraete mit der Rolle **nur messen** sind hier
+    # **nicht** dabei.
+    #
+    # **Der Anlass kommt aus dem Betrieb (24.10.2026).** In den Zimmern
+    # „Bar" und „Rezeption" liegt je eine unmontierte Vicki als Fuehler.
+    # Diese Schicht erkannte sie als abgenommen — zu Recht, sie liegt ja
+    # auf dem Tisch — und erzwang 10 °C fuer den ganzen Raum. Ein
+    # Infrarot-Pilot, dessen Soll die Engine auf Frostschutz zieht, heizt
+    # nie.
+    #
+    # **Warum herausnehmen und nicht als „attached" zaehlen**, wie es
+    # Sprint 20e mit dem Montage-Nachweis macht: ein Fuehler **ist** per
+    # Definition unmontiert, und beides andere waere eine Unwahrheit mit
+    # Folgen. Zaehlte er als attached, koennte er in einem gemischten
+    # Raum den Trigger **verhindern** — die Semantik ist UND ueber alle
+    # Geraete, ein einziges „attached" genuegt. Ein echtes Thermostat, das
+    # wirklich von der Wand faellt, bekaeme dann keinen Frostschutz mehr.
+    # Das waere eine Abschwaechung der Sicherheit zugunsten eines Geraets,
+    # das gar kein Ventil hat.
+    #
+    # Herausnehmen heisst dagegen: die uebrigen Geraete entscheiden allein,
+    # und in einer Zone, in der **nur** ein Fuehler haengt, bleibt die
+    # Liste leer — ``no_devices_in_zone``, kein Trigger. Genau das ist
+    # gewollt.
+    #
+    # **Fuer alle anderen Geraete aendert sich nichts** (S8). Die
+    # Bestandstests in ``test_engine_layer4_detached.py`` setzen kein
+    # ``measure_only`` und bleiben ohne Anpassung gruen (§5.47).
+    # Mutationsprobe M13 greift genau hier an.
     devices_stmt = (
         select(Device.id, Device.dev_eui, Device.mounted_confirmed_at)
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
         .where(Device.retired_at.is_(None))
+        .where(Device.measure_only.is_(False))
     )
     device_rows: list[tuple[int, str, datetime | None]] = list(
         (await session.execute(devices_stmt)).tuples().all()
@@ -741,6 +771,12 @@ async def layer_device_detached(
         .join(HeatingZone, HeatingZone.id == Device.heating_zone_id)
         .where(HeatingZone.room_id == room_id)
         .where(Device.retired_at.is_(None))
+        # Sprint 24b: derselbe Filter wie oben. Die beiden Abfragen
+        # **muessen** dieselbe Geraetemenge liefern — ``frames_by_dev``
+        # wird aus der ersten aufgebaut und aus der zweiten befuellt, ein
+        # Geraet nur in der zweiten waere ein ``KeyError``. Genau das ist
+        # beim ersten Versuch passiert, und der Test hat es gefangen.
+        .where(Device.measure_only.is_(False))
         .where(SensorReading.time >= threshold)
         .where(SensorReading.attached_backplate.is_not(None))
         .subquery()

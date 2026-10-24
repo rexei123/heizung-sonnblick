@@ -282,3 +282,38 @@ def test_aus_gilt_in_beiden_strategien_gleich() -> None:
         e = akt(gewuenscht_ein=False, bestaetigt_ein=True, strategie=strategie)
         assert e.aktion is WaechterAktion.SENDE_AUS
         assert e.sekunden is None
+
+
+# ---------------------------------------------------------------------------
+# Die Strategie kommt aus einer String-Spalte
+# ---------------------------------------------------------------------------
+
+
+def test_rohe_strategie_zeichenkette_verhaelt_sich_wie_das_enum() -> None:
+    """**Der Fall, den der Ende-zu-Ende-Test gefunden hat.**
+
+    ``device.watchdog_strategy`` ist ``String(20)``. Die erste Fassung
+    verglich im Waechter mit ``is`` gegen das Enum-Mitglied — ein roher
+    String ist damit **nicht** identisch, und der Vergleich fiel still in
+    den ``else``-Zweig, also in die riskantere ``REFRESH``-Strategie,
+    ohne dass sie jemand gewaehlt hatte.
+
+    Der Orchestrator wandelt inzwischen am Rand um. Dieser Test haelt
+    zusaetzlich fest, dass der Waechter auch mit dem rohen Wert richtig
+    liegt — in der sicheren Richtung nachgiebig, statt still das
+    Gegenteil zu tun.
+    """
+    e = naechste_aktion(
+        strategie="expire_and_resend",  # type: ignore[arg-type]
+        gewuenscht_ein=True,
+        bestaetigt_ein=True,
+        offen=None,
+        letzter_ein_befehl=None,
+        schwellen=SCHWELLEN,
+        now=NOW,
+    )
+    assert e.aktion is WaechterAktion.NICHTS
+    assert e.grund == "laeuft_ab_von_selbst", (
+        "mit 'is' statt '==' waere hier auffrischung_ohne_vorbefehl "
+        "herausgekommen — also ein 0x57 auf ein laufendes EIN (S2-Bruch)"
+    )

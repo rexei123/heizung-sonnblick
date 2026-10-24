@@ -179,7 +179,7 @@ def naechste_aktion(
         )
 
     # Bestaetigt EIN und EIN gewuenscht.
-    if strategie is WatchdogStrategy.EXPIRE_AND_RESEND:
+    if strategie == WatchdogStrategy.EXPIRE_AND_RESEND:
         # **Der Kern von S2.** Kein ``0x57`` auf ein laufendes EIN. Der
         # Timer laeuft ab, das Geraet meldet AUS, und dann greift
         # Zweig 4 oben. Das ist die Stelle, die Mutationsprobe M2
@@ -205,6 +205,14 @@ def naechste_aktion(
 def _timer(strategie: WatchdogStrategy, schwellen: WaechterSchwellen) -> timedelta:
     """Die Timer-Laufzeit der Strategie.
 
+    **Verglichen wird mit ``==``, nicht mit ``is``.** ``WatchdogStrategy``
+    ist ein ``StrEnum``, und die Strategie kommt aus einer
+    ``String(20)``-Spalte. Ein roher String ist **nicht** identisch mit
+    dem Enum-Mitglied, aber gleich — mit ``is`` waere er still in den
+    ``else``-Zweig gefallen, also in die riskantere Strategie, ohne dass
+    jemand sie gewaehlt hat. Gefunden hat das der Ende-zu-Ende-Test;
+    ``==`` ist in der sicheren Richtung nachgiebig.
+
     ``EXPIRE_AND_RESEND`` nimmt die laengere Zeit (Vorgabe 30 min): das
     Relais soll nicht unnoetig oft abfallen, weil jeder Abfall eine
     Abkuehlphase und einen Schaltzyklus bedeutet. ``REFRESH`` nimmt die
@@ -212,6 +220,6 @@ def _timer(strategie: WatchdogStrategy, schwellen: WaechterSchwellen) -> timedel
     Zeit der Sinn der Strategie ist — sie ist die Obergrenze fuer die
     Zeit, die ein Panel nach einem Serverausfall noch heizt.
     """
-    if strategie is WatchdogStrategy.REFRESH:
+    if strategie == WatchdogStrategy.REFRESH:
         return schwellen.timer_refresh
     return schwellen.timer_expire

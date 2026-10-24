@@ -195,6 +195,19 @@ class Device(Base):
     # soll als Rohwert ankommen statt die Sperre zu verhindern.
     protection_kind: Mapped[str | None] = mapped_column(String(20))
 
+    # Sprint 24b (Migration 0031): der **offene** Befehl. Was gesendet und
+    # noch nicht vom Geraet bestaetigt ist.
+    #
+    # Der **bestaetigte** Zustand steht bewusst nicht hier, sondern wird
+    # aus ``relay_reading`` abgeleitet (``services/relay_state.py``). Eine
+    # Kopie daneben waere eine zweite Wahrheit, die beim ersten verpassten
+    # Uplink auseinanderlaeuft (§5.53) — und bei einem Schaltzustand ist
+    # die falsche Haelfte genau die, auf die sich der Waechter verlassen
+    # wuerde.
+    pending_target_on: Mapped[bool | None] = mapped_column(Boolean)
+    pending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
     # Paket C: Zahl der Schaltvorgaenge, hochgezaehlt bei jedem
     # **bestaetigten** Wechsel nach EIN. Ein Relais hat eine endliche
     # Zahl mechanischer Schaltungen, und die Akzeptanzgrenze des
