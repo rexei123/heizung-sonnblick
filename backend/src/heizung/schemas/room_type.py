@@ -111,3 +111,47 @@ class RoomTypeRead(BaseModel):
     treat_unoccupied_as_vacant_after_hours: int | None
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Sprint 24d: Wirksamkeit der Sollwerte
+# ---------------------------------------------------------------------------
+
+
+class WirksamkeitFeld(BaseModel):
+    """Ein Feld der Raumtyp-Seite, dreifach beantwortet.
+
+    ``angezeigt`` ist die Spalte, ``wirksam`` das, was die Engine heute
+    fuer ein Zimmer dieses Typs nimmt, und ``quelle`` sagt, wer gewonnen
+    hat. Die drei nebeneinander sind der ganze Zweck: ein Feld, bei dem
+    sie auseinanderfallen, ist ein Schalter, der nicht schaltet.
+    """
+
+    feld: str
+    angezeigt: Decimal
+    wirksam: Decimal | None
+    quelle: str
+
+
+class WirksamkeitRaumtyp(BaseModel):
+    """Ein Raumtyp mit seinen drei Feldern."""
+
+    room_type_id: int
+    name: str
+    is_bookable: bool
+    #: Gibt es die saisonlose ``rule_config``-Zeile im Scope ROOM_TYPE?
+    zeile_vorhanden: bool
+    #: Wuerde das Uebernehmen einen wirksamen Wert verschieben?
+    wuerde_sich_aendern: bool
+    felder: list[WirksamkeitFeld]
+
+
+class SollwertUebernahme(BaseModel):
+    """Antwort von POST /room-types/{id}/sollwerte-uebernehmen."""
+
+    room_type_id: int
+    #: ``angelegt`` / ``aktualisiert`` / ``unveraendert`` / ``uebersprungen``
+    ergebnis: str
+    t_occupied: Decimal
+    t_vacant: Decimal
+    t_night: Decimal

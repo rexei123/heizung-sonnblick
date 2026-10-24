@@ -171,30 +171,6 @@ class _RoomContext:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_t(field_name: str, ctx: _RoomContext) -> Decimal | None:
-    """RuleConfig-Hierarchie: ROOM > ROOM_TYPE > GLOBAL.
-
-    NULL-Spalten = vererbt; durchlaufen die Hierarchie weiter.
-    Saisonale Eintraege (`season_id IS NOT NULL`) werden in Sprint 10
-    nach Saison-Aktivitaet gefiltert. Sprint 9.3 ignoriert Saison
-    bewusst und nimmt alle ein.
-    """
-    by_scope: dict[RuleConfigScope, list[RuleConfig]] = {
-        RuleConfigScope.ROOM: [],
-        RuleConfigScope.ROOM_TYPE: [],
-        RuleConfigScope.GLOBAL: [],
-    }
-    for rc in ctx.rule_configs:
-        by_scope[rc.scope].append(rc)
-
-    for scope in (RuleConfigScope.ROOM, RuleConfigScope.ROOM_TYPE, RuleConfigScope.GLOBAL):
-        for rc in by_scope[scope]:
-            value: Decimal | None = getattr(rc, field_name, None)
-            if value is not None:
-                return value
-    return None
-
-
 def layer_summer_mode(ctx: _RoomContext) -> LayerStep:
     """Layer 0: Sommermodus-Fast-Path (AE-31 historisch, AE-49 aktuell).
 
@@ -259,18 +235,142 @@ def layer_base_target(ctx: _RoomContext) -> LayerStep:
         )
 
     if status == RoomStatus.OCCUPIED:
-        t = _resolve_t("t_occupied", ctx) or ctx.room_type.default_t_occupied
+        aufgeloest, quelle = _resolve_t_mit_quelle("t_occupied", ctx)
+        t = aufgeloest or ctx.room_type.default_t_occupied
         reason = CommandReason.OCCUPIED_SETPOINT
     else:  # vacant, reserved, cleaning
-        t = _resolve_t("t_vacant", ctx) or ctx.room_type.default_t_vacant
+        aufgeloest, quelle = _resolve_t_mit_quelle("t_vacant", ctx)
+        t = aufgeloest or ctx.room_type.default_t_vacant
         reason = CommandReason.VACANT_SETPOINT
 
+    # ``aufgeloest`` kann 0 sein (eine konfigurierte Null gewinnt gegen das
+    # Erben, siehe ``resolve_rule_field``) — deshalb haengt die Marke an
+    # ``quelle`` und nicht an der Wahrheit von ``aufgeloest``.
     return LayerStep(
         layer=EventLogLayer.BASE_TARGET,
         setpoint_c=_quantize(t),
         reason=reason,
         detail=f"status={status.value}",
+        extras=_sollwert_extras(ctx, quelle or QUELLE_RAUMTYP_VORGABE),
     )
+
+
+#: Marken fuer die Herkunft eines Sollwerts im Trace. Dieselben Worte wie
+#: in ``services/raumtyp_regel`` und in der Vorschau-Antwort — wer den
+#: Trace liest und wer die Raumtyp-Seite liest, soll dieselbe Sprache
+#: finden.
+QUELLE_ZIMMER = "zimmer"
+QUELLE_RAUMTYP = "raumtyp"
+QUELLE_GLOBAL = "global"
+QUELLE_RAUMTYP_VORGABE = "raumtyp_vorgabe"
+
+_SCOPE_MARKE: dict[RuleConfigScope, str] = {
+    RuleConfigScope.ROOM: QUELLE_ZIMMER,
+    RuleConfigScope.ROOM_TYPE: QUELLE_RAUMTYP,
+    RuleConfigScope.GLOBAL: QUELLE_GLOBAL,
+}
+
+
+def _resolve_t_mit_quelle(field_name: str, ctx: _RoomContext) -> tuple[Decimal | None, str | None]:
+    """Wie ``_resolve_t``, nennt aber die Ebene, die gewonnen hat.
+
+    **Warum das in den Trace gehoert.** Bis zum 24.10.2026 war nicht zu
+    sehen, warum ein Zimmer 18 °C bekommt, wenn auf seiner Raumtyp-Seite
+    21 steht — der Trace nannte den Wert und nicht seine Herkunft. Die
+    Antwort lag in der Rangfolge der ``rule_config``-Zeilen, und die ist
+    nirgends sichtbar. Ein Trace, der den Wert zeigt und die Quelle
+    verschweigt, beantwortet genau die Frage nicht, die man an ihn hat.
+
+    ``None`` als Quelle heisst: keine Zeile setzt das Feld. Der Aufrufer
+    faellt dann auf die Spalte des Raumtyps zurueck und traegt
+    ``raumtyp_vorgabe`` ein.
+    """
+    by_scope: dict[RuleConfigScope, list[RuleConfig]] = {
+        RuleConfigScope.ROOM: [],
+        RuleConfigScope.ROOM_TYPE: [],
+        RuleConfigScope.GLOBAL: [],
+    }
+    for rc in ctx.rule_configs:
+        by_scope[rc.scope].append(rc)
+
+    for scope in (RuleConfigScope.ROOM, RuleConfigScope.ROOM_TYPE, RuleConfigScope.GLOBAL):
+        for rc in by_scope[scope]:
+            value: Decimal | None = getattr(rc, field_name, None)
+            if value is not None:
+                return value, _SCOPE_MARKE[scope]
+    return None, None
+
+
+def bereichs_kette(raumtyp: RoomType, kette: list[RuleConfig]) -> list[RuleConfig]:
+    """Hebt die Spalten eines **Allgemeinbereich**-Raumtyps auf ROOM_TYPE-Rang.
+
+    **Der Befund, den der Betreiber am 24.10.2026 in der Produktion
+    gelesen hat.** Die hausweite ``rule_config``-Zeile traegt dort
+    ``t_occupied = NULL``, ``t_vacant = NULL`` und ``t_night = 19.0``.
+    Damit wirken „Belegt" und „Frei" eines Raumtyps heute schon (die Kette
+    faellt bei NULL weiter durch bis auf die Spalte), **„Nacht" aber
+    nicht** — die 19,0 gewinnt gegen jeden Raumtyp. Genau das war auch der
+    Bad-Befund vom 18.10.: nicht die Zonen-Art war das Problem, sondern
+    diese eine Zahl.
+
+    **Korrektur meiner eigenen Behauptung aus 24c.** Dort stand, die
+    Bereiche heizten im Haus auf 18 °C, weil die hausweite Zeile den
+    Frei-Sollwert setze. Das war aus der **Test**-Datenbank geschlossen —
+    der Seed setzt alle drei Felder — und auf die Produktion
+    uebertragen, ohne sie zu messen (§5.68). Im Haus steht dort NULL.
+
+    **Was diese Funktion tut.** Fuer einen nicht buchbaren Raumtyp treten
+    seine drei Spalten als seine eigenen ROOM_TYPE-Werte auf. Die Zeile ist
+    **nicht** in der Sitzung — sie wird nie gespeichert, sie ist nur die
+    Form, in der die Kette den Wert lesen kann. Dieselbe Mechanik wie bei
+    der Bad-Vorlage (18.10.2026), und aus demselben Grund.
+
+    **Warum nur fuer nicht buchbare Raumtypen.** Dasselbe fuer ein
+    Gaestezimmer wuerde den **Nachtwert** jedes buchbaren Raumtyps gegen
+    die hausweite 19,0 stellen — eine Aenderung am wirksamen Verhalten von
+    Gaestezimmern, ohne dass jemand einen Wert gesehen hat. Das ist der
+    harte Stopp des Sprint-Briefs. Dort entsteht der Vorrang ueber die
+    ausdrueckliche Admin-Aktion, die vorher zeigt, was sich aendert
+    (``POST /room-types/{id}/sollwerte-uebernehmen``).
+
+    **Echte ROOM_TYPE-Eintraege stehen davor**: wer der Vorlage eine
+    ``rule_config`` gibt, soll damit ihre Spalten uebersteuern koennen —
+    dieselbe Rangfolge wie beim Zimmer.
+    """
+    if raumtyp.is_bookable:
+        return kette
+    return [
+        *kette,
+        RuleConfig(
+            scope=RuleConfigScope.ROOM_TYPE,
+            room_type_id=raumtyp.id,
+            t_occupied=raumtyp.default_t_occupied,
+            t_vacant=raumtyp.default_t_vacant,
+            t_night=raumtyp.default_t_night,
+        ),
+    ]
+
+
+def _sollwert_extras(ctx: _RoomContext, quelle: str) -> dict[str, Any]:
+    """Die beiden Angaben, die der Trace ueber einen Sollwert mitfuehrt.
+
+    ``betriebsbereich`` markiert ein Zimmer mit **nicht buchbarem**
+    Raumtyp — einen Allgemeinbereich. Es ist keine neue Steuerlogik: ein
+    solches Zimmer ist nie belegt und nimmt ohnehin den Frei-Zweig. Die
+    Marke sagt der Oberflaeche nur, dass sie den Wert „Betrieb-Sollwert"
+    nennen soll und nicht „Frei-Sollwert" — ein Bereich ist nicht frei,
+    er hat Betrieb.
+
+    **Warum keine eigene ``CommandReason``.** Der Enum traegt einen
+    DB-CHECK auf zwei Tabellen und ist auf 30 Zeichen begrenzt (§5.45);
+    ein neuer Wert waere eine Migration fuer eine Beschriftung. Die
+    Vorgabe aus §5.45 ist genau dieser Weg: unterscheiden in ``extras``,
+    nicht im Enum.
+    """
+    return {
+        "sollwert_quelle": quelle,
+        "betriebsbereich": not ctx.room_type.is_bookable,
+    }
 
 
 def _resolve_field(field_name: str, ctx: _RoomContext) -> Any:
@@ -366,14 +466,32 @@ def layer_temporal(
     # (night_start, night_end) korrekt ist. Engine-Decision-Panel-Trace
     # zeigt local-Stunde, das ist die fuer den Hotelier nachvollziehbare
     # Sicht.
-    if ctx.room.status == RoomStatus.OCCUPIED:
+    # **Sprint 24d: fuer einen Allgemeinbereich gilt das Zeitfenster immer.**
+    #
+    # Die Nachtabsenkung hing bisher an ``status == OCCUPIED`` — und das war
+    # richtig, solange es nur Gaestezimmer gab: in einem leeren Zimmer gibt
+    # es nichts abzusenken, es ist schon auf dem Frei-Sollwert.
+    #
+    # Ein Bereich ist **nie** belegt. Dieselbe Bedingung haette seine
+    # Betriebszeit damit vollstaendig wirkungslos gemacht: die Bar waere
+    # rund um die Uhr auf ihrem Betrieb-Sollwert geblieben. Bei einem
+    # Bereich ist das Fenster nicht „Nacht", sondern **ausserhalb der
+    # Betriebszeit** (``night_start`` = Betriebsende, ``night_end`` =
+    # Betriebsbeginn, gesetzt am Zimmer).
+    #
+    # Fuer Gaestezimmer aendert sich nichts — die Bedingung ist eine
+    # Erweiterung mit ``or``, keine Ersetzung. Mutationsprobe M24 greift
+    # hier an.
+    zeitfenster_gilt = ctx.room.status == RoomStatus.OCCUPIED or not ctx.room_type.is_bookable
+    if zeitfenster_gilt:
         night_start = _resolve_field("night_start", ctx)
         night_end = _resolve_field("night_end", ctx)
         if night_start is not None and night_end is not None:
             local_now = now.astimezone(ZoneInfo(ctx.timezone))
             now_t = local_now.time()
             if _is_in_night_window(now_t, night_start, night_end):
-                t_night = _resolve_field("t_night", ctx) or ctx.room_type.default_t_night
+                aufgeloest, quelle = _resolve_t_mit_quelle("t_night", ctx)
+                t_night = aufgeloest or ctx.room_type.default_t_night
                 return LayerStep(
                     layer=EventLogLayer.TEMPORAL_OVERRIDE,
                     setpoint_c=_quantize(t_night),
@@ -383,6 +501,7 @@ def layer_temporal(
                         f"tz={ctx.timezone} "
                         f"window=[{night_start.isoformat()},{night_end.isoformat()}]"
                     ),
+                    extras=_sollwert_extras(ctx, quelle or QUELLE_RAUMTYP_VORGABE),
                 )
             detail_token = "outside_night_setback"
 
@@ -1002,6 +1121,12 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     # seit Sprint 21 A1 in ``rules/config_resolve``, weil der
     # Verlauf-Endpunkt dieselbe Hierarchie braucht.
     rule_configs = await lade_rule_configs(session, room_id=room_id, room_type_id=room.room_type_id)
+
+    # Sprint 24d: bei einem Allgemeinbereich treten die Spalten des
+    # Raumtyps als seine eigenen ROOM_TYPE-Werte auf. Begruendung in
+    # ``bereichs_kette`` — und der Grund, warum es Gaestezimmer nicht
+    # betrifft, steht dort auch.
+    rule_configs = bereichs_kette(room.room_type, rule_configs)
 
     # Sprint 9.7/9.16: Sommermodus-Flag. Sprint 9.16 (AE-49) hat die
     # Quelle von ``global_config.summer_mode_active`` (gedroppt) auf

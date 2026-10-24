@@ -38,6 +38,30 @@ const STATUS_COLOR: Record<RoomStatus, string> = {
   blocked: "text-error",
 };
 
+/**
+ * Sprint 24d: ein Allgemeinbereich hat keinen Belegungsstatus.
+ *
+ * Bar, Rezeption und Spa standen bis hierher als „Frei" in der Liste —
+ * und „frei" heißt bei einem Zimmer „kein Gast drin". Bei einer Bar ist
+ * das keine Auskunft, sondern eine Verwechslung: der Bereich ist nicht
+ * leer, er hat Betrieb. Der Belegungsabgleich lässt die Spalte dort
+ * seither unberührt (`occupancy_service.sync_room_status`).
+ *
+ * **„Reinigung" und „Gesperrt" gewinnen trotzdem**, und das ist der
+ * Punkt: beide heißen „Automatik angehalten", und ein Bereich kann außer
+ * Betrieb sein. Wer sie hinter der Bereichs-Marke verstecken würde,
+ * nähme dem Bereich genau die Anzeige, die ein Eingreifen auslöst.
+ */
+function statusAnzeige(r: Room): { text: string; klasse: string } {
+  if (r.status === "cleaning" || r.status === "blocked") {
+    return { text: STATUS_LABEL[r.status], klasse: STATUS_COLOR[r.status] };
+  }
+  if (r.ist_allgemeinbereich) {
+    return { text: "Allgemeinbereich", klasse: "text-text-secondary" };
+  }
+  return { text: STATUS_LABEL[r.status], klasse: STATUS_COLOR[r.status] };
+}
+
 export default function ZimmerPage() {
   const [filterRoomTypeId, setFilterRoomTypeId] = useState<number | "">("");
   const [filterStatus, setFilterStatus] = useState<RoomStatus | "">("");
@@ -241,7 +265,13 @@ function RoomTable({ list, loading, error }: TableProps) {
               <td className="px-3 py-2 text-text-secondary">{r.floor ?? "—"}</td>
               <td className="px-3 py-2 text-text-secondary">{r.orientation ?? "—"}</td>
               <td className="px-3 py-2">
-                <span className={STATUS_COLOR[r.status]}>{STATUS_LABEL[r.status]}</span>
+                <span
+                  className={statusAnzeige(r).klasse}
+                  data-testid="zimmer-status"
+                  data-allgemeinbereich={r.ist_allgemeinbereich ? "true" : "false"}
+                >
+                  {statusAnzeige(r).text}
+                </span>
                 {/* Sprint 22 T7: „Reinigung" und „Gesperrt" halten den
                     Belegungs-Abgleich an (`occupancy_service.py:242`). Das
                     stand bisher nirgends — ein angehaltenes Zimmer sah aus

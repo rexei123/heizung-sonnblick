@@ -173,7 +173,12 @@ class TestAbfrage:
         )
         await db_session.flush()
 
-        assert await child_lock_verdict(db_session, dev.id) is True
+        meldung = await child_lock_verdict(db_session, dev.id)
+        assert meldung is not None
+        assert meldung.gesperrt is True
+        # Sprint 24d: die Zeit kommt mit. Ohne sie ist eine Meldung von
+        # **vor** dem Befehl nicht von einer Ablehnung zu unterscheiden.
+        assert meldung.gemeldet_um == jetzt - timedelta(minutes=10)
 
     async def test_die_juengste_meldung_mit_feld_gewinnt(self, db_session: AsyncSession) -> None:
         dev = await self._geraet(db_session)
@@ -189,7 +194,10 @@ class TestAbfrage:
             )
         await db_session.flush()
 
-        assert await child_lock_verdict(db_session, dev.id) is False
+        meldung = await child_lock_verdict(db_session, dev.id)
+        assert meldung is not None
+        assert meldung.gesperrt is False
+        assert meldung.gemeldet_um == jetzt - timedelta(minutes=5)
 
     async def test_leere_anfrage_gibt_leeres_ergebnis(self, db_session: AsyncSession) -> None:
         assert await child_lock_verdicts(db_session, []) == {}

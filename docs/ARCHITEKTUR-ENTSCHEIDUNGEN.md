@@ -6051,6 +6051,28 @@ falsche Beschriftung ist schlechter als eine rohe.
 
 ### 11.5 Der Befund: `room_type.default_t_*` steht **unter** GLOBAL
 
+> **Korrektur vom 24.10.2026, nachgetragen in Sprint 24d.** Was unten
+> steht, ist auf der Ebene der **Mechanik** richtig und auf der Ebene des
+> **Hauses** falsch. Die hausweite `rule_config`-Zeile der Produktion
+> trägt `t_occupied = NULL` und `t_vacant = NULL` (gelesen vom Betreiber,
+> 24.10.) — die Kette fällt dort also auf die Spalte des Raumtyps durch,
+> und „Belegt" und „Frei" **wirken**. Der Engine-Trace der Produktion
+> zeigt für die Bar 21 °C und für die Rezeption 19 °C, nicht 18.
+>
+> Die 18 °C kamen aus dem Seed der **Test**-Datenbank, der alle drei
+> Felder setzt. Ich habe eine Messung in der Testumgebung für einen
+> Befund über die Produktion genommen — §5.68 in eigener Sache, und zum
+> zweiten Mal in derselben Woche (der erste Fall steht in §10.5).
+>
+> **Was bleibt:** `t_night = 19.0` **ist** hausweit gesetzt. Der
+> Nachtwert eines Raumtyps ist damit wirkungslos, und genau das war auch
+> der Bad-Befund vom 18.10.2026 — dieselbe Zahl, dieselbe Zeile. Die
+> Aussage „die Spalten stehen unter GLOBAL" gilt also; nur ihre Folge
+> für das Haus war eine andere als behauptet.
+>
+> Sprint 24d (§12) stellt die Rangfolge für Allgemeinbereiche um und
+> lässt Gästezimmer unberührt.
+
 **Gemessen am 24.10.2026, nicht gefolgert.** Das Abschlusskriterium des
 Sprints lautete: „der Engine-Trace der Zone zeigt danach den
 Raumtyp-Sollwert statt 10 °C". Der zugehörige Test war einzeln grün und
@@ -6109,3 +6131,206 @@ entstanden ist (§5.39).
 | **Sollwert je Raumtyp in der Oberfläche** | ohne ihn heizen die Allgemeinflächen auf den hausweiten Frei-Sollwert (18 °C). Eigener Sprint; bis dahin ist der Prüfpunkt die Begründung im Trace, nicht die Zahl |
 | **S6** (Übersteuerung in nicht buchbaren Räumen) | unverändert offen, mit M6 und M8 — und jetzt zusätzlich der einzige Weg, der einen Wert *nur* für ein Zimmer setzen würde |
 | **Bestätigung der Kindersicherung** | kommt mit dem Keepalive; wie lange das dauert, zeigt erst der Betrieb an 027 und 056 |
+
+
+## 12. Nachtrag Sprint 24d (24.10.2026): Allgemeinbereiche
+
+Bar, Rezeption, Spa sind keine Zimmer, die gerade leer sind — sie sind
+Bereiche mit Betriebszeiten. Dieser Nachtrag führt die Entscheidungen, mit
+denen das System sie so behandelt und so benennt.
+
+### 12.1 Die Bestandsaufnahme, und was sie korrigiert
+
+Gelesen in der **Produktion** (Betreiber, 24.10.2026): die hausweite
+`rule_config`-Zeile trägt
+
+| Feld | Wert |
+|---|---|
+| `t_occupied` | **NULL** |
+| `t_vacant` | **NULL** |
+| `t_night` | **19.0** |
+| `night_start` / `night_end` | 20:00 / 06:00 |
+| `preheat_minutes_before_checkin` | 60 |
+
+Daraus folgt für jedes Feld der Raumtyp-Seite:
+
+| Feld (Oberfläche) | Spalte | wirkt heute? | Quelle des wirksamen Werts |
+|---|---|---|---|
+| Belegt | `default_t_occupied` | **ja** | Raumtyp — die hausweite Zeile lässt das Feld leer |
+| Frei | `default_t_vacant` | **ja** | Raumtyp, aus demselben Grund |
+| Nacht | `default_t_night` | **nein** | hausweit 19,0 |
+| Obergrenze | `max_temp_celsius` | **ja** | Raumtyp direkt (`clamp_grenzen`, Layer 5) |
+| Untergrenze | `min_temp_celsius` | **ja** | Raumtyp direkt |
+| Langzeit-Absenkung nach Stunden | `treat_unoccupied_as_vacant_after_hours` | **nein, kein Konsument** | — |
+
+Die letzte Zeile ist ein eigener Befund: das Feld hat in `rules/`,
+`services/` und `tasks/` **keinen** Treffer (nachgesehen, nicht vermutet).
+Es wird gespeichert und von niemandem gelesen — seit Sprint 8. Dasselbe
+gilt für `rule_config.long_vacant_hours`, `t_long_vacant`,
+`guest_override_min`, `guest_override_max` und
+`guest_override_duration_minutes`: nur im Seed, nirgends konsumiert.
+Entschieden: **kennzeichnen statt verstecken** (die Raumtyp-Seite sagt
+jetzt „wirkt noch nicht"), denn ein Schalter ohne Wirkung ist schlimmer
+als kein Schalter, und ein verstecktes Feld ist ein Schalter, den niemand
+mehr findet, wenn er einmal wirkt (§5.77).
+
+**Und die globale Seite log.** Sie zeigte „Zimmer belegt 21.0" und
+„Zimmer frei 18.0", obwohl beide Felder leer sind: die Anzeige setzte
+einen Vorgabewert ein, der wie eine Einstellung aussah. Ein Speichern
+hätte ihn wirksam gemacht und **jeden** Raumtyp überstimmt. Seit 24d
+steht dort „nicht festgelegt — Raumtyp entscheidet", der Titel nennt die
+Rangfolge, und neben jedem Feld steht, wie viele Raumtypen den Wert
+wirklich nehmen.
+
+### 12.2 Der Vorrang: eine Kette, kein Backfill
+
+Für einen **nicht buchbaren** Raumtyp treten seine drei Spalten als seine
+eigenen ROOM_TYPE-Werte auf (`rules.engine.bereichs_kette`). Die Zeile ist
+**nicht** in der Sitzung, wird nie gespeichert und ist nur die Form, in der
+die Kette den Wert lesen kann — dieselbe Mechanik wie bei der Bad-Vorlage
+vom 18.10.2026, und aus demselben Grund.
+
+**Verworfen: Backfill.** Die erste Fassung dieses Sprints hat beim
+Speichern eines Raumtyps eine echte `rule_config`-Zeile geschrieben und
+sie per Migration für alle nicht buchbaren Typen nachgezogen. Das ist
+gegen die Kette die schlechtere Lösung:
+
+* Eine Zeile neben der Spalte sind **zwei Wahrheiten** über denselben
+  Wert, und sie laufen beim ersten Umbau auseinander.
+* Der Backfill ist eine Datenänderung, die ein Rückfall mitnehmen müsste.
+* Und er beantwortet eine Frage, die niemand gestellt hat: welchen Wert
+  soll die Zeile tragen, wenn der Raumtyp bisher nur in der Spalte etwas
+  stehen hatte?
+
+**Für buchbare Raumtypen bleibt alles, wie es war.** Die Spalten dort auf
+ROOM_TYPE-Rang zu heben würde den wirksamen **Nachtwert** jedes
+Gästezimmers gegen die hausweite 19,0 stellen — eine Änderung am
+wirksamen Verhalten, ohne dass jemand einen Wert gesehen hat. Das ist der
+harte Stopp des Sprint-Briefs. Dort entsteht der Vorrang über
+`POST /room-types/{id}/sollwerte-uebernehmen`, und
+`GET /room-types/sollwert-wirksamkeit` zeigt vorher, was sich ändert.
+
+**Die Diff-Tabelle ist eine Abfrage und keine Tabelle in dieser Datei.**
+Welche Werte in diesem Haus stehen, weiß nur dieses Haus; eine Tabelle
+hier wäre eine Momentaufnahme von dem Tag, an dem jemand sie geschrieben
+hat (§5.79) — und genau so ist der Fehler in §11.5 entstanden.
+
+### 12.3 Betriebszeit: dasselbe Fenster, andere Worte
+
+Außerhalb der Betriebszeit ist bei einem Bereich genau das, was bei einem
+Gästezimmer die Nacht ist. Deshalb **kein neues Feld und kein eigener
+Engine-Zweig**, sondern eine Umbenennung an der Oberfläche:
+
+| Betriebszeit | `rule_config` |
+|---|---|
+| von (Beginn) | `night_end` |
+| bis (Ende) | `night_start` |
+
+Die Zuordnung sieht verdreht aus und ist es nicht: `night_start` ist der
+Beginn der **Absenkung**, und die beginnt, wenn der Betrieb endet.
+
+**Am Zimmer, nicht am Raumtyp** (Scope ROOM): Bar und Rezeption haben
+denselben Charakter und verschiedene Zeiten. Die Zeit gehört zum Ort, nicht
+zur Art. Fehlt sie am Zimmer, greift die Kette weiter.
+
+**„24:00" ist erlaubt** und wird auf `00:00` abgebildet. Für die Bar
+(15:00–24:00) ergibt das `night_start = 00:00`, `night_end = 15:00`, also
+ein Fenster `[00:00, 15:00)` — das **nicht** über Mitternacht läuft. Für
+die Rezeption (07:00–22:00) läuft es über Mitternacht. Beide Fälle liegen
+auf verschiedenen Seiten derselben Grenze und stehen deshalb beide im
+Test (M27).
+
+**Eine halbe Angabe wird abgewiesen.** Die Engine prüft beide Grenzen auf
+`not None` und würde ein halbes Fenster stillschweigend ignorieren — in der
+Oberfläche stünde dann eine Zeit, die nichts tut.
+
+**Die Zeitsteuerung gilt für Bereiche ohne Belegung.** Sie hing an
+`status == OCCUPIED`, und das war richtig, solange es nur Gästezimmer gab:
+in einem leeren Zimmer gibt es nichts abzusenken, es liegt schon auf dem
+Frei-Sollwert. Ein Bereich ist **nie** belegt; dieselbe Bedingung hätte
+seine Betriebszeit vollständig wirkungslos gemacht. Die Bedingung ist mit
+`or` erweitert und nicht ersetzt — für Gästezimmer ändert sich nichts
+(M24).
+
+### 12.4 Status und Bezeichnungen
+
+Ein Zimmer mit nicht buchbarem Raumtyp zeigt **„Allgemeinbereich"** statt
+„Frei", read-time abgeleitet aus `room_type.is_bookable` — keine Spalte,
+kein neuer `RoomStatus`-Wert, keine Migration (§5.73). „Reinigung" und
+„Gesperrt" gewinnen trotzdem: beide heißen „Automatik angehalten", und ein
+Bereich kann außer Betrieb sein.
+
+Der **Belegungsabgleich** lässt diese Zimmer unberührt. Ein abgeleitetes
+„frei" wäre dort keine Aussage, sondern eine Verwechslung — der Bereich ist
+nicht leer, er hat Betrieb (M21).
+
+Die Raumtyp-Seite nennt die Felder dort **„Betrieb"** und **„Absenkung"**
+und blendet „Belegt" aus. Intern ist „Betrieb" der Frei-Wert; „Belegt"
+zieht das Speichern gleich mit, damit nicht ein unsichtbarer Wert in der
+Spalte zurückbleibt und bei einem von Hand gesetzten Status plötzlich gilt.
+
+Der Trace nennt den Grund **„Betrieb-Sollwert"** bzw. **„Absenkung"**. Die
+Marke dafür steht in `details.betriebsbereich` und **nicht** in einem
+eigenen `CommandReason`: der Enum trägt einen DB-CHECK auf zwei Tabellen
+und ist auf 30 Zeichen begrenzt (§5.45), ein neuer Wert wäre eine
+Migration für eine Beschriftung.
+
+Die Heizzonen-Art **`common_area`** ist **nur eine Bezeichnung**. Die
+Spalte ist `VARCHAR(20)` ohne CHECK (am Schema nachgesehen) — keine
+Migration. Steuerlogik hängt daran nicht und soll nicht daran hängen: der
+Sollwert eines Bereichs kommt aus dem Raumtyp.
+
+### 12.5 Übersteuerung ohne Belegung (S6)
+
+Eigene Quelle `frontend_bereich` (Migration 0032, CHECK erweitert —
+additiv). Die Dauer steckt dort **nicht** im Namen, sondern in der
+Anfrage: ein Bereich wird für eine Veranstaltung warm gemacht, und die
+dauert zwei Stunden oder sechs.
+
+* **Ablauf ist Pflicht**, Vorschlag 4 h, Höchstmaß 24 h — **abgewiesen,
+  nicht gekappt**. Wer 48 Stunden eingibt, hat sich vertippt, und eine
+  stille Kürzung wäre eine Antwort auf eine Frage, die niemand gestellt
+  hat; sie stünde danach als „gewollt" in der Historie. Geprüft in
+  **beiden** Schichten (Schema und Dienst), weil der Dienst auch von einem
+  Aufrufer erreichbar ist, der nicht durch das Schema kommt (M6, M8).
+* **Gekappt** wird der Wunschwert an den Grenzen des Raumtyps, und zwar
+  schon beim Anlegen — für einen Bereich setzt die Rezeption den Wert
+  selbst und sieht die Antwort. Stünde in der Historie 28 und im Trace 25,
+  sähe das nach einem Fehler aus. Für Gästezimmer unverändert: dort ist
+  der rohe Gastwunsch aufgezeichnet und die Kappung eine Eigenschaft der
+  Regelung.
+* **Das Belegungs-Gate hängt an der Quelle**, nicht am Zimmer allein. So
+  bleibt der Drehrad-Pfad unberührt: `device` und `device_manual` laufen
+  weiter in das Gate und werden in einem Bereich weiter abgewiesen. Wer in
+  der Bar an einem Rad dreht, erzeugt keinen Override — wie vorher.
+* `frontend_bereich` an einem **buchbaren** Raumtyp wird abgewiesen
+  (`OVERRIDE_SOURCE_MISMATCH`). Sonst wäre AE-58 über einen Umweg
+  aufgehoben (M22).
+
+**Die Rollenprüfung:** `require_mitarbeiter`, dieselbe wie für
+Gästezimmer. Das Haus hat **zwei** Rollen, und beide sind Personal
+(AE-50) — eine Anfrage mit gültiger Sitzung, die 403 bekommt, gibt es
+hier also nicht. Der Sprint-Brief setzt eine dritte Rolle voraus, die es
+nicht gibt; sie zu erfinden wäre eine Änderung am Rollenmodell und nicht
+an diesem Sprint. Geprüft wird deshalb, dass der **Endpunkt die
+Abhängigkeit trägt** (M23) — wer die Prüfung in die Oberfläche verlegt,
+macht den Test rot.
+
+### 12.6 Vier Befunde aus dem Realbetrieb (aus 24c)
+
+| Befund | Ursache | Behoben durch |
+|---|---|---|
+| Kindersicherung zeigt direkt nach dem Umschalten **rot** statt „ausstehend" | die jüngste Meldung ist die vom Keepalive **davor**; ohne Befehlszeit ist eine alte Antwort nicht von einer Ablehnung zu unterscheiden | `device.child_lock_commanded_at` (Migration 0033, additiv) + Zeitvergleich in `child_lock_state` (M25) |
+| Zone „Kein Gerät" trotz zugeordnetem Fühler | das Kennzeichen hatte recht und sagte das Falsche: der Zone fehlt kein Gerät, ihr fehlt ein **Stellglied** | `geraete_luecke` je Zone: „Kein Fühler" / „Kein Stellglied" / beides; bei `no_device` ersetzt sie das Etikett, sonst steht sie daneben |
+| Zonenkarte und Geräteseite zeigen **„—"** | die Abfrage nahm die jüngste Zeile je Gerät, ganz gleich ob sie eine Temperatur führt — und eine **Befehlsantwort** führt keine. Seit 24c erzeugt die Kindersicherung genau solche Frames | Filter `temperature IS NOT NULL` in der WHERE-Klausel (dieselbe Falle wie bei `child_lock` in 24c, zwei Tage später) + Zeitstempel neben dem Wert |
+| „Soll" auf der Zonenkarte | war bereits der wirksame Wert (`event_log.setpoint_out`) — kein Mangel, aber ungeprüft | e2e-Zusicherung mit **abweichendem** Engine-Wert (M26) |
+
+### 12.7 Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Erstwerte der Betriebszeiten** | trägt der Betreiber nach dem Merge in der Oberfläche ein (Rezeption 07:00–22:00, Bar 15:00–24:00) — **nicht** per Migration, damit die Werte von einem Menschen kommen und nicht von mir |
+| **Nachtwert je Raumtyp** | wirkt für Gästezimmer weiter nicht (hausweit 19,0). Die Freigabe-Aktion kann es je Raumtyp ändern; die Entscheidung gehört dem Betreiber |
+| **Wochentage, Feiertage, Vorlaufzeit** | nicht im Umfang. Eine Bar, die sonntags anders öffnet, braucht sie — bis dahin gilt eine Zeit für alle Tage |
+| **Tote Felder** | `treat_unoccupied_as_vacant_after_hours` und die fünf `guest_override_*`/`long_vacant_*`-Felder sind gekennzeichnet, nicht entfernt. Entfernen wäre eine Verengung der API und eine eigene Entscheidung |
+| **S6 für Gästezimmer** | unverändert: Übersteuerung nur bei Belegung (AE-58) |

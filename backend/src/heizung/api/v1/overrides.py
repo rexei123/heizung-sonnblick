@@ -166,12 +166,22 @@ async def create_room_override(
 
     hotel_config = await session.get(GlobalConfig, 1)
     now = datetime.now(tz=UTC)
-    expires_at = override_service.compute_expires_at(
-        source,
-        now,
-        next_checkout_at=next_checkout,
-        hotel_config=hotel_config,
-    )
+    try:
+        expires_at = override_service.compute_expires_at(
+            source,
+            now,
+            next_checkout_at=next_checkout,
+            hotel_config=hotel_config,
+            dauer_minuten=payload.dauer_minuten,
+        )
+    except ValueError as e:
+        # Sprint 24d: Dauer fehlt oder liegt ueber 24 h. Das Schema weist
+        # das schon ab; dieser Zweig ist die Antwort fuer den Fall, dass
+        # jemand die Pruefung dort lockert — dann kommt 422 und nicht 500.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
 
     # B-Sprint13b2-7 (AE-59): Override-Domain-Exceptions
     # (RoomOverrideBlockedError, RoomNotOccupiedError,

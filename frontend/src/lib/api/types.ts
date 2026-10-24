@@ -464,6 +464,30 @@ export interface Room {
   mean_temperature_c: number | null;
   /** Soll: jüngster HARD_CLAMP-Setpoint des Zimmers (1-h-Fenster). */
   engine_setpoint_c: number | null;
+
+  /**
+   * Sprint 24d (§5.63): Zimmer mit **nicht buchbarem** Raumtyp — Bar,
+   * Rezeption, Spa. Es hat keine Belegung, und die Anzeige nennt es
+   * „Allgemeinbereich" statt „Frei"; ein Bereich ist nicht leer, er hat
+   * Betrieb.
+   *
+   * Backend leitet das read-time aus `room_type.is_bookable` ab (keine
+   * Spalte, kein neuer `RoomStatus`-Wert). Liste und Einzel-Response
+   * befüllen es, die Write-Antworten lassen es auf `false` — dort liest
+   * es niemand.
+   */
+  ist_allgemeinbereich: boolean;
+  /**
+   * Sprint 24d (§5.63): Betriebszeit **dieses** Zimmers, als `HH:MM:SS`.
+   * Nur für Allgemeinbereiche gefüllt; `null` = nicht festgelegt, dann
+   * greift Raumtyp oder Haus.
+   *
+   * Intern sind es die Grenzen des Nacht-Fensters mit getauschter
+   * Bedeutung — außerhalb der Betriebszeit ist bei einem Bereich genau
+   * das, was bei einem Gästezimmer die Nacht ist.
+   */
+  betriebszeit_von: string | null;
+  betriebszeit_bis: string | null;
 }
 
 // Sprint 12c (AE-58): Body fuer PATCH /rooms/{id}/override-block-state.
@@ -511,7 +535,16 @@ export type HeatingZoneKind =
   | "bathroom"
   | "living"
   | "hallway"
+  | "common_area"
   | "other";
+
+/**
+ * Was einer Zone fehlt, falls ihr etwas fehlt (Sprint 24d, §5.63).
+ *
+ * `null` heißt: nichts fehlt. Ein Fühler mit der Rolle „nur messen" zählt
+ * als Fühler und nicht als Stellglied — messen kann er, heizen nicht.
+ */
+export type ZonenGeraeteLuecke = "kein_fuehler" | "kein_stellglied" | "beides";
 
 export interface HeatingZone {
   id: number;
@@ -535,6 +568,24 @@ export interface HeatingZone {
   // Setpoint des Zimmers (AE-55 P1). Alle Zonen eines Zimmers teilen den Wert
   // (AE-51 §4.2). null = kein HARD_CLAMP-Eval im 1h-Fenster.
   engine_setpoint_c: number | null;
+  /**
+   * Sprint 24d (§5.63): **wann** `mean_temperature_c` gemessen wurde.
+   *
+   * Der Anlass ist ein Befund vom 24.10.2026: die Karte zeigte „—", weil
+   * die Abfrage die jüngste Zeile je Gerät nahm — und eine Befehlsantwort
+   * führt keine Temperatur. Der Filter sitzt jetzt in der Abfrage; der
+   * Zeitstempel steht daneben, damit ein alter Messwert als alter zu
+   * erkennen ist.
+   */
+  mean_temperature_at: string | null;
+  /**
+   * Sprint 24d (§5.63): was der Zone fehlt. `null` = nichts.
+   *
+   * „Kein Gerät" stand auch dort, wo ein Fühler zugeordnet ist und nur
+   * das Stellglied fehlt. Das Kennzeichen hatte recht und sagte das
+   * Falsche.
+   */
+  geraete_luecke: ZonenGeraeteLuecke | null;
 }
 
 export interface HeatingZoneCreate {
@@ -875,6 +926,8 @@ export type OverrideSource =
   | "device_manual"
   | "frontend_24h"
   | "frontend_checkout"
+  /** Sprint 24d: Allgemeinbereich, Dauer frei gewählt (bis 24 h). */
+  | "frontend_bereich"
   /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */
   | "frontend_4h"
   /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */
@@ -885,7 +938,10 @@ export type OverrideSource =
  * werden ausschliesslich vom Backend ``device_adapter`` aus Vicki-
  * Uplinks erzeugt.
  */
-export type FrontendOverrideSource = "frontend_24h" | "frontend_checkout";
+export type FrontendOverrideSource =
+  | "frontend_24h"
+  | "frontend_checkout"
+  | "frontend_bereich";
 
 /**
  * Spiegelt ``ManualOverrideResponse`` aus
@@ -915,6 +971,16 @@ export interface ManualOverrideCreate {
   setpoint: string;
   source: FrontendOverrideSource;
   reason?: string | null;
+  /**
+   * Sprint 24d: Dauer in Minuten, **Pflicht** fuer `frontend_bereich` und
+   * bei jeder anderen Quelle verboten (der Server weist beides mit 422 ab).
+   * Hoechstmass 1440 — 24 Stunden.
+   *
+   * Bei allen anderen Quellen steckt die Dauer im Namen; ein Feld, das
+   * daneben wirkungslos mitfaehrt, waere genau der Schalter ohne Wirkung,
+   * aus dem dieser Sprint entstanden ist.
+   */
+  dauer_minuten?: number;
   /**
    * Sprint 12a T3 (AE-58): optionaler Zone-Scope. ``undefined`` /
    * weggelassen = Room-Scope-Override (Backward-Compat). Gesetzt =

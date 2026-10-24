@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.enums import OccupancySource, RoomStatus
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
+from heizung.models.room_type import RoomType
 
 logger = logging.getLogger(__name__)
 
@@ -235,11 +236,28 @@ async def sync_room_status(
 
     CLEANING und BLOCKED werden NICHT ueberschrieben — sind manuelle
     Operations-Zustaende, die nichts mit Belegung zu tun haben.
+
+    **Allgemeinbereiche bleiben ebenfalls unberuehrt (Sprint 24d).** Ein
+    Zimmer mit nicht buchbarem Raumtyp — Bar, Rezeption, Spa — hat keine
+    Belegung. Ein abgeleitetes „frei" waere dort keine Aussage, sondern
+    eine Verwechslung: der Bereich ist nicht leer, er hat Betrieb. Der
+    Belegungsabgleich laesst die Spalte deshalb stehen, und die
+    Oberflaeche zeigt „Allgemeinbereich" (``RoomRead.
+    ist_allgemeinbereich``).
+
+    Ein **von Hand** gesetzter Status bleibt moeglich und ist der Weg,
+    einen Bereich ausser Betrieb zu nehmen (``blocked``) — der faellt
+    schon unter die Klausel darueber.
     """
     room = await session.get(Room, room_id)
     if room is None:
         return
     if room.status in (RoomStatus.CLEANING, RoomStatus.BLOCKED):
+        return
+    buchbar = await session.scalar(
+        select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+    )
+    if buchbar is False:
         return
     new_status = await derive_room_status(session, room_id, now)
     if room.status != new_status:

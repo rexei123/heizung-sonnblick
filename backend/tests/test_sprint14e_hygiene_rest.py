@@ -307,7 +307,9 @@ async def test_mean_temp_two_healthy_vickis_arithmetic_mean(
         async with sm() as session:
             result = await latest_mean_temp_per_zone(session, [zone_id])
 
-        assert result[zone_id] == Decimal("21.0")
+        # Sprint 24d: der Helfer liefert Wert **und** Stand (``ZonenIst``).
+        assert result[zone_id].mittel == Decimal("21.0")
+        assert result[zone_id].stand is not None, "ein Wert ohne Stand ist keine Messung"
     finally:
         await _cleanup(sm)
 
@@ -324,7 +326,10 @@ async def test_mean_temp_all_silent_returns_none(setup_engine: AsyncEngine) -> N
         async with sm() as session:
             result = await latest_mean_temp_per_zone(session, [zone_id])
 
-        assert result[zone_id] is None
+        assert result[zone_id].mittel is None
+        # Kein Mittelwert, kein Stand: die Zeit eines Messwerts, der
+        # nicht gezeigt wird, waere eine Angabe ohne Gegenstand.
+        assert result[zone_id].stand is None
     finally:
         await _cleanup(sm)
 
@@ -349,7 +354,9 @@ async def test_mean_temp_excludes_retired_vicki(setup_engine: AsyncEngine) -> No
 
         # Mittelwert ist 21.0 — der retired Device fliesst NICHT ein, sonst
         # waere das Aggregat None (Reading fehlt) oder anders.
-        assert result[zone_id] == Decimal("21.0")
+        # Sprint 24d: der Helfer liefert Wert **und** Stand (``ZonenIst``).
+        assert result[zone_id].mittel == Decimal("21.0")
+        assert result[zone_id].stand is not None, "ein Wert ohne Stand ist keine Messung"
     finally:
         await _cleanup(sm)
 

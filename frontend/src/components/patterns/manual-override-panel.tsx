@@ -34,6 +34,7 @@ import type {
   ManualOverride,
   OverrideSource,
 } from "@/lib/api/types";
+import { formatDateTimeTz } from "@/lib/format";
 import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
 /**
@@ -50,9 +51,31 @@ import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-dis
 const FRONTEND_SOURCES: FrontendOverrideSource[] = ["frontend_24h", "frontend_checkout"];
 
 /**
+ * Die Dauern fuer einen Allgemeinbereich (Sprint 24d).
+ *
+ * Eine Bar wird fuer eine Veranstaltung warm gemacht, und die dauert zwei
+ * Stunden oder sechs — nicht einen Aufenthalt. Deshalb eine Dauer in
+ * Minuten statt einer Quelle, die ihre Dauer im Namen traegt.
+ *
+ * **Vier Stunden sind die Vorauswahl**, und 24 Stunden das Hoechstmass
+ * (Entscheidung des Betreibers). Der Server weist mehr ab, statt zu
+ * kappen: wer acht Tage eingibt, hat sich vertippt, und eine stille
+ * Kuerzung waere eine Antwort auf eine Frage, die niemand gestellt hat.
+ */
+const BEREICH_DAUERN: { minuten: number; label: string }[] = [
+  { minuten: 60, label: "1 Stunde" },
+  { minuten: 120, label: "2 Stunden" },
+  { minuten: 240, label: "4 Stunden" },
+  { minuten: 480, label: "8 Stunden" },
+  { minuten: 720, label: "12 Stunden" },
+  { minuten: 1440, label: "24 Stunden" },
+];
+const BEREICH_VORSCHLAG = 240;
+
+/**
  * Sprint 12b: Zone-Kind-Labels + Material-Symbols-Icons. Quelle der
  * Wahrheit fuer Labels ist ``heating-zone-list.tsx`` (Sprint 8.10); hier
- * bewusst dupliziert weil nur 5 Eintraege und Cross-Component-Import
+ * bewusst dupliziert weil nur 6 Eintraege und Cross-Component-Import
  * der Konstanten ungewollte Kopplung schafft.
  */
 export const ZONE_KIND_LABEL: Record<HeatingZoneKind, string> = {
@@ -60,6 +83,7 @@ export const ZONE_KIND_LABEL: Record<HeatingZoneKind, string> = {
   bathroom: "Bad",
   living: "Wohnen",
   hallway: "Flur",
+  common_area: "Allgemeinbereich",
   other: "Sonstige",
 };
 
@@ -68,6 +92,7 @@ export const ZONE_KIND_ICON: Record<HeatingZoneKind, string> = {
   bathroom: "shower",
   living: "weekend",
   hallway: "door_open",
+  common_area: "storefront",
   other: "category",
 };
 
@@ -102,6 +127,13 @@ interface ZoneCardProps {
    * nennt sich deshalb zuerst.
    */
   roomNotOccupied?: boolean;
+  /**
+   * Sprint 24d (S6): Zimmer mit nicht buchbarem Raumtyp. Das Formular
+   * zeigt dann eine **Dauer** statt der Quellen-Auswahl, und das
+   * Belegungs-Gate gilt dort nicht. Die Durchsetzung sitzt im Dienst
+   * (`override_service.create`), nicht hier.
+   */
+  istBereich?: boolean;
 }
 
 export function ManualOverrideZoneCard({
@@ -112,6 +144,7 @@ export function ManualOverrideZoneCard({
   activeOverride,
   overrideBlocked = false,
   roomNotOccupied = false,
+  istBereich = false,
 }: ZoneCardProps) {
   return (
     <div className="bg-surface border border-border rounded-md p-5">
@@ -138,6 +171,7 @@ export function ManualOverrideZoneCard({
           heatingZoneId={zone.id}
           isWindowOpen={isWindowOpen}
           lastEvalTime={lastEvalTime}
+          istBereich={istBereich}
         />
       )}
     </div>
@@ -259,10 +293,24 @@ function ActiveOverrideDisplay({
             <span className="text-xl text-text-secondary">°C</span>
           </div>
           <SourceBadge source={override.source} className="mt-2" />
-          <p className="text-sm text-text-secondary mt-3">
-            Läuft ab in <span className="font-medium">{remaining}</span> ·{" "}
-            {new Date(override.expires_at).toLocaleString("de-AT")}
-          </p>
+          {override.source === "frontend_bereich" ? (
+            /* Sprint 24d: ein Bereich hat keinen Check-in, auf den man
+               verweisen koennte — der Satz nennt stattdessen, wann der
+               Plan wieder gilt. Die Zeitzone steht dabei (§5.79): eine
+               Uhrzeit neben einer Restzeit ohne Einheit ist genau die
+               Stelle, an der am 26.09. ein Einheitenfehler unsichtbar
+               geblieben ist. */
+            <p className="text-sm text-text-secondary mt-3" data-testid="bereich-satz">
+              Übersteuert auf <span className="font-medium">{displaySetpoint} °C</span> bis{" "}
+              {formatDateTimeTz(override.expires_at)}, danach wieder Plan · noch{" "}
+              <span className="font-medium">{remaining}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-text-secondary mt-3">
+              Läuft ab in <span className="font-medium">{remaining}</span> ·{" "}
+              {new Date(override.expires_at).toLocaleString("de-AT")}
+            </p>
+          )}
           {override.reason ? (
             <p className="text-sm text-text-secondary mt-1">Grund: {override.reason}</p>
           ) : null}
@@ -303,6 +351,8 @@ interface CreateFormProps {
   heatingZoneId: number;
   isWindowOpen: boolean;
   lastEvalTime: string | null;
+  /** Sprint 24d: Allgemeinbereich — Dauer waehlen statt Quelle. */
+  istBereich?: boolean;
 }
 
 function CreateOverrideForm({
@@ -310,10 +360,12 @@ function CreateOverrideForm({
   heatingZoneId,
   isWindowOpen,
   lastEvalTime,
+  istBereich = false,
 }: CreateFormProps) {
   const createMut = useCreateRoomOverride(roomId);
   const [setpoint, setSetpoint] = useState("21");
   const [source, setSource] = useState<FrontendOverrideSource>("frontend_24h");
+  const [dauer, setDauer] = useState<number>(BEREICH_VORSCHLAG);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -328,7 +380,10 @@ function CreateOverrideForm({
     try {
       await createMut.mutateAsync({
         setpoint,
-        source,
+        // Sprint 24d: in einem Bereich ist die Quelle nicht waehlbar —
+        // sie folgt aus dem Raumtyp, und der Server prueft das nach.
+        source: istBereich ? "frontend_bereich" : source,
+        ...(istBereich ? { dauer_minuten: dauer } : {}),
         reason: reason.trim() ? reason.trim() : null,
         heating_zone_id: heatingZoneId,
       });
@@ -344,7 +399,9 @@ function CreateOverrideForm({
         <WindowOpenBlocker lastEvalTime={lastEvalTime} />
       ) : (
         <p className="text-sm text-text-secondary">
-          Aktuell keine manuelle Übersteuerung. Engine arbeitet nach den regulären Regeln.
+          {istBereich
+            ? "Aktuell keine Übersteuerung. Der Bereich folgt dem Plan aus dem Raumtyp."
+            : "Aktuell keine manuelle Übersteuerung. Engine arbeitet nach den regulären Regeln."}
         </p>
       )}
 
@@ -365,22 +422,41 @@ function CreateOverrideForm({
 
         <label className="block">
           <span className="text-sm font-medium text-text-primary mb-1 block">Dauer</span>
-          <Select
-            value={source}
-            onValueChange={(v) => setSource(v as FrontendOverrideSource)}
-            disabled={isWindowOpen}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Bitte wählen" />
-            </SelectTrigger>
-            <SelectContent>
-              {FRONTEND_SOURCES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {SOURCE_LABEL[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {istBereich ? (
+            <Select
+              value={String(dauer)}
+              onValueChange={(v) => setDauer(Number(v))}
+              disabled={isWindowOpen}
+            >
+              <SelectTrigger data-testid="bereich-dauer">
+                <SelectValue placeholder="Bitte wählen" />
+              </SelectTrigger>
+              <SelectContent>
+                {BEREICH_DAUERN.map((d) => (
+                  <SelectItem key={d.minuten} value={String(d.minuten)}>
+                    {d.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Select
+              value={source}
+              onValueChange={(v) => setSource(v as FrontendOverrideSource)}
+              disabled={isWindowOpen}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Bitte wählen" />
+              </SelectTrigger>
+              <SelectContent>
+                {FRONTEND_SOURCES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {SOURCE_LABEL[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </label>
       </div>
 

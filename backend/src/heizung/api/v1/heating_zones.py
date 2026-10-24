@@ -40,16 +40,22 @@ from heizung.services.event_log import (
     latest_hard_clamp_bad_setpoint_per_room,
     latest_hard_clamp_setpoint_per_room,
 )
-from heizung.services.zone_aggregates import latest_mean_temp_per_zone
+from heizung.services.zone_aggregates import (
+    GeraeteLuecke,
+    ZonenIst,
+    geraete_luecke_per_zone,
+    latest_mean_temp_per_zone,
+)
 
 
 async def _build_zone_read(
     session: AsyncSession,
     zone: HeatingZone,
     *,
-    mean_temps: dict[int, Decimal | None] | None = None,
+    mean_temps: dict[int, ZonenIst] | None = None,
     engine_setpoints: dict[int, Decimal | None] | None = None,
     bad_setpoints: dict[int, int | None] | None = None,
+    luecken: dict[int, GeraeteLuecke | None] | None = None,
 ) -> HeatingZoneRead:
     """Sprint 14d FU-5 + 14e FU-1/FU-2: HeatingZoneRead + Anreicherungen.
 
@@ -76,7 +82,15 @@ async def _build_zone_read(
 
     if mean_temps is None:
         mean_temps = await latest_mean_temp_per_zone(session, [zone.id])
-    update["mean_temperature_c"] = mean_temps.get(zone.id)
+    ist = mean_temps.get(zone.id)
+    update["mean_temperature_c"] = ist.mittel if ist is not None else None
+    # Sprint 24d: der Zeitstempel gehoert neben den Wert. Ein Mittelwert
+    # ohne Stand ist nicht von einem aktuellen zu unterscheiden.
+    update["mean_temperature_at"] = ist.stand if ist is not None else None
+
+    if luecken is None:
+        luecken = await geraete_luecke_per_zone(session, [zone.id])
+    update["geraete_luecke"] = luecken.get(zone.id)
 
     if engine_setpoints is None:
         engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
@@ -158,6 +172,8 @@ async def list_heating_zones(
     # Hinweis stehen, weil er sonst beim naechsten Umbau wieder als
     # Eigenschaft gelesen wuerde (§5.77).
     mean_temps = await latest_mean_temp_per_zone(session, [z.id for z in zones])
+    # Eine Abfrage fuer alle Zonen des Zimmers, nicht eine je Karte.
+    luecken = await geraete_luecke_per_zone(session, [z.id for z in zones])
     engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [room_id])
     bad_setpoints = await latest_hard_clamp_bad_setpoint_per_room(session, [room_id])
     return [
@@ -165,6 +181,7 @@ async def list_heating_zones(
             session,
             zone,
             mean_temps=mean_temps,
+            luecken=luecken,
             engine_setpoints=engine_setpoints,
             bad_setpoints=bad_setpoints,
         )

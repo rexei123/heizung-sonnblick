@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { BetriebszeitForm } from "@/components/patterns/betriebszeit-form";
 import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
@@ -149,6 +150,13 @@ export default function ZimmerDetailPage() {
   // 409 ROOM_NOT_OCCUPIED im Formular stehen und wird nicht ersetzt.
   const istBelegt = room.data.status === "occupied";
 
+  // Sprint 24d (S6): ein Allgemeinbereich hat keine Belegung und darf
+  // trotzdem uebersteuert werden — mit Pflicht-Ablauf, bis 24 h. Das Gate
+  // dazu sitzt im Dienst (`override_service.create`, Quelle
+  // `frontend_bereich`); hier entscheidet es nur, ob der Knopf grau ist.
+  const istBereich = room.data.ist_allgemeinbereich;
+  const darfUebersteuern = istBelegt || istBereich;
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-4">
@@ -174,6 +182,12 @@ export default function ZimmerDetailPage() {
           {/* Sprint 22 T7: ein Zimmer, das aus der Automatik genommen ist,
               darf das nicht nur in einem Auswahlfeld in den Stammdaten
               stehen haben. */}
+          {istBereich ? (
+            <p className="text-sm text-text-secondary mt-2" data-testid="bereich-hinweis">
+              Allgemeinbereich — kein Check-in, keine Belegung. Der Sollwert kommt
+              aus dem Raumtyp („Betrieb" bzw. „Nacht").
+            </p>
+          ) : null}
           {room.data.status === "cleaning" || room.data.status === "blocked" ? (
             <p className="text-sm text-warning mt-2" role="status">
               Automatik angehalten (Status:{" "}
@@ -195,12 +209,13 @@ export default function ZimmerDetailPage() {
                 variant="primary"
                 icon="thermostat"
                 onClick={() => setTab("override")}
-                disabled={!istBelegt}
-                aria-describedby={istBelegt ? undefined : "temperatur-hinweis"}
+                disabled={!darfUebersteuern}
+                aria-describedby={darfUebersteuern ? undefined : "temperatur-hinweis"}
+                data-testid="temperatur-aendern"
               >
                 Temperatur ändern
               </Button>
-              {istBelegt ? null : (
+              {darfUebersteuern ? null : (
                 <p id="temperatur-hinweis" className="text-xs text-text-tertiary">
                   nur bei belegtem Zimmer
                 </p>
@@ -251,6 +266,13 @@ export default function ZimmerDetailPage() {
         <div className="bg-surface border border-border rounded-md p-5">
           {tab === "stammdaten" ? (
             <div className="space-y-4">
+              {/* Sprint 24d: die Betriebszeit gehoert zum Ort und steht
+                  deshalb in den Stammdaten des Zimmers — und nur bei einem
+                  Allgemeinbereich. Bei einem Gaestezimmer waere dasselbe
+                  Feld das Nacht-Fenster, und es unter dem Namen
+                  „Betriebszeit" zu zeigen hiesse, zwei Dinge gleich zu
+                  nennen, die verschieden gemeint sind. */}
+              {istBereich ? <BetriebszeitForm room={room.data} /> : null}
               {/* Sprint 14e T5b: Inline-Edit room_type mit Confirm + Audit
                   (Engine-Wirkungs-Warnung, R5-Gating). Steht vor dem Form,
                   weil room_type heizverhalten-relevant ist. RoomForm

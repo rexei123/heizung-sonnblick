@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
@@ -63,6 +63,39 @@ class RoomRead(BaseModel):
     has_active_override: bool = False
 
     # ------------------------------------------------------------------
+    # Allgemeinbereich (Sprint 24d)
+    # ------------------------------------------------------------------
+    # Ein Zimmer mit **nicht buchbarem** Raumtyp ist ein Bereich: Bar,
+    # Rezeption, Spa. Es hat keine Belegung, also auch kein Frei/Belegt —
+    # die Oberflaeche zeigt dort "Allgemeinbereich" statt "Frei".
+    #
+    # **Read-time abgeleitet, keine Spalte und kein neuer RoomStatus-Wert**
+    # (§5.73): die Wahrheit steht in ``room_type.is_bookable``, und ein
+    # zweites Feld daneben waere eine zweite Wahrheit, die beim ersten
+    # Umschalten von ``is_bookable`` auseinanderlaeuft. "Gesperrt" bleibt
+    # davon unberuehrt und gewinnt in der Anzeige — ein Bereich kann
+    # ausser Betrieb sein.
+    #
+    # Wie ``has_active_override`` befuellen das die Lese-Endpunkte; wer es
+    # auf ``False`` laesst, sagt damit nichts aus.
+    ist_allgemeinbereich: bool = False
+
+    # ------------------------------------------------------------------
+    # Betriebszeit (Sprint 24d)
+    # ------------------------------------------------------------------
+    # Nur fuer Allgemeinbereiche gefuellt und nur, wenn sie **an diesem
+    # Zimmer** steht (``rule_config`` im Scope ROOM). ``None`` heisst
+    # „nicht festgelegt" — dann greift, was Raumtyp oder Haus vorgeben.
+    #
+    # Intern sind es die Grenzen des Nacht-Fensters, mit getauschter
+    # Bedeutung: ``von`` ist ``night_end``, ``bis`` ist ``night_start``.
+    # Die Begruendung steht in ``services/betriebszeit`` — ausserhalb der
+    # Betriebszeit ist bei einem Bereich genau das, was bei einem
+    # Gaestezimmer die Nacht ist.
+    betriebszeit_von: time | None = None
+    betriebszeit_bis: time | None = None
+
+    # ------------------------------------------------------------------
     # Ist und Soll der Referenzzone (15.10.2026)
     # ------------------------------------------------------------------
     # Die Uebersicht zeigt eine Temperatur je Zimmer, ein Zimmer hat aber
@@ -107,6 +140,21 @@ class RoomRead(BaseModel):
         # ``HeatingZoneRead._decimal_temp_to_float`` — dieselben Werte,
         # dieselbe Form.
         return None if v is None else float(v)
+
+
+class BetriebszeitUpdate(BaseModel):
+    """Eingabe fuer ``PATCH /api/v1/rooms/{room_id}/betriebszeit``.
+
+    Strings und nicht ``time``, weil ``"24:00"`` erlaubt ist und Pydantic
+    es als ``time`` abweisen wuerde. Die Umwandlung steht in
+    ``services/betriebszeit.parse_uhrzeit`` — zusammen mit dem Grund,
+    warum ein Mensch „bis 24:00" eingibt und nicht „bis 00:00".
+
+    Beide ``None`` loescht die Betriebszeit.
+    """
+
+    von: str | None = Field(default=None, description="Betriebsbeginn, HH:MM")
+    bis: str | None = Field(default=None, description="Betriebsende, HH:MM oder 24:00")
 
 
 class RoomOverrideBlockUpdate(BaseModel):

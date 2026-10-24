@@ -36,12 +36,28 @@ class RoomStatus(enum.StrEnum):
 
 
 class HeatingZoneKind(enum.StrEnum):
-    """Funktionaler Zonen-Typ. Steuert teilweise Regel-Defaults."""
+    """Funktionaler Zonen-Typ. Steuert teilweise Regel-Defaults.
+
+    ``COMMON_AREA`` (Sprint 24d) ist **nur eine Bezeichnung**. Die Zone
+    einer Bar hiess bis dahin ``other``, und das ist richtig gewesen und
+    unbrauchbar: wer die Geraeteliste liest, sieht „Sonstige" und weiss
+    nichts. Steuerlogik haengt daran nicht und soll nicht daran haengen —
+    der Sollwert eines Allgemeinbereichs kommt aus dem **Raumtyp**, nicht
+    aus der Zonen-Art. Einzige Ausnahme im Bestand ist ``BATHROOM``, das
+    die Bad-Vorlage auswaehlt (18.10.2026); genau dieses Muster soll sich
+    nicht wiederholen, bis es jemand braucht und begruendet (S6).
+
+    Die Spalte ist ``VARCHAR(20)`` **ohne** CHECK (am Schema nachgesehen,
+    nicht aus einer Lesson uebernommen) — ein neuer Wert braucht also
+    keine Migration. Bei ``DeviceKind`` lag es in Sprint 24b genauso, bei
+    ``OverrideSource`` nicht.
+    """
 
     BEDROOM = "bedroom"
     BATHROOM = "bathroom"
     LIVING = "living"
     HALLWAY = "hallway"
+    COMMON_AREA = "common_area"
     OTHER = "other"
 
 
@@ -204,6 +220,12 @@ class OverrideSource(enum.StrEnum):
                       ueber einen ``0x28``-Frame (FW >= 3.5, Sprint 20f T1/T2).
                       Ablauf **24 h**.
     ``frontend_24h``  Rezeption setzt "fuer 24 Stunden". Ablauf now + 24 h.
+    ``frontend_bereich``  Rezeption setzt einen Wert fuer einen
+                      **Allgemeinbereich** (Bar, Rezeption, Spa — ein
+                      Zimmer mit nicht buchbarem Raumtyp). Ablauf aus der
+                      gewaehlten Dauer, Vorschlag 4 h, Hoechstmass 24 h.
+                      Braucht **keine** Belegung; ein Bereich hat keine.
+                      Sprint 24d, S6.
     ``frontend_checkout``  Rezeption setzt "bis Check-out". Ablauf
                       ``next_checkout_at``.
     ``frontend_4h``   **Historisch.** Rezeption setzte "fuer 4 Stunden",
@@ -242,6 +264,7 @@ class OverrideSource(enum.StrEnum):
     DEVICE = "device"
     DEVICE_MANUAL = "device_manual"
     FRONTEND_24H = "frontend_24h"
+    FRONTEND_BEREICH = "frontend_bereich"
     FRONTEND_CHECKOUT = "frontend_checkout"
     #: Historisch, seit Fix A (20.10.2026) nicht mehr waehlbar. Bleibt als
     #: Wert erhalten, weil die Historie ihre Etiketten braucht.

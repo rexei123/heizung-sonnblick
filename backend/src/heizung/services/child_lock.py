@@ -38,6 +38,8 @@ die jüngste Zeile, **die das Feld führt** — dieselbe Regel wie bei
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import select
@@ -51,24 +53,58 @@ from heizung.models.sensor_reading import SensorReading
 ChildLockState = Literal["bestaetigt", "ausstehend", "fehlgeschlagen"]
 
 
-def child_lock_state(*, measure_only: bool, gemeldet: bool | None) -> ChildLockState:
+def child_lock_state(
+    *,
+    measure_only: bool,
+    gemeldet: bool | None,
+    gemeldet_um: datetime | None = None,
+    befehl_um: datetime | None = None,
+) -> ChildLockState:
     """Vergleicht gewollt gegen gemeldet. Reine Funktion.
 
     ``gemeldet is None`` heißt „keine Zeile, die das Feld führt" — nicht
     „Rad frei". Der Unterschied ist der ganze Grund für ``ausstehend``:
     ein Gerät, von dem wir nichts gehört haben, hat die Sperre nicht
     verweigert.
+
+    **Und eine Meldung, die älter ist als der Befehl, ist keine Antwort
+    darauf** (Befund des Betreibers, 24.10.2026). Direkt nach dem
+    Umschalten auf „nur messen" ist die jüngste Meldung die vom Keepalive
+    **davor**: sie sagt „Rad frei", und das war bis zur Sekunde vorher
+    richtig. Ohne den Zeitvergleich stand dort ein roter Befund im
+    Normalfall — und ein Melder, der im Normalfall rot zeigt, wird nach
+    einer Woche nicht mehr gelesen (§5.79).
+
+    Fehlt eine der beiden Zeiten, wird nicht geraten: dann urteilt die
+    Funktion wie vorher. ``befehl_um is None`` heißt „kein Befehl bekannt"
+    (Bestandsgeräte vor Migration 0033), ``gemeldet_um is None`` heißt,
+    der Aufrufer hat die Zeit nicht mitgegeben.
     """
     if gemeldet is None:
+        return "ausstehend"
+    if befehl_um is not None and gemeldet_um is not None and gemeldet_um <= befehl_um:
         return "ausstehend"
     gewollt = measure_only
     return "bestaetigt" if gemeldet == gewollt else "fehlgeschlagen"
 
 
+@dataclass(frozen=True, slots=True)
+class Sperrmeldung:
+    """Was das Gerät gemeldet hat — **und wann**.
+
+    Die Zeit war in der ersten Fassung (24c) nicht dabei, und genau sie
+    fehlte: ohne sie ist eine Meldung von vor dem Befehl nicht von einer
+    Ablehnung zu unterscheiden.
+    """
+
+    gesperrt: bool
+    gemeldet_um: datetime
+
+
 async def child_lock_verdicts(
     session: AsyncSession,
     device_ids: Sequence[int],
-) -> dict[int, bool | None]:
+) -> dict[int, Sperrmeldung | None]:
     """Der jüngste gemeldete Sperr-Zustand je Gerät, in **einer** Abfrage.
 
     Dieselbe Form wie ``battery_verdicts`` und ``valve_verdicts``: die
@@ -80,7 +116,7 @@ async def child_lock_verdicts(
     fehlender Schlüssel wäre für den Aufrufer nicht von „keine Meldung"
     zu unterscheiden, und dann müsste er raten.
     """
-    ergebnis: dict[int, bool | None] = dict.fromkeys(device_ids)
+    ergebnis: dict[int, Sperrmeldung | None] = dict.fromkeys(device_ids)
     if not device_ids:
         return ergebnis
 
@@ -90,18 +126,20 @@ async def child_lock_verdicts(
     # sonst käme für ein Gerät, dessen jüngste Zeile das Feld nicht führt,
     # ``None`` heraus, obwohl die Zeile davor es führt.
     stmt = (
-        select(SensorReading.device_id, SensorReading.child_lock)
+        select(SensorReading.device_id, SensorReading.child_lock, SensorReading.time)
         .where(SensorReading.device_id.in_(list(device_ids)))
         .where(SensorReading.child_lock.is_not(None))
         .order_by(SensorReading.device_id, SensorReading.time.desc())
         .distinct(SensorReading.device_id)
     )
-    for device_id, gesperrt in (await session.execute(stmt)).tuples().all():
-        ergebnis[device_id] = gesperrt
+    for device_id, gesperrt, gemeldet_um in (await session.execute(stmt)).tuples().all():
+        if gesperrt is None:
+            continue
+        ergebnis[device_id] = Sperrmeldung(gesperrt=gesperrt, gemeldet_um=gemeldet_um)
     return ergebnis
 
 
-async def child_lock_verdict(session: AsyncSession, device_id: int) -> bool | None:
+async def child_lock_verdict(session: AsyncSession, device_id: int) -> Sperrmeldung | None:
     """Einzel-Variante für die Detail-Ansicht.
 
     Gegenstück zu den ``_verdict_fuer``-Helfern in ``api/v1/devices.py``:

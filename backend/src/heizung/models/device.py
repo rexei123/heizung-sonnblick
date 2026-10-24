@@ -149,6 +149,18 @@ class Device(Base):
         Boolean, nullable=False, server_default="false", default=False
     )
 
+    # Sprint 24d: **wann** die Kindersicherung gesendet wurde.
+    #
+    # Ohne diese Zeit ist eine alte Antwort nicht von einer Ablehnung zu
+    # unterscheiden. Direkt nach dem Umschalten ist die juengste Meldung
+    # die vom Keepalive davor; sie sagt „Rad frei", und das war bis zur
+    # Sekunde vorher richtig. Die Geraeteseite zeigte deshalb einen roten
+    # Befund im Normalfall (Befund des Betreibers, 24.10.2026).
+    #
+    # ``NULL`` heisst „kein Befehl bekannt" — fuer Geraete, die vor der
+    # Migration 0033 umgeschaltet wurden.
+    child_lock_commanded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # S2 / Paket C: Waechter-Strategie je Relais. Vorgabe ist
     # ``expire_and_resend``; ``refresh`` ist gebaut, aber bewusst nicht
     # die Vorgabe (Begruendung im Enum-Docstring).

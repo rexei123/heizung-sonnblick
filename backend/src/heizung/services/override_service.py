@@ -30,6 +30,7 @@ from heizung.models.enums import OverrideSource, RoomStatus
 from heizung.models.global_config import GlobalConfig
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
+from heizung.models.room_type import RoomType
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services.occupancy_service import derive_room_status
 
@@ -38,6 +39,18 @@ logger = logging.getLogger(__name__)
 MIN_SETPOINT = Decimal("5.0")
 MAX_SETPOINT = Decimal("30.0")
 HARD_MAX_DURATION_DAYS = 7
+
+#: Hoechstmass fuer die Uebersteuerung eines Allgemeinbereichs (Sprint 24d).
+#: 24 Stunden, Entscheidung des Betreibers. **Abgewiesen, nicht gekappt:**
+#: wer acht Tage eingibt, hat sich vertippt oder etwas anderes gemeint, und
+#: eine stille Kuerzung auf 24 h waere eine Antwort auf eine Frage, die
+#: niemand gestellt hat. Der 7-Tage-Hard-Cap (`_hard_cap`) bleibt als
+#: letzte Grenze darueber, greift hier aber nie.
+BEREICH_MAX_MINUTEN = 24 * 60
+
+#: Vorschlag in der Oberflaeche. Vier Stunden ist die Laenge einer
+#: Veranstaltung, nicht die eines Aufenthalts.
+BEREICH_VORSCHLAG_MINUTEN = 4 * 60
 HISTORY_LIMIT_CAP = 200
 DEFAULT_TIMEZONE = "Europe/Vienna"
 
@@ -135,6 +148,55 @@ class RoomNotOccupiedError(OverrideError):
         return {"room_id": self.room_id}
 
 
+class BereichsQuelleFalschError(OverrideError):
+    """Sprint 24d (S6): die Bereichs-Quelle passt nicht zum Zimmer.
+
+    Zwei Richtungen, ein Fehler:
+
+    * ``frontend_bereich`` an einem **buchbaren** Raumtyp. Das waere eine
+      Uebersteuerung ohne Belegung in einem Gaestezimmer und damit die
+      Umgehung von AE-58 — genau das, was Mutationsprobe M22 angreift.
+      Ein Gast, dessen Zimmer leer gemeldet ist, soll nicht ueber eine
+      andere Quelle doch einen Sollwert bekommen.
+    * eine **andere** ``frontend_*``-Quelle an einem Allgemeinbereich.
+      Dort greift das Belegungs-Gate und weist sie ab; die Meldung sagt
+      dann nur „nicht belegt", und das ist fuer eine Bar keine
+      brauchbare Auskunft. Deshalb ein eigener Fehler mit dem Hinweis,
+      welche Quelle gemeint ist.
+
+    Die Unterscheidung an der Quelle und nicht am Zimmertyp allein ist
+    Absicht: so bleibt der Pfad fuer Drehrad-Overrides (``device``,
+    ``device_manual``) in einem Bereich **unveraendert** abgewiesen. Ein
+    Gast, der in der Bar an einem Rad dreht, erzeugt weiter keinen
+    Override — das war vor diesem Sprint so und bleibt so.
+    """
+
+    error_code: ClassVar[str] = "OVERRIDE_SOURCE_MISMATCH"
+    http_status: ClassVar[int] = 409
+
+    def __init__(self, room_id: int, source: OverrideSource, *, ist_bereich: bool) -> None:
+        self.room_id = room_id
+        self.source = source
+        self.ist_bereich = ist_bereich
+        if ist_bereich:
+            text = (
+                f"Zimmer {room_id} ist ein Allgemeinbereich. Eine Uebersteuerung "
+                f"braucht dort die Quelle '{OverrideSource.FRONTEND_BEREICH.value}' "
+                f"mit einer Dauer, nicht '{source.value}'."
+            )
+        else:
+            text = (
+                f"Zimmer {room_id} ist ein Gaestezimmer. "
+                f"'{OverrideSource.FRONTEND_BEREICH.value}' gilt nur fuer "
+                "Allgemeinbereiche (nicht buchbarer Raumtyp); hier gilt weiter: "
+                "Uebersteuerung nur bei Belegung."
+            )
+        super().__init__(text)
+
+    def response_extras(self) -> dict[str, Any]:
+        return {"room_id": self.room_id, "ist_allgemeinbereich": self.ist_bereich}
+
+
 class RoomOverrideBlockedError(OverrideError):
     """Sprint 12c (AE-58): Override-Anlage wird abgewiesen, wenn das Zimmer
     die Uebersteuerungs-Sperre (``room.guest_override_blocked = True``) gesetzt
@@ -216,6 +278,7 @@ def compute_expires_at(
     *,
     next_checkout_at: datetime | None = None,
     hotel_config: GlobalConfig | None = None,
+    dauer_minuten: int | None = None,
 ) -> datetime:
     """Default-Ablauf je Quelle, anschliessend 7-Tage-Hard-Cap.
 
@@ -248,7 +311,29 @@ def compute_expires_at(
     Parameter heisst ``hotel_config`` (Plan-Wording), Typ ist projekt-
     seitig ``GlobalConfig``. Multi-Hotel kommt erst Sprint 11+.
     """
-    if source in (
+    if source == OverrideSource.FRONTEND_BEREICH:
+        # Sprint 24d (S6): die Dauer steckt hier **nicht** im Namen der
+        # Quelle, sondern in der Anfrage. Ein Allgemeinbereich wird fuer
+        # eine Veranstaltung warm gemacht, und die dauert zwei Stunden
+        # oder sechs — nicht immer 24.
+        #
+        # ``None`` ist deshalb ein Vertragsbruch des Aufrufers und kein
+        # Vorgabewert: ohne Ablauf waere die Uebersteuerung eines
+        # Bereichs unbefristet, und niemand bemerkt eine Bar, die
+        # durchheizt. Das Schema weist das schon mit 422 ab; hier steht
+        # die zweite Haelfte derselben Zusicherung, damit sie auch fuer
+        # einen Aufrufer gilt, der nicht durch das Schema kommt.
+        if dauer_minuten is None:
+            raise ValueError(
+                f"dauer_minuten ist Pflicht fuer source={source.value} "
+                "— eine Bereichs-Uebersteuerung ohne Ablauf gibt es nicht"
+            )
+        if dauer_minuten < 1 or dauer_minuten > BEREICH_MAX_MINUTEN:
+            raise ValueError(
+                f"dauer_minuten={dauer_minuten} liegt ausserhalb [1, {BEREICH_MAX_MINUTEN}] Minuten"
+            )
+        raw = now + timedelta(minutes=dauer_minuten)
+    elif source in (
         OverrideSource.FRONTEND_24H,
         OverrideSource.DEVICE,
         OverrideSource.DEVICE_MANUAL,
@@ -288,6 +373,50 @@ def compute_expires_at(
 
     capped, _ = _hard_cap(raw, now)
     return capped
+
+
+#: Die Quellen, die aus der Oberflaeche kommen. Einmal hier, weil das
+#: Gate in ``create`` sie braucht und der Spiegel-Test sie gegen den
+#: ``Literal`` im Schema haelt — zwei Aufzaehlungen derselben Menge laufen
+#: beim naechsten neuen Wert auseinander, und dieser Fall hat am 21.10.2026
+#: die Rezeption 44 Stunden gekostet (§5.83).
+_FRONTEND_QUELLEN: frozenset[OverrideSource] = frozenset(
+    {
+        OverrideSource.FRONTEND_24H,
+        OverrideSource.FRONTEND_CHECKOUT,
+        OverrideSource.FRONTEND_4H,
+        OverrideSource.FRONTEND_MIDNIGHT,
+        OverrideSource.FRONTEND_BEREICH,
+    }
+)
+
+
+def _kappe_an_raumtyp(setpoint: Decimal, raumtyp: RoomType | None) -> Decimal:
+    """Kappt den Wunschwert an den Grenzen des Raumtyps (Sprint 24d).
+
+    **Warum schon beim Anlegen und nicht erst in Layer 5.** Die Engine
+    kappt den Sollwert ohnehin (``clamp_grenzen``), die Zeile in
+    ``manual_override`` traegt aber den rohen Wunsch. Fuer ein
+    Gaestezimmer ist das in Ordnung — dort steht der Gastwunsch, und die
+    Kappung ist eine Eigenschaft der Regelung. Fuer einen Bereich setzt
+    die Rezeption den Wert selbst und sieht die Antwort: steht in der
+    Historie 28 und im Trace 25, sieht das nach einem Fehler aus.
+
+    **Nur fuer Bereiche.** Dieselbe Kappung fuer Gaestezimmer nachzuziehen
+    waere eine Verhaltensaenderung an einem Pfad, den dieser Sprint nicht
+    anfassen soll (harter Stopp im Brief) — und sie wuerde den
+    aufgezeichneten Gastwunsch verfaelschen.
+
+    ``None``-Grenzen heissen „keine eigene Grenze"; dann bleibt der Wert,
+    wie er ist. Die System-Grenzen 5..30 hat der Aufrufer schon geprueft.
+    """
+    if raumtyp is None:
+        return setpoint
+    if raumtyp.min_temp_celsius is not None and setpoint < raumtyp.min_temp_celsius:
+        return _quantize(raumtyp.min_temp_celsius)
+    if raumtyp.max_temp_celsius is not None and setpoint > raumtyp.max_temp_celsius:
+        return _quantize(raumtyp.max_temp_celsius)
+    return setpoint
 
 
 async def create(
@@ -353,9 +482,31 @@ async def create(
     # BLOCKED laufen auf globalen Einstellungen + Frostschutz, keine Override-
     # Ausnahmen. ``derive_room_status`` ist die canonical Quelle (aus aktiven
     # Occupancies abgeleitet), ``room.status``-Feld koennte stale sein.
-    room_status = await derive_room_status(session, room_id, now)
-    if room_status != RoomStatus.OCCUPIED:
-        raise RoomNotOccupiedError(room_id, room_status)
+    #
+    # **Sprint 24d (S6): Allgemeinbereiche gehen einen anderen Weg.** Ein
+    # Zimmer mit nicht buchbarem Raumtyp hat keine Belegung; das Gate
+    # oben wuerde dort **jede** Uebersteuerung abweisen, und genau das
+    # war bis zum 24.10.2026 der Zustand. Fuer diese Zimmer entscheidet
+    # deshalb der Raumtyp und nicht der Belegungsstatus.
+    #
+    # Die Unterscheidung haengt an der **Quelle** und nicht am Zimmer
+    # allein, damit der Drehrad-Pfad unberuehrt bleibt: ``device`` und
+    # ``device_manual`` laufen weiter in das Belegungs-Gate und werden in
+    # einem Bereich weiter abgewiesen. Wer in der Bar an einem Rad dreht,
+    # erzeugt also keinen Override — wie vorher.
+    raumtyp = await session.get(RoomType, room.room_type_id)
+    ist_bereich = raumtyp is not None and not raumtyp.is_bookable
+
+    if source == OverrideSource.FRONTEND_BEREICH:
+        if not ist_bereich:
+            raise BereichsQuelleFalschError(room_id, source, ist_bereich=False)
+        quantized = _kappe_an_raumtyp(quantized, raumtyp)
+    elif ist_bereich and source in _FRONTEND_QUELLEN:
+        raise BereichsQuelleFalschError(room_id, source, ist_bereich=True)
+    else:
+        room_status = await derive_room_status(session, room_id, now)
+        if room_status != RoomStatus.OCCUPIED:
+            raise RoomNotOccupiedError(room_id, room_status)
 
     # Sprint 12 T4 (AE-52): Pre-Insert Window-Check. Wenn mindestens eine
     # Zone des Raums Fenster offen meldet, wird der Override abgewiesen
@@ -434,6 +585,7 @@ _QUELLEN_RANG: dict[OverrideSource, int] = {
     OverrideSource.FRONTEND_4H: 0,
     OverrideSource.FRONTEND_MIDNIGHT: 0,
     OverrideSource.FRONTEND_24H: 0,
+    OverrideSource.FRONTEND_BEREICH: 0,
     OverrideSource.FRONTEND_CHECKOUT: 0,
 }
 

@@ -169,6 +169,21 @@ def test_create_schema_nennt_nur_echte_enum_werte() -> None:
     assert erlaubt <= py, f"im Literal, aber kein Enum-Wert: {sorted(erlaubt - py)}"
 
 
+#: Quellen, die die Union fuehrt, ohne im Dauer-Array des Panels zu stehen —
+#: mit dem Grund, warum sie dort nicht hingehoeren.
+#:
+#: ``frontend_bereich`` (Sprint 24d) ist **keine Dauer-Auswahl**: in einem
+#: Allgemeinbereich waehlt die Rezeption Minuten, und die Quelle folgt aus
+#: dem Raumtyp. Sie steht deshalb im Code des Formulars und nicht in
+#: ``FRONTEND_SOURCES``.
+#:
+#: Die Liste ist eine **Ausnahmeliste und kein Schlupfloch**: wer hier einen
+#: Wert eintraegt, nimmt ihn aus der Pruefung unten heraus, und das soll
+#: wehtun. Jeder Eintrag braucht den Satz, warum die Rezeption ihn nicht
+#: auswaehlt.
+NICHT_IN_DER_DAUER_AUSWAHL = {"frontend_bereich"}
+
+
 def test_waehlbare_dauern_sind_frontend_quellen() -> None:
     """Das Array im Panel passt zu seiner eigenen Union.
 
@@ -178,9 +193,25 @@ def test_waehlbare_dauern_sind_frontend_quellen() -> None:
     """
     waehlbar = set(frontend_waehlbare_dauern())
     union = _ts_union(TYPES_TS, "FrontendOverrideSource")
+    erwartet = union - NICHT_IN_DER_DAUER_AUSWAHL
 
-    assert waehlbar == union, (
-        f"nur in der Union: {sorted(union - waehlbar)} | nur im Array: {sorted(waehlbar - union)}"
+    assert waehlbar == erwartet, (
+        f"nur in der Union: {sorted(erwartet - waehlbar)} | "
+        f"nur im Array: {sorted(waehlbar - erwartet)}"
+    )
+
+
+def test_jede_ausnahme_steht_in_der_union() -> None:
+    """Die Ausnahmeliste altert nicht unbemerkt.
+
+    Verschwindet ``frontend_bereich`` eines Tages aus der Union, bleibt
+    hier ein Eintrag stehen, der eine Pruefung lockert, die er nicht mehr
+    lockern muss — ein Vermerk, der einmal richtig war und dann nicht mehr
+    (§5.77).
+    """
+    union = _ts_union(TYPES_TS, "FrontendOverrideSource")
+    assert union >= NICHT_IN_DER_DAUER_AUSWAHL, (
+        f"Ausnahme ohne Union-Wert: {sorted(NICHT_IN_DER_DAUER_AUSWAHL - union)}"
     )
 
 
@@ -201,13 +232,35 @@ def test_compute_expires_at_kennt_jede_quelle() -> None:
     ``frontend_checkout`` braucht ``next_checkout_at`` — ohne den ist
     ``ValueError`` das **gewollte** Verhalten (AE-58, das OCCUPIED-Gate
     garantiert den Wert). Deshalb wird er mitgegeben.
+
+    ``frontend_bereich`` braucht aus demselben Grund ``dauer_minuten``
+    (Sprint 24d): dort steckt die Frist in der Anfrage und nicht im Namen
+    der Quelle. Beide Pflicht-Angaben werden hier mitgegeben, damit der
+    Test die Frage „hat jede Quelle eine Frist?" beantwortet und nicht die
+    Frage „sind die Pflicht-Angaben gesetzt?" — die steht eigens unten.
     """
     now = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
     checkout = now + timedelta(days=1)
 
     for quelle in OverrideSource:
-        frist = override_service.compute_expires_at(quelle, now, next_checkout_at=checkout)
-        assert frist > now, f"{quelle.value}: Frist liegt nicht in der Zukunft ({frist})"
+        frist = override_service.compute_expires_at(
+            quelle, now, next_checkout_at=checkout, dauer_minuten=120
+        )
+        assert frist > now, f"{quelle.value}: Frist liegt nicht in der Zukunft ({quelle}: {frist})"
+
+
+def test_dauer_gilt_nur_fuer_die_bereichs_quelle() -> None:
+    """``dauer_minuten`` darf keine andere Quelle verbiegen.
+
+    Der Test oben gibt die Dauer **allen** Quellen mit, damit er nur die
+    Frist prueft. Genau das koennte eine Aenderung verdecken, die
+    ``dauer_minuten`` versehentlich auf jede Quelle anwendet — dann waere
+    die 24-Stunden-Wahl der Rezeption ploetzlich zwei Stunden lang.
+    """
+    now = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
+    mit = override_service.compute_expires_at(OverrideSource.FRONTEND_24H, now, dauer_minuten=120)
+    ohne = override_service.compute_expires_at(OverrideSource.FRONTEND_24H, now)
+    assert mit == ohne == now + timedelta(hours=24)
 
 
 # ---------------------------------------------------------------------------

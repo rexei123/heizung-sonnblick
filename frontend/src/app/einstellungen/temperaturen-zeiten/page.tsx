@@ -12,6 +12,7 @@
  */
 
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -24,6 +25,7 @@ import {
 } from "@/lib/api/hooks-rule-configs";
 import type { RuleConfigGlobalUpdate } from "@/lib/api/types";
 import { useAuth } from "@/contexts/auth-context";
+import { fetchHausstandardNutzung } from "@/lib/api/hausstandard";
 import { darfKonfigurationAendern } from "@/lib/auth/rechte";
 
 const tempValidator = (min: number, max: number) =>
@@ -58,6 +60,27 @@ function formatMinutes(v: number): string {
   return `${v} Min`;
 }
 
+/** „nicht festgelegt" statt einer Zahl, die niemand eingetragen hat. */
+const NICHT_FESTGELEGT = "nicht festgelegt — Raumtyp entscheidet";
+
+/**
+ * Hüllt einen Formatierer so ein, dass ein leerer Wert als Satz erscheint.
+ *
+ * Der Umweg über ``""`` statt ``null`` ist die Form, die
+ * ``InlineEditCell`` annimmt (``T extends string | number``) — und sie hat
+ * den erwünschten Nebeneffekt, dass das Eingabefeld leer startet und nicht
+ * mit einem Wert, den der Nutzer erst löschen müsste.
+ */
+function offenOder<T extends string | number>(
+  format: (v: T) => string,
+): (v: T | "") => string {
+  // ``v`` ist hier entweder der leere String (Feld nicht festgelegt) oder
+  // ein Wert des erwarteten Typs. Die Einengung geschieht zur Laufzeit
+  // ueber den Vergleich; TypeScript kann sie ueber die Generik nicht
+  // mitfuehren, weil ``""`` fuer ``T = number`` kein Teiltyp ist.
+  return (v: T | "") => (v === "" ? NICHT_FESTGELEGT : format(v as T));
+}
+
 export default function TemperaturenZeitenPage() {
   const cfg = useGlobalRuleConfig();
   // Sprint 22 T4: `PATCH /rule-configs/global` ist `require_admin`
@@ -82,6 +105,40 @@ export default function TemperaturenZeitenPage() {
     setErrorToast(null);
     await updateMut.mutateAsync(payload);
     showSuccess();
+  };
+
+  // Sprint 24d: wie viele Raumtypen und Zimmer diesen Wert wirklich nehmen.
+  //
+  // Ohne diese Zahl ist nicht zu sehen, ob eine Änderung hier 45 Zimmer
+  // bewegt oder keines — und am 24.10.2026 war der Fall eindeutig: zwei
+  // der Felder waren leer, und die Seite zeigte trotzdem Zahlen.
+  const nutzung = useQuery({
+    queryKey: ["hausstandard-nutzung"],
+    queryFn: fetchHausstandardNutzung,
+  });
+
+  const hinweis = (feld: string, grund: string): string => {
+    const n = nutzung.data?.find((x) => x.feld === feld);
+    if (n === undefined) {
+      return grund;
+    }
+    const teile = [grund];
+    if (n.raumtypen_eigen > 0) {
+      teile.push(
+        `${n.raumtypen_nutzen} Raumtyp${n.raumtypen_nutzen === 1 ? "" : "en"} ` +
+          `nehmen diesen Wert, ${n.raumtypen_eigen} ` +
+          `${n.raumtypen_eigen === 1 ? "hat" : "haben"} einen eigenen.`,
+      );
+    } else {
+      teile.push(`Alle ${n.raumtypen_nutzen} Raumtypen nehmen diesen Wert.`);
+    }
+    if (n.zimmer_eigen > 0) {
+      teile.push(
+        `${n.zimmer_eigen} Zimmer ${n.zimmer_eigen === 1 ? "hat" : "haben"} ` +
+          "eine eigene Einstellung und bleiben unberührt.",
+      );
+    }
+    return teile.join(" ");
   };
 
   if (cfg.isLoading) {
@@ -120,11 +177,26 @@ export default function TemperaturenZeitenPage() {
     <div className="p-6 max-w-content mx-auto">
       <header className="mb-6">
         <h1 className="text-2xl font-medium text-text-primary">
-          Temperaturen & Zeiten
+          Hausstandard — gilt nur, wenn Zimmer oder Raumtyp nichts vorgeben
         </h1>
         <p className="text-sm text-text-secondary mt-1">
-          Globale Sollwerte und Zeitfenster der Heizungssteuerung. Engine
-          übernimmt Änderungen beim nächsten Tick (≤ 60 s).
+          Die Regelung löst jeden Wert in der Reihenfolge{" "}
+          <strong>Zimmer → Raumtyp → Hausstandard</strong> auf. Was hier
+          steht, wirkt also nur dort, wo nichts Näheres gesagt ist. Engine
+          übernimmt Änderungen beim nächsten Durchlauf (≤ 60 s).
+        </p>
+        {/* Sprint 24d: der Satz, der die Seite ehrlich macht. Bis zum
+            24.10.2026 zeigten „Zimmer belegt" und „Zimmer frei" die Zahlen
+            21,0 und 18,0, obwohl beide Felder **leer** sind — die Anzeige
+            setzte einen Vorgabewert ein, der wie eine Einstellung aussah.
+            Ein Speichern hätte ihn wirksam gemacht und jeden Raumtyp
+            überstimmt (§5.77: ein Hinweis, der eine Wirkung behauptet, die
+            es nicht gibt). */}
+        <p className="text-sm text-text-secondary mt-2">
+          Ein leeres Feld heißt <em>nicht festgelegt</em> und ist kein
+          Versäumnis: dann entscheidet der Raumtyp. Wer es ausfüllt,
+          übersteuert damit <strong>alle</strong> Raumtypen, die den Wert
+          nicht selbst setzen.
         </p>
       </header>
 
@@ -165,14 +237,14 @@ export default function TemperaturenZeitenPage() {
           <SettingsList>
             <SettingRow
               label="Nachtabsenkung Start"
-              hint="Beginn des Nachtfensters (HH:MM, lokale Zeit)."
+              hint={hinweis("night_start", "Beginn des Nachtfensters (HH:MM, lokale Zeit).")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.night_start ?? "00:00:00"}
+                value={data.night_start ?? ""}
                 variant="time"
                 validator={timeValidator}
-                format={formatTime}
+                format={offenOder(formatTime)}
                 ariaLabel="Nachtabsenkung Start"
                 onSave={(v) => saveField({ night_start: v })}
                 onSaveError={setErrorToast}
@@ -180,14 +252,14 @@ export default function TemperaturenZeitenPage() {
             </SettingRow>
             <SettingRow
               label="Nachtabsenkung Ende"
-              hint="Ende des Nachtfensters. Über Mitternacht erlaubt."
+              hint={hinweis("night_end", "Ende des Nachtfensters. Über Mitternacht erlaubt.")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.night_end ?? "06:00:00"}
+                value={data.night_end ?? ""}
                 variant="time"
                 validator={timeValidator}
-                format={formatTime}
+                format={offenOder(formatTime)}
                 ariaLabel="Nachtabsenkung Ende"
                 onSave={(v) => saveField({ night_end: v })}
                 onSaveError={setErrorToast}
@@ -195,14 +267,14 @@ export default function TemperaturenZeitenPage() {
             </SettingRow>
             <SettingRow
               label="Vorheizen vor Check-In"
-              hint="Minuten vor Anreise, ab denen das Zimmer auf Belegt-Sollwert vorgeheizt wird."
+              hint={hinweis("preheat_minutes_before_checkin", "Minuten vor Anreise, ab denen das Zimmer auf Belegt-Sollwert vorgeheizt wird.")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.preheat_minutes_before_checkin ?? 90}
+                value={data.preheat_minutes_before_checkin ?? ""}
                 variant="number"
                 validator={preheatValidator}
-                format={formatMinutes}
+                format={offenOder(formatMinutes)}
                 ariaLabel="Vorheizen vor Check-In"
                 onSave={(v) =>
                   saveField({ preheat_minutes_before_checkin: v as number })
@@ -217,14 +289,14 @@ export default function TemperaturenZeitenPage() {
           <SettingsList>
             <SettingRow
               label="Zimmer belegt"
-              hint="Standard-Sollwert wenn Gast eingecheckt. Bereich 16–26 °C."
+              hint={hinweis("t_occupied", "Standard-Sollwert wenn Gast eingecheckt. Bereich 16–26 °C.")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.t_occupied ?? "21.0"}
+                value={data.t_occupied ?? ""}
                 variant="decimal"
                 validator={tempValidator(16, 26)}
-                format={formatCelsius}
+                format={offenOder(formatCelsius)}
                 ariaLabel="Zimmer belegt"
                 onSave={(v) => saveField({ t_occupied: v })}
                 onSaveError={setErrorToast}
@@ -232,14 +304,14 @@ export default function TemperaturenZeitenPage() {
             </SettingRow>
             <SettingRow
               label="Zimmer frei"
-              hint="Sollwert wenn Zimmer unbelegt. Bereich 10–22 °C."
+              hint={hinweis("t_vacant", "Sollwert wenn Zimmer unbelegt. Bereich 10–22 °C.")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.t_vacant ?? "18.0"}
+                value={data.t_vacant ?? ""}
                 variant="decimal"
                 validator={tempValidator(10, 22)}
-                format={formatCelsius}
+                format={offenOder(formatCelsius)}
                 ariaLabel="Zimmer frei"
                 onSave={(v) => saveField({ t_vacant: v })}
                 onSaveError={setErrorToast}
@@ -247,14 +319,14 @@ export default function TemperaturenZeitenPage() {
             </SettingRow>
             <SettingRow
               label="Nachtabsenkung"
-              hint="Sollwert im Nachtfenster bei belegtem Zimmer. Bereich 14–22 °C."
+              hint={hinweis("t_night", "Sollwert im Nachtfenster. Bereich 14–22 °C.")}
             >
               <InlineEditCell
           readOnly={!darfAendern}
-                value={data.t_night ?? "19.0"}
+                value={data.t_night ?? ""}
                 variant="decimal"
                 validator={tempValidator(14, 22)}
-                format={formatCelsius}
+                format={offenOder(formatCelsius)}
                 ariaLabel="Nachtabsenkung"
                 onSave={(v) => saveField({ t_night: v })}
                 onSaveError={setErrorToast}

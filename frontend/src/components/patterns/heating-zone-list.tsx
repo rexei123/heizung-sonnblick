@@ -27,6 +27,7 @@ const KINDS: HeatingZoneKind[] = [
   "bathroom",
   "living",
   "hallway",
+  "common_area",
   "other",
 ];
 const KIND_LABEL: Record<HeatingZoneKind, string> = {
@@ -34,6 +35,7 @@ const KIND_LABEL: Record<HeatingZoneKind, string> = {
   bathroom: "Bad",
   living: "Wohnen",
   hallway: "Flur",
+  common_area: "Allgemeinbereich",
   other: "Sonstige",
 };
 

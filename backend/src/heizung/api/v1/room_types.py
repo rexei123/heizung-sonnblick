@@ -6,6 +6,16 @@ CRUD:
     GET     /api/v1/room-types/{room_type_id}
     PATCH   /api/v1/room-types/{room_type_id}
     DELETE  /api/v1/room-types/{room_type_id}   — 409 wenn Raeume verknuepft
+
+Sprint 24d:
+    GET     /api/v1/room-types/sollwert-wirksamkeit
+    POST    /api/v1/room-types/{room_type_id}/sollwerte-uebernehmen
+
+**Die Reihenfolge der Routen ist nicht beliebig.** ``/{room_type_id}``
+traegt ``gt=0``; ein Aufruf von ``/sollwert-wirksamkeit`` wuerde daran mit
+422 scheitern, wenn die dynamische Route zuerst registriert ist. Die
+statische steht deshalb davor — dieselbe Falle wie bei den
+Playwright-Routen in Sprint 24b, nur eine Schicht tiefer.
 """
 
 from __future__ import annotations
@@ -20,7 +30,16 @@ from heizung.db import get_session
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.user import User
-from heizung.schemas.room_type import RoomTypeCreate, RoomTypeRead, RoomTypeUpdate
+from heizung.schemas.room_type import (
+    RoomTypeCreate,
+    RoomTypeRead,
+    RoomTypeUpdate,
+    SollwertUebernahme,
+    WirksamkeitFeld,
+    WirksamkeitRaumtyp,
+)
+from heizung.services import raumtyp_regel
+from heizung.services.business_audit_service import record_business_action
 
 # Postgres int4-Range. IDs > 2^31-1 wuerden DataError werfen → 500.
 INT4_MAX = 2_147_483_647
@@ -45,6 +64,125 @@ async def _get_or_404(session: AsyncSession, room_type_id: int) -> RoomType:
     return rt
 
 
+def _betrieb_gleichziehen(rt: RoomType) -> None:
+    """Bei einem Allgemeinbereich ist „Betrieb" der Frei-Wert — auch in der Spalte.
+
+    Die Raumtyp-Seite zeigt fuer einen nicht buchbaren Typ nur „Betrieb"
+    und „Nacht"; „Belegt" ist ausgeblendet, weil ein Bereich nie belegt
+    ist. Die Spalte ``default_t_occupied`` bleibt aber bestehen, und wer
+    sie stehenlaesst, haelt einen Wert, den niemand sieht und der bei
+    einem von Hand gesetzten Status ``occupied`` ploetzlich gilt.
+
+    Deshalb zieht das Speichern sie gleich. Eine Spalte, ein angezeigter
+    Wert, ein wirksamer Wert — sonst waere die Seite nach diesem Sprint
+    wieder eine Anzeige, die etwas anderes behauptet als die Engine tut
+    (§5.77, der Fehler, aus dem dieser Sprint entstanden ist).
+    """
+    if not rt.is_bookable:
+        rt.default_t_occupied = rt.default_t_vacant
+
+
+@router.get(
+    "/sollwert-wirksamkeit",
+    response_model=list[WirksamkeitRaumtyp],
+    summary="Vorschau: welcher Sollwert wirkt heute, welcher wuerde wirken",
+)
+async def sollwert_wirksamkeit(
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> list[WirksamkeitRaumtyp]:
+    """Die Diff-Tabelle als Abfrage, nicht als Behauptung in einer Doku.
+
+    Welche Werte in diesem Haus stehen, weiss nur dieses Haus. Eine
+    Tabelle im Sprint-Bericht waere eine Momentaufnahme meiner
+    Test-Datenbank (§5.79); diese Abfrage beantwortet die Frage am
+    Datenstand, an dem sie gestellt wird — und sie ist genau die
+    Vorschau, die die Admin-Aktion unten anbietet, bevor jemand sie
+    ausloest.
+    """
+    befunde = await raumtyp_regel.wirksamkeit(session)
+    return [
+        WirksamkeitRaumtyp(
+            room_type_id=b.room_type_id,
+            name=b.name,
+            is_bookable=b.is_bookable,
+            zeile_vorhanden=b.zeile_vorhanden,
+            wuerde_sich_aendern=b.wuerde_sich_aendern,
+            felder=[
+                WirksamkeitFeld(
+                    feld=f.feld,
+                    angezeigt=f.angezeigt,
+                    wirksam=f.wirksam,
+                    quelle=f.quelle,
+                )
+                for f in b.felder
+            ],
+        )
+        for b in befunde
+    ]
+
+
+@router.post(
+    "/{room_type_id}/sollwerte-uebernehmen",
+    response_model=SollwertUebernahme,
+    summary="Sollwerte dieses Raumtyps wirksam machen (Admin, mit Audit)",
+)
+async def sollwerte_uebernehmen(
+    room_type_id: int = RoomTypeIdPath,
+    admin: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> SollwertUebernahme:
+    """Die vorbereitete Freigabe-Aktion fuer **buchbare** Raumtypen.
+
+    Beim Speichern eines Gaestezimmer-Raumtyps entsteht bewusst keine
+    ``rule_config``-Zeile (Begruendung in ``services/raumtyp_regel``):
+    eine Aenderung an der Beschreibung wuerde sonst nebenbei die
+    Sollwerte von zwanzig Zimmern umstellen. Diese Aktion ist der
+    ausdrueckliche Weg — ein Aufruf je Raumtyp, mit Audit, nach der
+    Vorschau oben.
+
+    Fuer einen nicht buchbaren Typ ist sie unnoetig (das Speichern tut es
+    schon) und bleibt trotzdem erlaubt: sie ist dann der Weg, eine Zeile
+    nachzuziehen, die aus irgendeinem Grund fehlt.
+    """
+    rt = await _get_or_404(session, room_type_id)
+    vorher = await raumtyp_regel.lade_raumtyp_zeile(session, room_type_id)
+    altwert = (
+        {
+            "t_occupied": str(vorher.t_occupied) if vorher.t_occupied is not None else None,
+            "t_vacant": str(vorher.t_vacant) if vorher.t_vacant is not None else None,
+            "t_night": str(vorher.t_night) if vorher.t_night is not None else None,
+        }
+        if vorher is not None
+        else None
+    )
+
+    ergebnis = await raumtyp_regel.synchronisiere_raumtyp(session, rt, anlegen_erlaubt=True)
+
+    await record_business_action(
+        session,
+        user_id=admin.id,
+        action="ROOM_TYPE_SETPOINTS_APPLIED",
+        target_type="room_type",
+        target_id=room_type_id,
+        old_value=altwert,
+        new_value={
+            "ergebnis": ergebnis.value,
+            "t_occupied": str(rt.default_t_occupied),
+            "t_vacant": str(rt.default_t_vacant),
+            "t_night": str(rt.default_t_night),
+        },
+    )
+    await session.commit()
+    return SollwertUebernahme(
+        room_type_id=room_type_id,
+        ergebnis=ergebnis.value,
+        t_occupied=rt.default_t_occupied,
+        t_vacant=rt.default_t_vacant,
+        t_night=rt.default_t_night,
+    )
+
+
 @router.post(
     "",
     response_model=RoomTypeRead,
@@ -57,8 +195,15 @@ async def create_room_type(
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RoomType:
     rt = RoomType(**payload.model_dump())
+    _betrieb_gleichziehen(rt)
     session.add(rt)
     try:
+        # Sprint 24d: **kein** Nachziehen einer rule_config-Zeile hier.
+        # Fuer einen Allgemeinbereich hebt die Engine die Spalten ohnehin
+        # auf ROOM_TYPE-Rang (``rules.engine.bereichs_kette``); eine Zeile
+        # daneben waere eine zweite Wahrheit. Fuer ein Gaestezimmer ist der
+        # Vorrang eine Entscheidung des Betreibers und laeuft ueber
+        # ``POST /room-types/{id}/sollwerte-uebernehmen``.
         await session.commit()
     except IntegrityError as e:
         await session.rollback()
@@ -123,7 +268,14 @@ async def update_room_type(
         )
     for field, value in updates.items():
         setattr(rt, field, value)
+    _betrieb_gleichziehen(rt)
     try:
+        # Eine **vorhandene** Zeile wird nachgezogen — sie ist wirksam, und
+        # ein Formular, das sie stehenlaesst, zeigte danach einen Wert und
+        # die Engine naehme einen anderen. Eine neue entsteht hier nicht
+        # (Begruendung im POST oben).
+        if await raumtyp_regel.lade_raumtyp_zeile(session, rt.id) is not None:
+            await raumtyp_regel.synchronisiere_raumtyp(session, rt, anlegen_erlaubt=False)
         await session.commit()
     except IntegrityError as e:
         await session.rollback()
