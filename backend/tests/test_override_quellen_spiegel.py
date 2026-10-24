@@ -55,7 +55,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from heizung.models.enums import OverrideSource
+from heizung.models.enums import DeviceKind, OverrideSource
 from heizung.schemas.manual_override import FrontendOverrideSource
 from heizung.services import override_service
 
@@ -208,3 +208,30 @@ def test_compute_expires_at_kennt_jede_quelle() -> None:
     for quelle in OverrideSource:
         frist = override_service.compute_expires_at(quelle, now, next_checkout_at=checkout)
         assert frist > now, f"{quelle.value}: Frist liegt nicht in der Zukunft ({frist})"
+
+
+# ---------------------------------------------------------------------------
+# Naht 4: DeviceKind (Sprint 24b)
+# ---------------------------------------------------------------------------
+
+
+def test_device_kind_union_spiegelt_den_enum() -> None:
+    """``types.ts::DeviceKind`` kennt genau die Werte des Enums.
+
+    **Der Anlass ist ein Beinahe-Treffer.** ``relay`` kam mit Sprint 24
+    in den Python-Enum und fehlte in der TS-Union. Aufgefallen ist es
+    erst in Sprint 24b, als die Relais-Karte gegen ``"relay"`` verglich
+    und ``tsc`` „types have no overlap" meldete — also durch einen
+    Zufall, nicht durch eine Pruefung. Haette niemand verglichen, waere
+    die Luecke geblieben, und ein Relais haette auf der Geraeteseite die
+    Vicki-Kacheln gezeigt, die bei ihm alle leer sind.
+
+    Dasselbe Muster wie bei ``OverrideSource`` oben, und derselbe Grund:
+    die ``Record``-Maps sind typsicher, aber nur gegen **die Union**.
+    Eine veraltete Union ist in sich geschlossen und trotzdem falsch
+    (§5.63).
+    """
+    ts = _ts_union(TYPES_TS, "DeviceKind")
+    py = {a.value for a in DeviceKind}
+
+    assert ts == py, f"nur im Enum: {sorted(py - ts)} | nur in types.ts: {sorted(ts - py)}"

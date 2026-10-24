@@ -44,6 +44,7 @@ app: Celery = Celery(
         "heizung.tasks.occupancy_import_tasks",
         "heizung.tasks.occupancy_status_tasks",
         "heizung.tasks.pin_reminder_tasks",
+        "heizung.tasks.relay_tasks",
     ],
 )
 
@@ -73,6 +74,22 @@ app.conf.update(
     beat_schedule={
         "evaluate-due-rooms-every-60s": {
             "task": "heizung.evaluate_due_rooms",
+            "schedule": 60.0,
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 24b (Paket 3): der Relais-Orchestrator. Derselbe Takt wie
+        # die Engine-Auswertung, und zwar aus einem Grund: er liest deren
+        # Ergebnis (den HARD_CLAMP-Sollwert) und soll ihm nicht um
+        # Minuten nachlaufen.
+        #
+        # 60 s ist NICHT die Zahl der Downlinks. Gesendet wird nur bei
+        # einem Wechsel oder einer Wiederholung; die Mindestlauf- und
+        # Mindestpausenzeit von je 10 min lassen hoechstens drei
+        # Schaltzyklen je Stunde zu, also sechs Downlinks. Die Rechnung
+        # zur Sendezeit steht im Modul-Docstring von
+        # ``tasks/relay_tasks.py``.
+        "steuere-relais-zonen-every-60s": {
+            "task": "heizung.steuere_relais_zonen",
             "schedule": 60.0,
             "options": {"queue": "heizung_default"},
         },

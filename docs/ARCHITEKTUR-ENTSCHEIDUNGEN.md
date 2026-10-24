@@ -5840,3 +5840,149 @@ Schicht zum Gerät (der Orchestrator) und der Weg von ihr zum Menschen
 (die Oberfläche). S6 ist nicht umgesetzt, S8 ist erfüllt — die volle
 Suite ist grün, und kein bestehender Test wurde in seiner Erwartung
 geändert.
+
+## 10. Nachtrag Sprint 24b (24.10.2026): der Pilot läuft
+
+Sprint 24 endete mit „gebaut, aber nicht aufgerufen". Dieser Abschnitt
+hält fest, was 24b daraus gemacht hat, welche Befunde aus dem Realbetrieb
+dazukamen und was entschieden wurde.
+
+### 10.1 Paket F: endgültig nicht gebaut — Entscheidung des Betreibers
+
+**Allgemeinflächen werden je als eigenes Zimmer mit eigenem Raumtyp
+angelegt.** So ist es im Haus schon umgesetzt: „Bar" mit dem Raumtyp
+„Raum intern" (21 °C), „Rezeption" mit „Raum mit Exit" (19 °C), beide
+nicht buchbar, je eine Zone.
+
+Damit ist die Frage, die Paket F beantworten sollte, **weg** und nicht
+gelöst: es gibt keine zwei Zonen im selben Bereich mit verschiedenen
+Sollwerten, weil jeder Bereich sein eigenes Zimmer ist. Die vorhandene
+Auflösungskette `ROOM > ROOM_TYPE > GLOBAL` trägt das ohne jede
+Änderung — und sie trägt es besser als eine Zonen-Ebene, weil der
+Raumtyp auch Vorheizen, Nachtfenster und Grenzen mitbringt.
+
+**Die Bedingung, unter der die Frage zurückkommt:** ein Bereich, der
+**intern** verschiedene Sollwerte braucht und sich nicht sinnvoll in
+zwei Zimmer teilen lässt — etwa ein Saal, dessen Eingangsbereich kühler
+bleiben soll als die Sitzfläche, der aber als **ein** Raum belegt und
+abgerechnet wird. Dann ist der minimale Weg die Verallgemeinerung der
+Bad-Vorlage (§9.4), nicht ein Sollwert je Zone.
+
+S6, M6 und M8 (Übersteuerung in nicht buchbaren Räumen) gehen in einen
+späteren Sprint. Bis dahin gibt es in diesen Zimmern **keine**
+Übersteuerung über die Oberfläche; der Raumtyp bestimmt den Sollwert.
+
+### 10.2 Zwei Befunde aus dem Realbetrieb
+
+**Der Layer Geräte-Sicherheit zog die Pilot-Zimmer auf 10 °C.** Die
+unmontierten Fühler-Vickis (027 in „Bar", 056 in „Rezeption") melden
+`attached_backplate=false` — zu Recht, sie liegen auf dem Tisch. Die
+Schicht las daraus „alle Geräte abgenommen" und erzwang Frostschutz. Ein
+Pilot, dessen Soll auf 10 °C gezogen wird, heizt nie.
+
+Geräte mit der Rolle „nur messen" sind seit 24b in dieser Schicht nicht
+mehr dabei. **Herausgenommen, nicht als „attached" gezählt** — anders als
+der Montage-Nachweis aus Sprint 20e, und das ist eine Entscheidung mit
+Grund: die Semantik ist UND über alle Geräte, ein einziges „attached"
+verhindert den Trigger. Ein Fühler, der als attached zählt, hätte in
+einem gemischten Raum verhindert, dass ein **echtes** Thermostat
+Frostschutz bekommt, das wirklich von der Wand fällt. Das wäre eine
+Abschwächung der Sicherheit zugunsten eines Geräts, das kein Ventil hat.
+Test: `test_fuehler_verhindert_den_trigger_nicht`, Mutationsprobe M13.
+
+**Jedes Relais war dauerhaft `silent`.** Die Health-Berechnung fragte
+ausschließlich `sensor_reading` ab. Ein Relais schreibt in
+`relay_reading`, hatte dort also nie eine Zeile — `latest_time is None`,
+Basis-Zustand `silent`, und zwar unabhängig davon, wie zuverlässig es
+funkt. Eine Zone mit einem Relais wäre für immer `silent` gewesen, eine
+gemischte für immer `degraded`, und die Ampel des Hoteliers dauerhaft
+rot. Das ist §5.79 in der anderen Richtung: nicht ein Melder, der
+schweigt, sondern einer, der immer schreit — und dem deshalb niemand
+mehr glaubt. Ein Mangel aus Sprint 24, behoben in 24b.
+
+### 10.3 Analyse: Downlinks an abgenommene oder nicht-healthy Geräte
+
+Die Frage des Briefs, am Code beantwortet (`_get_zone_devices`,
+`tasks/engine_tasks.py`):
+
+| Zustand des Geräts | Bekommt Sollwert-Downlinks? |
+|---|---|
+| `health_state != "healthy"` (`silent`, `degraded`, `suspicious`) | **nein** — der Filter sitzt in `_get_zone_devices` |
+| `retired_at IS NOT NULL` | **nein** — Lifecycle-Filter (AE-57) |
+| `measure_only` | **nein**, seit Sprint 24 |
+| **abgenommen** (`attached_backplate=false`) und `healthy` | **ja** |
+
+Der letzte Fall ist der, auf den die Frage zielt, und die Antwort ist
+unbequem: ein abgenommenes Gerät, das weiter zuverlässig funkt, bleibt
+`healthy` und bekommt Downlinks. Es bekommt dann allerdings den
+**Frostschutz-Sollwert**, den die Geräte-Sicherheit gerade erzwungen hat
+— also 10 °C an ein Gerät, das auf dem Tisch liegt. Harmlos, aber
+Funkverkehr ohne Zweck.
+
+**Für 027 und 056 war das bis zum 24.10. der Zustand**: einer Zone
+zugeordnet, ohne Rolle, `healthy`, abgenommen. Sie bekamen also 10 °C
+geschickt, und das Zimmer wurde auf 10 °C geregelt. Mit der Rolle ist
+beides weg.
+
+**Nicht geändert wurde die Behandlung abgenommener Geräte im
+allgemeinen** (S8): ein Gästezimmer-Thermostat, das abfällt, bekommt
+weiterhin Frostschutz **und** den Downlink dazu. Das ist gewollt — der
+Downlink ist der Weg, auf dem das Ventil die Sicherheitsstellung
+erreicht.
+
+### 10.4 Entschiedene offene Punkte in 24b
+
+| Frage | Entscheidung | Begründung |
+|---|---|---|
+| Fühler in der Geräte-Sicherheit | **herausnehmen**, nicht „attached" | siehe 10.2 |
+| Tick-Intervall des Orchestrators | **60 s**, wie die Engine | Er liest deren Sollwert und soll ihm nicht um Minuten nachlaufen. Nicht die Zahl der Downlinks — gesendet wird nur bei Wechsel oder Wiederholung |
+| Schaltzustand unbekannt | **fragen** (`0xB1`), nicht schweigen | Der Wächter schaltet bei unbekanntem Zustand bewusst nicht ein. Das allein hätte ein frisches Relais **dauerhaft** stillgelegt: ohne Zustand kein Befehl, ohne Befehl keine Zeile. Gefunden hat das der Ende-zu-Ende-Test |
+| Regler sagt „unverändert" | **bisherigen Wunsch beibehalten** | Sonst sähe der Wächter im Totband bei jedem Tick einen AUS-Wunsch und schaltete ab, obwohl der Regler das Relais bewusst laufen lässt |
+| Zonen-Zustand bei mehreren Relais | **ein, sobald eines ein ist**, `seit` der **früheste** Beginn | Die sichere Richtung für Mindestlaufzeit und Zwangs-AUS. Beim spätesten zu rechnen würde die Mindestlaufzeit mit jedem versetzt zugeschalteten Panel neu starten |
+| Veraltungs-Fenster des Fühlers | **2,5 × `health_healthy_max_age_h`** | Ein einzelner verlorener Uplink soll keine Zone abschalten, zwei in Folge schon |
+| Erholungsmeldung des Geräts | hebt die Sperre **nicht** auf | Sonst wäre der ganze Mechanismus wirkungslos: ein Panel mit echtem Fehler liefe in eine Schleife aus Abschalten und Wiedereinschalten |
+| Audit beim Lesen | **nein**, nur bei Handlungen | Ein Lesezugriff auf den Relais-Stand ist kein Eingriff |
+
+### 10.5 Was die Werkzeuge gefunden haben, und ich nicht
+
+Sechs Fehler in diesem Sprint, jeder von einer Prüfung gefangen und
+keiner beim Entwerfen. Sie stehen hier, weil die Art der Fehler etwas
+über die Prüfungen sagt:
+
+1. **`watchdog_strategy` kam als String, der Wächter verglich mit `is`.**
+   Der Vergleich scheiterte still und fiel in den `else`-Zweig — also in
+   die **riskantere** `REFRESH`-Strategie, ohne dass sie jemand gewählt
+   hatte. Mein `type: ignore` hatte genau die Meldung unterdrückt, die
+   es gezeigt hätte. Gefunden: Ende-zu-Ende-Test.
+2. **Ein frisches Relais blieb dauerhaft stillgelegt** (siehe 10.4).
+   Gefunden: Ende-zu-Ende-Test.
+3. **`DeviceKind` im Frontend kannte `relay` nicht** — §5.63, derselbe
+   Fall wie `device_manual` in Sprint 20f. Gefunden: `tsc`, weil die
+   Relais-Karte zufällig gegen `"relay"` verglich. Seither hält ein
+   Spiegel-Test die Naht.
+4. **Die API-Pfade im Frontend trugen kein `/api/v1`.** Die Anfragen
+   gingen gegen die Next-App: 404. Gefunden: e2e-Test — ein Pfad ist ein
+   String, der Typprüfer sieht da nichts.
+5. **Die Admin-Probe war wertlos.** Unter `AUTH_ENABLED=false` liefert
+   `get_current_user` einen System-User mit Admin-Rechten; mein Test
+   ließ das Cookie weg und bekam 422 statt 403, weil die Endpunkt-Rümpfe
+   durchliefen. Die Mutationsprobe M12 wäre grün geblieben.
+6. **Zwei falsch-grüne Tests.** Eine Zusicherung prüfte die globale
+   Summe des Tasks statt die eigene Zone (§5.39), und ein e2e-Test
+   prüfte `toHaveCount(0)` auf eine Karte — was auch stimmt, wenn die
+   ganze Seite kaputt ist (§5.55).
+
+**Was daran auffällt:** die drei teuersten Fehler (1, 2, 5) waren alle
+Fälle, in denen etwas **still in die unsichere Richtung** fiel — eine
+riskantere Strategie, ein stillgelegtes Gerät, eine wirkungslose
+Rollenprüfung. Kein einziger davon hätte eine Fehlermeldung erzeugt.
+
+### 10.6 Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **T3.0** („previous state") | Pflicht-Stopp am Gerät, RUNBOOK §10aj Schritt 3. Bis dahin bleibt `REFRESH` gesperrt und `EXPIRE_AND_RESEND` ist der einzige Weg |
+| **S6** (Übersteuerung in nicht buchbaren Räumen) | späterer Sprint, mit M6 und M8 |
+| **Einheit der Gehäusetemperatur** | gestützte Annahme (die Doku nennt bei `0x60` und `0x72`/`0x73` °C), nicht belegt. Die Warnschwelle 40 ist in dieser Einheit gemeint |
+| **Zonenstatus bei gemischten Zonen** | Eine Zone mit Relais **und** Fühler ist `healthy`, sobald beide frisch melden. Ob das die Aussage ist, die der Hotelier erwartet, zeigt der Feldtest — eine Zone, deren **Relais** stumm ist, heißt dann `degraded`, und das ist richtig |
+| **Mail beim Schutz-Alarm** | `emit_relay_protection_alert` schreibt einen Logeintrag, kein Versand. Dieselbe Trennung wie bei `emit_health_alert`: der Logeintrag darf nie ausfallen, weil eine Mail nicht zugestellt werden konnte. Der Versandweg ist vorhanden (`services/mailer.py`) und nicht angeschlossen |

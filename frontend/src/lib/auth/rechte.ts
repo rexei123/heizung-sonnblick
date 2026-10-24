@@ -109,3 +109,22 @@ export function darfBenutzerVerwalten(user: User | null): boolean {
 export function darfGeraeteVerwalten(user: User | null): boolean {
   return user?.role === "admin";
 }
+
+/**
+ * Relais provisionieren, in Betrieb nehmen, Schutz-Sperre aufheben,
+ * Fühler-Rolle umschalten (Sprint 24b, Paket 6).
+ *
+ * Gate: `require_admin` an allen fünf Mutationen in
+ * `api/v1/relays.py` — `provision`, `commission` (POST und DELETE),
+ * `release-protection` und `PATCH /devices/{id}/measure-only`.
+ *
+ * **Warum das hier eine eigene Funktion ist und nicht
+ * `darfGeraeteVerwalten` mitbenutzt.** Die Gates sind heute dieselben,
+ * die Entscheidungen nicht: ein Gerät einer Zone zuzuordnen ist
+ * Stammdatenpflege, ein Panel scharf zu schalten ist ein Eingriff in ein
+ * Gerät, das Netzspannung schaltet. Wer eines der beiden Rechte später
+ * anders schneidet, soll dafür nicht die andere Oberfläche mitbewegen.
+ */
+export function darfRelaisSchalten(user: User | null): boolean {
+  return user?.role === "admin";
+}

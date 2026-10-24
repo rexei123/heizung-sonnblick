@@ -40,7 +40,8 @@ from sqlalchemy import select
 
 from heizung.celery_app import app
 from heizung.config import get_settings
-from heizung.models import Device, HeatingZone, Room, SensorReading
+from heizung.models import Device, HeatingZone, RelayReading, Room, SensorReading
+from heizung.models.enums import DeviceKind
 from heizung.models.global_config import GlobalConfig
 from heizung.services import mail_status, redis_client
 from heizung.services.health_alerts import handle_silent_transitions
@@ -243,6 +244,40 @@ async def _compute_health_state_async() -> dict[str, Any]:
         # bei <500 Devices und 5-min-Kadenz.
         latest_reading: dict[int, tuple[datetime, Decimal | None]] = {}
         for d in devices:
+            # Sprint 24b (Paket 4): ein Relais schreibt in
+            # ``relay_reading``, nicht in ``sensor_reading``.
+            #
+            # **Ein Mangel, der mit Sprint 24 entstanden ist.** Diese
+            # Schleife fragte ausschliesslich ``sensor_reading`` ab. Fuer
+            # ein Relais gibt es dort **keine** Zeile, also war
+            # ``latest_time is None`` und ``_basis_state_from_age``
+            # lieferte ``silent`` — dauerhaft, ganz gleich wie
+            # zuverlaessig das Geraet funkt. Eine Zone mit einem Relais
+            # waere damit fuer immer ``silent``, eine gemischte Zone fuer
+            # immer ``degraded``, und beides haette die Ampel des
+            # Hoteliers dauerhaft rot gehalten.
+            #
+            # Das ist §5.79 in der unangenehmen Richtung: nicht ein
+            # Melder, der schweigt, sondern einer, der immer schreit —
+            # und dem deshalb niemand mehr glaubt.
+            #
+            # ``temperature`` bleibt fuer ein Relais ``None``: es misst
+            # die Raumtemperatur nicht. Die Gehaeusetemperatur ist etwas
+            # anderes und gehoert nicht in die Ausreisser-Pruefung gegen
+            # den Zonen-Median.
+            if d.kind == DeviceKind.RELAY:
+                relais_zeit = (
+                    await session.execute(
+                        select(RelayReading.time)
+                        .where(RelayReading.device_id == d.id)
+                        .order_by(RelayReading.time.desc())
+                        .limit(1)
+                    )
+                ).scalar()
+                if relais_zeit is not None:
+                    latest_reading[d.id] = (relais_zeit, None)
+                continue
+
             row = (
                 await session.execute(
                     select(SensorReading.time, SensorReading.temperature)

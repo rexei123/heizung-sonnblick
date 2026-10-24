@@ -37,8 +37,9 @@ from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import PLAUSI_TEMP_MAX_C, PLAUSI_TEMP_MIN_C
-from heizung.services import redis_client
+from heizung.services import redis_client, relay_uplink
 from heizung.services.device_adapter import handle_uplink_for_override
+from heizung.services.health_alerts import emit_relay_protection_alert
 from heizung.tasks.engine_tasks import evaluate_room
 
 logger = logging.getLogger(__name__)
@@ -428,6 +429,57 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
                 dev_eui,
                 uplink.fCnt,
             )
+            return
+
+        # Sprint 24b (Paket 5): Relais haben einen eigenen Pfad.
+        #
+        # **Vor** dem Plausi-Filter und vor ``_map_to_reading``: ein
+        # Relais meldet keine Raumtemperatur, es hat keine
+        # Ventilstellung und keine Batterie. Durch den Thermostat-Pfad
+        # geschickt wuerde es eine ``sensor_reading``-Zeile aus lauter
+        # ``NULL`` erzeugen — und damit dem Zonen-Aggregat ein Geraet
+        # vortaeuschen, das Temperatur misst.
+        #
+        # Der Pfad schreibt ``relay_reading`` und setzt bei einer
+        # Schutzauslösung die Sperre (S4). Kein ``evaluate_room`` danach:
+        # der Relais-Orchestrator laeuft in seinem eigenen Takt, und ein
+        # Keepalive ist kein Grund, die Engine-Pipeline anzustossen.
+        if await relay_uplink.ist_relais(session, device_id):
+            obj_relais = uplink.object or {}
+            seen_at_relais = uplink.time or datetime.now(tz=UTC)
+            protokoll = await relay_uplink.verarbeite_relais_uplink(
+                session,
+                device_id=device_id,
+                obj=obj_relais,
+                zeit=seen_at_relais,
+                fcnt=uplink.fCnt,
+            )
+            await session.execute(
+                update(Device)
+                .where(Device.id == device_id)
+                .where((Device.last_seen_at.is_(None)) | (Device.last_seen_at < seen_at_relais))
+                .values(last_seen_at=seen_at_relais)
+            )
+            await session.commit()
+            logger.info(
+                "relais-uplink persistiert: dev_eui=%s fcnt=%s relay_on=%s "
+                "leistung=%s sperre_gesetzt=%s",
+                dev_eui,
+                uplink.fCnt,
+                protokoll["relay_on"],
+                protokoll["power_w"],
+                protokoll["sperre_gesetzt"],
+            )
+            if protokoll["sperre_gesetzt"]:
+                # Der Alarm **nach** dem Commit: nur ein persistierter
+                # Zustand loest einen Alarm aus. Dieselbe Reihenfolge wie
+                # in ``health_tasks`` Phase 6 — bei einem DB-Fehler waere
+                # die Session zurueckgerollt, und es ginge ein Alarm zu
+                # einem Zustand hinaus, den niemand mehr nachlesen kann.
+                nutzlast = await relay_uplink.alarm_nutzlast(
+                    session, device_id=device_id, art=str(protokoll.get("schutzart"))
+                )
+                emit_relay_protection_alert(nutzlast)
             return
 
         # Sprint 11 T2 (AE-53): Plausi-Filter auf Ist-Temperatur. Werte
