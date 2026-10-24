@@ -6949,7 +6949,13 @@ gemessen.
 
 ### Schritt 4 — PFLICHT-STOPP: die zwei Rücklesungen
 
-**Beide, nicht eine** (S4). Das Gerät hat zwei voneinander unabhängige
+**Beide, nicht eine** (S4). **Seit Sprint 24b läuft das über die
+Oberfläche:** Geräteseite des Relais → **Provisionieren**. Der Handgriff
+schickt die vier Downlinks in der richtigen Reihenfolge (setzen, setzen,
+lesen, lesen) und zeigt danach beide Rücklesungen als bestätigt oder
+nicht bestätigt. Kein Datenbank-Zugriff mehr.
+
+Das Gerät hat zwei voneinander unabhängige
 Wege, von selbst wieder EIN zu werden, und bei beiden ist die
 Hersteller-Vorgabe `last_state`:
 
@@ -7003,12 +7009,54 @@ Zonen-Aggregat fällt, nimmt der Zone ihren Istwert, und dann schaltet
 der Regler nach S5 alles ab — in einem Raum, dessen Fühler einwandfrei
 **messen**.
 
+### Schritt 6a — Fühler-Rolle setzen (Vicki 027, 056) und den Trace prüfen
+
+**Der Handgriff, der die beiden Pilot-Zimmer in Gang bringt.** Vicki 027
+liegt in „Bar" (Zone „Barbereich"), Vicki 056 in „Rezeption" (Zone
+„Eingang"). Beide sind seit dem 24.10. einer Zone zugeordnet, haben aber
+**keine Rolle** — und genau das war der Befund: der Layer
+Geräte-Sicherheit erkannte sie als abgenommen und erzwang **10 °C** für
+den ganzen Raum.
+
+1. Geräteseite des Fühlers öffnen → **Rolle „nur messen" setzen**
+   (Admin). Der Handgriff schickt die Kindersicherung gleich mit.
+2. **Kindersicherung nachsehen.** Sie ist erst mit dem nächsten
+   Keepalive bestätigt; bis dahin steht sie als nicht bestätigt. Wer es
+   genauer braucht: `sensor_reading.child_lock` der jüngsten Zeile.
+3. **Schicht-Trace des Zimmers öffnen.** Erwartung nach dem Setzen:
+
+   | Zimmer | Raumtyp | Soll im Trace |
+   |---|---|---|
+   | Bar | Raum intern | **21 °C** |
+   | Rezeption | Raum mit Exit | **19 °C** |
+
+   Steht dort weiter 10 °C, ist die Rolle nicht angekommen — dann führt
+   der Layer Geräte-Sicherheit das Gerät noch unter `detached_devices`,
+   und das ist der Prüfpunkt.
+
+**Warum beides zusammen gehört.** Die Rolle nimmt das Gerät aus der
+Geräte-Sicherheit **und** aus dem Sollwert-Dispatch. Ohne sie heizt der
+Pilot nie (10 °C), mit ihr bekommt das Gerät keine Sollwerte mehr — und
+dann wäre ein drehbares Rad ohne Sperre eine Einladung zu einer
+Verstellung, die niemand umsetzt.
+
 ### Schritt 7 — erst jetzt: Relais mit Last
 
-Reihenfolge: Last anschließen → Provisionierung wiederholen (die
-Einstellungen überleben einen Austausch nicht zwangsläufig) → beide
-Rücklesungen → **dann** „in Betrieb genommen" setzen. Erst mit diesem
-Kennzeichen gehen überhaupt Schaltbefehle an das Gerät (S3).
+Reihenfolge: Last anschließen → **Provisionieren** (die Einstellungen
+überleben einen Austausch nicht zwangsläufig) → beide Rücklesungen
+abwarten → **dann** „In Betrieb nehmen". Alles auf der Geräteseite,
+alles nur für Admins, jeder Handgriff mit Audit-Eintrag.
+
+Erst mit diesem Kennzeichen gehen überhaupt Schaltbefehle an das Gerät
+(S3) — und der Knopf erscheint nur, wenn **beide** Rücklesungen
+bestätigt sind. Die Prüfung sitzt trotzdem im Backend: ein Knopf, der
+nicht erscheint, ist Bedienung, keine Sicherheit (`test_api_relays.py`,
+Mutationsprobe M12).
+
+**Nach einer Schutzauslösung** bleibt das Relais aus, bis ein Admin auf
+der Geräteseite **Schutz-Sperre aufheben** drückt. Das Gerät erholt sich
+selbst; ohne diesen Handgriff wäre der Vorfall nach einer Minute
+unsichtbar.
 
 ### Schritt 8 — Feldtest, drei Wochen
 
@@ -7033,9 +7081,9 @@ nicht nach drei Wochen Betrieb erfahren.
 
 | Punkt | Warum |
 |---|---|
-| Sollwerte je Zone für nicht buchbare Räume | Paket F: gebaut ist **nichts**. Der Befund und der Vorschlag stehen in AE-78 — weder `RuleConfigScope` noch `ScenarioScope` haben eine Zonen-Ebene |
-| Übersteuerung in nicht buchbaren Räumen (S6) | ebenfalls Paket F, nicht gebaut |
-| Oberfläche (Paket G) | nicht gebaut. Bis dahin laufen Inbetriebnahme und Freigabe über die Datenbank, und das ist **kein** Dauerzustand: S3 verlangt, dass nur ein Admin das Kennzeichen setzt, und ein SQL-Zugang ist keine Rollenprüfung |
+| Sollwerte je Zone für nicht buchbare Räume | **Entschieden am 24.10.: wird nicht gebaut.** Allgemeinflächen werden je als eigenes Zimmer mit eigenem Raumtyp angelegt — so sind „Bar“ und „Rezeption“ schon umgesetzt. Die Bedingung, unter der die Frage zurückkommt, steht in AE-78 §10 |
+| Übersteuerung in nicht buchbaren Räumen (S6) | späterer Sprint, zusammen mit den Mutationsproben M6 und M8 |
+| Oberfläche | **gebaut (Sprint 24b).** Provisionieren, in Betrieb nehmen, zurücknehmen, Schutz-Sperre aufheben und die Fühler-Rolle laufen auf der Geräteseite — alle nur für Admins, alle mit Audit. Der SQL-Weg ist damit nicht mehr nötig, und das war wichtig: ein Datenbank-Zugang ist keine Rollenprüfung |
 | Leistungstakt, Lastmanagement, Energiereports | ausdrücklich nicht im Sprint-Umfang |
 
 **Querverweise:** AE-78 (die Architektur-Notiz mit allen belegten
