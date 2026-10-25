@@ -79,6 +79,11 @@ export function RoomTypeForm({
   const handle = async (e: FormEvent) => {
     e.preventDefault();
     const payload: RoomTypeCreate | RoomTypeUpdate = {
+      // Sprint 24e (PR A): das Echo der bearbeiteten ID. Der Server weist
+      // die Anfrage ab, wenn sie nicht zum Pfad passt — eine zweite
+      // Sicherung gegen genau den Fehler, der diesen Fix ausgeloest hat.
+      // Beim Anlegen gibt es keine ID; ``undefined`` faellt aus dem JSON.
+      ...(initial !== undefined ? { id: initial.id } : {}),
       name: name.trim(),
       description: description.trim() || null,
       is_bookable: isBookable,

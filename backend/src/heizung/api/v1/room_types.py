@@ -261,6 +261,31 @@ async def update_room_type(
 ) -> RoomType:
     rt = await _get_or_404(session, room_type_id)
     updates = payload.model_dump(exclude_unset=True)
+
+    # Sprint 24e (PR A): das Echo der bearbeiteten ID gegen den Pfad.
+    #
+    # Die Oberflaeche hat am 25.10.2026 im Formular einen **fremden**
+    # Datensatz gezeigt; ein Speichern haette dessen Werte in den
+    # ausgewaehlten Raumtyp geschrieben. Behoben ist das dort, wo es
+    # entstanden ist — diese Pruefung ist die zweite Haelfte, damit der
+    # Server sich nicht darauf verlaesst, dass die Oberflaeche richtig
+    # rechnet.
+    #
+    # ``id`` wird danach aus ``updates`` entfernt: es ist ein Echo und
+    # kein Feld. Bliebe es stehen, wuerde ``setattr`` den Primaerschluessel
+    # neu setzen — mit demselben Wert, also wirkungslos, aber eine
+    # schreibende Zuweisung auf einen Schluessel ist nichts, was man
+    # stehen lassen sollte.
+    gesendete_id = updates.pop("id", None)
+    if gesendete_id is not None and gesendete_id != room_type_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Die Anfrage gehoert zu Raumtyp {gesendete_id}, der Pfad zu "
+                f"{room_type_id}. Nichts gespeichert — bitte die Seite neu laden."
+            ),
+        )
+
     if not updates:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

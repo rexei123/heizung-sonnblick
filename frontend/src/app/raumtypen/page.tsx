@@ -174,7 +174,24 @@ export default function RoomTypesPage() {
                 </p>
               ) : null}
               <SollwertWirksamkeit roomTypeId={editingItem.id} />
+              {/* **`key` ist hier der Fix, nicht Kosmetik** (Befund des
+                  Betreibers, 25.10.2026).
+
+                  `RoomTypeForm` baut seinen Zustand mit `useState(initial
+                  ?? …)` auf — und das läuft **einmal je Montage**. Ohne
+                  `key` blieb die Komponente beim Wechsel der Auswahl
+                  montiert, behielt die Werte des **vorher** gewählten
+                  Raumtyps und zeigte damit einen fremden Datensatz: links
+                  „Raum intern", im Formular „Raum mit Exit" mit 19/17.
+
+                  Ein `key`, der sich ändert, montiert die Komponente neu;
+                  damit laufen die Initialisierer erneut. Das ist die
+                  Lösung, die React dafür vorsieht, und sie ist einer
+                  Kette von `useEffect`-Zuweisungen (ein Feld, ein Effekt)
+                  vorzuziehen: die kann man unvollständig schreiben, einen
+                  `key` nicht. */}
               <RoomTypeForm
+                key={editingItem.id}
                 initial={editingItem}
                 onSubmit={handleUpdate}
                 onCancel={() => setMode({ kind: "list" })}
