@@ -142,7 +142,7 @@ async function mockApi(
         });
         return;
       }
-      await route.continue();
+      await route.fallback();
     },
   );
 
@@ -179,7 +179,7 @@ async function mockApi(
       });
       return;
     }
-    await route.continue();
+    await route.fallback();
   });
 
   return {
