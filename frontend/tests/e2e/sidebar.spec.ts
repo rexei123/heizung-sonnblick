@@ -38,7 +38,15 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     );
   }
 
-  test("Desktop-Sidebar zeigt Admin 14 Eintraege in 5 Gruppen", async ({ page }) => {
+  /**
+   * Paket 1 (25.10.2026): die Zahlen sind von 14/13 auf 15/14 gestiegen
+   * und die Gruppen von 5 auf 6 — der Eintrag „Handbuch" in der Gruppe
+   * „Hilfe" ist dazugekommen, lesbar fuer **alle** Rollen. Das ist der
+   * Grund fuer die geaenderte Erwartung; sie wird hier genannt, damit
+   * niemand sie spaeter fuer eine stillschweigend nachgezogene Zahl
+   * haelt.
+   */
+  test("Desktop-Sidebar zeigt Admin 15 Eintraege in 6 Gruppen", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mitRolle(page, "admin");
 
@@ -48,19 +56,27 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     await expect(nav).toBeVisible();
 
     // 5 Gruppen-Header
-    const groups = ["Übersicht", "Steuerung", "Geräte", "Analyse", "Einstellungen"];
+    const groups = [
+      "Übersicht",
+      "Steuerung",
+      "Geräte",
+      "Analyse",
+      "Einstellungen",
+      "Hilfe",
+    ];
     for (const group of groups) {
       await expect(nav.getByRole("heading", { level: 3, name: group })).toBeVisible();
     }
 
     await expect(nav.getByRole("link", { name: "Benutzer" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Handbuch" })).toBeVisible();
 
-    // 14 Nav-Links
+    // 15 Nav-Links
     const links = nav.getByRole("link");
-    await expect(links).toHaveCount(14);
+    await expect(links).toHaveCount(15);
   });
 
-  test("Desktop-Sidebar zeigt Mitarbeiter 13 Eintraege ohne Benutzer", async ({ page }) => {
+  test("Desktop-Sidebar zeigt Mitarbeiter 14 Eintraege ohne Benutzer", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mitRolle(page, "mitarbeiter");
 
@@ -76,7 +92,10 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     ).toBeVisible();
 
     await expect(nav.getByRole("link", { name: "Benutzer" })).toHaveCount(0);
-    await expect(nav.getByRole("link")).toHaveCount(13);
+    // Das Handbuch ist fuer alle Rollen lesbar — es ist der einzige
+    // Eintrag, bei dem das ausdruecklich gefordert war.
+    await expect(nav.getByRole("link", { name: "Handbuch" })).toBeVisible();
+    await expect(nav.getByRole("link")).toHaveCount(14);
   });
 
   test("Mobile-Sheet oeffnet sich via Hamburger und schliesst nach Navigation", async ({

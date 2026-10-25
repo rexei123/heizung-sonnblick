@@ -7230,3 +7230,82 @@ SQL
 **Was die Abfrage nicht beantwortet:** ob das Diagramm sie richtig
 zeichnet. Dafür ist der Verlauf selbst der Prüfpunkt — mit der
 Zeitzonen-Angabe darunter.
+
+---
+
+## 10am. Das Handbuch in der Software: wo es liegt, wie man es ändert
+
+**Für wen:** den Betreiber, wenn ein Artikel falsch oder unvollständig ist.
+
+Seit 25.10.2026 hat die Oberfläche einen Menüpunkt **Handbuch** (unterste
+Gruppe „Hilfe", für alle Rollen lesbar). Darin: 23 Artikel in vier
+Kategorien, eine Suche, auf jeder Seite ein „?" zum passenden Artikel, und
+eine Druckansicht für den Ordner an der Rezeption.
+
+### Die drei Adressen
+
+| Adresse | Was dort steht |
+|---|---|
+| `/handbuch` | Übersicht, Suche über Titel, Überschriften, Text und Stichworte |
+| `/handbuch/<name>` | ein Artikel, mit Verzeichnis und Direktlinks auf die Abschnitte |
+| `/handbuch/drucken` | alle Artikel auf einer Seite; mit Strg+P drucken |
+
+### Was auf Papier fehlt — und warum
+
+Die aktuellen Sollwerte, Zeiten und Raumtyp-Werte stehen **nicht** im
+Ausdruck. Im Bildschirm werden sie beim Öffnen aus der Datenbank gelesen;
+auf Papier stünde der Stand des Ausdruckstages und sähe wie eine Zusicherung
+für morgen aus. Statt der Tabelle steht dort ein Satz, wo die Werte zu finden
+sind.
+
+Gedruckt wird dagegen die **Zeichnung der Heizlogik**: die Reihenfolge der
+sechs Schichten ändert sich nicht mit einem Sollwert.
+
+### Einen Artikel ändern
+
+Die Artikel sind Textdateien im Repo, nicht Datenbank-Einträge:
+
+```
+frontend/content/handbuch/<name>.md
+```
+
+Es gibt bewusst **keine** Bearbeitungsoberfläche. Wer das Handbuch ändert,
+ändert Software-Verhalten oder beschreibt es — beides gehört in einen Pull
+Request, und so wandert die Beschreibung mit der Änderung (AE-79, CLAUDE.md
+§3.13).
+
+Ein Hinweis an den Entwickler genügt also: *„Artikel X sagt Y, richtig ist
+Z."* Das Datum oben im Artikel (`Stand`) zeigt, wie alt die Aussage ist —
+weicht es stark vom letzten Merge ab, ist das der erste Verdacht.
+
+Was CI prüft: jede Seite der Seitenleiste hat einen Artikel, jeder Artikel
+ein Datum, jeder Verweis ein Ziel
+(`backend/tests/test_handbuch_spiegel.py`). Was CI **nicht** prüfen kann:
+ob der Text stimmt. Dafür steht in jedem Pull Request die Zeile
+`Handbuch: angepasst / nicht nötig, weil …`.
+
+### Vier Seiten sind leer, und das Handbuch sagt es
+
+`Profile`, `Temperaturverlauf`, `Gateway` und `Saison` sind Platzhalter —
+seit Sprint 9.13b. Der jeweilige Artikel benennt das und sagt, wo die Sache
+heute steht:
+
+| Leere Seite | Wo es heute steht |
+|---|---|
+| Profile | Nachtabsenkung unter „Temperaturen & Zeiten", Unterschiede je Raumtyp unter „Raumtypen" |
+| Temperaturverlauf | Tab „Verlauf" auf der Zimmer-Detailseite |
+| Gateway | Kachel „Geräte online" auf dem Dashboard, dann „Thermostate" |
+| Saison | Sommermodus unter „Szenarien" |
+
+### Zwei Begriffe, die auseinandergehalten werden
+
+Beide Aufgaben hießen in der Planung „T3". Im Handbuch und hier stehen sie
+deshalb mit Abgrenzung:
+
+| Begriff | Was es ist | Stand |
+|---|---|---|
+| **Listen-Wächter** | Mail, wenn acht Stunden keine Belegungsliste kam. Schwelle: Server-Einstellung `IMPORT_MAX_GAP_HOURS`, Vorgabe 8 | im Betrieb seit 25.10.2026, §10al |
+| **Relais-Test T3.0** | Messung am Relais-Pfad der Infrarot-Heizkörper | offen; es ist kein Relais montiert, §10aj |
+
+Wer eines von beiden sucht, sucht nicht nach „T3", sondern nach dem, was es
+tut.
