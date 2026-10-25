@@ -77,7 +77,6 @@ from sqlalchemy import select  # noqa: E402
 
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
-from heizung.models.enums import DeviceKind  # noqa: E402
 from heizung.scripts.pairing.firmware import (  # noqa: E402
     MIN_FW_FOR_OW_SET,
     min_fw_text,
@@ -88,14 +87,23 @@ from heizung.services.downlink_adapter import (  # noqa: E402
     query_firmware_version,
     set_open_window_detection,
 )
+from heizung.services.fenstererkennung import (  # noqa: E402
+    OW_DAUER_MIN_BETRIEB,
+    OW_DELTA_BETRIEB,
+    lade_ziele,
+)
 
 logger = logging.getLogger("activate_ow")
 
-# Vendor-Default fuer Hotelbetrieb (Cheat-Sheet §2): enabled,
-# 10 Min Ventil-Schliessung, 1.5 °C Delta. AE-47-Konvention.
+# Die Parameter liegen seit Sprint 23 T2 in
+# ``services/fenstererkennung`` — eine Zahl, eine Stelle (§5.53). Hier
+# standen vorher 1,5 °C aus der AE-47-Konvention; der Betriebswert des
+# Briefs ist **1,0 °C**, und zwei Vorgaben fuer denselben Befehl waeren
+# beim ersten Nachjustieren auseinandergelaufen, ohne dass es jemand
+# sieht. Die Begruendung des Wertes steht im Modul-Kopf des Dienstes.
 OW_DEFAULT_ENABLED: bool = True
-OW_DEFAULT_DURATION_MIN: int = 10
-OW_DEFAULT_DELTA_C: Decimal = Decimal("1.5")
+OW_DEFAULT_DURATION_MIN: int = OW_DAUER_MIN_BETRIEB
+OW_DEFAULT_DELTA_C: Decimal = OW_DELTA_BETRIEB
 
 # Schwelle + Parsing liegen seit Sprint 17 (C4) in
 # ``heizung.scripts.pairing.firmware`` — zweiter Konsument ist das
@@ -171,15 +179,31 @@ def _print_table(rows: list[dict[str, str]]) -> None:
 
 
 async def _load_target_devices() -> list[tuple[int, str, str | None]]:
-    """Devices mit kind=thermostat UND heating_zone_id NOT NULL."""
+    """Montierte Thermostate — ohne „nur messen", ohne Reserve-Pool.
+
+    **Die Auswahl kam frueher aus einer eigenen WHERE-Klausel hier** und
+    lautete „Thermostat mit Zone". Damit waren die Vickis auf „nur
+    messen" (027, 056) **nicht** ausgenommen: sie liegen als Fuehler im
+    Raum, bekommen bewusst keine Befehle (S7, Sprint 24c) — und haetten
+    trotzdem ein 0x45 erhalten.
+
+    Seit Sprint 23 T2 entscheidet ``services/fenstererkennung.lade_ziele``,
+    und zwar fuer dieses Skript und fuer
+    ``scripts/fenstererkennung`` gemeinsam. Zwei Auswahllisten waeren zwei
+    Wahrheiten darueber, welche Geraete Hardware-Befehle bekommen (§5.53)
+    — und das ist die unangenehmste Sorte: man sieht sie erst am Geraet.
+
+    Die Ausnahmen werden **ausgegeben**, nicht verschwiegen: wer einen
+    Hardware-Lauf startet, zaehlt die Geraete nach.
+    """
     async with SessionLocal() as session:
-        result = await session.execute(
-            select(Device.id, Device.dev_eui, Device.label)
-            .where(Device.kind == DeviceKind.THERMOSTAT)
-            .where(Device.heating_zone_id.is_not(None))
-            .order_by(Device.label.nulls_last(), Device.dev_eui)
-        )
-        return [(row[0], row[1], row[2]) for row in result.all()]
+        ziele, ausnahmen = await lade_ziele(session)
+    if ausnahmen:
+        print()
+        print("=== Ausgenommen (kein 0x45) ===")
+        for a in ausnahmen:
+            print(f"  {a.dev_eui}  {a.label or '':<20}  {a.grund}")
+    return [(z.device_id, z.dev_eui, z.label) for z in ziele]
 
 
 async def main_async(wait_secs: int, fw_only: bool) -> int:

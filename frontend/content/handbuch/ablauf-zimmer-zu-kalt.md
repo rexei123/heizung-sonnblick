@@ -22,9 +22,11 @@ fehlt.
 Dort stehen die sechs Schichten der letzten Auswertung. Die **letzte
 Schicht, die etwas geändert hat**, ist die Antwort. Die drei häufigen:
 
-- **Schicht 4, Fenster offen.** Jemand hat gelüftet oder das Fenster
-  steht auf Kipp. Nichts zu tun — Fenster zu, nach zehn Minuten regelt
-  es sich.
+- **Schicht 4, abgenommener Kopf.** Das Thermostat sitzt nicht am
+  Ventil. Jemand muss hin.
+  *(Ein offenes Fenster löst diese Schicht heute* **nicht** *aus — die
+  Fenstererkennung in den Geräten ist nicht in Betrieb. Wer lüftet, kühlt
+  das Zimmer, ohne dass die Steuerung es merkt; sie heizt dagegen.)*
 - **Schicht 2, Nachtabsenkung.** Es ist nach 20:00. Wenn der Gast es
   wärmer will, Schritt 4.
 - **Schicht 5, Kappung.** Der Raumtyp lässt nicht mehr zu. Mehr geht

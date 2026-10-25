@@ -33,9 +33,15 @@ zwei Tage bei 2,6 V und war danach wieder bei 3,5 V, ohne Tausch.
 Melder im Oktober und im Jänner derselbe. Was er sucht, ist ein
 abgefallener Kopf — ein Ventil ohne Kopf steht offen.
 
-**Fenster offen** und **Aktive Übersteuerungen** sind Zustandszähler.
-Eine Übersteuerung, die seit Tagen läuft, ist der häufigste Grund für
-„das Zimmer reagiert nicht auf die Automatik".
+**Aktive Übersteuerungen** ist ein Zustandszähler. Eine Übersteuerung,
+die seit Tagen läuft, ist der häufigste Grund für „das Zimmer reagiert
+nicht auf die Automatik".
+
+**Fenster offen** steht heute dauerhaft auf **0**, und das ist keine
+Aussage über die Fenster im Haus: die Thermostate liefern ihre
+Fenstererkennung ab Werk ausgeschaltet, und eingeschaltet wurde sie nie.
+Die Kachel wird erst nach der Erprobung (Sprint 23 T2) etwas melden
+können. Bis dahin ist eine 0 dort kein Befund.
 
 ## Letzter Algorithmen-Lauf
 
