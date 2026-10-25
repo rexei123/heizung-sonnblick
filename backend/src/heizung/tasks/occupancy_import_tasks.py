@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from heizung.celery_app import app
 from heizung.config import get_settings
-from heizung.services.occupancy_import_service import run_freshness_check
+from heizung.services.occupancy_import_service import run_freshness_check, run_gap_check
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,18 @@ async def _run() -> dict[str, Any]:
         # Schwelle kommt aus global_config (Migration 0022) — der Service laedt
         # sie selbst, damit es nur eine Quelle gibt.
         result = await run_freshness_check(session)
-    logger.info("check_occupancy_import_freshness result=%s", result)
-    return result
+        # Sprint 23 T3: derselbe stuendliche Lauf prueft auch den
+        # **Abstand** zur letzten Liste. Zwei Beats fuer zwei Fragen an
+        # dieselben Daten waeren zwei Taktgeber, die auseinanderlaufen
+        # koennen.
+        #
+        # Die Reihenfolge ist Absicht: der Stale-Waechter zuerst. An einem
+        # Tag ohne jede Liste ist „heute kam keine" die Aussage, die
+        # zaehlt; der Abstands-Waechter haelt sich dann heraus
+        # (``never_imported``).
+        gap = await run_gap_check(session)
+    logger.info("check_occupancy_import_freshness result=%s gap=%s", result, gap)
+    return {**result, "gap_check": gap}
 
 
 @app.task(name="heizung.check_occupancy_import_freshness", bind=True)

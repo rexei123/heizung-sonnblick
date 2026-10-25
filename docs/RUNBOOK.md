@@ -7133,6 +7133,47 @@ Hersteller-Angaben und den offenen Punkten), §5.21 (Codec-Routing über
 MQTT), §0 S4 (Hardware-Schutz), §10h (Pairing-Ablauf beim Vicki, als
 Vorlage für Schritt 2).
 
+## 10al. Der zweite Wächter: Abstand zur letzten Belegungsliste
+
+**Was er beantwortet.** §10ai beschreibt den Wächter, der fragt: „kam
+**heute** eine Liste?" Fallen die Listen um 15:30 und 19:30 aus, bleibt
+die Ampel grün — es kam ja eine, nämlich die um 08:30. Seit Sprint 23 T3
+fragt ein zweiter: „wie lange ist die letzte her?"
+
+**Wann er anschlägt.** Innerhalb des Versandfensters (08:30 bis 19:30
+Ortszeit), wenn die letzte angewandte Liste länger als **8 Stunden**
+zurückliegt. Dann steht ein Eintrag `OCCUPANCY_IMPORT_GAP` im Protokoll,
+und es geht eine Mail an die Alarm-Adresse — höchstens eine pro Tag,
+wie beim anderen Wächter.
+
+**Warum 8 und nicht 3** (die Zahl aus dem Sprint-Brief): die Listen
+kommen um 08:30, 15:30 und 19:30. Die **regulären** Abstände sind damit
+7 Stunden und 4 Stunden. Eine Schwelle von 3 hätte jeden Tag um 11:31
+angeschlagen — und ein Melder, dem niemand mehr glaubt, überwacht nichts.
+8 liegt eine Stunde über dem größten regulären Abstand.
+
+**Was er fängt und was nicht:**
+
+| Fall | Wer meldet |
+|---|---|
+| keine Liste den ganzen Tag | der tägliche Wächter (§10ai), ab 10:00 |
+| 15:30-Liste fällt aus | **dieser** Wächter, ab 16:31 |
+| 19:30-Liste fällt aus | niemand am selben Abend — das Fenster ist zu. Der tägliche Wächter meldet es am nächsten Morgen, wenn auch die 08:30-Liste fehlt |
+| nachts keine Liste | niemand, und das ist richtig |
+
+Die Lücke in der dritten Zeile ist bekannt und bewusst: sie zu schließen
+hieße, je Liste eine Soll-Zeit zu führen statt eines rollenden Abstands.
+Das ist der bessere Entwurf und mehr Arbeit, als dieser Task hatte.
+
+**Verstellen.** `IMPORT_MAX_GAP_HOURS` in `.env` (leer = aus),
+`IMPORT_WINDOW_START_LOCAL` / `IMPORT_WINDOW_END_LOCAL` für das Fenster.
+Nach einer Änderung startet der Deploy die Dienste ohnehin neu.
+
+**Wenn die Mail kommt:** zuerst in der Oberfläche unter Einstellungen →
+Belegungs-Import nachsehen, ob eine Liste **abgelehnt** wurde (dann steht
+dort der Grund). Kam gar keine, ist die Frage, ob sie verschickt wurde —
+und das steht nur im Postfach.
+
 ## 10ak. Lücke im Verlauf prüfen: fehlen Messwerte oder ist es die Anzeige?
 
 **Anlass (25.10.2026).** Im Zimmer-Verlauf der Umstellungsnacht

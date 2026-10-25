@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.config import get_settings
 from heizung.models.business_audit import BusinessAudit
 from heizung.models.enums import OccupancySource
 from heizung.models.global_config import GlobalConfig
@@ -53,6 +54,11 @@ ACTION_APPLIED = "OCCUPANCY_IMPORT_APPLIED"
 ACTION_REJECTED = "OCCUPANCY_IMPORT_REJECTED"
 ACTION_CONFLICT = "OCCUPANCY_IMPORT_CONFLICT"
 ACTION_STALE = "OCCUPANCY_IMPORT_STALE"
+#: Sprint 23 T3: der Abstand zur letzten angewandten Liste ist zu gross.
+#: Eigene Aktion und nicht ``ACTION_STALE``: „heute kam keine Liste" und
+#: „seit acht Stunden kam keine" sind verschiedene Aussagen, und wer das
+#: Audit liest, soll sie unterscheiden koennen.
+ACTION_GAP = "OCCUPANCY_IMPORT_GAP"
 #: Eine Liste, die **älter** ist als eine bereits angewandte desselben
 #: Tages. Seit dem Mehrfachversand (20.10.2026) möglich.
 ACTION_OUTDATED = "OCCUPANCY_IMPORT_OUTDATED"
@@ -1116,6 +1122,113 @@ async def _send_stale_alert(
     await session.commit()
 
 
+async def _gap_exists_for_list_date(
+    session: AsyncSession, list_date: date, now_utc: datetime
+) -> bool:
+    """Gibt es heute schon einen Abstands-Befund?
+
+    Der Beat laeuft stuendlich; ohne diese Pruefung stuenden bei einem
+    laengeren Ausfall fuenf gleichlautende Eintraege im Audit.
+    """
+    # **Verglichen wird das Listendatum im Eintrag, nicht sein
+    # Zeitstempel.** Die erste Fassung filterte auf
+    # ``ts BETWEEN tag_beginn AND now`` — und das ist genau die Falle aus
+    # §5.59: ``record_business_action`` setzt ``ts`` auf die **echte**
+    # Uhrzeit, ein Test mit gestellter Uhr schreibt also einen Eintrag
+    # ausserhalb seines eigenen Fensters. Der zweite Lauf fand ihn nicht
+    # und legte nach. Im Betrieb waere es nie aufgefallen; der Test hat es
+    # gefunden, weil er die Uhr stellt.
+    #
+    # Dieselbe Form wie ``_stale_exists_for_list_date``: die jüngsten
+    # Eintraege lesen und das Datum **im Inhalt** vergleichen. ``limit``
+    # statt Zeitfenster — bei einem Eintrag je Tag reichen 20 Zeilen fuer
+    # knapp drei Wochen.
+    #
+    # Der Spaltenname ist ``ts`` und nicht ``created_at``, am Modell
+    # nachgesehen (§5.62).
+    _ = now_utc  # die Uhr entscheidet hier nichts mehr
+    stmt = (
+        select(BusinessAudit)
+        .where(BusinessAudit.action == ACTION_GAP)
+        .where(BusinessAudit.target_type == TARGET_TYPE)
+        .order_by(desc(BusinessAudit.ts))
+        .limit(20)
+    )
+    iso = list_date.isoformat()
+    for audit in (await session.execute(stmt)).scalars().all():
+        if _nv(audit).get("list_date") == iso:
+            return True
+    return False
+
+
+async def _send_gap_alert(
+    session: AsyncSession,
+    *,
+    today_local: date,
+    last_success_at: datetime,
+    stunden: float,
+    tz: ZoneInfo,
+    now_utc: datetime,
+) -> None:
+    """Alarm-Mail zum zu grossen Abstand (Sprint 23 T3).
+
+    Eigener Text und nicht der des Stale-Alarms: dort ist **keine** Liste
+    gekommen, hier ist eine gekommen und die naechste fehlt. Was der
+    Hotelier tun soll, unterscheidet sich — und eine Mail, die den
+    falschen Fall beschreibt, kostet den Weg zur Ursache.
+
+    Dieselbe Drosselung wie beim Stale-Alarm, mit demselben Gegenstand
+    (dem Listendatum): ein zweiter Lauf am selben Tag legt nicht nach.
+    """
+    gc = await session.get(GlobalConfig, 1)
+    recipient = gc.alert_email if gc is not None else None
+    if not recipient:
+        return
+
+    if not alert_throttle.should_send(
+        alert_throttle.KIND_IMPORT_GAP,
+        today_local.isoformat(),
+        ttl_s=alert_throttle.TTL_IMPORT_STALE_S,
+    ):
+        return
+
+    letzte = fmt_local_time(last_success_at.astimezone(tz).time(), tz, now_utc)
+    body = "\n".join(
+        [
+            f"Die letzte Belegungsliste ist vor {stunden:.0f} Stunden eingetroffen",
+            f"({letzte}). Seither kam keine weitere.",
+            "",
+            "Was das System jetzt tut: nichts. Der letzte bekannte Belegungsstand",
+            "bleibt eingefroren, es wird kein Zimmer freigegeben und keines belegt.",
+            "Die Heizung regelt unverändert weiter.",
+            "",
+            "Was das heißt: Anreisen und Abreisen, die seit der letzten Liste",
+            "dazugekommen sind, sind dem System nicht bekannt. Bei einem",
+            "Gästewechsel am selben Tag heizt das Zimmer dann nicht vor.",
+            "",
+            "Wahrscheinlichste Ursachen:",
+            "  1. Die mittägliche oder abendliche Liste wurde nicht verschickt.",
+            "  2. Der Mail-Weiterleitungsdienst hat sie nicht durchgereicht.",
+            "  3. Die Liste kam an, wurde aber abgelehnt — dann steht der Grund",
+            "     in der Oberfläche unter Einstellungen / Belegungs-Import.",
+            "",
+            "Diese Meldung wiederholt sich frühestens morgen.",
+        ]
+    )
+    result = mailer.send_mail(
+        recipient=recipient,
+        subject="Heizung Sonnblick: Belegungsliste überfällig",
+        body=body,
+    )
+    if not result.sent:
+        logger.warning(
+            "import_gap_mail_nicht_zugestellt",
+            extra={"grund": result.reason, "detail": result.detail},
+        )
+    await mail_status.record_attempt(session, result)
+    await session.commit()
+
+
 async def run_freshness_check(
     session: AsyncSession,
     *,
@@ -1175,3 +1288,97 @@ async def run_freshness_check(
         _fmt_hhmm(expected),
     )
     return {"stale": True, "list_date": today_local.isoformat()}
+
+
+async def run_gap_check(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Prueft den **Abstand** zur letzten angewandten Liste (Sprint 23 T3).
+
+    Der taegliche Waechter fragt „kam heute eine Liste?". Fallen die Listen
+    um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai): es kam
+    ja eine. Dieser Waechter fragt „wie lange ist die letzte her?".
+
+    **Nur innerhalb des Versandfensters.** Zwischen 19:30 und 08:30 liegen
+    13 Stunden, und die sind normal — nachts verschickt niemand eine
+    Liste. Ohne diese Einschraenkung schlaegt der Waechter jede Nacht an,
+    und ein Melder, dem niemand mehr glaubt, ueberwacht nichts (§5.79).
+
+    **Die Schwelle ist 8 h und nicht 3**, und die Begruendung steht in
+    ``config.Settings``: die regulaeren Abstaende sind 7 h und 4 h, eine
+    Schwelle von 3 h haette jeden Tag um 11:31 angeschlagen. Gemessen an
+    den Versandzeiten des Hauses, nicht geschaetzt.
+
+    Gleicher Weg wie der Stale-Alarm: Audit, dann Mail, mit derselben
+    Tagesdrosselung. ``None`` als Schwelle schaltet den Waechter ganz aus.
+
+    Gibt **keine** Zimmer frei und aendert keinen Belegungsstand (S5).
+    """
+    settings = get_settings()
+    schwelle = settings.import_max_gap_hours
+    if schwelle is None:
+        return {"gap": False, "reason": "disabled"}
+
+    now_utc = now or datetime.now(tz=UTC)
+    tz, _checkin, _checkout = await _load_tz_and_times(session)
+    local_now = now_utc.astimezone(tz)
+
+    fenster_von = settings.import_window_start_local
+    fenster_bis = settings.import_window_end_local
+    if not (fenster_von <= local_now.time() <= fenster_bis):
+        return {"gap": False, "reason": "outside_window"}
+
+    last_success_at = await _last_applied_received_at(session)
+    if last_success_at is None:
+        # Noch nie eine Liste angewandt. Das ist nicht der Abstand, den
+        # dieser Waechter meint — dafuer ist der taegliche Stale-Waechter
+        # zustaendig. Zwei Melder fuer denselben Zustand sind einer zu viel.
+        return {"gap": False, "reason": "never_imported"}
+
+    abstand = now_utc - last_success_at
+    if abstand <= timedelta(hours=schwelle):
+        return {"gap": False, "reason": "within_threshold", "hours": abstand / timedelta(hours=1)}
+
+    today_local = local_now.date()
+    if await _gap_exists_for_list_date(session, today_local, now_utc):
+        return {"gap": True, "already_flagged": True}
+
+    await record_business_action(
+        session,
+        user_id=None,
+        action=ACTION_GAP,
+        target_type=TARGET_TYPE,
+        target_id=None,
+        old_value=None,
+        new_value={
+            "list_date": today_local.isoformat(),
+            "last_success_at": last_success_at.isoformat(),
+            "gap_hours": round(abstand / timedelta(hours=1), 1),
+            "threshold_hours": schwelle,
+        },
+    )
+    await session.commit()
+
+    # Nach dem commit, wie beim Stale-Alarm: nur ein persistiertes Audit
+    # loest eine Mail aus.
+    await _send_gap_alert(
+        session,
+        today_local=today_local,
+        last_success_at=last_success_at,
+        stunden=abstand / timedelta(hours=1),
+        tz=tz,
+        now_utc=now_utc,
+    )
+
+    logger.warning(
+        "occupancy-import GAP: letzte Liste vor %.1f h (Schwelle %d h)",
+        abstand / timedelta(hours=1),
+        schwelle,
+    )
+    return {
+        "gap": True,
+        "list_date": today_local.isoformat(),
+        "hours": round(abstand / timedelta(hours=1), 1),
+    }

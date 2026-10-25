@@ -9,6 +9,7 @@ Lokale Entwickler koennen die Validierung gezielt deaktivieren:
 """
 
 import os
+from datetime import time
 from decimal import Decimal
 from functools import lru_cache
 from typing import Final, Literal
@@ -169,6 +170,58 @@ class Settings(BaseSettings):
     # Schranke, die das verbietet, haette diesen Sprint blockiert.
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
+
+    # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
+    # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
+    # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —
+    # das Zwei-Stunden-Versprechen waere gebrochen, ohne dass es jemand
+    # sieht. Dieser Waechter sieht auf den **Abstand** zur letzten
+    # angewandten Liste.
+    #
+    # ``None`` schaltet ihn ganz aus. Warum in den Settings und nicht in
+    # ``global_config``: dieselbe Abwaegung wie bei den Batterie-Schwellen
+    # (AE-73) — ein Wert, der pro Haus verstellbar ist, aber in der
+    # Oberflaeche niemandem hilft, solange ihn niemand sucht.
+    #
+    # **Die Vorgabe ist 8 und nicht 3, und das ist eine Abweichung vom
+    # Sprint-Brief mit Messung dahinter.** Die Listen kommen um 08:30,
+    # 15:30 und 19:30 (RUNBOOK 10ai). Die **regulaeren** Abstaende sind
+    # damit 7 h (08:30 -> 15:30) und 4 h (15:30 -> 19:30). Eine Schwelle
+    # von 3 h haette jeden Tag um 11:31 angeschlagen — und ein Melder, dem
+    # niemand mehr glaubt, ueberwacht nichts (CLAUDE.md 5.79, 5.84).
+    #
+    # 8 h liegt eine Stunde ueber dem groessten regulaeren Abstand. Was das
+    # faengt: eine ausgefallene 15:30-Liste, ab 16:31. Was es **nicht**
+    # faengt: eine ausgefallene 19:30-Liste — dafuer ist der taegliche
+    # Stale-Waechter am naechsten Morgen zustaendig. Die bessere Loesung
+    # waere ein Soll-Zeitplan je Liste statt eines rollenden Abstands; das
+    # ist mehr als dieser Task und steht im PR-Text.
+    import_max_gap_hours: int | None = 8
+
+    @field_validator("import_max_gap_hours", mode="before")
+    @classmethod
+    def _leer_ist_aus(cls, v: object) -> object:
+        """``IMPORT_MAX_GAP_HOURS=`` (leer) heisst **aus**.
+
+        Ohne diesen Umweg weist Pydantic den leeren String als ``int``
+        ab, und der Dienst startet nicht. „Leer = aus" ist die Vorgabe des
+        Sprint-Briefs; eine Einstellung, die man nur durch Loeschen der
+        Zeile abschalten kann, ist keine.
+        """
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
+    # Das Versandfenster, in Ortszeit. Der Abstand gilt **nur** darin.
+    #
+    # Zwischen 19:30 und 08:30 liegen 13 Stunden, und die sind normal: nachts
+    # verschickt niemand eine Belegungsliste. Ohne diese Einschraenkung
+    # schlaegt der Waechter jede Nacht an.
+    #
+    # Die Werte sind die Versandzeiten des Hauses und keine Eigenschaft der
+    # Software — deshalb verstellbar und nicht als Konstante im Code.
+    import_window_start_local: time = time(8, 30)
+    import_window_end_local: time = time(19, 30)
 
     # --- Zweipunktregler fuer Relais-Zonen (Sprint 24, Paket D) -----------
     # EIN bei ``ist <= soll - relay_ein_delta_k``, AUS bei
