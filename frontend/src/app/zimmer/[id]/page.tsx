@@ -185,7 +185,7 @@ export default function ZimmerDetailPage() {
           {istBereich ? (
             <p className="text-sm text-text-secondary mt-2" data-testid="bereich-hinweis">
               Allgemeinbereich — kein Check-in, keine Belegung. Der Sollwert kommt
-              aus dem Raumtyp („Betrieb" bzw. „Nacht").
+              aus dem Raumtyp („Betrieb" bzw. „Absenkung").
             </p>
           ) : null}
           {room.data.status === "cleaning" || room.data.status === "blocked" ? (
@@ -272,7 +272,15 @@ export default function ZimmerDetailPage() {
                   Feld das Nacht-Fenster, und es unter dem Namen
                   „Betriebszeit" zu zeigen hiesse, zwei Dinge gleich zu
                   nennen, die verschieden gemeint sind. */}
-              {istBereich ? <BetriebszeitForm room={room.data} /> : null}
+              {/* `key` am Zimmer: der App-Router behaelt die Komponente
+                  beim Wechsel von `/zimmer/3` auf `/zimmer/4`, und
+                  `useState(() => kurz(...))` laeuft nur bei der Montage.
+                  Ohne den `key` stehen im Formular die Zeiten des zuvor
+                  geoeffneten Zimmers — dieselbe Fehlerklasse wie beim
+                  Raumtyp-Formular (PR A). */}
+              {istBereich ? (
+                <BetriebszeitForm key={room.data.id} room={room.data} />
+              ) : null}
               {/* Sprint 14e T5b: Inline-Edit room_type mit Confirm + Audit
                   (Engine-Wirkungs-Warnung, R5-Gating). Steht vor dem Form,
                   weil room_type heizverhalten-relevant ist. RoomForm

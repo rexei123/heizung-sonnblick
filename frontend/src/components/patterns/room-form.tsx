@@ -73,6 +73,9 @@ export function RoomForm({
   };
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
+  // Sprint 24e (P4): ein Zimmer mit nicht buchbarem Raumtyp.
+  const istBereich = initial?.ist_allgemeinbereich === true;
+
   const handle = async (e: FormEvent) => {
     e.preventDefault();
     if (roomTypeId === "") return;
@@ -179,33 +182,64 @@ export function RoomForm({
         {initial ? (
           <div>
             <label htmlFor="r-status" className="block text-sm font-medium text-text-primary mb-1">
-              Status (automatisch aus Belegungen)
+              {istBereich ? "Status" : "Status (automatisch aus Belegungen)"}
             </label>
+            {/* Sprint 24e (P4): ein Allgemeinbereich hat keinen
+                Belegungsstatus. „Frei" mit dem Hinweis „wird aus den
+                Belegungen gesetzt" war dort zweimal falsch — es gibt keine
+                Belegungen, und der Abgleich fasst das Zimmer seit 24d nicht
+                mehr an.
+
+                Angeboten werden deshalb zwei Zustände: in Betrieb (intern
+                weiter `vacant` — der Zweig, den die Engine für ein nie
+                belegtes Zimmer nimmt) und außer Betrieb (`blocked`). Die
+                übrigen Werte bleiben **wählbar für Gästezimmer** und
+                verschwinden nur hier. */}
             <select
               id="r-status"
               value={status}
               onChange={(e) => waehleStatus((e.target.value || "") as RoomStatus | "")}
               className="w-full px-3 py-2 border border-border rounded-md bg-surface focus:outline-none focus:border-border-focus"
+              data-testid="r-status"
+              data-bereich={istBereich ? "true" : "false"}
             >
-              <option value="">—</option>
-              <option value="vacant">Frei</option>
-              <option value="occupied">Belegt</option>
-              <option value="reserved">Reserviert</option>
-              <option value="cleaning">Reinigung</option>
-              <option value="blocked">Gesperrt</option>
+              {istBereich ? (
+                <>
+                  <option value="vacant">Allgemeinbereich (in Betrieb)</option>
+                  <option value="blocked">Gesperrt (außer Betrieb)</option>
+                </>
+              ) : (
+                <>
+                  <option value="">—</option>
+                  <option value="vacant">Frei</option>
+                  <option value="occupied">Belegt</option>
+                  <option value="reserved">Reserviert</option>
+                  <option value="cleaning">Reinigung</option>
+                  <option value="blocked">Gesperrt</option>
+                </>
+              )}
             </select>
             {/* Sprint 22 T7: das Feld ist **halb** automatisch, und das ist
                 der ganze Hinweis. `sync_room_status` leitet den Status alle
                 60 s aus den Belegungen ab — ausser bei „Reinigung" und
                 „Gesperrt", die gelten als manuell gesetzt
                 (`occupancy_service.py:242`). */}
-            <p className="text-xs text-text-tertiary mt-1">
-              Frei, Belegt und Reserviert werden laufend aus den Belegungen
-              gesetzt — eine Eingabe hier wird binnen einer Minute
-              überschrieben. <strong>Reinigung</strong> und{" "}
-              <strong>Gesperrt</strong> bleiben stehen und halten den
-              Abgleich für dieses Zimmer an.
-            </p>
+            {istBereich ? (
+              <p className="text-xs text-text-tertiary mt-1" data-testid="r-status-hinweis">
+                Ein Allgemeinbereich hat keine Belegung — der Abgleich fasst
+                diesen Status nicht an. <strong>Gesperrt</strong> nimmt den
+                Bereich außer Betrieb: die Engine fährt ihn dann auf
+                Frostschutz, unabhängig von der Betriebszeit.
+              </p>
+            ) : (
+              <p className="text-xs text-text-tertiary mt-1" data-testid="r-status-hinweis">
+                Frei, Belegt und Reserviert werden laufend aus den Belegungen
+                gesetzt — eine Eingabe hier wird binnen einer Minute
+                überschrieben. <strong>Reinigung</strong> und{" "}
+                <strong>Gesperrt</strong> bleiben stehen und halten den
+                Abgleich für dieses Zimmer an.
+              </p>
+            )}
           </div>
         ) : null}
       </div>

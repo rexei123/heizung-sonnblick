@@ -27,6 +27,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useAuth } from "@/contexts/auth-context";
+import { fehlerText } from "@/lib/api/fehler";
 import { darfRelaisSchalten } from "@/lib/auth/rechte";
 import {
   fetchRelaisStand,
@@ -114,13 +115,14 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
   const provision = useMutation({
     mutationFn: () => provisioniereRelais(deviceId),
     onSuccess: (ergebnis) => nachAktion(ergebnis.hinweis),
-    onError: (fehler: Error) => setMeldung(`Provisionierung fehlgeschlagen: ${fehler.message}`),
+    onError: (fehler: unknown) =>
+      setMeldung(`Provisionierung fehlgeschlagen: ${fehlerText(fehler)}`),
   });
 
   const inBetrieb = useMutation({
     mutationFn: () => nimmRelaisInBetrieb(deviceId),
     onSuccess: () => nachAktion("In Betrieb genommen. Der Regler darf jetzt schalten."),
-    onError: (fehler: Error) => setMeldung(fehler.message),
+    onError: (fehler: unknown) => setMeldung(fehlerText(fehler)),
   });
 
   const ausserBetrieb = useMutation({
@@ -129,13 +131,13 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
       nachAktion(
         "Zurückgenommen. Das Relais wird nicht ausgeschaltet — ein laufender Timer läuft ab.",
       ),
-    onError: (fehler: Error) => setMeldung(fehler.message),
+    onError: (fehler: unknown) => setMeldung(fehlerText(fehler)),
   });
 
   const freigabe = useMutation({
     mutationFn: () => hebeSchutzSperreAuf(deviceId),
     onSuccess: () => nachAktion("Schutz-Sperre aufgehoben."),
-    onError: (fehler: Error) => setMeldung(fehler.message),
+    onError: (fehler: unknown) => setMeldung(fehlerText(fehler)),
   });
 
   if (isLoading) {

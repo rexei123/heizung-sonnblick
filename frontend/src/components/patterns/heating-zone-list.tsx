@@ -18,7 +18,8 @@ import { ZoneCard } from "@/components/patterns/zone-card";
 import { Button } from "@/components/ui/button";
 import { useDevices } from "@/lib/api/hooks";
 import { useCreateHeatingZone, useHeatingZones } from "@/lib/api/hooks-rooms";
-import type { ApiError, HeatingZoneKind } from "@/lib/api/types";
+import { fehlerText } from "@/lib/api/fehler";
+import type { HeatingZoneKind } from "@/lib/api/types";
 import { useAuth } from "@/contexts/auth-context";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
 
@@ -165,11 +166,10 @@ export function HeatingZoneList({ roomId, onSwitchToOverrideTab }: Props) {
   );
 }
 
+// Sprint 24e: dieselbe Frage, eine Antwort. Die eigene Fassung hier war
+// richtig und hat trotzdem dazu beigetragen, dass sechs andere Stellen
+// ihre eigene geschrieben haben — vier davon falsch (`fehler.message` auf
+// einem Objekt, das keine `Error`-Instanz ist).
 function toMessage(err: unknown): string {
-  const e = err as ApiError | Error;
-  if (typeof e === "object" && e !== null && "detail" in e) {
-    const d = (e as ApiError).detail;
-    return typeof d === "string" ? d : JSON.stringify(d);
-  }
-  return e instanceof Error ? e.message : "Unbekannter Fehler";
+  return fehlerText(err);
 }

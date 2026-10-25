@@ -34,6 +34,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useAuth } from "@/contexts/auth-context";
+import { fehlerText } from "@/lib/api/fehler";
 import { setzeMessrolle } from "@/lib/api/relays";
 import { darfRelaisSchalten } from "@/lib/auth/rechte";
 import type { Device } from "@/lib/api/types";
@@ -82,8 +83,8 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
       void queryClient.invalidateQueries({ queryKey: ["device-audit", device.id] });
     },
-    onError: (fehler: Error) => {
-      setMeldung(`Umschalten fehlgeschlagen: ${fehler.message}`);
+    onError: (fehler: unknown) => {
+      setMeldung(`Umschalten fehlgeschlagen: ${fehlerText(fehler)}`);
       setDialogOffen(false);
     },
   });

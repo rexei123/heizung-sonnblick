@@ -6334,3 +6334,155 @@ macht den Test rot.
 | **Wochentage, Feiertage, Vorlaufzeit** | nicht im Umfang. Eine Bar, die sonntags anders öffnet, braucht sie — bis dahin gilt eine Zeit für alle Tage |
 | **Tote Felder** | `treat_unoccupied_as_vacant_after_hours` und die fünf `guest_override_*`/`long_vacant_*`-Felder sind gekennzeichnet, nicht entfernt. Entfernen wäre eine Verengung der API und eine eigene Entscheidung |
 | **S6 für Gästezimmer** | unverändert: Übersteuerung nur bei Belegung (AE-58) |
+
+## 13. Nachtrag Sprint 24e (25.10.2026): Befunde aus dem Realbetrieb
+
+Der erste Tag, an dem die Allgemeinbereiche in Betrieb waren, hat acht
+Befunde geliefert. Sie stehen hier mit ihrer Ursache, weil fünf davon
+Fehler in dem sind, was eine Woche vorher gebaut wurde.
+
+### 13.1 Das Raumtyp-Formular zeigte einen fremden Datensatz (PR A)
+
+Links „Raum intern" ausgewählt, im Formular „Raum mit Exit" mit dessen
+Werten — bei jedem Aufruf der Seite. `RoomTypeForm` baut seinen Zustand
+mit `useState(initial ?? …)` auf, und das läuft **einmal je Montage**;
+ohne `key` blieb die Komponente beim Wechsel der Auswahl stehen.
+
+**Kein Autosave:** der einzige Schreibweg ist der Knopf (oder `Enter`,
+was dasselbe Formular abschickt). Und was den Schaden verhindert hat, war
+ein Zufall: ein Speichern hätte den **fremden Namen** mitgesendet, und
+`room_type.name` trägt einen Eindeutigkeits-Index — die Anweisung wäre
+mit 409 abgewiesen worden, nichts geschrieben. Der Schutz hält nur,
+solange niemand den Namen vorher korrigiert. Festgehalten als Test und
+benannt als Zufall (§5.78: „ist gutgegangen" und „war abgesichert" sind
+zwei Dinge).
+
+**Behoben** mit `key={editingItem.id}` plus einer Sicherung im Backend:
+`PATCH /room-types/{id}` nimmt ein **Echo** der bearbeiteten ID und weist
+mit 409 ab, wenn es nicht zum Pfad passt. Optional, damit ein Skript ohne
+das Feld nicht bricht.
+
+**Dieselbe Klasse auf anderen Seiten geprüft:** betroffen war die
+Zimmerseite, eine Stufe milder — dort kann kein fremdes Zimmer
+erscheinen, aber der Raumtyp-Editor ändert den Typ, und `RoomForm` hält
+den alten in seinem Auswahlfeld. `key` am Raumtyp, nicht an einem
+Zeitstempel: er setzt das Formular zurück, wenn der Wert sich geändert
+hat, und nicht bei jedem Hintergrund-Abruf. Nicht betroffen: Benutzer
+(Dialoge werden je Öffnung neu montiert), Szenarien (kein
+Bearbeitungsformular), Einstellungen → API (`useEffect` auf die Daten),
+Zimmer-Liste (Formular nur zum Anlegen).
+
+### 13.2 Die Betriebszeit meldete nichts — auch keinen Fehler
+
+Der teuerste Befund dieses Tages, und er liegt in meinem Code aus 24d.
+
+**Der Server war es nicht.** `PATCH /rooms/{id}/betriebszeit` antwortet
+für 07:00/22:00 mit **200** — gemessen am Endpunkt, nicht gefolgert.
+
+**Die Anzeige war es.** `apiClient` wirft ein **einfaches Objekt**
+`{status, detail, error_code}` und keine `Error`-Instanz. `onError: (e:
+Error) => setFehler(e.message)` liest damit `undefined`, und
+`setFehler(undefined)` rendert einen Kasten mit nichts darin. Jede
+Ablehnung war unsichtbar — in der kleinsten Schriftgröße, ohne Text.
+
+Dieselbe Zeile stand an **sieben** Stellen: `betriebszeit-form`,
+`measure-only-toggle`, `sollwert-wirksamkeit` und viermal in
+`relay-card`, über drei Sprints hinweg. Jede Komponente hat ihre
+Fehlerbehandlung selbst geschrieben, und `heating-zone-list` hatte die
+einzige richtige Fassung — als lokale Funktion, wo sie niemand findet.
+Seit 24e steht sie einmal in `lib/api/fehler.ts`, und `toMessage`
+delegiert dorthin.
+
+Dazu zwei Abfrage-Schlüssel, die auf nichts zeigten:
+`["engine-trace", id]` statt `["room", id, "engine-trace"]` (ein falscher
+Schlüssel wirft keinen Fehler — er tut nichts), und die Zählung auf der
+globalen Seite wurde nie ungültig gemacht. Beides erklärt die Symptome
+„keine Bestätigung" und „globale Seite meldet weiterhin 1 Zimmer".
+
+**Was offen bleibt:** warum das Speichern im Haus überhaupt scheiterte,
+ist nach dem Umstand nicht mehr zu rekonstruieren — der Fehler war
+unsichtbar und ist nirgends protokolliert. Beim nächsten Versuch nennt
+die Oberfläche den Grund.
+
+### 13.3 Der Verlauf zeigte den eingefrorenen Gerätesollwert
+
+„Barbereich (Soll)" stand durchgehend auf 10 °C, während die Engine 21
+bzw. 19 rechnete. Der Wert war echt: er stand im Gerät, aus der Zeit der
+erzwungenen Frostschutz-Phase.
+
+Der Grundsatz des Verlaufs — „gezeigt wird, was am Heizkörper gilt, nicht
+was die Engine wollte" (AE-74) — setzt voraus, dass das Gerät den
+Heizkörper **stellt**. Eine Vicki mit der Rolle „nur messen" bekommt
+keine Sollwerte (S7); ihr gespeicherter Wert friert in dem Moment ein, in
+dem die Rolle gesetzt wird. Er ist dann kein Zustand der Zone, sondern
+ein Überrest.
+
+Für Zonen **ohne Stellglied** kommt der Sollwert deshalb aus dem
+`event_log` — derselbe HARD_CLAMP-Wert, den die Zonenkarte zeigt. Für
+Zonen mit Stellglied bleibt alles, wie es war; die Gegenprobe steht als
+Test daneben, weil die Änderung sonst eine Aussage weggenommen hätte.
+**Kein Rückfall** auf den Gerätewert, wenn ein Eimer keinen
+Engine-Eintrag hat: das wäre derselbe Befund, nur seltener.
+
+### 13.4 Status, Begriffe, Grammatik
+
+Die Stammdaten eines Bereichs zeigten „Frei" mit dem Hinweis „wird aus
+den Belegungen gesetzt" — zweimal falsch: es gibt keine Belegungen, und
+der Abgleich fasst das Zimmer seit 24d nicht mehr an. Angeboten werden
+jetzt zwei Zustände: **Allgemeinbereich (in Betrieb)** — intern weiter
+`vacant`, der Zweig, den die Engine für ein nie belegtes Zimmer nimmt —
+und **Gesperrt (außer Betrieb)**. Für Gästezimmer bleiben alle fünf.
+
+Dazu drei Beschriftungen: der Zimmerkopf sagt „Betrieb bzw. **Absenkung**"
+statt „Nacht", die Raumtyp-Liste zeigt bei nicht buchbaren Typen
+„Betrieb … · Absenkung …" statt „Belegt/Frei", und die globale Seite
+schreibt Singular im Singular („1 Zimmer hat … und **bleibt**
+unberührt"). Drei Namen für denselben Wert sind zwei zu viel.
+
+### 13.5 Die Zeitumstellung
+
+Betriebszeiten und Nachtfenster stehen jetzt mit Regressionstests an
+**beiden** Umstellungstagen (29.03. und 25.10.2026, Europe/Vienna). Die
+Tests bauen ihre Augenblicke aus der Ortszeit über `zoneinfo` und prüfen
+die Grenzen knapp — 06:30/07:30 und 21:59/22:01 bei der Rezeption,
+14:59/15:01 und 23:59/00:01 bei der Bar.
+
+Die **doppelte Stunde** hat zwei eigene Tests: 02:30 am Rückstelltag
+existiert zweimal (`fold=0` und `fold=1`), und beide Auslegungen müssen
+zu einem definierten und — wenn das Fenster beide einschließt — zum
+**selben** Ergebnis führen. 02:30 fehlt in der Grenz-Tabelle mit Absicht:
+am Vorstellungstag gibt es diese Ortszeit nicht.
+
+**Mutationsprobe M29** (feste UTC-Verschiebung statt Zeitzone) macht fünf
+dieser Tests rot. Sie greift am Vorstellungstag: dort ist 07:30 Ortszeit
+Sommerzeit, und mit einer festen Verschiebung von einer Stunde liest die
+Engine 06:30 — noch Absenkung.
+
+### 13.6 Die Lücke im Verlauf der Umstellungsnacht
+
+**Die Darstellung kann sie nicht erzeugen.** Die Achse rechnet in
+UTC-Millisekunden und beschriftet in Ortszeit; die doppelte Stunde sind
+zwei verschiedene Augenblicke mit zwei verschiedenen x-Werten. Die Linie
+ist dort lückenlos — nur die Beschriftung trägt zweimal „02:00", und das
+sieht wie ein Fehler aus. Deshalb steht die Zeitzone jetzt an der Legende
+(aus `daten.timezone`, derselben Angabe, mit der der Server die
+Nacht-Bänder rechnet).
+
+**Eine Lücke von etwa fünf Stunden ist dagegen der Normalfall.** Der
+Heartbeat einer Vicki ist `HEARTBEAT_INTERVAL = 6 h`
+(`rules/engine.py`): ein Gerät, bei dem sich nichts ändert, meldet
+stundenlang nichts, und im Diagramm fehlen dann Punkte. Dass die Lücke
+genau in der Umstellungsnacht auffiel, ist Zufall — sie fällt dort auf,
+weil man hinsieht.
+
+**Was ich nicht entscheiden kann:** ob in *dieser* Nacht wirklich
+Messwerte fehlen, steht nur in der Produktionsdatenbank. Die Abfrage dazu
+liegt in RUNBOOK §10ak; sie beantwortet die Frage in einer Zeile.
+
+### 13.7 Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Warum das Speichern im Haus scheiterte** | nicht rekonstruierbar — der Fehler war unsichtbar und nirgends protokolliert. Beim nächsten Versuch nennt die Oberfläche den Grund |
+| **Lücke in der Umstellungsnacht** | Abfrage in RUNBOOK §10ak; bis dahin ist die wahrscheinlichste Erklärung der 6-Stunden-Heartbeat |
+| **`ApiError` ist keine `Error`-Instanz** | `lib/api/fehler.ts` fängt das ab, aber die Wurzel bleibt: wer `throw {…}` schreibt, lädt zu `e.message` ein. Ein eigener `Error`-Abkömmling in `client.ts` wäre der nächste Schritt — eigener Durchgang, weil jeder Aufrufer davon abhängt |

@@ -180,6 +180,30 @@ function Diagramm({
   const beschriftung = (ms: number) =>
     daten.range === "24h" ? ZEIT_KURZ.format(new Date(ms)) : TAG_UND_ZEIT.format(new Date(ms));
 
+  /**
+   * Sprint 24e (P7): die Zeitzone **steht** an der Achse.
+   *
+   * Die Achse rechnet in UTC-Millisekunden und beschriftet in Ortszeit —
+   * das ist richtig und in der Umstellungsnacht nicht zu erkennen: Ende
+   * Oktober trägt die Achse **zweimal** „02:00", und das sieht wie ein
+   * Fehler aus. Die Linie ist dort lückenlos, weil zwei verschiedene
+   * Augenblicke zwei verschiedene x-Werte haben; nur die Beschriftung
+   * wiederholt sich.
+   *
+   * Eine Uhrzeit, die neben einer anderen steht, trägt ihre Zone (§5.79,
+   * dritter Teil). Hier ist es der einzige Hinweis darauf, dass die
+   * doppelte Stunde keine doppelten Daten sind.
+   */
+  // Die Zone kommt aus der **Antwort** (`daten.timezone`) und nicht aus
+  // einer Konstante hier: der Server rechnet die Nacht-Bänder damit, und
+  // zwei Quellen für dieselbe Zone wären zwei Wahrheiten (§5.53).
+  const zonenKuerzel = new Intl.DateTimeFormat("de-AT", {
+    timeZone: daten.timezone,
+    timeZoneName: "short",
+  })
+    .formatToParts(new Date(bisMs))
+    .find((t) => t.type === "timeZoneName")?.value;
+
   return (
     <div className="space-y-3">
       <ChartContainer testId="room-history-chart">
@@ -274,6 +298,15 @@ function Diagramm({
           Ein Tooltip allein waere die Falle aus §5.57: Semantik, die nur
           beim Darueberfahren existiert. */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-text-secondary">
+        {/* Sprint 24e (P7): die Zeitzone gehoert zur Achse.
+            In der Umstellungsnacht Ende Oktober steht dort zweimal
+            „02:00" — die Linie ist lueckenlos, nur die Beschriftung
+            wiederholt sich. Ohne diesen Hinweis sieht das wie ein Fehler
+            aus (§5.79, dritter Teil: eine Uhrzeit neben einer anderen
+            traegt ihre Zone). */}
+        {zonenKuerzel !== undefined ? (
+          <span data-testid="verlauf-zeitzone">Zeiten in {zonenKuerzel}</span>
+        ) : null}
         <span className="flex items-center gap-2">
           <span
             className="inline-block h-3 w-5 rounded-sm"
