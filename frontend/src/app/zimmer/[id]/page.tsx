@@ -278,7 +278,23 @@ export default function ZimmerDetailPage() {
                   weil room_type heizverhalten-relevant ist. RoomForm
                   bleibt fuer die uebrigen Stammdaten unveraendert. */}
               <RoomTypeInlineEditor room={room.data} />
+              {/* Sprint 24e (PR A): derselbe Fehler eine Stufe milder.
+
+                  Hier gibt es **einen** Datensatz, seine ID kommt aus dem
+                  Weg und wechselt nicht — ein fremder Raumtyp kann im
+                  Formular also nicht erscheinen. Was erscheinen kann, ist
+                  ein **veralteter** Wert: der Editor darüber ändert den
+                  Raumtyp, `RoomForm` hält weiter den alten in seinem
+                  Auswahlfeld, und ein Speichern schreibt ihn zurück.
+
+                  Der `key` hängt deshalb am Raumtyp und nicht an einem
+                  Zeitstempel: er setzt das Formular genau dann zurück,
+                  wenn der Wert, den ein anderes Bedienelement ändern
+                  kann, sich geändert hat — und nicht bei jedem
+                  Hintergrund-Abruf, der sonst die Eingabe eines Tippenden
+                  verwerfen würde. */}
               <RoomForm
+                key={room.data.room_type_id}
                 initial={room.data}
                 onSubmit={handleUpdate}
                 submitting={updateMut.isPending}

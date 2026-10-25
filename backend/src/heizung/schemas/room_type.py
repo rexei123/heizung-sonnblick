@@ -64,8 +64,31 @@ class RoomTypeCreate(BaseModel):
 
 
 class RoomTypeUpdate(BaseModel):
-    """Eingabe fuer PATCH /api/v1/room-types/{id}. Alle Felder optional."""
+    """Eingabe fuer PATCH /api/v1/room-types/{id}. Alle Felder optional.
 
+    ``id`` ist das **Echo** des Datensatzes, den der Aufrufer bearbeitet
+    hat, und kein Feld, das etwas aendert. Stimmt es nicht mit der Pfad-ID
+    ueberein, weist der Endpunkt die Anfrage ab.
+
+    **Der Anlass (Befund des Betreibers, 25.10.2026):** die Raumtypen-Seite
+    hat im Formular den **falschen** Datensatz gezeigt — links „Raum
+    intern" ausgewaehlt, im Formular „Raum mit Exit" samt dessen Werten.
+    Ein Speichern haette die Werte des einen in den anderen geschrieben.
+    Die Ursache lag in der Oberflaeche (der Formularzustand wurde beim
+    Auswahlwechsel nicht neu aufgebaut), und dort ist sie behoben.
+
+    Dieses Feld ist die zweite Haelfte: der Server soll eine solche
+    Anfrage **abweisen** und sich nicht darauf verlassen, dass die
+    Oberflaeche richtig rechnet. Es ist bewusst optional — ein Aufrufer,
+    der es nicht sendet (Skript, ``curl``), bekommt das alte Verhalten und
+    keine neue Pflicht.
+    """
+
+    id: int | None = Field(
+        default=None,
+        gt=0,
+        description="Echo der bearbeiteten Raumtyp-ID. Muss zur Pfad-ID passen.",
+    )
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     is_bookable: bool | None = None

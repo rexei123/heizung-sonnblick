@@ -394,6 +394,13 @@ export interface RoomTypeCreate {
 }
 
 export interface RoomTypeUpdate {
+  /**
+   * Sprint 24e (§5.63): **Echo** der bearbeiteten Raumtyp-ID, kein Feld,
+   * das etwas ändert. Der Server weist die Anfrage ab, wenn sie nicht zur
+   * Pfad-ID passt — eine zweite Sicherung gegen den Befund vom
+   * 25.10.2026, bei dem das Formular einen fremden Datensatz zeigte.
+   */
+  id?: number;
   name?: string;
   description?: string | null;
   is_bookable?: boolean;
