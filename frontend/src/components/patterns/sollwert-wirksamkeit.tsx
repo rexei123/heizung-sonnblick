@@ -27,6 +27,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-context";
+import { fehlerText } from "@/lib/api/fehler";
 import {
   FELD_LABEL,
   FELD_LABEL_BEREICH,
@@ -60,7 +61,8 @@ export function SollwertWirksamkeit({ roomTypeId }: { roomTypeId: number }) {
       );
       void queryClient.invalidateQueries({ queryKey: ["sollwert-wirksamkeit"] });
     },
-    onError: (fehler: Error) => setMeldung(`Übernehmen fehlgeschlagen: ${fehler.message}`),
+    onError: (fehler: unknown) =>
+      setMeldung(`Übernehmen fehlgeschlagen: ${fehlerText(fehler)}`),
   });
 
   if (isLoading) {

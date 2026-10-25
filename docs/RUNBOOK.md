@@ -7132,3 +7132,60 @@ Hersteller-Angaben und den offenen Punkten), §5.21 (Codec-Routing über
 `bytes[0]`), §5.22 (Codec-Re-Paste je Server), §5.28 (Downlinks über
 MQTT), §0 S4 (Hardware-Schutz), §10h (Pairing-Ablauf beim Vicki, als
 Vorlage für Schritt 2).
+
+## 10ak. Lücke im Verlauf prüfen: fehlen Messwerte oder ist es die Anzeige?
+
+**Anlass (25.10.2026).** Im Zimmer-Verlauf der Umstellungsnacht
+24./25.10. fehlte in der Bad-Zone ein Stück von etwa 00:40 bis 06:00.
+
+**Was die Anzeige nicht kann.** Die Zeitachse rechnet in UTC und
+beschriftet in Ortszeit. Die doppelt vorhandene Stunde der Rückstellung
+sind damit **zwei verschiedene** Punkte auf der Achse — die Linie bleibt
+dort durchgehend, nur die Beschriftung trägt zweimal „02:00". Eine
+Darstellungs-Lücke kann daraus nicht entstehen. Seit Sprint 24e steht
+die Zeitzone deshalb unter dem Diagramm („Zeiten in CET"), damit die
+doppelte Beschriftung nicht wie ein Fehler aussieht.
+
+**Was die wahrscheinliche Erklärung ist.** Eine Vicki, bei der sich
+nichts ändert, meldet bis zu **sechs Stunden** nichts
+(`HEARTBEAT_INTERVAL`). Eine Lücke von fünf Stunden ist damit normaler
+Betrieb und kein Ausfall — sie fällt nur auf, wenn man hinsieht.
+
+**Die Abfrage, die es entscheidet.** Sie zählt die Messwerte je Stunde
+in Ortszeit für ein Zimmer und eine Nacht:
+
+**SSH (Server, root):**
+
+```bash
+docker exec -i deploy-db-1 psql -U heizung -d heizung -v ON_ERROR_STOP=1 <<'SQL'
+SELECT date_trunc('hour', sr.time AT TIME ZONE 'Europe/Vienna') AS stunde_ortszeit,
+       hz.name                                                  AS zone,
+       count(*)                                                 AS messwerte,
+       count(sr.temperature)                                    AS mit_temperatur
+  FROM sensor_reading sr
+  JOIN device d      ON d.id = sr.device_id
+  JOIN heating_zone hz ON hz.id = d.heating_zone_id
+  JOIN room r        ON r.id = hz.room_id
+ WHERE r.number = '208'                       -- Zimmer anpassen
+   AND sr.time >= '2026-10-24 20:00:00+00'    -- Nacht anpassen
+   AND sr.time <  '2026-10-25 08:00:00+00'
+ GROUP BY 1, 2
+ ORDER BY 1, 2;
+SQL
+```
+
+**Wie das Ergebnis zu lesen ist:**
+
+- **Stunden fehlen ganz** → das Gerät hat nichts gesendet. Bis sechs
+  Stunden ist das der Heartbeat; darüber lohnt ein Blick auf
+  `health_state` und den Funk.
+- **`messwerte` steht da, `mit_temperatur` ist 0** → es kamen nur
+  Befehlsantworten. Das ist der Befund, den Sprint 24e behoben hat: die
+  Anzeige nimmt seither die jüngste Zeile **mit** Temperatur.
+- **Zwei Zeilen für dieselbe Stunde** am Rückstelltag → die doppelte
+  Stunde, und zwar korrekt: zwei verschiedene Augenblicke mit derselben
+  Ortszeit.
+
+**Was die Abfrage nicht beantwortet:** ob das Diagramm sie richtig
+zeichnet. Dafür ist der Verlauf selbst der Prüfpunkt — mit der
+Zeitzonen-Angabe darunter.

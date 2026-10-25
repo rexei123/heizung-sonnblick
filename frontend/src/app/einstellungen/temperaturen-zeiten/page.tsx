@@ -124,18 +124,30 @@ export default function TemperaturenZeitenPage() {
     }
     const teile = [grund];
     if (n.raumtypen_eigen > 0) {
-      teile.push(
-        `${n.raumtypen_nutzen} Raumtyp${n.raumtypen_nutzen === 1 ? "" : "en"} ` +
-          `nehmen diesen Wert, ${n.raumtypen_eigen} ` +
-          `${n.raumtypen_eigen === 1 ? "hat" : "haben"} einen eigenen.`,
-      );
+      const nehmen =
+        n.raumtypen_nutzen === 1
+          ? "1 Raumtyp nimmt diesen Wert"
+          : `${n.raumtypen_nutzen} Raumtypen nehmen diesen Wert`;
+      const eigene =
+        n.raumtypen_eigen === 1
+          ? "1 hat einen eigenen"
+          : `${n.raumtypen_eigen} haben einen eigenen`;
+      teile.push(`${nehmen}, ${eigene}.`);
     } else {
-      teile.push(`Alle ${n.raumtypen_nutzen} Raumtypen nehmen diesen Wert.`);
+      teile.push(
+        n.raumtypen_nutzen === 1
+          ? "Der einzige Raumtyp nimmt diesen Wert."
+          : `Alle ${n.raumtypen_nutzen} Raumtypen nehmen diesen Wert.`,
+      );
     }
     if (n.zimmer_eigen > 0) {
+      // Singular und Plural bis zum Satzende: „1 Zimmer hat … und bleiben
+      // unberührt" war halb richtig, und halb richtige Grammatik liest
+      // sich wie ein Platzhalter, den jemand vergessen hat.
       teile.push(
-        `${n.zimmer_eigen} Zimmer ${n.zimmer_eigen === 1 ? "hat" : "haben"} ` +
-          "eine eigene Einstellung und bleiben unberührt.",
+        n.zimmer_eigen === 1
+          ? "1 Zimmer hat eine eigene Einstellung und bleibt unberührt."
+          : `${n.zimmer_eigen} Zimmer haben eine eigene Einstellung und bleiben unberührt.`,
       );
     }
     return teile.join(" ");

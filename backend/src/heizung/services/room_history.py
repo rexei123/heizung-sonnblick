@@ -26,6 +26,21 @@ gezeigt wird, was am Heizkoerper gilt, nicht was die Engine wollte. Ein
 nicht angekommener Downlink ist damit im Diagramm **sichtbar** statt
 geglaettet, und genau dafuer sieht man sich einen Verlauf an.
 
+**Mit einer Ausnahme, und die ist ein Befund (Betreiber, 25.10.2026).**
+Im Zimmer „Bar" zeigte die Zone „Barbereich (Soll)" durchgehend
+**10 °C**, waehrend die Engine 21 bzw. 19 rechnete. Der Wert war echt: er
+stand im Geraet, aus der Zeit, in der die Geraete-Sicherheit Frostschutz
+erzwungen hat. Nur sagt er nichts mehr — eine Vicki mit der Rolle „nur
+messen" bekommt **keine Sollwerte** (S7), ihr gespeicherter Wert friert
+in dem Moment ein, in dem die Rolle gesetzt wird, und bleibt es.
+
+Der Satz „gezeigt wird, was am Heizkoerper gilt" setzt voraus, dass das
+Geraet den Heizkoerper stellt. Bei einem Fuehler ist das nicht so: er
+stellt nichts, und sein Sollwert ist kein Zustand der Zone, sondern ein
+Ueberrest. Fuer Zonen **ohne Stellglied** kommt der Sollwert deshalb aus
+dem ``event_log`` — derselbe HARD_CLAMP-Wert, den die Zonenkarte zeigt.
+So widerspricht der Verlauf nicht mehr der Karte darueber.
+
 **Kein Lifecycle-Filter, und das ist Absicht.** §5.58 verlangt
 ``retired_at IS NULL`` fuer jede Abfrage, die Geraete an Engine, Dispatch
 oder Alarme weitergibt — hier geht nichts weiter, hier wird Vergangenheit
@@ -51,7 +66,8 @@ from sqlalchemy import Interval, cast, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.device import Device
-from heizung.models.enums import HeatingZoneKind
+from heizung.models.enums import EventLogLayer, HeatingZoneKind
+from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
@@ -60,6 +76,7 @@ from heizung.rules.config_resolve import (
     lade_zeitzone,
     resolve_rule_field,
 )
+from heizung.services.zone_aggregates import geraete_luecke_per_zone
 
 # Fenster und Eimer je Bereich. Die Punktzahl je Zone steht daneben, weil
 # sie die eigentliche Zusage ist: 144 bzw. 168 Punkte sind eine Linie, die
@@ -172,6 +189,44 @@ def nacht_baender(
     return baender
 
 
+async def _engine_sollwerte(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    minuten: int,
+    von: datetime,
+    bis: datetime,
+) -> dict[datetime, Decimal | None]:
+    """Der HARD_CLAMP-Sollwert des Zimmers, in denselben Eimern.
+
+    Quelle ist ``event_log.setpoint_out`` der Schicht ``HARD_CLAMP`` —
+    derselbe Wert, den die Zonenkarte zeigt
+    (``latest_hard_clamp_setpoint_per_room``). Zwei Wege zur selben
+    Aussage waeren zwei Wahrheiten; der Verlauf nimmt deshalb den
+    gleichen.
+
+    ``max`` je Eimer, wie beim Geraete-Sollwert: innerhalb von zehn
+    Minuten kann die Engine mehrfach gelaufen sein, und der zuletzt
+    gueltige Wert ist der interessante. Dass ``max`` nicht „der letzte"
+    ist, faellt nur auf, wenn der Sollwert innerhalb eines Eimers
+    **sinkt** — dann zeigt das Diagramm zehn Minuten lang den hoeheren.
+    Dieselbe Eigenschaft hat die Geraete-Reihe seit Sprint 21, und sie
+    hier anders aufzuloesen hiesse, zwei Rechnungen zu haben.
+    """
+    eimer_log = func.time_bucket(
+        cast(literal(f"{minuten} minutes"), Interval), EventLog.time
+    ).label("eimer")
+    stmt = (
+        select(eimer_log, func.max(EventLog.setpoint_out).label("sollwert"))
+        .where(EventLog.room_id == room_id)
+        .where(EventLog.layer == EventLogLayer.HARD_CLAMP)
+        .where(EventLog.time >= von)
+        .where(EventLog.time < bis)
+        .group_by(eimer_log)
+    )
+    return {reihe.eimer: reihe.sollwert for reihe in (await session.execute(stmt)).all()}
+
+
 async def lade_verlauf(
     session: AsyncSession,
     *,
@@ -219,13 +274,33 @@ async def lade_verlauf(
     )
     reihen = (await session.execute(stmt)).all()
 
+    # Sprint 24e (P3): welche Zonen haben kein Stellglied? Fuer die ist der
+    # Sollwert des Geraets ein Ueberrest und nicht der Zustand der Zone
+    # (Begruendung im Kopf). Eine Abfrage fuer alle Zonen des Zimmers.
+    zone_ids = sorted({reihe.zone_id for reihe in reihen})
+    luecken = await geraete_luecke_per_zone(session, zone_ids)
+    nur_fuehler = {
+        zid for zid, luecke in luecken.items() if luecke in {"kein_stellglied", "beides"}
+    }
+    engine_soll = (
+        await _engine_sollwerte(session, room_id=room.id, minuten=minuten, von=von, bis=bis)
+        if nur_fuehler
+        else {}
+    )
+
     punkte_je_zone: dict[int, list[VerlaufPunkt]] = {}
     for reihe in reihen:
+        # ``None`` bleibt ``None``: gibt es fuer den Eimer keinen
+        # Engine-Eintrag, wird nicht der Geraetewert eingesetzt. Ein
+        # Rueckfall auf den eingefrorenen Wert waere genau der Befund, den
+        # diese Aenderung behebt — nur seltener und damit schwerer zu
+        # sehen.
+        sollwert = engine_soll.get(reihe.eimer) if reihe.zone_id in nur_fuehler else reihe.sollwert
         punkte_je_zone.setdefault(reihe.zone_id, []).append(
             VerlaufPunkt(
                 t=reihe.eimer,
                 temperature=reihe.temperatur,
-                setpoint=reihe.sollwert,
+                setpoint=sollwert,
             )
         )
 

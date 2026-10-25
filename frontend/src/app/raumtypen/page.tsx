@@ -278,8 +278,20 @@ function RoomTypeList({ items, isLoading, isError, selectedId, onSelect }: ListP
               ) : null}
             </div>
             <div className="text-xs text-text-tertiary mt-0.5">
-              Belegt {rt.default_t_occupied}° · Frei {rt.default_t_vacant}°
-              {!rt.is_bookable ? " · nicht buchbar" : ""}
+              {/* Ein Allgemeinbereich hat kein „Belegt" und kein „Frei" —
+                  er hat Betrieb und Absenkung. Dieselben Worte wie im
+                  Formular rechts und im Trace; drei Namen fuer denselben
+                  Wert sind zwei zu viel. */}
+              {rt.is_bookable ? (
+                <>
+                  Belegt {rt.default_t_occupied}° · Frei {rt.default_t_vacant}°
+                </>
+              ) : (
+                <>
+                  Betrieb {rt.default_t_vacant}° · Absenkung {rt.default_t_night}° ·
+                  Allgemeinbereich
+                </>
+              )}
             </div>
           </button>
         </li>

@@ -30,6 +30,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
+import { fehlerText } from "@/lib/api/fehler";
 import { setzeBetriebszeit } from "@/lib/api/betriebszeit";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
 import type { Room } from "@/lib/api/types";
@@ -66,12 +67,28 @@ export function BetriebszeitForm({ room }: { room: Room }) {
           ? "Betriebszeit gelöscht — es gilt wieder, was Raumtyp oder Haus vorgeben."
           : "Betriebszeit gespeichert. Die Engine übernimmt sie beim nächsten Durchlauf (≤ 60 s).",
       );
+      // **Die Schlüssel sind hier der Fix** (Befund des Betreibers,
+      // 25.10.2026: „kein Knopf Löschen, keine Bestätigung; globale Seite
+      // meldet weiterhin nur 1 Zimmer").
+      //
+      // `["engine-trace", id]` war **falsch**: der Schlüssel heißt
+      // `["room", id, "engine-trace"]` (`ROOM_KEYS.engineTrace`). Ein
+      // Schlüssel, der auf nichts zeigt, wirft keinen Fehler — er tut
+      // einfach nichts, und der Trace zeigte weiter den alten Stand.
+      //
+      // Und die Zählung auf der globalen Seite („wie viele Zimmer haben
+      // eine eigene Einstellung") wurde nie ungültig gemacht. Sie ist der
+      // einzige Ort, an dem man eine gesetzte Betriebszeit von außen
+      // sieht — genau dort stand die alte Zahl.
       void queryClient.invalidateQueries({ queryKey: ["room", room.id] });
-      void queryClient.invalidateQueries({ queryKey: ["engine-trace", room.id] });
+      void queryClient.invalidateQueries({ queryKey: ["room", room.id, "engine-trace"] });
+      void queryClient.invalidateQueries({ queryKey: ["hausstandard-nutzung"] });
     },
-    onError: (e: Error) => {
+    onError: (e: unknown) => {
       setMeldung(null);
-      setFehler(e.message);
+      // ``apiClient`` wirft ein einfaches Objekt, keine ``Error``-Instanz —
+      // ``e.message`` war ``undefined`` und der Kasten damit leer.
+      setFehler(fehlerText(e));
     },
   });
 
@@ -159,14 +176,35 @@ export function BetriebszeitForm({ room }: { room: Room }) {
         HH:MM. „24:00" ist erlaubt und bedeutet Mitternacht.
       </p>
 
+      {/* **Nicht mehr elf Pixel grau.** Der Betreiber hat am 25.10.2026
+          gemeldet, es sei „keine Bestätigung" gekommen — und ein Satz in
+          der kleinsten Schriftgröße unter einem Formular ist von „nichts
+          passiert" nicht zu unterscheiden. Ein Fehler erst recht nicht:
+          ein Melder, den man übersieht, meldet nichts (§5.79). */}
       {meldung !== null ? (
-        <p className="text-text-secondary mt-2 text-xs" data-testid="betriebszeit-meldung">
+        <p
+          className="border-success bg-success-soft text-success mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+          role="status"
+          data-testid="betriebszeit-meldung"
+        >
+          <span className="material-symbols-outlined shrink-0" aria-hidden style={{ fontSize: 18 }}>
+            check_circle
+          </span>
           {meldung}
         </p>
       ) : null}
       {fehler !== null ? (
-        <p className="text-error mt-2 text-xs" role="alert" data-testid="betriebszeit-fehler">
-          {fehler}
+        <p
+          className="border-error bg-error-soft text-error mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm font-medium"
+          role="alert"
+          data-testid="betriebszeit-fehler"
+        >
+          <span className="material-symbols-outlined shrink-0" aria-hidden style={{ fontSize: 18 }}>
+            error
+          </span>
+          <span>
+            Betriebszeit <strong>nicht</strong> gespeichert: {fehler}
+          </span>
         </p>
       ) : null}
     </section>
