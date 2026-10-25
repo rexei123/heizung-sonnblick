@@ -65,6 +65,10 @@ TTL_PIN_ACTIVE_S = 7 * 24 * 3600
 
 KIND_DEVICE_SILENT = "device_silent"
 KIND_IMPORT_STALE = "import_stale"
+#: Sprint 23 T3. Eigene Kennung, damit ein Abstands-Alarm einen
+#: Stale-Alarm desselben Tages nicht wegdrosselt — es sind zwei
+#: verschiedene Aussagen, und beide duerfen einmal am Tag hinausgehen.
+KIND_IMPORT_GAP = "import_gap"
 KIND_PIN_ACTIVE = "pin_active"
 
 # Gegenstand der Pin-Erinnerung ist der Zustand, nicht der SHA. Mit dem SHA
