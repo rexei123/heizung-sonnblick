@@ -7309,3 +7309,67 @@ deshalb mit Abgrenzung:
 
 Wer eines von beiden sucht, sucht nicht nach „T3", sondern nach dem, was es
 tut.
+
+---
+
+## 10an. Die Gast-Sperre: zwei Formen, und welche wann
+
+**Für wen:** die Rezeption. Ein Gast dreht am Thermostat, das Zimmer
+reagiert anders als er erwartet, und er beschwert sich.
+
+### Was die Sperre tut
+
+Sie verwirft Drehungen am Thermostat. Die Steuerung heizt weiter nach
+Plan; nur die Eingabe am Gerät wird nicht mehr übernommen. Die
+Wunschtemperatur von der Rezeption geht weiterhin
+(**Temperatur ändern** auf der Zimmerseite).
+
+Nicht zu verwechseln mit dem Zimmerstatus **gesperrt** — dort nimmt die
+Steuerung das Zimmer ganz heraus.
+
+### Die zwei Formen
+
+Seit 25.10.2026 fragt die Oberfläche beim Sperren, wie lange:
+
+| Form | Gilt | Wann richtig |
+|---|---|---|
+| **Bis Check-out** | endet mit der Abreise von selbst | der Regelfall — es geht um **diesen** Gast |
+| **Dauerhaft** | bleibt, bis jemand sie aufhebt | das Zimmer selbst soll kein bedienbares Rad haben |
+
+**Nehmen Sie „Bis Check-out", wenn Sie zweifeln.** Eine dauerhafte
+Sperre, die niemand zurücknimmt, trifft den nächsten Gast: er dreht, es
+passiert nichts, und niemand an der Rezeption weiß, warum — die Ursache
+ist eine Entscheidung von vorletzter Woche.
+
+Ist gesperrt, steht **unter dem Knopf**, welche Form gilt. Diese Zeile
+beantwortet die Frage, ob sich später jemand kümmern muss.
+
+### Im Allgemeinbereich
+
+Dort gibt es nur **dauerhaft**. Eine Bar hat keine Abreise; eine Sperre
+„bis Check-out" würde nie enden. Die Auswahl sagt das an der Stelle, an
+der man sie sucht, und der Server weist sie zusätzlich ab.
+
+### Was beim Sperren noch passiert
+
+Laufende Wunschtemperaturen des Zimmers werden aufgehoben. Die Auswahl
+nennt ihre Anzahl, **bevor** man sich entscheidet.
+
+### Prüfen, ob die Sperre wirklich gefallen ist
+
+Nach der Abreise: Zimmerseite öffnen. Steht der Knopf auf
+„Übersteuerung sperren" (nicht „gesperrt"), ist sie gefallen.
+
+Wer es im Protokoll nachsehen will, sucht die Aktion
+`ROOM_GUEST_BLOCK_LIFTED_ON_CHECKOUT` zu diesem Zimmer. Eigene Aktion und
+nicht ein Eintrag ohne Benutzer: beim Suchen nach „wer hat die Sperre
+aufgehoben" ist **„der Check-out"** eine andere Antwort als „niemand
+weiß es".
+
+### Was noch nicht geht
+
+Die **Kindersicherung am Gerät** — das Rad dreht sich dann nicht mehr,
+statt wirkungslos zu drehen. Das ist vorbereitet, aber **nicht in
+Betrieb**: es verlangt Funkbefehle an die Thermostate und einen eigenen
+Prüflauf. Bis dahin dreht sich das Rad, zeigt eine Zahl an, und die
+Steuerung ignoriert sie.

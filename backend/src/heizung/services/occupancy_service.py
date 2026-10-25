@@ -20,6 +20,7 @@ from heizung.models.enums import OccupancySource, RoomStatus
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.services import gast_sperre
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,20 @@ async def sync_room_status(
                 revoked,
                 room_id,
             )
+
+        # Sprint 23 T4-A: eine Sperre, die „bis Check-out" gesetzt wurde,
+        # endet hier — an derselben Stelle, an der der Check-out schon
+        # Folgen hat. Ein eigener Taktgeber waere eine zweite Stelle, die
+        # dasselbe Ereignis erkennen muesste (Paragraph 5.53); ein
+        # Ablaufdatum in der Zeile waere eine Vorhersage, die beim
+        # Verschieben der Abreise falsch wird.
+        #
+        # Normaler Import oben, kein Lazy wie bei ``override_pms_hook``:
+        # ``gast_sperre`` haengt nur an Modellen und am Audit-Dienst, es
+        # gibt also keinen Zirkel. Gepruefte Aussage, keine Vermutung —
+        # ein „vorsichtshalber lazy" waere eine Begruendung, die nicht
+        # stimmt (Paragraph 5.20).
+        await gast_sperre.loese_bei_checkout(session, room_id, previous_status, new_status)
 
 
 async def sync_active_rooms(session: AsyncSession, now: datetime | None = None) -> int:

@@ -207,8 +207,16 @@ async def test_patch_override_block_state_toggle_on_revokes_active_overrides(
         )
         assert len(audits) == 1
         audit = audits[0]
-        assert audit.old_value == {"blocked": False}
-        assert audit.new_value == {"blocked": True, "revoked_overrides_count": 2}
+        # Sprint 23 T4-A: das Audit fuehrt seither ``bis_checkout`` mit.
+        # Geaenderte Erwartung mit Grund (S8): ohne das Feld stuende im
+        # Protokoll „gesperrt", und ob jemand sich nach der Abreise darum
+        # kuemmern muss, waere nicht rekonstruierbar.
+        assert audit.old_value == {"blocked": False, "bis_checkout": False}
+        assert audit.new_value == {
+            "blocked": True,
+            "bis_checkout": False,
+            "revoked_overrides_count": 2,
+        }
 
 
 async def test_patch_override_block_state_toggle_off_does_not_touch_overrides(
@@ -252,7 +260,12 @@ async def test_patch_override_block_state_toggle_off_does_not_touch_overrides(
             .all()
         )
         assert len(audits) == 1
-        assert audits[0].new_value == {"blocked": False, "revoked_overrides_count": 0}
+        # T4-A: ``bis_checkout`` faellt beim Aufheben mit (siehe oben).
+        assert audits[0].new_value == {
+            "blocked": False,
+            "bis_checkout": False,
+            "revoked_overrides_count": 0,
+        }
 
 
 async def test_patch_override_block_state_idempotent_no_audit(

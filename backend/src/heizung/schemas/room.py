@@ -50,6 +50,10 @@ class RoomRead(BaseModel):
     orientation: Orientation | None
     status: RoomStatus
     guest_override_blocked: bool
+    # Sprint 23 T4-A: endet die Sperre mit der Abreise? Die Oberflaeche
+    # braucht beide Felder, weil „gesperrt" allein nicht sagt, ob jemand
+    # sich darum kuemmern muss.
+    guest_block_bis_checkout: bool = False
     notes: str | None
     created_at: datetime
     updated_at: datetime
@@ -162,8 +166,16 @@ class RoomOverrideBlockUpdate(BaseModel):
 
     Eigener Endpoint statt Erweiterung von ``RoomUpdate``: Toggle hat
     eigene Audit-Action und Auto-Revoke-Semantik (siehe AE-58 Sprint 12c).
+
+    **Sprint 23 T4-A:** ``bis_checkout`` sagt, dass die Sperre mit der
+    Abreise endet. Der Standard ist ``false`` und damit das bisherige
+    Verhalten — eine dauerhafte Sperre, die jemand von Hand zuruecknimmt.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     blocked: bool
+    #: Endet die Sperre mit der Abreise? Nur mit ``blocked=true``
+    #: zulaessig und nur fuer buchbare Zimmer (Begruendung im
+    #: Modell-Kommentar von ``Room.guest_block_bis_checkout``).
+    bis_checkout: bool = False

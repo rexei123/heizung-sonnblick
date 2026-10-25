@@ -13,6 +13,7 @@ in ``test_migrations_roundtrip.py``; dieses Modul setzt voraus, dass die
 DB bereits auf head ist.
 
 §5.49 (Sprint 12c): Room-Fixtures setzen ``guest_override_blocked=false``
+und seit Sprint 23 T4-A zusaetzlich ``guest_block_bis_checkout=false``
 explizit im Raw-SQL-INSERT, weil das Feld NOT NULL ohne DB-Server-Default
 ist (Default lebt nur im ORM-Modell, Raw-SQL umgeht das).
 """
@@ -71,8 +72,9 @@ def room_id(engine: Engine) -> Iterator[int]:
         ).scalar_one()
         rid = conn.execute(
             text(
-                "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
-                "VALUES (:num, :rt, 'vacant', false) RETURNING id"
+                "INSERT INTO room (number, room_type_id, status, guest_override_blocked, "
+                "guest_block_bis_checkout) "
+                "VALUES (:num, :rt, 'vacant', false, false) RETURNING id"
             ),
             {"num": room_number, "rt": rt_id},
         ).scalar_one()
@@ -186,8 +188,9 @@ def test_on_delete_cascade(engine: Engine) -> None:
         ).scalar_one()
         rid = conn.execute(
             text(
-                "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
-                "VALUES (:num, :rt, 'vacant', false) RETURNING id"
+                "INSERT INTO room (number, room_type_id, status, guest_override_blocked, "
+                "guest_block_bis_checkout) "
+                "VALUES (:num, :rt, 'vacant', false, false) RETURNING id"
             ),
             {"num": f"t9-9-{suffix}", "rt": rt_id},
         ).scalar_one()

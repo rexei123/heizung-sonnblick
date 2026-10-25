@@ -451,6 +451,12 @@ export interface Room {
   orientation: Orientation | null;
   status: RoomStatus;
   guest_override_blocked: boolean;
+  /**
+   * Sprint 23 T4-A: endet die Sperre mit der Abreise? Die Oberfläche
+   * braucht beide Felder — „gesperrt" allein sagt nicht, ob sich jemand
+   * nach dem Check-out darum kümmern muss.
+   */
+  guest_block_bis_checkout: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;
