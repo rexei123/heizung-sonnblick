@@ -37,6 +37,14 @@ Zimmer fällt der Sollwert auf Frostschutz, im belegten auf den Wert für
 „frei" — nicht auf Frostschutz, damit ein Gast nicht in ein kaltes Zimmer
 zurückkommt, weil er zehn Minuten gelüftet hat.
 
+> **Die Fenstererkennung ist derzeit nicht in Betrieb.** Die Thermostate
+> liefern sie ab Werk **ausgeschaltet**, und eingeschaltet wurde sie nie.
+> Diese Schicht reagiert heute also allein auf den **abgenommenen Kopf**.
+> Wer lüftet, hat keine Wirkung auf den Sollwert — das Zimmer heizt
+> weiter gegen das offene Fenster. Die Erprobung ist vorbereitet
+> (Sprint 23 T2); bis sie abgeschlossen ist, steht hier bewusst, was
+> nicht wirkt.
+
 **5 — Kappung.** Zuletzt wird auf die Grenzen des Raumtyps begrenzt. Was
 Schicht 3 erlaubt hat, kann hier noch gekürzt werden — das ist der Grund,
 warum eine eingestellte Wunschtemperatur manchmal niedriger wirkt als

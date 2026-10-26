@@ -204,6 +204,17 @@ async def query_firmware_version(dev_eui: str) -> str:
     return await send_raw_downlink(dev_eui, bytes([VICKI_FW_QUERY_COMMAND]))
 
 
+def ow_set_bytes(enabled: bool, duration_min: int, delta_c: Decimal) -> bytes:
+    """Die Bytes des ``0x45``-Befehls, ohne zu senden.
+
+    Oeffentlich, weil ein Werkzeug sie **vor** dem Senden zeigen will:
+    ``scripts/fenstererkennung`` laeuft als Probelauf und nennt die
+    Nutzlast, damit man vor einem Hardware-Eingriff sieht, was hinausgeht.
+    Ein ungueltiger Wert scheitert damit am Werkzeug und nicht am Geraet.
+    """
+    return _encode_ow_set_payload(enabled, duration_min, delta_c)
+
+
 async def set_open_window_detection(
     dev_eui: str,
     enabled: bool,

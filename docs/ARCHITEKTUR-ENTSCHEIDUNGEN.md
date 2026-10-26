@@ -6788,3 +6788,119 @@ ein zweiter Klick für dieselbe Entscheidung.
 | **Stufe B: Kindersicherung `0x07`** | eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
 | **Anzeige in der Zimmerliste** | die Liste zeigt das Schloss, aber nicht die Form. Für den Fall „welche Zimmer muss ich nach der Abreise aufräumen" wäre eine Spalte nützlich — nach Stufe B, sonst wird sie zweimal gebaut |
 | **Sperre bei Zimmerwechsel** | zieht nicht mit. Ein Gast, der ins Nachbarzimmer umzieht, nimmt seine Sperre nicht mit. Bewusst: der Umzug ist eine Entscheidung der Rezeption, und sie sieht die Sperre im neuen Zimmer nicht |
+
+---
+
+# AE-81 — Die Fenstererkennung braucht Parameter, einen Rückweg und einen Befund (Sprint 23 T2)
+
+**Datum:** 25.10.2026 · **Stand:** Werkzeug gebaut, **Erprobung offen**
+(Pflicht-Stop) · **Betrifft:** `services/fenstererkennung.py`,
+`scripts/fenstererkennung.py`, `scripts/activate_open_window_detection.py`,
+`downlink_adapter.ow_set_bytes` · **Erweitert:** AE-47 (Rollenteilung
+Gerät/Engine), §5.27 (Werkszustand aus)
+
+## 1. Was es schon gab
+
+`0x45` und `0x46` sind seit Sprint 9.11x.b gebaut, der Codec dekodiert die
+Antwort, und `scripts/activate_open_window_detection` schaltet die Erkennung
+im Bulk ein. Für die Testwoche aus dem Brief reichte das an **vier** Stellen
+nicht:
+
+1. **Die Parameter standen fest** (1,5 °C / 10 min, hart im Skript). Der
+   Brief verlangt 1,0 °C — und für die Messung T2.5 **0,2 °C auf genau
+   einem Gerät**.
+2. **Kein Weg, ein einzelnes Gerät zu adressieren.** Der Testplan nennt
+   drei (105, 110, 306 Schlafzimmer), die Messung genau eines.
+3. **Kein Weg, die Erkennung wieder auszuschalten.** Das Abbruchkriterium
+   lautet: löst sie *einmal* durch unsere eigene Absenkung aus, wird sie auf
+   **allen** Testgeräten abgeschaltet. Ohne Werkzeug war dieses Kriterium
+   **nicht ausführbar** — und ein Abbruchkriterium, das man nicht vollziehen
+   kann, ist keines.
+4. **Geräte auf „nur messen" waren nicht ausgenommen.** Die Auswahl lautete
+   „Thermostat mit Zone"; die Vickis 027 und 056 liegen als Fühler im Raum
+   und bekommen bewusst keine Befehle (S7, Sprint 24c). Ergänzung 2 des
+   Auftrags verlangt die Ausnahme ausdrücklich, **mit Test**.
+
+Punkt 3 ist der schwerste. Er stand im Brief als Vorgabe, und es gab kein
+Werkzeug dafür — niemand hätte das gemerkt, bis der Fall eintritt.
+
+## 2. Die Entscheidungen
+
+**Ein Dienst, zwei Einstiegspunkte.** `services/fenstererkennung` hält die
+Parameter, die Zielauswahl mit den Ausnahmen und die Einordnung eines
+Befundes. `scripts/fenstererkennung` ist das Werkzeug für einzelne Geräte;
+`scripts/activate_open_window_detection` bleibt die Bulk-Variante mit
+FW-Abfrage davor und **liest jetzt dieselbe Auswahl**. Zwei Auswahllisten
+wären zwei Wahrheiten darüber, welche Geräte Hardware-Befehle bekommen
+(§5.53) — und das ist die unangenehmste Sorte: man sieht sie erst am Gerät.
+
+Mit derselben Begründung ist die Vorgabe von 1,5 auf **1,0 °C** gezogen
+worden: zwei Vorgaben für denselben Befehl wären beim ersten Nachjustieren
+auseinandergelaufen.
+
+**Der Probelauf ist der Standard.** Ohne `--ausfuehren` wird nichts
+gesendet, sondern aufgezählt, was gesendet würde — mit Bytes, Firmware und
+den **Ausnahmen samt Grund**. Ein Werkzeug, das beim ersten Tippfehler
+funkt, ist das falsche Werkzeug.
+
+**Ein nicht gefundener Name bricht ab.** Ein leerer Lauf sieht sonst wie
+„alles ausgenommen" aus; der Unterschied ist der zwischen „nichts zu tun"
+und „am falschen Gerät gesucht".
+
+**Kein FW-Gate im Einzel-Werkzeug.** Das Bulk-Skript hat eines, weil es
+blind über alle Geräte läuft. Hier werden Geräte **namentlich** gewählt, und
+die Firmware steht im Probelauf neben jedem Namen. Ein zweites Gate hätte
+den Lauf bei genau den Geräten abgebrochen, über die der Betreiber gerade
+entscheidet.
+
+## 3. Der Befund, und warum er in Ortszeit rechnen muss
+
+Das Abbruchkriterium hängt an einer einzigen Frage: hat die Erkennung in
+**unserer** Absenkung ausgelöst? `befund` fasst die `open_window`-Meldungen
+zu Episoden zusammen, ordnet jede gegen das Nachtfenster ein und nennt den
+Temperaturabfall der zehn Minuten davor.
+
+**Die Zeitrechnung ist der kritische Teil.** Wer `zeitpunkt.time()` direkt
+vergleicht, vergleicht UTC-Wanduhr gegen Ortszeit und liegt ein bis zwei
+Stunden daneben (§5.65) — ein Fehlalarm um 20:30 würde als „außerhalb"
+eingeordnet, und damit wäre das Kriterium **stillschweigend ausgehebelt**.
+Das Nachtfenster kommt aus `rule_config` und nicht aus einer Konstante; der
+Bericht sagt ausdrücklich, wenn er mit dem Rückfall gerechnet hat.
+
+**Drei Eigenschaften, die der Bericht gegen stille Fehlbefunde hat:**
+
+- Eine Zeile ohne das Feld (`NULL`, etwa eine reine Befehlsantwort) beendet
+  **keine** Episode. Sie als „zu" auszulegen würde aus einem Fehlalarm zwei
+  machen — dieselbe Regel wie bei der Kindersicherung (24c).
+- Eine am Ende noch **offene** Episode wird gezeigt. Ein gerade laufender
+  Fehlalarm ist der dringendere Fall.
+- **Keine Messwerte ist kein „alles ruhig".** Der Bericht sagt das in
+  Worten und gibt 1 zurück; ohne diesen Satz liest sich ein leerer Bericht
+  wie ein guter (§5.55).
+
+## 4. Ein Befund am Rande, und er gehört ins Handbuch
+
+Weil die Erkennung nie eingeschaltet war, meldet `openWindow` **immer**
+`false`. Daraus folgt dreierlei, und keines davon stand bisher irgendwo:
+
+- **Schicht 4 der Heizlogik reagiert heute allein auf den abgenommenen
+  Kopf.** Wer lüftet, kühlt das Zimmer, ohne dass die Steuerung es merkt —
+  sie heizt dagegen.
+- Die Dashboard-Kachel „Fenster offen" steht dauerhaft auf **0**. Eine 0
+  dort ist kein Befund.
+- Der Ablauf „Gast sagt, das Zimmer ist zu kalt" nannte „Schicht 4, Fenster
+  offen" als häufige Ursache. Das war falsch.
+
+Alle drei Stellen sind im Handbuch korrigiert. Das ist §5.77 in der
+Entstehung: die Artikel waren seit zwei Tagen im Repo und hätten die
+Falschaussage mit der nächsten Woche zementiert.
+
+## 5. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Die Erprobung selbst** | Pflicht-Stop. Protokoll in RUNBOOK §10ao, fünf Schritte, Messung T2.5 vor dem Betriebswert |
+| **Die Bezugsgröße des Deltas** | unbelegt. Die Hersteller-Doku nennt die Messrate (1 min), aber nicht, gegen **welchen** Vorwert verglichen wird (Stand 22.10.2026). T2.5 beantwortet es durch Messung; bis dahin steht hier **nicht**, die Erkennung hätte den 306-Verlauf erkannt oder nicht |
+| **Was in den 10 Minuten mit unseren Downlinks passiert** | zu messen. Verwirft das Gerät sie, braucht der Engine-Abgleich eine Ausnahme, sonst Doppel-Downlinks |
+| **Der `0x46`-Stand ist nur im Protokoll** | der Codec dekodiert ihn, der Subscriber loggt ihn, persistiert wird er nicht. Für die Oberfläche wäre das eine Datenmodell-Erweiterung **außerhalb des Briefs** und damit ein eigener Pflicht-Stop — deshalb hier nicht gebaut |
+| **FW < 4.2** | `0x45` greift dort nicht, `0x06` wäre der Befehl (B-17-5). Die Firmware steht im Probelauf neben jedem Namen; wer „4.1" liest und ausführt, hat es gesehen |

@@ -7373,3 +7373,146 @@ statt wirkungslos zu drehen. Das ist vorbereitet, aber **nicht in
 Betrieb**: es verlangt Funkbefehle an die Thermostate und einen eigenen
 Prüflauf. Bis dahin dreht sich das Rad, zeigt eine Zahl an, und die
 Steuerung ignoriert sie.
+
+---
+
+## 10ao. Fenstererkennung im Gerät: einschalten, messen, abschalten (Sprint 23 T2)
+
+**Für wen:** den Betreiber, in der Testwoche. Jeder Befehl hier greift
+produktive Hardware an (S4).
+
+> **Pflicht-Stop vor dem ersten Befehl.** Das Werkzeug läuft ohne
+> `--ausfuehren` als **Probelauf** und sendet nichts. Der erste Lauf mit
+> `--ausfuehren` ist ein Hardware-Eingriff und braucht die Freigabe des
+> Betreibers — mit dem Protokoll unten, nicht nebenbei.
+
+### Was heute gilt
+
+**Die Erkennung ist aus.** Die Vickis liefern sie ab Werk ausgeschaltet
+(§5.27), und eingeschaltet wurde sie nie. Folge: `openWindow` meldet
+immer `false`, die Dashboard-Kachel „Fenster offen" steht dauerhaft auf
+0, und **Schicht 4 der Heizlogik reagiert heute allein auf den
+abgenommenen Kopf**. Wer lüftet, kühlt das Zimmer, ohne dass die
+Steuerung es merkt.
+
+### Das Werkzeug
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung <befehl>
+```
+
+| Befehl | Was er tut |
+|---|---|
+| `setzen` | `0x45` mit Delta und Dauer, danach `0x46` zum Zurücklesen |
+| `aus` | `0x45` mit `enabled=0` — der Rückweg des Abbruchkriteriums |
+| `status` | nur `0x46`, fragt den Stand ab |
+| `befund` | liest die Datenbank: hat sie ausgelöst, und war es unsere Absenkung? |
+
+**Ohne `--ausfuehren` wird nichts gesendet.** Der Probelauf zeigt die
+Ziele mit Firmware und den Bytes — und die **Ausnahmen mit Grund**. Das
+ist der Teil, den man vor dem Lauf liest.
+
+**Ausgenommen sind** Geräte auf „nur messen" (die Vickis 027 und 056
+liegen als Fühler im Raum und bekommen bewusst keine Befehle), der
+Reserve-Pool (ohne Zone, Gerät 100), ausgemusterte Geräte und Relais. Ein
+Test hält das fest (`tests/test_fenstererkennung.py`) — vorher nahm das
+Bulk-Skript die Fühler mit.
+
+**Ein Tippfehler im Namen bricht ab**, statt stillschweigend nichts zu
+tun. Ein leerer Lauf sieht sonst wie „alles ausgenommen" aus.
+
+### Das Protokoll der Testwoche — fünf Schritte
+
+**Schritt 1 — Probelauf, drei Geräte.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+```
+
+Lesen: stehen genau drei Ziele da? Welche Firmware? `0x45` greift erst ab
+**4.2** — bei „(NULL)" oder „4.1" nicht ausführen, sondern melden.
+
+**Schritt 2 — die Messung T2.5, genau EIN Gerät, am Vormittag.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+```
+
+Delta 0,2 ist der **empfindlichste** Wert und ein **Messwert, kein
+Betriebswert**. Er beantwortet die Frage, gegen welchen Vorwert das Gerät
+vergleicht — die Hersteller-Doku lässt das offen (Stand 22.10.2026). Er
+wird mit Fehlalarmen antworten; das ist der Zweck, und er bleibt **nicht**
+stehen.
+
+Mindestens ein voller Tag Abstand zur nächsten Absenkung, sonst ist nicht
+zu unterscheiden, was ausgelöst hat.
+
+**Schritt 3 — der Betriebswert auf alle drei.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+1,0 °C und 10 Minuten. Das ist bewusst **nicht** der empfindlichste Wert:
+der Vicki-Sensor sitzt am Heizkörper, und jede Absenkung, die *wir*
+schicken, schließt das Ventil und kühlt ihn.
+
+**Schritt 4 — echtes Fenster, 15 Minuten, niemand fasst das Gerät an.**
+
+Danach:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 2
+```
+
+**Schritt 5 — zwei Nächte abwarten, dann der Befund.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 72
+```
+
+Zwei Nächte, damit die Absenkung zweimal gemessen ist.
+
+### Das Abbruchkriterium
+
+**Löst die Erkennung auch nur einmal durch eine eigene Absenkung aus —
+Nacht, Check-out, Fenster-Sicherheit —, wird sie auf allen Testgeräten
+abgeschaltet, der Befund dokumentiert, und in derselben Woche nicht
+nachjustiert.**
+
+Der `befund` sagt es selbst: er druckt `ABBRUCHKRITIERUM GETROFFEN` und
+liefert Rückgabewert 3. Dann:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+**Warum nicht nachjustieren.** Die naheliegende Reaktion wäre, das Delta
+hochzudrehen, bis es ruhig ist. Das ist derselbe Zug, den §5.82 als
+Fehler benennt: den Melder leiser stellen statt die Ursache zu verstehen.
+Und die Ursache wäre hier bekannt und unveränderlich — der Sensor sitzt
+am Heizkörper. Ein größeres Delta verschiebt nur, wie stark die Absenkung
+sein muss.
+
+**Ein einziges Auftreten genügt**, und das ist strenger als es klingt:
+ein Fehlalarm heißt, dass Schicht 4 ein Zimmer auf den Sicherheitswert
+zieht, während niemand ein Fenster geöffnet hat — bei einem belegten
+Zimmer in der Nacht. Eine Erkennung, die das kann, ist schlechter als
+keine.
+
+**Für das Kriterium gilt die Absenkung ab 20:00.** Löst sie um 20:05 aus,
+ist das ein Treffer und kein Zufall. Der `befund` rechnet in **Ortszeit**
+und liest das Nachtfenster aus der Konfiguration; steht dort „RÜCKFALL,
+nicht konfiguriert", ist die Angabe im Bericht nicht die des Hauses und
+der Befund ist mit Vorsicht zu lesen.
+
+### Was der Bericht nicht beantwortet
+
+Ob zu einer Auslösung **außerhalb** der Absenkung wirklich gelüftet
+wurde. Das weiß nur, wer im Zimmer war. Der Bericht nennt Zeitpunkt, Zone
+und den Temperaturabfall der zehn Minuten davor — damit ist die Frage
+beantwortbar, aber nicht beantwortet.
