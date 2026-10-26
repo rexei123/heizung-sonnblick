@@ -34,6 +34,24 @@ gebündelt (CLAUDE.md §0.3, RUNBOOK §10v). Jeder Merge startet den Stack neu.
 Hotfix ist die Ausnahme — dann hier den Grund nennen.
 -->
 
+**Handbuch:** angepasst / nicht nötig, weil …
+<!--
+Pflichtzeile seit Paket 1 (CLAUDE.md §3.13). Das Handbuch liegt als Markdown
+in `frontend/content/handbuch` und wandert durch denselben PR wie die
+Änderung, die es beschreibt — ein Handbuch, das man getrennt pflegen muss,
+ist nach drei Sprints falsch.
+
+- **angepasst** — der PR ändert Verhalten oder Oberfläche, und der betroffene
+  Artikel samt `stand`-Datum ist mit drin.
+- **nicht nötig, weil …** — mit Grund. „Reiner Umbau ohne sichtbare
+  Änderung" ist ein Grund, „habe ich vergessen" nicht.
+
+Was CI prüft, ist nur die Vollständigkeit der Zuordnung
+(`backend/tests/test_handbuch_spiegel.py`: jede Seite der Seitenleiste hat
+einen Artikel, jeder Artikel ein Datum). Ob der Text noch stimmt, prüft diese
+Zeile — und nur sie.
+-->
+
 ---
 
 ## Was und warum

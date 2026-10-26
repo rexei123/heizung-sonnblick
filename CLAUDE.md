@@ -348,6 +348,38 @@ In dieser Reihenfolge:
     und ein geerbter Server den **alten** Build bedient (§5.55-Familie: ein
     grüner Lauf, der nichts geprüft hat).
 
+13. **Handbuch wandert mit (ab 25.10.2026):** Jeder PR, der **Verhalten oder
+    Oberfläche** ändert, passt den betroffenen Handbuch-Artikel in
+    `frontend/content/handbuch` im **selben PR** an — samt `stand`-Datum. Die
+    PR-Vorlage trägt dafür die Zeile `Handbuch: angepasst / nicht nötig,
+    weil …`.
+
+    **Warum im selben PR und nicht danach.** Ein Handbuch, das getrennt
+    gepflegt wird, ist nach drei Sprints falsch — und dann schlimmer als
+    keines, weil es wie ein Befund gelesen wird (§5.77 in Buchform). Die
+    Artikel liegen deshalb als Markdown im Repo und nicht in einer Datenbank:
+    wer das Verhalten ändert, hat die Beschreibung davon in derselben
+    Änderung vor sich.
+
+    **Was CI prüft** (`backend/tests/test_handbuch_spiegel.py`): jede Route
+    der Seitenleiste hat einen Artikel, jeder Artikel hat `titel`,
+    `kategorie` und ein gültiges `stand`-Datum, jeder Verweis zwischen
+    Artikeln zeigt auf einen vorhandenen Artikel, und die Zuordnung in
+    `lib/handbuch/routen.ts` stimmt in **beide** Richtungen. Was CI **nicht**
+    prüfen kann, ist, ob der Text noch stimmt — dafür ist die PR-Zeile da.
+
+    **Für eine neue Seite** gehören drei Dinge in den PR: der Artikel mit
+    `route:` in den Kopfdaten, der Eintrag in `ROUTE_ZU_ARTIKEL`, und — wenn
+    die Seite in die Seitenleiste kommt — der NAV-Eintrag. Fehlt eines,
+    meldet der Spiegel-Test es; die richtige Antwort ist dann nicht, die
+    Zuordnung nachzuziehen, sondern den Artikel zu schreiben.
+
+    **Zahlen gehören nicht in den Text.** Sollwerte, Zeiten und Grenzen
+    stehen als Marke `{{werte}}` im Artikel und werden beim Öffnen aus der
+    Datenbank gelesen. Eine Zahl im Handbuch ist eine Aussage über den
+    heutigen Stand und verfällt beim ersten Nachjustieren (§5.77). Dasselbe
+    gilt für Schwellen, die pro Haus verstellbar sind.
+
 ## 3.11 — gh pr create IMMER mit --base develop
 
 GitHub-Default für `gh pr create` ist `main`. Ohne explizites

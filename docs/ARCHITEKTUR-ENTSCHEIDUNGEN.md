@@ -6486,3 +6486,184 @@ liegt in RUNBOOK §10ak; sie beantwortet die Frage in einer Zeile.
 | **Warum das Speichern im Haus scheiterte** | nicht rekonstruierbar — der Fehler war unsichtbar und nirgends protokolliert. Beim nächsten Versuch nennt die Oberfläche den Grund |
 | **Lücke in der Umstellungsnacht** | Abfrage in RUNBOOK §10ak; bis dahin ist die wahrscheinlichste Erklärung der 6-Stunden-Heartbeat |
 | **`ApiError` ist keine `Error`-Instanz** | `lib/api/fehler.ts` fängt das ab, aber die Wurzel bleibt: wer `throw {…}` schreibt, lädt zu `e.message` ein. Ein eigener `Error`-Abkömmling in `client.ts` wäre der nächste Schritt — eigener Durchgang, weil jeder Aufrufer davon abhängt |
+
+---
+
+# AE-79 — Das Handbuch liegt im Repo und wandert mit dem Pull Request
+
+**Datum:** 25.10.2026 · **Stand:** umgesetzt (Paket 1) · **Betrifft:**
+`frontend/content/handbuch`, `frontend/src/lib/handbuch`, `/handbuch`,
+`backend/tests/test_handbuch_spiegel.py`, CLAUDE.md §3.13, PR-Vorlage
+
+## 1. Die Frage
+
+Das Haus wird von Personal bedient, das die Software nicht gebaut hat. Die
+Oberfläche erklärt, *was* ein Feld ist; sie erklärt nicht, warum ein Zimmer
+21 °C hat, obwohl beim Raumtyp 18 °C steht — und genau das war der Befund
+vom 24.10.2026.
+
+Drei Wege standen zur Wahl:
+
+| Weg | Was dafür spricht | Warum nicht |
+|---|---|---|
+| **A** — PDF oder Word, im Ordner an der Rezeption | gewohnt, offline | niemand pflegt es. Nach drei Sprints beschreibt es eine andere Software, und es sieht weiter aus wie eine Anleitung |
+| **B** — Artikel in der Datenbank, mit Oberfläche zum Bearbeiten | änderbar, ohne Entwickler | eine zweite Stelle, an der Verhalten beschrieben wird, ohne Verbindung zu der Änderung, die das Verhalten ändert. Und eine Bearbeitungsoberfläche, die niemand benutzt |
+| **C** — Markdown im Repo, als Seite ausgeliefert | **der Artikel wandert durch denselben PR wie die Änderung** | kein Bearbeiten ohne PR |
+
+**Gewählt: C.** Die Begründung ist nicht Bequemlichkeit, sondern §5.77 in
+Buchform: ein Vermerk, der einmal richtig war und nicht nachgezogen wurde,
+ist gefährlicher als keiner — er wird wie ein Befund gelesen. Ein Handbuch
+ist nichts anderes als ein Vermerk in Langform, und es altert genauso.
+
+Dass es ohne PR nicht bearbeitbar ist, ist der Preis **und** der Mechanismus:
+wer das Handbuch ändert, ändert Software-Verhalten oder beschreibt es. Beides
+gehört in einen PR.
+
+## 2. Was gebaut ist
+
+**Die Artikel** (23 Dateien) liegen in `frontend/content/handbuch` mit
+Kopfdaten `titel, kategorie, stichworte, rollen, stand, route`. Vier
+Kategorien: Grundlagen (Heizlogik, Glossar), Die Seiten (einer je Route der
+Seitenleiste plus Zimmer-Detail), Abläufe an der Rezeption (sechs).
+
+**Der Umfang von Markdown ist bewusst klein** (`lib/handbuch/markdown.ts`):
+Überschriften, Absätze, Listen, Tabellen, Zitate, Trenner, `**fett**`,
+`` `code` ``, Links. Kein `marked`, kein `remark` — aus drei Gründen in dieser
+Reihenfolge:
+
+1. **Kein `dangerouslySetInnerHTML`.** Der Parser liefert einen typisierten
+   Baum, die Anzeige macht React-Elemente daraus. Es gibt keine Stelle, an
+   der Text aus einer Datei als HTML in die Seite gelangt.
+2. **Eine Abhängigkeit weniger, deren Version ein Urteil fällt** (§5.80: ein
+   Markdown-Parser entscheidet, wie das Handbuch aussieht).
+3. **Was nicht erkannt wird, wird gezeigt.** Eine unverständliche Zeile wird
+   ein Absatz mit ihrem Rohtext; sie verschwindet nicht. Ein Handbuch mit
+   einer unformatierten Zeile ist besser als eines mit einer Lücke, weil man
+   die Zeile sieht.
+
+**Zahlen stehen nicht im Text.** Die Marke `{{werte}}` wird beim Öffnen durch
+eine Tabelle ersetzt, die den Hausstandard und die Raumtyp-Sollwerte **aus
+der Datenbank** liest — samt der Angabe, welcher Wert wirkt (Sprint 24d).
+`{{karte}}` ist die Zeichnung der Heizlogik als Inline-SVG. Eine Zahl im
+Handbuch wäre eine Aussage über den heutigen Stand und verfällt beim ersten
+Nachjustieren.
+
+**Die Suche** läuft im Browser über einen Index, der beim Bauen entsteht
+(`lib/handbuch/suche.ts`). Bei 23 Artikeln ist eine Schleife schneller als
+jede Abfrage, und es gibt keinen Dienst, der ausfallen kann. Ein Treffer
+zeigt die **Fundstelle** und verlinkt auf den **Abschnitt** — eine
+Trefferliste aus Titeln verlangt vom Leser, den Artikel selbst zu
+durchsuchen.
+
+**Die Kontext-Hilfe** ist ein „?" in der Hülle der Anwendung
+(`components/patterns/seiten-hilfe.tsx`), nicht fünfzehn Knöpfe in fünfzehn
+Seiten. Es findet den Artikel über `usePathname()` und die Zuordnung in
+`lib/handbuch/routen.ts`, und es erscheint **nicht**, wo es keinen Artikel
+gibt: ein „?", das auf eine leere Seite führt, verbraucht das Zutrauen, das
+die Hilfe auf den anderen Seiten braucht.
+
+**Die Druckansicht** (`/handbuch/drucken`) trägt alle Artikel mit
+Inhaltsverzeichnis; `@media print` in `globals.css` blendet Seitenleiste,
+Suchfeld und Anker aus und setzt Seitenumbrüche je Artikel. An der Rezeption
+hängt ein Ordner, und wenn die Steuerung selbst das Problem ist, hilft eine
+Hilfeseite in der Steuerung nicht.
+
+**Auf Papier fehlen die lebenden Werte bewusst.** Statt der Tabelle steht
+ein Satz, wo sie zu finden sind. Ein Ausdruck mit Zahlen vom Ausdruckstag
+liest sich wie eine Zusicherung für morgen und lässt sich nicht nachladen.
+
+## 3. Warum die Seiten statisch gebaut sein **müssen**
+
+Das Abbild für den Betrieb entsteht als Standalone-Output; der Ordner
+`content/` wird **nicht** mitkopiert (`frontend/Dockerfile`, Stage 3). Eine
+Seite, die die Artikel zur Laufzeit liest, stirbt also im Betrieb — und zwar
+erst dort, nicht im Bau.
+
+Darum tragen alle drei Seiten `export const dynamic = "error"` und die
+Artikelseite zusätzlich `dynamicParams = false`. Wer dort später
+`searchParams`, `cookies()` oder `headers()` benutzt, bekommt einen
+**Bau-Fehler** statt einer Seite, die auf dem Server stirbt.
+
+**Gemessen, nicht angenommen** (§5.83 — die Ebene nennen, auf der geprüft
+wurde). `next build` vom 25.10.2026:
+
+```
+├ ○ /handbuch                            2.12 kB         103 kB
+├ ● /handbuch/[slug]                     154 B           124 kB
+├ ○ /handbuch/drucken                    153 B           124 kB
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML
+```
+
+Keine der drei Routen ist `ƒ (Dynamic)`. Das ist der Beleg, dass zur Laufzeit
+keine Datei gelesen wird — nicht die Absicht, sondern die Ausgabe des Baus.
+
+## 4. Der Spiegel-Test, in beide Richtungen
+
+`backend/tests/test_handbuch_spiegel.py` liest den Quelltext der
+Seitenleiste, die Zuordnung und die Kopfdaten und prüft:
+
+- jede Route der Seitenleiste hat einen Artikel,
+- jeder zugeordnete Artikel existiert und nennt dieselbe Route,
+- **und die Gegenrichtung:** kein Artikel zeigt auf eine Route, die es nicht
+  mehr gibt,
+- jeder Artikel hat `titel`, `kategorie` und ein gültiges `stand`-Datum,
+- `rollen` ist `alle` oder `admin` (ein Tippfehler verliert sonst stumm die
+  Kennzeichnung, weil der Lader auf `alle` zurückfällt),
+- jeder Verweis `/handbuch/<slug>` zeigt auf einen vorhandenen Artikel,
+- es gibt keine unbekannte Marke.
+
+Die Gegenrichtung ist die unangenehmere Hälfte: ein Artikel, der eine
+verschwundene Seite beschreibt, liest sich wie eine Anleitung und ist eine
+Falschaussage (§5.77).
+
+**Warum im Backend.** Er vergleicht zwei Dateibäume und braucht weder Node
+noch Browser; die Backend-Suite läuft bei jedem PR ohne `paths`-Filter
+(§5.55). Damit greift er auch bei einem PR, der nur das Frontend anfasst.
+
+**Er prüft Vollständigkeit, nicht Wahrheit.** Ob ein Artikel noch stimmt,
+kann kein Test wissen. Dafür steht die Zeile `Handbuch: angepasst / nicht
+nötig, weil …` in der PR-Vorlage und die Regel in CLAUDE.md §3.13 — und das
+ist keine Automatisierungslücke, sondern die Grenze dessen, was automatisch
+prüfbar ist.
+
+## 5. Vier Seiten, die leer sind — und es jetzt selbst sagen
+
+Beim Schreiben der Artikel ist aufgefallen, dass vier Einträge der
+Seitenleiste auf Platzhalter führen: `/profile`, `/analyse/temperaturverlauf`,
+`/einstellungen/gateway` (alle `EmptyState`) und `/einstellungen/saison`
+(„In Vorbereitung").
+
+Das ist kein neuer Mangel — die Platzhalter sind seit Sprint 9.13b so. Neu
+ist, dass das Handbuch es **benennt** und je Fall sagt, wo die Sache heute
+steht: Nachtabsenkung und Raumtypen statt Profile, der Tab „Verlauf" am
+Zimmer statt der hausweiten Auswertung, die Kachel „Geräte online" statt
+einer Gateway-Seite, der Sommermodus unter Szenarien statt Saisonzeiten.
+
+Eine leere Seite ohne Erklärung sieht aus wie ein Ladefehler. Der Artikel
+dazu ist billiger als die Frage, die sonst an der Rezeption entsteht — und
+ehrlicher als sie zu entfernen, denn die Einträge sagen auch, was geplant ist.
+
+## 6. Begriffe, die getrennt bleiben müssen
+
+Zwei Aufgaben hießen in der Planung „T3", und beide sind im Handbuch
+benannt — mit der Abgrenzung direkt daneben (Glossar, `seite-api`,
+`seite-thermostate`):
+
+| Begriff | Was es ist | Stand |
+|---|---|---|
+| **Listen-Wächter** | Mail, wenn acht Stunden keine Belegungsliste kam (PR #338) | im Betrieb seit 25.10.2026 |
+| **Relais-Test T3.0** | Messung am Relais-Pfad der Infrarot-Heizkörper | offen; es ist kein Relais montiert |
+
+Dass beide „T3" hießen, ist eine Eigenschaft der Planung und keine der
+Anlage. Im Handbuch steht deshalb nicht die Sprint-Nummer, sondern was die
+Sache tut.
+
+## 7. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Bearbeiten ohne PR** | nicht vorgesehen, siehe §1. Wird es gebraucht, ist das eine neue Entscheidung und keine Erweiterung dieser |
+| **Keine Volltextsuche über Abläufe hinweg** | die Suche vergleicht Zeichenfolgen, kein Wortstamm, keine Tippfehler-Toleranz. Beides wäre eine Vermutung darüber, was gemeint war, und eine falsche Vermutung kostet mehr als ein fehlender Treffer |
+| **Vier leere Seiten** | §5 — benannt, nicht behoben. Die Artikel verfallen, sobald die Seiten gebaut werden; der Spiegel-Test merkt das nicht, die PR-Zeile ist die Stelle dafür |
+| **Bilder** | es gibt keine. Die Zeichnung der Heizlogik ist Inline-SVG, damit sie in hell, dunkel und auf Papier lesbar bleibt. Ein Bildschirmfoto wäre nach dem nächsten Umbau falsch, ohne dass es auffällt |

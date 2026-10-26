@@ -207,3 +207,91 @@ body {
     --radius: 0.5rem;
   }
 }
+
+/* ============================================================
+ * Druck (Paket 1 — Handbuch)
+ *
+ * Gedruckt wird der Text, nicht die Bedienung. Die Klasse
+ * `nicht-drucken` tragen Suchfeld, Verzeichnisse, Zurück-Links und
+ * Anker-Zeichen; die Seitenleiste und die Kontext-Hilfe fallen hier
+ * pauschal weg.
+ *
+ * Die Regeln stehen absichtlich NICHT in `@layer utilities`: Tailwind
+ * entfernt dort ungenutzte Klassen, und `nicht-drucken` steht in
+ * Komponenten, die der Scanner sieht — aber `aside`/`header` nicht. Eine
+ * handgeschriebene Regel ist hier kürzer als der Weg über die
+ * Konfiguration und bleibt an einer Stelle lesbar.
+ * ============================================================ */
+.nicht-drucken {
+  /* Im Bildschirm-Fall tut die Klasse nichts. */
+}
+
+@media print {
+  /* Seitenleiste, mobile Kopfzeile, Kontext-Hilfe und alles, was
+     ausdrücklich als Bedienung markiert ist. */
+  aside,
+  .nicht-drucken {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+    font-size: 11pt;
+  }
+
+  /* Der Rahmen der Anwendung gibt die Breite frei; sonst druckt der
+     Browser eine 200-px-Lücke dort, wo die Seitenleiste war. */
+  main {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* Eine Überschrift gehört nicht allein auf das Seitenende, und ein
+     Artikel beginnt auf einer neuen Seite. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .handbuch-druck-artikel {
+    break-before: page;
+    page-break-before: always;
+    border-top: none;
+  }
+
+  .handbuch-druck-artikel:first-of-type {
+    break-before: auto;
+    page-break-before: auto;
+  }
+
+  /* Tabellen und Bilder nicht über den Seitenrand hinaus reißen. */
+  table,
+  figure,
+  blockquote,
+  li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  .handbuch-artikel th,
+  .handbuch-artikel td {
+    border-bottom: 1px solid #cccccc;
+  }
+
+  /* Ein Verweis ist auf Papier nur dann etwas wert, wenn das Ziel
+     dabeisteht. Interne Verweise bleiben ohne Zusatz — „/zimmer" hilft
+     niemandem mit einem Blatt in der Hand. */
+  .handbuch-artikel a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    color: #444444;
+  }
+}
