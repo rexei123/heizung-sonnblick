@@ -7237,8 +7237,9 @@ Zeitzonen-Angabe darunter.
 
 **Für wen:** den Betreiber, wenn ein Artikel falsch oder unvollständig ist.
 
-Seit 25.10.2026 hat die Oberfläche einen Menüpunkt **Handbuch** (unterste
-Gruppe „Hilfe", für alle Rollen lesbar). Darin: 23 Artikel in vier
+Seit 25.10.2026 hat die Oberfläche einen Menüpunkt **Handbuch** (Gruppe
+**Übersicht**, direkt unter „Belegungen", für alle Rollen lesbar). Darin:
+23 Artikel in vier
 Kategorien, eine Suche, auf jeder Seite ein „?" zum passenden Artikel, und
 eine Druckansicht für den Ordner an der Rezeption.
 

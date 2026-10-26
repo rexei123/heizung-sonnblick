@@ -5954,9 +5954,13 @@ Rezeption, und dort hilft keine Architektur-Entscheidung.
 
 **Was in der Oberfläche steht** (AE-79, RUNBOOK §10am):
 
-- Menüpunkt **Handbuch** (`menu_book`), unterste Gruppe „Hilfe", **für alle
-  Rollen lesbar**. Die Seitenleiste zählt damit 15 Einträge für
-  Administratoren und 14 für Mitarbeiter in 6 Gruppen.
+- Menüpunkt **Handbuch** (`menu_book`), **für alle Rollen lesbar**. Die
+  Seitenleiste zählt damit 15 Einträge für Administratoren und 14 für
+  Mitarbeiter. **Platz korrigiert am 26.10.2026:** er stand zuerst in
+  einer eigenen Gruppe „Hilfe" am Ende (6 Gruppen) und sitzt seither in
+  **Übersicht**, direkt unter „Belegungen" — Entscheidung des Betreibers.
+  Eine eigene Gruppe für einen Eintrag war ohnehin eine Überschrift ohne
+  Inhalt.
 - **23 Artikel** in vier Kategorien: Grundlagen (Heizlogik mit Zeichnung,
   Glossar), Die Seiten (einer je Route der Seitenleiste plus Zimmer-Detail),
   Abläufe an der Rezeption (sechs: Zimmer zu kalt, spontane Anreise, Abreise
