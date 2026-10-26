@@ -6233,6 +6233,34 @@ neuen Felder ergaenzt (24e).
 Schritte, erstes Geraet **107 Schlafzimmer**. Rollout frueehestens Di
 27.10. frueh.
 
+**Korrektur vom 26.10.2026 (Befund des Betreibers, AE-82 §8).** Schritt
+3.2 und Pruefung 3 waren in 107 **nicht durchfuehrbar**: sie verlangten
+einen Sollwert ueber der Obergrenze per Uebersteuerung, und 107 ist frei
+— eine Uebersteuerung braucht einen eingecheckten Gast (AE-58). Ich hatte
+das Protokoll geschrieben, ohne die eigene Domaenen-Invariante gegen den
+gewaehlten Raum zu halten.
+
+Ersatz, naeher am Betrieb als das Original: ein Funk-Sollwert von
+**10 °C** — der Frostschutz, wie ihn Sommerbetrieb und
+Fenster-Sicherheit ohnehin schicken. Neuer Unterbefehl
+``geraetegrenzen sollwert-probe``: genau **ein** Sollwert an genau **ein**
+Geraet (``--nur`` ist Pflicht, zwei Treffer brechen ab), Probelauf als
+Standard, Readback mit Urteil (10 = Aussage bestaetigt; Untergrenze =
+stoppen; keine Antwort = kein Befund), und **danach Rueckgabe an die
+Engine in jedem Fall** — ein Zimmer, das auf 10 °C stehen bleibt, sieht
+im Winter nach „Heizung aus" aus und nicht nach „Testwert vergessen".
+
+Fuer den Fall „Untergrenze gemeldet" ist der Weg **vorbereitet, nicht
+ausgefuehrt**: Untergrenze der Raumtypen auf 10 statt 15/18, und der
+Beleg, dass daraus **keine** Endlos-Wiederholung entsteht — der
+Engine-Abgleich sendet hoechstens dreimal je Vorkommnis nach
+(``MAX_VERSUCHE``, Sprint 20f). Test:
+``test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf``.
+
+6 neue Tests fuer die Warte- und Urteilslogik, mit **virtueller Uhr**
+(§5.82) — einschliesslich eines Zaehltests, der eine halb gefaelschte
+Zeitquelle auffallen laesst.
+
 **Migration additiv: ja** — zwei nullable Spalten auf der Hypertable,
 kein Backfill.
 
