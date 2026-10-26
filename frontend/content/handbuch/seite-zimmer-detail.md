@@ -56,3 +56,28 @@ Der Schalter oben rechts verhindert, dass eine Drehung am Thermostat
 übernommen wird. Gedacht für Zimmer, in denen Gäste die Einstellung
 verstellen und sich danach beschweren. Er sperrt **nicht** die
 Wunschtemperatur von der Rezeption.
+
+Beim Sperren wird gefragt, **wie lange**:
+
+| Form | Gilt | Wann richtig |
+|---|---|---|
+| Bis Check-out | endet mit der Abreise von selbst | der Regelfall: es geht um **diesen** Gast |
+| Dauerhaft | bleibt, bis jemand sie aufhebt | das Zimmer selbst soll kein bedienbares Rad haben |
+
+**Warum die Frage gestellt wird.** Eine dauerhafte Sperre, die niemand
+zurücknimmt, trifft den **nächsten** Gast: er dreht am Rad, nichts
+passiert, und an der Rezeption gibt es keine Erklärung dafür — die
+Ursache ist eine Entscheidung von vorletzter Woche. „Bis Check-out"
+nimmt diese Sorge weg; der Belegungsabgleich löst die Sperre mit der
+Abreise.
+
+Ist gesperrt, steht unter dem Knopf, **welche Form** gilt. Das ist die
+Zeile, die sagt, ob sich jemand später darum kümmern muss.
+
+**Im Allgemeinbereich gibt es nur „dauerhaft".** Eine Bar hat keine
+Abreise — eine Sperre „bis Check-out" würde dort nie enden, und ein
+Versprechen ohne Einlösung ist schlechter als keines. Die Auswahl sagt
+das an der Stelle, an der man sie sucht.
+
+Beim Sperren werden laufende Wunschtemperaturen des Zimmers aufgehoben;
+die Auswahl nennt ihre Anzahl, bevor man sich entscheidet.

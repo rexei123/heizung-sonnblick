@@ -77,6 +77,12 @@ sechs Schichten.
 **Übersteuerung.** Ein Wert, der die Automatik für eine bestimmte Zeit
 schlägt — von der Rezeption gesetzt oder am Thermostat gedreht.
 
+**Übersteuerungs-Sperre.** Der Schalter, der eine Drehung am Thermostat
+nicht mehr übernimmt. Zwei Formen: **bis Check-out** (endet mit der
+Abreise) und **dauerhaft**. Nicht zu verwechseln mit dem Zimmerstatus
+„gesperrt" — dort nimmt die Steuerung das Zimmer ganz heraus, hier läuft
+sie normal weiter.
+
 **Vicki.** Das Funk-Thermostat am Heizkörper (Hersteller MClimate). In
 der Oberfläche heißt es „Thermostat".
 

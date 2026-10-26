@@ -13,6 +13,7 @@ Wenn TEST_DATABASE_URL nicht gesetzt -> Test wird skipped. CI muss die
 Variable setzen, sonst silent-pass = Test-Coverage-Luege.
 
 §5.49 (Sprint 12c): Room-Fixtures setzen ``guest_override_blocked=false``
+und seit Sprint 23 T4-A zusaetzlich ``guest_block_bis_checkout=false``
 explizit im Raw-SQL-INSERT, weil das Feld NOT NULL ohne DB-Server-Default
 ist (Default lebt nur im ORM-Modell, Raw-SQL umgeht das).
 """
@@ -396,8 +397,9 @@ def test_migration_0015_check_constraint_rejects_invalid(alembic_cfg: Config) ->
             ).scalar_one()
             room_id = conn.execute(
                 text(
-                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
-                    "VALUES ('r-0015c', :rt, 'vacant', false) RETURNING id"
+                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked, "
+                    "guest_block_bis_checkout) "
+                    "VALUES ('r-0015c', :rt, 'vacant', false, false) RETURNING id"
                 ),
                 {"rt": rt_id},
             ).scalar_one()
@@ -567,8 +569,9 @@ def test_migration_0016_fk_set_null_on_zone_delete(alembic_cfg: Config) -> None:
             ).scalar_one()
             room_id = conn.execute(
                 text(
-                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked) "
-                    "VALUES ('r-0016f', :rt, 'occupied', false) RETURNING id"
+                    "INSERT INTO room (number, room_type_id, status, guest_override_blocked, "
+                    "guest_block_bis_checkout) "
+                    "VALUES ('r-0016f', :rt, 'occupied', false, false) RETURNING id"
                 ),
                 {"rt": rt_id},
             ).scalar_one()

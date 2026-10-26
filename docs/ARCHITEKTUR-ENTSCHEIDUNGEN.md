@@ -6667,3 +6667,124 @@ Sache tut.
 | **Keine Volltextsuche über Abläufe hinweg** | die Suche vergleicht Zeichenfolgen, kein Wortstamm, keine Tippfehler-Toleranz. Beides wäre eine Vermutung darüber, was gemeint war, und eine falsche Vermutung kostet mehr als ein fehlender Treffer |
 | **Vier leere Seiten** | §5 — benannt, nicht behoben. Die Artikel verfallen, sobald die Seiten gebaut werden; der Spiegel-Test merkt das nicht, die PR-Zeile ist die Stelle dafür |
 | **Bilder** | es gibt keine. Die Zeichnung der Heizlogik ist Inline-SVG, damit sie in hell, dunkel und auf Papier lesbar bleibt. Ein Bildschirmfoto wäre nach dem nächsten Umbau falsch, ohne dass es auffällt |
+
+---
+
+# AE-80 — Die Gast-Sperre endet mit der Abreise (Sprint 23 T4-A)
+
+**Datum:** 25.10.2026 · **Stand:** umgesetzt (Stufe A), Stufe B offen ·
+**Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
+`services/gast_sperre.py`, `PATCH /rooms/{id}/override-block-state`,
+`RoomOverrideBlockToggle` · **Erweitert:** AE-58 (Override-Modell)
+
+## 1. Der Befund
+
+Die Übersteuerungs-Sperre aus Sprint 12c (`room.guest_override_blocked`)
+gilt **dauerhaft**. Gebaut ist sie für einen Gast, der am Rad dreht und
+sich danach beschwert — also für *einen Aufenthalt*. Wer sie nicht
+zurücknimmt, hinterlässt dem **nächsten** Gast ein Rad, das nichts
+bewirkt.
+
+Das Zimmer heizt dabei richtig. Die Drehung wird verworfen, der Gast
+sieht am Gerät eine Zahl, die nicht gilt, und an der Rezeption kann
+niemand die Frage „warum reagiert das nicht" beantworten, weil die
+Ursache eine Entscheidung von vorletzter Woche ist. **Eine Sperre, an die
+sich niemand erinnert, ist nicht weniger wirksam — nur unerklärlich.**
+
+Das ist dieselbe Klasse wie der Phantom-Override aus Sprint 20f: ein
+Zustand, der länger lebt als der Anlass, und dessen Spur niemand mehr
+findet.
+
+## 2. Die Entscheidung
+
+Ein zweites, additives Feld `guest_block_bis_checkout`. Ist es gesetzt,
+löst der Belegungsabgleich die Sperre beim Übergang OCCUPIED → VACANT
+selbst — **in derselben Kette, die schon die Overrides widerruft**
+(`occupancy_service.sync_room_status → auto_revoke_on_checkout`, Sprint
+9.9 T6).
+
+### Warum kein Ablaufdatum in der Zeile
+
+Ein `expires_at` wie beim Override wäre eine **Vorhersage**: es müsste
+beim Verschieben der Abreise nachgezogen werden, und wer das vergisst,
+hat genau das Problem zurück, das diese Änderung löst. Der Statuswechsel
+ist dagegen ein **Befund**. Dieselbe Begründung hat Sprint 20f für die
+Entfernung des Gnaden-Fensters getragen.
+
+### Warum zwei Spalten und nicht ein Moduswert
+
+Ein Feld `guest_block_mode` (`aus` / `dauerhaft` / `bis_checkout`) wäre
+schöner zu lesen. Es hätte aber `guest_override_blocked` **ersetzt**, und
+das Feld lesen die Engine, der Geräte-Adapter und der Override-Dienst.
+Ein `DROP COLUMN` bricht den Rückfall (Goldene Regel 10) — für einen
+Gewinn, der nur die Form betrifft. Die unsinnige Kombination
+(`blocked=false` mit `bis_checkout=true`) weist die API ab; kein
+DB-`CHECK`, weil eine verengte Bedingung nicht additiv ist.
+
+### Warum kein eigener Taktgeber
+
+Ein Beat-Task, der nach abgelaufenen Sperren sucht, wäre eine zweite
+Stelle, die dasselbe Ereignis erkennen müsste (§5.53) — und bei Ausfall
+des Taktgebers friert er **plausibel** ein (§5.76). Der Abgleich sieht
+den Check-out ohnehin.
+
+## 3. Zwei Abweisungen, und die zweite ist die interessante
+
+**`bis_checkout` ohne `blocked`** → 422. Eine Sperre, die endet, ohne
+begonnen zu haben, ist kein Zustand.
+
+**`bis_checkout` für einen Allgemeinbereich** → 422. Ein Zimmer mit nicht
+buchbarem Raumtyp wechselt **nie** auf VACANT: `sync_room_status` lässt
+seinen Status stehen (Sprint 24d). Eine Sperre „bis Check-out" würde dort
+nie enden.
+
+Dass der Löse-Dienst sie nie zu sehen bekäme, ist **kein Ersatz** für die
+Abweisung, sondern der Grund dafür: ohne sie wäre die Sperre still und
+dauerhaft, während die Oberfläche „endet mit der Abreise" verspricht.
+Genau diese Sorte Falschaussage ist §5.77 — und sie stünde dort, wo der
+Betreiber hinsieht. Die Oberfläche bietet die Form im Bereich deshalb
+auch nicht an; die Abweisung ist der Rückhalt, nicht die erste
+Verteidigungslinie (§5.30).
+
+## 4. Zwei Dinge, die beim Bauen auffielen
+
+**Die Idempotenz verglich nur ein Feld.** Im Endpoint stand
+`old_blocked == payload.blocked`. Mit dem neuen Feld hätte ein Wechsel
+von „dauerhaft" auf „bis Check-out" **nichts** getan und 200 gemeldet —
+die Oberfläche hätte die neue Form angezeigt, die Datenbank die alte. Ein
+Test hält beide Felder fest.
+
+**Der Widerruf gehört an den Beginn, nicht an jede Änderung.** Der
+Auto-Revoke lief bisher bei jedem Toggle-On. Mit zwei Feldern ist eine
+Änderung der *Form* kein Beginn — ein zweiter Widerruf träfe nichts und
+schriebe trotzdem ein Audit. Jetzt: `payload.blocked and not old_blocked`.
+
+**Und die Fehleranzeige.** Der Umschalter las `e.message` von einem
+Objekt, das keine `Error`-Instanz ist (§24e) — die beiden neuen 422 wären
+als leerer Kasten erschienen. Er nutzt jetzt `fehlerText`. Ein 422, dessen
+Satz nicht ankommt, ist schlimmer als keine Abweisung, weil der Nutzer
+dann denselben Klick wiederholt.
+
+## 5. Die Oberfläche
+
+Beim Sperren wird die Form **gefragt**, mit zwei Knöpfen statt
+Auswahlfeld plus Bestätigung: jeder Knopf nennt seine Handlung, und damit
+ist die Auswahl schon die Bestätigung (§5.85). „Bis Check-out" steht
+zuerst — es ist der Regelfall.
+
+Ist gesperrt, steht die Form **unter** dem Knopf („endet mit der Abreise"
+bzw. „dauerhaft — bleibt auch für den nächsten Gast"). Das ist die
+eigentliche Information für die Rezeption: muss sich jemand später darum
+kümmern?
+
+Der Hinweis auf die Anzahl der Übersteuerungen, die dabei aufgehoben
+werden, steht in der Auswahl. Ein eigener Bestätigungsschritt davor wäre
+ein zweiter Klick für dieselbe Entscheidung.
+
+## 6. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Stufe B: Kindersicherung `0x07`** | eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
+| **Anzeige in der Zimmerliste** | die Liste zeigt das Schloss, aber nicht die Form. Für den Fall „welche Zimmer muss ich nach der Abreise aufräumen" wäre eine Spalte nützlich — nach Stufe B, sonst wird sie zweimal gebaut |
+| **Sperre bei Zimmerwechsel** | zieht nicht mit. Ein Gast, der ins Nachbarzimmer umzieht, nimmt seine Sperre nicht mit. Bewusst: der Umzug ist eine Entscheidung der Rezeption, und sie sieht die Sperre im neuen Zimmer nicht |

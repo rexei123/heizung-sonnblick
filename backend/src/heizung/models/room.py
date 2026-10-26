@@ -78,6 +78,23 @@ class Room(Base):
     # gesperrt.
     guest_override_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Sprint 23 T4-A: endet die Sperre mit der Abreise? ``true`` ->
+    # ``occupancy_service.sync_room_status`` loest sie beim Uebergang
+    # OCCUPIED -> VACANT selbst (``services/gast_sperre``).
+    #
+    # **Invariante:** nur sinnvoll, solange ``guest_override_blocked``
+    # true ist. Die API weist ``bis_checkout`` ohne ``blocked`` ab, und
+    # beim Loesen werden beide Felder zurueckgesetzt — eine Sperre, die
+    # endet, ohne begonnen zu haben, waere kein Zustand, sondern ein
+    # Versehen. Kein DB-CHECK: eine verengte Bedingung ist nicht additiv
+    # (Goldene Regel 10), und es gibt genau einen Schreibpfad.
+    #
+    # **Gilt nur fuer buchbare Zimmer.** Ein Allgemeinbereich wechselt
+    # nie auf VACANT (der Belegungsabgleich laesst seinen Status stehen,
+    # Sprint 24d) — eine Sperre „bis Check-out" wuerde dort nie enden
+    # und waere ein Versprechen ohne Einloesung. Die API weist das ab.
+    guest_block_bis_checkout: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     notes: Mapped[str | None] = mapped_column(String(1000))
 
     # Sprint 9.7: Scheduler-Spalten fuer Celery-Beat ``evaluate_due_rooms``.
