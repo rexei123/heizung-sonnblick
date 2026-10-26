@@ -26,6 +26,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCreateRoomOverride, useRevokeOverride } from "@/lib/api/hooks-overrides";
+import { aufhebungsgrundText } from "@/lib/api/aufhebungsgrund";
+import { sollwertText } from "@/lib/api/kappung";
 import { mapOverrideError } from "@/lib/api/override-errors";
 import type {
   FrontendOverrideSource,
@@ -591,7 +593,7 @@ function HistoryTable({
                 </td>
                 <td className="py-2 pr-4 text-text-secondary">{bereichLabel}</td>
                 <td className="py-2 pr-4 font-medium text-text-primary tabular-nums">
-                  {Math.round(parseFloat(o.setpoint))} °C
+                  {sollwertText(parseFloat(o.setpoint), o.wirksam_gekappt_c)}
                 </td>
                 <td className="py-2 pr-4">
                   <SourceBadge source={o.source} />
@@ -628,20 +630,21 @@ function SourceBadge({ source, className }: { source: OverrideSource; className?
 
 function StatusBadge({ override }: { override: ManualOverride }) {
   if (override.revoked_at !== null) {
-    // Der Aufräum-Task und der Check-out-Haken setzen beide `revoked_at` —
-    // mit einem Grund, der mit „auto" beginnt (`auto: expired` bzw.
-    // `auto_revoke_on_checkout`). Ohne diese Unterscheidung stand hier für
-    // **jeden** abgelaufenen Override „manuell aufgehoben", also für den
-    // Normalfall die falsche Aussage (Befund 19.10.2026).
-    const grund = override.revoked_reason ?? "";
-    if (grund.startsWith("auto")) {
-      return (
-        <span className="text-xs text-text-tertiary">
-          {grund.includes("checkout") ? "mit der Abreise beendet" : "abgelaufen"}
-        </span>
-      );
-    }
-    return <span className="text-xs text-text-tertiary">manuell aufgehoben</span>;
+    // Sprint 23 T1.7: die Zuordnung liegt in `lib/api/aufhebungsgrund.ts`
+    // und vergleicht **genaue** Schlüssel.
+    //
+    // Hier stand ein Präfix-Vergleich auf `auto`, und zwei von fünf
+    // Werten fallen durch ihn — `superseded` und `room_override_blocked`,
+    // beide automatische Vorgänge. Sie erschienen als „manuell
+    // aufgehoben", also als falsche Tatsachenbehauptung. In der Historie
+    // von 306 (12 Drehungen in 16 Stunden) stand das elfmal.
+    //
+    // Der Fehler war das Muster, nicht einer seiner Zweige.
+    return (
+      <span className="text-xs text-text-tertiary">
+        {aufhebungsgrundText(override.revoked_reason)}
+      </span>
+    );
   }
   if (new Date(override.expires_at) <= new Date()) {
     return <span className="text-xs text-text-tertiary">abgelaufen</span>;

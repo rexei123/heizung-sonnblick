@@ -39,14 +39,17 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
   }
 
   /**
-   * Paket 1 (25.10.2026): die Zahlen sind von 14/13 auf 15/14 gestiegen
-   * und die Gruppen von 5 auf 6 — der Eintrag „Handbuch" in der Gruppe
-   * „Hilfe" ist dazugekommen, lesbar fuer **alle** Rollen. Das ist der
-   * Grund fuer die geaenderte Erwartung; sie wird hier genannt, damit
-   * niemand sie spaeter fuer eine stillschweigend nachgezogene Zahl
-   * haelt.
+   * Paket 1 (25.10.2026): die Zahlen sind von 14/13 auf 15/14 gestiegen —
+   * der Eintrag „Handbuch" ist dazugekommen, lesbar fuer **alle** Rollen.
+   *
+   * **Am 26.10. korrigiert:** er stand zuerst in einer eigenen Gruppe
+   * „Hilfe" am Ende (also 6 Gruppen) und sitzt seither in „Uebersicht",
+   * direkt unter „Belegungen" — Entscheidung des Betreibers. Damit sind
+   * es wieder **5** Gruppen bei 15 Eintraegen. Beide Aenderungen stehen
+   * hier mit Grund, damit niemand sie spaeter fuer stillschweigend
+   * nachgezogene Zahlen haelt.
    */
-  test("Desktop-Sidebar zeigt Admin 15 Eintraege in 6 Gruppen", async ({ page }) => {
+  test("Desktop-Sidebar zeigt Admin 15 Eintraege in 5 Gruppen", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mitRolle(page, "admin");
 
@@ -56,20 +59,16 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     await expect(nav).toBeVisible();
 
     // 5 Gruppen-Header
-    const groups = [
-      "Übersicht",
-      "Steuerung",
-      "Geräte",
-      "Analyse",
-      "Einstellungen",
-      "Hilfe",
-    ];
+    const groups = ["Übersicht", "Steuerung", "Geräte", "Analyse", "Einstellungen"];
     for (const group of groups) {
       await expect(nav.getByRole("heading", { level: 3, name: group })).toBeVisible();
     }
 
     await expect(nav.getByRole("link", { name: "Benutzer" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Handbuch" })).toBeVisible();
+    // Es gibt keine Gruppe „Hilfe" mehr — eine Ueberschrift fuer einen
+    // einzigen Eintrag war Rahmen ohne Inhalt.
+    await expect(nav.getByRole("heading", { level: 3, name: "Hilfe" })).toHaveCount(0);
 
     // 15 Nav-Links
     const links = nav.getByRole("link");

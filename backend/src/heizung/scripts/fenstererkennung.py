@@ -82,10 +82,12 @@ from heizung.services import downlink_adapter  # noqa: E402
 from heizung.services.fenstererkennung import (  # noqa: E402
     OW_DAUER_MIN_BETRIEB,
     OW_DELTA_BETRIEB,
-    Ausnahme,
-    Zielgeraet,
     episoden,
     lade_messwerte,
+)
+from heizung.services.geraete_ziele import (  # noqa: E402
+    Ausnahme,
+    Zielgeraet,
     lade_ziele,
     nicht_gefunden,
 )

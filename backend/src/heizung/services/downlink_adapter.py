@@ -243,6 +243,89 @@ async def get_open_window_detection(dev_eui: str) -> str:
     return await send_raw_downlink(dev_eui, bytes([VICKI_OW_GET_COMMAND]))
 
 
+# --- Temperaturgrenzen am Geraet (Sprint 23 T1, B-22-1) --------------------
+#
+# ``0x08`` setzt den Bereich, in dem das **Drehrad** die Zieltemperatur
+# verstellen darf; ``0x15`` fragt ihn ab. Beide Grenzen sind ganze Grad
+# Celsius **ohne** Offset und **ohne** Skalierung — anders als beim
+# Sollwert (``0x51``), der mit zehn multipliziert wird.
+#
+# Quelle: docs.mclimate.eu, Vicki-Protokoll, „Limit target temperature
+# range", abgerufen 21.10.2026. Belege der Doku: ``0x081018`` = 16/24 °C,
+# Antwort ``0x15051E`` = 5/30 °C (die Werkseinstellung).
+#
+# **Die Grenze gilt nur fuer das Rad.** Downlink-Sollwerte duerfen
+# darueber hinaus setzen (Hersteller-Aussage auf derselben Seite). Deshalb
+# kollidiert sie nicht mit Layer 5: ein Frostschutz von 10 °C geht auch an
+# ein Bad mit Untergrenze 18 durch. Das ist eine Aussage des Herstellers
+# und keine Messung — sie wird am Geraet geprueft, bevor der Rollout
+# laeuft (Pflicht-Stop, RUNBOOK §10ap).
+VICKI_TEMP_RANGE_SET_COMMAND: int = 0x08
+VICKI_TEMP_RANGE_GET_COMMAND: int = 0x15
+
+#: Die Spanne, die das Geraet annimmt. Werkseinstellung ist 5/30; ein
+#: Wert darueber oder darunter wird abgewiesen, statt ihn stillschweigend
+#: zu beschneiden — wer 35 schickt, hat sich vertippt und soll es
+#: erfahren.
+TEMP_RANGE_MIN_C: int = 5
+TEMP_RANGE_MAX_C: int = 30
+
+
+def temp_range_bytes(min_c: int, max_c: int) -> bytes:
+    """Die Bytes des ``0x08``-Befehls, ohne zu senden.
+
+    Oeffentlich aus demselben Grund wie ``ow_set_bytes``: das Werkzeug
+    laeuft als Probelauf und zeigt die Nutzlast, damit man vor einem
+    Hardware-Eingriff sieht, was hinausgeht.
+    """
+    return _encode_temp_range_payload(min_c, max_c)
+
+
+def _encode_temp_range_payload(min_c: int, max_c: int) -> bytes:
+    """``0x08`` + untere + obere Grenze, je ganze °C.
+
+    Keine Skalierung, kein Offset — das ist der Unterschied zum Sollwert,
+    und er ist die Stelle, an der eine Verwechslung teuer waere: mit
+    Faktor zehn waere aus 15/25 ein Wert von 150/250 geworden, und das
+    Geraet haette ihn abgeschnitten oder verworfen, ohne es zu sagen.
+    """
+    if not isinstance(min_c, int) or not isinstance(max_c, int):
+        raise DownlinkError(
+            f"Grenzen muessen int sein, sind {type(min_c).__name__}/{type(max_c).__name__}"
+        )
+    if min_c < TEMP_RANGE_MIN_C or max_c > TEMP_RANGE_MAX_C:
+        raise DownlinkError(
+            f"Grenzen {min_c}/{max_c} ausserhalb [{TEMP_RANGE_MIN_C}, {TEMP_RANGE_MAX_C}] °C"
+        )
+    if min_c >= max_c:
+        raise DownlinkError(f"untere Grenze {min_c} muss unter der oberen {max_c} liegen")
+    return bytes([VICKI_TEMP_RANGE_SET_COMMAND, min_c, max_c])
+
+
+async def set_temperature_range(dev_eui: str, min_c: int, max_c: int) -> str:
+    """Sendet ``0x08`` — begrenzt den Bereich des Drehrads.
+
+    :param min_c: untere Grenze in ganzen °C (>= 5).
+    :param max_c: obere Grenze in ganzen °C (<= 30), ueber ``min_c``.
+    :raises DownlinkError: bei Werten ausserhalb der Spanne oder
+        vertauschten Grenzen.
+    """
+    return await send_raw_downlink(dev_eui, _encode_temp_range_payload(min_c, max_c))
+
+
+async def get_temperature_range(dev_eui: str) -> str:
+    """Sendet ``0x15`` — fragt die Grenzen am Geraet ab.
+
+    Das Geraet antwortet asynchron mit ``0x15 <untere> <obere>``; der
+    Codec legt sie als ``temp_range_min`` / ``temp_range_max`` in den
+    ``object``-Block, der Subscriber schreibt sie nach
+    ``sensor_reading``. Erst **diese** Antwort sagt, was am Geraet steht —
+    was wir gesendet haben, steht in ``control_command`` und ist eine
+    Absicht, keine Zusicherung.
+    """
+    return await send_raw_downlink(dev_eui, bytes([VICKI_TEMP_RANGE_GET_COMMAND]))
+
+
 # --- Kindersicherung (Sprint 24, Paket E / S7) -----------------------------
 #
 # Hersteller-Doku, Abschnitt „Child lock", abgerufen 23.10.2026:

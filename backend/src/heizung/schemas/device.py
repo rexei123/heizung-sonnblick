@@ -287,6 +287,22 @@ class DeviceRead(BaseModel):
     # ``None`` wenn die Mindest-Stichprobe im Fenster nicht erreicht ist.
     battery_voltage_median: Decimal | None = None
 
+    # Sprint 23 T1: die Grenzen des Drehrads, Soll und Ist getrennt.
+    #
+    # ``soll`` kommt aus dem Raumtyp (Bad-Zonen aus dem der Vorlage),
+    # ``ist`` aus der Antwort des Geraets auf ``0x15``. Beide Paare
+    # einzeln und nicht als Zeichenkette "15-25", damit die Oberflaeche
+    # den Vergleich selbst anstellen kann, ohne zu parsen.
+    #
+    # ``ist`` ist ``None``, solange keine Antwort kam — das heisst
+    # **nicht** "falsch", sondern "nicht bestaetigt". Bei einem
+    # Class-A-Geraet ist das normal, solange es nicht gesendet hat.
+    grenzen_soll_min_c: int | None = None
+    grenzen_soll_max_c: int | None = None
+    grenzen_ist_min_c: int | None = None
+    grenzen_ist_max_c: int | None = None
+    grenzen_bestaetigt_um: datetime | None = None
+
     # Gesetzt, wenn im Fenster ein Batteriewechsel erkannt wurde (Sprung
     # >= 0.3 V nach oben). Dann zaehlen nur die Messwerte ab diesem
     # Zeitpunkt, und solange es davon weniger als drei gibt, ist

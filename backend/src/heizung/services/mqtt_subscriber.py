@@ -60,8 +60,14 @@ REPLY_REPORT_TYPES: frozenset[str] = frozenset(
         "setpoint_reply",  # 0x52 — Drehring/Setpoint-Ack (Sprint 9.0)
         "firmware_version_reply",  # 0x04 — FW-Query (Sprint 9.11x.b)
         "open_window_status_reply",  # 0x46 — OW-Get (Sprint 9.11x.b)
+        "temp_range_reply",  # 0x15 — Grenzen am Geraet (Sprint 23 T1)
     }
 )
+
+#: Der ``report_type`` der ``0x15``-Antwort. Eigene Konstante, weil zwei
+#: Stellen ihn vergleichen (die Menge oben und der Handler unten) und ein
+#: Tippfehler in einer davon stumm waere.
+TEMP_RANGE_REPORT_TYPE = "temp_range_reply"
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +598,71 @@ async def _handle_open_window_status_report(uplink: ChirpStackUplink) -> None:
     )
 
 
+async def _handle_temp_range_report(uplink: ChirpStackUplink) -> None:
+    """Sprint 23 T1: schreibt die Antwort auf ``0x15`` nach ``sensor_reading``.
+
+    **Warum eine eigene Zeile und nicht nur ein Protokolleintrag.** Die
+    Grenzen am Geraet sind die Antwort auf „was steht dort" — und die
+    Geraeteseite soll sie mit **Zeitpunkt** anzeigen koennen. Ein
+    Protokolleintrag (wie beim ``0x46``-Stand) ist fuer eine Anzeige
+    nicht lesbar, und ein Feld auf ``device`` haette den
+    Bestaetigungszeitpunkt als dritte Spalte gebraucht. Die Zeile hat ihn
+    in ``time``.
+
+    **Die Zeile traegt nur diese beiden Felder.** Das ist Absicht und
+    nicht Nachlaessigkeit: eine Reply hat weder Temperatur noch
+    Ventilstellung, und die Leser nehmen ohnehin die juengste Zeile, **die
+    das Feld fuehrt** — dieselbe Regel wie bei ``child_lock`` und
+    ``attached_backplate``. Dem Zonen-Aggregat taeuscht sie nichts vor,
+    weil es auf ``temperature IS NOT NULL`` filtert (Sprint 24e).
+
+    Fehler sind nicht toedlich: wir protokollieren und halten die
+    Subscriber-Schleife nicht an (dieselbe Haltung wie beim
+    FW-Bericht).
+    """
+    obj = uplink.object or {}
+    if obj.get("report_type") != TEMP_RANGE_REPORT_TYPE:
+        return
+    min_c = obj.get("temp_range_min")
+    max_c = obj.get("temp_range_max")
+    if not isinstance(min_c, int) or not isinstance(max_c, int):
+        logger.warning(
+            "temp-range-Antwort ohne brauchbare Werte dev_eui=%s min=%r max=%r",
+            uplink.deviceInfo.devEui,
+            min_c,
+            max_c,
+        )
+        return
+
+    dev_eui = uplink.deviceInfo.devEui.lower()
+    try:
+        async with SessionLocal() as session:
+            device_id = await session.scalar(select(Device.id).where(Device.dev_eui == dev_eui))
+            if device_id is None:
+                logger.warning("temp-range-Antwort unbekannter DevEUI %s verworfen", dev_eui)
+                return
+            session.add(
+                SensorReading(
+                    device_id=device_id,
+                    time=datetime.now(tz=UTC),
+                    fcnt=uplink.fCnt,
+                    temp_range_min=min_c,
+                    temp_range_max=max_c,
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("temp-range-Antwort nicht gespeichert dev_eui=%s", dev_eui)
+        return
+
+    logger.info(
+        "event_type=MAINTENANCE_VICKI_TEMP_RANGE dev_eui=%s min=%s max=%s",
+        dev_eui,
+        min_c,
+        max_c,
+    )
+
+
 async def _handle_firmware_version_report(uplink: ChirpStackUplink) -> None:
     """Sprint 9.11x.b T4: persistiert ``firmware_version`` aus Codec-Output.
 
@@ -821,6 +892,13 @@ async def _consume_loop() -> None:
                         # nichts zu tun.
                         await _handle_firmware_version_report(uplink)
                         await _handle_open_window_status_report(uplink)
+                        # Sprint 23 T1: die ``0x15``-Antwort schreibt ihre
+                        # eigene Zeile. Sie steht hier im Reply-Zweig und
+                        # nicht im Keepalive-Pfad, weil sie genau hier
+                        # ankommt — und ``_persist_uplink`` haette aus ihr
+                        # eine Zeile ohne Temperatur gemacht und sie
+                        # gleichzeitig durch den Plausi-Filter geschickt.
+                        await _handle_temp_range_report(uplink)
                         continue
 
                     try:

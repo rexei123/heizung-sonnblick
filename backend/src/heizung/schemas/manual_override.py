@@ -142,3 +142,23 @@ class ManualOverrideResponse(BaseModel):
     created_by: str | None
     revoked_at: datetime | None
     revoked_reason: str | None
+
+    # Sprint 23 T1.7: der **wirksame** Wert, falls die Kappung greift.
+    #
+    # Der Gastwunsch steht in ``setpoint``; gekappt wird in Layer 5 gegen
+    # die Grenzen des Raumtyps. Die Historie las bisher nur ``setpoint``
+    # und behauptete damit eine Wirkung, die es nicht gibt: „30 °C, aktiv"
+    # bei wirksamen 25.
+    #
+    # ``None`` heisst „keine Kappung" — entweder liegt der Wert in den
+    # Grenzen, oder die Zeile ist nicht mehr aktiv. **Und das zweite ist
+    # Absicht:** eine Bestandszeile von vorgestern gegen die *heutigen*
+    # Grenzen zu rechnen wuerde eine Vergangenheit behaupten, die so nicht
+    # war. Abgelaufene Zeilen zeigen weiter den gespeicherten Wert.
+    #
+    # Abgeleitet read-time aus dem Raumtyp (Bad-Zonen aus dem der
+    # Vorlage), nichts persistiert — dieselbe Form wie
+    # ``battery_voltage_median`` (AE-72). Ein zweites Feld am Override
+    # waere eine zweite Wahrheit, die beim ersten Grenzen-Wechsel
+    # auseinanderlaeuft.
+    wirksam_gekappt_c: int | None = None

@@ -379,8 +379,16 @@ async def test_revoke_all_active_overrides_revokes_device_and_frontend(
     await db_session.refresh(frontend)
     assert device.revoked_at is not None
     assert frontend.revoked_at is not None
-    assert device.revoked_reason == "auto: guest checked out"
-    assert frontend.revoked_reason == "auto: guest checked out"
+    # Sprint 23 T1.7: der Test gibt den Grund selbst mit und prueefte
+    # bisher die Zeichenkette ``auto: guest checked out`` — die **kein**
+    # Aufrufer im Quellcode schreibt (der Check-out-Haken schreibt
+    # ``auto_revoke_on_checkout``). Der Test war damit nicht falsch, aber
+    # er dokumentierte einen Wert, den es im Betrieb nicht gibt
+    # (Nebenbefund der Erhebung zu T1.7).
+    #
+    # Jetzt prueeft er die Konstante, die der Default wirklich traegt.
+    assert device.revoked_reason == override_service.REVOKE_REASON_CHECKOUT_FALLBACK
+    assert frontend.revoked_reason == override_service.REVOKE_REASON_CHECKOUT_FALLBACK
 
 
 async def test_cleanup_expired_marks_only_expired(db_session: AsyncSession, room_id: int) -> None:

@@ -446,7 +446,7 @@ async def set_override_block_state(
         revoked_count = await override_service.revoke_all_active_overrides(
             session,
             room_id=room_id,
-            reason="room_override_blocked",
+            reason=override_service.REVOKE_REASON_ROOM_BLOCKED,
         )
 
     room.guest_override_blocked = payload.blocked

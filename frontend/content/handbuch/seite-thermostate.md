@@ -37,6 +37,32 @@ bewusst keine Zahl, weil unter drei Messwerten keine Aussage möglich ist.
 
 **Im Lager.** Keiner Zone zugeordnet. Reserve für einen Tausch.
 
+## Grenzen am Gerät
+
+Auf der Detailseite eines Thermostats steht die Karte **Grenzen am
+Gerät**. Sie sagt, in welchem Bereich das **Drehrad** verstellen darf —
+im Haus 15–25 °C im Zimmer und 18–25 °C im Bad.
+
+**Die Zahl kommt vom Gerät, nicht von uns.** Das ist der Punkt: was die
+Steuerung gesendet hat, ist eine Absicht; was dort steht, ist die Antwort
+des Geräts. Deshalb gibt es drei Zustände:
+
+| Anzeige | Heißt |
+|---|---|
+| 15–25 °C, bestätigt vor … | das Gerät hat es gemeldet. Gültig. |
+| nicht bestätigt | es hat noch nicht geantwortet. **Kein Fehler** — es meldet sich von selbst. |
+| 5–30 °C, „Soll wäre 15–25 °C" | Werkseinstellung am Gerät. Der Gast kann auf 30 drehen. |
+
+**Die Grenze gilt nur für das Rad.** Die Steuerung darf darüber hinaus
+stellen: Frostschutz und Fenster-Sicherheit bleiben wirksam, ein Bad mit
+Untergrenze 18 fällt im Sommerbetrieb trotzdem auf 10.
+
+Gesetzt werden die Grenzen nicht aus der Oberfläche, sondern mit einem
+Werkzeug auf dem Server — der Weg steht im Betriebshandbuch
+(RUNBOOK §10ap). **Eine Änderung der Grenzen am Raumtyp wirkt also nicht
+von selbst am Gerät.** Das ist Absicht: ein Klick würde sonst bis zu
+45 Funkbefehle auslösen.
+
 ## nur messen
 
 Der Schalter sitzt auf der Zimmer-Detailseite im Tab „Geräte". Ein Gerät

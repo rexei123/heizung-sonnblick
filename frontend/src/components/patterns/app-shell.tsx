@@ -60,6 +60,12 @@ const NAV: NavGroup[] = [
       { href: "/", label: "Dashboard", icon: "home" },
       { href: "/zimmer", label: "Zimmerübersicht", icon: "meeting_room" },
       { href: "/belegungen", label: "Belegungen", icon: "event" },
+      // Paket 1, Platz korrigiert am 26.10.2026: das Handbuch stand
+      // zuerst in einer eigenen Gruppe „Hilfe" am Ende der Leiste.
+      // Entscheidung des Betreibers — es gehoert nach oben, zu den
+      // Seiten, die man ohne Anlass oeffnet. Eine eigene Gruppe fuer
+      // einen Eintrag war ohnehin eine Ueberschrift ohne Inhalt.
+      { href: "/handbuch", label: "Handbuch", icon: "menu_book" },
     ],
   },
   {
@@ -100,14 +106,6 @@ const NAV: NavGroup[] = [
       { href: "/einstellungen/benutzer", label: "Benutzer", icon: "group", nurAdmin: true },
       { href: "/einstellungen/api", label: "API & Webhooks", icon: "api" },
     ],
-  },
-  {
-    // Paket 1: eigene Gruppe am Ende, für alle Rollen. Das Handbuch
-    // gehört in keine der fünf Sachgruppen darüber — es beschreibt sie
-    // alle. Und es steht unten, weil man es sucht, wenn man etwas
-    // anderes nicht findet.
-    label: "Hilfe",
-    items: [{ href: "/handbuch", label: "Handbuch", icon: "menu_book" }],
   },
 ];
 

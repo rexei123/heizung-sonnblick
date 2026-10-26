@@ -36,6 +36,11 @@ frei ist und ein Fenster offen steht oder der Sommerbetrieb läuft.
 
 ## G bis N
 
+**Grenzen am Gerät.** Der Bereich, in dem das **Drehrad** verstellen
+darf — im Haus 15–25 °C, im Bad 18–25 °C. Nicht zu verwechseln mit der
+**Kappung**: die Grenze am Gerät hindert den Gast am Drehen, die Kappung
+begrenzt den errechneten Sollwert. Beide kommen aus demselben Raumtyp.
+
 **Hysterese.** Die Entscheidung, einen Befehl **nicht** zu senden, weil
 die Änderung zu klein ist. Steht im Algorithmenverlauf unter der
 Schichtenliste.
