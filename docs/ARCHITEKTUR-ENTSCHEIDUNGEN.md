@@ -7122,12 +7122,75 @@ Beides erst nach Freigabe. Es steht hier, damit im Ernstfall nicht unter
 Zeitdruck entschieden werden muss — nicht, damit es vorsorglich
 passiert.
 
+
+### 8.2 Dritte Korrektur: der Codec kannte 0x15, routete es aber nicht
+
+**Live-Beleg des Betreibers, 26.10.2026.** Geraet
+``70b3d52dd303337d``, Uplink 09:44:51, fCnt 3897,
+``data = "FQ8ZgRKbfNnZEfAw"``:
+
+    15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30
+
+Das Geraet meldete seine Grenzen — **15/25, ``0x08`` hatte gewirkt** —
+und haengte einen vollstaendigen Keep-alive an. ChirpStack zeigte im
+``object``-Block: ``{command: 21}``. Reply und Keep-alive verloren.
+
+**Ursache.** ``decodeCommandReply`` kannte ``0x15`` seit T1; aber
+``decodeUplink`` routete nur ``0x52``, ``0x04``, ``0x46`` und ``0x28``
+dorthin. Alles andere ging an ``decodePeriodicReport``, und das bricht am
+Command-Byte ab.
+
+**Und drei Tests waren dabei gruen.** Der Codec-Spiegel prueft die Bytes,
+der Dienst-Test die Abfrage, der e2e-Test die Anzeige — jeder auf seiner
+Ebene richtig, keiner auf der, die zaehlt. Paragraph 5.83, und diesmal
+nicht an einer Zusicherung im Text, sondern an drei gruenen Tests.
+
+**Der Python-Spiegel konnte es nicht finden**, und das ist der wichtigste
+Teil des Befunds: ``test_codec_mirror.py`` baut die Decoder-**Logik** in
+Python nach. Ein Routing-Fehler liegt in ``decodeUplink``, und davon hat
+der Spiegel keine Entsprechung. Deshalb gibt es seit T1b einen Test, der
+die Datei **ausfuehrt** (``infra/chirpstack/tests/test_codec_decode_uplink.py``,
+``node -e``), und der Workflow richtet Node ausdruecklich ein — ein Test,
+der sich still ueberspringt, ist kein Test (Paragraph 5.81).
+
+**Was behoben ist, und es war mehr als ein Code:**
+
+* ``REPLY_COMMANDS`` als **Liste** statt einer Oder-Kette. Wer einen
+  Downlink baut, traegt den Antwort-Code an **einer** Stelle ein.
+* ``0x15`` darin — der gemeldete Befund.
+* ``0x14`` (Kindersicherung abfragen) ebenfalls: wir **senden** den
+  Befehl, sein Antwortformat ist aber nicht dokumentiert. Geroutet landet
+  er im ``unknown_reply``-Zweig und traegt damit ein ``report_type``;
+  ohne das greift der Reply-Filter im Subscriber nicht und
+  ``_persist_uplink`` legt fuer eine Befehlsantwort eine
+  ``sensor_reading``-Zeile aus lauter NULL an. **Dekodiert wird er
+  nicht** — ohne die Laenge des Reply-Teils ist auch der Beginn eines
+  Keep-alive unbekannt, und ein Suchlauf danach wuerde bei passenden
+  Bytes einen erfinden.
+* ``mergeEmbeddedKeepalive`` als Helfer, benutzt von ``0x04`` (dort stand
+  die Schleife inline), ``0x15``, ``0x46`` und ``0x52``. Der Live-Frame
+  belegt, dass die Vicki Replies und Keep-alives im selben Uplink packt;
+  dass es fuer ``0x52`` bisher nicht aufgefallen ist, heisst nicht, dass
+  es nicht vorkommt.
+* Ein **Spiegel-Test** haelt die gesendeten Befehle aus
+  ``downlink_adapter`` gegen ``REPLY_COMMANDS``, mit ausdruecklicher
+  Zuordnung "welcher Befehl wird mit welchem Code beantwortet". Nicht
+  jeder Befehl hat eine Antwort mit eigenem Code (``0x45`` und ``0x08``
+  haben keine) — als Annahme "Antwort = derselbe Code" waere der Test
+  falsch.
+* Ein **Ende-zu-Ende-Test** im Backend geht die Kette Codec-Ausgabe ->
+  Subscriber -> ``sensor_reading`` -> Abfrage -> Anzeige.
+
+**Mutationsprobe**, am 26.10.2026 gelaufen: ``0x15`` aus
+``REPLY_COMMANDS`` entfernt -> **vier** Tests rot, darunter der
+Live-Frame-Test und der Spiegel, der den fehlenden Code namentlich nennt.
+
 ## 9. Was offen bleibt
 
 | Offen | Folge |
 |---|---|
 | **Die Erprobung** | Pflicht-Stop, RUNBOOK §10ap, fuenf Schritte, erstes Geraet **107 Schlafzimmer** |
-| **Codec-Re-Paste** | Handarbeit in der ChirpStack-Oberflaeche (§5.22). Ohne ihn bleibt die Anzeige dauerhaft „nicht bestaetigt" |
+| **Codec-Re-Paste** | Handarbeit in der ChirpStack-Oberflaeche (§5.22). Ohne ihn bleibt die Anzeige dauerhaft „nicht bestaetigt". **Pruefung nach dem Re-Paste:** im Events-Tab muss eine ``0x15``-Antwort ``temp_range_min``/``temp_range_max`` im ``object``-Block zeigen — bis 26.10. stand dort ``{command: 21}`` (§8.2) |
 | **Automatischer Auslöser** | §5, bewusst nicht gebaut |
 | **FW < 4.2** | `0x08` steht in der Befehlstabelle unter „All", eine FW-Anforderung nennt die Doku nicht. Die Firmware steht trotzdem im Probelauf neben jedem Namen |
 | **Zonen-Karte im Bad** | die Kappungs-Anzeige rechnet dort mit den Grenzen der Vorlage. Greift eine zimmerweite Entscheidung (Fenster, Sommer), folgt das Bad dem Zimmerwert — die Anzeige weiss das nicht und zeigt die Vorlage-Grenzen. Selten und harmlos, aber genannt |

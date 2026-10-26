@@ -77,6 +77,55 @@
 // (offizieller Decoder; hier strict-mode-konform reduziert; Spike 2026-05-02
 // hat Command 0x51 + 0x52 Format am realen Vicki validiert.)
 
+// Command-Bytes, mit denen die Vicki auf einen unserer Downlinks
+// ANTWORTET. Alles andere ist ein Periodic-Report (0x01/0x81) oder die
+// Handverstellung (0x28, eigener Zweig).
+//
+// Gegenstueck im Backend: downlink_adapter.VICKI_*_COMMAND. Wer dort
+// einen Befehl ergaenzt, dessen Antwort ein eigenes Command-Byte traegt,
+// ergaenzt ihn hier.
+var REPLY_COMMANDS = [
+    0x52, // Antwort auf 0x51 (Sollwert) oder Drehring
+    0x04, // Antwort auf 0x04 (Firmware)
+    0x46, // Antwort auf 0x46 (Fenstererkennung-Stand)
+    0x15, // Antwort auf 0x15 (Grenzen am Geraet) — Sprint 23 T1
+    0x14  // Antwort auf 0x14 (Kindersicherung) — Format undokumentiert
+];
+
+// Ein Reply-Frame traegt oft einen VOLLSTAENDIGEN Keep-alive dahinter.
+// Live belegt fuer 0x04 (2026-05-11) und fuer 0x15 (2026-10-26). Ohne
+// diesen Helfer geht die Messung in diesem Frame verloren.
+//
+// ``offset`` ist die Laenge des Reply-Teils, also die Stelle, an der der
+// Keep-alive beginnen kann. Sie wird NICHT geraten: jeder Aufrufer kennt
+// die Laenge seines eigenen Formats. Wo sie unbekannt ist (0x14), wird
+// nicht gemergt.
+//
+// Die Reply-Felder gewinnen bei Konflikt — besonders ``report_type``:
+// ohne ihn greift der REPLY_REPORT_TYPES-Filter im Subscriber nicht, und
+// _persist_uplink wuerde fuer den Reply eine sensor_reading-Zeile
+// anlegen (CLAUDE.md Paragraph 5.21-Pattern-Risiko).
+function mergeEmbeddedKeepalive(data, bytes, offset) {
+    if (bytes.length <= offset) {
+        return data;
+    }
+    var rest = bytes.slice(offset);
+    if (rest.length < 9 || (rest[0] !== 0x01 && rest[0] !== 0x81)) {
+        return data;
+    }
+    var periodic = decodePeriodicReport(rest);
+    if (!periodic || !periodic.data) {
+        return data;
+    }
+    for (var key in periodic.data) {
+        if (Object.prototype.hasOwnProperty.call(periodic.data, key)
+            && !Object.prototype.hasOwnProperty.call(data, key)) {
+            data[key] = periodic.data[key];
+        }
+    }
+    return data;
+}
+
 function decodeUplink(input) {
     var bytes = input.bytes;
 
@@ -87,8 +136,27 @@ function decodeUplink(input) {
     // Sprint 9.10c: Routing ueber Command-Byte, nicht ueber fPort.
     // Vickis schicken Periodic-Reports auf fPort 2 (Live-Beleg
     // 2026-05-07: dev_eui 70b3d52dd3034de4, fPort=2, bytes[0]=0x81).
+    //
+    // Sprint 23 T1b (Live-Befund 26.10.2026): die Liste ist der ganze
+    // Punkt dieser Stelle, und sie war unvollstaendig. Geraet
+    // 70b3d52dd303337d antwortete um 09:44:51 (fCnt 3897) mit
+    //   15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30
+    // also 0x15-Reply (Grenzen 15/25) PLUS angehaengtem Keep-alive. Weil
+    // 0x15 hier nicht stand, lief der Frame in decodePeriodicReport, und
+    // das gab `{command: 21}` — Reply UND Keep-alive verloren.
+    //
+    // Deshalb jetzt eine **Liste**: wer einen neuen Downlink baut, traegt
+    // seinen Reply-Code hier ein, und das ist eine Zeile an einer Stelle
+    // statt einer Oder-Kette, die beim vierten Glied vergessen wird.
+    //
+    // 0x14 (Kindersicherung abfragen) steht mit drin, obwohl das
+    // Antwortformat NICHT dokumentiert ist: so landet die Antwort im
+    // unknown_reply-Zweig und traegt damit ein `report_type`. Ohne das
+    // greift der REPLY_REPORT_TYPES-Filter im Subscriber nicht, und
+    // _persist_uplink legt fuer eine Befehlsantwort eine
+    // sensor_reading-Zeile aus lauter NULL an.
     var cmd = bytes[0];
-    if (cmd === 0x52 || cmd === 0x04 || cmd === 0x46) {
+    if (REPLY_COMMANDS.indexOf(cmd) !== -1) {
         return decodeCommandReply(bytes);
     }
     // Sprint 20f (T1): 0x28 = Handverstellung am Drehrad (FW >= 3.5). Der
@@ -354,14 +422,18 @@ function decodeCommandReply(bytes) {
         }
         var raw = (bytes[1] << 8) | bytes[2];
         var setpoint = raw / 10.0;
+        // Sprint 23 T1b: auch hier ein eventuell angehaengter Keep-alive.
+        // Der Live-Frame vom 26.10. belegt, dass die Vicki Replies und
+        // Keep-alives im selben Uplink packt; dass es fuer 0x52 bisher
+        // nicht aufgefallen ist, heisst nicht, dass es nicht vorkommt.
         return {
-            data: {
+            data: mergeEmbeddedKeepalive({
                 report_type: 'setpoint_reply',
                 command: cmd,
                 target_temperature: parseFloat(setpoint.toFixed(2)),
                 targetTemperature: parseFloat(setpoint.toFixed(2)),
                 acknowledged: true
-            }
+            }, bytes, 3)
         };
     }
 
@@ -395,28 +467,12 @@ function decodeCommandReply(bytes) {
             firmware_version: ((fwByte >> 4) & 0x0F) + '.' + (fwByte & 0x0F),
             hw_version: ((hwByte >> 4) & 0x0F) + '.' + (hwByte & 0x0F)
         };
-        // Optional eingebetteter Keep-alive (Cmd 0x01 oder 0x81, 9 Bytes).
-        // Vicki packt FW-Reply + Periodic im selben Uplink-Frame —
-        // wir wollen die Periodic-Felder nicht verlieren, aber
-        // report_type=firmware_version_reply MUSS bleiben, sonst
-        // greift REPLY_REPORT_TYPES-Filter im Subscriber nicht und
-        // _persist_uplink wuerde fuer den Reply einen sensor_reading-
-        // Insert versuchen (CLAUDE.md §5.21-Pattern-Risiko).
-        if (bytes.length > 3) {
-            var rest = bytes.slice(3);
-            if (rest.length >= 9 && (rest[0] === 0x01 || rest[0] === 0x81)) {
-                var periodic = decodePeriodicReport(rest);
-                if (periodic && periodic.data) {
-                    for (var key in periodic.data) {
-                        if (Object.prototype.hasOwnProperty.call(periodic.data, key)
-                            && !Object.prototype.hasOwnProperty.call(data, key)) {
-                            data[key] = periodic.data[key];
-                        }
-                    }
-                }
-            }
-        }
-        return { data: data };
+        // Optional eingebetteter Keep-alive. Die Schleife stand bis
+        // Sprint 23 T1b hier inline; sie liegt jetzt in
+        // mergeEmbeddedKeepalive, weil 0x15 sie genauso braucht — und
+        // zwei Kopien waeren zwei Stellen, an denen die Prioritaet von
+        // report_type spaeter abweichen kann.
+        return { data: mergeEmbeddedKeepalive(data, bytes, 3) };
     }
 
     // 0x46 = Open-Window-Status-Reply (Sprint 9.11x.b)
@@ -433,14 +489,16 @@ function decodeCommandReply(bytes) {
         var enabled = bytes[1] === 0x01;
         var durationMin = bytes[2] * 5;
         var deltaC = bytes[3] / 10.0;
+        // Sprint 23 T1b: Reply-Teil ist 4 Bytes lang, der Keep-alive
+        // beginnt also bei 4.
         return {
-            data: {
+            data: mergeEmbeddedKeepalive({
                 report_type: 'open_window_status_reply',
                 command: cmd,
                 open_window_detection_enabled: enabled,
                 open_window_detection_duration_min: durationMin,
                 open_window_detection_delta_c: parseFloat(deltaC.toFixed(2))
-            }
+            }, bytes, 4)
         };
     }
 
@@ -460,16 +518,30 @@ function decodeCommandReply(bytes) {
                 errors: ['temp-range reply too short (' + bytes.length + ' bytes, expected 3)']
             };
         }
+        // Der Live-Frame vom 26.10.2026 (Geraet 70b3d52dd303337d,
+        // fCnt 3897): `15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30` — drei
+        // Bytes Reply, dann ein vollstaendiger Keep-alive. Der Keep-alive
+        // beginnt also bei 3.
         return {
-            data: {
+            data: mergeEmbeddedKeepalive({
                 report_type: 'temp_range_reply',
                 command: cmd,
                 temp_range_min: bytes[1],
                 temp_range_max: bytes[2]
-            }
+            }, bytes, 3)
         };
     }
 
+    // Ein Reply-Code, den wir senden, aber nicht dekodieren koennen —
+    // heute genau 0x14 (Kindersicherung abfragen), dessen Antwortformat
+    // die Hersteller-Doku nicht nennt.
+    //
+    // **Hier wird nicht geraten.** Ohne die Laenge des Reply-Teils ist
+    // auch der Beginn eines angehaengten Keep-alive unbekannt, und ein
+    // Suchlauf danach wuerde bei passenden Bytes einen Keep-alive
+    // erfinden. Der Frame traegt aber ein `report_type`, und das ist der
+    // Gewinn: der Subscriber erkennt ihn als Befehlsantwort und legt
+    // keine sensor_reading-Zeile aus lauter NULL an.
     return {
         data: { command: cmd, report_type: 'unknown_reply' },
         warnings: ['unknown command-reply 0x' + cmd.toString(16)]

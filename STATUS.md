@@ -6277,6 +6277,34 @@ in der letzten Zeile, worauf das Zimmer steht. Dafuer fuehrt
 ``per_device_results`` jetzt ein ``setpoint_c`` je Geraet: der Raumwert
 allein genuegt nicht, weil eine Bad-Zone den Wert der Vorlage fuehrt.
 
+**Dritte Korrektur, Live-Beleg des Betreibers (AE-82 §8.2).** Geraet
+``70b3d52dd303337d`` antwortete am 26.10. um 09:44:51 (fCnt 3897) mit
+``15 0F 19 | 81 …`` — es meldete seine Grenzen **15/25, ``0x08`` hatte
+also gewirkt**, plus angehaengtem Keep-alive. ChirpStack zeigte trotzdem
+nur ``{command: 21}``: ``decodeCommandReply`` kannte ``0x15``, aber
+``decodeUplink`` routete es nicht dorthin. Reply **und** Keep-alive
+verloren.
+
+**Und drei Tests waren dabei gruen** — Codec-Spiegel (Bytes),
+Dienst-Test (Abfrage), e2e (Anzeige). Jeder auf seiner Ebene richtig,
+keiner auf der, die zaehlt (§5.83). Der **Python-Spiegel konnte es nicht
+finden**: er baut die Decoder-Logik nach und hat kein ``decodeUplink``.
+
+Behoben: ``REPLY_COMMANDS`` als Liste (eine Stelle statt einer
+Oder-Kette), ``0x15`` darin — und ``0x14`` (Kindersicherung abfragen)
+ebenfalls, weil wir den Befehl senden und seine Antwort sonst eine
+``sensor_reading``-Zeile aus lauter NULL erzeugt; dekodiert wird sie
+nicht, ihr Format ist undokumentiert. ``mergeEmbeddedKeepalive`` als
+Helfer fuer ``0x04``/``0x15``/``0x46``/``0x52``.
+
+Neu dazu **ein Test, der den Codec ausfuehrt** (``node -e``,
+``infra/chirpstack/tests/``) mit genau den Live-Bytes, ein **Spiegel**
+der gesendeten Befehle gegen ``REPLY_COMMANDS``, und ein
+**Ende-zu-Ende-Test** Codec-Ausgabe -> Subscriber -> ``sensor_reading``
+-> Abfrage. Der Workflow richtet Node ausdruecklich ein; ein Test, der
+sich still ueberspringt, ist kein Test (§5.81). **Mutationsprobe:**
+``0x15`` aus der Liste -> vier Tests rot.
+
 12 neue Tests: Warte- und Urteilslogik mit **virtueller Uhr** (§5.82,
 einschliesslich eines Zaehltests, der eine halb gefaelschte Zeitquelle
 auffallen laesst) und die Rueckgabe — darunter **die Reihenfolge** (Flag

@@ -7564,6 +7564,23 @@ ChirpStack zieht ihn **nicht** selbst (§5.22).
 
 Ohne diesen Schritt läuft alles andere, nur die Bestätigung kommt nie an.
 
+> **Live-Beleg, warum der Schritt nicht reicht, wenn der Codec nur
+> „0x15 kennt" (26.10.2026).** Gerät `70b3d52dd303337d` antwortete um
+> 09:44:51 (fCnt 3897) mit
+>
+>     15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30
+>
+> also: Grenzen **15/25 gemeldet, `0x08` hat gewirkt** — plus einem
+> angehängten Keep-alive. ChirpStack zeigte trotzdem nur
+> `{command: 21}`. Grund: `decodeUplink` schickte `0x15` nicht an den
+> Reply-Zweig, sondern an `decodePeriodicReport`. **Reply und Keep-alive
+> waren verloren.**
+>
+> Behoben in Sprint 23 T1b. Nach dem Re-Paste muss im Events-Tab bei
+> einer `0x15`-Antwort `temp_range_min` und `temp_range_max` im
+> `object`-Block stehen — das ist die Prüfung, die der Re-Paste
+> braucht.
+
 ### Das Werkzeug
 
 ```
