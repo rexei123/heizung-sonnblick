@@ -26,10 +26,13 @@ echte Codec aus dem Live-Frame erzeugt.
 
 from __future__ import annotations
 
+import json
 import os
+import pathlib
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -53,32 +56,38 @@ from heizung.services.geraetegrenzen import Grenzen, ist_grenzen_je_geraet
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SKIP_REASON = "DATABASE_URL nicht gesetzt - der Ende-zu-Ende-Test braucht Test-DB"
 
-#: Der ``object``-Block, den der echte Codec aus dem Live-Frame des
-#: Betreibers erzeugt (Geraet 70b3d52dd303337d, 26.10.2026 09:44:51,
-#: fCnt 3897, ``data = "FQ8ZgRKbfNnZEfAw"`` = ``15 0F 19 | 81 …``).
+#: Die echte Uplink-JSON, in der Form, in der sie ueber MQTT ankommt.
 #:
-#: **Abgenommen vom Codec-Lauf, nicht erfunden** — der JS-Test in
-#: ``infra/chirpstack/tests/test_codec_decode_uplink.py`` fuehrt dieselben
-#: Bytes durch ``decodeUplink`` und belegt diese Felder. Hier steht die
-#: Ausgabe, damit die Kette ohne Node prueefbar bleibt; die Herkunft
-#: steht dabei, weil ein Erwartungswert ohne Herkunft nur eine
-#: Momentaufnahme ist (Paragraph 5.79).
-CODEC_AUSGABE = {
-    "report_type": "temp_range_reply",
-    "command": 21,
-    "temp_range_min": 15,
-    "temp_range_max": 25,
-    # Der angehaengte Keep-alive — er gehoert dazu, weil der Frame ihn
-    # traegt. Dass der Subscriber ihn fuer einen Reply nicht als Messung
-    # speichert, ist eine andere Entscheidung (siehe Modul-Kopf des
-    # Subscribers).
-    "temperature": 22.35,
-    "target_temperature": 18,
-    "battery_voltage": 3.5,
-    "valve_openness": 0,
-    "attachedBackplate": True,
-    "childLock": False,
-}
+#: **Warum eine Datei und keine Konstante im Test** (Befund des
+#: Betreibers, 26.10.2026 10:14:30). Die erste Fassung dieses Tests hatte
+#: den ``object``-Block hier als Python-Literal mit ``"temp_range_min":
+#: 15`` — also einem ``int``. Im Betrieb kommen die Zahlen als
+#: **Gleitkommazahl** an (``15.0``), und die Pruefung im Subscriber
+#: lautete ``isinstance(min_c, int)``. Der Test war gruen, die Anlage
+#: verwarf die Antwort.
+#:
+#: Das ist Paragraph 5.79 woertlich: der Erwartungswert kam aus meiner
+#: Vorstellung der Form, nicht aus einer Quelle. Jetzt kommt die Eingabe
+#: aus einer Datei, die die Form **traegt** — JSON unterscheidet 15 und
+#: 15.0 nicht, die Datei schreibt die Nachkommastelle deshalb
+#: ausdruecklich.
+#:
+#: Herkunft der Datei: der ``object``-Block ist die Ausgabe des **echten
+#: Codecs** fuer die Live-Bytes des Betreibers
+#: (``data = "FQ8ZgRKbfNnZEfAw"``, Geraet 70b3d52dd303337d, fCnt 3897),
+#: jede Zahl als Gleitkommazahl. Der Umschlag folgt
+#: ``vicki-status-001.json``.
+UPLINK_DATEI = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "infra"
+    / "chirpstack"
+    / "test-uplinks"
+    / "vicki-temp-range-reply-107.json"
+)
+
+
+def _lade_uplink() -> dict[str, Any]:
+    return json.loads(UPLINK_DATEI.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 @pytest_asyncio.fixture
@@ -129,17 +138,19 @@ async def _raeum_auf(
     await session.commit()
 
 
-def _uplink(dev_eui: str, obj: dict[str, object]) -> mqtt_subscriber.ChirpStackUplink:
-    return mqtt_subscriber.ChirpStackUplink.model_validate(
-        {
-            "deviceInfo": {"devEui": dev_eui},
-            "fCnt": 3897,
-            "fPort": 2,
-            "time": datetime.now(tz=UTC).isoformat(),
-            "object": obj,
-            "data": "FQ8ZgRKbfNnZEfAw",
-        }
-    )
+def _uplink(dev_eui: str, obj: dict[str, Any] | None = None) -> mqtt_subscriber.ChirpStackUplink:
+    """Die echte Uplink-JSON, nur mit unserem Test-Geraet und jetzt.
+
+    ``obj`` ersetzt den ``object``-Block, wenn ein Test eine Abwandlung
+    braucht. Ohne Angabe kommt der Block aus der Datei — also die Form,
+    die im Betrieb ankommt.
+    """
+    rohling = _lade_uplink()
+    rohling["deviceInfo"]["devEui"] = dev_eui
+    rohling["time"] = datetime.now(tz=UTC).isoformat()
+    if obj is not None:
+        rohling["object"] = obj
+    return mqtt_subscriber.ChirpStackUplink.model_validate(rohling)
 
 
 async def test_codec_ausgabe_landet_als_grenzen_am_geraet(db_session: AsyncSession) -> None:
@@ -147,7 +158,7 @@ async def test_codec_ausgabe_landet_als_grenzen_am_geraet(db_session: AsyncSessi
     geraet, zone, room, rt = await _lege_geraet_an(db_session)
     try:
         # 1. Der Subscriber verarbeitet den Frame.
-        await mqtt_subscriber._handle_temp_range_report(_uplink(geraet.dev_eui, CODEC_AUSGABE))
+        await mqtt_subscriber._handle_temp_range_report(_uplink(geraet.dev_eui))
 
         # 2. Es liegt eine Zeile mit den Grenzen.
         zeilen = list(
@@ -182,7 +193,7 @@ async def test_der_reply_typ_ist_im_subscriber_bekannt() -> None:
     die Weiche, nicht Zierde.
     """
     assert mqtt_subscriber.TEMP_RANGE_REPORT_TYPE in mqtt_subscriber.REPLY_REPORT_TYPES
-    assert CODEC_AUSGABE["report_type"] == mqtt_subscriber.TEMP_RANGE_REPORT_TYPE
+    assert _lade_uplink()["object"]["report_type"] == mqtt_subscriber.TEMP_RANGE_REPORT_TYPE
 
 
 async def test_keepalive_ohne_grenzen_erzeugt_keine_zeile(db_session: AsyncSession) -> None:
@@ -195,7 +206,7 @@ async def test_keepalive_ohne_grenzen_erzeugt_keine_zeile(db_session: AsyncSessi
     """
     geraet, zone, room, rt = await _lege_geraet_an(db_session)
     try:
-        ohne = {k: v for k, v in CODEC_AUSGABE.items() if not k.startswith("temp_range")}
+        ohne = {k: v for k, v in _lade_uplink()["object"].items() if not k.startswith("temp_range")}
         ohne["report_type"] = "periodic"
         await mqtt_subscriber._handle_temp_range_report(_uplink(geraet.dev_eui, ohne))
 
@@ -215,7 +226,7 @@ async def test_unbrauchbare_werte_werden_nicht_gespeichert(db_session: AsyncSess
     """
     geraet, zone, room, rt = await _lege_geraet_an(db_session)
     try:
-        kaputt = dict(CODEC_AUSGABE)
+        kaputt = dict(_lade_uplink()["object"])
         kaputt["temp_range_min"] = "fuenfzehn"
         await mqtt_subscriber._handle_temp_range_report(_uplink(geraet.dev_eui, kaputt))
 
@@ -225,3 +236,91 @@ async def test_unbrauchbare_werte_werden_nicht_gespeichert(db_session: AsyncSess
         assert anzahl == 0
     finally:
         await _raeum_auf(db_session, geraet, zone, room, rt)
+
+
+# ---------------------------------------------------------------------------
+# Die Form der Zahlen (Befund des Betreibers, 26.10.2026 10:14:30)
+# ---------------------------------------------------------------------------
+
+
+def test_die_fixture_traegt_die_zahlen_als_gleitkomma() -> None:
+    """Die Schranke gegen ein "Aufraeumen" dieser Datei.
+
+    Wer ``15.0`` in der JSON zu ``15`` macht, macht den Test gruen und den
+    Betrieb kaputt — genau diese Richtung ist am 26.10. passiert, nur
+    umgekehrt: der Test hatte ``int``, die Anlage hatte ``float``, und der
+    Test war gruen.
+
+    JSON unterscheidet die beiden nicht; die Datei schreibt die
+    Nachkommastelle deshalb ausdruecklich, und dieser Test haelt sie fest.
+    """
+    obj = _lade_uplink()["object"]
+    for feld in ("temp_range_min", "temp_range_max"):
+        assert isinstance(obj[feld], float), (
+            f"{feld} ist {type(obj[feld]).__name__} statt float — die Fixture "
+            "bildet die Form des Betriebs nicht mehr ab"
+        )
+    # Und die Werte selbst, aus dem Live-Frame.
+    assert obj["temp_range_min"] == 15.0
+    assert obj["temp_range_max"] == 25.0
+
+
+@pytest.mark.parametrize(
+    ("roh", "erwartet"),
+    [
+        (15, 15),  # int, wie der Codec ihn meint
+        (15.0, 15),  # float, wie er ankommt — der Befund
+        (-3.0, -3),  # negativ und ganzzahlig: zulaessige Zahl
+        (0.0, 0),
+        (15.5, None),  # echte Nachkommastelle: verwerfen, nicht runden
+        (True, None),  # isinstance(True, int) ist wahr — trotzdem kein Messwert
+        (False, None),
+        ("15", None),
+        (None, None),
+    ],
+)
+def test_ganze_zahl_aus_dem_object_block(roh: object, erwartet: int | None) -> None:
+    """Die Umrechnung selbst, mit allen Formen, die vorkommen koennen.
+
+    ``15.5`` wird **verworfen und nicht gerundet**: das Geraet meldet
+    ganze Grad, und eine Nachkommastelle heisst, dass die Annahme ueber
+    das Format nicht stimmt. Dann ist Schweigen richtiger als eine Zahl,
+    die plausibel aussieht.
+    """
+    assert mqtt_subscriber._als_ganze_zahl(roh) == erwartet
+
+
+async def test_werte_ausserhalb_der_spanne_werden_verworfen(db_session: AsyncSession) -> None:
+    """5..30 ist die Spanne des Geraets (Werk 5/30).
+
+    Eine Antwort darueber hinaus heisst, dass die Bytes anders gemeint
+    sind als angenommen — und dann ist "nicht bestaetigt" die wahre
+    Aussage, nicht eine Grenze, die es nicht gibt.
+    """
+    geraet, zone, room, rt = await _lege_geraet_an(db_session)
+    try:
+        for min_c, max_c in ((3.0, 25.0), (15.0, 35.0), (25.0, 15.0), (20.0, 20.0)):
+            obj = dict(_lade_uplink()["object"])
+            obj["temp_range_min"] = min_c
+            obj["temp_range_max"] = max_c
+            await mqtt_subscriber._handle_temp_range_report(_uplink(geraet.dev_eui, obj))
+
+        anzahl = await db_session.scalar(
+            text("SELECT count(*) FROM sensor_reading WHERE device_id = :i"), {"i": geraet.id}
+        )
+        assert anzahl == 0, "eine unmoegliche Spanne wurde gespeichert"
+    finally:
+        await _raeum_auf(db_session, geraet, zone, room, rt)
+
+
+def test_die_spanne_kommt_aus_dem_downlink_adapter() -> None:
+    """Eine Zahl, eine Stelle.
+
+    Die Spanne, die das Geraet annimmt, steht im Downlink-Adapter — dort
+    prueft sie auch der Sende-Pfad. Zwei Zahlen fuer dieselbe
+    Geraete-Eigenschaft liefen beim ersten Nachjustieren auseinander
+    (Paragraph 5.53), und zwar stumm: beide Seiten saehen plausibel aus.
+    """
+    from heizung.services import downlink_adapter
+
+    assert (downlink_adapter.TEMP_RANGE_MIN_C, downlink_adapter.TEMP_RANGE_MAX_C) == (5, 30)
