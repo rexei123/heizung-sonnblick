@@ -1,10 +1,12 @@
 r"""Die Temperaturgrenzen am Geraet setzen, abfragen, vergleichen (Sprint 23 T1).
 
-Drei Unterbefehle:
+Vier Unterbefehle:
 
-    setzen     ``0x08`` mit den Soll-Grenzen der Zone, danach ``0x15``
-    abfragen   nur ``0x15``
-    vergleich  liest die Datenbank: Soll gegen zuletzt Gemeldetes
+    setzen          ``0x08`` mit den Soll-Grenzen der Zone, danach ``0x15``
+    abfragen        nur ``0x15``
+    vergleich       liest die Datenbank: Soll gegen zuletzt Gemeldetes
+    sollwert-probe  EIN Funk-Sollwert unter der Untergrenze an EIN Geraet,
+                    dann der Readback — und danach zurueck an die Engine
 
 **Ein Probelauf ist der Standard.** Ohne ``--ausfuehren`` wird nichts
 gesendet, sondern aufgezaehlt, was gesendet wuerde — mit den Bytes, der
@@ -51,6 +53,8 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import UTC, datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 # Siehe ``activate_open_window_detection``: der Guard trennt den
@@ -59,8 +63,13 @@ if __name__ == "__main__":  # pragma: no cover - Einstiegspunkt
     os.environ.setdefault("ENVIRONMENT", "test")
     os.environ.setdefault("ALLOW_DEFAULT_SECRETS", "1")
 
+from sqlalchemy import select  # noqa: E402
+
 from heizung.db import SessionLocal  # noqa: E402
-from heizung.services import downlink_adapter  # noqa: E402
+from heizung.models.heating_zone import HeatingZone  # noqa: E402
+from heizung.models.sensor_reading import SensorReading  # noqa: E402
+from heizung.scripts.pairing.clock import REAL_CLOCK, Clock  # noqa: E402
+from heizung.services import downlink_adapter, resync_flag  # noqa: E402
 from heizung.services.geraete_ziele import (  # noqa: E402
     Ausnahme,
     Zielgeraet,
@@ -78,6 +87,18 @@ from heizung.services.geraetegrenzen import (  # noqa: E402
 logger = logging.getLogger("geraetegrenzen")
 
 ZONE = "Europe/Vienna"
+
+#: Der Pruefwert der Sollwert-Probe. **10 °C ist kein beliebiger Wert**,
+#: sondern der Frostschutz: genau er kommt im Betrieb per Funk an ein Bad
+#: mit Untergrenze 18 oder an ein Zimmer mit Untergrenze 15, naemlich im
+#: Sommerbetrieb und bei der Fenster-Sicherheit. Die Probe fragt also
+#: nicht irgendetwas, sondern den Fall, der eintreten wird.
+PROBE_WERT_C: int = 10
+
+#: Wartefenster auf die Antwort des Geraets. Ein Vicki meldet sich im
+#: Regelfall alle paar Minuten; zehn Minuten sind der Periodic-Zyklus.
+PROBE_TIMEOUT_S: int = 900
+PROBE_INTERVALL_S: int = 20
 
 
 def _tabelle(kopf: list[str], zeilen: list[list[str]]) -> None:
@@ -275,6 +296,344 @@ async def _befehl_setzen(args: argparse.Namespace, *, nur_abfragen: bool) -> int
     return 1 if fehler else 0
 
 
+async def _juengster_messwert(device_id: int) -> SensorReading | None:
+    async with SessionLocal() as session:
+        return (
+            (
+                await session.execute(
+                    select(SensorReading)
+                    .where(SensorReading.device_id == device_id)
+                    .order_by(SensorReading.time.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+
+async def _warte_auf_readback(
+    device_id: int,
+    *,
+    gesendet_um: datetime,
+    ziel_c: int,
+    timeout_s: int,
+    intervall_s: int,
+    clock: Clock,
+) -> tuple[str, Decimal | None, datetime | None]:
+    """Wartet auf den **gemeldeten** Sollwert nach dem Downlink.
+
+    Returns ``(urteil, gemeldet, zeitpunkt)`` mit ``urteil`` in
+    ``{"ziel", "abweichend", "keine_antwort"}``.
+
+    **Ein frischer Uplink mit dem alten Sollwert ist noch kein Befund.**
+    Die Vicki kann einen Periodic-Report abgesetzt haben, bevor sie den
+    Downlink verarbeitet hat; wir merken ihn und warten weiter. Erst am
+    Ende des Fensters wird entschieden. Dieselbe Regel wie im
+    Batch-Eingangstest — und der Grund, warum dort kein einzelner Uplink
+    ein Urteil faellt.
+
+    Uhr und Warten kommen als **ein** Wert (``Clock``). Zwei getrennte
+    Einhaengepunkte liessen sich einzeln ersetzen, und genau daran ist
+    Sprint 19 fuenfzehn Minuten echter Wartezeit aufgesessen (Paragraph
+    5.82).
+    """
+    frist = clock.now().timestamp() + timeout_s
+    letzter_frischer: SensorReading | None = None
+
+    while True:
+        await clock.sleep(intervall_s)
+        messwert = await _juengster_messwert(device_id)
+        if messwert is not None and messwert.time > gesendet_um:
+            letzter_frischer = messwert
+            if messwert.setpoint is not None:
+                if int(messwert.setpoint) == ziel_c:
+                    return "ziel", messwert.setpoint, messwert.time
+                return "abweichend", messwert.setpoint, messwert.time
+        if clock.now().timestamp() >= frist:
+            break
+
+    if letzter_frischer is None:
+        return "keine_antwort", None, None
+    return "abweichend", letzter_frischer.setpoint, letzter_frischer.time
+
+
+async def _zurueck_an_die_engine(ziel: Zielgeraet, room_id: int) -> tuple[bool, int | None, str]:
+    """Gibt das Zimmer an die Engine zurueck — und zwar so, dass es wirkt.
+
+    Returns ``(erfolg, gesendeter_wert, text)``.
+
+    **Warum ein Engine-Lauf allein nicht genuegt** (Befund des Betreibers,
+    26.10.2026). Die Probe hat ``0x51`` **direkt** geschickt, nicht ueber
+    die Engine. Der Hysterese-Vergleich laeuft aber gegen den **zuletzt
+    selbst gesendeten** Wert, nicht gegen den, den das Geraet meldet
+    (das ist der Befund aus Sprint 20f): sie sieht also weiter den alten
+    Sollwert, rechnet ihn neu, findet ``delta = 0`` und **schweigt**.
+
+    Das Zimmer bliebe damit auf dem Probewert, bis der Engine-Abgleich es
+    merkt — und der braucht den **gemeldeten** Wert des Geraets und ist
+    auf einmal je 30 Minuten gedrosselt. Im schlechtesten Fall steht 107
+    also eine Dreiviertelstunde auf 10 Grad. Im Winter sieht das nach
+    „Heizung aus" aus und nicht nach „Testwert vergessen".
+
+    **Der Ausweg ist der vorhandene:** ``resync_flag`` ist genau dafuer
+    gebaut (Sprint 15c, AE-63) — ein Redis-Schluessel, den der Dispatch
+    einmal konsumiert und dafuer die Hysterese uebergeht. Dieselbe
+    Mechanik, die nach einem Geraete-Neustart den Drift einfaengt. Kein
+    zweiter Weg daneben.
+
+    **Setzt sich das Flag nicht** (Redis nicht erreichbar), wird das
+    ausdruecklich gesagt: dann ist die Rueckgabe nicht gesichert, und
+    jemand muss nachsehen. Ein stilles „ich habe es versucht" waere hier
+    das Teuerste.
+    """
+    flag_gesetzt = await asyncio.to_thread(resync_flag.mark_pending, ziel.dev_eui)
+    if not flag_gesetzt:
+        return (
+            False,
+            None,
+            "Das Re-Sync-Flag liess sich nicht setzen (Redis?). Die Engine "
+            "wuerde den Sollwert wegen der Hysterese womoeglich NICHT "
+            "senden.\nVon Hand nachsehen: Zimmerseite, Tab Engine — steht "
+            "dort der normale Sollwert und hat das Geraet ihn gemeldet?",
+        )
+
+    try:
+        from heizung.tasks.engine_tasks import _evaluate_room_async
+
+        ergebnis = await _evaluate_room_async(room_id)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            False,
+            None,
+            f"Der Engine-Lauf ist fehlgeschlagen ({exc}).\nDas Zimmer steht "
+            "womoeglich noch auf dem Probewert. Von Hand nachziehen: "
+            "Zimmerseite, Tab Engine.",
+        )
+
+    # Was ist mit **diesem** Geraet passiert? Der Raumwert allein genuegt
+    # nicht: eine Bad-Zone fuehrt den Wert der Vorlage.
+    eintraege = [
+        e
+        for e in (ergebnis.get("devices") or [])
+        if isinstance(e, dict) and e.get("device_id") == ziel.device_id
+    ]
+    if not eintraege:
+        return (
+            False,
+            None,
+            "Die Engine hat gerechnet, aber dieses Geraet kommt im Ergebnis "
+            f"nicht vor (Status: {ergebnis.get('status', 'ok')}).\n"
+            "Von Hand nachsehen: Zimmerseite, Tab Engine.",
+        )
+
+    eintrag = eintraege[0]
+    wert = eintrag.get("setpoint_c")
+    status = eintrag.get("status")
+    if status == "sent":
+        return True, wert, f"Zurueckgegeben: die Engine hat {wert} Grad gesendet."
+    if status == "skipped_hysteresis":
+        return (
+            False,
+            wert,
+            f"ACHTUNG: die Engine hat NICHT gesendet (Grund: "
+            f"{eintrag.get('hysteresis_reason')}).\nDas Zimmer steht "
+            "womoeglich noch auf dem Probewert, obwohl das Re-Sync-Flag "
+            "gesetzt war. Von Hand nachziehen und melden.",
+        )
+    return (
+        False,
+        wert,
+        f"ACHTUNG: der Downlink ist fehlgeschlagen "
+        f"({eintrag.get('error')}).\nDas Zimmer steht womoeglich noch auf "
+        "dem Probewert.",
+    )
+
+
+def _zeige_stand(ziel: Zielgeraet, rueckgabe_ok: bool, wert: int | None) -> None:
+    """Die letzte Zeile: worauf steht das Zimmer jetzt?
+
+    **Sie steht in jedem Zweig**, auch im schlechten. Das Urteil ueber die
+    Grenze und der Zustand des Zimmers sind zwei verschiedene Fragen, und
+    die zweite ist die dringendere: ein Zimmer auf dem Probewert ist ein
+    kaltes Zimmer, ganz gleich was die Probe ergeben hat.
+    """
+    print()
+    if rueckgabe_ok and wert is not None:
+        print(f"Stand {ziel.bezeichnung}: {wert} Grad, von der Engine gesendet. Nichts zu tun.")
+    else:
+        print(
+            f"Stand {ziel.bezeichnung}: UNGEKLAERT — die Rueckgabe ist nicht "
+            "gesichert (siehe oben). Bitte auf der Zimmerseite nachsehen, "
+            "Tab Engine."
+        )
+
+
+async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CLOCK) -> int:
+    """Prueft am Geraet, ob ein Funk-Sollwert **unter** der Untergrenze ankommt.
+
+    **Warum diese Probe und nicht eine Uebersteuerung.** Der Pflicht-Stop
+    sah zuerst vor, einen Sollwert ueber der Obergrenze per Uebersteuerung
+    zu setzen. In 107 geht das nicht: das Zimmer ist **frei**, und eine
+    Uebersteuerung verlangt einen eingecheckten Gast (AE-58). Die Probe
+    nimmt deshalb den Fall, der im Betrieb ohnehin vorkommt — den
+    Frostschutz von 10 Grad, wie ihn der Sommerbetrieb und die
+    Fenster-Sicherheit schicken.
+
+    **Die beiden Ergebnisse und was sie bedeuten:**
+
+    * **10 Grad gemeldet** — die Hersteller-Aussage stimmt: die Grenze
+      gilt nur fuer das Drehrad, Downlinks duerfen darueber hinaus.
+      Weiter.
+    * **die Untergrenze gemeldet** (15 im Zimmer, 18 im Bad) — das Geraet
+      klemmt **auch Funk-Sollwerte** an der Grenze. Dann kollidiert die
+      Gerätegrenze mit Layer 5, und T1 ist zu stoppen: ein Frostschutz
+      kaeme nicht mehr durch.
+
+    **Danach gibt die Probe das Zimmer sofort an die Engine zurueck** und
+    sagt das auch. Ein Zimmer, das nach einer Probe auf 10 Grad stehen
+    bleibt, ist der eigentliche Schaden dieses Versuchs — und zwar einer,
+    den niemand sieht, weil 10 Grad im Winter nach "Heizung aus" aussieht
+    und nicht nach "Testwert vergessen".
+    """
+    async with SessionLocal() as session:
+        ziele, ausnahmen = await lade_ziele(session, nur=args.nur or None)
+
+    if args.nur:
+        fehlend = nicht_gefunden(args.nur, ziele, ausnahmen)
+        if fehlend:
+            print()
+            print(f"Nicht gefunden: {', '.join(fehlend)}")
+            print("Abbruch — es wird nichts gesendet. Bezeichnung pruefen.")
+            return 2
+
+    # **Genau ein Geraet, ohne Ausnahme.** Ein Funk-Sollwert von 10 Grad
+    # ist ein Eingriff in ein bewohnbares Zimmer; ihn versehentlich an
+    # alle zu schicken, waere das Haus auf Frostschutz. Deshalb kein Lauf
+    # ohne ``--nur`` und keiner mit zwei Treffern.
+    if len(ziele) != 1:
+        print()
+        print("=== Sollwert-Probe ===")
+        print(f"Treffer: {len(ziele)}")
+        if ziele:
+            _tabelle(
+                ["Bezeichnung", "dev_eui"],
+                [[z.bezeichnung, z.dev_eui] for z in ziele],
+            )
+        print(
+            "\nDie Probe laeuft nur gegen GENAU EIN Geraet. Ein "
+            "Funk-Sollwert von 10 Grad ist ein Eingriff in ein "
+            "bewohnbares Zimmer."
+        )
+        print('Eindeutig waehlen, zum Beispiel: --nur "107 Schlafzimmer"')
+        return 2
+
+    ziel = ziele[0]
+    nutzlast = downlink_adapter.setpoint_bytes(args.wert)
+    async with SessionLocal() as session:
+        zone_id = ziel.heating_zone_id or -1
+        soll = (await soll_grenzen_je_zone(session, [zone_id])).get(zone_id)
+        room_id = await session.scalar(select(HeatingZone.room_id).where(HeatingZone.id == zone_id))
+
+    print()
+    print("=== Sollwert-Probe: kommt ein Funk-Sollwert unter der Grenze an? ===")
+    _tabelle(
+        ["Bezeichnung", "dev_eui", "Firmware", "Soll-Grenzen", "Probe", "Bytes"],
+        [
+            [
+                ziel.bezeichnung,
+                ziel.dev_eui,
+                ziel.firmware_version or "(NULL)",
+                str(soll) if soll is not None else "?",
+                f"{args.wert} Grad",
+                nutzlast.hex(),
+            ]
+        ],
+    )
+    if soll is not None and args.wert >= soll.min_c:
+        print(
+            f"\nDer Probewert {args.wert} liegt NICHT unter der Untergrenze "
+            f"{soll.min_c}. Die Probe beantwortet dann nichts."
+        )
+        print("Abbruch.")
+        return 2
+    if room_id is None:
+        print("\nKein Zimmer zur Zone gefunden — Abbruch, es wird nichts gesendet.")
+        return 2
+
+    if not args.ausfuehren:
+        print(
+            f"\nProbelauf: es wurde NICHTS gesendet.\n"
+            f"Mit --ausfuehren geht {nutzlast.hex()} an {ziel.bezeichnung} "
+            "— ein einzelner Funk-Sollwert.\n"
+            "Danach wartet das Werkzeug auf die Antwort und gibt das "
+            "Zimmer wieder an die Engine zurueck."
+        )
+        return 0
+
+    gesendet_um = datetime.now(tz=UTC)
+    try:
+        await downlink_adapter.send_setpoint(ziel.dev_eui, args.wert)
+    except Exception as exc:  # noqa: BLE001
+        print(f"\nFEHLER beim Senden: {exc}")
+        return 1
+    print(f"\nGesendet: {args.wert} Grad an {ziel.bezeichnung} ({ziel.dev_eui}).")
+    print(f"Warte bis zu {args.timeout // 60} min auf die Antwort des Geraets ...")
+
+    urteil, gemeldet, wann = await _warte_auf_readback(
+        ziel.device_id,
+        gesendet_um=gesendet_um,
+        ziel_c=args.wert,
+        timeout_s=args.timeout,
+        intervall_s=PROBE_INTERVALL_S,
+        clock=clock,
+    )
+
+    # **Die Rueckgabe an die Engine laeuft in jedem Fall** — auch bei
+    # "keine Antwort" und auch bei einem schlechten Urteil. Sie steht
+    # deshalb VOR der Ausgabe des Urteils: wer hier abbricht, weil das
+    # Ergebnis unerfreulich ist, laesst ein Zimmer auf 10 Grad stehen.
+    print()
+    print("Gebe das Zimmer an die Engine zurueck (mit Hysterese-Bypass) ...")
+    rueckgabe_ok, rueckgabe_wert, rueckgabe_text = await _zurueck_an_die_engine(ziel, room_id)
+    print(rueckgabe_text)
+
+    print()
+    print("=== Ergebnis ===")
+    if urteil == "ziel":
+        print(
+            f"Das Geraet meldet {gemeldet} Grad. HERSTELLER-AUSSAGE "
+            "BESTAETIGT: die Grenze gilt nur fuer das Drehrad, "
+            "Funk-Sollwerte duerfen darunter."
+        )
+        print("Weiter mit Schritt 4 (eine Nacht beobachten).")
+        _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
+        return 0 if rueckgabe_ok else 1
+    if urteil == "abweichend":
+        wann_text = wann.strftime("%d.%m. %H:%M") if wann is not None else "?"
+        print(f"Das Geraet meldet {gemeldet} Grad statt {args.wert} (gemeldet {wann_text} UTC).")
+        print(
+            "STOPPEN UND MELDEN. Liegt der Wert auf der Untergrenze, klemmt "
+            "das Geraet auch Funk-Sollwerte an der Grenze — dann kollidiert "
+            "sie mit Layer 5, und ein Frostschutz kaeme nicht mehr durch."
+        )
+        print(
+            "Die Grenzen gehoeren dann zurueck auf 5/30, bis entschieden "
+            "ist, wie es weitergeht (RUNBOOK 10ap, Abschnitt 'Wenn es "
+            "schiefgeht')."
+        )
+        _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
+        return 3
+    print(
+        f"Keine Antwort innerhalb von {args.timeout // 60} min. Das ist KEIN "
+        "Befund ueber die Grenze: Funk, Duty-Cycle oder Batterie koennen es "
+        "sein."
+    )
+    print("Probe wiederholen, wenn das Geraet wieder meldet (Geraeteseite: letzte Meldung).")
+    _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     unter = parser.add_subparsers(dest="befehl", required=True)
@@ -320,6 +679,39 @@ def main() -> int:
         "--nur", action="append", default=[], metavar="BEZEICHNUNG", help="wie bei setzen"
     )
 
+    p_probe = unter.add_parser(
+        "sollwert-probe",
+        help="EIN Funk-Sollwert unter der Untergrenze an EIN Geraet, dann Readback",
+    )
+    p_probe.add_argument(
+        "--nur",
+        action="append",
+        default=[],
+        required=True,
+        metavar="BEZEICHNUNG",
+        help="PFLICHT und genau ein Treffer. Ein Funk-Sollwert von 10 Grad ist "
+        "ein Eingriff in ein bewohnbares Zimmer.",
+    )
+    p_probe.add_argument(
+        "--ausfuehren",
+        action="store_true",
+        help="Wirklich senden. Ohne diese Angabe ist es ein Probelauf.",
+    )
+    p_probe.add_argument(
+        "--wert",
+        type=int,
+        default=PROBE_WERT_C,
+        help=f"Probewert in ganzen Grad, Vorgabe {PROBE_WERT_C} (der Frostschutz). "
+        "Muss UNTER der Untergrenze der Zone liegen, sonst beantwortet die "
+        "Probe nichts.",
+    )
+    p_probe.add_argument(
+        "--timeout",
+        type=int,
+        default=PROBE_TIMEOUT_S,
+        help=f"Wartefenster auf die Antwort in Sekunden, Vorgabe {PROBE_TIMEOUT_S}.",
+    )
+
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -327,6 +719,8 @@ def main() -> int:
         return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
     if args.befehl == "abfragen":
         return asyncio.run(_befehl_setzen(args, nur_abfragen=True))
+    if args.befehl == "sollwert-probe":
+        return asyncio.run(_befehl_sollwertprobe(args))
     return asyncio.run(_befehl_vergleich(args))
 
 

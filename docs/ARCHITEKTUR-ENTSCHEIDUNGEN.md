@@ -7040,7 +7040,89 @@ irgendwo im Repo, kein Downlink an 107. Das war eine Aussage ueber einen
 Zustand, den ich nie gemessen hatte, und §5.68 sagt genau das. Dass sie
 auffiel, lag am Betreiber und nicht an mir.
 
-## 8. Was offen bleibt
+## 8. Korrektur vom 26.10.2026: der Versuch war in 107 nicht durchfuehrbar
+
+§7 nannte als Pflicht-Stop „ein Sollwert ueber 25 muss trotzdem
+ankommen", gesetzt per Uebersteuerung. **Das geht in 107 nicht:** das
+Zimmer ist frei, und eine Uebersteuerung verlangt einen eingecheckten
+Gast (AE-58). Der Betreiber hat es gemeldet; ich hatte das Protokoll
+geschrieben, ohne die eigene Domaenen-Invariante gegen den gewaehlten
+Raum zu halten.
+
+**Der Ersatz ist naeher am Betrieb als das Original.** Statt eines
+Wertes *ueber* der Obergrenze prueft die Probe einen *unter* der
+Untergrenze: **10 °C**, also den Frostschutz. Genau er geht per Funk an
+ein Zimmer mit Untergrenze 15 oder ein Bad mit 18 — im Sommerbetrieb und
+bei der Fenster-Sicherheit. Die Probe fragt damit den Fall, der
+eintreten wird, und nicht einen konstruierten.
+
+**Das Werkzeug** (`geraetegrenzen sollwert-probe`) sendet genau **einen**
+Sollwert an genau **ein** Geraet (`--nur` ist Pflicht, zwei Treffer
+brechen ab), wartet auf den Readback und **gibt das Zimmer danach an die
+Engine zurueck**. Die Rueckgabe laeuft in jedem Fall, auch bei einem
+schlechten Urteil, und steht im Code deshalb **vor** der Ausgabe des
+Ergebnisses: wer dort abbricht, weil das Ergebnis unerfreulich ist,
+laesst ein Zimmer auf 10 °C stehen — und das sieht im Winter nach
+„Heizung aus" aus und nicht nach „Testwert vergessen".
+
+### 8.1 Zweite Korrektur am selben Tag: die Rueckgabe wirkte nicht
+
+**Befund des Betreibers, 26.10.2026.** Die erste Fassung der Probe rief
+nach dem Readback schlicht ``_evaluate_room_async``. Das genuegt nicht:
+
+Die Probe schickt ``0x51`` **direkt** ueber den Downlink-Adapter, nicht
+ueber die Engine. Der Hysterese-Vergleich laeuft gegen den zuletzt
+**selbst gesendeten** Wert und nicht gegen den, den das Geraet meldet —
+das ist der Befund aus Sprint 20f, und er trifft hier genau zu. Die
+Engine sieht also weiter den alten Sollwert, rechnet ihn neu, findet
+``delta = 0`` und **schweigt**.
+
+Das Zimmer bliebe auf dem Probewert, bis der Engine-Abgleich es merkt.
+Und der braucht den **gemeldeten** Wert des Geraets (den es nach einem
+frischen Downlink noch nicht gesendet haben muss) und ist auf einmal je
+30 Minuten gedrosselt: im schlechtesten Fall **eine Dreiviertelstunde
+auf 10 °C**.
+
+**Der Ausweg ist der vorhandene, nicht ein neuer.** ``resync_flag``
+(Sprint 15c, AE-63) ist genau dafuer gebaut: ein Redis-Schluessel, den
+der Dispatch einmal konsumiert und dafuer die Hysterese uebergeht —
+dieselbe Mechanik, die nach einem Geraete-Neustart den Drift einfaengt.
+Die Probe setzt ihn **vor** dem Engine-Lauf; die Reihenfolge ist der
+Punkt, denn konsumiert wird waehrend des Laufs.
+
+Drei Eigenschaften, die aus dem Befund folgen:
+
+* **Laesst sich das Flag nicht setzen** (Redis weg), laeuft der
+  Engine-Lauf **gar nicht**. Ein Lauf ohne Bypass koennte schweigen, und
+  „zurueckgegeben" waere dann eine Falschaussage.
+* **Das Ergebnis wird gelesen, nicht angenommen.** Das Werkzeug sucht den
+  Eintrag **dieses** Geraets im Ergebnis und nennt den gesendeten Wert.
+  Dafuer fuehrt ``per_device_results`` seit T1a ein ``setpoint_c`` je
+  Geraet: der Raumwert allein genuegt nicht, weil eine Bad-Zone den Wert
+  der Vorlage fuehrt.
+* **Die letzte Zeile nennt den Stand des Zimmers**, in jedem Zweig.
+  Urteil ueber die Grenze und Zustand des Zimmers sind zwei Fragen, und
+  die zweite ist die dringendere.
+
+**Der Fall „15 °C" ist vorbereitet, nicht ausgefuehrt.** Meldet das
+Geraet seine Untergrenze statt der 10, klemmt es auch Funk-Sollwerte, und
+ein Frostschutz kaeme nicht mehr durch. Dann:
+
+- Untergrenze der Raumtypen auf **10** statt 15/18, `setzen` erneut. Die
+  Grenze schuetzt dann nur noch oben — weniger, als gewollt war, aber
+  mehr als ein Frostschutz, der nicht ankommt.
+- Eine **Endlos-Wiederholung entsteht dabei nicht**: der Engine-Abgleich
+  sendet hoechstens `MAX_VERSUCHE` (drei) je Vorkommnis nach und hoert
+  dann auf (Sprint 20f, T3). Der Zaehler wird nur geloescht, wenn das
+  Geraet den Wert meldet — bei dauerhafter Abweichung also nie, und das
+  ist hier genau richtig. Ein Test haelt das Szenario fest
+  (`test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf`).
+
+Beides erst nach Freigabe. Es steht hier, damit im Ernstfall nicht unter
+Zeitdruck entschieden werden muss — nicht, damit es vorsorglich
+passiert.
+
+## 9. Was offen bleibt
 
 | Offen | Folge |
 |---|---|

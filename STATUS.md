@@ -6233,6 +6233,55 @@ neuen Felder ergaenzt (24e).
 Schritte, erstes Geraet **107 Schlafzimmer**. Rollout frueehestens Di
 27.10. frueh.
 
+**Korrektur vom 26.10.2026 (Befund des Betreibers, AE-82 §8).** Schritt
+3.2 und Pruefung 3 waren in 107 **nicht durchfuehrbar**: sie verlangten
+einen Sollwert ueber der Obergrenze per Uebersteuerung, und 107 ist frei
+— eine Uebersteuerung braucht einen eingecheckten Gast (AE-58). Ich hatte
+das Protokoll geschrieben, ohne die eigene Domaenen-Invariante gegen den
+gewaehlten Raum zu halten.
+
+Ersatz, naeher am Betrieb als das Original: ein Funk-Sollwert von
+**10 °C** — der Frostschutz, wie ihn Sommerbetrieb und
+Fenster-Sicherheit ohnehin schicken. Neuer Unterbefehl
+``geraetegrenzen sollwert-probe``: genau **ein** Sollwert an genau **ein**
+Geraet (``--nur`` ist Pflicht, zwei Treffer brechen ab), Probelauf als
+Standard, Readback mit Urteil (10 = Aussage bestaetigt; Untergrenze =
+stoppen; keine Antwort = kein Befund), und **danach Rueckgabe an die
+Engine in jedem Fall** — ein Zimmer, das auf 10 °C stehen bleibt, sieht
+im Winter nach „Heizung aus" aus und nicht nach „Testwert vergessen".
+
+Fuer den Fall „Untergrenze gemeldet" ist der Weg **vorbereitet, nicht
+ausgefuehrt**: Untergrenze der Raumtypen auf 10 statt 15/18, und der
+Beleg, dass daraus **keine** Endlos-Wiederholung entsteht — der
+Engine-Abgleich sendet hoechstens dreimal je Vorkommnis nach
+(``MAX_VERSUCHE``, Sprint 20f). Test:
+``test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf``.
+
+**Zweite Korrektur am selben Tag, ebenfalls vom Betreiber (AE-82 §8.1).**
+Die erste Fassung rief nach dem Readback schlicht
+``_evaluate_room_async`` — und das **wirkt nicht**: die Probe schickt
+``0x51`` direkt, der Hysterese-Vergleich laeuft gegen den zuletzt
+**selbst gesendeten** Wert (Sprint 20f), die Engine findet ``delta = 0``
+und schweigt. Das Zimmer bliebe auf dem Probewert, bis der Abgleich es
+merkt — und der braucht den gemeldeten Wert und ist auf einmal je
+30 Minuten gedrosselt: im schlechtesten Fall eine Dreiviertelstunde auf
+10 °C.
+
+Behoben mit dem **vorhandenen** Mechanismus: ``resync_flag`` (Sprint 15c,
+AE-63) wird **vor** dem Engine-Lauf gesetzt, der Dispatch konsumiert es
+einmal und uebergeht dafuer die Hysterese. Laesst sich das Flag nicht
+setzen, laeuft der Engine-Lauf **gar nicht** — ein Lauf ohne Bypass
+koennte schweigen, und „zurueckgegeben" waere dann eine Falschaussage.
+Das Werkzeug liest das Ergebnis, nennt den **gesendeten Wert** und sagt
+in der letzten Zeile, worauf das Zimmer steht. Dafuer fuehrt
+``per_device_results`` jetzt ein ``setpoint_c`` je Geraet: der Raumwert
+allein genuegt nicht, weil eine Bad-Zone den Wert der Vorlage fuehrt.
+
+12 neue Tests: Warte- und Urteilslogik mit **virtueller Uhr** (§5.82,
+einschliesslich eines Zaehltests, der eine halb gefaelschte Zeitquelle
+auffallen laesst) und die Rueckgabe — darunter **die Reihenfolge** (Flag
+vor dem Lauf, nicht danach) und der Fall „Hysterese schwieg trotzdem".
+
 **Migration additiv: ja** — zwei nullable Spalten auf der Hypertable,
 kein Backfill.
 

@@ -7575,6 +7575,7 @@ docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen <befehl>
 | `vergleich` | liest die Datenbank: Soll gegen zuletzt Gemeldetes. **Sendet nichts.** |
 | `setzen` | `0x08` mit den Soll-Grenzen der Zone, danach `0x15` |
 | `abfragen` | nur `0x15` |
+| `sollwert-probe` | **ein** Funk-Sollwert unter der Untergrenze an **ein** Gerät, dann der Readback — und danach zurück an die Engine |
 
 **Ohne `--ausfuehren` wird nichts gesendet.** Der Probelauf zeigt Ziele,
 Firmware, Bytes und die **Ausnahmen mit Grund**.
@@ -7615,15 +7616,90 @@ Steht dort `15–25 °C` und „stimmt", ist der Befehl angekommen. Dieselbe
 Angabe steht in der Oberfläche auf der Geräteseite unter **Grenzen am
 Gerät**.
 
-**Schritt 3 — am Gerät prüfen, nicht am Protokoll.** Zwei Handgriffe im
-Zimmer:
+**Schritt 3 — am Gerät prüfen, nicht am Protokoll.**
 
-1. **Rad über 25 drehen versuchen.** Es muss bei 25 stehen bleiben. Geht
-   es höher, wirkt die Grenze nicht.
-2. **Einen Sollwert über 25 von der Rezeption setzen** (Wunschtemperatur
-   auf dem Zimmer, falls die Kappung des Raumtyps es zulässt — sonst
-   genügt die Beobachtung, dass der Frostschutz im Sommerbetrieb unter 18
-   greift). Er muss **ankommen**. Kommt er nicht an, ist T1 zu stoppen.
+**3.1 Rad über 25 drehen versuchen.** Es muss bei 25 stehen bleiben. Geht
+es höher, wirkt die Grenze nicht.
+
+**3.2 Die Sollwert-Probe: ein Funk-Sollwert von 10 °C.**
+
+> **Korrektur vom 26.10.2026 (Befund des Betreibers).** Hier stand
+> „einen Sollwert über 25 von der Rezeption setzen". **Das ist in 107
+> nicht durchführbar:** das Zimmer ist frei, und eine Übersteuerung
+> verlangt einen eingecheckten Gast (AE-58). Der Schritt prüft jetzt den
+> Fall, der im Betrieb ohnehin vorkommt.
+
+**10 °C ist kein beliebiger Wert**, sondern der Frostschutz — genau er
+geht per Funk an ein Zimmer mit Untergrenze 15 oder ein Bad mit 18, und
+zwar im Sommerbetrieb und bei der Fenster-Sicherheit. Die Probe fragt
+also den Fall, der eintreten wird.
+
+Probelauf zuerst (sendet nichts):
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen     sollwert-probe --nur "107 Schlafzimmer"
+```
+
+Dann senden:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen     sollwert-probe --nur "107 Schlafzimmer" --ausfuehren
+```
+
+Das Werkzeug sendet **einen** Sollwert, wartet auf die Antwort des
+Geräts und **gibt das Zimmer danach sofort an die Engine zurück** — das
+steht in seiner Ausgabe, mit dem **gesendeten Wert**. Die Rückgabe läuft
+in jedem Fall, auch bei einem schlechten Ergebnis: ein Zimmer, das auf
+10 °C stehen bleibt, ist der eigentliche Schaden dieses Versuchs, und
+einer, den niemand sieht, weil 10 °C im Winter nach „Heizung aus"
+aussieht und nicht nach „Testwert vergessen".
+
+**Die letzte Zeile der Ausgabe sagt, worauf das Zimmer steht.** Entweder
+„Stand 107 Schlafzimmer: 21 Grad, von der Engine gesendet. Nichts zu
+tun." — oder **„UNGEKLÄRT"**, und dann gehört ein Blick auf die
+Zimmerseite dazu (Tab Engine).
+
+> **Warum ein Engine-Lauf allein nicht genügt** (Befund des Betreibers,
+> 26.10.2026). Die Probe schickt den Sollwert **direkt**, nicht über die
+> Engine. Der Hysterese-Vergleich läuft aber gegen den zuletzt **selbst
+> gesendeten** Wert (Sprint 20f): die Engine sieht weiter den alten
+> Sollwert, rechnet ihn neu, findet keine Änderung und **schweigt**. Das
+> Zimmer bliebe auf dem Probewert, bis der Abgleich es merkt — und der
+> braucht den **gemeldeten** Wert des Geräts und ist auf einmal je
+> 30 Minuten gedrosselt. Im schlechtesten Fall eine Dreiviertelstunde
+> auf 10 °C.
+>
+> Das Werkzeug setzt deshalb **vor** dem Engine-Lauf das Re-Sync-Flag
+> (`resync_pending`, Sprint 15c) — denselben Mechanismus, der nach einem
+> Geräte-Neustart den Drift einfängt. Der Dispatch konsumiert es einmal
+> und übergeht dafür die Hysterese. Lässt sich das Flag nicht setzen
+> (Redis), **läuft der Engine-Lauf gar nicht** und das Werkzeug sagt es:
+> ein Lauf ohne Bypass könnte schweigen, und „zurückgegeben" wäre dann
+> eine Falschaussage.
+
+Es läuft **nur gegen genau ein Gerät**: `--nur` ist Pflicht, zwei
+Treffer brechen ab.
+
+| Gemeldeter Sollwert | Heißt | Dann |
+|---|---|---|
+| **10 °C** | Hersteller-Aussage bestätigt: die Grenze gilt nur für das Rad | weiter mit Schritt 4 |
+| **15 °C** (die Untergrenze) | das Gerät klemmt **auch Funk-Sollwerte** an der Grenze | **stoppen und melden** |
+| keine Antwort | Funk, Duty-Cycle oder Batterie — **kein** Befund über die Grenze | Probe wiederholen, wenn das Gerät wieder meldet |
+
+**Was „15 °C" bedeuten würde.** Dann käme ein Frostschutz nicht mehr
+durch, und die Gerätegrenze kollidiert mit Layer 5. Der Weg daraus ist
+**vorbereitet, aber nicht ausgeführt**:
+
+- Die Untergrenze der Raumtypen würde auf **10** gesenkt (statt 15 im
+  Zimmer und 18 im Bad) und `setzen` erneut gelaufen. Die Grenze schützt
+  dann nur noch oben — das Rad ginge wieder bis 10 hinunter, was weit
+  weniger kostet als ein Frostschutz, der nicht ankommt.
+- Eine **Endlos-Wiederholung entsteht dabei nicht**: der Engine-Abgleich
+  sendet höchstens dreimal je Vorkommnis nach und hört dann auf
+  (`MAX_VERSUCHE`, Sprint 20f). Ein Test hält genau dieses Szenario fest
+  (`test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf`).
+
+Beides wird **erst nach Freigabe** gemacht, nicht vorsorglich.
 
 **Schritt 4 — eine Nacht beobachten.** Danach vier Prüfungen:
 
@@ -7631,7 +7707,7 @@ Zimmer:
 |---|---|---|
 | 1 | `0x15` liefert 15/25 | `vergleich` sagt „stimmt" |
 | 2 | Rad lässt sich nicht über 25 drehen | am Gerät, nicht am Protokoll |
-| 3 | Ein Sollwert über 25 kommt trotzdem an | Engine-Trace des Zimmers |
+| 3 | **10 °C per Funk kommt an** | die Sollwert-Probe aus Schritt 3.2 |
 | 4 | **Keine zusätzlichen Funkbefehle** | `vergleich` meldet „stimmt", und es wird nichts gesendet |
 
 Prüfung 4 ist die, die man vergisst. Der Abgleich darf nicht jede

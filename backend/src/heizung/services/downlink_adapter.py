@@ -79,6 +79,17 @@ def _encode_setpoint_payload(setpoint_c: int) -> bytes:
     return bytes([VICKI_SETPOINT_COMMAND, (raw >> 8) & 0xFF, raw & 0xFF])
 
 
+def setpoint_bytes(setpoint_c: int) -> bytes:
+    """Die Bytes des ``0x51``-Befehls, ohne zu senden.
+
+    Oeffentlich aus demselben Grund wie ``ow_set_bytes`` und
+    ``temp_range_bytes``: die Sollwert-Probe laeuft als Probelauf und
+    nennt die Nutzlast, damit man vor einem Hardware-Eingriff sieht, was
+    hinausgeht.
+    """
+    return _encode_setpoint_payload(setpoint_c)
+
+
 def _encode_ow_set_payload(
     enabled: bool,
     duration_min: int,
