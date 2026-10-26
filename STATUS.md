@@ -6257,9 +6257,30 @@ Engine-Abgleich sendet hoechstens dreimal je Vorkommnis nach
 (``MAX_VERSUCHE``, Sprint 20f). Test:
 ``test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf``.
 
-6 neue Tests fuer die Warte- und Urteilslogik, mit **virtueller Uhr**
-(§5.82) — einschliesslich eines Zaehltests, der eine halb gefaelschte
-Zeitquelle auffallen laesst.
+**Zweite Korrektur am selben Tag, ebenfalls vom Betreiber (AE-82 §8.1).**
+Die erste Fassung rief nach dem Readback schlicht
+``_evaluate_room_async`` — und das **wirkt nicht**: die Probe schickt
+``0x51`` direkt, der Hysterese-Vergleich laeuft gegen den zuletzt
+**selbst gesendeten** Wert (Sprint 20f), die Engine findet ``delta = 0``
+und schweigt. Das Zimmer bliebe auf dem Probewert, bis der Abgleich es
+merkt — und der braucht den gemeldeten Wert und ist auf einmal je
+30 Minuten gedrosselt: im schlechtesten Fall eine Dreiviertelstunde auf
+10 °C.
+
+Behoben mit dem **vorhandenen** Mechanismus: ``resync_flag`` (Sprint 15c,
+AE-63) wird **vor** dem Engine-Lauf gesetzt, der Dispatch konsumiert es
+einmal und uebergeht dafuer die Hysterese. Laesst sich das Flag nicht
+setzen, laeuft der Engine-Lauf **gar nicht** — ein Lauf ohne Bypass
+koennte schweigen, und „zurueckgegeben" waere dann eine Falschaussage.
+Das Werkzeug liest das Ergebnis, nennt den **gesendeten Wert** und sagt
+in der letzten Zeile, worauf das Zimmer steht. Dafuer fuehrt
+``per_device_results`` jetzt ein ``setpoint_c`` je Geraet: der Raumwert
+allein genuegt nicht, weil eine Bad-Zone den Wert der Vorlage fuehrt.
+
+12 neue Tests: Warte- und Urteilslogik mit **virtueller Uhr** (§5.82,
+einschliesslich eines Zaehltests, der eine halb gefaelschte Zeitquelle
+auffallen laesst) und die Rueckgabe — darunter **die Reihenfolge** (Flag
+vor dem Lauf, nicht danach) und der Fall „Hysterese schwieg trotzdem".
 
 **Migration additiv: ja** — zwei nullable Spalten auf der Hypertable,
 kein Backfill.

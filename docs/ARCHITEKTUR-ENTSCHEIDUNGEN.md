@@ -7065,6 +7065,45 @@ Ergebnisses: wer dort abbricht, weil das Ergebnis unerfreulich ist,
 laesst ein Zimmer auf 10 °C stehen — und das sieht im Winter nach
 „Heizung aus" aus und nicht nach „Testwert vergessen".
 
+### 8.1 Zweite Korrektur am selben Tag: die Rueckgabe wirkte nicht
+
+**Befund des Betreibers, 26.10.2026.** Die erste Fassung der Probe rief
+nach dem Readback schlicht ``_evaluate_room_async``. Das genuegt nicht:
+
+Die Probe schickt ``0x51`` **direkt** ueber den Downlink-Adapter, nicht
+ueber die Engine. Der Hysterese-Vergleich laeuft gegen den zuletzt
+**selbst gesendeten** Wert und nicht gegen den, den das Geraet meldet —
+das ist der Befund aus Sprint 20f, und er trifft hier genau zu. Die
+Engine sieht also weiter den alten Sollwert, rechnet ihn neu, findet
+``delta = 0`` und **schweigt**.
+
+Das Zimmer bliebe auf dem Probewert, bis der Engine-Abgleich es merkt.
+Und der braucht den **gemeldeten** Wert des Geraets (den es nach einem
+frischen Downlink noch nicht gesendet haben muss) und ist auf einmal je
+30 Minuten gedrosselt: im schlechtesten Fall **eine Dreiviertelstunde
+auf 10 °C**.
+
+**Der Ausweg ist der vorhandene, nicht ein neuer.** ``resync_flag``
+(Sprint 15c, AE-63) ist genau dafuer gebaut: ein Redis-Schluessel, den
+der Dispatch einmal konsumiert und dafuer die Hysterese uebergeht —
+dieselbe Mechanik, die nach einem Geraete-Neustart den Drift einfaengt.
+Die Probe setzt ihn **vor** dem Engine-Lauf; die Reihenfolge ist der
+Punkt, denn konsumiert wird waehrend des Laufs.
+
+Drei Eigenschaften, die aus dem Befund folgen:
+
+* **Laesst sich das Flag nicht setzen** (Redis weg), laeuft der
+  Engine-Lauf **gar nicht**. Ein Lauf ohne Bypass koennte schweigen, und
+  „zurueckgegeben" waere dann eine Falschaussage.
+* **Das Ergebnis wird gelesen, nicht angenommen.** Das Werkzeug sucht den
+  Eintrag **dieses** Geraets im Ergebnis und nennt den gesendeten Wert.
+  Dafuer fuehrt ``per_device_results`` seit T1a ein ``setpoint_c`` je
+  Geraet: der Raumwert allein genuegt nicht, weil eine Bad-Zone den Wert
+  der Vorlage fuehrt.
+* **Die letzte Zeile nennt den Stand des Zimmers**, in jedem Zweig.
+  Urteil ueber die Grenze und Zustand des Zimmers sind zwei Fragen, und
+  die zweite ist die dringendere.
+
 **Der Fall „15 °C" ist vorbereitet, nicht ausgefuehrt.** Meldet das
 Geraet seine Untergrenze statt der 10, klemmt es auch Funk-Sollwerte, und
 ein Frostschutz kaeme nicht mehr durch. Dann:

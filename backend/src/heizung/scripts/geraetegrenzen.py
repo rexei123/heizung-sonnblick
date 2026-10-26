@@ -69,7 +69,7 @@ from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.heating_zone import HeatingZone  # noqa: E402
 from heizung.models.sensor_reading import SensorReading  # noqa: E402
 from heizung.scripts.pairing.clock import REAL_CLOCK, Clock  # noqa: E402
-from heizung.services import downlink_adapter  # noqa: E402
+from heizung.services import downlink_adapter, resync_flag  # noqa: E402
 from heizung.services.geraete_ziele import (  # noqa: E402
     Ausnahme,
     Zielgeraet,
@@ -358,6 +358,117 @@ async def _warte_auf_readback(
     return "abweichend", letzter_frischer.setpoint, letzter_frischer.time
 
 
+async def _zurueck_an_die_engine(ziel: Zielgeraet, room_id: int) -> tuple[bool, int | None, str]:
+    """Gibt das Zimmer an die Engine zurueck — und zwar so, dass es wirkt.
+
+    Returns ``(erfolg, gesendeter_wert, text)``.
+
+    **Warum ein Engine-Lauf allein nicht genuegt** (Befund des Betreibers,
+    26.10.2026). Die Probe hat ``0x51`` **direkt** geschickt, nicht ueber
+    die Engine. Der Hysterese-Vergleich laeuft aber gegen den **zuletzt
+    selbst gesendeten** Wert, nicht gegen den, den das Geraet meldet
+    (das ist der Befund aus Sprint 20f): sie sieht also weiter den alten
+    Sollwert, rechnet ihn neu, findet ``delta = 0`` und **schweigt**.
+
+    Das Zimmer bliebe damit auf dem Probewert, bis der Engine-Abgleich es
+    merkt — und der braucht den **gemeldeten** Wert des Geraets und ist
+    auf einmal je 30 Minuten gedrosselt. Im schlechtesten Fall steht 107
+    also eine Dreiviertelstunde auf 10 Grad. Im Winter sieht das nach
+    „Heizung aus" aus und nicht nach „Testwert vergessen".
+
+    **Der Ausweg ist der vorhandene:** ``resync_flag`` ist genau dafuer
+    gebaut (Sprint 15c, AE-63) — ein Redis-Schluessel, den der Dispatch
+    einmal konsumiert und dafuer die Hysterese uebergeht. Dieselbe
+    Mechanik, die nach einem Geraete-Neustart den Drift einfaengt. Kein
+    zweiter Weg daneben.
+
+    **Setzt sich das Flag nicht** (Redis nicht erreichbar), wird das
+    ausdruecklich gesagt: dann ist die Rueckgabe nicht gesichert, und
+    jemand muss nachsehen. Ein stilles „ich habe es versucht" waere hier
+    das Teuerste.
+    """
+    flag_gesetzt = await asyncio.to_thread(resync_flag.mark_pending, ziel.dev_eui)
+    if not flag_gesetzt:
+        return (
+            False,
+            None,
+            "Das Re-Sync-Flag liess sich nicht setzen (Redis?). Die Engine "
+            "wuerde den Sollwert wegen der Hysterese womoeglich NICHT "
+            "senden.\nVon Hand nachsehen: Zimmerseite, Tab Engine — steht "
+            "dort der normale Sollwert und hat das Geraet ihn gemeldet?",
+        )
+
+    try:
+        from heizung.tasks.engine_tasks import _evaluate_room_async
+
+        ergebnis = await _evaluate_room_async(room_id)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            False,
+            None,
+            f"Der Engine-Lauf ist fehlgeschlagen ({exc}).\nDas Zimmer steht "
+            "womoeglich noch auf dem Probewert. Von Hand nachziehen: "
+            "Zimmerseite, Tab Engine.",
+        )
+
+    # Was ist mit **diesem** Geraet passiert? Der Raumwert allein genuegt
+    # nicht: eine Bad-Zone fuehrt den Wert der Vorlage.
+    eintraege = [
+        e
+        for e in (ergebnis.get("devices") or [])
+        if isinstance(e, dict) and e.get("device_id") == ziel.device_id
+    ]
+    if not eintraege:
+        return (
+            False,
+            None,
+            "Die Engine hat gerechnet, aber dieses Geraet kommt im Ergebnis "
+            f"nicht vor (Status: {ergebnis.get('status', 'ok')}).\n"
+            "Von Hand nachsehen: Zimmerseite, Tab Engine.",
+        )
+
+    eintrag = eintraege[0]
+    wert = eintrag.get("setpoint_c")
+    status = eintrag.get("status")
+    if status == "sent":
+        return True, wert, f"Zurueckgegeben: die Engine hat {wert} Grad gesendet."
+    if status == "skipped_hysteresis":
+        return (
+            False,
+            wert,
+            f"ACHTUNG: die Engine hat NICHT gesendet (Grund: "
+            f"{eintrag.get('hysteresis_reason')}).\nDas Zimmer steht "
+            "womoeglich noch auf dem Probewert, obwohl das Re-Sync-Flag "
+            "gesetzt war. Von Hand nachziehen und melden.",
+        )
+    return (
+        False,
+        wert,
+        f"ACHTUNG: der Downlink ist fehlgeschlagen "
+        f"({eintrag.get('error')}).\nDas Zimmer steht womoeglich noch auf "
+        "dem Probewert.",
+    )
+
+
+def _zeige_stand(ziel: Zielgeraet, rueckgabe_ok: bool, wert: int | None) -> None:
+    """Die letzte Zeile: worauf steht das Zimmer jetzt?
+
+    **Sie steht in jedem Zweig**, auch im schlechten. Das Urteil ueber die
+    Grenze und der Zustand des Zimmers sind zwei verschiedene Fragen, und
+    die zweite ist die dringendere: ein Zimmer auf dem Probewert ist ein
+    kaltes Zimmer, ganz gleich was die Probe ergeben hat.
+    """
+    print()
+    if rueckgabe_ok and wert is not None:
+        print(f"Stand {ziel.bezeichnung}: {wert} Grad, von der Engine gesendet. Nichts zu tun.")
+    else:
+        print(
+            f"Stand {ziel.bezeichnung}: UNGEKLAERT — die Rueckgabe ist nicht "
+            "gesichert (siehe oben). Bitte auf der Zimmerseite nachsehen, "
+            "Tab Engine."
+        )
+
+
 async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CLOCK) -> int:
     """Prueft am Geraet, ob ein Funk-Sollwert **unter** der Untergrenze ankommt.
 
@@ -483,21 +594,9 @@ async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CL
     # deshalb VOR der Ausgabe des Urteils: wer hier abbricht, weil das
     # Ergebnis unerfreulich ist, laesst ein Zimmer auf 10 Grad stehen.
     print()
-    print("Gebe das Zimmer an die Engine zurueck ...")
-    rueckgabe_ok = True
-    try:
-        from heizung.tasks.engine_tasks import _evaluate_room_async
-
-        await _evaluate_room_async(room_id)
-        print("Zurueckgegeben: die Engine hat neu gerechnet und ihren Sollwert gesendet.")
-    except Exception as exc:  # noqa: BLE001
-        rueckgabe_ok = False
-        print(
-            f"ACHTUNG: Rueckgabe fehlgeschlagen ({exc}).\n"
-            "Das Zimmer steht womoeglich noch auf dem Probewert. Von Hand "
-            "nachziehen: auf der Zimmerseite im Tab Engine eine Auswertung "
-            "anstossen und den Sollwert pruefen."
-        )
+    print("Gebe das Zimmer an die Engine zurueck (mit Hysterese-Bypass) ...")
+    rueckgabe_ok, rueckgabe_wert, rueckgabe_text = await _zurueck_an_die_engine(ziel, room_id)
+    print(rueckgabe_text)
 
     print()
     print("=== Ergebnis ===")
@@ -508,6 +607,7 @@ async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CL
             "Funk-Sollwerte duerfen darunter."
         )
         print("Weiter mit Schritt 4 (eine Nacht beobachten).")
+        _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
         return 0 if rueckgabe_ok else 1
     if urteil == "abweichend":
         wann_text = wann.strftime("%d.%m. %H:%M") if wann is not None else "?"
@@ -522,6 +622,7 @@ async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CL
             "ist, wie es weitergeht (RUNBOOK 10ap, Abschnitt 'Wenn es "
             "schiefgeht')."
         )
+        _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
         return 3
     print(
         f"Keine Antwort innerhalb von {args.timeout // 60} min. Das ist KEIN "
@@ -529,6 +630,7 @@ async def _befehl_sollwertprobe(args: argparse.Namespace, clock: Clock = REAL_CL
         "sein."
     )
     print("Probe wiederholen, wenn das Geraet wieder meldet (Geraeteseite: letzte Meldung).")
+    _zeige_stand(ziel, rueckgabe_ok, rueckgabe_wert)
     return 1
 
 

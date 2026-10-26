@@ -7648,11 +7648,34 @@ docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen     sollwert-p
 
 Das Werkzeug sendet **einen** Sollwert, wartet auf die Antwort des
 Geräts und **gibt das Zimmer danach sofort an die Engine zurück** — das
-steht in seiner Ausgabe. Die Rückgabe läuft in jedem Fall, auch bei
-einem schlechten Ergebnis: ein Zimmer, das auf 10 °C stehen bleibt, ist
-der eigentliche Schaden dieses Versuchs, und einer, den niemand sieht,
-weil 10 °C im Winter nach „Heizung aus" aussieht und nicht nach
-„Testwert vergessen".
+steht in seiner Ausgabe, mit dem **gesendeten Wert**. Die Rückgabe läuft
+in jedem Fall, auch bei einem schlechten Ergebnis: ein Zimmer, das auf
+10 °C stehen bleibt, ist der eigentliche Schaden dieses Versuchs, und
+einer, den niemand sieht, weil 10 °C im Winter nach „Heizung aus"
+aussieht und nicht nach „Testwert vergessen".
+
+**Die letzte Zeile der Ausgabe sagt, worauf das Zimmer steht.** Entweder
+„Stand 107 Schlafzimmer: 21 Grad, von der Engine gesendet. Nichts zu
+tun." — oder **„UNGEKLÄRT"**, und dann gehört ein Blick auf die
+Zimmerseite dazu (Tab Engine).
+
+> **Warum ein Engine-Lauf allein nicht genügt** (Befund des Betreibers,
+> 26.10.2026). Die Probe schickt den Sollwert **direkt**, nicht über die
+> Engine. Der Hysterese-Vergleich läuft aber gegen den zuletzt **selbst
+> gesendeten** Wert (Sprint 20f): die Engine sieht weiter den alten
+> Sollwert, rechnet ihn neu, findet keine Änderung und **schweigt**. Das
+> Zimmer bliebe auf dem Probewert, bis der Abgleich es merkt — und der
+> braucht den **gemeldeten** Wert des Geräts und ist auf einmal je
+> 30 Minuten gedrosselt. Im schlechtesten Fall eine Dreiviertelstunde
+> auf 10 °C.
+>
+> Das Werkzeug setzt deshalb **vor** dem Engine-Lauf das Re-Sync-Flag
+> (`resync_pending`, Sprint 15c) — denselben Mechanismus, der nach einem
+> Geräte-Neustart den Drift einfängt. Der Dispatch konsumiert es einmal
+> und übergeht dafür die Hysterese. Lässt sich das Flag nicht setzen
+> (Redis), **läuft der Engine-Lauf gar nicht** und das Werkzeug sagt es:
+> ein Lauf ohne Bypass könnte schweigen, und „zurückgegeben" wäre dann
+> eine Falschaussage.
 
 Es läuft **nur gegen genau ein Gerät**: `--nur` ist Pflicht, zwei
 Treffer brechen ab.

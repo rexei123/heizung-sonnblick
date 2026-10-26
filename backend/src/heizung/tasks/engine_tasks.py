@@ -833,12 +833,18 @@ async def _dispatch_downlinks_per_zone(
 
             if not dev_decision.should_send:
                 skipped_count += 1
+                # Sprint 23 T1a: ``setpoint_c`` gehoert je Geraet dazu, nicht
+                # nur als Raumwert oben. Eine Bad-Zone fuehrt den Wert der
+                # Vorlage, und wer vom Raumwert auf "das hat dieses Geraet
+                # bekommen" schliesst, liegt dort falsch. Der Probelauf der
+                # Sollwert-Probe liest ihn, um den gesendeten Wert zu nennen.
                 per_device_results.append(
                     {
                         "zone_id": zone.id,
                         "device_id": dev.id,
                         "dev_eui": dev.dev_eui,
                         "status": "skipped_hysteresis",
+                        "setpoint_c": zone_target_setpoint_c,
                         "hysteresis_reason": dev_decision.reason,
                         "error": None,
                     }
@@ -901,6 +907,7 @@ async def _dispatch_downlinks_per_zone(
                         "device_id": dev.id,
                         "dev_eui": dev.dev_eui,
                         "status": "failed",
+                        "setpoint_c": zone_target_setpoint_c,
                         "hysteresis_reason": hyst_reason,
                         "error": f"{type(outcome).__name__}: {outcome}",
                     }
@@ -922,6 +929,7 @@ async def _dispatch_downlinks_per_zone(
                         "device_id": dev.id,
                         "dev_eui": dev.dev_eui,
                         "status": "sent",
+                        "setpoint_c": zone_target_setpoint_c,
                         "hysteresis_reason": hyst_reason,
                         "error": None,
                     }
