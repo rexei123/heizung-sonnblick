@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
 import { useDeleteHeatingZone, useUpdateHeatingZone } from "@/lib/api/hooks-rooms";
 import { formatRelative } from "@/lib/format";
+import { sollwertText, wirdGekappt } from "@/lib/api/kappung";
 import { SOURCE_LABEL } from "@/lib/overrides-display";
 import type { ApiError, Device, HeatingZone, HeatingZoneKind } from "@/lib/api/types";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
@@ -307,6 +308,9 @@ function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
   const effectiveSetpoint = override
     ? override.setpoint_celsius
     : zone.engine_setpoint_c;
+  // Sprint 23 T1.7: steht hier der Gastwunsch, behauptet die Karte eine
+  // Wirkung, die es nicht gibt — in 306 war das „30 °C" bei wirksamen 25.
+  const gekappt = override?.wirksam_gekappt_c;
   return (
     <dl className="mt-2 grid grid-cols-1 gap-1 text-sm">
       <div
@@ -346,7 +350,11 @@ function ZoneHeaderMetrics({ zone }: { zone: HeatingZone }) {
           Soll
         </dt>
         <dd className="tabular-nums text-text-primary">
-          {effectiveSetpoint == null ? "—" : `${effectiveSetpoint.toFixed(1)} °C`}
+          {effectiveSetpoint == null
+            ? "—"
+            : wirdGekappt(effectiveSetpoint, gekappt)
+              ? sollwertText(effectiveSetpoint, gekappt)
+              : `${effectiveSetpoint.toFixed(1)} °C`}
         </dd>
         {override ? (
           <dd

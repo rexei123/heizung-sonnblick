@@ -30,8 +30,11 @@ import pytest
 from heizung.services.downlink_adapter import (
     VICKI_FW_QUERY_COMMAND,
     VICKI_OW_GET_COMMAND,
+    VICKI_TEMP_RANGE_GET_COMMAND,
+    VICKI_TEMP_RANGE_SET_COMMAND,
     _encode_ow_set_payload,
     _encode_setpoint_payload,
+    _encode_temp_range_payload,
 )
 from heizung.services.mqtt_subscriber import REPLY_REPORT_TYPES
 
@@ -616,3 +619,56 @@ def test_0x28_zweiter_satz_ohne_28_praefix_wird_abgebrochen() -> None:
 
     assert d["manual_target_temperature"] == 20
     assert d["manual_target_history"] == [20]
+
+
+# ---------------------------------------------------------------------------
+# 0x08 / 0x15 — Temperaturgrenzen am Geraet (Sprint 23 T1)
+# ---------------------------------------------------------------------------
+
+
+def test_codec_mirror_temp_range_set() -> None:
+    """Vendor-Beleg: ``0x081018`` = 16/24 °C.
+
+    Quelle: docs.mclimate.eu, Vicki-Protokoll, „Limit target temperature
+    range", abgerufen 21.10.2026. Der Codec-Zweig
+    ``encodeDownlink({set_temperature_range: {min_c, max_c}})`` baut
+    ``[0x08, min_c, max_c]`` — dieselben Bytes, ohne Skalierung.
+
+    **Die Stelle, an der eine Verwechslung teuer waere:** der Sollwert
+    (``0x51``) wird mit zehn multipliziert, die Grenzen nicht. Mit Faktor
+    zehn waere aus 15/25 ein Wert von 150/250 geworden.
+    """
+    assert VICKI_TEMP_RANGE_SET_COMMAND == 0x08
+    assert _encode_temp_range_payload(16, 24) == bytes([0x08, 0x10, 0x18])
+    # Die Werte des Hauses.
+    assert _encode_temp_range_payload(15, 25) == bytes([0x08, 0x0F, 0x19])
+    assert _encode_temp_range_payload(18, 25) == bytes([0x08, 0x12, 0x19])
+
+
+def test_codec_mirror_temp_range_get() -> None:
+    """Vendor: ``0x15`` (1 byte). Codec-Zweig
+    ``encodeDownlink({get_temperature_range: true})`` -> ``[0x15]``."""
+    assert VICKI_TEMP_RANGE_GET_COMMAND == 0x15
+
+
+def test_codec_mirror_temp_range_reply_decoder() -> None:
+    """Spiegel des JS-Decoders ``cmd === 0x15``.
+
+    Vendor-Beleg der Antwort: ``0x15051E`` = 5/30 °C, die
+    Werkseinstellung. Der Decoder liest ``bytes[1]`` und ``bytes[2]``
+    unveraendert — keine Division, kein Offset.
+
+    Wenn der JS-Codec geaendert wird, MUSS dieser Spiegel parallel
+    nachgezogen werden. Und danach kommt der **manuelle Re-Paste** in der
+    ChirpStack-Oberflaeche (Paragraph 5.22, RUNBOOK §10c.1): ohne ihn
+    bleibt die Antwort undekodiert, und die Anzeige sagt dauerhaft „nicht
+    bestaetigt".
+    """
+    rohbytes = bytes.fromhex("15051e")
+    assert rohbytes[0] == VICKI_TEMP_RANGE_GET_COMMAND
+    # Was der Codec daraus macht:
+    assert rohbytes[1] == 5
+    assert rohbytes[2] == 30
+    # Und dass der Reply-Typ im Subscriber bekannt ist — sonst landet die
+    # Antwort im ``unknown_reply``-Zweig und wird nie gespeichert.
+    assert "temp_range_reply" in REPLY_REPORT_TYPES

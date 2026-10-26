@@ -14,6 +14,7 @@ trackt die operative Aktion separat.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -36,6 +37,7 @@ from heizung.schemas.manual_override import (
 )
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
+from heizung.services.geraetegrenzen import Grenzen, soll_grenzen_je_zone
 from heizung.services.occupancy_service import next_active_checkout
 from heizung.services.override_service import InvalidZoneError
 from heizung.tasks.engine_tasks import evaluate_room as _evaluate_room_task
@@ -89,6 +91,54 @@ async def _ensure_zone_in_room(
         raise InvalidZoneError(room_id=room_id, zone_id=heating_zone_id)
 
 
+async def _mit_kappung(
+    session: AsyncSession, verlauf: Sequence[ManualOverride]
+) -> list[ManualOverrideResponse]:
+    """Ergaenzt den **wirksamen** Wert, wo die Kappung greift (T1.7).
+
+    **Nur fuer aktive Zeilen.** Eine Bestandszeile von vorgestern gegen
+    die *heutigen* Grenzen zu rechnen wuerde eine Vergangenheit
+    behaupten, die so nicht war — abgelaufene und widerrufene Zeilen
+    zeigen weiter den gespeicherten Wert.
+
+    Die Grenzen kommen aus ``soll_grenzen_je_zone``, also aus demselben
+    Helfer, der sie an das Geraet schickt (T1.3) und der die Bad-Vorlage
+    kennt. Eine zweite Rechnung daneben waere die Stelle, an der die
+    Anzeige spaeter von der Engine abweicht (Paragraph 5.53).
+
+    Zonenlose Overrides (``heating_zone_id IS NULL``, zimmerweit) nehmen
+    die Grenzen des **Zimmertyps**: so rechnet Layer 5 fuer das Zimmer
+    auch.
+    """
+    jetzt = datetime.now(tz=UTC)
+    aktiv = [
+        o
+        for o in verlauf
+        if o.revoked_at is None and o.expires_at > jetzt and o.heating_zone_id is not None
+    ]
+    grenzen_je_zone: dict[int, Grenzen] = {}
+    if aktiv:
+        grenzen_je_zone = await soll_grenzen_je_zone(
+            session, [o.heating_zone_id for o in aktiv if o.heating_zone_id is not None]
+        )
+
+    ergebnis: list[ManualOverrideResponse] = []
+    for o in verlauf:
+        antwort = ManualOverrideResponse.model_validate(o)
+        grenzen = (
+            grenzen_je_zone.get(o.heating_zone_id)
+            if o in aktiv and o.heating_zone_id is not None
+            else None
+        )
+        if grenzen is not None:
+            wunsch = int(o.setpoint)
+            gekappt = max(grenzen.min_c, min(grenzen.max_c, wunsch))
+            if gekappt != wunsch:
+                antwort = antwort.model_copy(update={"wirksam_gekappt_c": gekappt})
+        ergebnis.append(antwort)
+    return ergebnis
+
+
 @router.get(
     "/rooms/{room_id}/overrides",
     response_model=list[ManualOverrideResponse],
@@ -101,7 +151,7 @@ async def list_room_overrides(
     zone_id: int | None = Query(default=None, gt=0),  # noqa: B008
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> list[ManualOverride]:
+) -> list[ManualOverrideResponse]:
     """Override-Historie eines Raums.
 
     Sprint 12a T3 (AE-58): Optionaler Query-Param ``zone_id`` filtert auf
@@ -113,13 +163,14 @@ async def list_room_overrides(
     await _ensure_room_exists(session, room_id)
     if zone_id is not None:
         await _ensure_zone_in_room(session, room_id=room_id, heating_zone_id=zone_id)
-    return await override_service.get_history(
+    verlauf = await override_service.get_history(
         session,
         room_id,
         limit=limit,
         include_expired=include_expired,
         heating_zone_id=zone_id,
     )
+    return await _mit_kappung(session, verlauf)
 
 
 @router.post(

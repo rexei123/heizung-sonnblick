@@ -90,8 +90,8 @@ from heizung.services.downlink_adapter import (  # noqa: E402
 from heizung.services.fenstererkennung import (  # noqa: E402
     OW_DAUER_MIN_BETRIEB,
     OW_DELTA_BETRIEB,
-    lade_ziele,
 )
+from heizung.services.geraete_ziele import lade_ziele  # noqa: E402
 
 logger = logging.getLogger("activate_ow")
 

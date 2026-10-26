@@ -6904,3 +6904,148 @@ Falschaussage mit der nächsten Woche zementiert.
 | **Was in den 10 Minuten mit unseren Downlinks passiert** | zu messen. Verwirft das Gerät sie, braucht der Engine-Abgleich eine Ausnahme, sonst Doppel-Downlinks |
 | **Der `0x46`-Stand ist nur im Protokoll** | der Codec dekodiert ihn, der Subscriber loggt ihn, persistiert wird er nicht. Für die Oberfläche wäre das eine Datenmodell-Erweiterung **außerhalb des Briefs** und damit ein eigener Pflicht-Stop — deshalb hier nicht gebaut |
 | **FW < 4.2** | `0x45` greift dort nicht, `0x06` wäre der Befehl (B-17-5). Die Firmware steht im Probelauf neben jedem Namen; wer „4.1" liest und ausführt, hat es gesehen |
+
+---
+
+# AE-82 — Temperaturgrenzen am Geraet: die Grenze gehoert an das Rad (Sprint 23 T1)
+
+**Datum:** 26.10.2026 · **Stand:** gebaut, **Erprobung offen**
+(Pflicht-Stop, 107 Schlafzimmer) · **Betrifft:** Codec `0x08`/`0x15`,
+`downlink_adapter`, `services/geraetegrenzen.py`,
+`scripts/geraetegrenzen.py`, Migration 0035, Geraeteseite,
+Uebersteuerungs-Historie · **Erweitert:** AE-48 (Downlink-Helfer), AE-57
+
+## 1. Der Anlass
+
+In Zimmer 306 hat ein Gast am 21./22.10.2026 **zwoelf Mal in sechzehn
+Stunden** am Rad gedreht, bis auf 29 °C. Jedes Mal hat Layer 5 den Wert
+auf 25 gekappt. Das Zimmer war richtig geheizt — und der Gast drehte
+weiter, weil das Geraet eine Zahl zeigte, die nicht galt.
+
+**Die Kappung ist nicht der Fehler, die Rueckmeldung ist es.** Layer 5
+tut genau das Richtige; was fehlt, ist dass der Gast es merkt. `0x08`
+setzt die Grenze dort an, wo das Problem entsteht.
+
+## 2. Der Befund, der die Sache einfach macht
+
+Hersteller-Doku, dieselbe Seite: der Grenzbereich greift bei Verstellung
+**mit der Krone**; Downlink-Befehle duerfen ein Ziel darueber hinaus
+setzen.
+
+Damit faellt das Hauptrisiko weg, das ich erwartet hatte:
+
+- Die Engine bleibt **unberuehrt**. Ein Sommermodus-Frostschutz von 10 °C
+  geht auch an ein Bad mit Untergrenze 18 durch, ein
+  Fenster-Sicherheitswert ebenso.
+- Es entsteht **kein** Ping-Pong zwischen Gerätegrenze und Layer 5.
+
+**Es ist eine Hersteller-Aussage und keine Messung.** Sie steht als
+Schritt 3 im Pflicht-Stop-Protokoll (RUNBOOK §10ap) und wird am Geraet
+geprueft. Faellt sie anders aus, ist T1 zu stoppen.
+
+## 3. Soll und Ist sind zwei Fragen
+
+| | Quelle | Bedeutung |
+|---|---|---|
+| **Soll** | Raumtyp (Bad-Zonen: der der Vorlage), ueber `grenzen_aus_raumtyp` | was gelten soll |
+| **Ist** | Antwort auf `0x15`, in `sensor_reading` | was am Geraet steht |
+
+**Nicht aus `control_command`.** Das sagt, was wir gesendet haben — eine
+Absicht. Eine Anzeige, die das Gesendete zeigt, waere eine Zusicherung
+ohne Deckung, und zwar genau die, die wir vor Sprint 20f fuer den
+Sollwert hatten.
+
+Gelesen wird die **juengste Zeile, die die Felder fuehrt**. Ein Keepalive
+ohne `0x15`-Antwort sagt ueber die Grenzen nichts; ihn als „keine
+Grenzen" zu lesen waere derselbe Fehler, der bei `child_lock` und
+`attached_backplate` schon einmal gemacht wurde (24c).
+
+**„Nicht bestaetigt" heisst nicht „falsch".** Bei einem Class-A-Geraet
+ist das normal, solange es nicht gesendet hat — und der Text sagt das,
+damit niemand daraus einen Fehler liest.
+
+## 4. Die Rechnung steht einmal
+
+`clamp_grenzen(ctx)` ruft seit T1 `grenzen_aus_raumtyp(raumtyp)` auf. Vier
+Stellen brauchen denselben Wert: Layer 5, der Zonen-Override-Clamp, der
+Dispatch (Hotfix 18.10.) und jetzt die Grenzen am Geraet. Vier Kopien
+waeren vier Stellen, an denen eine Grenze spaeter abweicht (§5.53) — und
+die Abweichung waere unsichtbar, weil beide Seiten plausibel aussehen.
+
+Dieselbe Funktion speist auch die **Kappungs-Anzeige** aus T1.7: „30 °C →
+begrenzt auf 25 °C" rechnet mit den Grenzen, mit denen Layer 5 kappt.
+
+## 5. Kein automatischer Auslöser — und warum das Absicht ist
+
+Der Brief nannte drei Auslöser; gebaut ist **keiner**. Eine Aenderung der
+Grenzen in der Oberflaeche wirkt am Geraet erst, wenn jemand das Werkzeug
+laufen laesst.
+
+**Grund:** ein `PATCH` auf einen Raumtyp betrifft alle Zonen dieses Typs —
+bei „Bad" alle Baeder im Haus, also bis zu **45 Funkbefehle aus einem
+Klick**. Dieser Pfad gehoert hinter den Pflicht-Stop und nicht davor. Vor
+der Messung am Geraet waere er ein Mechanismus, dessen Wirkung niemand
+kennt, mit 45-facher Reichweite.
+
+Der Auftrag des Betreibers vom 26.10. nennt ihn ebenfalls nicht; die
+Liste dort ist Werkzeug, Anzeige und Historie.
+
+## 6. T1.7 — zwei Anzeigefehler, und der zweite war groesser als gemeldet
+
+**(a) Gekappte Uebersteuerungen zeigten den Gastwert.** „30 °C, aktiv"
+bei wirksamen 25, an drei Stellen: Historie, Zonen-Karte,
+Uebersteuerungs-Karte. Jetzt „30 °C → begrenzt auf 25 °C", read-time
+abgeleitet, **nur fuer aktive Zeilen**: eine Bestandszeile gegen die
+*heutigen* Grenzen zu rechnen wuerde eine Vergangenheit behaupten, die so
+nicht war.
+
+**(b) `revoked_reason` wurde falsch gedeutet — zweimal, nicht einmal.**
+Die Zuordnung prueefte `grund.startsWith("auto")`. Durch dieses Muster
+fallen **zwei** von fuenf Werten, und beide sind automatische Vorgaenge:
+
+| Wert | hiess | heisst |
+|---|---|---|
+| `superseded` | manuell aufgehoben | ersetzt (neue Drehung) |
+| `room_override_blocked` | manuell aufgehoben | durch Sperre beendet |
+| `auto_revoke_on_checkout` | mit der Abreise beendet | unveraendert |
+| `auto: expired` | abgelaufen | unveraendert |
+| `NULL`/leer | manuell aufgehoben | unveraendert |
+| alles andere | manuell aufgehoben | **der Rohwert** |
+
+**Der Fehler war das Muster, nicht einer seiner Zweige.** `superseded`
+und `room_override_blocked` beginnen beide nicht mit `auto`. Die neue
+Zuordnung ist eine Tabelle mit **genauen** Schluesseln, und ein
+Spiegel-Test haelt sie gegen die Konstanten im Backend — die beiden
+Literale sind im Zuge dessen Konstanten geworden, sonst prueefte der
+Spiegel gegen eine Zeichenkette, die jemand beim Umbenennen uebersieht.
+
+**Der Rohwert als Auffangwert** ist eine Vorgabe des Betreibers und
+richtig: ein unbekannter Wert ist entweder ein neuer Code aus dem Backend
+oder ein Freitext aus der Oberflaeche. Im ersten Fall ist „manuell
+aufgehoben" eine falsche Tatsachenbehauptung, im zweiten verwirft es
+genau die Information, die jemand hingeschrieben hat.
+
+**Nebenbefund:** `test_override_service.py` erwartete
+`auto: guest checked out` — eine Zeichenkette, die **kein** Aufrufer
+schreibt. Der Test gab sich den Grund selbst mit und war damit nicht
+falsch, dokumentierte aber einen Wert, den es im Betrieb nicht gibt. Der
+Default heisst jetzt `REVOKE_REASON_CHECKOUT_FALLBACK` und sagt, was er
+ist.
+
+## 7. In eigener Sache
+
+Ich habe T1 am 25.10. in einer Statustabelle als „geparkt, Nachtwerte
+pruefen" gefuehrt. Es gab **keinen PR und keinen Code** — kein `0x08`
+irgendwo im Repo, kein Downlink an 107. Das war eine Aussage ueber einen
+Zustand, den ich nie gemessen hatte, und §5.68 sagt genau das. Dass sie
+auffiel, lag am Betreiber und nicht an mir.
+
+## 8. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Die Erprobung** | Pflicht-Stop, RUNBOOK §10ap, fuenf Schritte, erstes Geraet **107 Schlafzimmer** |
+| **Codec-Re-Paste** | Handarbeit in der ChirpStack-Oberflaeche (§5.22). Ohne ihn bleibt die Anzeige dauerhaft „nicht bestaetigt" |
+| **Automatischer Auslöser** | §5, bewusst nicht gebaut |
+| **FW < 4.2** | `0x08` steht in der Befehlstabelle unter „All", eine FW-Anforderung nennt die Doku nicht. Die Firmware steht trotzdem im Probelauf neben jedem Namen |
+| **Zonen-Karte im Bad** | die Kappungs-Anzeige rechnet dort mit den Grenzen der Vorlage. Greift eine zimmerweite Entscheidung (Fenster, Sommer), folgt das Bad dem Zimmerwert — die Anzeige weiss das nicht und zeigt die Vorlage-Grenzen. Selten und harmlos, aber genannt |

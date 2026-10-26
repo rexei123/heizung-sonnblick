@@ -7516,3 +7516,157 @@ Ob zu einer Auslösung **außerhalb** der Absenkung wirklich gelüftet
 wurde. Das weiß nur, wer im Zimmer war. Der Bericht nennt Zeitpunkt, Zone
 und den Temperaturabfall der zehn Minuten davor — damit ist die Frage
 beantwortbar, aber nicht beantwortet.
+
+---
+
+## 10ap. Grenzen am Gerät setzen (Sprint 23 T1) — mit Pflicht-Stop
+
+**Für wen:** den Betreiber. Jeder Befehl hier greift produktive Hardware
+an (S4).
+
+> **Vor dem ersten Befehl mit `--ausfuehren`: Freigabe des Betreibers.**
+> Der erste Lauf geht an **genau ein Gerät**: 107 Schlafzimmer. Erst nach
+> einer Nacht Beobachtung und nach den vier Prüfungen unten folgt der
+> Rollout — frühestens Dienstag, 27.10.2026, früh.
+
+### Was die Grenze tut, und was nicht
+
+`0x08` begrenzt den Bereich, in dem das **Drehrad** die Zieltemperatur
+verstellen darf. Der Anlass: in 306 hat ein Gast am 21./22.10.2026
+**zwölf Mal** gedreht, bis auf 29 °C, und jedes Mal hat Layer 5 den Wert
+hinterher auf 25 gekappt. Das Zimmer war richtig geheizt, das Gerät zeigte
+eine Zahl, die nicht galt, und der Gast drehte weiter.
+
+**Downlinks bleiben unberührt.** Hersteller-Aussage: der Grenzbereich
+greift bei Verstellung mit der Krone, Downlink-Befehle dürfen darüber
+hinaus setzen. Damit kollidiert die Grenze **nicht** mit Layer 5 — ein
+Frostschutz von 10 °C geht auch an ein Bad mit Untergrenze 18 durch.
+
+**Das ist eine Aussage des Herstellers und keine Messung.** Sie steht in
+Schritt 3 des Protokolls und wird dort geprüft. Fällt sie anders aus, ist
+T1 zu stoppen: dann kollidiert die Gerätegrenze mit Layer 5, und das ist
+eine andere Aufgabe.
+
+### Vor dem ersten Befehl: der Codec
+
+Der Codec in ChirpStack muss die Antwort auf `0x15` kennen, sonst bleibt
+die Anzeige dauerhaft auf „nicht bestätigt". Repo-Stand ist Quelle,
+ChirpStack zieht ihn **nicht** selbst (§5.22).
+
+> **Codec einfügen.** Datei:
+> `infra/chirpstack/codecs/mclimate-vicki.js`. Drei Klicks in der
+> ChirpStack-Oberfläche: *Device Profiles* → Profil der Vicki →
+> *Codec*-Tab, Inhalt der Datei ersetzen, **Submit**. Danach prüfen:
+> *Applications* → ein aktiver Vicki → *Events*-Tab — der `object`-Block
+> eines Frames muss unverändert aussehen (die Erweiterung betrifft nur
+> Antworten auf `0x15`, nicht den Keepalive).
+
+Ohne diesen Schritt läuft alles andere, nur die Bestätigung kommt nie an.
+
+### Das Werkzeug
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen <befehl>
+```
+
+| Befehl | Was er tut |
+|---|---|
+| `vergleich` | liest die Datenbank: Soll gegen zuletzt Gemeldetes. **Sendet nichts.** |
+| `setzen` | `0x08` mit den Soll-Grenzen der Zone, danach `0x15` |
+| `abfragen` | nur `0x15` |
+
+**Ohne `--ausfuehren` wird nichts gesendet.** Der Probelauf zeigt Ziele,
+Firmware, Bytes und die **Ausnahmen mit Grund**.
+
+**Die Werte kommen aus dem Raumtyp, nicht von der Kommandozeile.** Im
+Haus: Zimmer **15/25**, Bad **18/25** (Bad-Zonen folgen der Vorlage). Ein
+`--min`/`--max` von Hand wäre eine zweite Wahrheit neben Layer 5.
+
+**Ausgenommen sind** Geräte auf „nur messen" (027, 056), der
+Reserve-Pool (100), ausgemusterte Geräte und Relais — dieselbe Liste wie
+bei der Fenstererkennung, aus demselben Modul, mit Test.
+
+### Das Protokoll — fünf Schritte
+
+**Schritt 1 — Probelauf an 107.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --nur "107 Schlafzimmer"
+```
+
+Lesen: steht **genau ein** Ziel da? Firmware **4.2 oder höher**? Bei
+„(NULL)" oder „4.1" nicht ausführen, sondern melden.
+
+**Schritt 2 — senden, an dieses eine Gerät.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --nur "107 Schlafzimmer" --ausfuehren
+```
+
+Dann warten. Die Bestätigung kommt mit dem nächsten Keepalive, bis zu
+einige Minuten. Danach:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen vergleich --nur "107 Schlafzimmer"
+```
+
+Steht dort `15–25 °C` und „stimmt", ist der Befehl angekommen. Dieselbe
+Angabe steht in der Oberfläche auf der Geräteseite unter **Grenzen am
+Gerät**.
+
+**Schritt 3 — am Gerät prüfen, nicht am Protokoll.** Zwei Handgriffe im
+Zimmer:
+
+1. **Rad über 25 drehen versuchen.** Es muss bei 25 stehen bleiben. Geht
+   es höher, wirkt die Grenze nicht.
+2. **Einen Sollwert über 25 von der Rezeption setzen** (Wunschtemperatur
+   auf dem Zimmer, falls die Kappung des Raumtyps es zulässt — sonst
+   genügt die Beobachtung, dass der Frostschutz im Sommerbetrieb unter 18
+   greift). Er muss **ankommen**. Kommt er nicht an, ist T1 zu stoppen.
+
+**Schritt 4 — eine Nacht beobachten.** Danach vier Prüfungen:
+
+| # | Prüfung | Woran |
+|---|---|---|
+| 1 | `0x15` liefert 15/25 | `vergleich` sagt „stimmt" |
+| 2 | Rad lässt sich nicht über 25 drehen | am Gerät, nicht am Protokoll |
+| 3 | Ein Sollwert über 25 kommt trotzdem an | Engine-Trace des Zimmers |
+| 4 | **Keine zusätzlichen Funkbefehle** | `vergleich` meldet „stimmt", und es wird nichts gesendet |
+
+Prüfung 4 ist die, die man vergisst. Der Abgleich darf nicht jede
+Viertelstunde funken, wenn die Grenzen passen — Batterie und Motor sind
+real.
+
+**Schritt 5 — Rollout, gestaffelt.** Frühestens Dienstag 27.10. früh,
+nach Freigabe:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --ausfuehren
+```
+
+Ohne `--nur` sind das alle montierten Thermostate. Geräte, deren Grenzen
+schon stimmen, werden **übersprungen**; `--pause` (Vorgabe 2 s) staffelt
+den Rest. Bei hundert Geräten rund drei Minuten.
+
+### Wenn es schiefgeht
+
+Der Rückweg ist derselbe Befehl mit der Werkseinstellung — es gibt keinen
+eigenen „aus"-Befehl, weil 5/30 das Werk ist:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen abfragen --nur "107 Schlafzimmer" --ausfuehren
+```
+
+zeigt den Stand. Um die Grenze zurückzunehmen, werden die Grenzen am
+**Raumtyp** auf 5/30 gestellt und `setzen` erneut gelaufen — dann schickt
+das Werkzeug `0x08 05 1E`. Kein Neustart, keine Datenbankänderung.
+
+### Was dieses Werkzeug nicht tut
+
+**Automatisch senden.** Eine Änderung der Grenzen in der Oberfläche löst
+**keinen** Downlink aus; sie wirkt am Gerät erst, wenn jemand `setzen`
+laufen lässt. Das ist Absicht und der offene Rest von T1: ein `PATCH` auf
+einen Raumtyp betrifft alle Zonen dieses Typs — bei „Bad" alle Bäder im
+Haus, also bis zu 45 Funkbefehle aus einem Klick. Dieser Pfad gehört
+hinter den Pflicht-Stop.

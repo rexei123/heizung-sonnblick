@@ -11,6 +11,7 @@ import { SensorReadingsChart } from "@/components/patterns/sensor-readings-chart
 import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
 import { DeviceAuditList } from "@/components/patterns/device-audit-list";
+import { GeraetegrenzenKarte } from "@/components/patterns/geraetegrenzen-karte";
 import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
 import { useAuth } from "@/contexts/auth-context";
@@ -236,6 +237,9 @@ export default function DeviceDetailPage() {
               testId="kpi-ventilstellung"
             />
             <WindowBackplateCard reading={snapshot} />
+            {/* Sprint 23 T1.5: was am Geraet steht — aus der Antwort auf
+                0x15, nicht aus dem, was wir gesendet haben. */}
+            <GeraetegrenzenKarte device={device} />
             <OverrideCard override={device.active_override} />
             {/* Sprint 24b: nur fuer Relais. Die Vicki-Kacheln darueber
                 (Ist, Soll, Ventil, Fenster) sagen bei einem 16ASPM

@@ -50,6 +50,21 @@ Sollwert so ist. Das ist die Seite für jede Frage, die mit „warum" anfängt.
 Zimmers, mit Quelle (Rezeption oder Gast am Thermostat) und Ablauf. Hier
 wird eine Übersteuerung auch vorzeitig beendet.
 
+Steht dort **„30 °C → begrenzt auf 25 °C"**, hat die Kappung des Raumtyps
+gegriffen: eingetragen sind 30, wirksam 25. Bis zum 26.10.2026 stand an
+dieser Stelle nur „30 °C" — also eine Zahl, die nicht galt.
+
+Und der Grund, warum eine Übersteuerung endete, steht dahinter:
+
+| Text | Heißt |
+|---|---|
+| ersetzt (neue Drehung) | der Gast hat nochmal gedreht |
+| mit der Abreise beendet | Check-out |
+| durch Sperre beendet | jemand hat die Übersteuerung des Zimmers gesperrt |
+| abgelaufen | die Dauer war um |
+| manuell aufgehoben | über die Oberfläche beendet, ohne Grund |
+| irgendein anderer Text | genau das, was jemand beim Aufheben notiert hat |
+
 ## Die Sperre für Übersteuerungen
 
 Der Schalter oben rechts verhindert, dass eine Drehung am Thermostat

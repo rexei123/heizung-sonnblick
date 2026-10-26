@@ -17,6 +17,7 @@
 //   0x52  -> Setpoint-Reply (decodeCommandReply)
 //   0x04  -> FW-Query-Reply (Sprint 9.11x.b, decodeCommandReply)
 //   0x46  -> Open-Window-Status-Reply (Sprint 9.11x.b, decodeCommandReply)
+//   0x15  -> Temperature-Range-Reply (Sprint 23 T1, decodeCommandReply)
 //   sonst -> Periodic Status Report (decodePeriodicReport)
 // fPort wird damit redundant fuer das Routing.
 //
@@ -24,6 +25,8 @@
 //   0x04        -> FW-Query (Antwort siehe 9.11x.c-Korrektur unten)
 //   0x4501020F  -> Open-Window-Detection an (Vendor-Bytes, FW>=4.2)
 //   0x46        -> Open-Window-Detection-Status abfragen
+//   0x080F19    -> Grenzen am Geraet 15/25 °C (Sprint 23 T1)
+//   0x15        -> Grenzen am Geraet abfragen
 // Vendor-Doku: docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md.
 // Backend-Helper-Architektur (Spiegel) in
 // backend/src/heizung/services/downlink_adapter.py — Drift-Schutz via
@@ -441,6 +444,32 @@ function decodeCommandReply(bytes) {
         };
     }
 
+    // 0x15 = Temperature-Range-Reply (Sprint 23 T1).
+    // Vendor-Format: [0x15, untere_grenze, obere_grenze], je ganze Grad
+    // Celsius OHNE Offset und OHNE Skalierung. Beleg der Hersteller-Doku:
+    // 0x15051E = 5 °C / 30 °C (die Werkseinstellung).
+    //
+    // Quelle: docs.mclimate.eu ... /temperature-control/
+    //         limit-target-temperature-range, abgerufen 21.10.2026.
+    //
+    // Geroutet wird ueber bytes[0] und nicht ueber fPort (Lesson 5.21).
+    if (cmd === 0x15) {
+        if (bytes.length < 3) {
+            return {
+                data: { command: cmd, report_type: 'temp_range_reply' },
+                errors: ['temp-range reply too short (' + bytes.length + ' bytes, expected 3)']
+            };
+        }
+        return {
+            data: {
+                report_type: 'temp_range_reply',
+                command: cmd,
+                temp_range_min: bytes[1],
+                temp_range_max: bytes[2]
+            }
+        };
+    }
+
     return {
         data: { command: cmd, report_type: 'unknown_reply' },
         warnings: ['unknown command-reply 0x' + cmd.toString(16)]
@@ -501,6 +530,34 @@ function encodeDownlink(input) {
     // 0x46 — Open-Window-Detection-Status abfragen.
     if (data.get_open_window_detection === true) {
         return { bytes: [0x46], fPort: 1, errors: errors };
+    }
+
+    // 0x08 — Zieltemperatur-Bereich am Geraet begrenzen (Sprint 23 T1).
+    // Vendor-Format: [0x08, untere_grenze, obere_grenze], je ganze Grad.
+    // Beleg der Doku: 0x081018 = 16/24 °C. Werk: 5/30.
+    //
+    // Die Grenze gilt NUR fuer das Drehrad; Downlink-Sollwerte duerfen
+    // darueber hinaus setzen (Hersteller-Aussage, in T1.2 am Geraet zu
+    // pruefen). Deshalb kollidiert sie nicht mit Layer 5 der Engine.
+    if (typeof data.set_temperature_range === 'object' && data.set_temperature_range !== null) {
+        var tr = data.set_temperature_range;
+        var trMin = tr.min_c;
+        var trMax = tr.max_c;
+        if (typeof trMin !== 'number' || typeof trMax !== 'number'
+            || trMin % 1 !== 0 || trMax % 1 !== 0) {
+            errors.push('min_c und max_c muessen ganze Zahlen sein');
+            return { bytes: [], fPort: 1, errors: errors };
+        }
+        if (trMin < 5 || trMax > 30 || trMin >= trMax) {
+            errors.push('Grenzen muessen 5 <= min < max <= 30 sein');
+            return { bytes: [], fPort: 1, errors: errors };
+        }
+        return { bytes: [0x08, trMin, trMax], fPort: 1, errors: errors };
+    }
+
+    // 0x15 — Zieltemperatur-Bereich abfragen.
+    if (data.get_temperature_range === true) {
+        return { bytes: [0x15], fPort: 1, errors: errors };
     }
 
     errors.push('no actionable downlink fields in input.data');

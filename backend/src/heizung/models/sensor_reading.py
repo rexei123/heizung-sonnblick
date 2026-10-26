@@ -131,6 +131,23 @@ class SensorReading(Base):
     # nichts darueber".
     child_lock: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Sprint 23 T1: die Grenzen, in denen das **Drehrad** verstellen darf
+    # — aus der Antwort auf ``0x15``, in ganzen Grad Celsius. Werk ist
+    # 5/30.
+    #
+    # Das ist die Antwort auf „was steht am Geraet". Was **wir** gesendet
+    # haben, steht in ``control_command`` und ist eine Absicht; eine
+    # Anzeige, die das Gesendete zeigt, waere eine Zusicherung ohne
+    # Deckung — genau die, die wir vor Sprint 20f fuer den Sollwert
+    # hatten.
+    #
+    # NULL = diese Zeile fuehrt das Feld nicht (ein Keepalive ohne
+    # ``0x15``-Antwort sagt ueber die Grenzen nichts). Gelesen wird
+    # deshalb die juengste Zeile, **die sie fuehrt** — dieselbe
+    # Drei-Zustands-Regel wie oben.
+    temp_range_min: Mapped[int | None] = mapped_column(SmallInteger)
+    temp_range_max: Mapped[int | None] = mapped_column(SmallInteger)
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)
