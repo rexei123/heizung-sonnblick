@@ -7185,6 +7185,79 @@ der sich still ueberspringt, ist kein Test (Paragraph 5.81).
 ``REPLY_COMMANDS`` entfernt -> **vier** Tests rot, darunter der
 Live-Frame-Test und der Spiegel, der den fehlenden Code namentlich nennt.
 
+
+### 8.3 Vierte Korrektur: die Zahlen kommen als Gleitkommazahl
+
+**Server-Log des Betreibers, 26.10.2026 10:14:30 UTC:**
+
+    command-reply dev_eui=70b3d52dd303337d report_type=temp_range_reply
+      — skip reading-insert
+    WARNING temp-range-Antwort ohne brauchbare Werte
+      dev_eui=70b3d52dd303337d min=15.0 max=25.0
+
+Der Codec-Fix aus §8.2 wirkte: die Antwort kam als ``temp_range_reply``
+an und trug die richtigen Werte. Verworfen hat sie **mein** Handler —
+seine Pruefung lautete ``isinstance(min_c, int)``, und die Zahlen kommen
+als ``float`` an.
+
+**Und mein Ende-zu-Ende-Test war gruen**, weil er ``int`` eingespeist
+hat. Der Erwartungswert kam aus meiner Vorstellung der Form, nicht aus
+einer Quelle — Paragraph 5.79 woertlich, und zum zweiten Mal in diesem
+Sprint an derselben Schnittstelle.
+
+**Was der genaue Weg ist, steht hier nicht.** Ob protobuf-``Struct``
+(dessen Zahlen ``double`` sind) oder der JSON-Marshaler die
+Nachkommastelle erzeugt, ist unbelegt; der Befund ist das Log, und die
+Korrektur haengt nicht an der Erklaerung (Paragraph 5.68). Festhalten
+laesst sich nur: **jede Zahl aus dem ``object``-Block kann als
+Gleitkommazahl ankommen.**
+
+**Warum es bisher nirgends aufgefallen ist.** Die uebrigen Zahlen gehen
+durch ``_to_decimal`` (``Decimal(str(v))``, gleichgueltig gegen den Typ)
+oder sind Wahrheitswerte. ``valve_position`` schreibt den Rohwert direkt
+in eine ``SmallInteger``-Spalte — und das geht durch, weil
+asyncpg/Postgres einen ganzzahligen Float annimmt (gemessen).
+
+**Der zweite Befund aus derselben Messung, und er ist der unangenehmere:**
+ein Float **mit** Nachkommastelle wird in einer Integer-Spalte **still
+auf die ganze Zahl abgeschnitten** — ``12.5`` wird ``12``, ohne Meldung
+(gemessen am 26.10.2026 gegen die Test-Datenbank). Deshalb verwirft
+``_als_ganze_zahl`` eine echte Nachkommastelle, statt sie der Datenbank
+zu ueberlassen: eine Zahl, die plausibel aussieht und nicht die ist, die
+das Geraet gesendet hat, ist schlimmer als keine.
+
+**Behoben:**
+
+* ``_als_ganze_zahl`` nimmt ``int`` und ganzzahligen ``float``, verwirft
+  echte Nachkommastellen und — ausdruecklich — ``bool``, obwohl
+  ``isinstance(True, int)`` in Python wahr ist.
+* Die Spanne 5..30 wird gegen ``downlink_adapter.TEMP_RANGE_MIN_C/MAX_C``
+  geprueft, also gegen dieselben Zahlen, die der Sende-Pfad benutzt.
+* Die Eingabe der Tests ist eine **Datei**
+  (``infra/chirpstack/test-uplinks/vicki-temp-range-reply-107.json``) mit
+  den Zahlen als Gleitkommazahl. JSON unterscheidet 15 und 15.0 nicht,
+  die Datei schreibt die Nachkommastelle deshalb ausdruecklich — und ein
+  Test haelt fest, dass sie es tut. Wer sie "aufraeumt", macht den Test
+  gruen und den Betrieb kaputt.
+
+**Die anderen Handler, geprueft:** ``_handle_firmware_version_report``
+prueft auf ``str`` und ist richtig (``firmware_version`` ist eine
+Zeichenkette, ``"4.5"``). ``_handle_open_window_status_report``
+protokolliert nur. ``child_lock`` ist ein Wahrheitswert. **Genau eine
+Stelle war betroffen.**
+
+**Offen, gemeldet, nicht geaendert:** der Relais-Pfad
+(``services/relay_uplink``) schreibt mehrere Rohwerte direkt in
+Integer-Spalten. Ganzzahlige Floats gehen durch; eine echte
+Nachkommastelle wuerde dort **still abgeschnitten**. Relais sind
+vorbereitet und nicht in Betrieb (AE-78), und der Pfad gehoert nicht in
+diesen PR — aber er hat dieselbe Eigenschaft.
+
+**Mutationsprobe**, am 26.10.2026 gelaufen: den Float-Zweig aus
+``_als_ganze_zahl`` entfernt (= die alte ``isinstance``-Pruefung) ->
+**vier** Tests rot, darunter der Ende-zu-Ende-Test, der den
+Produktionspfad nachgeht.
+
 ## 9. Was offen bleibt
 
 | Offen | Folge |

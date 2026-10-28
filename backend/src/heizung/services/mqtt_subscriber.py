@@ -37,7 +37,7 @@ from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import PLAUSI_TEMP_MAX_C, PLAUSI_TEMP_MIN_C
-from heizung.services import redis_client, relay_uplink
+from heizung.services import downlink_adapter, redis_client, relay_uplink
 from heizung.services.device_adapter import handle_uplink_for_override
 from heizung.services.health_alerts import emit_relay_protection_alert
 from heizung.tasks.engine_tasks import evaluate_room
@@ -206,6 +206,58 @@ def _to_decimal(v: Any) -> Decimal | None:
         return Decimal(str(v))
     except (ValueError, ArithmeticError):
         return None
+
+
+def _als_ganze_zahl(wert: Any) -> int | None:
+    """Eine ganze Zahl aus dem ``object``-Block — oder ``None``.
+
+    **Der Anlass, 26.10.2026 10:14:30 UTC.** Die ``0x15``-Antwort von
+    Geraet ``70b3d52dd303337d`` wurde verworfen mit
+
+        WARNING temp-range-Antwort ohne brauchbare Werte min=15.0 max=25.0
+
+    Die Werte waren richtig. Die Pruefung war falsch: sie lautete
+    ``isinstance(min_c, int)``, und die Zahlen kommen als **float** an.
+
+    **Warum das keine Besonderheit dieses Feldes ist.** Jede Zahl aus dem
+    ``object``-Block kann als Gleitkommazahl ankommen — der Weg von
+    ChirpStack hierher fuehrt durch JSON, und dort gibt es keinen
+    Unterschied zwischen 15 und 15.0. Dass es bisher nicht aufgefallen
+    ist, liegt daran, dass die uebrigen Felder durch ``_to_decimal``
+    gehen (``Decimal(str(v))``, gleichgueltig gegen den Typ) oder
+    Wahrheitswerte sind.
+
+    **Was der genaue Weg ist, weiss ich nicht**, und es steht hier
+    bewusst nicht: ob protobuf-``Struct`` (dessen Zahlen ``double`` sind)
+    oder der JSON-Marshaler die Nachkommastelle erzeugt, ist unbelegt.
+    Der Befund ist das Server-Log, und die Korrektur haengt nicht an der
+    Erklaerung (Paragraph 5.68).
+
+    Drei Entscheidungen:
+
+    * ``15.0`` wird **15**. Eine ganzzahlige Gleitkommazahl ist dieselbe
+      Zahl.
+    * ``15.5`` wird **verworfen**. Das Geraet meldet ganze Grad; eine
+      Nachkommastelle heisst, dass die Annahme ueber das Format nicht
+      stimmt, und dann ist Schweigen richtiger als Runden.
+
+      **Und zwar gemessen**, nicht aus Vorsicht: ein ``12.5`` in eine
+      Integer-Spalte geschrieben wird von asyncpg/Postgres **still auf
+      12 abgeschnitten** (gemessen am 26.10.2026 gegen die Test-DB).
+      Keine Meldung, kein Fehler — nur eine Zahl, die plausibel aussieht
+      und nicht die ist, die das Geraet gesendet hat. Genau deshalb muss
+      die Pruefung hier stehen und nicht in der Datenbank.
+    * ``True`` wird **verworfen**, obwohl ``isinstance(True, int)`` in
+      Python wahr ist. Ein Wahrheitswert als Temperaturgrenze ist kein
+      Messwert, sondern ein Formatfehler.
+    """
+    if isinstance(wert, bool):
+        return None
+    if isinstance(wert, int):
+        return wert
+    if isinstance(wert, float):
+        return int(wert) if wert.is_integer() else None
+    return None
 
 
 def _snr_db(rx: _RxInfo | None) -> Decimal | None:
@@ -623,11 +675,32 @@ async def _handle_temp_range_report(uplink: ChirpStackUplink) -> None:
     obj = uplink.object or {}
     if obj.get("report_type") != TEMP_RANGE_REPORT_TYPE:
         return
-    min_c = obj.get("temp_range_min")
-    max_c = obj.get("temp_range_max")
-    if not isinstance(min_c, int) or not isinstance(max_c, int):
+    roh_min = obj.get("temp_range_min")
+    roh_max = obj.get("temp_range_max")
+    min_c = _als_ganze_zahl(roh_min)
+    max_c = _als_ganze_zahl(roh_max)
+    if min_c is None or max_c is None:
         logger.warning(
             "temp-range-Antwort ohne brauchbare Werte dev_eui=%s min=%r max=%r",
+            uplink.deviceInfo.devEui,
+            roh_min,
+            roh_max,
+        )
+        return
+    # Spanne des Geraets (Werk 5/30). Die Grenzen kommen aus dem
+    # Downlink-Adapter, nicht als Zahlen hier — eine zweite Wahrheit
+    # darueber, was das Geraet annimmt, liefe beim ersten Nachjustieren
+    # auseinander.
+    if not (
+        downlink_adapter.TEMP_RANGE_MIN_C <= min_c <= downlink_adapter.TEMP_RANGE_MAX_C
+        and downlink_adapter.TEMP_RANGE_MIN_C <= max_c <= downlink_adapter.TEMP_RANGE_MAX_C
+        and min_c < max_c
+    ):
+        # Lieber "nicht bestaetigt" als eine Grenze, die es nicht gibt:
+        # die Anzeige sagt dann, dass noch keine Antwort kam, und das ist
+        # wahr.
+        logger.warning(
+            "temp-range-Antwort ausserhalb der Spanne dev_eui=%s min=%s max=%s",
             uplink.deviceInfo.devEui,
             min_c,
             max_c,

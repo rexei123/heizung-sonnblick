@@ -6305,6 +6305,34 @@ der gesendeten Befehle gegen ``REPLY_COMMANDS``, und ein
 sich still ueberspringt, ist kein Test (§5.81). **Mutationsprobe:**
 ``0x15`` aus der Liste -> vier Tests rot.
 
+**Vierte Korrektur, Server-Log des Betreibers (AE-82 §8.3).** Nach dem
+Codec-Fix kam die Antwort an — und **mein** Handler verwarf sie:
+``WARNING temp-range-Antwort ohne brauchbare Werte min=15.0 max=25.0``.
+Die Pruefung lautete ``isinstance(min_c, int)``, die Zahlen kommen als
+``float``. **Mein Ende-zu-Ende-Test war gruen, weil er ``int``
+eingespeist hat** — der Erwartungswert kam aus meiner Vorstellung der
+Form, nicht aus einer Quelle (§5.79, zum zweiten Mal an derselben
+Schnittstelle).
+
+Behoben mit ``_als_ganze_zahl``: ``int`` und ganzzahliger ``float``
+werden genommen, echte Nachkommastellen und ``bool`` verworfen
+(``isinstance(True, int)`` ist in Python wahr). Spanne 5..30 gegen
+``downlink_adapter.TEMP_RANGE_MIN_C/MAX_C``, also gegen dieselben Zahlen
+wie der Sende-Pfad.
+
+**Zweiter Befund aus der Messung dazu:** ein Float mit Nachkommastelle
+wird in einer Integer-Spalte **still abgeschnitten** — ``12.5`` wird
+``12``, ohne Meldung. Deshalb verwirft der Helfer statt der Datenbank zu
+vertrauen. Gemeldet, aber **nicht geaendert**: der Relais-Pfad hat
+dieselbe Eigenschaft (Relais sind vorbereitet, nicht in Betrieb).
+
+Die Test-Eingabe ist jetzt eine **Datei** mit den Zahlen als
+Gleitkommazahl, und ein Test haelt fest, dass sie es bleibt. Alle anderen
+Handler geprueft: Firmware ist eine Zeichenkette, der Fenster-Status
+protokolliert nur, ``child_lock`` ist ein Wahrheitswert — **genau eine
+Stelle war betroffen**. **Mutationsprobe:** Float-Zweig raus -> vier
+Tests rot.
+
 12 neue Tests: Warte- und Urteilslogik mit **virtueller Uhr** (§5.82,
 einschliesslich eines Zaehltests, der eine halb gefaelschte Zeitquelle
 auffallen laesst) und die Rueckgabe — darunter **die Reihenfolge** (Flag
