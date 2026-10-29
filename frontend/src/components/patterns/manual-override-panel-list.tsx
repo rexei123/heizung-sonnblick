@@ -43,7 +43,24 @@ export function ManualOverridePanelList({ roomId }: Props) {
   // Sprint 12c (AE-58): Sperre-Flag. React-Query-Cache-Hit aus Parent-
   // Page (gleicher roomId-Key) — kein zusaetzlicher Network-Request.
   const roomQuery = useRoom(roomId);
-  const overrideBlocked = roomQuery.data?.guest_override_blocked === true;
+  const gesperrt = roomQuery.data?.guest_override_blocked === true;
+  const bisCheckout = roomQuery.data?.guest_block_bis_checkout === true;
+  /**
+   * Sprint 23 T4-A2: **die beiden Formen der Sperre tun hier nicht
+   * dasselbe.**
+   *
+   * Die dauerhafte Sperre nimmt das Formular weg — so war es seit
+   * Sprint 12c, und so bleibt es. Die Sperre „bis Check-out" nimmt dem
+   * **Gast** das Rad, nicht der Rezeption die Eingabe: sie entsteht
+   * gerade dadurch, dass die Rezeption einen Wert festsetzt, und wer ihr
+   * danach das Formular verschließt, erzwingt für eine Korrektur den
+   * Umweg „aufheben, setzen, wieder sperren" — drei Handgriffe, bei denen
+   * der mittlere das Rad kurz freigibt. Das Gate im Dienst lässt die
+   * `frontend_*`-Quellen aus demselben Grund durch
+   * (`override_service.create`).
+   */
+  const sperreDauerhaft = gesperrt && !bisCheckout;
+  const sperreBisCheckout = gesperrt && bisCheckout;
   // Sprint 21 A2: den Belegungs-Status *vor* dem Ausfuellen zeigen, nicht
   // erst danach. Die Abweisung mit 409 ROOM_NOT_OCCUPIED bleibt — sie ist
   // das Gate (§5.53: `room.status` ist die persistierte Spalte, der Service
@@ -89,11 +106,12 @@ export function ManualOverridePanelList({ roomId }: Props) {
         </p>
       </header>
 
-      {overrideBlocked ? (
+      {gesperrt ? (
         <div
           role="status"
           aria-live="polite"
           className="flex items-start gap-3 rounded-md border border-border bg-surface p-4"
+          data-testid="sperre-banner"
         >
           <span
             className="material-symbols-outlined text-text-secondary"
@@ -104,16 +122,20 @@ export function ManualOverridePanelList({ roomId }: Props) {
           </span>
           <div>
             <p className="text-sm font-medium text-text-primary">
-              Übersteuerung gesperrt
+              {sperreBisCheckout
+                ? "Gast kann bis Check-out nicht ändern"
+                : "Übersteuerung gesperrt"}
             </p>
             <p className="text-xs text-text-secondary mt-1">
-              Neue Übersteuerungen sind aktuell nicht möglich. Bitte Mitarbeiter aufheben.
+              {sperreBisCheckout
+                ? "Das Rad im Zimmer bleibt ohne Wirkung. Die Rezeption kann den Wert weiter ändern; Sperre und Übersteuerung enden mit der Abreise."
+                : "Neue Übersteuerungen sind aktuell nicht möglich. Bitte Mitarbeiter aufheben."}
             </p>
           </div>
         </div>
       ) : null}
 
-      {nichtBelegt && !overrideBlocked ? (
+      {nichtBelegt && !gesperrt ? (
         <div
           role="status"
           aria-live="polite"
@@ -142,7 +164,7 @@ export function ManualOverridePanelList({ roomId }: Props) {
         <ManualOverrideRoomCard
           roomId={roomId}
           override={activeRoomScopeOverride}
-          overrideBlocked={overrideBlocked}
+          overrideBlocked={sperreDauerhaft}
         />
       ) : null}
 
@@ -161,7 +183,7 @@ export function ManualOverridePanelList({ roomId }: Props) {
             isWindowOpen={openZoneIds.has(zone.id)}
             lastEvalTime={lastEvalTime}
             activeOverride={findActiveOverride(overrides, zone.id)}
-            overrideBlocked={overrideBlocked}
+            overrideBlocked={sperreDauerhaft}
             roomNotOccupied={nichtBelegt}
             istBereich={istBereich}
           />

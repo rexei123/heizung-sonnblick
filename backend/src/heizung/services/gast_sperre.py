@@ -1,4 +1,4 @@
-"""Die Gast-Sperre endet mit der Abreise (Sprint 23 T4-A).
+"""Die Gast-Sperre endet mit der Abreise (Sprint 23 T4-A / T4-A2).
 
 **Was vorher fehlte.** Die Uebersteuerungs-Sperre aus Sprint 12c
 (``room.guest_override_blocked``) gilt dauerhaft. Sie ist dafuer gebaut,
@@ -33,6 +33,13 @@ dort **nie** enden. Die API weist sie deshalb ab; dass dieser Dienst sie
 nie zu sehen bekaeme, ist kein Ersatz fuer die Abweisung, sondern der
 Grund dafuer: ein Versprechen, das niemand einloest, darf nicht
 annehmbar sein.
+
+**Nachtrag T4-A2: es gibt zwei Wege, die Sperre zu setzen, und sie tun
+nicht dasselbe.** Der Knopf in der Kopfzeile beginnt die Sperre mit einem
+Widerruf aller Uebersteuerungen; der Haken im Uebersteuerungs-Dialog
+nicht, weil er eine Uebersteuerung gerade **anlegt**. Der Unterschied ist
+kein Detail, sondern der ganze Befund des Betreibers zu #340 — er steht
+im Docstring von ``setze_bis_checkout``.
 """
 
 from __future__ import annotations
@@ -101,4 +108,87 @@ async def loese_bei_checkout(
         new_value={"blocked": False, "bis_checkout": False},
     )
     logger.info("Gast-Sperre fuer room_id=%s mit dem Check-out geloest", room_id)
+    return True
+
+
+#: Marker im Audit, wenn die Sperre **mit** einer Uebersteuerung gesetzt
+#: wurde (T4-A2). Dieselbe Action wie beim Knopf in der Kopfzeile, damit
+#: die Frage „wer hat gesperrt" eine Abfrage bleibt und nicht zwei; das
+#: ``via`` sagt, auf welchem Weg.
+VIA_UEBERSTEUERUNG = "uebersteuerung"
+
+
+async def setze_bis_checkout(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    user_id: int | None,
+    request_ip: str | None = None,
+) -> bool:
+    """Setzt die Sperre „bis Check-out", **ohne** Overrides zu widerrufen.
+
+    Das ist der Unterschied zum Knopf in der Kopfzeile
+    (``PATCH /rooms/{id}/override-block-state``), und er ist der Grund,
+    warum es diese Funktion gibt. Dort beginnt die Sperre mit einem
+    Widerruf aller aktiven Uebersteuerungen — richtig, wenn jemand sagt
+    „ab jetzt soll hier niemand mehr drehen", denn der zuletzt gedrehte
+    Wert ist dann Teil des Problems.
+
+    Hier ist es umgekehrt: die Rezeption setzt **einen bestimmten Wert**
+    und sperrt ihn fest. Ein Widerruf wuerde genau die Uebersteuerung
+    treffen, die gerade angelegt wurde — das Zimmer fiele auf den Plan
+    zurueck, und der eingetragene Wunsch waere weg. **Genau das war der
+    Befund des Betreibers zu #340:** der Weg ueber den Sperr-Knopf deckt
+    diesen Fall nicht ab, er hebt ihn auf.
+
+    **Ein Zustand, nicht zwei.** Beide Felder werden zusammen gesetzt.
+    Ein ``guest_block_bis_checkout`` ohne ``guest_override_blocked`` ist
+    kein Zustand, sondern eine Sperre, die endet, ohne begonnen zu haben
+    (dieselbe Begruendung wie beim 422 des Knopf-Endpunkts).
+
+    Idempotent (Paragraph S2): steht die Sperre schon in dieser Form, wird
+    nichts geschrieben und **kein** Audit erzeugt — ein Protokoll voller
+    Nicht-Ereignisse verdeckt die echten.
+
+    Die Pruefung, ob das Zimmer ueberhaupt eine Abreise hat, gehoert
+    **nicht** hierher, sondern vor den Schreibvorgang in die API: dort
+    liegt der Satz, den der Nutzer liest. Diese Funktion setzt voraus,
+    dass sie bestanden ist.
+
+    Die Transaktion committet der Aufrufer (Paragraph 5.61).
+
+    Returns ``True``, wenn geschrieben wurde.
+    """
+    room = await session.get(Room, room_id)
+    if room is None:
+        return False
+
+    alt_blocked = room.guest_override_blocked
+    alt_bis_checkout = room.guest_block_bis_checkout
+    if alt_blocked and alt_bis_checkout:
+        return False
+
+    room.guest_override_blocked = True
+    room.guest_block_bis_checkout = True
+
+    await record_business_action(
+        session,
+        user_id=user_id,
+        action="ROOM_OVERRIDE_BLOCK_TOGGLED",
+        target_type="room",
+        target_id=room_id,
+        old_value={"blocked": alt_blocked, "bis_checkout": alt_bis_checkout},
+        new_value={
+            "blocked": True,
+            "bis_checkout": True,
+            # Kein ``revoked_overrides_count`` wie beim Knopf — hier wird
+            # bewusst nichts widerrufen. Die fehlende Zahl ist die Aussage.
+            "via": VIA_UEBERSTEUERUNG,
+        },
+        request_ip=request_ip,
+    )
+    logger.info(
+        "Gast-Sperre bis Check-out fuer room_id=%s mit der Uebersteuerung gesetzt",
+        room_id,
+    )
     return True

@@ -115,9 +115,14 @@ interface ZoneCardProps {
   /** Aktiver Zone-Override (heating_zone_id === zone.id), sonst null. */
   activeOverride: ManualOverride | null;
   /**
-   * Sprint 12c (AE-58): ``room.guest_override_blocked === true`` -> Create-
-   * Form wird ausgeblendet, aktive Anzeigen read-only ohne Revoke-Button
-   * (Doppel-Aktion mit Toggle-Off vermeiden).
+   * Sprint 12c (AE-58): Create-Form wird ausgeblendet, aktive Anzeigen
+   * read-only ohne Revoke-Button (Doppel-Aktion mit Toggle-Off vermeiden).
+   *
+   * **Sprint 23 T4-A2: das ist die _dauerhafte_ Sperre, nicht jede.** Der
+   * Aufrufer rechnet `guest_override_blocked && !guest_block_bis_checkout`
+   * und begründet es dort (`manual-override-panel-list.tsx`). Eine Sperre
+   * „bis Check-out" lässt das Formular stehen — sie nimmt dem Gast das
+   * Rad, nicht der Rezeption die Eingabe.
    */
   overrideBlocked?: boolean;
   /**
@@ -369,7 +374,18 @@ function CreateOverrideForm({
   const [source, setSource] = useState<FrontendOverrideSource>("frontend_24h");
   const [dauer, setDauer] = useState<number>(BEREICH_VORSCHLAG);
   const [reason, setReason] = useState("");
+  const [gastSperre, setGastSperre] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Das Häkchen gehört zur Dauer „Bis Check-out" und zu keiner anderen.
+   *
+   * Bei jeder anderen Dauer läuft die Übersteuerung aus, während der Gast
+   * noch im Haus ist — die Sperre bliebe stehen und nähme ihm das Rad für
+   * einen Wert, den niemand mehr gesetzt hat. Der Server weist die
+   * Kombination mit 422 ab; hier steht sie gar nicht zur Wahl.
+   */
+  const sperreWaehlbar = !istBereich && source === "frontend_checkout";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -386,10 +402,14 @@ function CreateOverrideForm({
         // sie folgt aus dem Raumtyp, und der Server prueft das nach.
         source: istBereich ? "frontend_bereich" : source,
         ...(istBereich ? { dauer_minuten: dauer } : {}),
+        // Nur mitschicken, wenn er auch wählbar war. Sonst hinge am
+        // Zimmer eine Sperre, die aus einer ausgegrauten Zeile stammt.
+        ...(sperreWaehlbar && gastSperre ? { gast_sperre_bis_checkout: true } : {}),
         reason: reason.trim() ? reason.trim() : null,
         heating_zone_id: heatingZoneId,
       });
       setReason("");
+      setGastSperre(false);
     } catch (err) {
       setError(mapOverrideError(err));
     }
@@ -444,7 +464,16 @@ function CreateOverrideForm({
           ) : (
             <Select
               value={source}
-              onValueChange={(v) => setSource(v as FrontendOverrideSource)}
+              onValueChange={(v) => {
+                const neu = v as FrontendOverrideSource;
+                setSource(neu);
+                // **Mitziehen, nicht nur ausgrauen.** Ein Häkchen, das
+                // gesetzt bleibt und nur nicht mehr sichtbar wirkt, wäre
+                // ein Schalter, dessen Zustand niemand sieht — und beim
+                // nächsten Wechsel auf „Bis Check-out" stünde eine
+                // Absicht da, die niemand geäußert hat (§5.77).
+                if (neu !== "frontend_checkout") setGastSperre(false);
+              }}
               disabled={isWindowOpen}
             >
               <SelectTrigger>
@@ -461,6 +490,40 @@ function CreateOverrideForm({
           )}
         </label>
       </div>
+
+      {istBereich ? null : (
+        <div>
+          <div className="flex items-start gap-2">
+            <input
+              id={`gast-sperre-${heatingZoneId}`}
+              type="checkbox"
+              className="mt-0.5 rounded"
+              checked={gastSperre}
+              onChange={(e) => setGastSperre(e.target.checked)}
+              disabled={isWindowOpen || !sperreWaehlbar}
+              data-testid="gast-sperre-haken"
+            />
+            <label
+              htmlFor={`gast-sperre-${heatingZoneId}`}
+              className={`text-sm ${
+                sperreWaehlbar ? "text-text-primary" : "text-text-tertiary"
+              }`}
+            >
+              Gast kann bis Check-out nicht ändern
+            </label>
+          </div>
+          {/* **Der Satz steht da, wenn das Häkchen nicht wählbar ist.**
+              Ein ausgegrautes Feld ohne Grund ist eine Sperre, die der
+              Nutzer sich selbst erklären muss — und er erklärt sie falsch
+              (§5.57: die sichtbare Beschriftung ist die einzige Quelle,
+              die ohne Interaktion lesbar ist). */}
+          <p className="text-text-tertiary mt-1 ml-6 text-xs" data-testid="gast-sperre-hinweis">
+            {sperreWaehlbar
+              ? "Das Rad im Zimmer bleibt ohne Wirkung, die Rezeption kann weiter ändern. Beides endet mit der Abreise."
+              : 'Nur mit der Dauer „Bis Check-out" — sonst endet die Übersteuerung vor der Abreise, die Sperre aber nicht.'}
+          </p>
+        </div>
+      )}
 
       <label className="block">
         <span className="text-sm font-medium text-text-primary mb-1 block">Grund (optional)</span>

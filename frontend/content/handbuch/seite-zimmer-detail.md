@@ -3,7 +3,7 @@ titel: Ein Zimmer im Detail
 kategorie: Die Seiten
 stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Temperatur ändern
 rollen: alle
-stand: 2026-10-25
+stand: 2026-10-29
 route: /zimmer/[id]
 ---
 
@@ -96,3 +96,36 @@ das an der Stelle, an der man sie sucht.
 
 Beim Sperren werden laufende Wunschtemperaturen des Zimmers aufgehoben;
 die Auswahl nennt ihre Anzahl, bevor man sich entscheidet.
+
+## Einen Wert setzen und gleich festhalten
+
+Im Reiter **Übersteuerung** steht beim Eintragen einer Wunschtemperatur
+ein Häkchen: **„Gast kann bis Check-out nicht ändern"**. Es ist aus, und
+es ist nur mit der Dauer **„Bis Check-out"** wählbar — bei jeder anderen
+Dauer läuft die Wunschtemperatur ab, während der Gast noch im Haus ist,
+und die Sperre bliebe für einen Wert stehen, den niemand mehr gesetzt
+hat.
+
+Mit dem Häkchen passiert beides in einem Schritt: die Wunschtemperatur
+wird gesetzt **und** das Rad im Zimmer stillgelegt. Beides endet mit der
+Abreise.
+
+**Das ist nicht derselbe Weg wie der Schalter oben rechts.** Der hebt
+beim Sperren laufende Wunschtemperaturen auf — er ist für „hier soll
+niemand mehr drehen" gebaut. Wer damit einen gerade eingetragenen Wert
+festhalten wollte, löschte ihn: erst sperren hebt die Wunschtemperatur
+auf, erst eintragen und dann sperren ebenso. Das Häkchen hebt nichts
+auf, weil es den Wert gerade selbst anlegt.
+
+**Die Rezeption bleibt handlungsfähig.** Während dieser Sperre kann
+Personal die Wunschtemperatur weiter ändern — nur das Rad im Zimmer
+bleibt ohne Wirkung. Sonst bräuchte eine Korrektur drei Handgriffe
+(aufheben, neu setzen, wieder sperren), und beim mittleren wäre das Rad
+kurz frei.
+
+**Im Allgemeinbereich gibt es das Häkchen nicht** — dieselbe Begründung
+wie oben: keine Abreise, kein Ende.
+
+Die dauerhafte Sperre bleibt unverändert: sie sperrt alles, auch die
+Eingabe von der Rezeption, und ihr Weg zurück ist der Schalter oben
+rechts.

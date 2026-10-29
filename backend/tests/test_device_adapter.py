@@ -591,6 +591,60 @@ async def test_handle_uplink_room_blocked_writes_event_log_and_returns_none(
     assert rows[0].details["uplink_setpoint"] == "24.0"
 
 
+async def test_handle_uplink_sperre_bis_checkout_blockt_das_rad_weiter(
+    session: AsyncSession,
+) -> None:
+    """Sprint 23 T4-A2: der Vorab-Check gilt fuer **beide** Formen der Sperre.
+
+    T4-A2 hat das Gate im Dienst aufgeteilt — die Sperre "bis Check-out"
+    laesst die ``frontend_*``-Quellen durch, damit die Rezeption ihren
+    eigenen Wert korrigieren kann. Das Rad des Gastes ist genau die
+    Quelle, die sie **nicht** durchlaesst, und dieser Test haelt das hier
+    fest, wo es zuerst greift.
+
+    Der Vorab-Check liest ``guest_override_blocked`` und sieht die Form
+    der Sperre nicht. Das ist richtig, aber es ist eine **Eigenschaft des
+    Codes und keine Zusicherung**, solange sie nicht geprueft wird: wer
+    die Aufteilung des Dienst-Gates hier nachbaut, oeffnet dem Gast das
+    Rad und die Suite bliebe gruen (Paragraph 5.55).
+    """
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.enums import EventLogLayer
+    from heizung.models.event_log import EventLog
+
+    room_id, _zone_id, device_id, now = await _seed_occupied_stack(session)
+    room = await session.get(Room, room_id)
+    assert room is not None
+    room.guest_override_blocked = True
+    room.guest_block_bis_checkout = True
+    await session.flush()
+
+    result = await device_adapter.handle_uplink_for_override(
+        session,
+        device_id=device_id,
+        uplink_target_temp=Decimal("28.0"),
+        fport=1,
+        received_at=now,
+    )
+    assert result is None
+
+    rows = list(
+        (
+            await session.execute(
+                sa_select(EventLog).where(
+                    EventLog.room_id == room_id,
+                    EventLog.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].reason == CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED
+
+
 async def test_handle_uplink_block_takes_precedence_over_vacant(
     session: AsyncSession,
 ) -> None:
