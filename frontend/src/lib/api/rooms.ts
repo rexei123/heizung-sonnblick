@@ -55,8 +55,26 @@ export const roomsApi = {
     apiClient.get<EventLogEntry[]>(`${BASE}/${id}/engine-trace?limit=${limit}`),
 
   // Sprint 12c (AE-58): Uebersteuerungs-Sperre togglen.
-  patchOverrideBlockState: (id: number, blocked: boolean): Promise<Room> =>
-    apiClient.patch<Room>(`${BASE}/${id}/override-block-state`, { blocked }),
+  /**
+   * Sprint 23 T4-A: `bisCheckout` sagt, dass die Sperre mit der Abreise
+   * endet. Der Standard ist `false` — das bisherige Verhalten, eine
+   * dauerhafte Sperre.
+   *
+   * Zwei Fälle weist der Server mit 422 ab: „bis Check-out" ohne Sperre,
+   * und „bis Check-out" für einen Allgemeinbereich (der hat keine
+   * Abreise). Die Oberfläche bietet deshalb beides dort nicht an — die
+   * Abweisung ist der Rückhalt und nicht die erste Verteidigungslinie
+   * (§5.30).
+   */
+  patchOverrideBlockState: (
+    id: number,
+    blocked: boolean,
+    bisCheckout = false,
+  ): Promise<Room> =>
+    apiClient.patch<Room>(`${BASE}/${id}/override-block-state`, {
+      blocked,
+      bis_checkout: bisCheckout,
+    }),
 
   /**
    * Sprint 21 A1: Verlauf je Heizzone, serverseitig zusammengefasst.

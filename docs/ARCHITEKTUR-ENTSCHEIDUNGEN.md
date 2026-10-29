@@ -6486,3 +6486,798 @@ liegt in RUNBOOK §10ak; sie beantwortet die Frage in einer Zeile.
 | **Warum das Speichern im Haus scheiterte** | nicht rekonstruierbar — der Fehler war unsichtbar und nirgends protokolliert. Beim nächsten Versuch nennt die Oberfläche den Grund |
 | **Lücke in der Umstellungsnacht** | Abfrage in RUNBOOK §10ak; bis dahin ist die wahrscheinlichste Erklärung der 6-Stunden-Heartbeat |
 | **`ApiError` ist keine `Error`-Instanz** | `lib/api/fehler.ts` fängt das ab, aber die Wurzel bleibt: wer `throw {…}` schreibt, lädt zu `e.message` ein. Ein eigener `Error`-Abkömmling in `client.ts` wäre der nächste Schritt — eigener Durchgang, weil jeder Aufrufer davon abhängt |
+
+---
+
+# AE-79 — Das Handbuch liegt im Repo und wandert mit dem Pull Request
+
+**Datum:** 25.10.2026 · **Stand:** umgesetzt (Paket 1) · **Betrifft:**
+`frontend/content/handbuch`, `frontend/src/lib/handbuch`, `/handbuch`,
+`backend/tests/test_handbuch_spiegel.py`, CLAUDE.md §3.13, PR-Vorlage
+
+## 1. Die Frage
+
+Das Haus wird von Personal bedient, das die Software nicht gebaut hat. Die
+Oberfläche erklärt, *was* ein Feld ist; sie erklärt nicht, warum ein Zimmer
+21 °C hat, obwohl beim Raumtyp 18 °C steht — und genau das war der Befund
+vom 24.10.2026.
+
+Drei Wege standen zur Wahl:
+
+| Weg | Was dafür spricht | Warum nicht |
+|---|---|---|
+| **A** — PDF oder Word, im Ordner an der Rezeption | gewohnt, offline | niemand pflegt es. Nach drei Sprints beschreibt es eine andere Software, und es sieht weiter aus wie eine Anleitung |
+| **B** — Artikel in der Datenbank, mit Oberfläche zum Bearbeiten | änderbar, ohne Entwickler | eine zweite Stelle, an der Verhalten beschrieben wird, ohne Verbindung zu der Änderung, die das Verhalten ändert. Und eine Bearbeitungsoberfläche, die niemand benutzt |
+| **C** — Markdown im Repo, als Seite ausgeliefert | **der Artikel wandert durch denselben PR wie die Änderung** | kein Bearbeiten ohne PR |
+
+**Gewählt: C.** Die Begründung ist nicht Bequemlichkeit, sondern §5.77 in
+Buchform: ein Vermerk, der einmal richtig war und nicht nachgezogen wurde,
+ist gefährlicher als keiner — er wird wie ein Befund gelesen. Ein Handbuch
+ist nichts anderes als ein Vermerk in Langform, und es altert genauso.
+
+Dass es ohne PR nicht bearbeitbar ist, ist der Preis **und** der Mechanismus:
+wer das Handbuch ändert, ändert Software-Verhalten oder beschreibt es. Beides
+gehört in einen PR.
+
+## 2. Was gebaut ist
+
+**Die Artikel** (23 Dateien) liegen in `frontend/content/handbuch` mit
+Kopfdaten `titel, kategorie, stichworte, rollen, stand, route`. Vier
+Kategorien: Grundlagen (Heizlogik, Glossar), Die Seiten (einer je Route der
+Seitenleiste plus Zimmer-Detail), Abläufe an der Rezeption (sechs).
+
+**Der Umfang von Markdown ist bewusst klein** (`lib/handbuch/markdown.ts`):
+Überschriften, Absätze, Listen, Tabellen, Zitate, Trenner, `**fett**`,
+`` `code` ``, Links. Kein `marked`, kein `remark` — aus drei Gründen in dieser
+Reihenfolge:
+
+1. **Kein `dangerouslySetInnerHTML`.** Der Parser liefert einen typisierten
+   Baum, die Anzeige macht React-Elemente daraus. Es gibt keine Stelle, an
+   der Text aus einer Datei als HTML in die Seite gelangt.
+2. **Eine Abhängigkeit weniger, deren Version ein Urteil fällt** (§5.80: ein
+   Markdown-Parser entscheidet, wie das Handbuch aussieht).
+3. **Was nicht erkannt wird, wird gezeigt.** Eine unverständliche Zeile wird
+   ein Absatz mit ihrem Rohtext; sie verschwindet nicht. Ein Handbuch mit
+   einer unformatierten Zeile ist besser als eines mit einer Lücke, weil man
+   die Zeile sieht.
+
+**Zahlen stehen nicht im Text.** Die Marke `{{werte}}` wird beim Öffnen durch
+eine Tabelle ersetzt, die den Hausstandard und die Raumtyp-Sollwerte **aus
+der Datenbank** liest — samt der Angabe, welcher Wert wirkt (Sprint 24d).
+`{{karte}}` ist die Zeichnung der Heizlogik als Inline-SVG. Eine Zahl im
+Handbuch wäre eine Aussage über den heutigen Stand und verfällt beim ersten
+Nachjustieren.
+
+**Die Suche** läuft im Browser über einen Index, der beim Bauen entsteht
+(`lib/handbuch/suche.ts`). Bei 23 Artikeln ist eine Schleife schneller als
+jede Abfrage, und es gibt keinen Dienst, der ausfallen kann. Ein Treffer
+zeigt die **Fundstelle** und verlinkt auf den **Abschnitt** — eine
+Trefferliste aus Titeln verlangt vom Leser, den Artikel selbst zu
+durchsuchen.
+
+**Die Kontext-Hilfe** ist ein „?" in der Hülle der Anwendung
+(`components/patterns/seiten-hilfe.tsx`), nicht fünfzehn Knöpfe in fünfzehn
+Seiten. Es findet den Artikel über `usePathname()` und die Zuordnung in
+`lib/handbuch/routen.ts`, und es erscheint **nicht**, wo es keinen Artikel
+gibt: ein „?", das auf eine leere Seite führt, verbraucht das Zutrauen, das
+die Hilfe auf den anderen Seiten braucht.
+
+**Die Druckansicht** (`/handbuch/drucken`) trägt alle Artikel mit
+Inhaltsverzeichnis; `@media print` in `globals.css` blendet Seitenleiste,
+Suchfeld und Anker aus und setzt Seitenumbrüche je Artikel. An der Rezeption
+hängt ein Ordner, und wenn die Steuerung selbst das Problem ist, hilft eine
+Hilfeseite in der Steuerung nicht.
+
+**Auf Papier fehlen die lebenden Werte bewusst.** Statt der Tabelle steht
+ein Satz, wo sie zu finden sind. Ein Ausdruck mit Zahlen vom Ausdruckstag
+liest sich wie eine Zusicherung für morgen und lässt sich nicht nachladen.
+
+## 3. Warum die Seiten statisch gebaut sein **müssen**
+
+Das Abbild für den Betrieb entsteht als Standalone-Output; der Ordner
+`content/` wird **nicht** mitkopiert (`frontend/Dockerfile`, Stage 3). Eine
+Seite, die die Artikel zur Laufzeit liest, stirbt also im Betrieb — und zwar
+erst dort, nicht im Bau.
+
+Darum tragen alle drei Seiten `export const dynamic = "error"` und die
+Artikelseite zusätzlich `dynamicParams = false`. Wer dort später
+`searchParams`, `cookies()` oder `headers()` benutzt, bekommt einen
+**Bau-Fehler** statt einer Seite, die auf dem Server stirbt.
+
+**Gemessen, nicht angenommen** (§5.83 — die Ebene nennen, auf der geprüft
+wurde). `next build` vom 25.10.2026:
+
+```
+├ ○ /handbuch                            2.12 kB         103 kB
+├ ● /handbuch/[slug]                     154 B           124 kB
+├ ○ /handbuch/drucken                    153 B           124 kB
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML
+```
+
+Keine der drei Routen ist `ƒ (Dynamic)`. Das ist der Beleg, dass zur Laufzeit
+keine Datei gelesen wird — nicht die Absicht, sondern die Ausgabe des Baus.
+
+## 4. Der Spiegel-Test, in beide Richtungen
+
+`backend/tests/test_handbuch_spiegel.py` liest den Quelltext der
+Seitenleiste, die Zuordnung und die Kopfdaten und prüft:
+
+- jede Route der Seitenleiste hat einen Artikel,
+- jeder zugeordnete Artikel existiert und nennt dieselbe Route,
+- **und die Gegenrichtung:** kein Artikel zeigt auf eine Route, die es nicht
+  mehr gibt,
+- jeder Artikel hat `titel`, `kategorie` und ein gültiges `stand`-Datum,
+- `rollen` ist `alle` oder `admin` (ein Tippfehler verliert sonst stumm die
+  Kennzeichnung, weil der Lader auf `alle` zurückfällt),
+- jeder Verweis `/handbuch/<slug>` zeigt auf einen vorhandenen Artikel,
+- es gibt keine unbekannte Marke.
+
+Die Gegenrichtung ist die unangenehmere Hälfte: ein Artikel, der eine
+verschwundene Seite beschreibt, liest sich wie eine Anleitung und ist eine
+Falschaussage (§5.77).
+
+**Warum im Backend.** Er vergleicht zwei Dateibäume und braucht weder Node
+noch Browser; die Backend-Suite läuft bei jedem PR ohne `paths`-Filter
+(§5.55). Damit greift er auch bei einem PR, der nur das Frontend anfasst.
+
+**Er prüft Vollständigkeit, nicht Wahrheit.** Ob ein Artikel noch stimmt,
+kann kein Test wissen. Dafür steht die Zeile `Handbuch: angepasst / nicht
+nötig, weil …` in der PR-Vorlage und die Regel in CLAUDE.md §3.13 — und das
+ist keine Automatisierungslücke, sondern die Grenze dessen, was automatisch
+prüfbar ist.
+
+## 5. Vier Seiten, die leer sind — und es jetzt selbst sagen
+
+Beim Schreiben der Artikel ist aufgefallen, dass vier Einträge der
+Seitenleiste auf Platzhalter führen: `/profile`, `/analyse/temperaturverlauf`,
+`/einstellungen/gateway` (alle `EmptyState`) und `/einstellungen/saison`
+(„In Vorbereitung").
+
+Das ist kein neuer Mangel — die Platzhalter sind seit Sprint 9.13b so. Neu
+ist, dass das Handbuch es **benennt** und je Fall sagt, wo die Sache heute
+steht: Nachtabsenkung und Raumtypen statt Profile, der Tab „Verlauf" am
+Zimmer statt der hausweiten Auswertung, die Kachel „Geräte online" statt
+einer Gateway-Seite, der Sommermodus unter Szenarien statt Saisonzeiten.
+
+Eine leere Seite ohne Erklärung sieht aus wie ein Ladefehler. Der Artikel
+dazu ist billiger als die Frage, die sonst an der Rezeption entsteht — und
+ehrlicher als sie zu entfernen, denn die Einträge sagen auch, was geplant ist.
+
+## 6. Begriffe, die getrennt bleiben müssen
+
+Zwei Aufgaben hießen in der Planung „T3", und beide sind im Handbuch
+benannt — mit der Abgrenzung direkt daneben (Glossar, `seite-api`,
+`seite-thermostate`):
+
+| Begriff | Was es ist | Stand |
+|---|---|---|
+| **Listen-Wächter** | Mail, wenn acht Stunden keine Belegungsliste kam (PR #338) | im Betrieb seit 25.10.2026 |
+| **Relais-Test T3.0** | Messung am Relais-Pfad der Infrarot-Heizkörper | offen; es ist kein Relais montiert |
+
+Dass beide „T3" hießen, ist eine Eigenschaft der Planung und keine der
+Anlage. Im Handbuch steht deshalb nicht die Sprint-Nummer, sondern was die
+Sache tut.
+
+## 7. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Bearbeiten ohne PR** | nicht vorgesehen, siehe §1. Wird es gebraucht, ist das eine neue Entscheidung und keine Erweiterung dieser |
+| **Keine Volltextsuche über Abläufe hinweg** | die Suche vergleicht Zeichenfolgen, kein Wortstamm, keine Tippfehler-Toleranz. Beides wäre eine Vermutung darüber, was gemeint war, und eine falsche Vermutung kostet mehr als ein fehlender Treffer |
+| **Vier leere Seiten** | §5 — benannt, nicht behoben. Die Artikel verfallen, sobald die Seiten gebaut werden; der Spiegel-Test merkt das nicht, die PR-Zeile ist die Stelle dafür |
+| **Bilder** | es gibt keine. Die Zeichnung der Heizlogik ist Inline-SVG, damit sie in hell, dunkel und auf Papier lesbar bleibt. Ein Bildschirmfoto wäre nach dem nächsten Umbau falsch, ohne dass es auffällt |
+
+---
+
+# AE-80 — Die Gast-Sperre endet mit der Abreise (Sprint 23 T4-A)
+
+**Datum:** 25.10.2026 · **Stand:** umgesetzt (Stufe A), Stufe B offen ·
+**Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
+`services/gast_sperre.py`, `PATCH /rooms/{id}/override-block-state`,
+`RoomOverrideBlockToggle` · **Erweitert:** AE-58 (Override-Modell)
+
+## 1. Der Befund
+
+Die Übersteuerungs-Sperre aus Sprint 12c (`room.guest_override_blocked`)
+gilt **dauerhaft**. Gebaut ist sie für einen Gast, der am Rad dreht und
+sich danach beschwert — also für *einen Aufenthalt*. Wer sie nicht
+zurücknimmt, hinterlässt dem **nächsten** Gast ein Rad, das nichts
+bewirkt.
+
+Das Zimmer heizt dabei richtig. Die Drehung wird verworfen, der Gast
+sieht am Gerät eine Zahl, die nicht gilt, und an der Rezeption kann
+niemand die Frage „warum reagiert das nicht" beantworten, weil die
+Ursache eine Entscheidung von vorletzter Woche ist. **Eine Sperre, an die
+sich niemand erinnert, ist nicht weniger wirksam — nur unerklärlich.**
+
+Das ist dieselbe Klasse wie der Phantom-Override aus Sprint 20f: ein
+Zustand, der länger lebt als der Anlass, und dessen Spur niemand mehr
+findet.
+
+## 2. Die Entscheidung
+
+Ein zweites, additives Feld `guest_block_bis_checkout`. Ist es gesetzt,
+löst der Belegungsabgleich die Sperre beim Übergang OCCUPIED → VACANT
+selbst — **in derselben Kette, die schon die Overrides widerruft**
+(`occupancy_service.sync_room_status → auto_revoke_on_checkout`, Sprint
+9.9 T6).
+
+### Warum kein Ablaufdatum in der Zeile
+
+Ein `expires_at` wie beim Override wäre eine **Vorhersage**: es müsste
+beim Verschieben der Abreise nachgezogen werden, und wer das vergisst,
+hat genau das Problem zurück, das diese Änderung löst. Der Statuswechsel
+ist dagegen ein **Befund**. Dieselbe Begründung hat Sprint 20f für die
+Entfernung des Gnaden-Fensters getragen.
+
+### Warum zwei Spalten und nicht ein Moduswert
+
+Ein Feld `guest_block_mode` (`aus` / `dauerhaft` / `bis_checkout`) wäre
+schöner zu lesen. Es hätte aber `guest_override_blocked` **ersetzt**, und
+das Feld lesen die Engine, der Geräte-Adapter und der Override-Dienst.
+Ein `DROP COLUMN` bricht den Rückfall (Goldene Regel 10) — für einen
+Gewinn, der nur die Form betrifft. Die unsinnige Kombination
+(`blocked=false` mit `bis_checkout=true`) weist die API ab; kein
+DB-`CHECK`, weil eine verengte Bedingung nicht additiv ist.
+
+### Warum kein eigener Taktgeber
+
+Ein Beat-Task, der nach abgelaufenen Sperren sucht, wäre eine zweite
+Stelle, die dasselbe Ereignis erkennen müsste (§5.53) — und bei Ausfall
+des Taktgebers friert er **plausibel** ein (§5.76). Der Abgleich sieht
+den Check-out ohnehin.
+
+## 3. Zwei Abweisungen, und die zweite ist die interessante
+
+**`bis_checkout` ohne `blocked`** → 422. Eine Sperre, die endet, ohne
+begonnen zu haben, ist kein Zustand.
+
+**`bis_checkout` für einen Allgemeinbereich** → 422. Ein Zimmer mit nicht
+buchbarem Raumtyp wechselt **nie** auf VACANT: `sync_room_status` lässt
+seinen Status stehen (Sprint 24d). Eine Sperre „bis Check-out" würde dort
+nie enden.
+
+Dass der Löse-Dienst sie nie zu sehen bekäme, ist **kein Ersatz** für die
+Abweisung, sondern der Grund dafür: ohne sie wäre die Sperre still und
+dauerhaft, während die Oberfläche „endet mit der Abreise" verspricht.
+Genau diese Sorte Falschaussage ist §5.77 — und sie stünde dort, wo der
+Betreiber hinsieht. Die Oberfläche bietet die Form im Bereich deshalb
+auch nicht an; die Abweisung ist der Rückhalt, nicht die erste
+Verteidigungslinie (§5.30).
+
+## 4. Zwei Dinge, die beim Bauen auffielen
+
+**Die Idempotenz verglich nur ein Feld.** Im Endpoint stand
+`old_blocked == payload.blocked`. Mit dem neuen Feld hätte ein Wechsel
+von „dauerhaft" auf „bis Check-out" **nichts** getan und 200 gemeldet —
+die Oberfläche hätte die neue Form angezeigt, die Datenbank die alte. Ein
+Test hält beide Felder fest.
+
+**Der Widerruf gehört an den Beginn, nicht an jede Änderung.** Der
+Auto-Revoke lief bisher bei jedem Toggle-On. Mit zwei Feldern ist eine
+Änderung der *Form* kein Beginn — ein zweiter Widerruf träfe nichts und
+schriebe trotzdem ein Audit. Jetzt: `payload.blocked and not old_blocked`.
+
+**Und die Fehleranzeige.** Der Umschalter las `e.message` von einem
+Objekt, das keine `Error`-Instanz ist (§24e) — die beiden neuen 422 wären
+als leerer Kasten erschienen. Er nutzt jetzt `fehlerText`. Ein 422, dessen
+Satz nicht ankommt, ist schlimmer als keine Abweisung, weil der Nutzer
+dann denselben Klick wiederholt.
+
+## 5. Die Oberfläche
+
+Beim Sperren wird die Form **gefragt**, mit zwei Knöpfen statt
+Auswahlfeld plus Bestätigung: jeder Knopf nennt seine Handlung, und damit
+ist die Auswahl schon die Bestätigung (§5.85). „Bis Check-out" steht
+zuerst — es ist der Regelfall.
+
+Ist gesperrt, steht die Form **unter** dem Knopf („endet mit der Abreise"
+bzw. „dauerhaft — bleibt auch für den nächsten Gast"). Das ist die
+eigentliche Information für die Rezeption: muss sich jemand später darum
+kümmern?
+
+Der Hinweis auf die Anzahl der Übersteuerungen, die dabei aufgehoben
+werden, steht in der Auswahl. Ein eigener Bestätigungsschritt davor wäre
+ein zweiter Klick für dieselbe Entscheidung.
+
+## 6. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Stufe B: Kindersicherung `0x07`** | eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
+| **Anzeige in der Zimmerliste** | die Liste zeigt das Schloss, aber nicht die Form. Für den Fall „welche Zimmer muss ich nach der Abreise aufräumen" wäre eine Spalte nützlich — nach Stufe B, sonst wird sie zweimal gebaut |
+| **Sperre bei Zimmerwechsel** | zieht nicht mit. Ein Gast, der ins Nachbarzimmer umzieht, nimmt seine Sperre nicht mit. Bewusst: der Umzug ist eine Entscheidung der Rezeption, und sie sieht die Sperre im neuen Zimmer nicht |
+
+---
+
+# AE-81 — Die Fenstererkennung braucht Parameter, einen Rückweg und einen Befund (Sprint 23 T2)
+
+**Datum:** 25.10.2026 · **Stand:** Werkzeug gebaut, **Erprobung offen**
+(Pflicht-Stop) · **Betrifft:** `services/fenstererkennung.py`,
+`scripts/fenstererkennung.py`, `scripts/activate_open_window_detection.py`,
+`downlink_adapter.ow_set_bytes` · **Erweitert:** AE-47 (Rollenteilung
+Gerät/Engine), §5.27 (Werkszustand aus)
+
+## 1. Was es schon gab
+
+`0x45` und `0x46` sind seit Sprint 9.11x.b gebaut, der Codec dekodiert die
+Antwort, und `scripts/activate_open_window_detection` schaltet die Erkennung
+im Bulk ein. Für die Testwoche aus dem Brief reichte das an **vier** Stellen
+nicht:
+
+1. **Die Parameter standen fest** (1,5 °C / 10 min, hart im Skript). Der
+   Brief verlangt 1,0 °C — und für die Messung T2.5 **0,2 °C auf genau
+   einem Gerät**.
+2. **Kein Weg, ein einzelnes Gerät zu adressieren.** Der Testplan nennt
+   drei (105, 110, 306 Schlafzimmer), die Messung genau eines.
+3. **Kein Weg, die Erkennung wieder auszuschalten.** Das Abbruchkriterium
+   lautet: löst sie *einmal* durch unsere eigene Absenkung aus, wird sie auf
+   **allen** Testgeräten abgeschaltet. Ohne Werkzeug war dieses Kriterium
+   **nicht ausführbar** — und ein Abbruchkriterium, das man nicht vollziehen
+   kann, ist keines.
+4. **Geräte auf „nur messen" waren nicht ausgenommen.** Die Auswahl lautete
+   „Thermostat mit Zone"; die Vickis 027 und 056 liegen als Fühler im Raum
+   und bekommen bewusst keine Befehle (S7, Sprint 24c). Ergänzung 2 des
+   Auftrags verlangt die Ausnahme ausdrücklich, **mit Test**.
+
+Punkt 3 ist der schwerste. Er stand im Brief als Vorgabe, und es gab kein
+Werkzeug dafür — niemand hätte das gemerkt, bis der Fall eintritt.
+
+## 2. Die Entscheidungen
+
+**Ein Dienst, zwei Einstiegspunkte.** `services/fenstererkennung` hält die
+Parameter, die Zielauswahl mit den Ausnahmen und die Einordnung eines
+Befundes. `scripts/fenstererkennung` ist das Werkzeug für einzelne Geräte;
+`scripts/activate_open_window_detection` bleibt die Bulk-Variante mit
+FW-Abfrage davor und **liest jetzt dieselbe Auswahl**. Zwei Auswahllisten
+wären zwei Wahrheiten darüber, welche Geräte Hardware-Befehle bekommen
+(§5.53) — und das ist die unangenehmste Sorte: man sieht sie erst am Gerät.
+
+Mit derselben Begründung ist die Vorgabe von 1,5 auf **1,0 °C** gezogen
+worden: zwei Vorgaben für denselben Befehl wären beim ersten Nachjustieren
+auseinandergelaufen.
+
+**Der Probelauf ist der Standard.** Ohne `--ausfuehren` wird nichts
+gesendet, sondern aufgezählt, was gesendet würde — mit Bytes, Firmware und
+den **Ausnahmen samt Grund**. Ein Werkzeug, das beim ersten Tippfehler
+funkt, ist das falsche Werkzeug.
+
+**Ein nicht gefundener Name bricht ab.** Ein leerer Lauf sieht sonst wie
+„alles ausgenommen" aus; der Unterschied ist der zwischen „nichts zu tun"
+und „am falschen Gerät gesucht".
+
+**Kein FW-Gate im Einzel-Werkzeug.** Das Bulk-Skript hat eines, weil es
+blind über alle Geräte läuft. Hier werden Geräte **namentlich** gewählt, und
+die Firmware steht im Probelauf neben jedem Namen. Ein zweites Gate hätte
+den Lauf bei genau den Geräten abgebrochen, über die der Betreiber gerade
+entscheidet.
+
+## 3. Der Befund, und warum er in Ortszeit rechnen muss
+
+Das Abbruchkriterium hängt an einer einzigen Frage: hat die Erkennung in
+**unserer** Absenkung ausgelöst? `befund` fasst die `open_window`-Meldungen
+zu Episoden zusammen, ordnet jede gegen das Nachtfenster ein und nennt den
+Temperaturabfall der zehn Minuten davor.
+
+**Die Zeitrechnung ist der kritische Teil.** Wer `zeitpunkt.time()` direkt
+vergleicht, vergleicht UTC-Wanduhr gegen Ortszeit und liegt ein bis zwei
+Stunden daneben (§5.65) — ein Fehlalarm um 20:30 würde als „außerhalb"
+eingeordnet, und damit wäre das Kriterium **stillschweigend ausgehebelt**.
+Das Nachtfenster kommt aus `rule_config` und nicht aus einer Konstante; der
+Bericht sagt ausdrücklich, wenn er mit dem Rückfall gerechnet hat.
+
+**Drei Eigenschaften, die der Bericht gegen stille Fehlbefunde hat:**
+
+- Eine Zeile ohne das Feld (`NULL`, etwa eine reine Befehlsantwort) beendet
+  **keine** Episode. Sie als „zu" auszulegen würde aus einem Fehlalarm zwei
+  machen — dieselbe Regel wie bei der Kindersicherung (24c).
+- Eine am Ende noch **offene** Episode wird gezeigt. Ein gerade laufender
+  Fehlalarm ist der dringendere Fall.
+- **Keine Messwerte ist kein „alles ruhig".** Der Bericht sagt das in
+  Worten und gibt 1 zurück; ohne diesen Satz liest sich ein leerer Bericht
+  wie ein guter (§5.55).
+
+## 4. Ein Befund am Rande, und er gehört ins Handbuch
+
+Weil die Erkennung nie eingeschaltet war, meldet `openWindow` **immer**
+`false`. Daraus folgt dreierlei, und keines davon stand bisher irgendwo:
+
+- **Schicht 4 der Heizlogik reagiert heute allein auf den abgenommenen
+  Kopf.** Wer lüftet, kühlt das Zimmer, ohne dass die Steuerung es merkt —
+  sie heizt dagegen.
+- Die Dashboard-Kachel „Fenster offen" steht dauerhaft auf **0**. Eine 0
+  dort ist kein Befund.
+- Der Ablauf „Gast sagt, das Zimmer ist zu kalt" nannte „Schicht 4, Fenster
+  offen" als häufige Ursache. Das war falsch.
+
+Alle drei Stellen sind im Handbuch korrigiert. Das ist §5.77 in der
+Entstehung: die Artikel waren seit zwei Tagen im Repo und hätten die
+Falschaussage mit der nächsten Woche zementiert.
+
+## 5. Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Die Erprobung selbst** | Pflicht-Stop. Protokoll in RUNBOOK §10ao, fünf Schritte, Messung T2.5 vor dem Betriebswert |
+| **Die Bezugsgröße des Deltas** | unbelegt. Die Hersteller-Doku nennt die Messrate (1 min), aber nicht, gegen **welchen** Vorwert verglichen wird (Stand 22.10.2026). T2.5 beantwortet es durch Messung; bis dahin steht hier **nicht**, die Erkennung hätte den 306-Verlauf erkannt oder nicht |
+| **Was in den 10 Minuten mit unseren Downlinks passiert** | zu messen. Verwirft das Gerät sie, braucht der Engine-Abgleich eine Ausnahme, sonst Doppel-Downlinks |
+| **Der `0x46`-Stand ist nur im Protokoll** | der Codec dekodiert ihn, der Subscriber loggt ihn, persistiert wird er nicht. Für die Oberfläche wäre das eine Datenmodell-Erweiterung **außerhalb des Briefs** und damit ein eigener Pflicht-Stop — deshalb hier nicht gebaut |
+| **FW < 4.2** | `0x45` greift dort nicht, `0x06` wäre der Befehl (B-17-5). Die Firmware steht im Probelauf neben jedem Namen; wer „4.1" liest und ausführt, hat es gesehen |
+
+---
+
+# AE-82 — Temperaturgrenzen am Geraet: die Grenze gehoert an das Rad (Sprint 23 T1)
+
+**Datum:** 26.10.2026 · **Stand:** gebaut, **Erprobung offen**
+(Pflicht-Stop, 107 Schlafzimmer) · **Betrifft:** Codec `0x08`/`0x15`,
+`downlink_adapter`, `services/geraetegrenzen.py`,
+`scripts/geraetegrenzen.py`, Migration 0035, Geraeteseite,
+Uebersteuerungs-Historie · **Erweitert:** AE-48 (Downlink-Helfer), AE-57
+
+## 1. Der Anlass
+
+In Zimmer 306 hat ein Gast am 21./22.10.2026 **zwoelf Mal in sechzehn
+Stunden** am Rad gedreht, bis auf 29 °C. Jedes Mal hat Layer 5 den Wert
+auf 25 gekappt. Das Zimmer war richtig geheizt — und der Gast drehte
+weiter, weil das Geraet eine Zahl zeigte, die nicht galt.
+
+**Die Kappung ist nicht der Fehler, die Rueckmeldung ist es.** Layer 5
+tut genau das Richtige; was fehlt, ist dass der Gast es merkt. `0x08`
+setzt die Grenze dort an, wo das Problem entsteht.
+
+## 2. Der Befund, der die Sache einfach macht
+
+Hersteller-Doku, dieselbe Seite: der Grenzbereich greift bei Verstellung
+**mit der Krone**; Downlink-Befehle duerfen ein Ziel darueber hinaus
+setzen.
+
+Damit faellt das Hauptrisiko weg, das ich erwartet hatte:
+
+- Die Engine bleibt **unberuehrt**. Ein Sommermodus-Frostschutz von 10 °C
+  geht auch an ein Bad mit Untergrenze 18 durch, ein
+  Fenster-Sicherheitswert ebenso.
+- Es entsteht **kein** Ping-Pong zwischen Gerätegrenze und Layer 5.
+
+**Es ist eine Hersteller-Aussage und keine Messung.** Sie steht als
+Schritt 3 im Pflicht-Stop-Protokoll (RUNBOOK §10ap) und wird am Geraet
+geprueft. Faellt sie anders aus, ist T1 zu stoppen.
+
+## 3. Soll und Ist sind zwei Fragen
+
+| | Quelle | Bedeutung |
+|---|---|---|
+| **Soll** | Raumtyp (Bad-Zonen: der der Vorlage), ueber `grenzen_aus_raumtyp` | was gelten soll |
+| **Ist** | Antwort auf `0x15`, in `sensor_reading` | was am Geraet steht |
+
+**Nicht aus `control_command`.** Das sagt, was wir gesendet haben — eine
+Absicht. Eine Anzeige, die das Gesendete zeigt, waere eine Zusicherung
+ohne Deckung, und zwar genau die, die wir vor Sprint 20f fuer den
+Sollwert hatten.
+
+Gelesen wird die **juengste Zeile, die die Felder fuehrt**. Ein Keepalive
+ohne `0x15`-Antwort sagt ueber die Grenzen nichts; ihn als „keine
+Grenzen" zu lesen waere derselbe Fehler, der bei `child_lock` und
+`attached_backplate` schon einmal gemacht wurde (24c).
+
+**„Nicht bestaetigt" heisst nicht „falsch".** Bei einem Class-A-Geraet
+ist das normal, solange es nicht gesendet hat — und der Text sagt das,
+damit niemand daraus einen Fehler liest.
+
+## 4. Die Rechnung steht einmal
+
+`clamp_grenzen(ctx)` ruft seit T1 `grenzen_aus_raumtyp(raumtyp)` auf. Vier
+Stellen brauchen denselben Wert: Layer 5, der Zonen-Override-Clamp, der
+Dispatch (Hotfix 18.10.) und jetzt die Grenzen am Geraet. Vier Kopien
+waeren vier Stellen, an denen eine Grenze spaeter abweicht (§5.53) — und
+die Abweichung waere unsichtbar, weil beide Seiten plausibel aussehen.
+
+Dieselbe Funktion speist auch die **Kappungs-Anzeige** aus T1.7: „30 °C →
+begrenzt auf 25 °C" rechnet mit den Grenzen, mit denen Layer 5 kappt.
+
+## 5. Kein automatischer Auslöser — und warum das Absicht ist
+
+Der Brief nannte drei Auslöser; gebaut ist **keiner**. Eine Aenderung der
+Grenzen in der Oberflaeche wirkt am Geraet erst, wenn jemand das Werkzeug
+laufen laesst.
+
+**Grund:** ein `PATCH` auf einen Raumtyp betrifft alle Zonen dieses Typs —
+bei „Bad" alle Baeder im Haus, also bis zu **45 Funkbefehle aus einem
+Klick**. Dieser Pfad gehoert hinter den Pflicht-Stop und nicht davor. Vor
+der Messung am Geraet waere er ein Mechanismus, dessen Wirkung niemand
+kennt, mit 45-facher Reichweite.
+
+Der Auftrag des Betreibers vom 26.10. nennt ihn ebenfalls nicht; die
+Liste dort ist Werkzeug, Anzeige und Historie.
+
+## 6. T1.7 — zwei Anzeigefehler, und der zweite war groesser als gemeldet
+
+**(a) Gekappte Uebersteuerungen zeigten den Gastwert.** „30 °C, aktiv"
+bei wirksamen 25, an drei Stellen: Historie, Zonen-Karte,
+Uebersteuerungs-Karte. Jetzt „30 °C → begrenzt auf 25 °C", read-time
+abgeleitet, **nur fuer aktive Zeilen**: eine Bestandszeile gegen die
+*heutigen* Grenzen zu rechnen wuerde eine Vergangenheit behaupten, die so
+nicht war.
+
+**(b) `revoked_reason` wurde falsch gedeutet — zweimal, nicht einmal.**
+Die Zuordnung prueefte `grund.startsWith("auto")`. Durch dieses Muster
+fallen **zwei** von fuenf Werten, und beide sind automatische Vorgaenge:
+
+| Wert | hiess | heisst |
+|---|---|---|
+| `superseded` | manuell aufgehoben | ersetzt (neue Drehung) |
+| `room_override_blocked` | manuell aufgehoben | durch Sperre beendet |
+| `auto_revoke_on_checkout` | mit der Abreise beendet | unveraendert |
+| `auto: expired` | abgelaufen | unveraendert |
+| `NULL`/leer | manuell aufgehoben | unveraendert |
+| alles andere | manuell aufgehoben | **der Rohwert** |
+
+**Der Fehler war das Muster, nicht einer seiner Zweige.** `superseded`
+und `room_override_blocked` beginnen beide nicht mit `auto`. Die neue
+Zuordnung ist eine Tabelle mit **genauen** Schluesseln, und ein
+Spiegel-Test haelt sie gegen die Konstanten im Backend — die beiden
+Literale sind im Zuge dessen Konstanten geworden, sonst prueefte der
+Spiegel gegen eine Zeichenkette, die jemand beim Umbenennen uebersieht.
+
+**Der Rohwert als Auffangwert** ist eine Vorgabe des Betreibers und
+richtig: ein unbekannter Wert ist entweder ein neuer Code aus dem Backend
+oder ein Freitext aus der Oberflaeche. Im ersten Fall ist „manuell
+aufgehoben" eine falsche Tatsachenbehauptung, im zweiten verwirft es
+genau die Information, die jemand hingeschrieben hat.
+
+**Nebenbefund:** `test_override_service.py` erwartete
+`auto: guest checked out` — eine Zeichenkette, die **kein** Aufrufer
+schreibt. Der Test gab sich den Grund selbst mit und war damit nicht
+falsch, dokumentierte aber einen Wert, den es im Betrieb nicht gibt. Der
+Default heisst jetzt `REVOKE_REASON_CHECKOUT_FALLBACK` und sagt, was er
+ist.
+
+## 7. In eigener Sache
+
+Ich habe T1 am 25.10. in einer Statustabelle als „geparkt, Nachtwerte
+pruefen" gefuehrt. Es gab **keinen PR und keinen Code** — kein `0x08`
+irgendwo im Repo, kein Downlink an 107. Das war eine Aussage ueber einen
+Zustand, den ich nie gemessen hatte, und §5.68 sagt genau das. Dass sie
+auffiel, lag am Betreiber und nicht an mir.
+
+## 8. Korrektur vom 26.10.2026: der Versuch war in 107 nicht durchfuehrbar
+
+§7 nannte als Pflicht-Stop „ein Sollwert ueber 25 muss trotzdem
+ankommen", gesetzt per Uebersteuerung. **Das geht in 107 nicht:** das
+Zimmer ist frei, und eine Uebersteuerung verlangt einen eingecheckten
+Gast (AE-58). Der Betreiber hat es gemeldet; ich hatte das Protokoll
+geschrieben, ohne die eigene Domaenen-Invariante gegen den gewaehlten
+Raum zu halten.
+
+**Der Ersatz ist naeher am Betrieb als das Original.** Statt eines
+Wertes *ueber* der Obergrenze prueft die Probe einen *unter* der
+Untergrenze: **10 °C**, also den Frostschutz. Genau er geht per Funk an
+ein Zimmer mit Untergrenze 15 oder ein Bad mit 18 — im Sommerbetrieb und
+bei der Fenster-Sicherheit. Die Probe fragt damit den Fall, der
+eintreten wird, und nicht einen konstruierten.
+
+**Das Werkzeug** (`geraetegrenzen sollwert-probe`) sendet genau **einen**
+Sollwert an genau **ein** Geraet (`--nur` ist Pflicht, zwei Treffer
+brechen ab), wartet auf den Readback und **gibt das Zimmer danach an die
+Engine zurueck**. Die Rueckgabe laeuft in jedem Fall, auch bei einem
+schlechten Urteil, und steht im Code deshalb **vor** der Ausgabe des
+Ergebnisses: wer dort abbricht, weil das Ergebnis unerfreulich ist,
+laesst ein Zimmer auf 10 °C stehen — und das sieht im Winter nach
+„Heizung aus" aus und nicht nach „Testwert vergessen".
+
+### 8.1 Zweite Korrektur am selben Tag: die Rueckgabe wirkte nicht
+
+**Befund des Betreibers, 26.10.2026.** Die erste Fassung der Probe rief
+nach dem Readback schlicht ``_evaluate_room_async``. Das genuegt nicht:
+
+Die Probe schickt ``0x51`` **direkt** ueber den Downlink-Adapter, nicht
+ueber die Engine. Der Hysterese-Vergleich laeuft gegen den zuletzt
+**selbst gesendeten** Wert und nicht gegen den, den das Geraet meldet —
+das ist der Befund aus Sprint 20f, und er trifft hier genau zu. Die
+Engine sieht also weiter den alten Sollwert, rechnet ihn neu, findet
+``delta = 0`` und **schweigt**.
+
+Das Zimmer bliebe auf dem Probewert, bis der Engine-Abgleich es merkt.
+Und der braucht den **gemeldeten** Wert des Geraets (den es nach einem
+frischen Downlink noch nicht gesendet haben muss) und ist auf einmal je
+30 Minuten gedrosselt: im schlechtesten Fall **eine Dreiviertelstunde
+auf 10 °C**.
+
+**Der Ausweg ist der vorhandene, nicht ein neuer.** ``resync_flag``
+(Sprint 15c, AE-63) ist genau dafuer gebaut: ein Redis-Schluessel, den
+der Dispatch einmal konsumiert und dafuer die Hysterese uebergeht —
+dieselbe Mechanik, die nach einem Geraete-Neustart den Drift einfaengt.
+Die Probe setzt ihn **vor** dem Engine-Lauf; die Reihenfolge ist der
+Punkt, denn konsumiert wird waehrend des Laufs.
+
+Drei Eigenschaften, die aus dem Befund folgen:
+
+* **Laesst sich das Flag nicht setzen** (Redis weg), laeuft der
+  Engine-Lauf **gar nicht**. Ein Lauf ohne Bypass koennte schweigen, und
+  „zurueckgegeben" waere dann eine Falschaussage.
+* **Das Ergebnis wird gelesen, nicht angenommen.** Das Werkzeug sucht den
+  Eintrag **dieses** Geraets im Ergebnis und nennt den gesendeten Wert.
+  Dafuer fuehrt ``per_device_results`` seit T1a ein ``setpoint_c`` je
+  Geraet: der Raumwert allein genuegt nicht, weil eine Bad-Zone den Wert
+  der Vorlage fuehrt.
+* **Die letzte Zeile nennt den Stand des Zimmers**, in jedem Zweig.
+  Urteil ueber die Grenze und Zustand des Zimmers sind zwei Fragen, und
+  die zweite ist die dringendere.
+
+**Der Fall „15 °C" ist vorbereitet, nicht ausgefuehrt.** Meldet das
+Geraet seine Untergrenze statt der 10, klemmt es auch Funk-Sollwerte, und
+ein Frostschutz kaeme nicht mehr durch. Dann:
+
+- Untergrenze der Raumtypen auf **10** statt 15/18, `setzen` erneut. Die
+  Grenze schuetzt dann nur noch oben — weniger, als gewollt war, aber
+  mehr als ein Frostschutz, der nicht ankommt.
+- Eine **Endlos-Wiederholung entsteht dabei nicht**: der Engine-Abgleich
+  sendet hoechstens `MAX_VERSUCHE` (drei) je Vorkommnis nach und hoert
+  dann auf (Sprint 20f, T3). Der Zaehler wird nur geloescht, wenn das
+  Geraet den Wert meldet — bei dauerhafter Abweichung also nie, und das
+  ist hier genau richtig. Ein Test haelt das Szenario fest
+  (`test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf`).
+
+Beides erst nach Freigabe. Es steht hier, damit im Ernstfall nicht unter
+Zeitdruck entschieden werden muss — nicht, damit es vorsorglich
+passiert.
+
+
+### 8.2 Dritte Korrektur: der Codec kannte 0x15, routete es aber nicht
+
+**Live-Beleg des Betreibers, 26.10.2026.** Geraet
+``70b3d52dd303337d``, Uplink 09:44:51, fCnt 3897,
+``data = "FQ8ZgRKbfNnZEfAw"``:
+
+    15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30
+
+Das Geraet meldete seine Grenzen — **15/25, ``0x08`` hatte gewirkt** —
+und haengte einen vollstaendigen Keep-alive an. ChirpStack zeigte im
+``object``-Block: ``{command: 21}``. Reply und Keep-alive verloren.
+
+**Ursache.** ``decodeCommandReply`` kannte ``0x15`` seit T1; aber
+``decodeUplink`` routete nur ``0x52``, ``0x04``, ``0x46`` und ``0x28``
+dorthin. Alles andere ging an ``decodePeriodicReport``, und das bricht am
+Command-Byte ab.
+
+**Und drei Tests waren dabei gruen.** Der Codec-Spiegel prueft die Bytes,
+der Dienst-Test die Abfrage, der e2e-Test die Anzeige — jeder auf seiner
+Ebene richtig, keiner auf der, die zaehlt. Paragraph 5.83, und diesmal
+nicht an einer Zusicherung im Text, sondern an drei gruenen Tests.
+
+**Der Python-Spiegel konnte es nicht finden**, und das ist der wichtigste
+Teil des Befunds: ``test_codec_mirror.py`` baut die Decoder-**Logik** in
+Python nach. Ein Routing-Fehler liegt in ``decodeUplink``, und davon hat
+der Spiegel keine Entsprechung. Deshalb gibt es seit T1b einen Test, der
+die Datei **ausfuehrt** (``infra/chirpstack/tests/test_codec_decode_uplink.py``,
+``node -e``), und der Workflow richtet Node ausdruecklich ein — ein Test,
+der sich still ueberspringt, ist kein Test (Paragraph 5.81).
+
+**Was behoben ist, und es war mehr als ein Code:**
+
+* ``REPLY_COMMANDS`` als **Liste** statt einer Oder-Kette. Wer einen
+  Downlink baut, traegt den Antwort-Code an **einer** Stelle ein.
+* ``0x15`` darin — der gemeldete Befund.
+* ``0x14`` (Kindersicherung abfragen) ebenfalls: wir **senden** den
+  Befehl, sein Antwortformat ist aber nicht dokumentiert. Geroutet landet
+  er im ``unknown_reply``-Zweig und traegt damit ein ``report_type``;
+  ohne das greift der Reply-Filter im Subscriber nicht und
+  ``_persist_uplink`` legt fuer eine Befehlsantwort eine
+  ``sensor_reading``-Zeile aus lauter NULL an. **Dekodiert wird er
+  nicht** — ohne die Laenge des Reply-Teils ist auch der Beginn eines
+  Keep-alive unbekannt, und ein Suchlauf danach wuerde bei passenden
+  Bytes einen erfinden.
+* ``mergeEmbeddedKeepalive`` als Helfer, benutzt von ``0x04`` (dort stand
+  die Schleife inline), ``0x15``, ``0x46`` und ``0x52``. Der Live-Frame
+  belegt, dass die Vicki Replies und Keep-alives im selben Uplink packt;
+  dass es fuer ``0x52`` bisher nicht aufgefallen ist, heisst nicht, dass
+  es nicht vorkommt.
+* Ein **Spiegel-Test** haelt die gesendeten Befehle aus
+  ``downlink_adapter`` gegen ``REPLY_COMMANDS``, mit ausdruecklicher
+  Zuordnung "welcher Befehl wird mit welchem Code beantwortet". Nicht
+  jeder Befehl hat eine Antwort mit eigenem Code (``0x45`` und ``0x08``
+  haben keine) — als Annahme "Antwort = derselbe Code" waere der Test
+  falsch.
+* Ein **Ende-zu-Ende-Test** im Backend geht die Kette Codec-Ausgabe ->
+  Subscriber -> ``sensor_reading`` -> Abfrage -> Anzeige.
+
+**Mutationsprobe**, am 26.10.2026 gelaufen: ``0x15`` aus
+``REPLY_COMMANDS`` entfernt -> **vier** Tests rot, darunter der
+Live-Frame-Test und der Spiegel, der den fehlenden Code namentlich nennt.
+
+
+### 8.3 Vierte Korrektur: die Zahlen kommen als Gleitkommazahl
+
+**Server-Log des Betreibers, 26.10.2026 10:14:30 UTC:**
+
+    command-reply dev_eui=70b3d52dd303337d report_type=temp_range_reply
+      — skip reading-insert
+    WARNING temp-range-Antwort ohne brauchbare Werte
+      dev_eui=70b3d52dd303337d min=15.0 max=25.0
+
+Der Codec-Fix aus §8.2 wirkte: die Antwort kam als ``temp_range_reply``
+an und trug die richtigen Werte. Verworfen hat sie **mein** Handler —
+seine Pruefung lautete ``isinstance(min_c, int)``, und die Zahlen kommen
+als ``float`` an.
+
+**Und mein Ende-zu-Ende-Test war gruen**, weil er ``int`` eingespeist
+hat. Der Erwartungswert kam aus meiner Vorstellung der Form, nicht aus
+einer Quelle — Paragraph 5.79 woertlich, und zum zweiten Mal in diesem
+Sprint an derselben Schnittstelle.
+
+**Was der genaue Weg ist, steht hier nicht.** Ob protobuf-``Struct``
+(dessen Zahlen ``double`` sind) oder der JSON-Marshaler die
+Nachkommastelle erzeugt, ist unbelegt; der Befund ist das Log, und die
+Korrektur haengt nicht an der Erklaerung (Paragraph 5.68). Festhalten
+laesst sich nur: **jede Zahl aus dem ``object``-Block kann als
+Gleitkommazahl ankommen.**
+
+**Warum es bisher nirgends aufgefallen ist.** Die uebrigen Zahlen gehen
+durch ``_to_decimal`` (``Decimal(str(v))``, gleichgueltig gegen den Typ)
+oder sind Wahrheitswerte. ``valve_position`` schreibt den Rohwert direkt
+in eine ``SmallInteger``-Spalte — und das geht durch, weil
+asyncpg/Postgres einen ganzzahligen Float annimmt (gemessen).
+
+**Der zweite Befund aus derselben Messung, und er ist der unangenehmere:**
+ein Float **mit** Nachkommastelle wird in einer Integer-Spalte **still
+auf die ganze Zahl abgeschnitten** — ``12.5`` wird ``12``, ohne Meldung
+(gemessen am 26.10.2026 gegen die Test-Datenbank). Deshalb verwirft
+``_als_ganze_zahl`` eine echte Nachkommastelle, statt sie der Datenbank
+zu ueberlassen: eine Zahl, die plausibel aussieht und nicht die ist, die
+das Geraet gesendet hat, ist schlimmer als keine.
+
+**Behoben:**
+
+* ``_als_ganze_zahl`` nimmt ``int`` und ganzzahligen ``float``, verwirft
+  echte Nachkommastellen und — ausdruecklich — ``bool``, obwohl
+  ``isinstance(True, int)`` in Python wahr ist.
+* Die Spanne 5..30 wird gegen ``downlink_adapter.TEMP_RANGE_MIN_C/MAX_C``
+  geprueft, also gegen dieselben Zahlen, die der Sende-Pfad benutzt.
+* Die Eingabe der Tests ist eine **Datei**
+  (``infra/chirpstack/test-uplinks/vicki-temp-range-reply-107.json``) mit
+  den Zahlen als Gleitkommazahl. JSON unterscheidet 15 und 15.0 nicht,
+  die Datei schreibt die Nachkommastelle deshalb ausdruecklich — und ein
+  Test haelt fest, dass sie es tut. Wer sie "aufraeumt", macht den Test
+  gruen und den Betrieb kaputt.
+
+**Die anderen Handler, geprueft:** ``_handle_firmware_version_report``
+prueft auf ``str`` und ist richtig (``firmware_version`` ist eine
+Zeichenkette, ``"4.5"``). ``_handle_open_window_status_report``
+protokolliert nur. ``child_lock`` ist ein Wahrheitswert. **Genau eine
+Stelle war betroffen.**
+
+**Offen, gemeldet, nicht geaendert:** der Relais-Pfad
+(``services/relay_uplink``) schreibt mehrere Rohwerte direkt in
+Integer-Spalten. Ganzzahlige Floats gehen durch; eine echte
+Nachkommastelle wuerde dort **still abgeschnitten**. Relais sind
+vorbereitet und nicht in Betrieb (AE-78), und der Pfad gehoert nicht in
+diesen PR — aber er hat dieselbe Eigenschaft.
+
+**Mutationsprobe**, am 26.10.2026 gelaufen: den Float-Zweig aus
+``_als_ganze_zahl`` entfernt (= die alte ``isinstance``-Pruefung) ->
+**vier** Tests rot, darunter der Ende-zu-Ende-Test, der den
+Produktionspfad nachgeht.
+
+## 9. Stand am 29.10.2026 — und was offen bleibt
+
+**Die Erprobung ist durch.** Rollout 28.10. ab 08:35, zweiter Durchlauf
+an fuenf Geraete, ``vergleich`` am 29.10. 07:59: **101 von 101
+„stimmt", 0 ohne Antwort**. Ausgenommen 027, 056 (nur messen) und 100
+(Reserve-Pool) — 101 + 3 = 104, der vollstaendige Bestand.
+
+Damit ist die Hersteller-Aussage aus §2 am Geraet geprueft und die
+Grenze wirksam, wo sie gewollt ist.
+
+**Korrektur zu §8 und zur Anweisung in RUNBOOK §10ap:** Geraet 405
+Schlafzimmer hat mit ``firmware_version = NULL`` bestaetigt. Mein
+Protokoll sagte „bei (NULL) oder 4.1 nicht ausfuehren" — strenger als
+der Befund und strenger als die Doku, die ``08`` unter „All" fuehrt.
+Das stand in §2 dieses ADR bereits richtig; die Anweisung hat es
+ignoriert. Fuer ``0x45`` (T2) bleibt FW >= 4.2 ein Stop-Kriterium.
+
+| Offen | Folge |
+|---|---|
+| **Fehlalarm der Sollwert-Probe** (29.10.) | Ursache **nicht bestimmt**, wird nicht geraten. Betrifft das Werkzeug, nicht die Anlage — die Grenzen sind vom Geraet bestaetigt. Was die Ursache bestimmen wuerde, steht in RUNBOOK §10ap |
+| **Automatischer Auslöser** | §5, bewusst nicht gebaut. Mit abgeschlossenem Rollout ist der Druck geringer: die Grenzen stehen, und eine Aenderung am Raumtyp ist ein seltener Handgriff, dem ein ``setzen`` folgen kann |
+| **Zahlen aus dem Relais-Pfad** | §8.3, gemeldet und nicht geaendert |
+| **Zonen-Karte im Bad** | die Kappungs-Anzeige rechnet dort mit den Grenzen der Vorlage. Greift eine zimmerweite Entscheidung (Fenster, Sommer), folgt das Bad dem Zimmerwert — die Anzeige weiss das nicht und zeigt die Vorlage-Grenzen. Selten und harmlos, aber genannt |

@@ -35,6 +35,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Sprint 23 T1b: der Codec-Test fuehrt `codecs/mclimate-vicki.js`
+      # mit `node` aus, statt die Decoder-Logik in Python nachzubauen.
+      #
+      # Der Grund steht im Test: ein Python-Spiegel hat kein
+      # `decodeUplink` und kann deshalb keinen **Routing**-Fehler finden.
+      # Genau einer lag vom 25. bis 26.10.2026 vor — die 0x15-Antwort des
+      # Geraets landete im falschen Zweig, und der Spiegel-Test war die
+      # ganze Zeit gruen.
+      #
+      # Node ist auf den GitHub-Runnern vorinstalliert; der Schritt pinnt
+      # die Fassung und macht die Abhaengigkeit sichtbar. Ohne ihn
+      # uebersprang der Test sich im Zweifel selbst — und ein Test, der
+      # sich still ueberspringt, ist kein Test (CLAUDE.md 5.81).
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install tooling
         # Bewusst OHNE requirements-provision.txt: die Tests laufen gegen
         # einen Doppelgaenger des gRPC-Clients, nicht gegen chirpstack-api.

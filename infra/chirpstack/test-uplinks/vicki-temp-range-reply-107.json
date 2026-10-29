@@ -1,0 +1,50 @@
+{
+  "deduplicationId": "t1c-live-2026-10-26",
+  "time": "2026-10-26T10:14:30.000Z",
+  "deviceInfo": {
+    "tenantName": "Hotel Sonnblick",
+    "applicationName": "Heizung",
+    "deviceProfileName": "MClimate Vicki",
+    "deviceName": "vicki-107-schlafzimmer",
+    "devEui": "70b3d52dd303337d"
+  },
+  "fCnt": 3897,
+  "fPort": 2,
+  "confirmed": false,
+  "data": "FQ8ZgRKbfNnZEfAw",
+  "object": {
+    "report_type": "temp_range_reply",
+    "command": 21.0,
+    "temp_range_min": 15.0,
+    "temp_range_max": 25.0,
+    "temperature": 22.35,
+    "target_temperature": 18.0,
+    "battery_voltage": 3.5,
+    "motor_position": 473.0,
+    "motor_range": 473.0,
+    "valve_openness": 0.0,
+    "sensorTemperature": 22.35,
+    "targetTemperature": 18.0,
+    "batteryVoltage": 3.5,
+    "motorPosition": 473.0,
+    "motorRange": 473.0,
+    "relativeHumidity": 48.44,
+    "valveOpenness": 0.0,
+    "openWindow": false,
+    "highMotorConsumption": false,
+    "lowMotorConsumption": false,
+    "brokenSensor": false,
+    "childLock": false,
+    "calibrationFailed": false,
+    "attachedBackplate": true,
+    "perceiveAsOnline": true,
+    "antiFreezeProtection": false
+  },
+  "rxInfo": [
+    {
+      "gatewayId": "0102030405060708",
+      "rssi": -85,
+      "snr": 7.5
+    }
+  ]
+}

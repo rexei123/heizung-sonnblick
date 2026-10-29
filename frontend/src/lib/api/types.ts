@@ -120,9 +120,23 @@ export interface DeviceActiveOverride {
   setpoint_celsius: number;
   started_at: string;
   expires_at: string;
+  /**
+   * Sprint 23 T1.7: der wirksame Wert, falls Layer 5 kappt — sonst
+   * `null`/fehlend. Die Zonen-Karte zeigt sonst den Gastwunsch und
+   * behauptet eine Wirkung, die es nicht gibt.
+   */
+  wirksam_gekappt_c?: number | null;
 }
 
 /** Juengster SensorReading-Frame fuer die Diagnose-Kacheln (D5). */
+/**
+ * Sprint 23 T1: die Grenzen des Drehrads, Soll und Ist getrennt.
+ *
+ * `soll` kommt aus dem Raumtyp (Bad-Zonen aus dem der Vorlage), `ist` aus
+ * der Antwort des Geräts auf `0x15`. Fehlt `ist`, heißt das **nicht**
+ * „falsch", sondern „nicht bestätigt" — bei einem Class-A-Gerät ist das
+ * normal, solange es nicht gesendet hat.
+ */
 export interface DeviceLatestReading {
   valve_position: number | null;
   open_window: boolean | null;
@@ -206,6 +220,22 @@ export interface Device {
    * null, wenn die Mindest-Stichprobe im Fenster nicht erreicht ist.
    */
   battery_voltage_median: number | null;
+  /**
+   * Sprint 23 T1: die Grenzen des Drehrads.
+   *
+   * `soll` kommt aus dem Raumtyp (Bad-Zonen aus dem der Vorlage), `ist`
+   * aus der Antwort des Geräts auf `0x15` samt Zeitpunkt. Fehlt `ist`,
+   * heißt das **nicht** „falsch", sondern „nicht bestätigt" — bei einem
+   * Class-A-Gerät ist das normal, solange es nicht gesendet hat.
+   *
+   * Ein Gerät ohne Zone (Reserve-Pool) hat kein `soll`: ohne Einsatzort
+   * gibt es keine Grenzen, und das ist eine Aussage, kein fehlender Wert.
+   */
+  grenzen_soll_min_c: number | null;
+  grenzen_soll_max_c: number | null;
+  grenzen_ist_min_c: number | null;
+  grenzen_ist_max_c: number | null;
+  grenzen_bestaetigt_um: string | null;
   /**
    * Gesetzt, wenn im Fenster ein Batteriewechsel erkannt wurde (Sprung
    * >= 0,3 V nach oben). Dann zaehlen nur Messwerte ab diesem Zeitpunkt, und
@@ -451,6 +481,12 @@ export interface Room {
   orientation: Orientation | null;
   status: RoomStatus;
   guest_override_blocked: boolean;
+  /**
+   * Sprint 23 T4-A: endet die Sperre mit der Abreise? Die Oberfläche
+   * braucht beide Felder — „gesperrt" allein sagt nicht, ob sich jemand
+   * nach dem Check-out darum kümmern muss.
+   */
+  guest_block_bis_checkout: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -972,6 +1008,13 @@ export interface ManualOverride {
   created_by: string | null;
   revoked_at: string | null;
   revoked_reason: string | null;
+  /**
+   * Sprint 23 T1.7: der **wirksame** Wert, falls Layer 5 kappt — sonst
+   * `null`. Nur bei aktiven Zeilen gesetzt: eine abgelaufene gegen die
+   * heutigen Grenzen zu rechnen würde eine Vergangenheit behaupten, die
+   * so nicht war.
+   */
+  wirksam_gekappt_c: number | null;
 }
 
 export interface ManualOverrideCreate {

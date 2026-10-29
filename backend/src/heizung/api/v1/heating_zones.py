@@ -40,6 +40,7 @@ from heizung.services.event_log import (
     latest_hard_clamp_bad_setpoint_per_room,
     latest_hard_clamp_setpoint_per_room,
 )
+from heizung.services.geraetegrenzen import soll_grenzen_je_zone
 from heizung.services.zone_aggregates import (
     GeraeteLuecke,
     ZonenIst,
@@ -73,11 +74,21 @@ async def _build_zone_read(
 
     active = await override_service.get_active(session, zone.room_id, heating_zone_id=zone.id)
     if active is not None:
+        # Sprint 23 T1.7: der gekappte Wert dazu, falls Layer 5 greift.
+        # Dieselbe Rechnung wie fuer die Grenzen am Geraet und wie in der
+        # Historie — ueber ``soll_grenzen_je_zone``, nicht daneben.
+        grenzen = (await soll_grenzen_je_zone(session, [zone.id])).get(zone.id)
+        gekappt: int | None = None
+        if grenzen is not None:
+            wunsch = int(active.setpoint)
+            begrenzt = max(grenzen.min_c, min(grenzen.max_c, wunsch))
+            gekappt = begrenzt if begrenzt != wunsch else None
         update["active_override"] = ZoneActiveOverrideRead(
             source=active.source,
             setpoint_celsius=active.setpoint,
             started_at=active.created_at,
             expires_at=active.expires_at,
+            wirksam_gekappt_c=gekappt,
         )
 
     if mean_temps is None:

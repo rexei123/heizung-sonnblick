@@ -25,6 +25,16 @@ class ZoneActiveOverrideRead(BaseModel):
     started_at: datetime
     expires_at: datetime
 
+    # Sprint 23 T1.7: der **wirksame** Wert, falls Layer 5 kappt.
+    #
+    # ``setpoint_celsius`` ist der Gastwunsch. Stand hier allein „30 °C",
+    # behauptete die Karte eine Wirkung, die es nicht gibt — wirksam
+    # waren 25. ``None`` heisst „keine Kappung".
+    #
+    # Read-time aus dem Raumtyp abgeleitet (Bad-Zonen aus dem der
+    # Vorlage), ueber denselben Helfer wie die Grenzen am Geraet.
+    wirksam_gekappt_c: int | None = None
+
     @field_serializer("setpoint_celsius")
     def _decimal_to_float(self, v: Decimal) -> float:
         return float(v)

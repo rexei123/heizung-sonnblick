@@ -595,6 +595,39 @@ _QUELLEN_RANG: dict[OverrideSource, int] = {
 # "Abreise" und "durch einen neueren ersetzt" sehen koennen.
 REVOKE_REASON_SUPERSEDED = "superseded"
 
+#: ``revoked_reason`` der Tages-Aufraeumung abgelaufener Eintraege
+#: (``cleanup_expired``).
+#:
+#: **Sprint 23 T1.7 hat die Zeichenkette zur Konstante gemacht**, und
+#: zwar mit Grund: die Historie im Frontend ordnet die Gruende seither
+#: ueber eine Tabelle mit **genauen** Schluesseln zu, und ein Spiegel-Test
+#: haelt sie gegen diese Konstanten. Stuende hier weiter ein Literal,
+#: prueefte der Spiegel gegen eine Zeichenkette, die jemand beim
+#: Umbenennen uebersieht — und die Oberflaeche zeigte den Rohwert, wo sie
+#: „abgelaufen" zeigen sollte.
+REVOKE_REASON_EXPIRED = "auto: expired"
+
+#: ``revoked_reason``, wenn ein Mitarbeiter die Uebersteuerung des Zimmers
+#: gesperrt hat (``PATCH /rooms/{id}/override-block-state``). Lag bis
+#: Sprint 23 T1.7 als Literal in ``api/v1/rooms.py`` — und genau dieser
+#: Wert wurde in der Historie als „manuell aufgehoben" ausgegeben, weil
+#: die Zuordnung auf das Wortanfang-Muster ``auto`` prueefte.
+REVOKE_REASON_ROOM_BLOCKED = "room_override_blocked"
+
+#: Der Vorgabewert von ``revoke_all_active_overrides``, falls ein Aufrufer
+#: keinen Grund mitgibt.
+#:
+#: **Kein Aufrufer im Quellcode tut das** — der Check-out-Haken schreibt
+#: ``REVOKE_REASON_CHECKOUT``, die Zimmersperre
+#: ``REVOKE_REASON_ROOM_BLOCKED``. Der Wert ist damit toter Text, und er
+#: stand als Literal in der Signatur: ein Test erwartete ihn (Nebenbefund
+#: der Erhebung zu T1.7) und dokumentierte damit einen Grund, den es im
+#: Betrieb nicht gibt.
+#:
+#: Er bleibt als Konstante stehen statt zu verschwinden, weil die
+#: Signatur ihn als Default braucht — aber er heisst jetzt, was er ist.
+REVOKE_REASON_CHECKOUT_FALLBACK = "auto: unbekannter Aufrufer"
+
 
 async def _beende_aeltere_im_selben_bereich(
     session: AsyncSession,
@@ -816,7 +849,7 @@ async def revoke_all_active_overrides(
     session: AsyncSession,
     room_id: int,
     *,
-    reason: str = "auto: guest checked out",
+    reason: str = REVOKE_REASON_CHECKOUT_FALLBACK,
     now: datetime | None = None,
 ) -> int:
     """Revoked ALLE aktiven Overrides des Raums (Sprint 12a T2, AE-58).
@@ -879,7 +912,7 @@ async def cleanup_expired(session: AsyncSession) -> int:
     overrides = list(result.scalars().all())
     for override in overrides:
         override.revoked_at = override.expires_at
-        override.revoked_reason = "auto: expired"
+        override.revoked_reason = REVOKE_REASON_EXPIRED
     if overrides:
         await session.flush()
     return len(overrides)

@@ -378,22 +378,81 @@ async def set_override_block_state(
     Begriffstrennung: ``guest_override_blocked`` ist **nicht** identisch
     mit ``RoomStatus.BLOCKED`` (das ist „Zimmer aus Engine genommen").
     Hier laeuft die Engine normal, nur die Override-Eingabe ist gesperrt.
+
+    **Sprint 23 T4-A: ``bis_checkout``.** Mit ``true`` endet die Sperre
+    beim Uebergang OCCUPIED -> VACANT von selbst
+    (``services/gast_sperre``). Das ist der Regelfall fuer einen Gast, der
+    die Einstellung verstellt: eine dauerhafte Sperre, die niemand
+    zuruecknimmt, hinterlaesst dem **naechsten** Gast ein Rad, das nichts
+    bewirkt — und an der Rezeption keine Erklaerung dafuer.
+
+    Der Standard bleibt ``false`` und damit das bisherige Verhalten. Zwei
+    Faelle werden mit 422 abgewiesen: ``bis_checkout`` ohne ``blocked``,
+    und ``bis_checkout`` fuer einen Allgemeinbereich (der hat keine
+    Abreise, die Sperre wuerde nie enden). Begruendungen stehen im Code
+    daneben.
     """
     room = await _get_or_404(session, room_id)
 
+    # Sprint 23 T4-A: zwei Abweisungen, bevor irgendetwas geschrieben wird.
+    #
+    # 1. ``bis_checkout`` ohne ``blocked`` ist kein Zustand. Es waere eine
+    #    Sperre, die endet, ohne begonnen zu haben — und sie wuerde beim
+    #    naechsten Setzen eine Absicht vorspiegeln, die niemand geaeussert
+    #    hat.
+    if payload.bis_checkout and not payload.blocked:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                '„Bis Check-out" setzt eine Sperre voraus. Entweder sperren '
+                "und bis Check-out, oder aufheben."
+            ),
+        )
+
+    # 2. Ein Allgemeinbereich hat keinen Check-out. ``sync_room_status``
+    #    laesst den Status eines nicht buchbaren Raumtyps stehen (Sprint
+    #    24d), der Uebergang OCCUPIED -> VACANT tritt dort nie ein — eine
+    #    Sperre „bis Check-out" wuerde also **nie** enden. Dass der
+    #    Loese-Dienst sie nie zu sehen bekaeme, ist kein Ersatz fuer diese
+    #    Abweisung, sondern der Grund dafuer: ein Versprechen, das niemand
+    #    einloest, darf nicht annehmbar sein (Paragraph 5.77).
+    if payload.bis_checkout:
+        buchbar = await session.scalar(
+            select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+        )
+        if buchbar is False:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Ein Allgemeinbereich hat keine Abreise — eine Sperre „bis "
+                    'Check-out" wuerde dort nie enden. Hier gilt nur die '
+                    "dauerhafte Sperre."
+                ),
+            )
+
     old_blocked = room.guest_override_blocked
-    if old_blocked == payload.blocked:
+    old_bis_checkout = room.guest_block_bis_checkout
+    # Idempotenz (Paragraph S2) vergleicht **beide** Felder. Vorher stand
+    # hier nur ``blocked``; damit haette ein Wechsel von „dauerhaft" auf
+    # „bis Check-out" nichts getan und 200 gemeldet.
+    if old_blocked == payload.blocked and old_bis_checkout == payload.bis_checkout:
         return room
 
     revoked_count = 0
-    if payload.blocked:
+    # Widerrufen wird beim **Beginn** der Sperre, nicht bei jeder
+    # Aenderung: wer von „dauerhaft" auf „bis Check-out" umstellt, hat
+    # schon gesperrt, und ein zweiter Widerruf traefe nichts.
+    if payload.blocked and not old_blocked:
         revoked_count = await override_service.revoke_all_active_overrides(
             session,
             room_id=room_id,
-            reason="room_override_blocked",
+            reason=override_service.REVOKE_REASON_ROOM_BLOCKED,
         )
 
     room.guest_override_blocked = payload.blocked
+    # Beim Aufheben faellt die Absicht mit — sonst stuende sie beim
+    # naechsten Setzen noch da (dieselbe Regel wie im Loese-Dienst).
+    room.guest_block_bis_checkout = payload.bis_checkout if payload.blocked else False
 
     await record_business_action(
         session,
@@ -401,9 +460,10 @@ async def set_override_block_state(
         action="ROOM_OVERRIDE_BLOCK_TOGGLED",
         target_type="room",
         target_id=room_id,
-        old_value={"blocked": old_blocked},
+        old_value={"blocked": old_blocked, "bis_checkout": old_bis_checkout},
         new_value={
             "blocked": payload.blocked,
+            "bis_checkout": room.guest_block_bis_checkout,
             "revoked_overrides_count": revoked_count,
         },
         request_ip=request.client.host if request.client else None,

@@ -7,8 +7,12 @@ import { test, expect, type Page, type Route } from "./fixtures";
  * Pattern wie ``manual-override-zone.spec.ts`` (Sprint 12b).
  * §5.54: Routes mit RegExp + ``(\?.*)?$`` fuer Query-String-Robustheit.
  *
+ * Sprint 23 T4-A hat den Bestaetigungs-Dialog beim Sperren durch die
+ * Auswahl „bis Check-out oder dauerhaft" ersetzt. Die Faelle 1 und 2
+ * sind entsprechend nachgezogen, mit Grund im Test.
+ *
  * Test-Cases (4):
- *  1. Toggle-On bei aktiven Overrides zeigt Confirm-Dialog
+ *  1. Toggle-On bei aktiven Overrides zeigt die Auswahl mit Override-Count
  *  2. Toggle-On revoked Overrides und blendet Create-Form aus
  *  3. Blockiertes Zimmer rendert Banner, Create-Form ist weg
  *  4. Toggle-Off stellt Create-Form wieder her
@@ -25,7 +29,11 @@ const MOCK_MITARBEITER = {
   last_login_at: "2026-05-19T18:00:00Z",
 };
 
-function roomMock(opts: { blocked: boolean }): Record<string, unknown> {
+function roomMock(opts: {
+  blocked: boolean;
+  bisCheckout?: boolean;
+  bereich?: boolean;
+}): Record<string, unknown> {
   return {
     id: 101,
     number: "101",
@@ -35,6 +43,12 @@ function roomMock(opts: { blocked: boolean }): Record<string, unknown> {
     orientation: null,
     status: "occupied",
     guest_override_blocked: opts.blocked,
+    // Sprint 23 T4-A: die Form der Sperre. Der Mock fuehrt sie mit,
+    // weil die Oberflaeche daraus den Satz „endet mit der Abreise" bzw.
+    // „dauerhaft" ableitet — ein Mock, der duenner ist als die API,
+    // laesst die Seite falsch aussehen oder abstuerzen (§24e).
+    guest_block_bis_checkout: opts.bisCheckout ?? false,
+    ist_allgemeinbereich: opts.bereich ?? false,
     notes: null,
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-05-15T10:00:00Z",
@@ -99,11 +113,13 @@ async function mockApi(
   },
 ): Promise<{
   patchedBlocked: () => boolean | null;
+  patchedBisCheckout: () => boolean | null;
   resetOverrides: () => void;
 }> {
   let currentRoom = roomMock({ blocked: opts.initialBlocked });
   let currentOverrides = [...opts.initialOverrides];
   let patchedBlockedValue: boolean | null = null;
+  let patchedBisCheckoutValue: boolean | null = null;
 
   // Catch-all leer (Playwright: zuletzt registriert wird zuerst getroffen).
   await page.route("**/api/v1/**", async (route: Route) => {
@@ -124,9 +140,16 @@ async function mockApi(
     /.*\/api\/v1\/rooms\/101\/override-block-state(\?.*)?$/,
     async (route: Route) => {
       if (route.request().method() === "PATCH") {
-        const body = JSON.parse(route.request().postData() ?? "{}") as { blocked: boolean };
+        const body = JSON.parse(route.request().postData() ?? "{}") as {
+          blocked: boolean;
+          bis_checkout?: boolean;
+        };
         patchedBlockedValue = body.blocked;
-        currentRoom = roomMock({ blocked: body.blocked });
+        patchedBisCheckoutValue = body.bis_checkout ?? false;
+        currentRoom = roomMock({
+          blocked: body.blocked,
+          bisCheckout: body.blocked && (body.bis_checkout ?? false),
+        });
         if (body.blocked) {
           // Auto-Revoke wie Backend.
           currentOverrides = currentOverrides.map((ov) => ({
@@ -184,6 +207,7 @@ async function mockApi(
 
   return {
     patchedBlocked: () => patchedBlockedValue,
+    patchedBisCheckout: () => patchedBisCheckoutValue,
     resetOverrides: () => {
       currentOverrides = [];
     },
@@ -204,7 +228,12 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
     await expect(toggleBtn).toBeVisible();
     await toggleBtn.click();
 
-    // Confirm-Dialog mit Count.
+    // Sprint 23 T4-A: an der Stelle des Bestaetigungs-Dialogs steht jetzt
+    // die Auswahl „bis Check-out oder dauerhaft" — mit demselben Hinweis
+    // auf die Overrides, die dabei aufgehoben werden. Ein eigener
+    // Bestaetigungsschritt davor waere ein zweiter Klick fuer dieselbe
+    // Entscheidung.
+    await expect(page.getByTestId("sperre-auswahl")).toBeVisible();
     await expect(page.getByText(/1 aktive Übersteuerung wird/)).toBeVisible();
 
     // Cancel -> kein PATCH.
@@ -223,13 +252,17 @@ test.describe("Sprint 12c — Uebersteuerungs-Sperre", () => {
     await page.getByRole("button", { name: "Übersteuerung", exact: true }).click();
     await expect(page.getByRole("button", { name: "Anwenden" })).toBeVisible();
 
-    // Toggle-On (keine aktiven Overrides -> kein Dialog, direkter PATCH).
-    await page
-      .getByRole("button", { name: "Übersteuerung sperren" })
-      .click();
+    // Sprint 23 T4-A: die Form wird abgefragt, auch ohne aktive
+    // Overrides — geaenderte Erwartung mit Grund (S8). Vorher ging bei
+    // leerer Override-Liste ein direkter PATCH raus; eine Sperre ohne
+    // Angabe, wie lange sie gilt, ist aber genau der Fall, der dem
+    // naechsten Gast ein totes Drehrad hinterlaesst.
+    await page.getByRole("button", { name: "Übersteuerung sperren" }).click();
+    await page.getByRole("button", { name: "Dauerhaft sperren" }).click();
 
     // PATCH ging mit blocked=true raus.
     await expect.poll(() => ctrl.patchedBlocked()).toBe(true);
+    expect(ctrl.patchedBisCheckout()).toBe(false);
 
     // Banner sichtbar, Create-Form weg.
     await expect(page.getByText("Übersteuerung gesperrt").first()).toBeVisible();

@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
+import { SeitenHilfe } from "@/components/patterns/seiten-hilfe";
 import {
   Sheet,
   SheetContent,
@@ -59,6 +60,12 @@ const NAV: NavGroup[] = [
       { href: "/", label: "Dashboard", icon: "home" },
       { href: "/zimmer", label: "Zimmerübersicht", icon: "meeting_room" },
       { href: "/belegungen", label: "Belegungen", icon: "event" },
+      // Paket 1, Platz korrigiert am 26.10.2026: das Handbuch stand
+      // zuerst in einer eigenen Gruppe „Hilfe" am Ende der Leiste.
+      // Entscheidung des Betreibers — es gehoert nach oben, zu den
+      // Seiten, die man ohne Anlass oeffnet. Eine eigene Gruppe fuer
+      // einen Eintrag war ohnehin eine Ueberschrift ohne Inhalt.
+      { href: "/handbuch", label: "Handbuch", icon: "menu_book" },
     ],
   },
   {
@@ -302,6 +309,12 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
       </aside>
 
       <main className="flex-1 min-w-0">{children}</main>
+
+      {/* Paket 1: das „?" zur aktuellen Seite. Steht hier und nicht in
+          den Seiten, damit es keine Seite gibt, die es vergisst. Vor der
+          Anmeldung erscheint es nicht — der Zweig oben kehrt vorher
+          zurück. */}
+      <SeitenHilfe />
     </div>
   );
 }

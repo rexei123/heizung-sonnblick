@@ -128,12 +128,24 @@ export function useDeleteRoom(): UseMutationResult<void, Error, number> {
 // Sprint 12c (AE-58): Uebersteuerungs-Sperre togglen.
 // Invalidiert Room (neuer guest_override_blocked-Stand) und die Override-Liste
 // des Raums (Toggle-On revoked aktive Overrides serverseitig).
+/**
+ * Sprint 23 T4-A: die Mutation nimmt jetzt beide Felder.
+ *
+ * Ein Objekt statt zweier Stellungen, damit der Aufrufer sie nicht
+ * verwechseln kann — `mutateAsync(true, true)` wäre nicht lesbar.
+ */
+export interface SperrEingabe {
+  blocked: boolean;
+  bisCheckout?: boolean;
+}
+
 export function useSetRoomOverrideBlockState(
   id: number,
-): UseMutationResult<Room, Error, boolean> {
+): UseMutationResult<Room, Error, SperrEingabe> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (blocked: boolean) => roomsApi.patchOverrideBlockState(id, blocked),
+    mutationFn: ({ blocked, bisCheckout = false }: SperrEingabe) =>
+      roomsApi.patchOverrideBlockState(id, blocked, bisCheckout),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ROOM_KEYS.one(id) });
       qc.invalidateQueries({ queryKey: ROOM_KEYS.all });

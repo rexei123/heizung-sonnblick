@@ -323,3 +323,57 @@ def test_zu_int_faellt_auf_den_standard_zurueck(roh: object) -> None:
 
 def test_zu_int_nimmt_einen_eigenen_standard() -> None:
     assert engine_abgleich._zu_int("keine zahl", standard=7) == 7
+
+
+# ---------------------------------------------------------------------------
+# Vorbereitet fuer den Fall "Geraet klemmt Funk-Sollwerte" (Sprint 23 T1a)
+# ---------------------------------------------------------------------------
+
+
+def test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf(
+    fake_redis: _FakeRedis,
+) -> None:
+    """Engine will 10 Grad, das Geraet meldet dauerhaft 15 — und zwar nie 10.
+
+    **Der Fall, fuer den dieser Test vorbereitet ist.** Sollte sich in der
+    Probe aus Sprint 23 T1a zeigen, dass die Vicki auch **Funk**-Sollwerte
+    an ihrer Untergrenze klemmt (gemeldet 15 statt der gesendeten 10),
+    dann stimmt der gemeldete Sollwert nach einem Frostschutz **nie** mit
+    dem Engine-Soll ueberein. ``erfolg_gemeldet`` wird also nie gerufen,
+    der Zaehler nie geloescht.
+
+    Die Frage, die dieser Test beantwortet: entsteht daraus eine
+    Endlos-Wiederholung? **Nein** — nach ``MAX_VERSUCHE`` ist Schluss, und
+    danach gibt ``darf_senden`` auch nach Ablauf der Drosselung weiter
+    ``False`` zurueck, weil der Zaehler vor der Sperre geprueft wird.
+
+    Das ist der Grund, warum die Untergrenze im Notfall auf 10 gesenkt
+    werden **koennte**, ohne dass vorher eine Drosselung gebaut werden
+    muss: die Grenze steht schon, und sie steht an der richtigen Stelle.
+    Drei Downlinks je Vorkommnis sind der Preis, nicht einer je Tick.
+
+    Gegenprobe im selben Test: sobald das Geraet den Wert doch meldet,
+    beginnt es wieder bei null — der Melder ist also nicht dauerhaft
+    taub.
+    """
+    dev = "70b3d52dd3034de4"
+
+    gesendet = 0
+    for _tick in range(12):  # zwoelf Engine-Ticks, Sperre jeweils abgelaufen
+        if engine_abgleich.darf_senden(dev):
+            gesendet += 1
+            engine_abgleich.versuch_gezaehlt(dev)
+        # Das Geraet meldet weiter 15 statt 10 — kein ``erfolg_gemeldet``.
+        # Ablauf der Drosselung simulieren — die Attrappe bildet TTL
+        # nicht nach (siehe ihren Docstring).
+        fake_redis.delete(engine_abgleich._drossel_key(dev))
+
+    assert gesendet == engine_abgleich.MAX_VERSUCHE, (
+        f"{gesendet} Nachsendungen bei dauerhafter Abweichung — erwartet "
+        f"hoechstens {engine_abgleich.MAX_VERSUCHE}"
+    )
+
+    # Und wenn das Geraet den Wert doch einmal meldet, geht es weiter.
+    engine_abgleich.erfolg_gemeldet(dev)
+    fake_redis.delete(engine_abgleich._drossel_key(dev))
+    assert engine_abgleich.darf_senden(dev) is True

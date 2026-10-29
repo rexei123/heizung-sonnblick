@@ -64,6 +64,12 @@ from heizung.services.device_service import (
     replace_device,
     retire_device,
 )
+from heizung.services.geraetegrenzen import (
+    Grenzbefund,
+    Grenzen,
+    ist_grenzen_je_geraet,
+    soll_grenzen_je_zone,
+)
 from heizung.services.valve_health import ValveVerdict, valve_verdicts
 from heizung.tasks.engine_tasks import evaluate_room
 
@@ -115,6 +121,8 @@ async def _build_device_read(
     verdict: BatteryVerdict,
     ventil: ValveVerdict,
     kindersicherung: Sperrmeldung | None,
+    grenzen_soll: Grenzen | None,
+    grenzen_ist: Grenzbefund | None,
 ) -> DeviceRead:
     """Assembliert ein ``DeviceRead`` inkl. Nested-Zuordnung + active_override
     + latest_reading (Sprint 14a, D2) + battery_state (Sprint 15d, AE-65).
@@ -136,6 +144,13 @@ async def _build_device_read(
     wuerde genau den Fehler zulassen, den er verdeckt — eine Liste, die
     stillschweigend "unbekannt" fuer jedes Geraet ausgibt, weil jemand das
     Argument vergessen hat.
+
+    ``grenzen_soll`` und ``grenzen_ist`` ebenso (Sprint 23 T1), und hier
+    ist die Trennung der Punkt: ``soll`` kommt aus dem Raumtyp (bei einer
+    Bad-Zone aus dem der Vorlage), ``ist`` aus der Antwort auf ``0x15``.
+    Beides als Pflicht-Argument und aus je **einer** Aggregat-Abfrage vor
+    der Schleife. ``grenzen_ist is None`` heisst "noch keine Antwort" —
+    und die Oberflaeche sagt "nicht bestaetigt", nicht "falsch".
 
     ``kindersicherung`` ebenso (Sprint 24c): der gemeldete Sperr-Zustand
     kommt aus **einer** Abfrage fuer alle Geraete des Requests
@@ -216,7 +231,28 @@ async def _build_device_read(
             "battery_jump_at": verdict.jump_at,
             "battery_last_voltage": verdict.last_v,
             "battery_last_at": verdict.last_at,
+            # Sprint 23 T1: Soll und Ist getrennt. Eine Anzeige, die das
+            # **Gesendete** zeigt, waere eine Zusicherung ohne Deckung —
+            # genau die, die wir vor Sprint 20f fuer den Sollwert hatten.
+            "grenzen_soll_min_c": None if grenzen_soll is None else grenzen_soll.min_c,
+            "grenzen_soll_max_c": None if grenzen_soll is None else grenzen_soll.max_c,
+            "grenzen_ist_min_c": None if grenzen_ist is None else grenzen_ist.grenzen.min_c,
+            "grenzen_ist_max_c": None if grenzen_ist is None else grenzen_ist.grenzen.max_c,
+            "grenzen_bestaetigt_um": None if grenzen_ist is None else grenzen_ist.gemeldet_um,
         }
+    )
+
+
+async def _grenzen_soll_fuer(session: AsyncSession, device: Device) -> Grenzen | None:
+    """Soll-Grenzen fuer ein einzelnes Geraet.
+
+    ``None`` fuer ein Geraet ohne Zone: ohne Einsatzort gibt es keine
+    Grenzen, und das ist eine Aussage und kein fehlender Wert.
+    """
+    if device.heating_zone_id is None:
+        return None
+    return (await soll_grenzen_je_zone(session, [device.heating_zone_id])).get(
+        device.heating_zone_id
     )
 
 
@@ -254,12 +290,15 @@ async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRe
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
+    grenzen_soll = await _grenzen_soll_fuer(session, device)
     return await _build_device_read(
         session,
         device,
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
         await child_lock_verdict(session, device_id),
+        grenzen_soll,
+        (await ist_grenzen_je_geraet(session, [device_id]))[device_id],
     )
 
 
@@ -338,8 +377,23 @@ async def list_devices(
     ventile = await valve_verdicts(session, ids)
     # Sprint 24c: dieselbe Form -- eine Abfrage fuer die ganze Seite.
     sperren = await child_lock_verdicts(session, ids)
+    # Sprint 23 T1: zwei weitere Aggregat-Abfragen vor der Schleife —
+    # Soll je Zone und Gemeldetes je Geraet. Eine Abfrage je Zeile waere
+    # bei 104 Geraeten der vierte und fuenfte N+1-Pfad.
+    soll_je_zone = await soll_grenzen_je_zone(
+        session, [d.heating_zone_id for d in devices if d.heating_zone_id is not None]
+    )
+    grenzen_ist = await ist_grenzen_je_geraet(session, ids)
     return [
-        await _build_device_read(session, d, verdicts[d.id], ventile[d.id], sperren[d.id])
+        await _build_device_read(
+            session,
+            d,
+            verdicts[d.id],
+            ventile[d.id],
+            sperren[d.id],
+            soll_je_zone.get(d.heating_zone_id) if d.heating_zone_id is not None else None,
+            grenzen_ist[d.id],
+        )
         for d in devices
     ]
 
@@ -436,8 +490,13 @@ async def list_pool_devices(
     verdicts = await battery_verdicts(session, pool_ids)
     ventile = await valve_verdicts(session, pool_ids)
     sperren = await child_lock_verdicts(session, pool_ids)
+    # Pool-Geraete haben keine Zone und damit keine Soll-Grenzen — das ist
+    # kein Sonderfall, sondern die Aussage: ohne Einsatzort gibt es keine.
+    grenzen_ist = await ist_grenzen_je_geraet(session, pool_ids)
     return [
-        await _build_device_read(session, d, verdicts[d.id], ventile[d.id], sperren[d.id])
+        await _build_device_read(
+            session, d, verdicts[d.id], ventile[d.id], sperren[d.id], None, grenzen_ist[d.id]
+        )
         for d in pool
     ]
 
@@ -460,12 +519,15 @@ async def get_device(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device {device_id} nicht gefunden",
         )
+    grenzen_soll = await _grenzen_soll_fuer(session, device)
     return await _build_device_read(
         session,
         device,
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
         await child_lock_verdict(session, device_id),
+        grenzen_soll,
+        (await ist_grenzen_je_geraet(session, [device_id]))[device_id],
     )
 
 

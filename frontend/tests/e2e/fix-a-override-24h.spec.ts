@@ -73,6 +73,13 @@ function historie(
     created_by: null,
     revoked_at,
     revoked_reason,
+    // Sprint 23 T1.7: der wirksame Wert bei Kappung. Hier ``null`` —
+    // diese Zeilen sind alle beendet, und eine beendete Zeile gegen die
+    // heutigen Grenzen zu rechnen wuerde eine Vergangenheit behaupten,
+    // die so nicht war. Der Mock fuehrt das Feld trotzdem, weil die API
+    // es fuehrt (24e: ein Mock, der duenner ist als die API, laesst die
+    // Seite falsch aussehen).
+    wirksam_gekappt_c: null,
   };
 }
 
@@ -122,16 +129,40 @@ test.describe("Fix A — Übersteuerung", () => {
   });
 
   test("abgelaufener_override_heisst_abgelaufen_nicht_aufgehoben", async ({ page }) => {
-    // Drei Zeilen, drei Wege aus dem Leben eines Overrides.
+    // Sechs Zeilen, sechs Wege aus dem Leben eines Overrides.
+    //
+    // **Sprint 23 T1.7 hat zwei Erwartungen geaendert, mit Grund (S8):**
+    //
+    // 1. Ein **Freitext** (Zeile 3) erscheint jetzt als Rohwert statt als
+    //    „manuell aufgehoben". Vorgabe des Betreibers, und sie ist
+    //    richtig: der Rohwert ist genau das, was der Mitarbeiter beim
+    //    Aufheben hingeschrieben hat — „manuell aufgehoben" verwirft
+    //    diese Information.
+    // 2. `superseded` (Zeile 4) und `room_override_blocked` (Zeile 5)
+    //    hiessen vorher **beide** „manuell aufgehoben", obwohl beide
+    //    automatische Vorgaenge sind: die Zuordnung prueefte auf das
+    //    Wortanfang-Muster `auto` und verfehlte sie. In der Historie von
+    //    306 (12 Drehungen in 16 Stunden) stand das elfmal.
+    //
+    // „manuell aufgehoben" bleibt fuer `NULL` — Aufhebung ueber die
+    // Oberflaeche, Grund freiwillig (Zeile 6).
     await mockRoom(page, [
       historie(1, "frontend_24h", "2026-10-19T09:00:00Z", "auto: expired"),
       historie(2, "device_manual", "2026-10-19T11:00:00Z", "auto_revoke_on_checkout"),
       historie(3, "frontend_checkout", "2026-10-19T12:00:00Z", "Gast hat sich beschwert"),
+      historie(4, "device_manual", "2026-10-19T13:00:00Z", "superseded"),
+      historie(5, "frontend_24h", "2026-10-19T14:00:00Z", "room_override_blocked"),
+      historie(6, "frontend_24h", "2026-10-19T15:00:00Z", null),
     ]);
     await zumReiter(page);
 
     await expect(page.getByText("abgelaufen", { exact: true })).toHaveCount(1);
     await expect(page.getByText("mit der Abreise beendet")).toHaveCount(1);
+    await expect(page.getByText("ersetzt (neue Drehung)")).toHaveCount(1);
+    await expect(page.getByText("durch Sperre beendet")).toHaveCount(1);
+    // Der Freitext, unveraendert.
+    await expect(page.getByText("Gast hat sich beschwert")).toHaveCount(1);
+    // Und nur noch EINMAL „manuell aufgehoben" — fuer die Zeile ohne Grund.
     await expect(page.getByText("manuell aufgehoben")).toHaveCount(1);
   });
 

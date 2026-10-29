@@ -1015,8 +1015,24 @@ def clamp_grenzen(ctx: _RoomContext) -> tuple[int, int]:
     ``ctx.room_type`` ist der Hebel: fuer Bad-Zonen laeuft derselbe Helfer
     ueber den Kontext der Vorlage und liefert damit deren Grenzen.
     """
-    rt_min = _safe_int(ctx.room_type.min_temp_celsius, default=MIN_SETPOINT_C)
-    rt_max = _safe_int(ctx.room_type.max_temp_celsius, default=MAX_SETPOINT_C)
+    return grenzen_aus_raumtyp(ctx.room_type)
+
+
+def grenzen_aus_raumtyp(raumtyp: RoomType) -> tuple[int, int]:
+    """Dieselbe Rechnung, nur ohne Engine-Kontext.
+
+    **Warum sie herausgezogen ist (Sprint 23 T1).** Die Grenzen am Geraet
+    (``0x08``) brauchen genau diesen Wert, haben aber keinen
+    ``_RoomContext`` zur Hand: sie werden je **Zone** bestimmt, aus dem
+    Raumtyp des Zimmers oder — bei einer Bad-Zone — aus dem der Vorlage.
+    Die vier Zeilen dort zu wiederholen waere die vierte Kopie derselben
+    Rechnung, und §5.53 ist genau darueber.
+
+    ``clamp_grenzen`` ruft sie mit ``ctx.room_type`` auf und bleibt damit
+    die Stelle, die die Engine kennt.
+    """
+    rt_min = _safe_int(raumtyp.min_temp_celsius, default=MIN_SETPOINT_C)
+    rt_max = _safe_int(raumtyp.max_temp_celsius, default=MAX_SETPOINT_C)
     return max(rt_min, MIN_SETPOINT_C), min(rt_max, MAX_SETPOINT_C)
 
 

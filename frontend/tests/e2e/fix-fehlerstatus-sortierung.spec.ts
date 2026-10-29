@@ -72,6 +72,14 @@ function makeDevice(
     battery_jump_at: null,
     battery_last_voltage: 3.2,
     battery_last_at: iso(5 * 60 * 1000),
+    // Sprint 23 T1: die Grenzen des Drehrads. Vollstaendig im Mock, auch
+    // wenn dieser Test sie nicht prueft — ein Mock, der duenner ist als
+    // die API, laesst die Seite falsch aussehen oder abstuerzen (24e).
+    grenzen_soll_min_c: 15,
+    grenzen_soll_max_c: 25,
+    grenzen_ist_min_c: null,
+    grenzen_ist_max_c: null,
+    grenzen_bestaetigt_um: null,
     ...zusatz,
   };
 }

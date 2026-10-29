@@ -7230,3 +7230,621 @@ SQL
 **Was die Abfrage nicht beantwortet:** ob das Diagramm sie richtig
 zeichnet. Dafür ist der Verlauf selbst der Prüfpunkt — mit der
 Zeitzonen-Angabe darunter.
+
+---
+
+## 10am. Das Handbuch in der Software: wo es liegt, wie man es ändert
+
+**Für wen:** den Betreiber, wenn ein Artikel falsch oder unvollständig ist.
+
+Seit 25.10.2026 hat die Oberfläche einen Menüpunkt **Handbuch** (Gruppe
+**Übersicht**, direkt unter „Belegungen", für alle Rollen lesbar). Darin:
+23 Artikel in vier
+Kategorien, eine Suche, auf jeder Seite ein „?" zum passenden Artikel, und
+eine Druckansicht für den Ordner an der Rezeption.
+
+### Die drei Adressen
+
+| Adresse | Was dort steht |
+|---|---|
+| `/handbuch` | Übersicht, Suche über Titel, Überschriften, Text und Stichworte |
+| `/handbuch/<name>` | ein Artikel, mit Verzeichnis und Direktlinks auf die Abschnitte |
+| `/handbuch/drucken` | alle Artikel auf einer Seite; mit Strg+P drucken |
+
+### Was auf Papier fehlt — und warum
+
+Die aktuellen Sollwerte, Zeiten und Raumtyp-Werte stehen **nicht** im
+Ausdruck. Im Bildschirm werden sie beim Öffnen aus der Datenbank gelesen;
+auf Papier stünde der Stand des Ausdruckstages und sähe wie eine Zusicherung
+für morgen aus. Statt der Tabelle steht dort ein Satz, wo die Werte zu finden
+sind.
+
+Gedruckt wird dagegen die **Zeichnung der Heizlogik**: die Reihenfolge der
+sechs Schichten ändert sich nicht mit einem Sollwert.
+
+### Einen Artikel ändern
+
+Die Artikel sind Textdateien im Repo, nicht Datenbank-Einträge:
+
+```
+frontend/content/handbuch/<name>.md
+```
+
+Es gibt bewusst **keine** Bearbeitungsoberfläche. Wer das Handbuch ändert,
+ändert Software-Verhalten oder beschreibt es — beides gehört in einen Pull
+Request, und so wandert die Beschreibung mit der Änderung (AE-79, CLAUDE.md
+§3.13).
+
+Ein Hinweis an den Entwickler genügt also: *„Artikel X sagt Y, richtig ist
+Z."* Das Datum oben im Artikel (`Stand`) zeigt, wie alt die Aussage ist —
+weicht es stark vom letzten Merge ab, ist das der erste Verdacht.
+
+Was CI prüft: jede Seite der Seitenleiste hat einen Artikel, jeder Artikel
+ein Datum, jeder Verweis ein Ziel
+(`backend/tests/test_handbuch_spiegel.py`). Was CI **nicht** prüfen kann:
+ob der Text stimmt. Dafür steht in jedem Pull Request die Zeile
+`Handbuch: angepasst / nicht nötig, weil …`.
+
+### Vier Seiten sind leer, und das Handbuch sagt es
+
+`Profile`, `Temperaturverlauf`, `Gateway` und `Saison` sind Platzhalter —
+seit Sprint 9.13b. Der jeweilige Artikel benennt das und sagt, wo die Sache
+heute steht:
+
+| Leere Seite | Wo es heute steht |
+|---|---|
+| Profile | Nachtabsenkung unter „Temperaturen & Zeiten", Unterschiede je Raumtyp unter „Raumtypen" |
+| Temperaturverlauf | Tab „Verlauf" auf der Zimmer-Detailseite |
+| Gateway | Kachel „Geräte online" auf dem Dashboard, dann „Thermostate" |
+| Saison | Sommermodus unter „Szenarien" |
+
+### Zwei Begriffe, die auseinandergehalten werden
+
+Beide Aufgaben hießen in der Planung „T3". Im Handbuch und hier stehen sie
+deshalb mit Abgrenzung:
+
+| Begriff | Was es ist | Stand |
+|---|---|---|
+| **Listen-Wächter** | Mail, wenn acht Stunden keine Belegungsliste kam. Schwelle: Server-Einstellung `IMPORT_MAX_GAP_HOURS`, Vorgabe 8 | im Betrieb seit 25.10.2026, §10al |
+| **Relais-Test T3.0** | Messung am Relais-Pfad der Infrarot-Heizkörper | offen; es ist kein Relais montiert, §10aj |
+
+Wer eines von beiden sucht, sucht nicht nach „T3", sondern nach dem, was es
+tut.
+
+---
+
+## 10an. Die Gast-Sperre: zwei Formen, und welche wann
+
+**Für wen:** die Rezeption. Ein Gast dreht am Thermostat, das Zimmer
+reagiert anders als er erwartet, und er beschwert sich.
+
+### Was die Sperre tut
+
+Sie verwirft Drehungen am Thermostat. Die Steuerung heizt weiter nach
+Plan; nur die Eingabe am Gerät wird nicht mehr übernommen. Die
+Wunschtemperatur von der Rezeption geht weiterhin
+(**Temperatur ändern** auf der Zimmerseite).
+
+Nicht zu verwechseln mit dem Zimmerstatus **gesperrt** — dort nimmt die
+Steuerung das Zimmer ganz heraus.
+
+### Die zwei Formen
+
+Seit 25.10.2026 fragt die Oberfläche beim Sperren, wie lange:
+
+| Form | Gilt | Wann richtig |
+|---|---|---|
+| **Bis Check-out** | endet mit der Abreise von selbst | der Regelfall — es geht um **diesen** Gast |
+| **Dauerhaft** | bleibt, bis jemand sie aufhebt | das Zimmer selbst soll kein bedienbares Rad haben |
+
+**Nehmen Sie „Bis Check-out", wenn Sie zweifeln.** Eine dauerhafte
+Sperre, die niemand zurücknimmt, trifft den nächsten Gast: er dreht, es
+passiert nichts, und niemand an der Rezeption weiß, warum — die Ursache
+ist eine Entscheidung von vorletzter Woche.
+
+Ist gesperrt, steht **unter dem Knopf**, welche Form gilt. Diese Zeile
+beantwortet die Frage, ob sich später jemand kümmern muss.
+
+### Im Allgemeinbereich
+
+Dort gibt es nur **dauerhaft**. Eine Bar hat keine Abreise; eine Sperre
+„bis Check-out" würde nie enden. Die Auswahl sagt das an der Stelle, an
+der man sie sucht, und der Server weist sie zusätzlich ab.
+
+### Was beim Sperren noch passiert
+
+Laufende Wunschtemperaturen des Zimmers werden aufgehoben. Die Auswahl
+nennt ihre Anzahl, **bevor** man sich entscheidet.
+
+### Prüfen, ob die Sperre wirklich gefallen ist
+
+Nach der Abreise: Zimmerseite öffnen. Steht der Knopf auf
+„Übersteuerung sperren" (nicht „gesperrt"), ist sie gefallen.
+
+Wer es im Protokoll nachsehen will, sucht die Aktion
+`ROOM_GUEST_BLOCK_LIFTED_ON_CHECKOUT` zu diesem Zimmer. Eigene Aktion und
+nicht ein Eintrag ohne Benutzer: beim Suchen nach „wer hat die Sperre
+aufgehoben" ist **„der Check-out"** eine andere Antwort als „niemand
+weiß es".
+
+### Was noch nicht geht
+
+Die **Kindersicherung am Gerät** — das Rad dreht sich dann nicht mehr,
+statt wirkungslos zu drehen. Das ist vorbereitet, aber **nicht in
+Betrieb**: es verlangt Funkbefehle an die Thermostate und einen eigenen
+Prüflauf. Bis dahin dreht sich das Rad, zeigt eine Zahl an, und die
+Steuerung ignoriert sie.
+
+---
+
+## 10ao. Fenstererkennung im Gerät: einschalten, messen, abschalten (Sprint 23 T2)
+
+**Für wen:** den Betreiber, in der Testwoche. Jeder Befehl hier greift
+produktive Hardware an (S4).
+
+> **Pflicht-Stop vor dem ersten Befehl.** Das Werkzeug läuft ohne
+> `--ausfuehren` als **Probelauf** und sendet nichts. Der erste Lauf mit
+> `--ausfuehren` ist ein Hardware-Eingriff und braucht die Freigabe des
+> Betreibers — mit dem Protokoll unten, nicht nebenbei.
+
+### Was heute gilt
+
+**Die Erkennung ist aus.** Die Vickis liefern sie ab Werk ausgeschaltet
+(§5.27), und eingeschaltet wurde sie nie. Folge: `openWindow` meldet
+immer `false`, die Dashboard-Kachel „Fenster offen" steht dauerhaft auf
+0, und **Schicht 4 der Heizlogik reagiert heute allein auf den
+abgenommenen Kopf**. Wer lüftet, kühlt das Zimmer, ohne dass die
+Steuerung es merkt.
+
+### Das Werkzeug
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung <befehl>
+```
+
+| Befehl | Was er tut |
+|---|---|
+| `setzen` | `0x45` mit Delta und Dauer, danach `0x46` zum Zurücklesen |
+| `aus` | `0x45` mit `enabled=0` — der Rückweg des Abbruchkriteriums |
+| `status` | nur `0x46`, fragt den Stand ab |
+| `befund` | liest die Datenbank: hat sie ausgelöst, und war es unsere Absenkung? |
+
+**Ohne `--ausfuehren` wird nichts gesendet.** Der Probelauf zeigt die
+Ziele mit Firmware und den Bytes — und die **Ausnahmen mit Grund**. Das
+ist der Teil, den man vor dem Lauf liest.
+
+**Ausgenommen sind** Geräte auf „nur messen" (die Vickis 027 und 056
+liegen als Fühler im Raum und bekommen bewusst keine Befehle), der
+Reserve-Pool (ohne Zone, Gerät 100), ausgemusterte Geräte und Relais. Ein
+Test hält das fest (`tests/test_fenstererkennung.py`) — vorher nahm das
+Bulk-Skript die Fühler mit.
+
+**Ein Tippfehler im Namen bricht ab**, statt stillschweigend nichts zu
+tun. Ein leerer Lauf sieht sonst wie „alles ausgenommen" aus.
+
+### Das Protokoll der Testwoche — fünf Schritte
+
+**Schritt 1 — Probelauf, drei Geräte.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+```
+
+Lesen: stehen genau drei Ziele da? Welche Firmware? `0x45` greift erst ab
+**4.2** — bei „(NULL)" oder „4.1" nicht ausführen, sondern melden.
+
+**Schritt 2 — die Messung T2.5, genau EIN Gerät, am Vormittag.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+```
+
+Delta 0,2 ist der **empfindlichste** Wert und ein **Messwert, kein
+Betriebswert**. Er beantwortet die Frage, gegen welchen Vorwert das Gerät
+vergleicht — die Hersteller-Doku lässt das offen (Stand 22.10.2026). Er
+wird mit Fehlalarmen antworten; das ist der Zweck, und er bleibt **nicht**
+stehen.
+
+Mindestens ein voller Tag Abstand zur nächsten Absenkung, sonst ist nicht
+zu unterscheiden, was ausgelöst hat.
+
+**Schritt 3 — der Betriebswert auf alle drei.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+1,0 °C und 10 Minuten. Das ist bewusst **nicht** der empfindlichste Wert:
+der Vicki-Sensor sitzt am Heizkörper, und jede Absenkung, die *wir*
+schicken, schließt das Ventil und kühlt ihn.
+
+**Schritt 4 — echtes Fenster, 15 Minuten, niemand fasst das Gerät an.**
+
+Danach:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 2
+```
+
+**Schritt 5 — zwei Nächte abwarten, dann der Befund.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 72
+```
+
+Zwei Nächte, damit die Absenkung zweimal gemessen ist.
+
+### Das Abbruchkriterium
+
+**Löst die Erkennung auch nur einmal durch eine eigene Absenkung aus —
+Nacht, Check-out, Fenster-Sicherheit —, wird sie auf allen Testgeräten
+abgeschaltet, der Befund dokumentiert, und in derselben Woche nicht
+nachjustiert.**
+
+Der `befund` sagt es selbst: er druckt `ABBRUCHKRITIERUM GETROFFEN` und
+liefert Rückgabewert 3. Dann:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+**Warum nicht nachjustieren.** Die naheliegende Reaktion wäre, das Delta
+hochzudrehen, bis es ruhig ist. Das ist derselbe Zug, den §5.82 als
+Fehler benennt: den Melder leiser stellen statt die Ursache zu verstehen.
+Und die Ursache wäre hier bekannt und unveränderlich — der Sensor sitzt
+am Heizkörper. Ein größeres Delta verschiebt nur, wie stark die Absenkung
+sein muss.
+
+**Ein einziges Auftreten genügt**, und das ist strenger als es klingt:
+ein Fehlalarm heißt, dass Schicht 4 ein Zimmer auf den Sicherheitswert
+zieht, während niemand ein Fenster geöffnet hat — bei einem belegten
+Zimmer in der Nacht. Eine Erkennung, die das kann, ist schlechter als
+keine.
+
+**Für das Kriterium gilt die Absenkung ab 20:00.** Löst sie um 20:05 aus,
+ist das ein Treffer und kein Zufall. Der `befund` rechnet in **Ortszeit**
+und liest das Nachtfenster aus der Konfiguration; steht dort „RÜCKFALL,
+nicht konfiguriert", ist die Angabe im Bericht nicht die des Hauses und
+der Befund ist mit Vorsicht zu lesen.
+
+### Was der Bericht nicht beantwortet
+
+Ob zu einer Auslösung **außerhalb** der Absenkung wirklich gelüftet
+wurde. Das weiß nur, wer im Zimmer war. Der Bericht nennt Zeitpunkt, Zone
+und den Temperaturabfall der zehn Minuten davor — damit ist die Frage
+beantwortbar, aber nicht beantwortet.
+
+---
+
+## 10ap. Grenzen am Gerät setzen (Sprint 23 T1) — mit Pflicht-Stop
+
+**Für wen:** den Betreiber. Jeder Befehl hier greift produktive Hardware
+an (S4).
+
+> **Erledigt am 29.10.2026.** Der Rollout ist durch: 101 von 101
+> montierten Thermostaten melden ihre Grenzen, 0 ohne Antwort. Die
+> Zahlen stehen unten unter „Abgeschlossen am 29.10.2026".
+>
+> **Der Abschnitt bleibt als Anleitung stehen** — er ist der Weg für
+> jedes neu montierte Gerät und für einen Gerätetausch. Was unten als
+> Pflicht-Stop steht, galt für den **ersten** Lauf und ist eingelöst;
+> wer ein einzelnes Gerät nachzieht, braucht ihn nicht erneut.
+
+> **Beim ersten Lauf galt (eingelöst 27.–29.10.2026):** Freigabe des
+> Betreibers vor dem ersten `--ausfuehren`, erstes Gerät **107
+> Schlafzimmer**, dann eine Nacht Beobachtung und die vier Prüfungen.
+
+### Was die Grenze tut, und was nicht
+
+`0x08` begrenzt den Bereich, in dem das **Drehrad** die Zieltemperatur
+verstellen darf. Der Anlass: in 306 hat ein Gast am 21./22.10.2026
+**zwölf Mal** gedreht, bis auf 29 °C, und jedes Mal hat Layer 5 den Wert
+hinterher auf 25 gekappt. Das Zimmer war richtig geheizt, das Gerät zeigte
+eine Zahl, die nicht galt, und der Gast drehte weiter.
+
+**Downlinks bleiben unberührt.** Hersteller-Aussage: der Grenzbereich
+greift bei Verstellung mit der Krone, Downlink-Befehle dürfen darüber
+hinaus setzen. Damit kollidiert die Grenze **nicht** mit Layer 5 — ein
+Frostschutz von 10 °C geht auch an ein Bad mit Untergrenze 18 durch.
+
+**Das ist eine Aussage des Herstellers und keine Messung.** Sie steht in
+Schritt 3 des Protokolls und wird dort geprüft. Fällt sie anders aus, ist
+T1 zu stoppen: dann kollidiert die Gerätegrenze mit Layer 5, und das ist
+eine andere Aufgabe.
+
+### Vor dem ersten Befehl: der Codec
+
+Der Codec in ChirpStack muss die Antwort auf `0x15` kennen, sonst bleibt
+die Anzeige dauerhaft auf „nicht bestätigt". Repo-Stand ist Quelle,
+ChirpStack zieht ihn **nicht** selbst (§5.22).
+
+> **Codec einfügen.** Datei:
+> `infra/chirpstack/codecs/mclimate-vicki.js`. Drei Klicks in der
+> ChirpStack-Oberfläche: *Device Profiles* → Profil der Vicki →
+> *Codec*-Tab, Inhalt der Datei ersetzen, **Submit**. Danach prüfen:
+> *Applications* → ein aktiver Vicki → *Events*-Tab — der `object`-Block
+> eines Frames muss unverändert aussehen (die Erweiterung betrifft nur
+> Antworten auf `0x15`, nicht den Keepalive).
+
+Ohne diesen Schritt läuft alles andere, nur die Bestätigung kommt nie an.
+
+> **Live-Beleg, warum der Schritt nicht reicht, wenn der Codec nur
+> „0x15 kennt" (26.10.2026).** Gerät `70b3d52dd303337d` antwortete um
+> 09:44:51 (fCnt 3897) mit
+>
+>     15 0F 19 | 81 12 9B 7C D9 D9 11 F0 30
+>
+> also: Grenzen **15/25 gemeldet, `0x08` hat gewirkt** — plus einem
+> angehängten Keep-alive. ChirpStack zeigte trotzdem nur
+> `{command: 21}`. Grund: `decodeUplink` schickte `0x15` nicht an den
+> Reply-Zweig, sondern an `decodePeriodicReport`. **Reply und Keep-alive
+> waren verloren.**
+>
+> Behoben in Sprint 23 T1b. Nach dem Re-Paste muss im Events-Tab bei
+> einer `0x15`-Antwort `temp_range_min` und `temp_range_max` im
+> `object`-Block stehen — das ist die Prüfung, die der Re-Paste
+> braucht.
+
+### Das Werkzeug
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen <befehl>
+```
+
+| Befehl | Was er tut |
+|---|---|
+| `vergleich` | liest die Datenbank: Soll gegen zuletzt Gemeldetes. **Sendet nichts.** |
+| `setzen` | `0x08` mit den Soll-Grenzen der Zone, danach `0x15` |
+| `abfragen` | nur `0x15` |
+| `sollwert-probe` | **ein** Funk-Sollwert unter der Untergrenze an **ein** Gerät, dann der Readback — und danach zurück an die Engine |
+
+**Ohne `--ausfuehren` wird nichts gesendet.** Der Probelauf zeigt Ziele,
+Firmware, Bytes und die **Ausnahmen mit Grund**.
+
+**Die Werte kommen aus dem Raumtyp, nicht von der Kommandozeile.** Im
+Haus: Zimmer **15/25**, Bad **18/25** (Bad-Zonen folgen der Vorlage). Ein
+`--min`/`--max` von Hand wäre eine zweite Wahrheit neben Layer 5.
+
+**Ausgenommen sind** Geräte auf „nur messen" (027, 056), der
+Reserve-Pool (100), ausgemusterte Geräte und Relais — dieselbe Liste wie
+bei der Fenstererkennung, aus demselben Modul, mit Test.
+
+### Das Protokoll — fünf Schritte
+
+**Schritt 1 — Probelauf an 107.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --nur "107 Schlafzimmer"
+```
+
+Lesen: steht **genau ein** Ziel da?
+
+**Die Firmware ist für `0x08` unerheblich** — Korrektur vom 29.10.2026:
+hier stand „Firmware 4.2 oder höher, bei (NULL) oder 4.1 nicht
+ausführen". Die Hersteller-Doku führt `08` unter „All" und nennt keine
+Anforderung, und Gerät **405 Schlafzimmer hat mit `firmware_version =
+NULL` bestätigt**. Meine Anweisung war strenger als der Befund.
+
+Für die **Fenstererkennung** (`0x45`, T2) bleibt FW ≥ 4.2 ein
+Stop-Kriterium. Begründung und Belege im Abschluss unten.
+
+**Schritt 2 — senden, an dieses eine Gerät.**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --nur "107 Schlafzimmer" --ausfuehren
+```
+
+Dann warten. Die Bestätigung kommt mit dem nächsten Keepalive, bis zu
+einige Minuten. Danach:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen vergleich --nur "107 Schlafzimmer"
+```
+
+Steht dort `15–25 °C` und „stimmt", ist der Befehl angekommen. Dieselbe
+Angabe steht in der Oberfläche auf der Geräteseite unter **Grenzen am
+Gerät**.
+
+**Schritt 3 — am Gerät prüfen, nicht am Protokoll.**
+
+**3.1 Rad über 25 drehen versuchen.** Es muss bei 25 stehen bleiben. Geht
+es höher, wirkt die Grenze nicht.
+
+**3.2 Die Sollwert-Probe: ein Funk-Sollwert von 10 °C.**
+
+> **Korrektur vom 26.10.2026 (Befund des Betreibers).** Hier stand
+> „einen Sollwert über 25 von der Rezeption setzen". **Das ist in 107
+> nicht durchführbar:** das Zimmer ist frei, und eine Übersteuerung
+> verlangt einen eingecheckten Gast (AE-58). Der Schritt prüft jetzt den
+> Fall, der im Betrieb ohnehin vorkommt.
+
+**10 °C ist kein beliebiger Wert**, sondern der Frostschutz — genau er
+geht per Funk an ein Zimmer mit Untergrenze 15 oder ein Bad mit 18, und
+zwar im Sommerbetrieb und bei der Fenster-Sicherheit. Die Probe fragt
+also den Fall, der eintreten wird.
+
+Probelauf zuerst (sendet nichts):
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen     sollwert-probe --nur "107 Schlafzimmer"
+```
+
+Dann senden:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen     sollwert-probe --nur "107 Schlafzimmer" --ausfuehren
+```
+
+Das Werkzeug sendet **einen** Sollwert, wartet auf die Antwort des
+Geräts und **gibt das Zimmer danach sofort an die Engine zurück** — das
+steht in seiner Ausgabe, mit dem **gesendeten Wert**. Die Rückgabe läuft
+in jedem Fall, auch bei einem schlechten Ergebnis: ein Zimmer, das auf
+10 °C stehen bleibt, ist der eigentliche Schaden dieses Versuchs, und
+einer, den niemand sieht, weil 10 °C im Winter nach „Heizung aus"
+aussieht und nicht nach „Testwert vergessen".
+
+**Die letzte Zeile der Ausgabe sagt, worauf das Zimmer steht.** Entweder
+„Stand 107 Schlafzimmer: 21 Grad, von der Engine gesendet. Nichts zu
+tun." — oder **„UNGEKLÄRT"**, und dann gehört ein Blick auf die
+Zimmerseite dazu (Tab Engine).
+
+> **Warum ein Engine-Lauf allein nicht genügt** (Befund des Betreibers,
+> 26.10.2026). Die Probe schickt den Sollwert **direkt**, nicht über die
+> Engine. Der Hysterese-Vergleich läuft aber gegen den zuletzt **selbst
+> gesendeten** Wert (Sprint 20f): die Engine sieht weiter den alten
+> Sollwert, rechnet ihn neu, findet keine Änderung und **schweigt**. Das
+> Zimmer bliebe auf dem Probewert, bis der Abgleich es merkt — und der
+> braucht den **gemeldeten** Wert des Geräts und ist auf einmal je
+> 30 Minuten gedrosselt. Im schlechtesten Fall eine Dreiviertelstunde
+> auf 10 °C.
+>
+> Das Werkzeug setzt deshalb **vor** dem Engine-Lauf das Re-Sync-Flag
+> (`resync_pending`, Sprint 15c) — denselben Mechanismus, der nach einem
+> Geräte-Neustart den Drift einfängt. Der Dispatch konsumiert es einmal
+> und übergeht dafür die Hysterese. Lässt sich das Flag nicht setzen
+> (Redis), **läuft der Engine-Lauf gar nicht** und das Werkzeug sagt es:
+> ein Lauf ohne Bypass könnte schweigen, und „zurückgegeben" wäre dann
+> eine Falschaussage.
+
+Es läuft **nur gegen genau ein Gerät**: `--nur` ist Pflicht, zwei
+Treffer brechen ab.
+
+| Gemeldeter Sollwert | Heißt | Dann |
+|---|---|---|
+| **10 °C** | Hersteller-Aussage bestätigt: die Grenze gilt nur für das Rad | weiter mit Schritt 4 |
+| **15 °C** (die Untergrenze) | das Gerät klemmt **auch Funk-Sollwerte** an der Grenze | **stoppen und melden** |
+| keine Antwort | Funk, Duty-Cycle oder Batterie — **kein** Befund über die Grenze | Probe wiederholen, wenn das Gerät wieder meldet |
+
+**Was „15 °C" bedeuten würde.** Dann käme ein Frostschutz nicht mehr
+durch, und die Gerätegrenze kollidiert mit Layer 5. Der Weg daraus ist
+**vorbereitet, aber nicht ausgeführt**:
+
+- Die Untergrenze der Raumtypen würde auf **10** gesenkt (statt 15 im
+  Zimmer und 18 im Bad) und `setzen` erneut gelaufen. Die Grenze schützt
+  dann nur noch oben — das Rad ginge wieder bis 10 hinunter, was weit
+  weniger kostet als ein Frostschutz, der nicht ankommt.
+- Eine **Endlos-Wiederholung entsteht dabei nicht**: der Engine-Abgleich
+  sendet höchstens dreimal je Vorkommnis nach und hört dann auf
+  (`MAX_VERSUCHE`, Sprint 20f). Ein Test hält genau dieses Szenario fest
+  (`test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf`).
+
+Beides wird **erst nach Freigabe** gemacht, nicht vorsorglich.
+
+**Schritt 4 — eine Nacht beobachten.** Danach vier Prüfungen:
+
+| # | Prüfung | Woran |
+|---|---|---|
+| 1 | `0x15` liefert 15/25 | `vergleich` sagt „stimmt" |
+| 2 | Rad lässt sich nicht über 25 drehen | am Gerät, nicht am Protokoll |
+| 3 | **10 °C per Funk kommt an** | die Sollwert-Probe aus Schritt 3.2 |
+| 4 | **Keine zusätzlichen Funkbefehle** | `vergleich` meldet „stimmt", und es wird nichts gesendet |
+
+Prüfung 4 ist die, die man vergisst. Der Abgleich darf nicht jede
+Viertelstunde funken, wenn die Grenzen passen — Batterie und Motor sind
+real.
+
+**Schritt 5 — Rollout, gestaffelt.** Gelaufen am **28.10.2026 ab
+08:35**; der Befehl bleibt der Weg für neu montierte Geräte:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --ausfuehren
+```
+
+Ohne `--nur` sind das alle montierten Thermostate. Geräte, deren Grenzen
+schon stimmen, werden **übersprungen**; `--pause` (Vorgabe 2 s) staffelt
+den Rest. Bei hundert Geräten rund drei Minuten.
+
+### Abgeschlossen am 29.10.2026 — die Zahlen
+
+> **T1 ist durch.** Die Grenzen stehen auf allen montierten Thermostaten,
+> und zwar bestätigt vom Gerät, nicht nur gesendet.
+
+| | |
+|---|---|
+| Rollout an alle | **28.10.2026, ab 08:35** |
+| Zweiter Durchlauf | **5 Geräte** — 103 Schlafzimmer, 105 Bad, 208 Schlafzimmer, 308 Bad, 401 Kinderzimmer |
+| `vergleich` | **29.10.2026, 07:59** |
+| Ergebnis | **101 von 101 „stimmt"**, **0 ohne Antwort** |
+| Ausgenommen | **027**, **056** (nur messen) und **100** (Reserve-Pool) |
+
+101 bestätigte plus 3 ausgenommene Geräte = 104, also der vollständige
+Bestand.
+
+**Der zweite Durchlauf ist der Normalfall, nicht ein Fehler.** Fünf
+Geräte hatten beim ersten Lauf noch nicht geantwortet — bei Class-A-Funk
+heißt das, sie hatten in diesem Moment nichts gesendet. Das Werkzeug
+überspringt beim zweiten Lauf alles, was schon stimmt, und beschickt nur
+die offenen (S4).
+
+#### Firmware NULL ist kein Hinderungsgrund für `0x08`
+
+**Korrektur meiner eigenen Anweisung in Schritt 1.** Dort stand: „bei
+„(NULL)" oder „4.1" nicht ausführen, sondern melden."
+
+**Gerät 405 Schlafzimmer hat mit `firmware_version = NULL` bestätigt.**
+Das deckt sich mit der Hersteller-Doku, die `08` in der Befehlstabelle
+unter „All" führt und **keine** Firmware-Anforderung nennt — das stand
+schon in AE-82, und meine Anweisung war trotzdem strenger als der Befund.
+
+| Befehl | Firmware-Anforderung | Quelle |
+|---|---|---|
+| `0x08` / `0x15` (Grenzen) | **keine** | Befehlstabelle „All"; live bestätigt an 405 SZ mit NULL |
+| `0x45` / `0x46` (Fenstererkennung) | **FW ≥ 4.2** | Vendor-Doku §01; das Bulk-Skript hat dafür ein Gate |
+
+„Firmware NULL" heißt ohnehin nur, dass das Gerät auf `0x04` noch nicht
+geantwortet hat — es ist eine Aussage über **unser Wissen**, nicht über
+das Gerät. Für die Grenzen ist sie unerheblich; für T2 bleibt sie ein
+Stop-Kriterium.
+
+#### Offener Kleinpunkt: Fehlalarm der Sollwert-Probe
+
+Bei der Sollwert-Probe in Schritt 3.2 kam es zu einem **Fehlalarm**
+(Befund des Betreibers, 29.10.2026).
+
+**Die Ursache ist noch nicht bestimmt**, und sie wird hier nicht
+geraten — es steht als offener Punkt, damit er nicht in Erinnerung
+verschwindet. Was ihn bestimmen würde:
+
+- die **Ausgabe** der Probe (welcher der drei Zweige: „abweichend",
+  „keine Antwort", oder die Rückgabe-Zeile),
+- der **gemeldete Sollwert** zum Zeitpunkt der Probe
+  (`sensor_reading.setpoint` des Geräts im Fenster),
+- ob die Rückgabe an die Engine danach gegriffen hat (die letzte Zeile
+  der Ausgabe: „Nichts zu tun" oder „UNGEKLÄRT").
+
+**Was er nicht in Frage stellt:** das Ergebnis von T1. Die Grenzen sind
+an 101 Geräten vom Gerät selbst bestätigt, und das ist eine andere
+Messung als die Probe. Der Fehlalarm betrifft das **Werkzeug**, nicht die
+Anlage.
+
+**Warum er trotzdem notiert ist:** die Probe ist das Werkzeug, mit dem
+eine Hersteller-Aussage am Gerät geprüft wird. Eines, das falsch Alarm
+gibt, wird beim nächsten Mal nicht geglaubt — und dann ist die Prüfung
+wertlos (§5.79).
+
+### Wenn es schiefgeht
+
+Der Rückweg ist derselbe Befehl mit der Werkseinstellung — es gibt keinen
+eigenen „aus"-Befehl, weil 5/30 das Werk ist:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen abfragen --nur "107 Schlafzimmer" --ausfuehren
+```
+
+zeigt den Stand. Um die Grenze zurückzunehmen, werden die Grenzen am
+**Raumtyp** auf 5/30 gestellt und `setzen` erneut gelaufen — dann schickt
+das Werkzeug `0x08 05 1E`. Kein Neustart, keine Datenbankänderung.
+
+### Was dieses Werkzeug nicht tut
+
+**Automatisch senden.** Eine Änderung der Grenzen in der Oberfläche löst
+**keinen** Downlink aus; sie wirkt am Gerät erst, wenn jemand `setzen`
+laufen lässt. Das ist Absicht und der offene Rest von T1: ein `PATCH` auf
+einen Raumtyp betrifft alle Zonen dieses Typs — bei „Bad" alle Bäder im
+Haus, also bis zu 45 Funkbefehle aus einem Klick. Dieser Pfad gehört
+hinter den Pflicht-Stop.
