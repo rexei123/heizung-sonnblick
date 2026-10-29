@@ -7258,12 +7258,26 @@ diesen PR — aber er hat dieselbe Eigenschaft.
 **vier** Tests rot, darunter der Ende-zu-Ende-Test, der den
 Produktionspfad nachgeht.
 
-## 9. Was offen bleibt
+## 9. Stand am 29.10.2026 — und was offen bleibt
+
+**Die Erprobung ist durch.** Rollout 28.10. ab 08:35, zweiter Durchlauf
+an fuenf Geraete, ``vergleich`` am 29.10. 07:59: **101 von 101
+„stimmt", 0 ohne Antwort**. Ausgenommen 027, 056 (nur messen) und 100
+(Reserve-Pool) — 101 + 3 = 104, der vollstaendige Bestand.
+
+Damit ist die Hersteller-Aussage aus §2 am Geraet geprueft und die
+Grenze wirksam, wo sie gewollt ist.
+
+**Korrektur zu §8 und zur Anweisung in RUNBOOK §10ap:** Geraet 405
+Schlafzimmer hat mit ``firmware_version = NULL`` bestaetigt. Mein
+Protokoll sagte „bei (NULL) oder 4.1 nicht ausfuehren" — strenger als
+der Befund und strenger als die Doku, die ``08`` unter „All" fuehrt.
+Das stand in §2 dieses ADR bereits richtig; die Anweisung hat es
+ignoriert. Fuer ``0x45`` (T2) bleibt FW >= 4.2 ein Stop-Kriterium.
 
 | Offen | Folge |
 |---|---|
-| **Die Erprobung** | Pflicht-Stop, RUNBOOK §10ap, fuenf Schritte, erstes Geraet **107 Schlafzimmer** |
-| **Codec-Re-Paste** | Handarbeit in der ChirpStack-Oberflaeche (§5.22). Ohne ihn bleibt die Anzeige dauerhaft „nicht bestaetigt". **Pruefung nach dem Re-Paste:** im Events-Tab muss eine ``0x15``-Antwort ``temp_range_min``/``temp_range_max`` im ``object``-Block zeigen — bis 26.10. stand dort ``{command: 21}`` (§8.2) |
-| **Automatischer Auslöser** | §5, bewusst nicht gebaut |
-| **FW < 4.2** | `0x08` steht in der Befehlstabelle unter „All", eine FW-Anforderung nennt die Doku nicht. Die Firmware steht trotzdem im Probelauf neben jedem Namen |
+| **Fehlalarm der Sollwert-Probe** (29.10.) | Ursache **nicht bestimmt**, wird nicht geraten. Betrifft das Werkzeug, nicht die Anlage — die Grenzen sind vom Geraet bestaetigt. Was die Ursache bestimmen wuerde, steht in RUNBOOK §10ap |
+| **Automatischer Auslöser** | §5, bewusst nicht gebaut. Mit abgeschlossenem Rollout ist der Druck geringer: die Grenzen stehen, und eine Aenderung am Raumtyp ist ein seltener Handgriff, dem ein ``setzen`` folgen kann |
+| **Zahlen aus dem Relais-Pfad** | §8.3, gemeldet und nicht geaendert |
 | **Zonen-Karte im Bad** | die Kappungs-Anzeige rechnet dort mit den Grenzen der Vorlage. Greift eine zimmerweite Entscheidung (Fenster, Sommer), folgt das Bad dem Zimmerwert — die Anzeige weiss das nicht und zeigt die Vorlage-Grenzen. Selten und harmlos, aber genannt |

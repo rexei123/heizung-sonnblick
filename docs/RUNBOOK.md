@@ -7525,10 +7525,18 @@ beantwortbar, aber nicht beantwortet.
 **Für wen:** den Betreiber. Jeder Befehl hier greift produktive Hardware
 an (S4).
 
-> **Vor dem ersten Befehl mit `--ausfuehren`: Freigabe des Betreibers.**
-> Der erste Lauf geht an **genau ein Gerät**: 107 Schlafzimmer. Erst nach
-> einer Nacht Beobachtung und nach den vier Prüfungen unten folgt der
-> Rollout — frühestens Dienstag, 27.10.2026, früh.
+> **Erledigt am 29.10.2026.** Der Rollout ist durch: 101 von 101
+> montierten Thermostaten melden ihre Grenzen, 0 ohne Antwort. Die
+> Zahlen stehen unten unter „Abgeschlossen am 29.10.2026".
+>
+> **Der Abschnitt bleibt als Anleitung stehen** — er ist der Weg für
+> jedes neu montierte Gerät und für einen Gerätetausch. Was unten als
+> Pflicht-Stop steht, galt für den **ersten** Lauf und ist eingelöst;
+> wer ein einzelnes Gerät nachzieht, braucht ihn nicht erneut.
+
+> **Beim ersten Lauf galt (eingelöst 27.–29.10.2026):** Freigabe des
+> Betreibers vor dem ersten `--ausfuehren`, erstes Gerät **107
+> Schlafzimmer**, dann eine Nacht Beobachtung und die vier Prüfungen.
 
 ### Was die Grenze tut, und was nicht
 
@@ -7613,8 +7621,16 @@ bei der Fenstererkennung, aus demselben Modul, mit Test.
 docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --nur "107 Schlafzimmer"
 ```
 
-Lesen: steht **genau ein** Ziel da? Firmware **4.2 oder höher**? Bei
-„(NULL)" oder „4.1" nicht ausführen, sondern melden.
+Lesen: steht **genau ein** Ziel da?
+
+**Die Firmware ist für `0x08` unerheblich** — Korrektur vom 29.10.2026:
+hier stand „Firmware 4.2 oder höher, bei (NULL) oder 4.1 nicht
+ausführen". Die Hersteller-Doku führt `08` unter „All" und nennt keine
+Anforderung, und Gerät **405 Schlafzimmer hat mit `firmware_version =
+NULL` bestätigt**. Meine Anweisung war strenger als der Befund.
+
+Für die **Fenstererkennung** (`0x45`, T2) bleibt FW ≥ 4.2 ein
+Stop-Kriterium. Begründung und Belege im Abschluss unten.
 
 **Schritt 2 — senden, an dieses eine Gerät.**
 
@@ -7731,8 +7747,8 @@ Prüfung 4 ist die, die man vergisst. Der Abgleich darf nicht jede
 Viertelstunde funken, wenn die Grenzen passen — Batterie und Motor sind
 real.
 
-**Schritt 5 — Rollout, gestaffelt.** Frühestens Dienstag 27.10. früh,
-nach Freigabe:
+**Schritt 5 — Rollout, gestaffelt.** Gelaufen am **28.10.2026 ab
+08:35**; der Befehl bleibt der Weg für neu montierte Geräte:
 
 ```
 docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen
@@ -7742,6 +7758,74 @@ docker exec deploy-api-1 python -m heizung.scripts.geraetegrenzen setzen --ausfu
 Ohne `--nur` sind das alle montierten Thermostate. Geräte, deren Grenzen
 schon stimmen, werden **übersprungen**; `--pause` (Vorgabe 2 s) staffelt
 den Rest. Bei hundert Geräten rund drei Minuten.
+
+### Abgeschlossen am 29.10.2026 — die Zahlen
+
+> **T1 ist durch.** Die Grenzen stehen auf allen montierten Thermostaten,
+> und zwar bestätigt vom Gerät, nicht nur gesendet.
+
+| | |
+|---|---|
+| Rollout an alle | **28.10.2026, ab 08:35** |
+| Zweiter Durchlauf | **5 Geräte** — 103 Schlafzimmer, 105 Bad, 208 Schlafzimmer, 308 Bad, 401 Kinderzimmer |
+| `vergleich` | **29.10.2026, 07:59** |
+| Ergebnis | **101 von 101 „stimmt"**, **0 ohne Antwort** |
+| Ausgenommen | **027**, **056** (nur messen) und **100** (Reserve-Pool) |
+
+101 bestätigte plus 3 ausgenommene Geräte = 104, also der vollständige
+Bestand.
+
+**Der zweite Durchlauf ist der Normalfall, nicht ein Fehler.** Fünf
+Geräte hatten beim ersten Lauf noch nicht geantwortet — bei Class-A-Funk
+heißt das, sie hatten in diesem Moment nichts gesendet. Das Werkzeug
+überspringt beim zweiten Lauf alles, was schon stimmt, und beschickt nur
+die offenen (S4).
+
+#### Firmware NULL ist kein Hinderungsgrund für `0x08`
+
+**Korrektur meiner eigenen Anweisung in Schritt 1.** Dort stand: „bei
+„(NULL)" oder „4.1" nicht ausführen, sondern melden."
+
+**Gerät 405 Schlafzimmer hat mit `firmware_version = NULL` bestätigt.**
+Das deckt sich mit der Hersteller-Doku, die `08` in der Befehlstabelle
+unter „All" führt und **keine** Firmware-Anforderung nennt — das stand
+schon in AE-82, und meine Anweisung war trotzdem strenger als der Befund.
+
+| Befehl | Firmware-Anforderung | Quelle |
+|---|---|---|
+| `0x08` / `0x15` (Grenzen) | **keine** | Befehlstabelle „All"; live bestätigt an 405 SZ mit NULL |
+| `0x45` / `0x46` (Fenstererkennung) | **FW ≥ 4.2** | Vendor-Doku §01; das Bulk-Skript hat dafür ein Gate |
+
+„Firmware NULL" heißt ohnehin nur, dass das Gerät auf `0x04` noch nicht
+geantwortet hat — es ist eine Aussage über **unser Wissen**, nicht über
+das Gerät. Für die Grenzen ist sie unerheblich; für T2 bleibt sie ein
+Stop-Kriterium.
+
+#### Offener Kleinpunkt: Fehlalarm der Sollwert-Probe
+
+Bei der Sollwert-Probe in Schritt 3.2 kam es zu einem **Fehlalarm**
+(Befund des Betreibers, 29.10.2026).
+
+**Die Ursache ist noch nicht bestimmt**, und sie wird hier nicht
+geraten — es steht als offener Punkt, damit er nicht in Erinnerung
+verschwindet. Was ihn bestimmen würde:
+
+- die **Ausgabe** der Probe (welcher der drei Zweige: „abweichend",
+  „keine Antwort", oder die Rückgabe-Zeile),
+- der **gemeldete Sollwert** zum Zeitpunkt der Probe
+  (`sensor_reading.setpoint` des Geräts im Fenster),
+- ob die Rückgabe an die Engine danach gegriffen hat (die letzte Zeile
+  der Ausgabe: „Nichts zu tun" oder „UNGEKLÄRT").
+
+**Was er nicht in Frage stellt:** das Ergebnis von T1. Die Grenzen sind
+an 101 Geräten vom Gerät selbst bestätigt, und das ist eine andere
+Messung als die Probe. Der Fehlalarm betrifft das **Werkzeug**, nicht die
+Anlage.
+
+**Warum er trotzdem notiert ist:** die Probe ist das Werkzeug, mit dem
+eine Hersteller-Aussage am Gerät geprüft wird. Eines, das falsch Alarm
+gibt, wird beim nächsten Mal nicht geglaubt — und dann ist die Prüfung
+wertlos (§5.79).
 
 ### Wenn es schiefgeht
 
