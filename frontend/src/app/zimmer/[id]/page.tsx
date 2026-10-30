@@ -41,6 +41,7 @@ import {
   darfTemperaturAendern,
   darfUebersteuerungSperren,
 } from "@/lib/auth/rechte";
+import { uebersteuerungslage } from "@/lib/uebersteuerung";
 
 type Tab = "stammdaten" | "zonen" | "geraete" | "verlauf" | "engine" | "override";
 
@@ -148,14 +149,25 @@ export default function ZimmerDetailPage() {
   // Fenster ist also hoechstens eine Minute lang offen — in dieser Minute
   // ist der graue Knopf falsch. Genau deshalb bleibt die Behandlung von
   // 409 ROOM_NOT_OCCUPIED im Formular stehen und wird nicht ersetzt.
-  const istBelegt = room.data.status === "occupied";
-
+  //
+  // 30.10.2026: die Regel kommt aus `lib/uebersteuerung.ts`, zusammen mit
+  // dem Knopf in der Zimmerübersicht. Sie stand hier als eine Zeile
+  // (`istBelegt || istBereich`) und im Übersteuerungs-Reiter als vier
+  // weitere; eine dritte Kopie in der Liste wäre die Stelle gewesen, an
+  // der sie auseinanderlaufen (§5.53).
+  //
+  // **Eine Änderung ist dabei, und sie ist gewollt:** bei dauerhafter
+  // Sperre ist der Knopf jetzt grau statt in einen Reiter zu führen, in
+  // dem nur „Übersteuerung gesperrt" steht. Der Grund steht als Satz
+  // darunter, wie bei einem freien Zimmer.
+  //
   // Sprint 24d (S6): ein Allgemeinbereich hat keine Belegung und darf
   // trotzdem uebersteuert werden — mit Pflicht-Ablauf, bis 24 h. Das Gate
   // dazu sitzt im Dienst (`override_service.create`, Quelle
-  // `frontend_bereich`); hier entscheidet es nur, ob der Knopf grau ist.
+  // `frontend_bereich`).
+  const lage = uebersteuerungslage(room.data);
   const istBereich = room.data.ist_allgemeinbereich;
-  const darfUebersteuern = istBelegt || istBereich;
+  const darfUebersteuern = lage.erlaubt;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -217,7 +229,9 @@ export default function ZimmerDetailPage() {
               </Button>
               {darfUebersteuern ? null : (
                 <p id="temperatur-hinweis" className="text-xs text-text-tertiary">
-                  nur bei belegtem Zimmer
+                  {lage.grund === "dauerhaft_gesperrt"
+                    ? "Übersteuerung gesperrt"
+                    : "nur bei belegtem Zimmer"}
                 </p>
               )}
             </div>

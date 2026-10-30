@@ -8,12 +8,14 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { RoomForm } from "@/components/patterns/room-form";
+import { UebersteuernDialog } from "@/components/patterns/uebersteuern-dialog";
 import { Button } from "@/components/ui/button";
 import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
 import { useAuth } from "@/contexts/auth-context";
-import { darfStammdatenAendern } from "@/lib/auth/rechte";
+import { darfStammdatenAendern, darfTemperaturAendern } from "@/lib/auth/rechte";
 import { formatTemperature } from "@/lib/format";
+import { uebersteuerungslage } from "@/lib/uebersteuerung";
 import type {
   ApiError,
   Room,
@@ -204,7 +206,31 @@ interface TableProps {
   error: boolean;
 }
 
+/**
+ * Die Zeilen-Knöpfe, seit dem 30.10.2026 zwei echte statt eines Links.
+ *
+ * Der häufigste Handgriff der Rezeption ist „Wert setzen", und er lag
+ * hinter zwei Klicks und einem Seitenwechsel: „Detail →", dann der Reiter
+ * Übersteuerung. Dieselbe Verlegung wie in Sprint 21 A2 auf der
+ * Zimmerseite, eine Ebene höher.
+ *
+ * **Beide sind `secondary` bzw. `ghost`, keiner ist `primary`.** Das
+ * Design-System lässt einen Haupt-Knopf je Region zu (§6.1), und bei 104
+ * Zeilen wären das 104 — die Seite hätte dann keinen Schwerpunkt mehr,
+ * sondern 104 davon. Die Reihenfolge trägt die Gewichtung: „Übersteuern"
+ * steht links mit Umrandung, „Details" rechts als Text, so wie der Link
+ * vorher aussah.
+ */
 function RoomTable({ list, loading, error }: TableProps) {
+  // Sprint 22 T5 / `rechte.ts`: `POST /rooms/{id}/overrides` ist
+  // `require_mitarbeiter`. Wer nicht darf, sieht den Knopf nicht — statt
+  // ihn zu sehen und 403 zu bekommen.
+  const { user } = useAuth();
+  const darfTemperatur = darfTemperaturAendern(user);
+  // Ein Dialog für die ganze Tabelle, nicht einer je Zeile. Welches
+  // Zimmer offen ist, steht hier; `null` heißt zu.
+  const [offenesZimmer, setOffenesZimmer] = useState<Room | null>(null);
+
   if (loading) {
     return (
       <div className="bg-surface border border-border rounded-md p-4 text-sm text-text-secondary">
@@ -227,7 +253,11 @@ function RoomTable({ list, loading, error }: TableProps) {
     );
   }
   return (
-    <div className="bg-surface border border-border rounded-md overflow-hidden">
+    /* Die zwei Knoepfe machen die Zeile breiter als ein Link.
+       `overflow-x-auto` statt `overflow-hidden`, damit am Handy gescrollt
+       und nicht abgeschnitten wird (§5.66, gleiche Klasse wie die
+       Geraeteliste). */
+    <div className="bg-surface border border-border rounded-md overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-surface-alt border-b border-border">
           <tr>
@@ -245,7 +275,11 @@ function RoomTable({ list, loading, error }: TableProps) {
             <th className="text-left px-3 py-2 font-medium text-text-secondary">
               Übersteuerung
             </th>
-            <th className="text-left px-3 py-2 font-medium text-text-secondary"></th>
+            {/* §5.57: eine Spalte mit Handlungen am Tabellen-Ende darf
+                ohne sichtbaren Kopf stehen — aber nicht ohne Kopf. */}
+            <th className="text-right px-3 py-2 font-medium text-text-secondary">
+              <span className="sr-only">Aktionen</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -326,18 +360,89 @@ function RoomTable({ list, loading, error }: TableProps) {
                   </span>
                 ) : null}
               </td>
-              <td className="px-3 py-2 text-right">
-                <Link
-                  href={`/zimmer/${r.id}` as never}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Detail →
-                </Link>
+              <td className="px-3 py-2">
+                <ZeilenKnoepfe
+                  room={r}
+                  darfTemperatur={darfTemperatur}
+                  onUebersteuern={() => setOffenesZimmer(r)}
+                />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {/* Radix hängt den Inhalt in einen Portal am Seitenende ein — der
+          Dialog steht hier also im Markup, aber nicht in der Tabelle. */}
+      <UebersteuernDialog room={offenesZimmer} onClose={() => setOffenesZimmer(null)} />
+    </div>
+  );
+}
+
+interface ZeilenKnoepfeProps {
+  room: Room;
+  darfTemperatur: boolean;
+  onUebersteuern: () => void;
+}
+
+/**
+ * Zwei Knöpfe, und bei einem von beiden ein Grund.
+ *
+ * **Am Handy nur die Symbole.** Die Beschriftung liegt in einem
+ * `hidden sm:inline` — weg ist sie damit nur fürs Auge: `aria-label` und
+ * `title` tragen den Text in jeder Breite, sonst hätte die Rezeption am
+ * Telefon zwei Symbole ohne Namen (§5.57, eine Ebene kleiner).
+ *
+ * **Warum der Grund an einem umschließenden `span` hängt.** Ein
+ * `disabled`-Knopf bekommt aus dem Design-System `pointer-events-none` —
+ * ein `title` an ihm selbst würde nie erscheinen, also genau dort nicht,
+ * wo er gebraucht wird. Der Umschlag bekommt die Maus-Ereignisse
+ * stattdessen; für Vorleseprogramme steht derselbe Satz als
+ * `aria-describedby` daneben. Zwei Wege, weil keiner allein beide
+ * Benutzergruppen erreicht.
+ */
+function ZeilenKnoepfe({ room, darfTemperatur, onUebersteuern }: ZeilenKnoepfeProps) {
+  const lage = uebersteuerungslage(room);
+  const grundId = `uebersteuern-grund-${room.id}`;
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {darfTemperatur ? (
+        <span title={lage.hinweis ?? "Übersteuern"}>
+          <Button
+            variant="secondary"
+            icon="tune"
+            className="px-3 sm:px-4"
+            onClick={onUebersteuern}
+            disabled={!lage.erlaubt}
+            aria-label={`Zimmer ${room.number} übersteuern`}
+            aria-describedby={lage.hinweis ? grundId : undefined}
+            data-testid={`uebersteuern-${room.number}`}
+          >
+            <span className="hidden sm:inline">Übersteuern</span>
+          </Button>
+          {lage.hinweis ? (
+            <span id={grundId} className="sr-only">
+              {lage.hinweis}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {/* `asChild` schaltet die Icon-Logik des Knopfs ab (Slot nimmt genau
+          ein Kind) — das Zeichen steht deshalb im Link, und zwar hinter
+          der Beschriftung: ein Pfeil nach rechts vor dem Wort zeigt in die
+          falsche Richtung. */}
+      <Button variant="ghost" className="px-3 sm:px-4" asChild>
+        <Link
+          href={`/zimmer/${room.id}` as never}
+          aria-label={`Details zu Zimmer ${room.number}`}
+          data-testid={`details-${room.number}`}
+        >
+          <span className="hidden sm:inline">Details</span>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }} aria-hidden>
+            chevron_right
+          </span>
+        </Link>
+      </Button>
     </div>
   );
 }

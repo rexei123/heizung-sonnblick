@@ -31,51 +31,49 @@ import {
 import { useRoomOverrides } from "@/lib/api/hooks-overrides";
 import { useEngineTrace, useHeatingZones, useRoom } from "@/lib/api/hooks-rooms";
 import type { EventLogEntry, ManualOverride } from "@/lib/api/types";
+import { uebersteuerungslage } from "@/lib/uebersteuerung";
 
 interface Props {
   roomId: number;
+  /**
+   * 30.10.2026: dieselbe Liste im Dialog der Zimmerübersicht. Weggelassen
+   * werden nur die **Überschrift** (der Dialog hat seine eigene, und zwei
+   * davon übereinander lesen sich wie zwei Abschnitte) und die
+   * **Historie** (sie wächst, der Dialog soll nicht mitwachsen; sie steht
+   * unverändert auf der Zimmerseite).
+   *
+   * Was bleibt, ist alles, was eine Entscheidung trägt: die Karte je Zone,
+   * die Sperr-Banner, der Belegungs-Hinweis, die Fenster-Blockade.
+   */
+  kompakt?: boolean;
 }
 
-export function ManualOverridePanelList({ roomId }: Props) {
+export function ManualOverridePanelList({ roomId, kompakt = false }: Props) {
   const zonesQuery = useHeatingZones(roomId);
   const traceQuery = useEngineTrace(roomId);
   const overridesQuery = useRoomOverrides(roomId, { include_expired: true });
   // Sprint 12c (AE-58): Sperre-Flag. React-Query-Cache-Hit aus Parent-
   // Page (gleicher roomId-Key) — kein zusaetzlicher Network-Request.
   const roomQuery = useRoom(roomId);
-  const gesperrt = roomQuery.data?.guest_override_blocked === true;
-  const bisCheckout = roomQuery.data?.guest_block_bis_checkout === true;
   /**
-   * Sprint 23 T4-A2: **die beiden Formen der Sperre tun hier nicht
-   * dasselbe.**
+   * 30.10.2026: die vier Aussagen kommen aus **einer** Funktion.
    *
-   * Die dauerhafte Sperre nimmt das Formular weg — so war es seit
-   * Sprint 12c, und so bleibt es. Die Sperre „bis Check-out" nimmt dem
-   * **Gast** das Rad, nicht der Rezeption die Eingabe: sie entsteht
-   * gerade dadurch, dass die Rezeption einen Wert festsetzt, und wer ihr
-   * danach das Formular verschließt, erzwingt für eine Korrektur den
-   * Umweg „aufheben, setzen, wieder sperren" — drei Handgriffe, bei denen
-   * der mittlere das Rad kurz freigibt. Das Gate im Dienst lässt die
-   * `frontend_*`-Quellen aus demselben Grund durch
-   * (`override_service.create`).
+   * Sie standen bis hierher als vier Zeilen hier und als eine fünfte in
+   * der Kopfzeile der Zimmerseite; mit dem Knopf in der Zimmerübersicht
+   * wäre eine sechste dazugekommen. Was die Zeilen sagen, hat sich nicht
+   * geändert — die Begründungen stehen jetzt in `lib/uebersteuerung.ts`,
+   * samt der Zeilen im Dienst, die sie spiegeln:
+   *
+   * - die **dauerhafte** Sperre nimmt das Formular weg (Sprint 12c),
+   * - die Sperre **bis Check-out** nimmt dem *Gast* das Rad, nicht der
+   *   Rezeption die Eingabe (Sprint 23 T4-A2),
+   * - ein **Allgemeinbereich** hat keine Belegung, und das Belegungs-Gate
+   *   gilt dort nicht (Sprint 24d),
+   * - `undefined` heißt „noch nicht geladen" und blockiert nichts.
    */
-  const sperreDauerhaft = gesperrt && !bisCheckout;
-  const sperreBisCheckout = gesperrt && bisCheckout;
-  // Sprint 21 A2: den Belegungs-Status *vor* dem Ausfuellen zeigen, nicht
-  // erst danach. Die Abweisung mit 409 ROOM_NOT_OCCUPIED bleibt — sie ist
-  // das Gate (§5.53: `room.status` ist die persistierte Spalte, der Service
-  // rechnet mit `derive_room_status`, dazwischen liegen bis zu 60 s).
-  // `undefined` heisst "noch nicht geladen" und blockiert nichts, sonst
-  // blitzt der Hinweis bei jedem Seitenaufruf kurz auf.
-  // Sprint 24d (S6): ein Allgemeinbereich hat keine Belegung, und das
-  // Belegungs-Gate gilt dort nicht. Ohne diese Zeile stuende in der Bar
-  // "Zimmer ist nicht belegt ... ab dem Check-in" — ein Satz ueber einen
-  // Check-in, den es dort nie gibt.
-  const istBereich = roomQuery.data?.ist_allgemeinbereich === true;
-  const nichtBelegt =
-    roomQuery.data !== undefined &&
-    roomQuery.data.status !== "occupied" &&
-    !istBereich;
+  const lage = uebersteuerungslage(roomQuery.data);
+  const gesperrt = lage.sperreDauerhaft || lage.sperreBisCheckout;
+  const { sperreDauerhaft, sperreBisCheckout, nichtBelegt, istBereich } = lage;
 
   const zones = useMemo(() => zonesQuery.data ?? [], [zonesQuery.data]);
   const overrides = useMemo(() => overridesQuery.data ?? [], [overridesQuery.data]);
@@ -98,13 +96,15 @@ export function ManualOverridePanelList({ roomId }: Props) {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-lg font-medium text-text-primary">Übersteuerung</h2>
-        <p className="text-sm text-text-secondary mt-1">
-          Pro Heizzone kann ein eigener Soll-Wert gesetzt werden. Bei offenem Fenster ist die
-          Übersteuerung blockiert.
-        </p>
-      </header>
+      {kompakt ? null : (
+        <header>
+          <h2 className="text-lg font-medium text-text-primary">Übersteuerung</h2>
+          <p className="text-sm text-text-secondary mt-1">
+            Pro Heizzone kann ein eigener Soll-Wert gesetzt werden. Bei offenem Fenster ist die
+            Übersteuerung blockiert.
+          </p>
+        </header>
+      )}
 
       {gesperrt ? (
         <div
@@ -190,7 +190,9 @@ export function ManualOverridePanelList({ roomId }: Props) {
         ))
       )}
 
-      <HistoryCard items={overrides} zones={zones} loading={overridesQuery.isLoading} />
+      {kompakt ? null : (
+        <HistoryCard items={overrides} zones={zones} loading={overridesQuery.isLoading} />
+      )}
     </div>
   );
 }
