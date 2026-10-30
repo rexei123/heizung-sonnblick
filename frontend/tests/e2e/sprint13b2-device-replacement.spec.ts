@@ -201,7 +201,7 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
       /.*\/api\/v1\/devices\/\d+\/replace\/from-pool$/,
       async (route: Route) => {
         if (route.request().method() !== "POST") {
-          await route.continue();
+          await route.fallback();
           return;
         }
         postedBody = JSON.parse(route.request().postData() ?? "{}") as Record<
@@ -327,7 +327,7 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
       /.*\/api\/v1\/devices\/\d+\/replace\/from-pool$/,
       async (route: Route) => {
         if (route.request().method() !== "POST") {
-          await route.continue();
+          await route.fallback();
           return;
         }
         await route.fulfill({
@@ -404,7 +404,7 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
       /.*\/api\/v1\/devices\/\d+\/retire$/,
       async (route: Route) => {
         if (route.request().method() !== "POST") {
-          await route.continue();
+          await route.fallback();
           return;
         }
         postedBody = JSON.parse(route.request().postData() ?? "{}") as Record<
@@ -525,7 +525,7 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
       /.*\/api\/v1\/devices\/\d+\/replace\/from-pool$/,
       async (route: Route) => {
         if (route.request().method() !== "POST") {
-          await route.continue();
+          await route.fallback();
           return;
         }
         await route.fulfill({
@@ -594,7 +594,7 @@ test.describe("Sprint 13b.2 — Device-Lifecycle Frontend", () => {
       /.*\/api\/v1\/devices\/\d+\/retire$/,
       async (route: Route) => {
         if (route.request().method() !== "POST") {
-          await route.continue();
+          await route.fallback();
           return;
         }
         await route.fulfill({

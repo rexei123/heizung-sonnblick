@@ -101,6 +101,11 @@ async function mockDetail(
   await page.route(/.*\/api\/v1\/devices\/\d+\/sensor-readings(\?.*)?$/, (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
+  // Historie der Geräteseite (Sprint 24c). Ohne Mock ginge sie über den
+  // Rewrite an API_PROXY_TARGET; der Rückhalt in `fixtures.ts` hält auf.
+  await page.route(/.*\/api\/v1\/devices\/\d+\/audit(\?.*)?$/, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+  );
   await page.route(/.*\/api\/v1\/devices\/\d+(\?.*)?$/, (route) =>
     route.fulfill({
       status: 200,
