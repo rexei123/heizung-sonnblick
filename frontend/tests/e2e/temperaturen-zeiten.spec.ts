@@ -23,6 +23,18 @@ test.describe("Sprint 9.14 Globale Temperaturen + Zeiten", () => {
   test("Page lädt mit beiden Tabs und Inline-Edit funktioniert", async ({ page }) => {
     let current = { ...INITIAL };
 
+    // Zwei Nebenanfragen der Seite, die dieser Test nicht prüft: wer den
+    // Hausstandard wirklich nimmt (Sprint 24d) und die Szenarien für das
+    // Warn-Banner (eigener Test in `temperaturen-zeiten-warn-banner`).
+    // Ohne Mock gehen sie über den Rewrite an API_PROXY_TARGET — der
+    // Rückhalt in `fixtures.ts` hält sie auf und nennt sie.
+    await page.route("**/api/v1/rule-configs/global/nutzung", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+    await page.route("**/api/v1/scenarios", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+
     await page.route("**/api/v1/rule-configs/global", async (route) => {
       if (route.request().method() === "GET") {
         await route.fulfill({
@@ -42,7 +54,7 @@ test.describe("Sprint 9.14 Globale Temperaturen + Zeiten", () => {
         });
         return;
       }
-      await route.continue();
+      await route.fallback();
     });
 
     await page.goto("/einstellungen/temperaturen-zeiten");

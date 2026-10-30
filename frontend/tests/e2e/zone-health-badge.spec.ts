@@ -56,9 +56,19 @@ const HW_STATUS = {
   window_minutes: 30,
 };
 
-async function mockHardwareStatus(page: Page) {
+/**
+ * Montage-Zustand und Historie — die Nebenanfragen der Geräteseiten.
+ *
+ * Die Historie (`/audit`, Sprint 24c) fehlte hier bis 25.10.2026; ohne
+ * Mock wäre sie über den Rewrite an `API_PROXY_TARGET` gegangen
+ * (Rückhalt in `fixtures.ts`).
+ */
+async function mockNebenanfragen(page: Page) {
   await page.route("**/api/v1/devices/*/hardware-status", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HW_STATUS) }),
+  );
+  await page.route("**/api/v1/devices/*/audit", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 }
 
@@ -84,7 +94,7 @@ test.describe("Sprint 14a — ZoneHealthBadge", () => {
         body: JSON.stringify(devices),
       }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices");
 
@@ -110,7 +120,7 @@ test.describe("Sprint 14a — ZoneHealthBadge", () => {
     await page.route(`**/api/v1/devices/${device.id}/sensor-readings*`, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto(`/devices/${device.id}`);
 

@@ -126,6 +126,11 @@ test.describe("Sprint 9.13c Hardware-Status-Badge", () => {
           body: "[]",
         }),
     );
+    // Historie der Geräteseite (Sprint 24c). Ohne Mock ginge sie über den
+    // Rewrite an API_PROXY_TARGET; der Rückhalt in `fixtures.ts` hält auf.
+    await page.route(`**/api/v1/devices/${SAMPLE_DEVICE.id}/audit`, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.route(`**/api/v1/devices/${SAMPLE_DEVICE.id}`, (route) =>
       route.fulfill({
         status: 200,
