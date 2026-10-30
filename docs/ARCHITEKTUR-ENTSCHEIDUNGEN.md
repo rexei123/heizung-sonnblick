@@ -6674,7 +6674,8 @@ Sache tut.
 
 **Datum:** 25.10.2026, **Nachtrag T4-A2 29.10.2026** · **Stand:**
 umgesetzt (Stufe A **und** A2), **Rad-Test offen (Pflicht-Stop)**, Stufe B
-offen · **Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
+zur Hälfte (§8: die gemeinsame Funktion steht; der Auslöser ist am
+30.10.2026 entschieden, §8.5, und **noch nicht gebaut**) · **Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
 `services/gast_sperre.py`, `PATCH /rooms/{id}/override-block-state`,
 `RoomOverrideBlockToggle`, `POST /rooms/{id}/overrides`,
 `override_service.create` (Block-Gate), `ManualOverrideZoneCard` ·
@@ -6793,7 +6794,7 @@ ein zweiter Klick für dieselbe Entscheidung.
 
 | Offen | Folge |
 |---|---|
-| **Stufe B: Kindersicherung `0x07`** | eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
+| **Stufe B: Kindersicherung `0x07`** | **erster Teil gebaut am 29.10.2026, siehe §8** — die gemeinsame Funktion steht, der Auslöser fehlt noch. Der Rest bleibt eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
 | **Anzeige in der Zimmerliste** | die Liste zeigt das Schloss, aber nicht die Form. Für den Fall „welche Zimmer muss ich nach der Abreise aufräumen" wäre eine Spalte nützlich — nach Stufe B, sonst wird sie zweimal gebaut |
 | **Sperre bei Zimmerwechsel** | zieht nicht mit. Ein Gast, der ins Nachbarzimmer umzieht, nimmt seine Sperre nicht mit. Bewusst: der Umzug ist eine Entscheidung der Rezeption, und sie sieht die Sperre im neuen Zimmer nicht |
 
@@ -6910,6 +6911,142 @@ dort stehen können.
 | **Rad-Test durch den Betreiber** | Pflicht-Stop, höchstens fünf Schritte. Alles bis hier ist gegen Mocks und gegen Postgres geprüft, nicht gegen ein Rad an einer Wand |
 | **Die Sperre in der Zimmerliste** | unverändert offen (§6). Mit T4-A2 gibt es die Form nun an zwei Stellen zu sehen, in der Liste weiter nicht |
 | **Widerruf während der Sperre** | die Übersteuerung kann aufgehoben werden, die Sperre bleibt dann allein stehen. Zulässiger Zustand (das Zimmer läuft auf dem Plan, das Rad bleibt gesperrt), aber keiner, den die Oberfläche benennt |
+
+## 8. Stufe B, erster Teil (29.10.2026) — eine Funktion für den gewollten Zustand
+
+**Was §6 verlangt hat, steht jetzt.** Die Kindersicherung hatte bis
+hierher **einen** Treiber: die Rolle „nur messen" (Sprint 24c). Mit der
+Gast-Sperre kommt ein zweiter, und ein zweiter Treiber ohne gemeinsame
+Quelle ist die zweite Wahrheit aus §5.53.
+
+Die beiden Fehlerbilder waren nicht theoretisch, sondern erreichbar,
+sobald die Gast-Sperre `0x07` treibt:
+
+| Fehlerbild | Wie es entstanden wäre |
+|---|---|
+| **Das Zurücknehmen der Rolle gibt das Rad eines gast-gesperrten Zimmers frei** | `setze_messrolle` schickte `set_child_lock(dev_eui, payload.measure_only)` — es wusste vom zweiten Grund nichts |
+| **Ein gast-gesperrtes Normalgerät meldet „fehlgeschlagen"** | `child_lock_state` verglich gegen `measure_only`; gewollt wäre „frei", gemeldet „gesperrt" — ein roter Befund im Normalfall (§5.79) |
+
+### 8.1 Die Funktion, und warum ihr Parametername zählt
+
+```python
+def soll_kindersicherung(*, measure_only: bool, gast_sperre: bool) -> bool:
+    return measure_only or gast_sperre
+```
+
+Eine Zeile, und trotzdem der Kern von Stufe B: **die einzige Stelle, an
+der aus Gründen ein gewollter Zustand wird.** Beide Schreibpfade und der
+Lesepfad gehen durch sie.
+
+`child_lock_state` nimmt seither `gewollt` statt `measure_only`. **Der
+alte Parametername war die Falle**, nicht nur unscharf: er erklärte einen
+der beiden Gründe zur Wahrheit, und ein Aufrufer, der ihn füllt, merkt
+nicht, dass er etwas auslässt. Einen Default gibt es aus demselben Grund
+nicht — er würde genau diesen Aufrufer erlauben.
+
+**Oder, nicht Und.** Jeder Grund allein genügt; keiner hebt den anderen
+auf. Die vier Fälle stehen als Tabelle im Docstring und als
+parametrisierter Test, vollständig und nicht nur in den interessanten
+Zeilen.
+
+### 8.2 Der zweite Grund kommt gehoben, nicht je Zeile
+
+`gast_sperren_je_geraet(session, ids)` liest `guest_override_blocked`
+über `device → heating_zone → room`, in **einer** Abfrage für alle Geräte
+des Requests. Die Geräteliste rendert über hundert Zeilen; eine Abfrage
+je Zeile wäre der sechste N+1-Pfad für eine Spalte (§5.73).
+
+Jede angefragte ID kommt im Ergebnis vor, ein Gerät ohne Zone mit
+`False`. Das ist keine Annahme, sondern die Lage: wo kein Zimmer ist,
+ist kein Gast. Und es ist nötig, weil `_build_device_read` das Argument
+als Pflicht nimmt — ein fehlender Schlüssel wäre dort ein `KeyError`
+statt einer Antwort.
+
+**Beide Formen der Sperre zählen.** Gelesen wird
+`guest_override_blocked` allein, ohne `guest_block_bis_checkout`: das Rad
+soll in beiden Formen still sein, die Formen unterscheiden sich nur
+darin, **wann** die Sperre endet.
+
+### 8.3 Eine Folge, die wie ein Fehler aussieht und keiner ist
+
+Gesendet wird jetzt, wenn sich der **gewollte Zustand des Rades** ändert
+— nicht, wenn sich die Rolle ändert. Bei stehender Gast-Sperre ist das
+Rad in beiden Rollen gesperrt, und dann geht **nichts** hinaus, obwohl
+die Rolle umgeschaltet wurde.
+
+Das ist S4 und kein übersehener Fall: ein Befehl, der nichts ändert,
+kostet Batterie und Motor. Damit es später nicht wie ein Fehler gelesen
+wird, nennt die Antwort den Grund („Das Rad bleibt gesperrt — die
+Gast-Sperre des Zimmers verlangt es weiter"), und das Protokoll trägt
+`rad_gesperrt_gewollt` und `gast_sperre` mit. Ohne diese zwei Felder
+wäre „Rolle zurück, kein Downlink" im Nachhinein nicht von einem Fehler
+zu unterscheiden (§0 S3).
+
+### 8.4 Was dieser Teil **nicht** tut
+
+**Die Gast-Sperre treibt `0x07` noch nicht.** Setzt die Rezeption eine
+Sperre, geht kein Downlink hinaus; das Rad dreht sich weiter und die
+Drehung wird verworfen, wie seit Sprint 12c. Dieser Teil schließt die
+Falle, **bevor** der Auslöser dazukommt — das ist die Reihenfolge, die
+§5.53 verlangt, und der einzige Zeitpunkt, an dem sie ohne Risiko zu
+schließen ist.
+
+Verhaltensänderung heute ist genau eine, und sie ist eine Verbesserung
+ohne neuen Funkverkehr: das Zurücknehmen der Rolle gibt ein
+gast-gesperrtes Rad nicht mehr frei.
+
+Der Auslöser ist seit dem 30.10.2026 **entschieden** (§8.5) und wird in
+einem eigenen PR gebaut — mit Pflicht-Stop, weil dann Funkbefehle an
+montierte Geräte gehen.
+
+### 8.5 Die Entscheidung des Betreibers (30.10.2026)
+
+> Hier stand bis zum 30.10. eine offene Frage mit zwei Wegen und meiner
+> Empfehlung („das bestehende Häkchen, mit einem Schalter in den
+> Einstellungen"). Der Betreiber hat entschieden — und den Schalter
+> **gestrichen**. Zu Recht: eine Einstellung, die niemand verstellt, ist
+> ein Schalter, der stumm veraltet (§5.77). Die Empfehlung steht hier
+> nicht mehr daneben, weil zwei Aussagen zur selben Frage genau das
+> Fehlerbild sind, das diese Datei an anderer Stelle beklagt.
+
+**Der gewollte Zustand ist eine Regel, keine Einstellung:**
+
+```
+Rad gesperrt  ⇔  measure_only  ODER  room.guest_override_blocked
+```
+
+Beide Formen der Gast-Sperre zählen — dauerhaft, bis Check-out, und
+damit auch das Häkchen aus §7. Sonst **AUS**. Das ist genau
+`soll_kindersicherung` aus §8.1; die Entscheidung bestätigt das Rückgrat,
+statt es zu erweitern.
+
+**Kein Schalter in der Oberfläche.** Die Rezeption entscheidet weiter nur
+„Gast soll nicht ändern". Was angezeigt wird, ist der **Zustand**: „Rad
+gesperrt" oder „Rad frei", mit Bestätigung vom Gerät (`childLock` aus dem
+Keepalive, `sensor_reading.child_lock`). Also eine Anzeige über einen
+Befund und kein Bedienelement über eine Absicht.
+
+### 8.6 Was daraus noch zu bauen ist
+
+| Teil | Inhalt |
+|---|---|
+| **Auslöser** | jede Änderung des gewollten Zustands sendet. Drei Wege führen dorthin: der Sperr-Knopf (§2), das Häkchen (§7) und `loese_bei_checkout`. Alle drei durch `soll_kindersicherung`, keiner daneben |
+| **Lösen** | Sperre aufgehoben oder Abreise → `0x07 00`, **außer** `measure_only` verlangt die Sperre weiter. Das ist dieselbe Regel, nur in die andere Richtung gelesen |
+| **Gerät offline** | das **Soll merken** und beim nächsten Uplink nachziehen. Ein Class-A-Gerät hört nicht zu, wenn wir senden wollen; ein Downlink ins Leere ist kein Fehlschlag, sondern der Normalfall |
+| **Abgleich** | wie bei den Grenzen (AE-82): höchstens **3 Versuche**, danach ein **Befund** statt eines vierten Versuchs. Der Zähler fällt erst, wenn das Gerät den Wert meldet — nicht, wenn wir gesendet haben |
+| **Anzeige** | „Rad gesperrt / frei" mit Bestätigung. `child_lock_state` liefert die drei Aussagen schon (§8.1); was fehlt, ist die Beschriftung, die den **Zustand** nennt statt des Vorgangs |
+
+**Pflicht-Stop, ausdrücklich:** der erste `0x07` geht **nur an 107
+Schlafzimmer**, und erst nach dem OK des Betreibers. Danach eine Nacht
+beobachten, wie bei T1.
+
+**Warum der Abgleich die eigentliche Arbeit ist.** Das Senden ist eine
+Zeile. Die Frage, was passiert, wenn das Gerät nicht antwortet, ist der
+Rest — und sie hat bei T1 den größten Teil der Tests gekostet. Ohne
+Versuchszähler entsteht eine Schleife, die bei einem defekten Gerät
+Batterie verbrennt; ohne Befund nach dem dritten Versuch merkt es
+niemand. Beide Hälften gehören zusammen (§5.76: die Wirkung überwachen,
+nicht die Mechanik).
 
 ---
 

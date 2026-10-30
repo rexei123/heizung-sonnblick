@@ -49,6 +49,7 @@ from heizung.models.relay_reading import RelayReading
 from heizung.models.user import User
 from heizung.services import downlink_adapter, relay_adapter, relay_service
 from heizung.services.business_audit_service import record_business_action
+from heizung.services.child_lock import gast_sperren_je_geraet, soll_kindersicherung
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +400,22 @@ async def setze_messrolle(
     Geraets verwirren.
 
     Beim **Zuruecknehmen** der Rolle wird die Sperre wieder geloest: ein
-    montiertes Thermostat soll am Rad bedienbar sein.
+    montiertes Thermostat soll am Rad bedienbar sein — **es sei denn, ein
+    zweiter Grund verlangt sie weiter** (Sprint 23 T4-B).
+
+    Dieser zweite Grund ist die Gast-Sperre des Zimmers. Ohne ihn stand
+    hier ``set_child_lock(dev_eui, payload.measure_only)``, und damit
+    haette das Zuruecknehmen der Rolle das Rad eines gast-gesperrten
+    Zimmers **freigegeben** — eine zweite Wahrheit ueber denselben
+    Zustand (Paragraph 5.53). Der gewollte Zustand kommt deshalb aus
+    ``soll_kindersicherung``, der einzigen Stelle, die beide Gruende
+    zusammenfuehrt.
+
+    **Folge: es gibt Umschaltungen ohne Downlink.** Wechselt die Rolle,
+    der gewollte Zustand des Rades aber nicht — Rolle zurueck bei
+    stehender Gast-Sperre —, wird nichts gesendet. Das ist kein
+    uebersehener Fall, sondern S4: ein Befehl, der nichts aendert, kostet
+    Batterie und Motor.
 
     Das Ergebnis der Sperre kommt asynchron — ``sensor_reading.child_lock``
     im naechsten Keepalive. Deshalb ``gesendet`` und nicht ``gesetzt``.
@@ -416,11 +432,17 @@ async def setze_messrolle(
         )
 
     alt = geraet.measure_only
+    gast_sperre = (await gast_sperren_je_geraet(session, [device_id]))[device_id]
+    soll_alt = soll_kindersicherung(measure_only=alt, gast_sperre=gast_sperre)
+    soll_neu = soll_kindersicherung(measure_only=payload.measure_only, gast_sperre=gast_sperre)
     geraet.measure_only = payload.measure_only
 
     gesendet = False
-    if alt != payload.measure_only:
-        await downlink_adapter.set_child_lock(geraet.dev_eui, payload.measure_only)
+    # Gesendet wird, wenn sich der **gewollte Zustand des Rades** aendert
+    # — nicht, wenn sich die Rolle aendert. Bei stehender Gast-Sperre ist
+    # das Rad in beiden Rollen gesperrt, und dann gibt es nichts zu tun.
+    if soll_alt != soll_neu:
+        await downlink_adapter.set_child_lock(geraet.dev_eui, soll_neu)
         await downlink_adapter.get_child_lock(geraet.dev_eui)
         gesendet = True
         # Sprint 24d: der Zeitpunkt des Befehls. Ohne ihn ist die juengste
@@ -442,6 +464,11 @@ async def setze_messrolle(
         new_value={
             "measure_only": payload.measure_only,
             "kindersicherung_gesendet": gesendet,
+            # Sprint 23 T4-B: der gewollte Zustand und der zweite Grund
+            # stehen mit im Protokoll. Ohne sie ist "Rolle zurueck, kein
+            # Downlink" spaeter nicht von einem Fehler zu unterscheiden.
+            "rad_gesperrt_gewollt": soll_neu,
+            "gast_sperre": gast_sperre,
         },
     )
     await session.commit()
@@ -454,6 +481,9 @@ async def setze_messrolle(
             "Die Kindersicherung wird mit dem naechsten Keepalive bestaetigt "
             "(Feld child_lock). Bis dahin ist nicht gesichert, dass sie sitzt."
             if gesendet
+            else "Das Rad bleibt gesperrt — die Gast-Sperre des Zimmers "
+            "verlangt es weiter. Kein Downlink gesendet."
+            if gast_sperre
             else "Rolle unveraendert — kein Downlink gesendet."
         ),
     )

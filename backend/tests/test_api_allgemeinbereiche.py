@@ -57,7 +57,7 @@ from heizung.models.room_type import RoomType
 from heizung.rules.engine import evaluate_room
 from heizung.schemas.manual_override import ManualOverrideCreate
 from heizung.services import override_service
-from heizung.services.child_lock import child_lock_state
+from heizung.services.child_lock import child_lock_state, soll_kindersicherung
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SKIP_REASON = "DATABASE_URL nicht gesetzt - API-Tests brauchen Test-DB"
@@ -826,7 +826,7 @@ def test_eine_meldung_von_vor_dem_befehl_ist_ausstehend() -> None:
     befehl = datetime(2026, 10, 24, 8, 0, tzinfo=UTC)
     assert (
         child_lock_state(
-            measure_only=True,
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=False,
             gemeldet_um=befehl - timedelta(minutes=10),
             befehl_um=befehl,
@@ -844,11 +844,21 @@ def test_eine_meldung_nach_dem_befehl_entscheidet() -> None:
     befehl = datetime(2026, 10, 24, 8, 0, tzinfo=UTC)
     nachher = befehl + timedelta(minutes=5)
     assert (
-        child_lock_state(measure_only=True, gemeldet=False, gemeldet_um=nachher, befehl_um=befehl)
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
+            gemeldet=False,
+            gemeldet_um=nachher,
+            befehl_um=befehl,
+        )
         == "fehlgeschlagen"
     )
     assert (
-        child_lock_state(measure_only=True, gemeldet=True, gemeldet_um=nachher, befehl_um=befehl)
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
+            gemeldet=True,
+            gemeldet_um=nachher,
+            befehl_um=befehl,
+        )
         == "bestaetigt"
     )
 
@@ -862,7 +872,7 @@ def test_ohne_befehlszeit_urteilt_es_wie_vorher() -> None:
     """
     assert (
         child_lock_state(
-            measure_only=True,
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=False,
             gemeldet_um=datetime(2026, 10, 24, 8, 0, tzinfo=UTC),
             befehl_um=None,
