@@ -4,6 +4,14 @@
  * Mutationen invalidieren auch ``["room", roomId]``, damit der Engine-
  * Decision-Panel-Refetch (Layer-3-Eintrag) automatisch laeuft.
  *
+ * **Und ``["rooms"]``, seit dem 30.10.2026.** Die Spalte „Übersteuerung"
+ * der Zimmerliste liest ``has_active_override``, und das Feld füllt nur
+ * der Listen-Endpoint (§5.63). Ohne diese Zeile blieb die Liste nach einem
+ * Setzen auf ihrem Stand — bis hierher nur beim Zurückgehen von der
+ * Zimmerseite sichtbar, mit dem Dialog in der Liste aber direkt daneben.
+ * Der Dialog hat die Lücke nicht erzeugt, sondern sie unübersehbar
+ * gemacht.
+ *
  * Sprint 12b: Query-Keys tragen zusaetzlich die Zone-Achse, damit
  * Per-Zone-Lookups (``useZoneOverride``) nicht mit Room-weiten Listen
  * gegeneinander cachen.
@@ -86,6 +94,7 @@ export function useCreateRoomOverride(
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.allForRoom(roomId) });
       qc.invalidateQueries({ queryKey: ["room", roomId] });
+      qc.invalidateQueries({ queryKey: ["rooms"] });
     },
   });
 }
@@ -99,6 +108,7 @@ export function useRevokeOverride(
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.allForRoom(roomId) });
       qc.invalidateQueries({ queryKey: ["room", roomId] });
+      qc.invalidateQueries({ queryKey: ["rooms"] });
     },
   });
 }
