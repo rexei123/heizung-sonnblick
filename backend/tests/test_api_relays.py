@@ -494,3 +494,115 @@ async def test_rolle_an_einem_relais_abgewiesen(
     )
     assert antwort.status_code == 422
     assert "misst nicht" in antwort.text
+
+
+# ---------------------------------------------------------------------------
+# Sprint 23 T4-B: die Gast-Sperre ist der zweite Grund
+#
+# Das Fehlerbild, das diese drei Tests festhalten, stand in AE-80 §6 als
+# Warnung und war bis T4-B erreichbar: das Zuruecknehmen der Rolle haette
+# das Rad eines gast-gesperrten Zimmers freigegeben, weil der Downlink
+# ``payload.measure_only`` folgte statt dem gewollten Zustand.
+# ---------------------------------------------------------------------------
+
+
+async def _sperre_das_zimmer(setup_engine: AsyncEngine, room_id: int) -> None:
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        room = await session.get(Room, room_id)
+        assert room is not None
+        room.guest_override_blocked = True
+        room.guest_block_bis_checkout = True
+        await session.commit()
+
+
+async def test_rolle_zuruecknehmen_gibt_ein_gast_gesperrtes_rad_nicht_frei(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    mitgeschnitten: dict[str, list[Any]],
+    setup_engine: AsyncEngine,
+) -> None:
+    """**Der Kern von T4-B.** Rolle an, Zimmer gesperrt, Rolle zurueck.
+
+    Vorher waere hier ``0x07 00`` hinausgegangen und das Rad frei
+    gewesen — bei stehender Gast-Sperre. Jetzt aendert sich der gewollte
+    Zustand nicht, und es geht gar nichts hinaus: ein Befehl, der nichts
+    aendert, kostet Batterie und Motor (§0 S4).
+    """
+    erst = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.thermostat_id}/measure-only",
+        json={"measure_only": True},
+    )
+    assert erst.status_code == 200, erst.text
+    assert len(mitgeschnitten["child_lock"]) == 2
+    mitgeschnitten["child_lock"].clear()
+
+    await _sperre_das_zimmer(setup_engine, aufbau.room_id)
+
+    zurueck = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.thermostat_id}/measure-only",
+        json={"measure_only": False},
+    )
+    assert zurueck.status_code == 200, zurueck.text
+    rumpf = zurueck.json()
+    assert rumpf["measure_only"] is False, "die Rolle wird zurueckgenommen"
+    assert rumpf["kindersicherung_gesendet"] is False
+    assert mitgeschnitten["child_lock"] == [], "es darf kein 0x07 00 hinausgehen"
+    # Der Satz muss den Grund nennen. Ein "Rolle unveraendert" waere hier
+    # falsch — die Rolle hat sich geaendert.
+    assert "Gast-Sperre" in rumpf["hinweis"]
+
+
+async def test_rolle_setzen_bei_gast_sperre_sendet_auch_nichts(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    mitgeschnitten: dict[str, list[Any]],
+    setup_engine: AsyncEngine,
+) -> None:
+    """Die Gegenrichtung: das Rad ist schon gesperrt, die Rolle kommt dazu.
+
+    Auch hier aendert sich der gewollte Zustand nicht. Ohne diesen Test
+    waere die Richtung "Rolle **an** bei Sperre" ein ungeprueffter Zweig
+    derselben Bedingung.
+    """
+    await _sperre_das_zimmer(setup_engine, aufbau.room_id)
+
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.thermostat_id}/measure-only",
+        json={"measure_only": True},
+    )
+    assert antwort.status_code == 200, antwort.text
+    assert antwort.json()["measure_only"] is True
+    assert antwort.json()["kindersicherung_gesendet"] is False
+    assert mitgeschnitten["child_lock"] == []
+
+
+async def test_das_protokoll_nennt_den_gewollten_zustand_und_den_grund(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: AsyncEngine,
+) -> None:
+    """Ohne diese zwei Felder ist "Rolle zurueck, kein Downlink" spaeter
+    nicht von einem Fehler zu unterscheiden (§0 S3)."""
+    await _sperre_das_zimmer(setup_engine, aufbau.room_id)
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.thermostat_id}/measure-only",
+        json={"measure_only": True},
+    )
+    assert antwort.status_code == 200, antwort.text
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        rows = await session.execute(
+            select(BusinessAudit)
+            .where(BusinessAudit.target_type == "device")
+            .where(BusinessAudit.target_id == aufbau.thermostat_id)
+            .where(BusinessAudit.action == "DEVICE_MEASURE_ONLY_TOGGLED")
+        )
+        audits = list(rows.scalars().all())
+    assert len(audits) == 1
+    neu = audits[0].new_value
+    assert neu is not None
+    assert neu["rad_gesperrt_gewollt"] is True
+    assert neu["gast_sperre"] is True
+    assert neu["kindersicherung_gesendet"] is False

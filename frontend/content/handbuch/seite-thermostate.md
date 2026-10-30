@@ -3,7 +3,7 @@ titel: Thermostate
 kategorie: Die Seiten
 stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren
 rollen: alle
-stand: 2026-10-25
+stand: 2026-10-29
 route: /devices
 ---
 
@@ -71,6 +71,16 @@ geschickt. Der Sollwert der Zone wird trotzdem errechnet und angezeigt.
 
 Derzeit gesetzt bei **027** und **056**. Gerät **100** liegt im
 Reserve-Pool.
+
+**Beim Setzen wird das Rad am Gerät gesperrt**, beim Zurücknehmen wieder
+freigegeben — ein Fühler, der unmontiert im Raum liegt, soll nicht
+verstellbar sein.
+
+**Mit einer Ausnahme seit 29.10.2026:** steht auf dem Zimmer eine
+Gast-Sperre, bleibt das Rad beim Zurücknehmen der Rolle **gesperrt**. Die
+Sperre hat dann einen zweiten Grund, und der gilt weiter. In diesem Fall
+wird kein Funkbefehl gesendet — es gibt nichts zu ändern —, und der
+Hinweis unter dem Schalter sagt es.
 
 ## Relais
 

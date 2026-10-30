@@ -1,4 +1,10 @@
-"""Zustand der Kindersicherung (Sprint 24c).
+"""Zustand der Kindersicherung (Sprint 24c, Sprint 23 T4-B).
+
+**Die Bestandstests gehen seit T4-B durch ``soll_kindersicherung``**, auch
+wo die Gast-Sperre nicht die Rolle spielt. Sie koennten ``gewollt``
+direkt setzen — dann wuerden sie den neuen Parameternamen pruefen und
+nicht die Kette, die im Betrieb laeuft (Paragraph 5.79, zweiter Teil: ein
+Erwartungswert ohne Herkunft prueft nur, dass sich nichts geaendert hat).
 
 Die Ableitung ist eine reine Funktion und prüfbar ohne Datenbank. Der
 Abfrage-Teil braucht Postgres und steht unten.
@@ -18,7 +24,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.models.device import Device
-from heizung.models.enums import DeviceKind, DeviceVendor
+from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind
+from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
+from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
 from heizung.schemas.device import DeviceRead
 from heizung.services.child_lock import (
@@ -26,6 +35,8 @@ from heizung.services.child_lock import (
     child_lock_state,
     child_lock_verdict,
     child_lock_verdicts,
+    gast_sperren_je_geraet,
+    soll_kindersicherung,
 )
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
@@ -39,7 +50,12 @@ PREFIX = "t24cl"
 
 
 def test_rolle_gesetzt_und_rad_gesperrt_ist_bestaetigt() -> None:
-    assert child_lock_state(measure_only=True, gemeldet=True) == "bestaetigt"
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False), gemeldet=True
+        )
+        == "bestaetigt"
+    )
 
 
 def test_rolle_gesetzt_und_rad_frei_ist_fehlgeschlagen() -> None:
@@ -49,7 +65,12 @@ def test_rolle_gesetzt_und_rad_frei_ist_fehlgeschlagen() -> None:
     angekommen oder wurde überschrieben, und das braucht einen Namen,
     der zum Handeln auffordert.
     """
-    assert child_lock_state(measure_only=True, gemeldet=False) == "fehlgeschlagen"
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False), gemeldet=False
+        )
+        == "fehlgeschlagen"
+    )
 
 
 def test_ohne_rolle_ist_ein_freies_rad_bestaetigt() -> None:
@@ -60,11 +81,21 @@ def test_ohne_rolle_ist_ein_freies_rad_bestaetigt() -> None:
     Dienst zwei Regeln, und die zweite würde beim ersten Umbau
     vergessen.
     """
-    assert child_lock_state(measure_only=False, gemeldet=False) == "bestaetigt"
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=False, gast_sperre=False), gemeldet=False
+        )
+        == "bestaetigt"
+    )
 
 
 def test_ohne_rolle_ist_ein_gesperrtes_rad_fehlgeschlagen() -> None:
-    assert child_lock_state(measure_only=False, gemeldet=True) == "fehlgeschlagen"
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=False, gast_sperre=False), gemeldet=True
+        )
+        == "fehlgeschlagen"
+    )
 
 
 def test_keine_meldung_ist_ausstehend_und_nicht_fehlgeschlagen() -> None:
@@ -76,8 +107,18 @@ def test_keine_meldung_ist_ausstehend_und_nicht_fehlgeschlagen() -> None:
     Umschalten ein roter Befund auf der Geräteseite — bei einem
     Funkgerät der Normalfall.
     """
-    assert child_lock_state(measure_only=True, gemeldet=None) == "ausstehend"
-    assert child_lock_state(measure_only=False, gemeldet=None) == "ausstehend"
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False), gemeldet=None
+        )
+        == "ausstehend"
+    )
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=False, gast_sperre=False), gemeldet=None
+        )
+        == "ausstehend"
+    )
 
 
 def test_das_schema_spiegelt_die_drei_zustaende() -> None:
@@ -201,3 +242,153 @@ class TestAbfrage:
 
     async def test_leere_anfrage_gibt_leeres_ergebnis(self, db_session: AsyncSession) -> None:
         assert await child_lock_verdicts(db_session, []) == {}
+
+    # -----------------------------------------------------------------
+    # Sprint 23 T4-B: die Gast-Sperre je Geraet, gehoben
+    # -----------------------------------------------------------------
+
+    async def _geraet_im_zimmer(
+        self, session: AsyncSession, *, gesperrt: bool, bis_checkout: bool = False
+    ) -> Device:
+        """Ein Geraet mit Zone und Zimmer. Gibt das Geraet.
+
+        Schema-Grenzen (Paragraph 5.49): ``room.number`` max 20 Zeichen,
+        ``device.dev_eui`` genau 16. Der Suffix ist deshalb acht Hex und
+        nicht eine Uhrzeit.
+        """
+        kurz = uuid.uuid4().hex[:8]
+        rt = RoomType(name=f"{PREFIX}-rt-{kurz}")
+        session.add(rt)
+        await session.flush()
+        room = Room(
+            number=f"{PREFIX}-{kurz}",
+            room_type_id=rt.id,
+            guest_override_blocked=gesperrt,
+            guest_block_bis_checkout=bis_checkout,
+        )
+        session.add(room)
+        await session.flush()
+        zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="zone")
+        session.add(zone)
+        await session.flush()
+        dev = Device(
+            dev_eui=f"beef{uuid.uuid4().hex[:12]}",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="vicki",
+            label=f"{PREFIX}-im-zimmer",
+            health_state="healthy",
+            heating_zone_id=zone.id,
+        )
+        session.add(dev)
+        await session.flush()
+        return dev
+
+    async def test_gast_sperre_wird_ueber_zone_und_zimmer_gefunden(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Der Weg ist Geraet -> Zone -> Zimmer, und er muss stimmen.
+
+        Ein falscher Join liefert hier kein Fehlerbild, sondern ein
+        stilles ``False`` — und damit ein Rad, das freigegeben wird,
+        obwohl die Sperre steht.
+        """
+        gesperrt = await self._geraet_im_zimmer(db_session, gesperrt=True)
+        frei = await self._geraet_im_zimmer(db_session, gesperrt=False)
+
+        ergebnis = await gast_sperren_je_geraet(db_session, [gesperrt.id, frei.id])
+        assert ergebnis[gesperrt.id] is True
+        assert ergebnis[frei.id] is False
+
+    async def test_beide_formen_der_sperre_zaehlen(self, db_session: AsyncSession) -> None:
+        """Dauerhaft und bis Check-out sind beide eine Sperre.
+
+        Die Formen unterscheiden sich darin, **wann** sie enden, nicht
+        darin, ob das Rad still sein soll. Wer hier
+        ``guest_block_bis_checkout`` mitliest, baut einen Unterschied,
+        den es nicht gibt.
+        """
+        bis_checkout = await self._geraet_im_zimmer(db_session, gesperrt=True, bis_checkout=True)
+        dauerhaft = await self._geraet_im_zimmer(db_session, gesperrt=True)
+
+        ergebnis = await gast_sperren_je_geraet(db_session, [bis_checkout.id, dauerhaft.id])
+        assert ergebnis[bis_checkout.id] is True
+        assert ergebnis[dauerhaft.id] is True
+
+    async def test_ein_geraet_ohne_zimmer_steht_mit_false_drin(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Ein Pool-Geraet hat keine Zone — und damit keinen Gast.
+
+        Es **fehlt nicht** im Ergebnis: ein fehlender Schluessel waere
+        fuer den Aufrufer nicht von "nicht gesperrt" zu unterscheiden,
+        und das Pflicht-Argument in ``_build_device_read`` waere dann ein
+        ``KeyError`` statt einer Antwort.
+        """
+        ohne = await self._geraet(db_session)
+        ergebnis = await gast_sperren_je_geraet(db_session, [ohne.id, 999_999])
+        assert set(ergebnis) == {ohne.id, 999_999}
+        assert ergebnis[ohne.id] is False
+        assert ergebnis[999_999] is False
+
+    async def test_leere_anfrage_ergibt_leeres_ergebnis_ohne_abfrage(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Eine leere Geraeteliste ist kein Sonderfall, sondern der Pool
+        eines Hauses ohne Reserve. ``IN ()`` waere ein SQL-Fehler."""
+        assert await gast_sperren_je_geraet(db_session, []) == {}
+
+
+# ---------------------------------------------------------------------------
+# Sprint 23 T4-B — der gewollte Zustand hat zwei Gruende
+#
+# Die Tests oben prueffen ``child_lock_state`` mit einem fertigen
+# ``gewollt``. Hier geht es um die Stelle davor: wie aus zwei Gruenden
+# **einer** gewollter Zustand wird, und dass keiner der beiden verloren
+# geht.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("measure_only", "gast_sperre", "erwartet"),
+    [
+        (True, True, True),
+        (True, False, True),
+        (False, True, True),
+        (False, False, False),
+    ],
+)
+def test_soll_kindersicherung_ist_oder_nicht_und(
+    measure_only: bool, gast_sperre: bool, erwartet: bool
+) -> None:
+    """Jeder Grund allein genuegt, und keiner hebt den anderen auf.
+
+    Die vollstaendige Tabelle und nicht nur die interessanten Zeilen: die
+    Funktion hat vier Faelle, und welcher spaeter falsch wird, weiss man
+    vorher nicht. Die dritte Zeile ist die neue, die zweite die, die beim
+    Zuruecknehmen der Rolle nicht verloren gehen darf.
+    """
+    assert soll_kindersicherung(measure_only=measure_only, gast_sperre=gast_sperre) is erwartet
+
+
+def test_gast_sperre_allein_macht_ein_gesperrtes_rad_bestaetigt() -> None:
+    """Das erste der beiden Fehlerbilder aus AE-80 §6, als Test.
+
+    Ohne die gemeinsame Funktion haette ``child_lock_state`` fuer ein
+    gast-gesperrtes Normalgeraet "fehlgeschlagen" gemeldet: gewollt waere
+    ``measure_only=False``, gemeldet "gesperrt". Ein Melder, der im
+    Normalfall rot zeigt, wird nach einer Woche nicht mehr gelesen
+    (Paragraph 5.79).
+    """
+    gewollt = soll_kindersicherung(measure_only=False, gast_sperre=True)
+    assert child_lock_state(gewollt=gewollt, gemeldet=True) == "bestaetigt"
+
+
+def test_ohne_beide_gruende_ist_ein_gesperrtes_rad_weiter_fehlgeschlagen() -> None:
+    """Die Gegenprobe: ohne Grund bleibt ein gesperrtes Rad ein Fehlschlag.
+
+    Sonst waere die Aenderung oben nicht eine Erweiterung des gewollten
+    Zustands, sondern das Abschalten des Melders.
+    """
+    gewollt = soll_kindersicherung(measure_only=False, gast_sperre=False)
+    assert child_lock_state(gewollt=gewollt, gemeldet=True) == "fehlgeschlagen"

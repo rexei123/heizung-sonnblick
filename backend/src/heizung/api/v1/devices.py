@@ -54,6 +54,8 @@ from heizung.services.child_lock import (
     child_lock_state,
     child_lock_verdict,
     child_lock_verdicts,
+    gast_sperren_je_geraet,
+    soll_kindersicherung,
 )
 from heizung.services.device_service import (
     assign_zone,
@@ -121,6 +123,7 @@ async def _build_device_read(
     verdict: BatteryVerdict,
     ventil: ValveVerdict,
     kindersicherung: Sperrmeldung | None,
+    gast_sperre: bool,
     grenzen_soll: Grenzen | None,
     grenzen_ist: Grenzbefund | None,
 ) -> DeviceRead:
@@ -213,10 +216,18 @@ async def _build_device_read(
             "valve_state": ventil.state,
             "valve_delta_k": ventil.delta_k,
             # Sprint 24c: gewollt gegen gemeldet, in einer reinen Funktion.
-            # ``measure_only`` kommt ueber ``model_validate`` mit und wird
-            # hier nur gelesen, nicht gesetzt.
+            #
+            # **Sprint 23 T4-B: der gewollte Zustand hat zwei Gruende.**
+            # ``soll_kindersicherung`` ist die einzige Stelle, die sie
+            # zusammenfuehrt. Wer hier ``measure_only`` direkt einsetzte,
+            # bekaeme fuer ein gast-gesperrtes Normalgeraet
+            # "fehlgeschlagen" — einen roten Befund im Normalfall
+            # (Paragraph 5.79). ``gast_sperre`` ist Pflicht-Argument und
+            # kommt aus einer Aggregat-Abfrage vor der Schleife.
             "child_lock_state": child_lock_state(
-                measure_only=device.measure_only,
+                gewollt=soll_kindersicherung(
+                    measure_only=device.measure_only, gast_sperre=gast_sperre
+                ),
                 gemeldet=kindersicherung.gesperrt if kindersicherung is not None else None,
                 gemeldet_um=kindersicherung.gemeldet_um if kindersicherung is not None else None,
                 befehl_um=device.child_lock_commanded_at,
@@ -297,6 +308,7 @@ async def _reload_device_read(session: AsyncSession, device_id: int) -> DeviceRe
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
         await child_lock_verdict(session, device_id),
+        (await gast_sperren_je_geraet(session, [device_id]))[device_id],
         grenzen_soll,
         (await ist_grenzen_je_geraet(session, [device_id]))[device_id],
     )
@@ -384,6 +396,10 @@ async def list_devices(
         session, [d.heating_zone_id for d in devices if d.heating_zone_id is not None]
     )
     grenzen_ist = await ist_grenzen_je_geraet(session, ids)
+    # Sprint 23 T4-B: der zweite Grund fuer eine gesperrte Kindersicherung,
+    # ebenfalls gehoben. Eine Abfrage je Zeile waere bei 104 Geraeten der
+    # sechste N+1-Pfad fuer eine Spalte (Paragraph 5.73).
+    gast_sperren = await gast_sperren_je_geraet(session, ids)
     return [
         await _build_device_read(
             session,
@@ -391,6 +407,7 @@ async def list_devices(
             verdicts[d.id],
             ventile[d.id],
             sperren[d.id],
+            gast_sperren[d.id],
             soll_je_zone.get(d.heating_zone_id) if d.heating_zone_id is not None else None,
             grenzen_ist[d.id],
         )
@@ -493,9 +510,21 @@ async def list_pool_devices(
     # Pool-Geraete haben keine Zone und damit keine Soll-Grenzen — das ist
     # kein Sonderfall, sondern die Aussage: ohne Einsatzort gibt es keine.
     grenzen_ist = await ist_grenzen_je_geraet(session, pool_ids)
+    # Ein Pool-Geraet hat keine Zone und damit kein Zimmer — die
+    # Gast-Sperre ist dort immer aus. Die Abfrage steht trotzdem hier und
+    # nicht als ``False``-Konstante: ein Pool-Geraet **mit** Zone waere ein
+    # Datenfehler, und den soll die Anzeige zeigen, nicht verdecken.
+    gast_sperren = await gast_sperren_je_geraet(session, pool_ids)
     return [
         await _build_device_read(
-            session, d, verdicts[d.id], ventile[d.id], sperren[d.id], None, grenzen_ist[d.id]
+            session,
+            d,
+            verdicts[d.id],
+            ventile[d.id],
+            sperren[d.id],
+            gast_sperren[d.id],
+            None,
+            grenzen_ist[d.id],
         )
         for d in pool
     ]
@@ -526,6 +555,7 @@ async def get_device(
         await _verdict_fuer(session, device_id),
         await _ventil_fuer(session, device_id),
         await child_lock_verdict(session, device_id),
+        (await gast_sperren_je_geraet(session, [device_id]))[device_id],
         grenzen_soll,
         (await ist_grenzen_je_geraet(session, [device_id]))[device_id],
     )
