@@ -139,6 +139,27 @@ class RuleResult:
     #: gesendet 25 — kein Downlink).
     clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C)
 
+    #: Steht die Gast-Sperre fuer dieses Zimmer (Sprint 23 T4-A2b)?
+    #:
+    #: ``room.guest_override_blocked``, **beide** Formen — dauerhaft und
+    #: bis Check-out. Sie unterscheiden sich nur darin, wann die Sperre
+    #: endet (``services/gast_sperre``), nicht in ihrer Wirkung auf das
+    #: Rad.
+    #:
+    #: Der Dispatch braucht sie fuer den Engine-Abgleich. Bei aktivem
+    #: Override ist der Abgleich auf Werte **ausserhalb** der Grenzen
+    #: verengt — richtig, solange die Abweichung ein Gastwunsch sein
+    #: kann, den man nicht alle 30 Minuten ueberschreiben will. Unter der
+    #: Sperre kann sie das gerade **nicht**: dort ist jede Abweichung eine
+    #: abgewiesene Drehung und gehoert zurueckgeholt. Belegt in Zimmer 107
+    #: am 30.10.2026, 25 °C innerhalb der Grenzen [15, 25], zwei Stunden
+    #: unkorrigiert.
+    #:
+    #: Der Wert kommt aus dem Engine-Kontext und nicht aus einer zweiten
+    #: Abfrage im Dispatch: ``ctx.room`` liegt hier schon in der Hand, und
+    #: zwei Lesestellen fuer eine Wahrheit sind Paragraph 5.53.
+    gast_sperre: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class HysteresisDecision:
@@ -1362,6 +1383,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
             layers=(summer, clamp),
             base_reason=summer.reason,
             clamp_grenzen_c=zimmer_grenzen,
+            gast_sperre=bool(ctx.room.guest_override_blocked),
         )
 
     base = layer_base_target(ctx)
@@ -1522,6 +1544,7 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         zone_overrides=zone_overrides,
         bad_setpoint_c=bad_setpoint_c,
         clamp_grenzen_c=zimmer_grenzen,
+        gast_sperre=bool(ctx.room.guest_override_blocked),
     )
 
 

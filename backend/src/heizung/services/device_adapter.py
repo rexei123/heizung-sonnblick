@@ -226,6 +226,32 @@ async def _device_measure_only(session: AsyncSession, device_id: int) -> bool:
     return bool(treffer)
 
 
+async def _device_eui(session: AsyncSession, device_id: int) -> str | None:
+    """``Device.dev_eui`` zur ID. ``None`` wenn unbekannt oder retired.
+
+    Gebraucht nur auf dem Abweis-Pfad der Gast-Sperre (Sprint 23 T4-A2b),
+    und nur, wenn der Aufrufer die EUI nicht mitgegeben hat.
+
+    **Warum ueberhaupt, wenn der Subscriber sie immer mitgibt.** Weil
+    ``dev_eui`` ein optionaler Parameter ist und das Re-Sync-Flag sonst
+    genau dann ausfiele, wenn ein Aufrufer ihn weglaesst — eine Luecke,
+    die niemand sieht, weil der Pfad daneben (das Audit) weiterlaeuft. Ein
+    Abfrage auf dem seltenen Abweis-Pfad ist dafuer der kleinere Preis.
+
+    Der ``retired_at``-Filter ist derselbe wie in ``_device_room_id``
+    (Paragraph 5.58): ein stillgelegtes Geraet bekommt keinen Downlink,
+    also auch kein Flag, das einen anfordert.
+    """
+    stmt = (
+        select(Device.dev_eui)
+        .where(Device.id == device_id)
+        .where(Device.retired_at.is_(None))
+        .limit(1)
+    )
+    eui: str | None = await session.scalar(stmt)
+    return eui
+
+
 async def _device_zone_id(session: AsyncSession, device_id: int) -> int | None:
     """``Device.heating_zone_id`` direkt. ``None`` wenn nicht zugeordnet
     ODER retired.
@@ -253,6 +279,7 @@ async def _write_blocked_event_log(
     received_at: datetime,
     reason: CommandReason,
     uplink_setpoint: Decimal,
+    zusatz: dict[str, object] | None = None,
 ) -> None:
     """Off-pipeline event_log-Audit fuer device_adapter Pre-Insert-Skip.
 
@@ -263,6 +290,13 @@ async def _write_blocked_event_log(
     ``evaluation_id`` (gehoert keiner Engine-Tick-Eval an). ``setpoint_in``
     / ``setpoint_out`` bleiben ``None`` — es entstand keine Steuer-
     Entscheidung. ``details`` traegt den verworfenen User-Setpoint.
+
+    ``zusatz`` wird in ``details`` eingemischt. Gebraucht vom Sperr-Gate
+    (Sprint 23 T4-A2b): dort gehoert dazu, ob das Re-Sync-Flag wirklich
+    gesetzt wurde. Steht es nicht, kommt das Geraet erst mit dem
+    Engine-Abgleich zurueck, und das ist der Unterschied zwischen einer
+    Minute und einer halben Stunde — wer den Verlauf liest, muss ihn
+    sehen koennen (Paragraph 5.76: die Wirkung zaehlt, nicht der Versuch).
     """
     entry = EventLog(
         time=received_at,
@@ -276,6 +310,7 @@ async def _write_blocked_event_log(
         details={
             "source": "device_adapter",
             "uplink_setpoint": str(uplink_setpoint),
+            **(zusatz or {}),
         },
     )
     session.add(entry)
@@ -312,7 +347,10 @@ async def handle_uplink_for_override(
        Eintrag mit ``reason=DEVICE_BLOCKED_ROOM_BLOCKED``. Spiegelt das
        Single-Source-of-Truth-Gate in ``override_service.create`` und
        schreibt zusaetzlich Audit (S3), weil der Skip nicht durch den
-       Service laeuft.
+       Service laeuft. **Seit Sprint 23 T4-A2b setzt dieses Gate
+       zusaetzlich das Re-Sync-Flag** (``grund=sperre``) — abweisen allein
+       laesst das Rad auf dem gedrehten Wert stehen, belegt in Zimmer 107
+       ueber zwei Stunden. Begruendung am Gate selbst.
     a) **OCCUPIED-Gate** (Sprint 12a T4, via ``derive_room_status``):
        VACANT/RESERVED/CLEANING/BLOCKED -> silent skip +
        ``MANUAL_OVERRIDE_BLOCKED``-event_log-Eintrag mit
@@ -392,7 +430,9 @@ async def handle_uplink_for_override(
             # akzeptiert: flag_set landet im event_log fuer Diagnose; der
             # naechste 60-s-Beat-Tick wuerde den Re-Sync trotzdem ausloesen
             # sobald der Vicki nach Heartbeat-Ablauf ohnehin gesendet bekommt.
-            flag_set = await asyncio.to_thread(resync_flag.mark_pending, dev_eui)
+            flag_set = await asyncio.to_thread(
+                resync_flag.mark_pending, dev_eui, grund=resync_flag.GRUND_REBOOT
+            )
             logger.info(
                 "reboot-frame erkannt dev_eui=%s device_id=%s prior_fcnt=%s "
                 "current_fcnt=%s uplink_setpoint=%s resync_flag_set=%s",
@@ -422,10 +462,63 @@ async def handle_uplink_for_override(
     if room is None:
         return None
     if room.guest_override_blocked:
+        # Sprint 23 T4-A2b: Abweisen genuegt nicht — das Rad steht noch da,
+        # wo der Gast es gedreht hat.
+        #
+        # **Der Befund des Betreibers, Zimmer 107 am 30.10.2026.** Um 11:46
+        # Uebersteuerung 23 °C bis Check-out, Geraet auf 23. Um 11:49 dreht
+        # der Gast auf 25; die Drehung wird hier korrekt abgewiesen, der
+        # Override bleibt 23. **Und das Geraet meldete zwei Stunden lang
+        # 25.0** — Ventil von 18 auf 34 %, Raum von 22,5 auf 23,9 °C. Kein
+        # Befehl kam zurueck.
+        #
+        # Niemand holte es zurueck, und zwar aus zwei Gruenden, die beide
+        # fuer sich richtig sind:
+        #
+        # 1. Die **Hysterese** vergleicht gegen den zuletzt **selbst
+        #    gesendeten** Wert. Der war 23, gewollt waren 23, ``delta = 0``
+        #    — sie schweigt (``rules/engine.py``, Sprint 20f).
+        # 2. Der **Engine-Abgleich** vergleicht gegen den **gemeldeten**
+        #    Wert und haette gegriffen, war aber bei aktivem Override auf
+        #    Werte ``ausserhalb`` der Grenzen verengt (Hotfix 18.10.2026).
+        #    25 liegt in [15, 25] — innerhalb, also stumm.
+        #
+        # Korrigiert hat es erst der Sechs-Stunden-Heartbeat. Zwei Stunden
+        # heizen gegen den eingetragenen Wunsch ist keine Verzoegerung mehr,
+        # sondern eine Sperre, die nicht sperrt.
+        #
+        # **Der Ausweg ist der vorhandene.** ``resync_flag`` ist genau dafuer
+        # gebaut (AE-63): der naechste Engine-Lauf sendet den Engine-Soll
+        # und uebergeht die Hysterese, einmal. Ereignisgetrieben — die
+        # Drehung **ist** der Anlass, auf den naechsten Abgleich zu warten
+        # waere eine halbe Stunde fuer eine Information, die hier schon
+        # vorliegt. Der Abgleich bleibt als zweite Schicht dahinter (T4-A2b
+        # Punkt 2), fuer den Fall, dass Redis nicht erreichbar war.
+        #
+        # **Beide Formen der Sperre**, dauerhaft und bis Check-out: gelesen
+        # wird ``guest_override_blocked``, und die Formen unterscheiden sich
+        # nur darin, wann die Sperre endet (``services/gast_sperre``). Auch
+        # **ohne** aktiven Override gilt es — dann ist der Engine-Soll der
+        # Plan-Wert, und das Geraet muss ebenso dorthin zurueck.
+        #
+        # Nicht fuer die anderen Gates (VACANT, Fenster): dort gibt es
+        # keinen aktiven Override, der den Abgleich verengt, und der holt
+        # die Abweichung ohnehin — langsamer, aber zuverlaessig. Ein Flag
+        # je abgewiesener Drehung waere dort zusaetzlicher Funk fuer eine
+        # bereits geloeste Frage (Paragraph 0 S6).
+        eui = dev_eui if dev_eui is not None else await _device_eui(session, device_id)
+        flag_set = (
+            await asyncio.to_thread(resync_flag.mark_pending, eui, grund=resync_flag.GRUND_SPERRE)
+            if eui is not None
+            else False
+        )
         logger.info(
-            "device-override skip: room_id=%s guest_override_blocked=True — device_id=%s",
+            "device-override skip: room_id=%s guest_override_blocked=True — device_id=%s "
+            "(resync_flag_set=%s, gemeldet=%s)",
             room_id,
             device_id,
+            flag_set,
+            user_setpoint,
         )
         await _write_blocked_event_log(
             session,
@@ -434,6 +527,7 @@ async def handle_uplink_for_override(
             received_at=received_at,
             reason=CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED,
             uplink_setpoint=user_setpoint,
+            zusatz={"resync_flag_set": flag_set},
         )
         return None
 

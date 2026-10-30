@@ -154,23 +154,28 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
 
 
 def test_resync_flag_mark_then_consume(fake_redis: _FakeRedis) -> None:
-    """mark_pending -> consume gibt True zurueck und loescht den Key."""
-    assert resync_flag.mark_pending("AABBCCDDEEFF0011") is True
+    """mark_pending -> consume gibt den Grund zurueck und loescht den Key.
+
+    Sprint 23 T4-A2b: die Rueckgabe war ``True``, jetzt ist sie der Grund.
+    Der Dispatch braucht ihn, um ``reboot_resync`` nur dort in den
+    ``control_command`` zu schreiben, wo wirklich ein Neustart war.
+    """
+    assert resync_flag.mark_pending("AABBCCDDEEFF0011", grund=resync_flag.GRUND_REBOOT) is True
     assert "resync_pending:aabbccddeeff0011" in fake_redis.store
-    assert resync_flag.consume("AABBCCDDEEFF0011") is True
+    assert resync_flag.consume("AABBCCDDEEFF0011") == resync_flag.GRUND_REBOOT
     assert "resync_pending:aabbccddeeff0011" not in fake_redis.store
 
 
 def test_resync_flag_consume_when_not_set(fake_redis: _FakeRedis) -> None:
-    """consume ohne vorheriges mark_pending -> False."""
-    assert resync_flag.consume("aabbccddeeff0011") is False
+    """consume ohne vorheriges mark_pending -> None."""
+    assert resync_flag.consume("aabbccddeeff0011") is None
 
 
 def test_resync_flag_key_case_insensitive(fake_redis: _FakeRedis) -> None:
     """Key wird auf lowercase normalisiert (subscriber lowercased dev_eui)."""
-    resync_flag.mark_pending("AABBCC")
+    resync_flag.mark_pending("AABBCC", grund=resync_flag.GRUND_REBOOT)
     assert "resync_pending:aabbcc" in fake_redis.store
-    assert resync_flag.consume("aabbcc") is True
+    assert resync_flag.consume("aabbcc") == resync_flag.GRUND_REBOOT
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +490,7 @@ async def test_dispatch_resync_flag_bypasses_hysteresis(
     await session.commit()  # damit _dispatch_downlinks_per_zone die sieht
 
     # Flag setzen
-    resync_flag.mark_pending(dev_eui)
+    resync_flag.mark_pending(dev_eui, grund=resync_flag.GRUND_REBOOT)
     assert f"resync_pending:{dev_eui.lower()}" in fake_redis.store
 
     # send_setpoint mocken (kein echter MQTT-Call)
@@ -597,7 +602,7 @@ async def test_dispatch_flag_consumed_on_normal_send(
     await session.flush()
     await session.commit()
 
-    resync_flag.mark_pending(dev_eui)
+    resync_flag.mark_pending(dev_eui, grund=resync_flag.GRUND_REBOOT)
 
     sent: list[tuple[str, int]] = []
 

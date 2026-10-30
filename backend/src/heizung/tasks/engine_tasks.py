@@ -258,6 +258,7 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 zone_overrides=result.zone_overrides,
                 bad_setpoint_c=result.bad_setpoint_c,
                 clamp_grenzen_c=result.clamp_grenzen_c,
+                gast_sperre=result.gast_sperre,
             )
             sent_devices = per_device_results
 
@@ -549,6 +550,7 @@ async def _dispatch_downlinks_per_zone(
     zone_overrides: dict[int, int] | None = None,
     bad_setpoint_c: int | None = None,
     clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C),
+    gast_sperre: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
 
@@ -578,6 +580,13 @@ async def _dispatch_downlinks_per_zone(
     Sprint 12a T5 (AE-58 Option G): ``zone_overrides`` ist ein optionaler
     Dict ``zone_id -> int_setpoint``. Pro Zone wird ``zone_overrides[zone_id]``
     bevorzugt, sonst Fallback auf ``target_setpoint_c`` (Room-Default).
+
+    Sprint 23 T4-A2b: ``gast_sperre`` ist ``room.guest_override_blocked``
+    (beide Formen) und hebt die Ausnahme auf, die den Engine-Abgleich bei
+    aktivem Override auf Werte ausserhalb der Grenzen verengt. Der Default
+    ``False`` ist die bisherige Lage — ein Aufrufer, der die Sperre nicht
+    kennt, bekommt das Verhalten von vor dem 30.10.2026 und nicht eines,
+    das eine Sperre behauptet, die er nie gelesen hat.
     """
     zone_overrides = zone_overrides or {}
     zones = await _get_zones_for_room(session, room_id)
@@ -656,24 +665,32 @@ async def _dispatch_downlinks_per_zone(
                 new_setpoint_c=zone_target_setpoint_c,
             )
 
-            # Sprint 15c (AE-63): Reboot-Re-Sync-Bypass. ``resync_flag.consume``
-            # ist atomarer GETDEL — gibt True zurueck wenn das Flag gesetzt
-            # war (und ist jetzt geloescht). Konsumiert unabhaengig von
-            # ``dev_decision.should_send`` (cleanup, vermeidet doppelten
+            # Sprint 15c (AE-63): Re-Sync-Bypass. ``resync_flag.consume``
+            # ist atomarer GETDEL — gibt den **Grund** zurueck, wenn das Flag
+            # gesetzt war (und ist jetzt geloescht). Konsumiert unabhaengig
+            # von ``dev_decision.should_send`` (cleanup, vermeidet doppelten
             # Re-Sync im naechsten Tick wenn die Hysterese ohnehin senden
             # wuerde). Nur wenn die Hysterese skippen wollte UND das Flag
             # gesetzt war, ueberschreiben wir die Entscheidung auf
-            # forced-send mit ``reason=reboot_resync``.
-            flag_was_set = await asyncio.to_thread(resync_flag.consume, dev.dev_eui)
+            # forced-send.
+            #
+            # Sprint 23 T4-A2b: der Grund steht im Wert, weil es inzwischen
+            # drei gibt — Geraete-Neustart, abgewiesene Drehung unter der
+            # Gast-Sperre, Rueckgabe nach der Sollwert-Probe. Er geht in den
+            # Hysterese-Text und entscheidet unten ueber den ``reason`` des
+            # ``ControlCommand``: ``reboot_resync`` darf nur dort stehen, wo
+            # wirklich ein Neustart war (Paragraph 5.68).
+            resync_grund = await asyncio.to_thread(resync_flag.consume, dev.dev_eui)
             resync_forced = False
-            if flag_was_set and not dev_decision.should_send:
+            if resync_grund is not None and not dev_decision.should_send:
                 resync_forced = True
                 dev_decision = HysteresisDecision(
                     should_send=True,
-                    reason=f"reboot_resync (was: {dev_decision.reason})",
+                    reason=f"{resync_grund}_resync (was: {dev_decision.reason})",
                 )
                 logger.info(
-                    "reboot_resync forced dev_eui=%s zone_id=%s setpoint_c=%s",
+                    "resync forced grund=%s dev_eui=%s zone_id=%s setpoint_c=%s",
+                    resync_grund,
                     dev.dev_eui,
                     zone.id,
                     zone_target_setpoint_c,
@@ -769,16 +786,39 @@ async def _dispatch_downlinks_per_zone(
             # Vorlage gekappt werden, muss sie hier nachziehen — sonst
             # vergleicht der Abgleich gegen eine Grenze, die dieser Wert
             # nie gesehen hat.
-            if aktiver_override is None:
-                override_erlaubt_abgleich = True
+            # **Und unter der Gast-Sperre gilt die Ausnahme gar nicht**
+            # (Sprint 23 T4-A2b, Befund Zimmer 107 vom 30.10.2026).
+            #
+            # Die Verengung oben hat genau einen Grund: die Abweichung
+            # **koennte** ein Gastwunsch sein, und den will man nicht alle
+            # 30 Minuten ueberschreiben. Steht die Sperre, kann sie das
+            # nicht — der Gast darf nicht stellen, also ist jede Abweichung
+            # eine abgewiesene Drehung oder Drift, und beides gehoert
+            # zurueckgeholt.
+            #
+            # Belegt: Uebersteuerung 23 bis Check-out, Gast dreht auf 25.
+            # 25 liegt in [15, 25], also innerhalb — der Abgleich blieb
+            # stumm, und das Geraet heizte zwei Stunden auf 25, bis der
+            # Sechs-Stunden-Heartbeat daran vorbeikam.
+            #
+            # Das ist die **zweite** Schicht. Die erste ist das Re-Sync-Flag
+            # aus dem Sperr-Gate (``device_adapter``), das innerhalb einer
+            # Minute wirkt. Hier landet, was sie nicht erreicht hat: Redis
+            # nicht erreichbar, Flag abgelaufen, oder eine Abweichung ohne
+            # ``0x28``-Frame. Die Drosselung auf eine Nachsendung je 30
+            # Minuten und die drei Versuche gelten unveraendert — sie sind
+            # der Schutz dagegen, dass aus einer Nachbesserung eine
+            # Dauer-Anfunkung wird (Paragraph 0 S4).
+            if aktiver_override is None or gast_sperre:
+                abgleich_erlaubt = True
             else:
                 unten, oben = clamp_grenzen_c
-                override_erlaubt_abgleich = ist_wert is not None and not (unten <= ist_wert <= oben)
+                abgleich_erlaubt = ist_wert is not None and not (unten <= ist_wert <= oben)
 
             if (
                 not dev_decision.should_send
                 and not resync_forced
-                and override_erlaubt_abgleich
+                and abgleich_erlaubt
                 and ist_wert is not None
                 and ist_wert != zone_target_setpoint_c
                 and downlink_alt_genug
@@ -789,17 +829,24 @@ async def _dispatch_downlinks_per_zone(
                 # ohne Grenze bei jedem Tick angefunkt.
                 if await asyncio.to_thread(engine_abgleich.darf_senden, dev.dev_eui):
                     abgleich_forced = True
-                    trotz_override = aktiver_override is not None
+                    # Der Zusatz nennt, **warum** trotz Override gesendet
+                    # wird — es gibt zwei Gruende, und sie zu vermischen
+                    # waere eine falsche Aussage im Trace: unter der Sperre
+                    # liegt der Wert in der Regel innerhalb der Grenzen.
+                    if aktiver_override is None:
+                        zusatz = ""
+                    elif gast_sperre:
+                        zusatz = ", Gast-Sperre steht — jede Abweichung zaehlt"
+                    else:
+                        zusatz = (
+                            f", ausserhalb der Grenzen {clamp_grenzen_c} trotz aktivem Override"
+                        )
                     dev_decision = HysteresisDecision(
                         should_send=True,
                         reason=(
                             f"engine_abgleich: Geraet meldet {ist_wert}, "
                             f"Soll {zone_target_setpoint_c}"
-                            + (
-                                f", ausserhalb der Grenzen {clamp_grenzen_c} trotz aktivem Override"
-                                if trotz_override
-                                else ""
-                            )
+                            + zusatz
                             + f" (was: {dev_decision.reason})"
                         ),
                     )
@@ -850,7 +897,21 @@ async def _dispatch_downlinks_per_zone(
                     }
                 )
                 continue
-            cc_reason = CommandReason.REBOOT_RESYNC if resync_forced else base_reason
+            # Sprint 23 T4-A2b: ``reboot_resync`` nur beim Neustart. Die
+            # anderen Gruende senden denselben Wert aus demselben Anlass —
+            # "das Geraet steht nicht auf dem Soll" —, aber keiner von ihnen
+            # ist ein Neustart, und ein ``reason``, der einen behauptet, ist
+            # eine Falschaussage in einer Quelle, die spaeter als Beleg
+            # gelesen wird (Paragraph 5.68). Sie tragen deshalb den Grund des
+            # Laufs und nennen den Anlass im Hysterese-Text, genau wie der
+            # Engine-Abgleich. Ein eigener Enum-Wert je Grund waere eine
+            # Migration der ``CHECK``-Beschraenkung (Paragraph 5.45) — fuer
+            # eine Audit-Nuance die falsche Waehrung.
+            cc_reason = (
+                CommandReason.REBOOT_RESYNC
+                if resync_grund == resync_flag.GRUND_REBOOT and resync_forced
+                else base_reason
+            )
             cc = ControlCommand(
                 device_id=dev.id,
                 target_setpoint=Decimal(zone_target_setpoint_c),

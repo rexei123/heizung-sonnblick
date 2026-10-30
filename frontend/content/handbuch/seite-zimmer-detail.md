@@ -3,7 +3,7 @@ titel: Ein Zimmer im Detail
 kategorie: Die Seiten
 stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Temperatur ändern
 rollen: alle
-stand: 2026-10-29
+stand: 2026-10-30
 route: /zimmer/[id]
 ---
 
@@ -96,6 +96,23 @@ das an der Stelle, an der man sie sucht.
 
 Beim Sperren werden laufende Wunschtemperaturen des Zimmers aufgehoben;
 die Auswahl nennt ihre Anzahl, bevor man sich entscheidet.
+
+**Was am Gerät passiert, wenn der Gast trotzdem dreht.** Das Rad lässt
+sich bewegen — die Sperre liegt in der Steuerung und nicht im Knopf. Die
+Drehung wird nicht übernommen, und die Steuerung schickt den gültigen
+Wert beim nächsten Lauf an den Heizkörper zurück. Bis das Gerät den
+Befehl abholt, kann noch eine Funkperiode vergehen: ein Thermostat
+empfängt nur im Fenster nach einer eigenen Meldung.
+
+Am Gerät steht in dieser Zeit der gedrehte Wert, und das Zimmer heizt
+kurz danach. Im **Verlauf** ist dieser Ausschlag sichtbar — das ist
+Absicht, dort wird gezeigt, was am Heizkörper tatsächlich galt.
+
+Dauerte es früher deutlich länger, war das ein Fehler und ist behoben
+(30.10.2026): die Steuerung merkte die Abweichung erst nach Stunden, weil
+sie gegen den zuletzt **selbst gesendeten** Wert verglich und der
+unverändert richtig war. Wird es wieder lang, gehört das gemeldet und
+nicht abgewartet.
 
 ## Einen Wert setzen und gleich festhalten
 

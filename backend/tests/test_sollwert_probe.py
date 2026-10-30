@@ -217,7 +217,12 @@ def _mit_engine(
     """Haengt Flag und Engine-Lauf ein und protokolliert die Reihenfolge."""
     ablauf: list[str] = []
 
-    def mark_pending(dev_eui: str) -> bool:
+    def mark_pending(dev_eui: str, *, grund: str) -> bool:
+        # Der Grund ist seit Sprint 23 T4-A2b Pflicht, und die Attrappe
+        # prueft ihn mit: die Probe gibt ein Zimmer an die Engine zurueck,
+        # das ist kein Geraete-Neustart. Stuende hier ``reboot``, behauptete
+        # der ``control_command`` einen Neustart, den es nicht gab.
+        assert grund == werkzeug.resync_flag.GRUND_PROBE
         ablauf.append("flag")
         return flag_gesetzt
 
