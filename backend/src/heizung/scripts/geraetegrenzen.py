@@ -387,7 +387,9 @@ async def _zurueck_an_die_engine(ziel: Zielgeraet, room_id: int) -> tuple[bool, 
     jemand muss nachsehen. Ein stilles „ich habe es versucht" waere hier
     das Teuerste.
     """
-    flag_gesetzt = await asyncio.to_thread(resync_flag.mark_pending, ziel.dev_eui)
+    flag_gesetzt = await asyncio.to_thread(
+        resync_flag.mark_pending, ziel.dev_eui, grund=resync_flag.GRUND_PROBE
+    )
     if not flag_gesetzt:
         return (
             False,

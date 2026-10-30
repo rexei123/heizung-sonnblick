@@ -3559,6 +3559,70 @@ dokumentiert" sagt nichts darüber, ob sie wirkt), §5.80 (dieselbe Familie
 bei Abhängigkeiten: zwei Dinge hatten sich geändert, gesehen habe ich
 eines).
 
+### 5.87 Ein Test, der selbst committet, kann einen fehlenden Commit nicht sehen (Sprint 23 T4-A2b, 30.10.2026)
+
+**Der Befund.** `mqtt_subscriber._handle_override_detection` hat so
+committet:
+
+```python
+override = await handle_uplink_for_override(...)
+if override is not None:
+    await session.commit()
+```
+
+Der Dienst dahinter hat aber **vier** Pfade, die etwas schreiben und
+`None` zurueckgeben — die abgewiesene Drehung unter der Gast-Sperre, das
+freie Zimmer, das offene Fenster, der erkannte Geraete-Neustart. Alle
+vier rufen `session.add(...)` plus `flush` und bekamen keinen Commit:
+beim Verlassen des `async with` rollte die Sitzung zurueck.
+
+Damit hat der einzige produktive Aufrufer dieses Pfades **seit Sprint 12a
+T4 jede Off-Pipeline-Audit-Zeile verworfen.** Die Mechanik war gebaut,
+in zwei Dokumenten beschrieben (AE-58 §9, §5.52) und wirkungslos. Erst
+ein Rad-Test im Betrieb hat in die Naehe geleuchtet.
+
+**Warum es kein Test gefunden hat, und das ist der eigentliche Punkt.**
+Es gibt acht Tests zu diesen Gates, und alle acht pruefen die
+`event_log`-Zeile. Sie rufen aber `handle_uplink_for_override`
+**direkt**, mit ihrer eigenen Sitzung, und die committen oder lesen
+innerhalb derselben Transaktion. Eine geflushte Zeile ist dort sichtbar —
+mit Commit wie ohne.
+
+Der Dienst war also vollstaendig geprueft und sein einziger Aufrufer gar
+nicht. §5.61 sagt, dass in `services/` der Aufrufer committet; was dort
+fehlte, ist die Umkehrung: **wer den Aufrufer nicht prueft, prueft die
+Regel nicht.**
+
+**Und beim Nachbauen wiederholt sich der Fehler sofort.** Der erste Test
+zu genau diesem Befund lieh dem Subscriber die Test-Sitzung und las die
+Zeile danach aus **derselben** Sitzung. Er war gruen — auch mit wieder
+entferntem Commit. Aufgefallen ist das nur, weil die Mutationsprobe zu
+dieser Aussage gruen blieb (§5.55: ein gruener Lauf, der nichts geprueft
+hat). Der Test liest jetzt ueber eine zweite Verbindung.
+
+**Regel, zwei Teile:**
+
+1. **Fuer jeden Dienst, dessen Transaktion der Aufrufer traegt, gibt es
+   mindestens einen Test, der durch den echten Aufrufer geht.** Nicht
+   jeden Pfad — einen, der belegt, dass der Aufrufer committet. Bei
+   mehreren Rueckgabe-Pfaden ist das der, der **nichts** zurueckgibt und
+   trotzdem schreibt; der andere ist ohnehin gedeckt.
+2. **Ein Test auf „ist persistiert" liest ueber eine zweite Verbindung.**
+   Innerhalb der schreibenden Transaktion ist „geflusht" von
+   „committet" nicht zu unterscheiden, und genau diesen Unterschied soll
+   er pruefen.
+
+**Die Gegenprobe, die man sich sparen kann:** ein Commit ohne offene
+Aenderung kostet nichts. Eine Bedingung davor ist deshalb kein
+Sparprogramm, sondern die Stelle, an der das naechste Gate vergessen
+wird. In diesem Pfad steht der Commit jetzt unbedingt.
+
+**Querverweise:** §5.61 (der Aufrufer committet — hier aus der anderen
+Richtung verletzt), §5.52 (Off-Pipeline-Audit-Muster, dessen Zeilen
+betroffen waren), §5.55 (der gruene Lauf, der nichts prueft — doppelt:
+beim alten Test und beim ersten neuen), §5.76 (Mechanik stimmt, Wirkung
+fehlt), §0 S3 (Auditierbarkeit), STATUS §2cm.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

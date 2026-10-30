@@ -875,8 +875,31 @@ async def _handle_override_detection(uplink: ChirpStackUplink) -> None:
                 dev_eui=dev_eui,
                 current_fcnt=uplink.fCnt,
             )
+            # **Immer committen, nicht nur bei angelegtem Override**
+            # (Befund 30.10.2026, Sprint 23 T4-A2b).
+            #
+            # Hier stand ``if override is not None: await session.commit()``.
+            # Die Gates davor schreiben aber ``event_log``-Zeilen und geben
+            # dann ``None`` zurueck — der abgewiesene Drehring in einem
+            # gesperrten oder freien Zimmer, das offene Fenster, der
+            # erkannte Geraete-Neustart. Alle vier haben ``flush`` gerufen
+            # und **keinen** Commit bekommen: beim Verlassen des ``async
+            # with`` rollte die Sitzung zurueck.
+            #
+            # Damit hat der einzige produktive Aufrufer dieses Pfades seit
+            # Sprint 12a T4 **jede** Off-Pipeline-Audit-Zeile verworfen —
+            # die Mechanik war gebaut, getestet (die Tests rufen
+            # ``handle_uplink_for_override`` direkt und committen selbst)
+            # und ohne Wirkung. Genau das Muster aus Paragraph 5.76: ein
+            # Melder, dessen Mechanik stimmt und dessen Wirkung ausbleibt.
+            # Paragraph 5.61 nennt die Regel, gegen die es ging — in
+            # ``services/`` committet der Aufrufer, und er muss es tun.
+            #
+            # Ein Commit ohne offene Aenderung kostet nichts, deshalb steht
+            # er ohne Bedingung. Eine Bedingung waere die naechste Stelle,
+            # an der ein neues Gate vergessen wird.
+            await session.commit()
             if override is not None:
-                await session.commit()
                 logger.info(
                     "device-override erkannt dev_eui=%s setpoint=%s expires_at=%s",
                     dev_eui,
