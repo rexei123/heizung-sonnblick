@@ -214,7 +214,7 @@ async function mockBasicAuthAndRoom(
       return;
     }
     // POST faengt der Test mit eigenem Route-Override
-    await route.continue();
+    await route.fallback();
   });
 }
 

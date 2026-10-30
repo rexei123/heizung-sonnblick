@@ -33,6 +33,13 @@ const SUMMER_SCENARIO_BASE = {
 test.describe("Sprint 9.16 Warn-Banner Temperaturen+Zeiten", () => {
 
   test("Banner sichtbar bei aktivem Sommermodus", async ({ page }) => {
+    // Wer den Hausstandard wirklich nimmt (Sprint 24d) — die Seite holt
+    // es beim Laden, dieser Test prüft es nicht. Ohne Mock ginge die
+    // Anfrage über den Rewrite an API_PROXY_TARGET (Rückhalt in
+    // `fixtures.ts`).
+    await page.route("**/api/v1/rule-configs/global/nutzung", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.route("**/api/v1/rule-configs/global", (route) =>
       route.fulfill({
         status: 200,
@@ -61,6 +68,13 @@ test.describe("Sprint 9.16 Warn-Banner Temperaturen+Zeiten", () => {
   });
 
   test("Kein Banner bei inaktivem Sommermodus", async ({ page }) => {
+    // Wer den Hausstandard wirklich nimmt (Sprint 24d) — die Seite holt
+    // es beim Laden, dieser Test prüft es nicht. Ohne Mock ginge die
+    // Anfrage über den Rewrite an API_PROXY_TARGET (Rückhalt in
+    // `fixtures.ts`).
+    await page.route("**/api/v1/rule-configs/global/nutzung", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.route("**/api/v1/rule-configs/global", (route) =>
       route.fulfill({
         status: 200,

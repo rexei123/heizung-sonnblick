@@ -98,9 +98,20 @@ const HW_STATUS = {
   window_minutes: 30,
 };
 
-async function mockHardwareStatus(page: Page) {
+/**
+ * Die Nebenanfragen der Geräteseiten: Montage-Zustand und Historie.
+ *
+ * Die Historie (`/audit`, Sprint 24c) fehlte hier bis 25.10.2026. Ohne
+ * Mock geht die Anfrage über den Rewrite aus `next.config.mjs` an
+ * `API_PROXY_TARGET` — der Rückhalt in `fixtures.ts` hält sie jetzt auf
+ * und nennt sie.
+ */
+async function mockNebenanfragen(page: Page) {
   await page.route("**/api/v1/devices/*/hardware-status", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HW_STATUS) }),
+  );
+  await page.route("**/api/v1/devices/*/audit", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 }
 
@@ -119,7 +130,7 @@ test.describe("Sprint 14a — /devices-Liste (5 Spalten)", () => {
         body: JSON.stringify([ASSIGNED_DEVICE, POOL_DEVICE]),
       }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices");
 
@@ -146,7 +157,7 @@ test.describe("Sprint 14a — /devices-Liste (5 Spalten)", () => {
         body: JSON.stringify([ASSIGNED_DEVICE, POOL_DEVICE]),
       }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices");
 
@@ -163,7 +174,7 @@ test.describe("Sprint 14a — /devices-Liste (5 Spalten)", () => {
         body: JSON.stringify([ASSIGNED_DEVICE, POOL_DEVICE]),
       }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices");
 
@@ -204,7 +215,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
         body: JSON.stringify(SAMPLE_READINGS),
       }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
   }
 
   test("Header, Zuordnungs-Karte, Identifikations-Karte", async ({ page }) => {
@@ -320,6 +331,11 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
         body: JSON.stringify({ detail: "Device 9999 nicht gefunden" }),
       }),
     );
+    // Die Messwert-Abfrage läuft auch für ein Gerät, das es nicht gibt —
+    // sie hängt an der Adresse, nicht am Ergebnis der Geräte-Abfrage.
+    await page.route("**/api/v1/devices/9999/sensor-readings*", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.goto("/devices/9999");
     await expect(page.getByText("Gerät nicht gefunden")).toBeVisible();
   });
@@ -346,7 +362,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     await page.route("**/api/v1/devices/42/sensor-readings*", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices/42");
     await page.getByRole("button", { name: "Hardware-Nummer bearbeiten" }).click();
@@ -380,7 +396,7 @@ test.describe("Sprint 14a — /devices/[id]-Detail", () => {
     await page.route("**/api/v1/devices/42/sensor-readings*", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
-    await mockHardwareStatus(page);
+    await mockNebenanfragen(page);
 
     await page.goto("/devices/42");
     await page.getByRole("button", { name: "Hardware-Nummer bearbeiten" }).click();

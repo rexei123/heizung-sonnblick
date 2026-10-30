@@ -1,4 +1,4 @@
-import { test, expect, type Route } from "./fixtures";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 /**
  * Sprint 9.13a — Geraete-Pairing-Wizard + Detach-Button.
@@ -69,10 +69,40 @@ function mockJson(route: Route, body: unknown) {
   });
 }
 
+/**
+ * Was die Geräteliste und die Zimmerseite **nebenbei** holen, ohne dass
+ * dieser Test es prüft: den Montage-Zustand je Gerät, die Raumtypen und
+ * die Übersteuerungen des Zimmers.
+ *
+ * Bis 25.10.2026 standen diese drei Mocks hier nicht. Die Anfragen sind
+ * damit über den Rewrite aus `next.config.mjs` an `API_PROXY_TARGET`
+ * gegangen — lokal die Produktion dieses Hauses. Der Rückhalt in
+ * `fixtures.ts` hält sie jetzt auf und nennt sie beim Namen.
+ *
+ * Das Glob `**\/api\/v1\/devices*` der Tests unten deckt sie **nicht**
+ * ab: ein `*` läuft nicht über einen Schrägstrich (§5.54 ist dieselbe
+ * Familie, dort der Query-String).
+ */
+async function mockNebenanfragen(page: Page) {
+  await page.route("**/api/v1/devices/*/hardware-status", (r) =>
+    mockJson(r, {
+      status: "active",
+      source: "window",
+      mounted_confirmed_at: null,
+      last_seen: new Date(NOW - 5 * 60 * 1000).toISOString(),
+      frames_in_window: 3,
+      window_minutes: 30,
+    }),
+  );
+  await page.route("**/api/v1/room-types*", (r) => mockJson(r, []));
+  await page.route("**/api/v1/rooms/*/overrides*", (r) => mockJson(r, []));
+}
+
 test.describe("Sprint 9.13a Pairing-Wizard", () => {
   test("/devices zeigt CTA „Gerät hinzufügen“ und führt zum Wizard", async ({
     page,
   }) => {
+    await mockNebenanfragen(page);
     await page.route("**/api/v1/devices*", (r) => mockJson(r, [VICKI_ASSIGNED]));
     // RoomStep + HeatingZoneStep nicht zwingend für Step 1, aber Page lädt useRooms
     // beim Mount — Mock vorhalten verhindert XHR-Fehler im Test-Run.
@@ -129,6 +159,7 @@ test.describe("Sprint 9.13a Pairing-Wizard", () => {
   test("Detach-ConfirmDialog auf /zimmer/[id] erscheint korrekt", async ({
     page,
   }) => {
+    await mockNebenanfragen(page);
     await page.route("**/api/v1/rooms/101", (r) => mockJson(r, ROOM_101));
     await page.route("**/api/v1/rooms/101/heating-zones", (r) =>
       mockJson(r, [HEATING_ZONE_91]),
@@ -158,6 +189,7 @@ test.describe("Sprint 9.13a Pairing-Wizard", () => {
   test("Inline-Edit-Input hat autoComplete=off und zeigt aktuellen Label-Wert (HF-9.13a-1)", async ({
     page,
   }) => {
+    await mockNebenanfragen(page);
     await page.route("**/api/v1/devices*", (r) => mockJson(r, [VICKI_ASSIGNED]));
     await page.route("**/api/v1/rooms*", (r) => mockJson(r, [ROOM_101]));
 
