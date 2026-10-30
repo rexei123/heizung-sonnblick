@@ -1032,6 +1032,16 @@ export interface ManualOverrideCreate {
    */
   dauer_minuten?: number;
   /**
+   * Sprint 23 T4-A2: setzt zusätzlich die Gast-Sperre „bis Check-out" auf
+   * dem **Zimmer** — der Gast kann den eingestellten Wert dann nicht mehr
+   * verstellen, das Personal schon.
+   *
+   * Nur mit `source: "frontend_checkout"` erlaubt und nicht in einem
+   * Allgemeinbereich; beides weist der Server mit 422 ab. Die Sperre endet
+   * mit der Abreise, zusammen mit dieser Übersteuerung.
+   */
+  gast_sperre_bis_checkout?: boolean;
+  /**
    * Sprint 12a T3 (AE-58): optionaler Zone-Scope. ``undefined`` /
    * weggelassen = Room-Scope-Override (Backward-Compat). Gesetzt =
    * Zone-Match (Backend FK-404-Check verifiziert, dass Zone zum Pfad-

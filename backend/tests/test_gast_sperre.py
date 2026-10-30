@@ -26,6 +26,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -50,8 +51,12 @@ from heizung.models.manual_override import ManualOverride
 from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
-from heizung.services import occupancy_service
-from heizung.services.gast_sperre import ACTION_GELOEST, loese_bei_checkout
+from heizung.services import occupancy_service, override_service
+from heizung.services.gast_sperre import (
+    ACTION_GELOEST,
+    VIA_UEBERSTEUERUNG,
+    loese_bei_checkout,
+)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SKIP_REASON = "DATABASE_URL nicht gesetzt - T4-A-Tests brauchen Test-DB"
@@ -441,3 +446,324 @@ async def test_belegungsabgleich_loest_die_sperre(setup_engine: AsyncEngine, zim
     sperre = await _lies_sperre(setup_engine, zimmer)
     assert sperre == (False, False), f"Sperre nach Abgleich: {sperre}"
     assert len(await _audits(setup_engine, zimmer, ACTION_GELOEST)) == 1
+
+
+# ---------------------------------------------------------------------------
+# 4. T4-A2 — das Haekchen im Uebersteuerungs-Dialog
+#
+# **Der Befund des Betreibers zu #340, als Test.** Der Weg ueber den
+# Sperr-Knopf deckt den vereinbarten Fall nicht ab: dort beginnt die
+# Sperre mit einem Widerruf aller Uebersteuerungen, und das trifft genau
+# die, die die Rezeption gerade festsetzen will. Der erste Test unten ist
+# der Beweis, dass dieser Weg es anders macht.
+# ---------------------------------------------------------------------------
+
+
+async def _belege(setup_engine: AsyncEngine, room_id: int) -> None:
+    """Eine laufende Belegung plus ``status=occupied``.
+
+    Beides ist noetig und aus verschiedenen Gruenden: ``frontend_checkout``
+    braucht einen kommenden Check-out (``next_active_checkout``), und das
+    OCCUPIED-Gate des Dienstes rechnet mit ``derive_room_status`` aus
+    derselben Belegung. Das Statusfeld steht daneben fuer die Oberflaeche
+    (Paragraph 5.53 — zwei Quellen, die der Abgleich zusammenhaelt).
+    """
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    jetzt = datetime.now(tz=UTC)
+    async with sessionmaker() as session:
+        room = await session.get(Room, room_id)
+        assert room is not None
+        room.status = RoomStatus.OCCUPIED
+        session.add(
+            Occupancy(
+                room_id=room_id,
+                check_in=jetzt - timedelta(hours=2),
+                check_out=jetzt + timedelta(days=2),
+                guest_count=1,
+                source=OccupancySource.MANUAL,
+            )
+        )
+        await session.commit()
+
+
+async def _overrides(setup_engine: AsyncEngine, room_id: int) -> list[ManualOverride]:
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        rows = await session.execute(
+            select(ManualOverride)
+            .where(ManualOverride.room_id == room_id)
+            .order_by(ManualOverride.id)
+        )
+        return list(rows.scalars().all())
+
+
+async def test_haekchen_setzt_sperre_und_widerruft_die_uebersteuerung_nicht(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """**Der Kern von T4-A2.** 23 Grad plus Haekchen in einem Aufruf.
+
+    Danach muss **beides** stehen: die Sperre auf dem Zimmer und die
+    Uebersteuerung mit 23 Grad, nicht widerrufen. Der Weg ueber den
+    Sperr-Knopf haette hier eine widerrufene Zeile hinterlassen — das war
+    der Befund zu #340, und dieser Test ist die Gegenprobe dazu.
+    """
+    await _belege(setup_engine, zimmer)
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={
+            "setpoint": "23",
+            "source": "frontend_checkout",
+            "gast_sperre_bis_checkout": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    assert await _lies_sperre(setup_engine, zimmer) == (True, True)
+
+    zeilen = await _overrides(setup_engine, zimmer)
+    assert len(zeilen) == 1
+    assert zeilen[0].revoked_at is None, "die Uebersteuerung wurde widerrufen — genau #340"
+    assert zeilen[0].revoked_reason is None
+    assert int(zeilen[0].setpoint) == 23
+    assert zeilen[0].source == OverrideSource.FRONTEND_CHECKOUT
+
+
+async def test_haekchen_schreibt_sein_audit_ohne_widerrufszahl(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Die Sperre ist nachlesbar, und zwar unter derselben Action wie beim
+    Knopf — sonst waere "wer hat gesperrt" zwei Abfragen.
+
+    Die fehlende ``revoked_overrides_count`` ist die Aussage: hier wurde
+    bewusst nichts widerrufen.
+    """
+    await _belege(setup_engine, zimmer)
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout", "gast_sperre_bis_checkout": True},
+    )
+    assert resp.status_code == 201, resp.text
+
+    sperr_audits = await _audits(setup_engine, zimmer, "ROOM_OVERRIDE_BLOCK_TOGGLED")
+    assert len(sperr_audits) == 1
+    neu = sperr_audits[0].new_value
+    assert neu is not None
+    assert neu["blocked"] is True
+    assert neu["bis_checkout"] is True
+    assert neu["via"] == VIA_UEBERSTEUERUNG
+    assert "revoked_overrides_count" not in neu
+
+    set_audits = await _audits(setup_engine, zimmer, "MANUAL_OVERRIDE_SET")
+    assert len(set_audits) == 1
+    assert set_audits[0].new_value is not None
+    assert set_audits[0].new_value["gast_sperre_bis_checkout"] is True
+
+
+async def test_ohne_haekchen_bleibt_die_sperre_aus(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Der Standard ist AUS. Ohne das Feld passiert nichts Zusaetzliches —
+    eine Uebersteuerung "Bis Check-out" ist fuer sich keine Sperre.
+    """
+    await _belege(setup_engine, zimmer)
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert await _lies_sperre(setup_engine, zimmer) == (False, False)
+    assert await _audits(setup_engine, zimmer, "ROOM_OVERRIDE_BLOCK_TOGGLED") == []
+
+
+async def test_haekchen_ohne_bis_checkout_ist_422(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Bei jeder anderen Dauer laeuft die Uebersteuerung aus, waehrend der
+    Gast noch da ist — die Sperre bliebe stehen.
+
+    Und: nach einem 422 darf **nichts** geschrieben sein. Die Abweisung
+    steht deshalb vor dem Schreibvorgang.
+    """
+    await _belege(setup_engine, zimmer)
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_24h", "gast_sperre_bis_checkout": True},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "Bis Check-out" in resp.json()["detail"]
+    assert await _lies_sperre(setup_engine, zimmer) == (False, False)
+    assert await _overrides(setup_engine, zimmer) == []
+
+
+async def test_haekchen_im_allgemeinbereich_ist_422(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, bereich: int
+) -> None:
+    """Ein Bereich hat keine Abreise — die Sperre wuerde nie enden.
+
+    Die Quelle waere hier ohnehin falsch, und der Dienst wuerde das
+    abweisen. Dieser Satz sagt dem Leser aber, **was** nicht geht; der
+    andere sagt nur, dass die Quelle nicht passt.
+    """
+    resp = await http_client.post(
+        f"/api/v1/rooms/{bereich}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout", "gast_sperre_bis_checkout": True},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "Allgemeinbereich" in resp.json()["detail"]
+    assert await _lies_sperre(setup_engine, bereich) == (False, False)
+
+
+async def test_personal_darf_waehrend_der_sperre_weiter_setzen(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Die Sperre "bis Check-out" nimmt dem Gast das Rad, nicht der
+    Rezeption die Eingabe.
+
+    Sonst waere eine Korrektur der eigenen Eingabe nur ueber "aufheben,
+    setzen, wieder sperren" moeglich — drei Handgriffe, bei denen der
+    mittlere das Rad kurz freigibt.
+    """
+    await _belege(setup_engine, zimmer)
+    erst = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout", "gast_sperre_bis_checkout": True},
+    )
+    assert erst.status_code == 201, erst.text
+
+    zweit = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "21", "source": "frontend_checkout"},
+    )
+    assert zweit.status_code == 201, zweit.text
+    assert await _lies_sperre(setup_engine, zimmer) == (True, True), "die Sperre bleibt stehen"
+
+    aktiv = [o for o in await _overrides(setup_engine, zimmer) if o.revoked_at is None]
+    assert len(aktiv) == 1
+    assert int(aktiv[0].setpoint) == 21
+
+
+async def test_dauerhafte_sperre_weist_auch_das_personal_ab(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Die dauerhafte Sperre bleibt, wie sie war: 409 fuer alle.
+
+    Sie ist eine Entscheidung ueber das Zimmer, keine ueber einen Gast,
+    und ihr Weg zurueck ist der Knopf in der Kopfzeile.
+    """
+    await _belege(setup_engine, zimmer)
+    await _setze_sperre(setup_engine, zimmer, blocked=True, bis_checkout=False)
+
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error_code"] == "ROOM_OVERRIDE_BLOCKED"
+    assert await _overrides(setup_engine, zimmer) == []
+
+
+@pytest.mark.parametrize("quelle", [OverrideSource.DEVICE, OverrideSource.DEVICE_MANUAL])
+async def test_das_rad_bleibt_waehrend_der_sperre_abgewiesen(
+    setup_engine: AsyncEngine, zimmer: int, quelle: OverrideSource
+) -> None:
+    """Der Gast dreht — und der Dienst weist ab, auch bei der Sperre
+    "bis Check-out".
+
+    Das ist die Haelfte von "zurueck auf 23 Grad": die Drehung erzeugt
+    keinen Override. Die andere Haelfte steht im Test darunter.
+
+    Geprueft wird der **Dienst**, weil dort die einzige Wahrheit liegt
+    (AE-58). Der Vorab-Check im ``device_adapter`` liest unveraendert
+    ``guest_override_blocked`` und greift damit bei beiden Formen; sein
+    eigener Test liegt in ``test_device_adapter.py``.
+    """
+    await _belege(setup_engine, zimmer)
+    await _setze_sperre(setup_engine, zimmer, blocked=True, bis_checkout=True)
+
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        with pytest.raises(override_service.RoomOverrideBlockedError):
+            await override_service.create(
+                session,
+                room_id=zimmer,
+                setpoint=Decimal("18"),
+                source=quelle,
+                expires_at=datetime.now(tz=UTC) + timedelta(hours=4),
+            )
+
+
+async def test_nach_der_abgewiesenen_drehung_gilt_weiter_23_grad(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """Die andere Haelfte: der Wert der Rezeption **ueberlebt** die
+    Drehung.
+
+    Damit ist "spaetestens mit dem naechsten Abgleich wieder 23 Grad"
+    belegt, ohne einen Engine-Tick zu fahren: Layer 3 liest genau diese
+    Zeile, und sie steht unveraendert da. Ein Test, der zusaetzlich einen
+    Downlink prueft, braeuchte Geraete und wuerde dieselbe Zusicherung
+    eine Ebene tiefer wiederholen.
+    """
+    await _belege(setup_engine, zimmer)
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout", "gast_sperre_bis_checkout": True},
+    )
+    assert resp.status_code == 201, resp.text
+
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        with pytest.raises(override_service.RoomOverrideBlockedError):
+            await override_service.create(
+                session,
+                room_id=zimmer,
+                setpoint=Decimal("28"),
+                source=OverrideSource.DEVICE,
+                expires_at=datetime.now(tz=UTC) + timedelta(hours=4),
+            )
+
+    async with sessionmaker() as session:
+        aktiv = await override_service.get_active(session, zimmer)
+    assert aktiv is not None
+    assert int(aktiv.setpoint) == 23
+
+
+async def test_abreise_beendet_sperre_und_uebersteuerung_zusammen(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine, zimmer: int
+) -> None:
+    """ "Bei Abreise enden Override und Sperre gemeinsam."
+
+    Beide haengen am selben Ereignis und an derselben Stelle
+    (``sync_room_status``): ``auto_revoke_on_checkout`` fuer die Zeile,
+    ``loese_bei_checkout`` fuer die Sperre. Dieser Test fasst sie
+    zusammen, weil "gemeinsam" die Zusicherung ist — zwei getrennt gruene
+    Tests wuerden einen fehlenden der beiden Aufrufe nicht zeigen
+    (Paragraph 5.55).
+    """
+    await _belege(setup_engine, zimmer)
+    resp = await http_client.post(
+        f"/api/v1/rooms/{zimmer}/overrides",
+        json={"setpoint": "23", "source": "frontend_checkout", "gast_sperre_bis_checkout": True},
+    )
+    assert resp.status_code == 201, resp.text
+
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    jetzt = datetime.now(tz=UTC)
+    # Die Abreise vorziehen: dieselbe Belegung, Check-out in der
+    # Vergangenheit. Der Abgleich leitet daraus "vacant" ab.
+    async with sessionmaker() as session:
+        await session.execute(
+            text("UPDATE occupancy SET check_out = :c WHERE room_id = :r"),
+            {"c": jetzt - timedelta(hours=1), "r": zimmer},
+        )
+        await session.commit()
+
+    async with sessionmaker() as session:
+        await occupancy_service.sync_room_status(session, zimmer, jetzt)
+        await session.commit()
+
+    assert await _lies_sperre(setup_engine, zimmer) == (False, False)
+    zeilen = await _overrides(setup_engine, zimmer)
+    assert len(zeilen) == 1
+    assert zeilen[0].revoked_at is not None, "die Uebersteuerung laeuft weiter"

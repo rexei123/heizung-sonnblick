@@ -213,6 +213,14 @@ class RoomOverrideBlockedError(OverrideError):
     operativ aus der Engine genommen). Hier laeuft die Engine normal, nur
     die Override-Eingabe ist gesperrt.
 
+    **Sprint 23 T4-A2: seit es zwei Formen der Sperre gibt, trifft dieser
+    Fehler nicht mehr jede Quelle.** Die dauerhafte Sperre weist weiter
+    alles ab. Die Sperre „bis Check-out" weist ``device`` und
+    ``device_manual`` ab — das Rad des Gastes — und laesst die
+    ``frontend_*``-Quellen durch, damit die Rezeption den Wert, den sie
+    festgesetzt hat, auch korrigieren kann. Begruendung am Gate in
+    ``create``.
+
     :param room_id: betroffener Raum.
     """
 
@@ -434,10 +442,12 @@ async def create(
 
     Pre-Insert-Gates in fester Reihenfolge:
 
-    1. **Block-Gate** (Sprint 12c, AE-58) — Raum hat
+    1. **Block-Gate** (Sprint 12c, AE-58; Sprint 23 T4-A2) — Raum hat
        ``guest_override_blocked=True`` -> ``RoomOverrideBlockedError``,
        unabhaengig vom Belegungsstatus. Single-Source-of-Truth fuer die
-       Sperre.
+       Sperre. **Ausnahme seit T4-A2:** ist die Sperre als „bis
+       Check-out" gesetzt, gilt sie nur fuer ``device`` und
+       ``device_manual``; die ``frontend_*``-Quellen kommen durch.
     2. **OCCUPIED-Gate** (Sprint 12a T2, AE-58) — Override gilt nur fuer
        belegte Raeume. Status wird via ``derive_room_status`` aus aktiven
        Occupancies berechnet (canonical, nicht stale ``room.status``-Feld).
@@ -452,7 +462,9 @@ async def create(
     :raises ValueError: setpoint out-of-range [MIN_SETPOINT, MAX_SETPOINT],
         oder Raum existiert nicht.
     :raises RoomOverrideBlockedError: Sprint 12c (AE-58) — Raum hat
-        ``guest_override_blocked=True``. Override wird NICHT persistiert.
+        ``guest_override_blocked=True`` und die Quelle ist von der Sperre
+        erfasst (bei „bis Check-out" nur das Rad). Override wird NICHT
+        persistiert.
     :raises RoomNotOccupiedError: Sprint 12a T2 (AE-58) — Raum ist nicht
         OCCUPIED. Override wird NICHT persistiert.
     :raises OverrideRejectedWindowOpenError: Sprint 12 T4 (AE-52) — eine
@@ -474,7 +486,21 @@ async def create(
     room = await session.get(Room, room_id)
     if room is None:
         raise ValueError(f"Raum {room_id} existiert nicht")
-    if room.guest_override_blocked:
+    # **Sprint 23 T4-A2: die Sperre „bis Check-out" trifft das Rad, nicht
+    # das Personal.** Sie wird gesetzt, damit ein Gast einen von der
+    # Rezeption eingestellten Wert nicht mehr verstellt — nicht, damit die
+    # Rezeption ihn selbst nicht mehr aendern kann. Wer sie dort ebenfalls
+    # abweist, baut eine Sperre, die der Rezeption die Korrektur ihrer
+    # eigenen Eingabe verwehrt, und erzwingt den Umweg „erst aufheben,
+    # dann setzen, dann wieder sperren" — drei Handgriffe, bei denen der
+    # mittlere das Rad kurz freigibt.
+    #
+    # Die **dauerhafte** Sperre bleibt unberuehrt und weist weiter alles
+    # ab. Sie ist eine Entscheidung ueber das Zimmer, keine ueber einen
+    # Gast, und ihr Weg zurueck ist der Knopf in der Kopfzeile.
+    if room.guest_override_blocked and not (
+        room.guest_block_bis_checkout and source in _FRONTEND_QUELLEN
+    ):
         raise RoomOverrideBlockedError(room_id=room_id)
 
     # Sprint 12a T2 (AE-58): OCCUPIED-Gate VOR Window-Gate. AE-58 verankert

@@ -69,6 +69,13 @@ class ManualOverrideCreate(BaseModel):
         "Hoechstmass 1440 (24 h). Bei allen anderen Quellen steckt die "
         "Dauer im Namen der Quelle und dieses Feld bleibt leer.",
     )
+    gast_sperre_bis_checkout: bool = Field(
+        default=False,
+        description="Sprint 23 T4-A2: setzt zusaetzlich die Gast-Sperre "
+        "'bis Check-out' auf dem Zimmer, ohne diese Uebersteuerung zu "
+        "widerrufen. Nur mit der Quelle 'frontend_checkout' und nicht in "
+        "einem Allgemeinbereich — beides weist die API mit 422 ab.",
+    )
     reason: str | None = Field(default=None, max_length=500)
     heating_zone_id: int | None = Field(
         default=None,

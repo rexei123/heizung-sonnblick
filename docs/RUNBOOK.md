@@ -7351,10 +7351,45 @@ Dort gibt es nur **dauerhaft**. Eine Bar hat keine Abreise; eine Sperre
 „bis Check-out" würde nie enden. Die Auswahl sagt das an der Stelle, an
 der man sie sucht, und der Server weist sie zusätzlich ab.
 
+### Einen Wert setzen und gleich festhalten (ab 29.10.2026)
+
+Der Knopf oben rechts ist der Weg für „hier soll niemand mehr drehen".
+Für den häufigeren Fall — **die Rezeption stellt einen Wert ein und will,
+dass er bleibt** — gibt es seit 29.10. das Häkchen im Reiter
+**Übersteuerung**:
+
+> ☐ Gast kann bis Check-out nicht ändern
+
+Es ist aus, und es ist nur mit der Dauer **„Bis Check-out"** wählbar.
+Anklicken, Wert eintragen, **Anwenden** — das setzt beides in einem
+Schritt und beides endet mit der Abreise.
+
+**Nehmen Sie dafür nicht den Knopf oben rechts.** Über ihn ist dieser
+Fall nicht erreichbar, in keiner Reihenfolge:
+
+| Was Sie versuchen | Was passiert |
+|---|---|
+| erst sperren, dann die Temperatur setzen | das Setzen wird abgewiesen |
+| erst die Temperatur setzen, dann sperren | der Wert wird beim Sperren aufgehoben |
+
+Beides endet mit einem Zimmer auf dem Plan statt auf Ihrem Wert. Das war
+der Befund vom 26.10.2026, und das Häkchen ist die Antwort darauf.
+
+**Sie bleiben handlungsfähig.** Während dieser Sperre können Sie die
+Wunschtemperatur weiter ändern — nur das Rad im Zimmer bleibt ohne
+Wirkung. Bei der **dauerhaften** Sperre ist das anders: die sperrt auch
+Ihre Eingabe, und ihr Weg zurück ist der Knopf oben rechts.
+
+**Im Allgemeinbereich gibt es das Häkchen nicht** — dieselbe Begründung
+wie oben: keine Abreise, kein Ende.
+
 ### Was beim Sperren noch passiert
 
 Laufende Wunschtemperaturen des Zimmers werden aufgehoben. Die Auswahl
 nennt ihre Anzahl, **bevor** man sich entscheidet.
+
+Das gilt für den **Knopf**. Das Häkchen im Übersteuerungs-Dialog hebt
+nichts auf — es legt den Wert gerade selbst an (siehe oben).
 
 ### Prüfen, ob die Sperre wirklich gefallen ist
 
@@ -7848,3 +7883,97 @@ laufen lässt. Das ist Absicht und der offene Rest von T1: ein `PATCH` auf
 einen Raumtyp betrifft alle Zonen dieses Typs — bei „Bad" alle Bäder im
 Haus, also bis zu 45 Funkbefehle aus einem Klick. Dieser Pfad gehört
 hinter den Pflicht-Stop.
+
+## 10aq. Rad-Test „Gast kann bis Check-out nicht ändern" (Sprint 23 T4-A2) — Pflicht-Stop
+
+> **Pflicht-Stop. Fünf Schritte, höchstens.** Alles an T4-A2 ist gegen
+> Mocks und gegen eine echte Datenbank geprüft. Was **nicht** geprüft
+> ist: dass ein Mensch an einem Rad an einer Wand dreht und das Zimmer
+> trotzdem auf dem eingestellten Wert bleibt. Das kann nur der Betreiber,
+> und es ist die einzige Prüfung, die diese Funktion wirklich bestätigt.
+
+**Es geht kein Downlink von diesem Test aus.** Die Sperre verwirft eine
+Drehung — sie schickt dem Gerät nichts. Der einzige Funkverkehr ist der,
+den der Abgleich ohnehin erzeugt, um den Sollwert der Rezeption
+wiederherzustellen. Deshalb braucht dieser Test **kein** freies
+Testgerät und keine Vorab-Freigabe für einen Befehl.
+
+### Was gebraucht wird
+
+Ein **belegtes** Zimmer mit einem montierten, online erreichbaren
+Thermostat, an dem jemand drehen kann. Keine Sonderbedingung sonst.
+
+| | |
+|---|---|
+| Zimmer | ein belegtes, nach Wahl des Betreibers |
+| Dauer | etwa 15 Minuten, davon 10 Minuten Warten |
+| Risiko | keines, das über eine normale Wunschtemperatur hinausgeht |
+
+### Die fünf Schritte
+
+**1. Setzen mit Häkchen.** Zimmerseite öffnen, Reiter
+**Übersteuerung**, Dauer **„Bis Check-out"**, Temperatur **23 °C**,
+Häkchen **„Gast kann bis Check-out nicht ändern"** anklicken,
+**Anwenden**.
+
+Erwartet: die Karte zeigt 23 °C, und oben im Reiter steht
+„Gast kann bis Check-out nicht ändern".
+
+**2. Am Rad drehen.** Im Zimmer das Thermostat auf einen deutlich
+anderen Wert drehen — **28 °C** oder den Anschlag. Die Zahl am Gerät
+ändert sich; das ist richtig und sagt noch nichts.
+
+**3. Zehn Minuten warten, dann nachsehen.** Zimmerseite neu laden.
+
+Erwartet: die Wunschtemperatur steht **unverändert auf 23 °C**, und in
+der **Historie** ist keine neue Zeile mit der Quelle „Thermostat"
+entstanden. Das Gerät meldet nach dem nächsten Abgleich wieder 23.
+
+**Wenn stattdessen eine neue Zeile „Thermostat 28 °C" steht: stoppen und
+melden.** Dann greift die Sperre nicht, und das ist der Befund, den
+dieser Test sucht.
+
+**4. Prüfen, dass die Rezeption weiter kann.** Im Reiter
+**Übersteuerung** die Temperatur auf **21 °C** ändern, Dauer wieder
+**„Bis Check-out"**, **ohne** das Häkchen (die Sperre steht schon).
+
+Erwartet: geht durch, die Karte zeigt 21 °C, und die Sperre steht
+weiterhin. **Wird das abgewiesen: melden** — dann sperrt die Sperre zu
+viel.
+
+**5. Abreise.** Entweder die echte Abreise abwarten oder in der
+Belegung den Check-out auf jetzt stellen und die Zimmerseite nach
+spätestens einer Stunde neu laden (der Abgleich läuft stündlich).
+
+Erwartet: der Knopf oben rechts steht wieder auf
+**„Übersteuerung sperren"** (nicht „gesperrt"), und in der Historie ist
+die Zeile mit 21 °C auf **„mit der Abreise beendet"** gewechselt.
+**Beides zusammen** ist die Zusicherung; eines allein genügt nicht.
+
+### Die Prüftabelle
+
+| # | Prüfung | Erwartet |
+|---|---|---|
+| 1 | Setzen mit Häkchen | 23 °C steht, Banner nennt die Sperre |
+| 2 | Drehung am Rad | wird verworfen — keine neue Zeile „Thermostat" |
+| 3 | Wert nach 10 Minuten | unverändert 23 °C |
+| 4 | Rezeption ändert auf 21 °C | geht durch, Sperre bleibt |
+| 5 | Abreise | Sperre gefallen **und** Zeile beendet |
+
+### Was danach im Protokoll steht
+
+Wer es nachlesen will, sucht zu diesem Zimmer:
+
+| Aktion | Heißt |
+|---|---|
+| `MANUAL_OVERRIDE_SET` mit `gast_sperre_bis_checkout: true` | Schritt 1 — Wert und Sperre in einem |
+| `ROOM_OVERRIDE_BLOCK_TOGGLED` mit `via: "uebersteuerung"` | dieselbe Handlung, von der Seite der Sperre gesehen. **Ohne** `revoked_overrides_count` — hier wurde bewusst nichts aufgehoben |
+| `ROOM_GUEST_BLOCK_LIFTED_ON_CHECKOUT` | Schritt 5 — die Sperre ist mit der Abreise gefallen |
+
+Die verworfene Drehung aus Schritt 2 steht **nicht** im
+Geschäftsprotokoll, sondern im Engine-Protokoll des Zimmers als
+`MANUAL_OVERRIDE_BLOCKED` mit dem Grund
+`device_blocked_room_blocked`. Sie ist kein Geschäftsvorfall — niemand
+hat etwas entschieden, es wurde etwas nicht übernommen.
+
+---

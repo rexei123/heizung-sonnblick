@@ -29,13 +29,14 @@ from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
+from heizung.models.room_type import RoomType
 from heizung.models.user import User
 from heizung.schemas.manual_override import (
     ManualOverrideCreate,
     ManualOverrideResponse,
     ManualOverrideRevoke,
 )
-from heizung.services import override_service
+from heizung.services import gast_sperre, override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.geraetegrenzen import Grenzen, soll_grenzen_je_zone
 from heizung.services.occupancy_service import next_active_checkout
@@ -206,6 +207,46 @@ async def create_room_override(
 
     source = OverrideSource(payload.source)
 
+    # Sprint 23 T4-A2: zwei Abweisungen, bevor irgendetwas geschrieben
+    # wird. Beide sind der Rueckhalt — die Oberflaeche bietet den Haken
+    # in diesen Faellen nicht an (Paragraph 5.30: die Abweisung ist nicht
+    # die erste Verteidigungslinie, aber sie muss stehen).
+    #
+    # 1. Der Haken hat nur mit „Bis Check-out" einen Sinn. Bei jeder
+    #    anderen Dauer laeuft die Uebersteuerung aus, waehrend der Gast
+    #    noch im Haus ist — die Sperre blieb dann stehen und naehme ihm
+    #    das Rad fuer einen Wert, den niemand mehr gesetzt hat.
+    if payload.gast_sperre_bis_checkout and source != OverrideSource.FRONTEND_CHECKOUT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                '„Gast kann bis Check-out nicht aendern" geht nur mit der Dauer '
+                '„Bis Check-out". Bei jeder anderen Dauer endet die '
+                "Uebersteuerung vor der Abreise, die Sperre aber nicht."
+            ),
+        )
+
+    # 2. Ein Allgemeinbereich hat keine Abreise (Sprint 24d) — dieselbe
+    #    Begruendung wie beim Knopf in der Kopfzeile, und derselbe Satz.
+    #    Ohne diesen Zweig kaeme die Abweisung trotzdem, aber als
+    #    „falsche Quelle fuer einen Bereich"; das ist richtig und sagt
+    #    dem Leser nicht, was er wissen muss.
+    if payload.gast_sperre_bis_checkout:
+        buchbar = await session.scalar(
+            select(RoomType.is_bookable)
+            .join(Room, Room.room_type_id == RoomType.id)
+            .where(Room.id == room_id)
+        )
+        if buchbar is False:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Ein Allgemeinbereich hat keine Abreise — eine Sperre „bis "
+                    'Check-out" wuerde dort nie enden. Hier gilt nur die '
+                    "dauerhafte Sperre."
+                ),
+            )
+
     next_checkout: datetime | None = None
     if source == OverrideSource.FRONTEND_CHECKOUT:
         next_checkout = await next_active_checkout(session, room_id)
@@ -258,6 +299,27 @@ async def create_room_override(
             detail=str(e),
         ) from e
 
+    # Sprint 23 T4-A2: die Sperre **nach** der Anlage, und ohne Widerruf.
+    #
+    # Die Reihenfolge ist nicht beliebig. Wer erst sperrt, laeuft in das
+    # Block-Gate des Dienstes: das Zimmer waere beim Anlegen schon
+    # gesperrt. Dass die Sperre „bis Check-out" die ``frontend_*``-Quellen
+    # durchlaesst, macht diese Reihenfolge nicht egal — eine Anlage, die
+    # scheitert, wuerde sonst eine Sperre hinterlassen, die niemand
+    # gewollt hat.
+    #
+    # ``setze_bis_checkout`` widerruft bewusst nichts. Der Knopf in der
+    # Kopfzeile tut das, und genau daran ist #340 gescheitert: er haette
+    # die Uebersteuerung getroffen, die hier eine Zeile zuvor entstanden
+    # ist.
+    if payload.gast_sperre_bis_checkout:
+        await gast_sperre.setze_bis_checkout(
+            session,
+            room_id=room_id,
+            user_id=user.id,
+            request_ip=request.client.host if request.client else None,
+        )
+
     await record_business_action(
         session,
         user_id=user.id,
@@ -270,6 +332,10 @@ async def create_room_override(
             "setpoint": payload.setpoint,
             "source": source.value,
             "expires_at": expires_at,
+            # Steht auch hier, nicht nur im Sperr-Audit: wer eine
+            # Uebersteuerung nachliest, soll sehen, dass sie festgesetzt
+            # wurde, ohne eine zweite Tabelle dazuzuholen.
+            "gast_sperre_bis_checkout": payload.gast_sperre_bis_checkout,
         },
         request_ip=request.client.host if request.client else None,
     )

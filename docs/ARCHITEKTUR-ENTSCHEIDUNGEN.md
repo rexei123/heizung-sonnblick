@@ -6672,10 +6672,18 @@ Sache tut.
 
 # AE-80 — Die Gast-Sperre endet mit der Abreise (Sprint 23 T4-A)
 
-**Datum:** 25.10.2026 · **Stand:** umgesetzt (Stufe A), Stufe B offen ·
-**Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
+**Datum:** 25.10.2026, **Nachtrag T4-A2 29.10.2026** · **Stand:**
+umgesetzt (Stufe A **und** A2), **Rad-Test offen (Pflicht-Stop)**, Stufe B
+offen · **Betrifft:** `room.guest_block_bis_checkout` (Migration 0034),
 `services/gast_sperre.py`, `PATCH /rooms/{id}/override-block-state`,
-`RoomOverrideBlockToggle` · **Erweitert:** AE-58 (Override-Modell)
+`RoomOverrideBlockToggle`, `POST /rooms/{id}/overrides`,
+`override_service.create` (Block-Gate), `ManualOverrideZoneCard` ·
+**Erweitert:** AE-58 (Override-Modell)
+
+> **§7 ist der wichtigere Teil dieser Entscheidung.** Stufe A hat den
+> vereinbarten Ablauf nicht abgedeckt — nicht durch einen Fehler in der
+> Umsetzung, sondern weil §2 ihn nicht zu Ende gedacht hat. Wer hier
+> aufsetzt, liest §7 vor §2.
 
 ## 1. Der Befund
 
@@ -6788,6 +6796,120 @@ ein zweiter Klick für dieselbe Entscheidung.
 | **Stufe B: Kindersicherung `0x07`** | eigener PR und **Pflicht-Stop** (Downlink an echte Geräte). Der Knackpunkt steckt nicht im Senden, sondern darin, dass die Sperre heute **einen** Treiber hat (`device.measure_only`, Sprint 24c). Ein zweiter Treiber ohne gemeinsame Quelle wäre eine zweite Wahrheit (§5.53): das Zurücknehmen der Rolle würde das Rad eines gast-gesperrten Zimmers freigeben, und `child_lock_state` würde für ein gast-gesperrtes Normalgerät „fehlgeschlagen" melden. Stufe B bringt deshalb **eine** Funktion, die den gewollten Zustand aus beiden Gründen berechnet, und beide Schreibpfade gehen durch sie |
 | **Anzeige in der Zimmerliste** | die Liste zeigt das Schloss, aber nicht die Form. Für den Fall „welche Zimmer muss ich nach der Abreise aufräumen" wäre eine Spalte nützlich — nach Stufe B, sonst wird sie zweimal gebaut |
 | **Sperre bei Zimmerwechsel** | zieht nicht mit. Ein Gast, der ins Nachbarzimmer umzieht, nimmt seine Sperre nicht mit. Bewusst: der Umzug ist eine Entscheidung der Rezeption, und sie sieht die Sperre im neuen Zimmer nicht |
+
+## 7. Nachtrag T4-A2 (29.10.2026) — Stufe A hat den vereinbarten Fall nicht abgedeckt
+
+**Der Befund des Betreibers zu #340, wörtlich:** „Die Sperre widerruft
+beim Setzen auch die Rezeptions-Übersteuerung."
+
+Er ist richtig, und er trifft nicht einen Fehler in der Umsetzung,
+sondern eine Lücke in dieser Entscheidung. §2 hat die Sperre als
+**eigenen Handgriff** gedacht: ein Knopf in der Kopfzeile, zwei Formen,
+und beim Beginn der Sperre ein Widerruf aller laufenden Übersteuerungen
+— weil „ab jetzt soll hier niemand mehr drehen" bedeutet, dass auch der
+zuletzt gedrehte Wert weg soll.
+
+Der vereinbarte Fall ist aber ein anderer: **die Rezeption setzt einen
+bestimmten Wert und friert ihn ein.** Über den Knopf ist das nicht
+erreichbar, in keiner Reihenfolge:
+
+| Reihenfolge | Ergebnis |
+|---|---|
+| erst sperren, dann setzen | das Setzen wird mit 409 abgewiesen (Block-Gate) |
+| erst setzen, dann sperren | der Widerruf trifft genau den eben gesetzten Wert |
+
+Beides endet mit einem Zimmer auf dem Plan statt auf 23 °C. Die Lücke
+war **nicht sichtbar**, solange man die beiden Handgriffe getrennt
+betrachtet — jeder einzelne tut das Richtige.
+
+### 7.1 Die Ergänzung
+
+Ein Häkchen **im Übersteuerungs-Dialog**, nicht ein dritter Knopf in der
+Kopfzeile: „Gast kann bis Check-out nicht ändern". Es gehört dorthin,
+weil es keine eigene Entscheidung ist, sondern eine Eigenschaft der
+Eingabe, die gerade gemacht wird.
+
+Daraus folgen drei Dinge, und alle drei sind Abweichungen vom Knopf:
+
+1. **Kein Widerruf.** `gast_sperre.setze_bis_checkout` setzt beide
+   Felder und rührt die Übersteuerungs-Tabelle nicht an. Das ist der
+   ganze Punkt; ein geteilter Hilfsdienst mit einem Schalter
+   `widerrufen: bool` wäre dieselbe Funktion mit zwei Bedeutungen, und
+   der Standardwert entschiede über das Ergebnis.
+2. **Reihenfolge: erst anlegen, dann sperren.** Eine fehlgeschlagene
+   Anlage darf keine Sperre hinterlassen, die niemand gewollt hat.
+3. **Nur mit „Bis Check-out".** Bei jeder anderen Dauer läuft die
+   Übersteuerung ab, während der Gast noch im Haus ist — die Sperre
+   bliebe für einen Wert stehen, den niemand mehr gesetzt hat. Das ist
+   genau der Zustand aus §1, nur über einen anderen Weg erreicht.
+
+### 7.2 Das Block-Gate ist jetzt quellenabhängig
+
+Die wichtigste Änderung steckt nicht im neuen Code, sondern in einer
+Zeile alten Codes. `override_service.create` hat bisher jede Quelle
+abgewiesen, sobald `guest_override_blocked` stand. Seit T4-A2:
+
+| Form der Sperre | `device` / `device_manual` | `frontend_*` |
+|---|---|---|
+| **dauerhaft** | 409 | 409 |
+| **bis Check-out** | 409 | **durch** |
+
+**Warum das Personal durchkommt.** Die Sperre entsteht dadurch, dass die
+Rezeption einen Wert festsetzt. Wer ihr danach die Eingabe verschließt,
+erzwingt für eine Korrektur drei Handgriffe — aufheben, neu setzen,
+wieder sperren —, und beim mittleren ist das Rad im Zimmer kurz frei.
+Eine Sperre, deren Pflege sie selbst kurz aufhebt, ist keine.
+
+**Warum die dauerhafte Sperre unberührt bleibt.** Sie ist eine
+Entscheidung über das **Zimmer**, keine über einen Gast. Dort ist „auch
+die Rezeption nicht" die Absicht und nicht ein Nebeneffekt.
+
+Der Vorab-Check im `device_adapter` liest weiter `guest_override_blocked`
+allein und sieht die Form der Sperre nicht. Das ist richtig — das Rad ist
+in beiden Formen gesperrt — aber es ist eine **Eigenschaft des Codes und
+keine Zusicherung**, solange sie nicht geprüft wird. Wer die Aufteilung
+dort nachbaut, öffnet dem Gast das Rad; der Test dazu liegt deshalb in
+`test_device_adapter.py` und nicht nur beim Dienst (§5.55).
+
+### 7.3 Was die Oberfläche verschieden macht
+
+Die beiden Formen der Sperre sahen bis T4-A2 gleich aus: Formular weg,
+Banner „Übersteuerung gesperrt". Das stimmt für die dauerhafte und ist
+für „bis Check-out" falsch geworden — dort bleibt das Formular stehen,
+und das Banner nennt, wen die Sperre trifft („Das Rad im Zimmer bleibt
+ohne Wirkung. Die Rezeption kann den Wert weiter ändern").
+
+Das Häkchen ist **aus** und nur mit der Dauer „Bis Check-out" wählbar.
+Es bleibt sichtbar und wird ausgegraut, statt zu verschwinden, und der
+Satz darunter nennt die Bedingung — ein ausgegrautes Feld ohne Grund
+erklärt sich der Nutzer selbst, und zwar falsch (§5.57). Beim Wechsel
+der Dauer wird es **zurückgesetzt**, nicht nur ausgegraut: ein Haken,
+der gesetzt bleibt und nur nicht mehr wirkt, ist ein Schalter, dessen
+Zustand niemand sieht (§5.77).
+
+Im Allgemeinbereich gibt es es nicht — dieselbe Begründung wie in §3:
+keine Abreise, kein Ende. Der 422 dahinter bleibt als Rückhalt.
+
+### 7.4 Die Lesson, unbequem
+
+Dieser Nachtrag ist die vierte Korrektur des Betreibers an einer
+Aufgabe, die ich als erledigt gemeldet hatte. Das Muster ist dasselbe
+wie bei §5.68 in eigener Sache: #340 hat **den Mechanismus** gebaut, den
+der Brief nannte (zwei Formen der Sperre, Lösung beim Check-out), und
+nicht geprüft, ob der **vereinbarte Ablauf** damit durchführbar ist.
+
+Die Probe, die gefehlt hat, kostet zwei Minuten: den Fall einmal von
+vorne durchspielen, in jeder Reihenfolge, und aufschreiben, was
+herauskommt. Die Tabelle in §7 oben ist genau das — sie hätte am 25.10.
+dort stehen können.
+
+### 7.5 Was offen bleibt
+
+| Offen | Folge |
+|---|---|
+| **Rad-Test durch den Betreiber** | Pflicht-Stop, höchstens fünf Schritte. Alles bis hier ist gegen Mocks und gegen Postgres geprüft, nicht gegen ein Rad an einer Wand |
+| **Die Sperre in der Zimmerliste** | unverändert offen (§6). Mit T4-A2 gibt es die Form nun an zwei Stellen zu sehen, in der Liste weiter nicht |
+| **Widerruf während der Sperre** | die Übersteuerung kann aufgehoben werden, die Sperre bleibt dann allein stehen. Zulässiger Zustand (das Zimmer läuft auf dem Plan, das Rad bleibt gesperrt), aber keiner, den die Oberfläche benennt |
 
 ---
 
