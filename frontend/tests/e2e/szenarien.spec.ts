@@ -27,7 +27,7 @@ test.describe("Sprint 9.16 Szenarien-UI", () => {
 
     await page.route("**/api/v1/scenarios", async (route) => {
       if (route.request().method() !== "GET") {
-        await route.continue();
+        await route.fallback();
         return;
       }
       await route.fulfill({

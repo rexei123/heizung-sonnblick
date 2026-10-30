@@ -3665,6 +3665,37 @@ npm run lint
 npm run build
 ```
 
+**e2e lokal (Playwright), ab 25.10.2026 mit Schranke.** Ein Lauf bricht ab,
+wenn `API_PROXY_TARGET` nicht auf localhost zeigt. Grund: ungemockte
+API-Anfragen gehen über den Rewrite aus `next.config.mjs` an dieses Ziel,
+und in `frontend/.env.local` steht lokal `https://heizung-test.hoteltec.at`
+— develop, also **die Produktion dieses Hauses**. Die Begründung samt
+Anlass steht im Docstring von `frontend/tests/proxy-ziel.ts`.
+
+Die Datei des Betreibers bleibt unverändert; der Wert aus der Shell
+gewinnt (Next überschreibt keine gesetzte Variable):
+
+```powershell
+cd C:\Users\User\dev\heizung-sonnblick\frontend
+$env:API_PROXY_TARGET = "http://127.0.0.1:9"
+$env:PORT = "3133"   # eigener Port, nicht 3000 — siehe Goldene Regel 12
+npx playwright test
+```
+
+Dort lauscht nichts, und das ist beabsichtigt: eine Anfrage, die dort
+ankommt, ist ein fehlender Mock. Der Rückhalt in
+`frontend/tests/e2e/fixtures.ts` bricht sie schon im Browser ab und nennt
+den Pfad im Test, der sie ausgelöst hat.
+
+**Der eigene Port ist nicht Kosmetik.** Lokal gilt
+`reuseExistingServer: true`. Läuft auf dem Port schon ein Next — ein
+`npm run dev` des Betreibers etwa, oder ein Server, der vom vorigen Lauf
+noch herunterfährt —, startet Playwright keinen eigenen. Dann erreicht die
+geprüfte Umgebung diesen Prozess nie, und er proxyt weiter nach **seiner**
+`.env.local`. Zweimal beobachtet am 25.10.2026: einmal als Lauf, der
+`ERR_CONNECTION_REFUSED` auf 231 Tests meldete (§5.55-Familie: ein Lauf,
+der nichts geprüft hat).
+
 ---
 
 ## 7. Aktuelle Backlog-Punkte
