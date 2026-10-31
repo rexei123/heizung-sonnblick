@@ -3617,6 +3617,28 @@ Aenderung kostet nichts. Eine Bedingung davor ist deshalb kein
 Sparprogramm, sondern die Stelle, an der das naechste Gate vergessen
 wird. In diesem Pfad steht der Commit jetzt unbedingt.
 
+**Nachtrag vom 31.10.2026 — vier Faelle in drei Tagen.** Diese Lesson ist
+am 30.10. aus **einem** Befund entstanden. Seither hat sie in jedem PR
+dieses Sprints wieder gegriffen, und jedes Mal hat eine **Mutationsprobe**
+sie gefunden und kein Test:
+
+| | Der Dienst war geprueft | Der Aufrufer nicht |
+|---|---|---|
+| #351 | `handle_uplink_for_override` | der Subscriber committet nicht |
+| #352 | der Lesehelfer fuer den Zonen-Sollwert | der Dispatch schreibt das Feld nicht |
+| #353 | `sende_bei_aenderung` | der Sperr-Knopf ruft sie nicht |
+| §10as | `pair_device(kind=…)` | `--kind` erreicht den Dienst nicht |
+
+In allen vier Faellen lief der Test gegen die Funktion und nicht gegen den
+Weg, der sie benutzt — und in allen vier Faellen war der Weg genau der, den
+ein Mensch im Betrieb nimmt: der MQTT-Pfad, die Engine, der Knopf an der
+Wand, die Kommandozeile am Montagetag.
+
+**Die Regel oben ist richtig formuliert; was fehlt, ist der Reflex.**
+Deshalb die Zaehlung hier: eine Lesson, die man vier Mal neu lernt, hat
+ihre Zahl verdient. Beim naechsten Dienst mit genau einem Aufrufer ist der
+erste Test der durch den Aufrufer, nicht der durch den Dienst.
+
 **Querverweise:** §5.61 (der Aufrufer committet — hier aus der anderen
 Richtung verletzt), §5.52 (Off-Pipeline-Audit-Muster, dessen Zeilen
 betroffen waren), §5.55 (der gruene Lauf, der nichts prueft — doppelt:

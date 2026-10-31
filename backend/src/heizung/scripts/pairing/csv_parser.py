@@ -110,14 +110,28 @@ def _row_to_dict(raw_row: dict[str, str], line_no: int) -> dict[str, object]:
     return cleaned
 
 
-def parse_csv(path: Path, *, require_app_key: bool = True) -> list[PairingCsvRow]:
+def parse_csv(path: Path) -> list[PairingCsvRow]:
     """CSV-Datei einlesen, validieren und Liste der Rows zurueckgeben.
 
-    :param require_app_key: ``True`` (Default) fuer den Import — ohne AppKey
-        kann ChirpStack das Geraet nicht registrieren. ``False`` fuer
-        ``assign`` (Sprint 17 / C8): die Montage-CSV wird bewusst ohne
-        AppKey-Spalte exportiert, damit das Geheimnis nicht ein zweites Mal
-        ueber den Tisch wandert.
+    **Der AppKey ist keine Pflicht**, und bis zum 31.10.2026 war er eine.
+
+    Hier stand ein Schalter ``require_app_key``, mit ``True`` fuer den
+    Import und ``False`` fuer ``assign``. Die Begruendung lautete „ohne
+    AppKey kann ChirpStack das Geraet nicht registrieren" — richtig, aber
+    sie betrifft das **Provisionierungs-Skript**, das die CSV selbst liest.
+    Der Import legt ``device``-Zeilen an und **speichert den AppKey
+    nirgends**; das sagt der Modul-Kopf von ``pairing_service`` seit
+    Sprint 13a ausdruecklich.
+
+    Die Forderung hat also einen Wert erzwungen, den niemand verbraucht —
+    und damit ein Geheimnis auf den Server getragen, wo es nichts zu
+    suchen hatte. Ein Test dafuer gab es nicht; die Pruefung schuetzte
+    nichts (Paragraph 0 S6, Paragraph 5.77: eine Bedingung ohne
+    Konsumenten).
+
+    ``app_key`` bleibt eine erlaubte, **ignorierte** Spalte: eine
+    Bestands-CSV mit Spalte F laeuft unveraendert durch.
+
     :raises ParseError: bei strukturellen Problemen (zu viele Zeilen, kein
         Trennzeichen, kein Header) ODER wenn mindestens eine Row die
         Pydantic-Validation nicht besteht. ``ParseError.errors`` enthaelt
@@ -160,9 +174,6 @@ def parse_csv(path: Path, *, require_app_key: bool = True) -> list[PairingCsvRow
                 f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
             )
             errors.append(f"Zeile {offset}: {msgs}")
-            continue
-        if require_app_key and row.app_key is None:
-            errors.append(f"Zeile {offset}: app_key fehlt (fuer den Import Pflicht).")
             continue
         rows.append(row)
 

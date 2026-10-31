@@ -87,10 +87,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Vicki-Hardware-Identifikation. Heute pairen wir ausschliesslich
-# MClimate-Vickis (Thermostat). Andere Vendoren / Sensor-Devices
-# laufen ueber eigenen Pfad, nicht ueber diesen CSV-Import.
+# Vicki-Hardware-Identifikation. Der Regelfall dieses Imports.
 DEVICE_MODEL_VICKI: str = "Vicki"
+
+# Sprint 23 (31.10.2026): das Relais kann denselben Weg nehmen.
+#
+# **Warum es ihn braucht.** Fuer eine Relais-Zeile in der Datenbank gab es
+# **keinen** dokumentierten Weg: ``pair_devices`` setzte
+# ``kind=THERMOSTAT`` fest, das Formular in der Oberflaeche kennt nur
+# Thermostat und Sensor, und RUNBOOK Paragraph 10aj springt von „in
+# ChirpStack anmelden" direkt zu „Provisionieren" — und setzt die Zeile
+# damit voraus. Geblieben waere ein ``POST`` von Hand gegen die API,
+# ohne Probelauf und ohne Audit-Urheber.
+#
+# Der Import bringt beides mit und braucht dafuer genau diese Abbildung:
+# die Art entscheidet das Modell, und mehr unterscheidet die beiden
+# Geraete auf dieser Ebene nicht.
+DEVICE_MODEL_16ASPM: str = "MC-LW-16ASPM-01"
+
+#: Modell je Art. Eine Abbildung und kein ``--model``-Argument: das Modell
+#: ist eine Eigenschaft der Hardware, keine Wahl des Aufrufers — und ein
+#: Tippfehler darin faellt niemandem auf, weil nichts davon abhaengt.
+MODELL_JE_ART: dict[DeviceKind, str] = {
+    DeviceKind.THERMOSTAT: DEVICE_MODEL_VICKI,
+    DeviceKind.RELAY: DEVICE_MODEL_16ASPM,
+}
 
 # Sprint 17 (E4/C2): Abbildung CSV-Spalte -> Device-Spalte fuer die drei
 # optionalen Metadaten. Begruendung der Zuordnung steht im Modul-Docstring
@@ -292,6 +313,7 @@ async def pair_device(
     session: AsyncSession,
     *,
     user_id: int | None = None,
+    kind: DeviceKind = DeviceKind.THERMOSTAT,
 ) -> PairResult:
     """Pairt ein einzelnes Geraet: Device-Row + Audit.
 
@@ -311,6 +333,12 @@ async def pair_device(
     :param user_id: BusinessAudit-``user_id``. ``None`` = System-
         Trigger (Praezedenzfall siehe Sprint-13-Hygiene
         ``OVERRIDES_AUTO_REVOKED_ON_CHECKOUT``).
+    :param kind: ``THERMOSTAT`` (Vorgabe) oder ``RELAY``. Entscheidet die
+        Art **und** das Modell (``MODELL_JE_ART``); sonst unterscheidet
+        sich der Ablauf nicht. Ein Relais kommt als Pool-Zeile ohne Zone
+        und ohne ``commissioned_at`` — „nicht in Betrieb" ist damit der
+        Ausgangszustand und kein eigener Schritt (S3 in
+        ``services/relay_service``).
     """
     # Gate 1: DevEUI-Existenz (bewusst OHNE retired_at-Filter, Sprint
     # 13b.1, AE-57). Pre-Flight-Disziplin: CSV-Bulk-Pairing rejected auch
@@ -348,9 +376,9 @@ async def pair_device(
     metadata = _csv_metadata(row)
     device = Device(
         dev_eui=row.dev_eui,
-        kind=DeviceKind.THERMOSTAT,
+        kind=kind,
         vendor=DeviceVendor.MCLIMATE,
-        model=DEVICE_MODEL_VICKI,
+        model=MODELL_JE_ART[kind],
         heating_zone_id=heating_zone_id,
         **metadata,
     )
@@ -401,6 +429,7 @@ async def pair_batch(
     session: AsyncSession,
     *,
     user_id: int | None = None,
+    kind: DeviceKind = DeviceKind.THERMOSTAT,
 ) -> list[PairResult]:
     """Iteriert ueber alle Rows mit Pro-Row-Savepoint-Isolation.
 
@@ -418,6 +447,10 @@ async def pair_batch(
     :param session: ``AsyncSession``. Pro Row Savepoint, kein
         Top-Level-Commit.
     :param user_id: weitergereicht an ``pair_device``.
+    :param kind: weitergereicht an ``pair_device``. Gilt fuer **alle**
+        Zeilen der CSV — eine Datei, eine Geraete-Art. Die Mischung in
+        einer Datei waere eine Spalte mehr und ein Fehler mehr, den man
+        erst am Geraet sieht.
     :return: ``PairResult``-Liste in Input-Reihenfolge (gleicher
         ``row_number``-Offset).
     """
@@ -425,7 +458,7 @@ async def pair_batch(
     for offset, row in enumerate(rows, start=2):
         savepoint = await session.begin_nested()
         try:
-            result = await pair_device(row, offset, session, user_id=user_id)
+            result = await pair_device(row, offset, session, user_id=user_id, kind=kind)
             await savepoint.commit()
         except Exception as exc:  # noqa: BLE001 — pair_batch ist Top-Level-Wrapper
             await savepoint.rollback()
