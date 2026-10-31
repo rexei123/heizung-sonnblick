@@ -96,7 +96,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
-from heizung.models.enums import UserRole  # noqa: E402
+from heizung.models.enums import DeviceKind, UserRole  # noqa: E402
 from heizung.models.user import User  # noqa: E402
 from heizung.scripts.pairing.assign import (  # noqa: E402
     format_report as format_assign_report,
@@ -306,7 +306,7 @@ async def _cmd_import(args: argparse.Namespace) -> int:
 
         # Pair-Batch. Sprint 17 (C3): rein transaktional, kein Downlink —
         # ein --dry-run hat damit garantiert KEINEN Aussen-Effekt mehr.
-        results = await pair_batch(rows, session, user_id=user_id)
+        results = await pair_batch(rows, session, user_id=user_id, kind=DeviceKind(args.kind))
 
         if args.dry_run:
             await session.rollback()
@@ -580,7 +580,7 @@ async def _cmd_assign(args: argparse.Namespace) -> int:
     try:
         # AppKey ist hier nicht noetig: die Montage-CSV wird ohne die Spalte
         # exportiert, damit das Geheimnis nicht ein zweites Mal herumliegt.
-        rows = parse_csv(csv_path, require_app_key=False)
+        rows = parse_csv(csv_path)
     except ParseError as exc:
         print(f"[FAIL] CSV-Parse-Fehler: {exc}")
         for err in exc.errors:
@@ -662,6 +662,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--user-email",
         default=None,
         help="Email des CLI-Aufrufers fuer BusinessAudit-user_id. Default: None (System-Trigger).",
+    )
+    p_import.add_argument(
+        "--kind",
+        choices=["thermostat", "relay"],
+        default="thermostat",
+        help="Geraete-Art fuer ALLE Zeilen der CSV. Vorgabe: thermostat (Vicki). "
+        "'relay' legt 16ASPM-Schaltaktoren an — ohne Zone und ohne "
+        "Inbetriebnahme, Schaltbefehle bleiben gesperrt (S3).",
     )
     p_import.add_argument(
         "--dry-run",

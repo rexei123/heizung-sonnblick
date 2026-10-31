@@ -540,3 +540,64 @@ def test_parse_csv_ragged_rows_are_rejected_not_truncated(tmp_path: Path) -> Non
     )
     with pytest.raises(ParseError):
         parse_csv(csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Der AppKey ist keine Pflicht mehr (31.10.2026)
+# ---------------------------------------------------------------------------
+
+_POOL_OHNE_APPKEY = "\n".join(
+    [
+        "dev_eui,app_eui,serial_number,hardware_nummer",
+        "{eui1},70b3d52dd3000000,V6TF410485L19W,105",
+        "{eui2},70b3d52dd3000000,CKPW410470CJHU,106",
+        "",
+    ]
+)
+
+
+def test_parse_csv_ohne_app_key_spalte(tmp_path: Path) -> None:
+    """Eine CSV **ohne** die Spalte ``app_key`` wird eingelesen.
+
+    Bis zum 31.10.2026 brach ``parse_csv`` hier ab: „app_key fehlt (fuer
+    den Import Pflicht)". Die Begruendung betraf das
+    Provisionierungs-Skript, das die CSV selbst liest — der Import legt
+    ``device``-Zeilen an und **speichert den AppKey nirgends** (Modul-Kopf
+    von ``pairing_service``, seit Sprint 13a).
+
+    Die Forderung hat also einen Wert erzwungen, den niemand verbraucht,
+    und damit ein Geheimnis auf den Server getragen. Einen Test dafuer gab
+    es nicht; die Pruefung schuetzte nichts (Paragraph 0 S6).
+    """
+    csv_path = tmp_path / "pool-ohne-appkey.csv"
+    _write_csv(
+        csv_path,
+        _POOL_OHNE_APPKEY.format(eui1=_VALID_DEV_EUI_1, eui2=_VALID_DEV_EUI_2),
+    )
+
+    rows = parse_csv(csv_path)
+
+    assert len(rows) == 2
+    assert all(r.app_key is None for r in rows)
+    assert all(r.is_pool_device for r in rows), "ohne Zimmer und Zone ist es eine Pool-Zeile"
+    assert rows[0].serial_number == "V6TF410485L19W"
+    assert rows[0].app_eui == "70b3d52dd3000000"
+
+
+def test_parse_csv_mit_app_key_laeuft_unveraendert(tmp_path: Path) -> None:
+    """Eine Bestands-CSV **mit** Spalte F bleibt gueltig.
+
+    Die Spalte ist erlaubt und wird ignoriert. Ohne diese Pruefung waere
+    die Lockerung auch gruen, wenn die Spalte jetzt abgewiesen wuerde —
+    und dann schlaegt der naechste Lauf mit der alten Datei fehl.
+    """
+    csv_path = tmp_path / "mit-appkey.csv"
+    _write_csv(
+        csv_path,
+        "\n".join(["dev_eui,app_key", f"{_VALID_DEV_EUI_1},{_VALID_APP_KEY}", ""]),
+    )
+
+    rows = parse_csv(csv_path)
+
+    assert len(rows) == 1
+    assert rows[0].app_key == _VALID_APP_KEY

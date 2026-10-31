@@ -1564,12 +1564,20 @@ enthält AppKeys und gehört **nicht** ins Repo, nicht in Slack, nicht per Mail.
 
 | Variante | Spalten | Verwendung |
 |---|---|---|
-| **Import-CSV** | alle, **mit** Spalte F (`app_key`) | §10h.2 Provisioning, §10h.3 Import |
-| **Montage-CSV** | **ohne** Spalte F | §10h.6 `assign` |
+| **Import-CSV** | alle, **mit** Spalte F (`app_key`) | §10h.2 Provisioning |
+| **Montage-CSV** | **ohne** Spalte F | §10h.3 Import, §10h.6 `assign` |
 
-**Warum zwei:** `assign` braucht den AppKey nicht. Ihn trotzdem mitzuführen
-hieße, das Geheimnis ein zweites Mal über den Tisch und auf den Server zu
-tragen, ohne Gegenwert.
+**Warum zwei:** nur das **Provisioning** braucht den AppKey. Ihn weiter
+mitzuführen hieße, das Geheimnis ein zweites Mal über den Tisch und auf
+den Server zu tragen, ohne Gegenwert.
+
+> **Korrigiert am 31.10.2026.** Hier stand der Import in der ersten Zeile:
+> `pair_devices import` **verlangte** den AppKey. Das war ein Überrest aus
+> der 104er-Lieferung, bei der eine Datei beide Schritte gefüttert hat —
+> der Import **speichert den AppKey nirgends**. Die Pflicht ist entfallen,
+> die Spalte bleibt erlaubt und wird ignoriert. Eine Bestands-CSV mit
+> Spalte F läuft also unverändert; eine neue braucht sie nicht
+> (§10as).
 
 **Export:** Blatt `Pairing` aktivieren → *Speichern unter* → Dateityp
 **CSV UTF-8 (durch Trennzeichen getrennt)**. Excel exportiert nur das aktive
@@ -7894,7 +7902,9 @@ hinter den Pflicht-Stop.
 > | 2 | Drehung am Rad wird verworfen | bestanden |
 > | 3 | Wert bleibt stehen | **erst im zweiten Anlauf** — siehe unten |
 > | 4 | Rezeption kann weiter ändern | bestanden |
-> | 5 | Abreise | **offen**, Prüfung am 31.10. um 11:15 (Test-Belegung endet 11:00) |
+> | 5 | Abreise | bestanden |
+>
+> **T4-A2 ist damit vollständig abgenommen** (Betreiber, 31.10.2026).
 >
 > **Schritt 3 war am 30.10.2026 nicht bestanden, und das war der
 > wichtigste Befund dieses Sprints.** Um 11:46 stand die Übersteuerung auf
@@ -7917,6 +7927,32 @@ hinter den Pflicht-Stop.
 >
 > Damit sind beide Schichten im Betrieb geprüft: das Flag (eine Minute)
 > und der Abgleich (bis 30 Minuten) als Netz darunter.
+>
+> **Schritt 5 im Einzelnen** (31.10.2026, ~09:26). Geprüft wurde nicht die
+> Abreise um 11:00, sondern die **gelöschte Test-Belegung** — derselbe
+> Übergang OCCUPIED → VACANT:
+>
+> | Zeit | Beobachtung |
+> |---|---|
+> | ~09:26 | Test-Belegung 107 gelöscht |
+> | danach | 107 steht auf **Frei**, **kein Schloss**, **kein „Aktiv"** |
+> | danach | Engine rechnet **18** — den Frei-Sollwert |
+> | 09:28 | Gerät **020** meldet **18,0** |
+>
+> **Warum die gelöschte Belegung den Test vollwertig macht.**
+> ``gast_sperre.loese_bei_checkout`` hängt am Statuswechsel und nicht
+> daran, **warum** er eintritt: ``sync_room_status`` leitet den Status aus
+> den aktiven Belegungen ab, und ohne Belegung ist das Zimmer frei. Der
+> Code-Pfad ist derselbe wie bei einer Abreise um 11:00.
+>
+> Nicht geprüft ist damit nur, dass eine **ablaufende** ``check_out``-Zeit
+> den Wechsel auslöst — das ist der Belegungsabgleich aus Sprint 15e und
+> steht für sich (§10ag). Die Sperre selbst ist vollständig belegt.
+>
+> **Drei Zusicherungen in einer Zeile**, und das ist der Wert dieses
+> Schritts: die Sperre ist gefallen (T4-A), die Spalte zeigt beides
+> richtig an — nämlich nichts (PR #352) —, und das Gerät hat den
+> Frei-Sollwert zwei Minuten später gemeldet.
 >
 > **Das Rad ließ sich bei diesem Test weiter drehen** — die Sperre wirkte
 > nur im System. Das ist kein Mangel dieses Tests, sondern seine Grenze:
@@ -8025,6 +8061,39 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 >
 > Dieser Test schickt den ersten `0x07` des Hauses. Er läuft **nur nach
 > ausdrücklicher Freigabe** und **nur an ein Zimmer**.
+
+> ### Kein Merge zwischen Schritt 2 und Schritt 7
+>
+> **Festlegung des Betreibers, 31.10.2026** — und sie hat einen
+> technischen Grund, der leicht untergeht.
+>
+> Ein Merge nach `develop` ist ein Deploy auf heizung-test (§0.3): der
+> Timer zieht alle fünf Minuten und rekreiert `api`, `web`,
+> `celery_worker` und `celery_beat`. **Mit dem Container sind dessen Logs
+> weg** — `docker logs --since` beginnt nach einem Neustart bei null
+> (§5.17).
+>
+> Genau darauf stützen sich zwei Schritte:
+>
+> | Schritt | braucht |
+> |---|---|
+> | 4 | `docker logs deploy-api-1 --since 3m` → die Zeile `kindersicherung gesendet` |
+> | 7 | `docker logs deploy-api-1 --since 20h` → **wie viele** `0x07` in der Nacht liefen |
+>
+> Schritt 7 ist der empfindliche. Er prüft eine Aussage über die **ganze
+> Nacht** — „es ist kein weiterer Befehl gelaufen" —, und ein Neustart um
+> drei Uhr macht sie unbeweisbar. Nicht falsch: **unbeweisbar**, und das
+> ist beim ersten Funkbefehl des Hauses dasselbe wie ein Fehlschlag.
+>
+> Der Downlink selbst überlebt einen Neustart (er liegt in der
+> ChirpStack-Queue), und die Bestätigung des Geräts steht in
+> `sensor_reading` und damit in der Datenbank. **Verloren geht nur der
+> Beweis** — und der ist hier der Zweck.
+>
+> Praktisch: offene PRs **vor** Schritt 2 mergen oder **nach** Schritt 8.
+> Das Merge-Fenster 10–12 Uhr (§0.1) fällt genau in die Beobachtungszeit,
+> wenn der Test am Vormittag beginnt — dann ist der nächste Merge der des
+> Folgetags.
 
 ### Wie viele Befehle wirklich hinausgehen
 
@@ -8220,5 +8289,277 @@ auch im System aufgehoben ist.
 **Querverweise:** §10aq (der Rad-Test davor, ohne Downlink), §10an (die
 zwei Formen der Sperre), §10e (Downlink-Versuche von Hand), §5.13
 (ChirpStack verlangt `devEui` im Payload), STATUS §2co.
+
+---
+
+## 10as. Neue Hardware anlegen: 3 Vicki in den Pool, 2 Relais (Lieferung 31.10.2026)
+
+Für die Nachlieferung vom 31.10.2026. Baut auf §10h (Pool) und §10aj
+(Relais) auf und nennt nur, was **anders** ist: fünf Geräte von Hand statt
+104 aus einer Liste.
+
+**Jeder Schritt ist gekennzeichnet:** *ChirpStack-Oberfläche*,
+*SSH (Server)*, *Software-Oberfläche* oder *Vor Ort*.
+
+### Was geliefert wurde
+
+| Art | DevEUI | Seriennummer |
+|---|---|---|
+| Vicki | `70b3d52dd30329c6` | `V6TF410485L19W` |
+| Vicki | `70b3d52dd30329b7` | `CKPW410470CJHU` |
+| Vicki | `70b3d52dd30329ba` | `1VFG410473HP15` |
+| Relais A | `70b3d52ddd001f23` | `FCN1865403KA7L` |
+| Relais B | `70b3d52ddd001e69` | `JD4M865217RV4U` |
+
+JoinEUI für alle Vicki: `70b3d52dd3000000`, Profil **„Heizung"**.
+
+**Kein drittes Relais.** T3.0 läuft **ohne Last an Relais A**; erst nach
+bestandenem Test kommen beide mit Last. Relais B bekommt vor dem Einbau
+dieselben Rücklesungen.
+
+### Der AppKey verlässt den Laptop nicht
+
+Er wird **nur** in der ChirpStack-Oberfläche eingetippt. Er gehört nicht
+in eine CSV, nicht auf den Server, nicht in dieses Repo und nicht in einen
+Chat.
+
+**Das ist seit dem 31.10.2026 auch technisch so**, und vorher war es
+umgekehrt: `pair_devices import` verlangte den AppKey in der CSV. Die
+Forderung war ein Überrest aus der 104er-Lieferung, bei der **dieselbe**
+Datei das Provisionierungs-Skript gefüttert hat. Der Import speichert den
+AppKey nirgends — er hat ein Geheimnis auf den Server getragen, das dort
+niemand verbraucht. Die Pflicht ist entfallen; die Spalte ist weiter
+erlaubt und wird ignoriert.
+
+**Deshalb braucht §10h.0.3 hier keine zwei CSV-Varianten.** Eine Datei
+ohne Spalte F genügt für alles.
+
+---
+
+### Schritt 1 — Nächste freie Nummer feststellen
+
+*SSH (Server)* — das Etikett folgt der Durchnummerierung, und die darf
+sich nicht doppeln:
+
+```bash
+docker exec deploy-api-1 python -c "
+import asyncio
+from sqlalchemy import select
+from heizung.db import SessionLocal
+from heizung.models.device import Device
+async def main():
+    async with SessionLocal() as s:
+        rows = (await s.execute(select(Device.label).order_by(Device.label))).scalars().all()
+        print('Etiketten:', [r for r in rows if r])
+asyncio.run(main())
+"
+```
+
+**Erwartung:** Etiketten `001`–`104` (bzw. `Vicki-001` bei den vier
+Testgeräten). Die drei neuen Vicki bekommen dann **105, 106, 107** — in
+der Reihenfolge der Tabelle oben.
+
+> **Vorsicht mit der 107.** Das ist zufällig auch eine Zimmernummer, und
+> in diesem RUNBOOK steht sie an vielen Stellen als *Zimmer* 107. Das
+> Etikett `107` meint ein **Gerät**. Wenn das verwirrt: `105`–`107`
+> überspringen und bei `108` beginnen — die Nummern müssen nur eindeutig
+> sein, nicht lückenlos.
+
+Die Relais bekommen **keine** Vicki-Nummer. Etikett `Relais A` und
+`Relais B` — sie stehen in einer anderen Reihe, und eine gemeinsame
+Nummerierung würde beim Suchen zwei Dinge vermischen.
+
+### Schritt 2 — ChirpStack: fünf Geräte anlegen
+
+*ChirpStack-Oberfläche.* Applications → **Heizung** → Devices → **Add
+device**, fünfmal.
+
+| Feld | Vicki | Relais |
+|---|---|---|
+| Name | `105`, `106`, `107` | `Relais-A`, `Relais-B` |
+| Device EUI | aus der Tabelle | aus der Tabelle |
+| Join EUI | `70b3d52dd3000000` | *(Aufkleber des Geräts)* |
+| Device profile | **Heizung** | **MClimate 16ASPM** (Schritt 5) |
+
+Danach je Gerät Tab **Keys (OTAA)** → **Application key** eintippen →
+speichern. **Der AppKey wird hier eingetippt und nirgends sonst.**
+
+> **Die Relais erst nach Schritt 5 anlegen** — ohne das Class-C-Profil
+> gibt es kein Profil zum Auswählen.
+
+### Schritt 3 — Heizungs-DB: die drei Vicki als Pool-Geräte
+
+*SSH (Server).* Eine CSV **ohne** AppKey, drei Zeilen, kein Zimmer und
+keine Zone (das ist die Pool-Konvention aus §10h):
+
+```bash
+cat > /tmp/nachlieferung.csv <<'CSV'
+dev_eui,app_eui,serial_number,hardware_nummer
+70b3d52dd30329c6,70b3d52dd3000000,V6TF410485L19W,105
+70b3d52dd30329b7,70b3d52dd3000000,CKPW410470CJHU,106
+70b3d52dd30329ba,70b3d52dd3000000,1VFG410473HP15,107
+CSV
+docker cp /tmp/nachlieferung.csv deploy-api-1:/tmp/nachlieferung.csv
+```
+
+> Container-Namen nicht hart annehmen (§10h.0.4):
+> `docker ps --format '{{.Names}}' | grep api`.
+>
+> **Nach einem Deploy ist die Kopie im Container weg.** Der Timer läuft
+> alle fünf Minuten; dann `docker cp` wiederholen (§10h.3).
+
+*SSH (Server)* — prüfen, **Probelauf**, anlegen:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  validate /tmp/nachlieferung.csv
+
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  import /tmp/nachlieferung.csv --dry-run
+
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  import /tmp/nachlieferung.csv --user-email <ihre-admin-adresse>
+```
+
+**Erwartung:** `[OK] 3 CSV-Rows validiert`, dann im Probelauf
+`[DRY-RUN] DB-Aenderungen zurueckgerollt`, dann
+`Resultat: 3 angelegt, 0 ergaenzt, 0 unveraendert, 0 Konflikte, 0 Fehler.`
+
+`--user-email` muss ein **aktives Konto mit der Rolle `admin`** sein,
+sonst bricht der Aufruf **vor** dem ersten Schreibvorgang ab und sagt,
+warum (§10h.0.2). Die Adresse steht danach als Urheber im Audit.
+
+**Grenzen am Gerät (T1) kommen hier nicht.** Sie gehören zur Zuordnung an
+eine Zone — ein Pool-Gerät im Lager hat keine Zone und keinen Raumtyp,
+dessen Grenzen gelten würden (§10ap).
+
+### Schritt 4 — Heizungs-DB: die zwei Relais
+
+*SSH (Server).* Derselbe Weg, mit `--kind relay`:
+
+```bash
+cat > /tmp/relais.csv <<'CSV'
+dev_eui,serial_number,hardware_nummer
+70b3d52ddd001f23,FCN1865403KA7L,Relais A
+70b3d52ddd001e69,JD4M865217RV4U,Relais B
+CSV
+docker cp /tmp/relais.csv deploy-api-1:/tmp/relais.csv
+
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  import /tmp/relais.csv --kind relay --dry-run
+
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  import /tmp/relais.csv --kind relay --user-email <ihre-admin-adresse>
+```
+
+**`--kind relay` gibt es seit dem 31.10.2026.** Vorher führte kein
+dokumentierter Weg zu einer Relais-Zeile: der Import setzte „Thermostat"
+fest, das Formular in der Oberfläche kennt nur Thermostat und Sensor, und
+§10aj springt von „in ChirpStack anmelden" zu „Provisionieren" — und setzt
+die Zeile voraus.
+
+**„Nicht in Betrieb" ist der Ausgangszustand und kein eigener Schritt.**
+`commissioned_at` bleibt leer, und ohne diesen Wert gehen **keine**
+Schaltbefehle an das Gerät (S3). In Betrieb nimmt es erst §10aj Schritt 5,
+nach beiden Rücklesungen.
+
+*SSH (Server)* — **aufräumen, beide Kopien:**
+
+```bash
+rm -f /tmp/nachlieferung.csv /tmp/relais.csv
+docker exec deploy-api-1 rm -f /tmp/nachlieferung.csv /tmp/relais.csv
+```
+
+Die Dateien enthalten keine AppKeys — Seriennummern sind kein Geheimnis.
+Weg sind sie trotzdem besser: eine Datei, die liegen bleibt, wird beim
+nächsten Mal für aktuell gehalten.
+
+*Software-Oberfläche* — nachsehen:
+
+Geräte → die fünf neuen stehen in der Liste, **ohne Zone**, Status
+„noch nie gemeldet". Die Relais tragen die Art **Relais**.
+
+### Schritt 5 — ChirpStack: Class-C-Profil und Relais-Codec
+
+*ChirpStack-Oberfläche.* **Vollständig nach §10aj Schritt 1** — hier nur
+die Punkte, bei denen es schiefgeht:
+
+- **„Device supports class C" muss an sein.** Das ist der Unterschied zum
+  Vicki. Ohne den Schalter stellt ChirpStack Downlinks in die
+  Warteschlange, statt sie sofort zu senden, und der Wächter verlässt sich
+  auf die sofortige Zustellung.
+- Codec: Inhalt von `infra/chirpstack/codecs/mclimate-16aspm.js`
+  **vollständig** einfügen, nicht ergänzen und nicht mischen.
+- **Prüfung, und sie ist nicht optional:** sobald das erste Relais
+  gejoint hat, im **Events-Tab** einen Uplink öffnen. Der `object`-Block
+  muss `report_type`, `relayState` und `power_W` zeigen. Steht dort
+  nichts, ist der Codec nicht gelaufen — die Goja-Engine meldet einen
+  Syntaxfehler nicht an der Oberfläche (§5.22).
+
+### Schritt 6 — Vicki-Eingangstest: Join und Firmware
+
+*Vor Ort.* Batterien in **einen** Vicki einlegen. Das Gerät joint
+innerhalb weniger Minuten.
+
+*Software-Oberfläche.* Geräte → das Gerät → **zuletzt gemeldet** muss
+einen Zeitstempel tragen.
+
+*SSH (Server)* — Firmware lesen, derselbe Weg wie im Batch-Eingangstest
+(§10h.4):
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.pair_devices \
+  test <dev_eui> --user-email <ihre-admin-adresse>
+```
+
+**Erwartung: Firmware `4.4`.** Eine andere Zahl ist kein Abbruch, aber
+sie gehört notiert — die Fenstererkennung (`0x45`) braucht ≥ 4.2, und die
+Grenzen am Gerät (`0x08`, T1) sind gegen 4.4 geprüft.
+
+*Vor Ort.* **Batterien wieder heraus.** Ein Pool-Gerät im Lager soll nicht
+senden: es kostet Batterie, erzeugt Messwerte ohne Zone und taucht in der
+Geräte-Sicherheit als unmontiert auf.
+
+Dann das nächste Gerät. **Eines nach dem anderen** — drei gleichzeitig
+joinende Vickis sind drei Zeitstempel, die niemand auseinanderhält.
+
+### Schritt 7 — Relais: nur anlegen, nicht in Betrieb nehmen
+
+**Hier endet diese Liste.** Strom und Elektriker folgen; alles Weitere
+steht in §10aj:
+
+| Was | Wo | Status |
+|---|---|---|
+| T3.0 „previous state" an **Relais A ohne Last** | §10aj Schritt 3 | **Pflicht-Stop** |
+| beide Rücklesungen, dann in Betrieb | §10aj Schritt 4+5 | **Pflicht-Stop** |
+| Relais B: dieselben Rücklesungen vor dem Einbau | §10aj Schritt 4 | nach A |
+
+**Kein Schaltbefehl bis dahin** — und das hängt nicht an der Disziplin,
+sondern an `commissioned_at` (S3).
+
+### Die Prüftabelle
+
+| # | Prüfung | Erwartet |
+|---|---|---|
+| 1 | nächste freie Nummer | 105–107 frei, keine Doppelung |
+| 2 | ChirpStack | fünf Geräte, AppKey je Gerät eingetippt |
+| 3 | Vicki-Import | `3 angelegt, 0 Konflikte`, Probelauf davor |
+| 4 | Relais-Import | `2 angelegt`, Art **Relais**, ohne Zone |
+| 4 | CSV weg | auf dem Server **und** im Container |
+| 5 | Codec | `report_type`, `relayState`, `power_W` im Events-Tab |
+| 6 | je Vicki | Zeitstempel da, Firmware notiert, Batterien raus |
+| 7 | Relais | `commissioned_at` leer — kein Schaltbefehl möglich |
+
+### Was danach im Protokoll steht
+
+| Aktion | Heißt |
+|---|---|
+| `DEVICE_PAIRED` × 5 | die fünf Zeilen, mit Ihrer Adresse als Urheber |
+| `DEVICE_INBOUND_TEST` × 3 | Schritt 6, je Vicki |
+
+**Querverweise:** §10h.0.2 (Rollen und `--user-email`), §10h.0.4
+(Container-Namen), §10h.3 (Pool-Import im Original), §10h.4
+(Eingangstest), §10aj (Relais von vorn), §10ap (Grenzen am Gerät, bei der
+Zuordnung), §5.22 (Codec ist Handarbeit je Server), STATUS §2cp.
 
 ---

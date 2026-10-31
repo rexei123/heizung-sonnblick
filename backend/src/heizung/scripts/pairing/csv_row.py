@@ -140,10 +140,11 @@ class PairingCsvRow(BaseModel):
     app_key: str | None = Field(
         default=None,
         description="LoRaWAN AppKey (16 Byte hex, 32 Zeichen). Wird lowercase "
-        "normalisiert. Fuer den Import Pflicht — das erzwingt ``parse_csv`` "
-        "mit ``require_app_key=True``. Fuer ``assign`` (Sprint 17 / C8) nicht: "
-        "die Montage-CSV wird ohne AppKey-Spalte exportiert, damit das "
-        "Geheimnis nicht ein zweites Mal ueber den Tisch wandert.",
+        "normalisiert. **Optional und ungenutzt** — der Import speichert ihn "
+        "nirgends, er gehoert zur ChirpStack-Registrierung. Bis zum "
+        "31.10.2026 war er fuer den Import Pflicht; das hat ein Geheimnis "
+        "auf den Server getragen, das dort niemand verbraucht (Begruendung "
+        "in ``parse_csv``).",
     )
 
     # --- Sprint 17 (E4/C2): optionale Metadaten ---------------------------

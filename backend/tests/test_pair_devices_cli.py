@@ -663,3 +663,115 @@ async def test_import_bricht_bei_mitarbeiter_konto_ab_ohne_zu_schreiben(
     )
     assert count == 0
     # Kein Downlink durch den Abbruch.
+
+
+# ---------------------------------------------------------------------------
+# --kind relay (31.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_cmd_import_kind_relay_legt_relais_an(
+    patched_session_local: AsyncSession,
+    tmp_path: Path,
+    mock_all_downlinks: dict[str, int],
+) -> None:
+    """``import --kind relay`` legt ein 16ASPM an, ohne Zone und ohne Betrieb.
+
+    **Dieser Test ist durch eine Mutationsprobe entstanden.** Der Dienst
+    war geprueft (``test_pairing_service``), der Schalter am
+    Kommandozeilen-Aufruf nicht: ein festverdrahtetes
+    ``kind=DeviceKind.THERMOSTAT`` in ``_cmd_import`` liess alle
+    CLI-Tests gruen. Geprueft war die Funktion, nicht der Weg, der sie
+    ruft — dasselbe Muster wie Paragraph 5.87, und in diesem Sprint zum
+    vierten Mal.
+
+    ``commissioned_at`` bleibt leer: ohne diesen Wert gehen **keine**
+    Schaltbefehle an das Geraet (S3). „Nicht in Betrieb" ist damit der
+    Ausgangszustand und kein eigener Schritt.
+    """
+    dev_eui = _eui()
+    # Seriennummer je Lauf eindeutig: ``ix_device_hardware_number_unique``
+    # ist ein Partial-Unique-Index (Migration 0020). Eine feste Nummer
+    # kollidiert mit jedem Test, der sie auch nimmt — und mit Zeilen, die
+    # ein frueherer Lauf committet hat.
+    seriennummer = f"SN{_short().upper()}"
+    csv_path = tmp_path / "relais.csv"
+    _write_csv(
+        csv_path,
+        "\n".join(
+            ["dev_eui,serial_number,hardware_nummer", f"{dev_eui},{seriennummer},Relais A", ""]
+        ),
+    )
+
+    exit_code = await pair_devices.main_async(["import", str(csv_path), "--kind", "relay"])
+
+    assert exit_code == 0
+    geraet = (
+        await patched_session_local.execute(select(Device).where(Device.dev_eui == dev_eui))
+    ).scalar_one()
+    assert geraet.kind == DeviceKind.RELAY
+    assert geraet.model == "MC-LW-16ASPM-01"
+    assert geraet.heating_zone_id is None
+    assert geraet.commissioned_at is None
+    assert geraet.hardware_number == seriennummer
+    assert geraet.label == "Relais A"
+
+
+async def test_cmd_import_ohne_kind_legt_ein_thermostat_an(
+    patched_session_local: AsyncSession,
+    tmp_path: Path,
+    mock_all_downlinks: dict[str, int],
+) -> None:
+    """Ohne den Schalter ein Vicki — der Regelfall darf sich nicht verschieben.
+
+    Die Gegenprobe. Ohne sie waere der Test oben auch gruen, wenn jeder
+    Import ein Relais anlegte, und die naechste Pool-Lieferung landete als
+    Schaltaktor in der Datenbank.
+    """
+    dev_eui = _eui()
+    csv_path = tmp_path / "pool.csv"
+    # Zwei Spalten, nicht eine: der Trennzeichen-Erkenner braucht ein
+    # Trennzeichen, und eine einspaltige CSV hat keines („Could not
+    # determine delimiter"). Bestandsverhalten, hier nur umgangen.
+    _write_csv(csv_path, "\n".join(["dev_eui,app_eui", f"{dev_eui},70b3d52dd3000000", ""]))
+
+    exit_code = await pair_devices.main_async(["import", str(csv_path)])
+
+    assert exit_code == 0
+    geraet = (
+        await patched_session_local.execute(select(Device).where(Device.dev_eui == dev_eui))
+    ).scalar_one()
+    assert geraet.kind == DeviceKind.THERMOSTAT
+    assert geraet.model == "Vicki"
+
+
+async def test_cmd_import_ohne_app_key_spalte(
+    patched_session_local: AsyncSession,
+    tmp_path: Path,
+    mock_all_downlinks: dict[str, int],
+) -> None:
+    """Eine CSV ohne AppKey-Spalte laeuft durch die CLI.
+
+    Bis zum 31.10.2026 brach der Import hier ab. Der AppKey wird nirgends
+    gespeichert — die Forderung hat ein Geheimnis auf den Server getragen,
+    das dort niemand verbraucht (Paragraph 0 S6). Gepruefter Weg: die
+    ganze CLI, nicht nur der Parser.
+    """
+    dev_eui = _eui()
+    seriennummer = f"SN{_short().upper()}"
+    csv_path = tmp_path / "ohne-appkey.csv"
+    _write_csv(
+        csv_path,
+        "\n".join(
+            ["dev_eui,app_eui,serial_number", f"{dev_eui},70b3d52dd3000000,{seriennummer}", ""]
+        ),
+    )
+
+    exit_code = await pair_devices.main_async(["import", str(csv_path)])
+
+    assert exit_code == 0
+    geraet = (
+        await patched_session_local.execute(select(Device).where(Device.dev_eui == dev_eui))
+    ).scalar_one()
+    assert geraet.app_eui == "70b3d52dd3000000"
+    assert geraet.hardware_number == seriennummer

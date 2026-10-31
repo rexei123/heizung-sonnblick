@@ -745,3 +745,78 @@ async def test_pair_device_existing_keeps_zone_assignment(session: AsyncSession)
     await session.refresh(existing)
     assert existing.heating_zone_id == zone_id
     assert existing.hardware_number == "MDC-Z"
+
+
+# ---------------------------------------------------------------------------
+# Neue Hardware, 31.10.2026: Relais über denselben Weg, AppKey nicht nötig
+# ---------------------------------------------------------------------------
+
+
+async def test_pair_device_relais_als_pool_zeile(session: AsyncSession) -> None:
+    """``kind=RELAY`` legt ein 16ASPM an — ohne Zone, nicht in Betrieb.
+
+    **Für eine Relais-Zeile gab es keinen dokumentierten Weg.**
+    ``pair_devices`` setzte ``kind=THERMOSTAT`` fest, das Formular in der
+    Oberfläche kennt nur Thermostat und Sensor, und RUNBOOK §10aj springt
+    von „in ChirpStack anmelden" direkt zu „Provisionieren" — und setzt
+    die Zeile damit voraus. Geblieben wäre ein ``POST`` von Hand gegen die
+    API, ohne Probelauf und ohne Audit-Urheber.
+
+    ``commissioned_at`` bleibt leer, und das ist die Zusicherung, die
+    zählt: ohne sie gehen **keine** Schaltbefehle an das Gerät (S3 in
+    ``services/relay_service``). „Nicht in Betrieb" ist damit der
+    Ausgangszustand und kein eigener Schritt.
+    """
+    # Seriennummer je Lauf eindeutig: ``ix_device_hardware_number_unique``
+    # ist ein Partial-Unique-Index (Migration 0020). Eine feste Nummer
+    # kollidiert mit jedem anderen Test, der sie auch nimmt — und mit
+    # Zeilen, die ein frueherer Lauf committet hat.
+    seriennummer = f"SN{uuid.uuid4().hex[:10].upper()}"
+    row = PairingCsvRow(dev_eui=_eui(), serial_number=seriennummer)
+
+    result = await pair_device(row, row_number=2, session=session, kind=DeviceKind.RELAY)
+
+    assert result.status == "paired"
+    device = await session.get(Device, result.device_id)
+    assert device is not None
+    assert device.kind == DeviceKind.RELAY
+    assert device.model == "MC-LW-16ASPM-01"
+    assert device.heating_zone_id is None
+    assert device.commissioned_at is None, "ein frisches Relais schaltet nichts (S3)"
+    assert device.hardware_number == seriennummer
+
+
+async def test_pair_device_bleibt_ohne_angabe_ein_thermostat(session: AsyncSession) -> None:
+    """Ohne ``kind`` ein Vicki — der Regelfall darf sich nicht verschieben.
+
+    Die Gegenprobe zum Test oben: ohne sie wäre die Änderung auch grün,
+    wenn aus jedem Import ein Relais würde.
+    """
+    row = PairingCsvRow(dev_eui=_eui())
+
+    result = await pair_device(row, row_number=2, session=session)
+
+    device = await session.get(Device, result.device_id)
+    assert device is not None
+    assert device.kind == DeviceKind.THERMOSTAT
+    assert device.model == "Vicki"
+
+
+async def test_pair_device_ohne_app_key(session: AsyncSession) -> None:
+    """Eine Zeile **ohne** AppKey wird angelegt.
+
+    Der Import speichert den AppKey nirgends — er gehört zur
+    ChirpStack-Registrierung. Bis zum 31.10.2026 verlangte ``parse_csv``
+    ihn trotzdem; das hat ein Geheimnis auf den Server getragen, das dort
+    niemand verbraucht (§0 S6).
+
+    Geprüft wird hier die Anlage, in ``test_pairing_csv_parser`` das
+    Einlesen einer CSV ohne die Spalte.
+    """
+    row = PairingCsvRow(dev_eui=_eui())
+
+    result = await pair_device(row, row_number=2, session=session)
+
+    assert result.status == "paired"
+    device = await session.get(Device, result.device_id)
+    assert device is not None
