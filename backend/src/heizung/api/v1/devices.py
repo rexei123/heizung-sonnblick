@@ -233,7 +233,10 @@ async def _build_device_read(
             "child_lock_state": child_lock_state(
                 gewollt=rad_gesperrt_gewollt,
                 gemeldet=kindersicherung.gesperrt if kindersicherung is not None else None,
-                gemeldet_um=kindersicherung.gemeldet_um if kindersicherung is not None else None,
+                # Nicht die Zeit, sondern die Anzahl: bei Class A ist auch
+                # die erste Meldung nach dem Befehl noch keine Antwort
+                # darauf. Begruendung samt Zeitlinie in ``child_lock_state``.
+                nach_befehl=kindersicherung.nach_befehl if kindersicherung is not None else 0,
                 befehl_um=device.child_lock_commanded_at,
             ),
             # Sprint 23 T4-B: der gewollte Zustand geht **mit** hinaus.

@@ -112,19 +112,25 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
   }
 
   const sperre = sperrText(device.child_lock_state, device.rad_gesperrt_gewollt);
-  // **Gezeigt wird, sobald es eine Frage gibt** (Sprint 23 T4-B).
+  // **Der Zustand des Rades steht immer da** (Betreiber, 01.11.2026).
   //
-  // Hier stand `device.measure_only`, mit der damals richtigen
+  // Hier stand zweimal eine Bedingung, und beide waren zu eng. Zuerst
+  // `device.measure_only` (Sprint 24c), mit der damals richtigen
   // Begründung: bei einem normalen Thermostat ist das Rad absichtlich
-  // frei, und ein „bestätigt" dafür wäre eine Aussage ohne Frage.
+  // frei, und ein „bestätigt" dafür wäre eine Aussage ohne Frage. Mit der
+  // Gast-Sperre hat auch ein normales Thermostat ein gesperrtes Rad —
+  // also erweitert auf „gesperrt gewollt **oder** Soll und Meldung
+  // auseinander" (T4-B).
   //
-  // Mit der Gast-Sperre hat auch ein normales Thermostat ein gesperrtes
-  // Rad — und die Karte zeigte dafür **nichts**. Die Bedingung war nicht
-  // falsch, sie ist zu eng geworden (§5.77). Gezeigt wird jetzt, wenn das
-  // Rad gesperrt sein soll **oder** wenn Soll und Meldung auseinander
-  // liegen; verschwiegen wird nur der langweilige Fall „soll frei sein
-  // und ist frei".
-  const sperreZeigen = device.rad_gesperrt_gewollt || device.child_lock_state !== "bestaetigt";
+  // Verschwiegen blieb damit noch „soll frei sein und ist frei" — und
+  // genau das ist eine Auskunft, die jemand sucht: **ist das Rad in
+  // diesem Zimmer bedienbar?** Nach dem Lösen einer Sperre ist das die
+  // Frage, und eine leere Karte beantwortet sie nicht. Sie sieht aus wie
+  // „dazu wissen wir nichts".
+  //
+  // Dieselbe Entscheidung wie beim Gerätetyp: eine Information, die aus
+  // dem **Fehlen** einer Anzeige gelesen werden muss, ist die Falle aus
+  // §5.57. Der Zustand ist billig zu zeigen und teuer zu erraten.
 
   return (
     <div
@@ -148,7 +154,7 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
         </span>
       </div>
 
-      {sperreZeigen && (
+      {(
         <div
           className={`mt-2 flex items-center gap-1 text-xs ${sperre.klasse}`}
           data-testid="child-lock-status"
@@ -170,6 +176,21 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
             disabled={mut.isPending}
             data-testid="measure-only-toggle"
           >
+            {/* **Die Beschriftung bleibt, wie sie war** (01.11.2026).
+                Beim Befund „der Knopf ragt über den Kartenrand" lag die
+                erste Vermutung auf dem langen Text — der Knopf des
+                Design-Systems trägt `whitespace-nowrap`, er bricht nicht
+                um, sondern wächst.
+
+                **Gemessen war es etwas anderes:** der Text macht 240 px,
+                und die Karte ist in jeder Breite breiter. Zu schmal war
+                der **Slot** — die Karte stand im KPI-Raster mit vier
+                Spalten und hatte bei 768 px 118 px. Behoben ist es dort;
+                hier gab es nichts zu kürzen.
+
+                „nur messen" ist zudem das Wort, das die Karte und das
+                API-Feld benutzen. Ein drittes Wort für dieselbe Sache
+                wäre ein Vokabular mehr (§5.53). */}
             {device.measure_only ? "Rolle zurücknehmen" : "Auf „nur messen“ umstellen"}
           </Button>
         </div>

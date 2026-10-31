@@ -12,6 +12,7 @@ import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
 import { DeviceAuditList } from "@/components/patterns/device-audit-list";
 import { GeraetegrenzenKarte } from "@/components/patterns/geraetegrenzen-karte";
+import { Geraetetyp } from "@/components/patterns/geraetetyp";
 import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
 import { useAuth } from "@/contexts/auth-context";
@@ -112,8 +113,18 @@ export default function DeviceDetailPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="min-w-0">
                 <DeviceLabelEdit device={device} />
-                <p className="mt-1 text-sm text-text-secondary">
-                  {device.vendor} {device.model} · {device.kind}
+                {/* Der Gerätetyp als Wort, nicht als Enum-Wert (Betreiber,
+                    31.10.2026). Hier stand `· {device.kind}` und damit
+                    „relay" bzw. „thermostat" — technisch vorhanden, aber
+                    kein Wort, das jemand liest. Mit den Relais 108 und
+                    109 ist es die Frage, mit der man auf diese Seite
+                    kommt. Begründung in `patterns/geraetetyp`. */}
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+                  <Geraetetyp kind={device.kind} className="text-sm" />
+                  <span aria-hidden>·</span>
+                  <span>
+                    {device.vendor} {device.model}
+                  </span>
                 </p>
                 {device.retired_at !== null ? (
                   <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium bg-danger-soft text-danger w-fit">
@@ -241,11 +252,34 @@ export default function DeviceDetailPage() {
                 0x15, nicht aus dem, was wir gesendet haben. */}
             <GeraetegrenzenKarte device={device} />
             <OverrideCard override={device.active_override} />
+          </section>
+
+          {/* **Diese zwei Karten gehören nicht ins Kachel-Raster**
+              (Befund des Betreibers, 01.11.2026: „der Knopf ragt über den
+              Kartenrand").
+
+              Gemessen, nicht geraten: im Raster darüber (`md:grid-cols-4`)
+              blieben der Rollen-Karte bei 768 px Fensterbreite **118 px**
+              und bei 375 px **155 px** — darin passt kein Knopf. Die
+              erste Vermutung war der lange Text; der macht 240 px und
+              hätte in jede Karte gepasst. Zu schmal war der Slot.
+
+              Das Raster darüber ist für **Wert-Kacheln** gebaut: eine
+              Zahl, ein Wort, kein Bedienelement. Diese beiden tragen
+              Überschrift, Zustand und einen Knopf — sie sind Karten und
+              keine Kacheln, und deshalb stehen sie jetzt in einem eigenen
+              Abschnitt mit höchstens zwei Spalten.
+
+              Die Relais-Karte wandert mit: sie saß im selben Slot und
+              trägt noch mehr (Zustand, Leistung, Zähler, Sperren, die
+              Handgriffe). Dass sie dort nicht gemessen wurde, liegt nur
+              daran, dass im Haus noch kein Relais angelegt ist — mit 108
+              und 109 kommt sie in Sicht. */}
+          <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Sprint 24b: nur fuer Relais. Die Vicki-Kacheln darueber
                 (Ist, Soll, Ventil, Fenster) sagen bei einem 16ASPM
                 nichts — es misst keine Raumtemperatur und hat kein
-                Ventil. Die Relais-Karte traegt stattdessen Zustand,
-                Leistung, Zaehler, Sperren und die Handgriffe. */}
+                Ventil. */}
             {device.kind === "relay" && <RelayCard deviceId={device.id} />}
             {/* Sprint 24c: die Rolle. Fuer ein Relais gibt sie die
                 Komponente selbst nicht aus -- ein Relais misst nicht. */}

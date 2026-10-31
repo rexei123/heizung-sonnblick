@@ -225,15 +225,18 @@ test.describe("Umschalter „nur messen“", () => {
     await expect(status).toContainText("meldet es als frei");
   });
 
-  test("ohne Rolle und ohne Sperre gibt es keinen Sperr-Status", async ({ page }) => {
-    // Bei einem normalen Thermostat, dessen Rad frei sein **soll** und
-    // frei **ist**, wäre ein „bestätigt" eine Aussage ohne Frage.
-    //
-    // Sprint 23 T4-B hat die Bedingung von `measure_only` auf den
-    // gewollten Zustand umgestellt — der Fixture trägt deshalb
-    // ausdrücklich `rad_gesperrt_gewollt: false` **und**
-    // `child_lock_state: "bestaetigt"`. Beides zusammen ist der
-    // langweilige Fall, und nur der wird verschwiegen.
+  test("auch ohne Rolle und ohne Sperre steht da, dass das Rad frei ist", async ({ page }) => {
+    /**
+     * **Befund des Betreibers, 01.11.2026.** Hier prüfte dieser Test bis
+     * dahin das Gegenteil: „soll frei sein und ist frei" wurde
+     * verschwiegen, mit der Begründung „eine Aussage ohne Frage".
+     *
+     * Die Frage gibt es aber, und zwar nach dem Lösen einer Sperre:
+     * **ist das Rad in diesem Zimmer wieder bedienbar?** Eine leere
+     * Karte beantwortet sie nicht — sie sieht aus wie „dazu wissen wir
+     * nichts". Eine Information, die aus dem **Fehlen** einer Anzeige
+     * gelesen werden muss, ist die Falle aus §5.57.
+     */
     await mock(page, {
       device: { ...VICKI, child_lock_state: "bestaetigt" as const },
       nutzer: ADMIN,
@@ -241,8 +244,41 @@ test.describe("Umschalter „nur messen“", () => {
     await page.goto("/devices/77");
 
     await expect(page.getByTestId("measure-only-card")).toBeVisible();
-    await expect(page.getByTestId("child-lock-status")).toHaveCount(0);
+    await expect(page.getByTestId("child-lock-status")).toContainText("Rad frei · bestätigt");
   });
+
+  // **Die Breiten sind gemessen, nicht gewählt** (01.11.2026).
+  //
+  // Befund des Betreibers: „der Knopf ragt über den Kartenrand". Die
+  // erste Vermutung war der lange Text — der macht 240 px und hätte in
+  // jede Karte gepasst. Zu schmal war der **Slot**: die Rollen-Karte
+  // stand im KPI-Raster mit vier Spalten und hatte bei **768 px**
+  // Fensterbreite 118 px, bei **375 px** 155 px.
+  //
+  // Bei 1024 px und darüber ist die Karte breit genug — eine Prüfung nur
+  // in der Standard-Breite hätte den Befund **nicht** gefangen. Genau das
+  // ist beim ersten Anlauf passiert: die Probe gegen den langen Text
+  // blieb grün.
+  for (const breite of [768, 375]) {
+    test(`der Umschalt-Knopf bleibt bei ${breite} px in der Karte`, async ({ page }) => {
+      await page.setViewportSize({ width: breite, height: 900 });
+      await mock(page, { device: VICKI, nutzer: ADMIN });
+      await page.goto("/devices/77");
+
+      const karte = page.getByTestId("measure-only-card");
+      const knopf = page.getByTestId("measure-only-toggle");
+      await expect(knopf).toBeVisible();
+
+      const k = await karte.boundingBox();
+      const b = await knopf.boundingBox();
+      expect(k, "Karte muss sichtbar sein").not.toBeNull();
+      expect(b, "Knopf muss sichtbar sein").not.toBeNull();
+      if (k === null || b === null) return;
+
+      expect(b.x + b.width, "rechter Rand des Knopfes").toBeLessThanOrEqual(k.x + k.width);
+      expect(b.x, "linker Rand des Knopfes").toBeGreaterThanOrEqual(k.x);
+    });
+  }
 
   test("ein gast-gesperrtes Thermostat zeigt den Sperr-Status", async ({ page }) => {
     /**
