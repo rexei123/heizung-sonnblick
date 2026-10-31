@@ -252,11 +252,34 @@ export default function DeviceDetailPage() {
                 0x15, nicht aus dem, was wir gesendet haben. */}
             <GeraetegrenzenKarte device={device} />
             <OverrideCard override={device.active_override} />
+          </section>
+
+          {/* **Diese zwei Karten gehören nicht ins Kachel-Raster**
+              (Befund des Betreibers, 01.11.2026: „der Knopf ragt über den
+              Kartenrand").
+
+              Gemessen, nicht geraten: im Raster darüber (`md:grid-cols-4`)
+              blieben der Rollen-Karte bei 768 px Fensterbreite **118 px**
+              und bei 375 px **155 px** — darin passt kein Knopf. Die
+              erste Vermutung war der lange Text; der macht 240 px und
+              hätte in jede Karte gepasst. Zu schmal war der Slot.
+
+              Das Raster darüber ist für **Wert-Kacheln** gebaut: eine
+              Zahl, ein Wort, kein Bedienelement. Diese beiden tragen
+              Überschrift, Zustand und einen Knopf — sie sind Karten und
+              keine Kacheln, und deshalb stehen sie jetzt in einem eigenen
+              Abschnitt mit höchstens zwei Spalten.
+
+              Die Relais-Karte wandert mit: sie saß im selben Slot und
+              trägt noch mehr (Zustand, Leistung, Zähler, Sperren, die
+              Handgriffe). Dass sie dort nicht gemessen wurde, liegt nur
+              daran, dass im Haus noch kein Relais angelegt ist — mit 108
+              und 109 kommt sie in Sicht. */}
+          <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Sprint 24b: nur fuer Relais. Die Vicki-Kacheln darueber
                 (Ist, Soll, Ventil, Fenster) sagen bei einem 16ASPM
                 nichts — es misst keine Raumtemperatur und hat kein
-                Ventil. Die Relais-Karte traegt stattdessen Zustand,
-                Leistung, Zaehler, Sperren und die Handgriffe. */}
+                Ventil. */}
             {device.kind === "relay" && <RelayCard deviceId={device.id} />}
             {/* Sprint 24c: die Rolle. Fuer ein Relais gibt sie die
                 Komponente selbst nicht aus -- ein Relais misst nicht. */}

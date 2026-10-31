@@ -819,35 +819,63 @@ def test_eine_meldung_von_vor_dem_befehl_ist_ausstehend() -> None:
 
     Direkt nach dem Umschalten auf „nur messen" ist die juengste Meldung
     die vom Keepalive **davor**: sie sagt „Rad frei", und das war bis zur
-    Sekunde vorher richtig. Ohne den Zeitvergleich stand dort ein roter
+    Sekunde vorher richtig. Ohne diese Bedingung stand dort ein roter
     Befund im Normalfall — und ein Melder, der im Normalfall rot zeigt,
     wird nach einer Woche nicht mehr gelesen (§5.79).
+
+    **Seit dem 01.11.2026 zaehlt die Anzahl statt der Zeit** — eine
+    Meldung von vor dem Befehl hat ``nach_befehl = 0``. Die Aussage
+    dieses Tests ist unveraendert, die Bedingung deckt sie mit ab.
     """
     befehl = datetime(2026, 10, 24, 8, 0, tzinfo=UTC)
     assert (
         child_lock_state(
             gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=False,
-            gemeldet_um=befehl - timedelta(minutes=10),
+            nach_befehl=0,
             befehl_um=befehl,
         )
         == "ausstehend"
     )
 
 
-def test_eine_meldung_nach_dem_befehl_entscheidet() -> None:
-    """Die Gegenprobe — sonst waere „immer ausstehend" auch gruen.
+def test_die_erste_meldung_nach_dem_befehl_ist_noch_keine_antwort() -> None:
+    """**Der Befund aus RUNBOOK §10ar** (Betreiber, 01.11.2026).
 
-    Kommt nach dem Befehl eine Meldung und sagt „Rad frei", ist das eine
-    **Antwort** und ein Befund.
+    Zimmer 107: 10:16 gingen drei ``0x07`` hinaus, um 10:23 meldete das
+    Geraet **„frei"** — und erst **danach** holte es den Befehl im
+    Empfangsfenster ab (Class A). Die Anzeige sagte um 10:23 „das Geraet
+    meldet es als frei": ein roter Befund, elf Minuten vor der
+    Bestaetigung um 10:34.
+
+    Der Zeitvergleich liess diese Meldung durch, weil sie **nach** dem
+    Befehl lag. Die erste Meldung oeffnet aber nur das Fenster; die
+    zweite berichtet das Ergebnis.
     """
-    befehl = datetime(2026, 10, 24, 8, 0, tzinfo=UTC)
-    nachher = befehl + timedelta(minutes=5)
+    befehl = datetime(2026, 11, 1, 10, 16, tzinfo=UTC)
     assert (
         child_lock_state(
             gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=False,
-            gemeldet_um=nachher,
+            nach_befehl=1,
+            befehl_um=befehl,
+        )
+        == "ausstehend"
+    )
+
+
+def test_die_zweite_meldung_nach_dem_befehl_entscheidet() -> None:
+    """Die Gegenprobe — sonst waere „immer ausstehend" auch gruen.
+
+    Ab der zweiten Meldung ist der Befehl zugestellt, und was dann
+    gemeldet wird, ist eine **Antwort**: in beide Richtungen.
+    """
+    befehl = datetime(2026, 11, 1, 10, 16, tzinfo=UTC)
+    assert (
+        child_lock_state(
+            gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
+            gemeldet=False,
+            nach_befehl=2,
             befehl_um=befehl,
         )
         == "fehlgeschlagen"
@@ -856,7 +884,7 @@ def test_eine_meldung_nach_dem_befehl_entscheidet() -> None:
         child_lock_state(
             gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=True,
-            gemeldet_um=nachher,
+            nach_befehl=2,
             befehl_um=befehl,
         )
         == "bestaetigt"
@@ -874,7 +902,7 @@ def test_ohne_befehlszeit_urteilt_es_wie_vorher() -> None:
         child_lock_state(
             gewollt=soll_kindersicherung(measure_only=True, gast_sperre=False),
             gemeldet=False,
-            gemeldet_um=datetime(2026, 10, 24, 8, 0, tzinfo=UTC),
+            nach_befehl=0,
             befehl_um=None,
         )
         == "fehlgeschlagen"

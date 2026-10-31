@@ -67,7 +67,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.device import Device
@@ -120,7 +120,7 @@ def child_lock_state(
     *,
     gewollt: bool,
     gemeldet: bool | None,
-    gemeldet_um: datetime | None = None,
+    nach_befehl: int = 0,
     befehl_um: datetime | None = None,
 ) -> ChildLockState:
     """Vergleicht gewollt gegen gemeldet. Reine Funktion.
@@ -130,18 +130,43 @@ def child_lock_state(
     ein Gerät, von dem wir nichts gehört haben, hat die Sperre nicht
     verweigert.
 
-    **Und eine Meldung, die älter ist als der Befehl, ist keine Antwort
-    darauf** (Befund des Betreibers, 24.10.2026). Direkt nach dem
-    Umschalten auf „nur messen" ist die jüngste Meldung die vom Keepalive
-    **davor**: sie sagt „Rad frei", und das war bis zur Sekunde vorher
-    richtig. Ohne den Zeitvergleich stand dort ein roter Befund im
-    Normalfall — und ein Melder, der im Normalfall rot zeigt, wird nach
-    einer Woche nicht mehr gelesen (§5.79).
+    **Die erste Meldung nach dem Befehl ist noch keine Antwort darauf**
+    (Befund des Betreibers aus RUNBOOK §10ar, 01.11.2026).
 
-    Fehlt eine der beiden Zeiten, wird nicht geraten: dann urteilt die
-    Funktion wie vorher. ``befehl_um is None`` heißt „kein Befehl bekannt"
-    (Bestandsgeräte vor Migration 0033), ``gemeldet_um is None`` heißt,
-    der Aufrufer hat die Zeit nicht mitgegeben.
+    Der Grund liegt in Class A und ist keine Unschärfe, sondern die
+    Bauart: ein Vicki **empfängt nur im Fenster nach einem eigenen
+    Uplink**. Die Zeitlinie aus Zimmer 107:
+
+    ====== ===============================================================
+    10:16  drei ``0x07`` in die Warteschlange
+    10:23  Keepalive — meldet **„frei"**, und **danach** holt das Gerät
+           den Befehl im Empfangsfenster ab
+    10:34  Keepalive — meldet **„gesperrt"**
+    ====== ===============================================================
+
+    Die Meldung um 10:23 liegt **nach** dem Befehl und trägt trotzdem den
+    Zustand von **vorher**. Ein Zeitvergleich ``gemeldet_um > befehl_um``
+    lässt sie durch, und die Anzeige sagte um 10:23 „das Gerät meldet es
+    als frei" — ein roter Befund, elf Minuten vor der Bestätigung.
+
+    **Deshalb zählt nicht die Zeit, sondern die Anzahl.** Gültig ist eine
+    Meldung erst, wenn **mindestens eine weitere** zwischen dem Befehl und
+    ihr liegt: die erste öffnet das Fenster, die zweite berichtet das
+    Ergebnis. Das ersetzt den Zeitvergleich und deckt ihn mit ab — eine
+    Meldung von **vor** dem Befehl hat ``nach_befehl = 0``.
+
+    **Exakt wäre der Zeitpunkt der Zustellung** (``txack`` von
+    ChirpStack). Den haben wir nicht: der Subscriber hört
+    ``event/up`` und sonst nichts, und ihn zu holen hiesse eine zweite
+    MQTT-Anmeldung plus eine Spalte für die Zustellzeit. Die Zählung ist
+    die Antwort ohne Migration, und ihr Fehler geht in die **sichere**
+    Richtung: sie urteilt **später** als nötig, wenn das Gerät den Befehl
+    ausnahmsweise schon im ersten Fenster hatte. Ein zu spätes
+    „ausstehend" kostet eine Keepalive-Periode; ein zu frühes
+    „fehlgeschlagen" kostet den Glauben an den Melder (§5.79).
+
+    ``befehl_um is None`` heißt „kein Befehl bekannt" (Bestandsgeräte vor
+    Migration 0033) — dann urteilt die Funktion ohne diese Bedingung.
 
     **``gewollt`` ist ein Pflicht-Argument und kommt aus
     ``soll_kindersicherung``** (Sprint 23 T4-B). Hier stand bis dahin
@@ -152,22 +177,37 @@ def child_lock_state(
     """
     if gemeldet is None:
         return "ausstehend"
-    if befehl_um is not None and gemeldet_um is not None and gemeldet_um <= befehl_um:
+    # Eine Bedingung, zwei Faelle: ``0`` heisst „die Meldung ist aelter als
+    # der Befehl", ``1`` heisst „sie hat das Empfangsfenster erst
+    # geoeffnet". Beide sind keine Antwort.
+    if befehl_um is not None and nach_befehl < 2:
         return "ausstehend"
     return "bestaetigt" if gemeldet == gewollt else "fehlgeschlagen"
 
 
 @dataclass(frozen=True, slots=True)
 class Sperrmeldung:
-    """Was das Gerät gemeldet hat — **und wann**.
+    """Was das Gerät gemeldet hat, wann — und als wievielte Meldung.
 
-    Die Zeit war in der ersten Fassung (24c) nicht dabei, und genau sie
-    fehlte: ohne sie ist eine Meldung von vor dem Befehl nicht von einer
-    Ablehnung zu unterscheiden.
+    Die **Zeit** war in der ersten Fassung (24c) nicht dabei, und genau
+    sie fehlte: ohne sie ist eine Meldung von vor dem Befehl nicht von
+    einer Ablehnung zu unterscheiden.
+
+    Die **Anzahl** fehlte in der zweiten (Sprint 23 T4-B), und sie fehlte
+    aus demselben Grund eine Ebene tiefer: bei Class A ist auch die erste
+    Meldung **nach** dem Befehl noch keine Antwort darauf, weil sie das
+    Empfangsfenster erst öffnet. Begründung samt Zeitlinie in
+    :func:`child_lock_state`.
+
+    ``nach_befehl`` zählt die Meldungen **mit gesetztem Feld** seit
+    ``device.child_lock_commanded_at``, die jüngste eingeschlossen. Ohne
+    bekannten Befehl ist es ``0`` — dann urteilt die Funktion ohne diese
+    Bedingung.
     """
 
     gesperrt: bool
     gemeldet_um: datetime
+    nach_befehl: int = 0
 
 
 async def child_lock_verdicts(
@@ -201,10 +241,41 @@ async def child_lock_verdicts(
         .order_by(SensorReading.device_id, SensorReading.time.desc())
         .distinct(SensorReading.device_id)
     )
+    # Zweite Abfrage: wie viele Meldungen liegen **nach** dem Befehl?
+    #
+    # Gezaehlt wird im selben Zug fuer alle angefragten Geraete, mit
+    # derselben Begruendung wie oben — eine Abfrage je Zeile waere bei 104
+    # Geraeten 104 Rundreisen (AE-72 §3).
+    #
+    # Der Vergleich steht in SQL und nicht in Python, weil der Befehlszeitpunkt
+    # je Geraet an ``device`` haengt: ihn erst zu holen und dann je Geraet zu
+    # zaehlen waere ein zweiter Weg zur selben Zahl.
+    #
+    # ``child_lock IS NOT NULL`` auch hier: eine Zeile ohne das Feld sagt
+    # nichts ueber die Sperre und darf nicht mitzaehlen — sonst oeffnete eine
+    # beliebige Befehlsantwort das Urteil zu frueh.
+    zaehl_stmt = (
+        select(SensorReading.device_id, func.count().label("anzahl"))
+        .select_from(SensorReading)
+        .join(Device, Device.id == SensorReading.device_id)
+        .where(SensorReading.device_id.in_(list(device_ids)))
+        .where(SensorReading.child_lock.is_not(None))
+        .where(Device.child_lock_commanded_at.is_not(None))
+        .where(SensorReading.time > Device.child_lock_commanded_at)
+        .group_by(SensorReading.device_id)
+    )
+    nach_befehl = {
+        int(did): int(anzahl) for did, anzahl in (await session.execute(zaehl_stmt)).tuples().all()
+    }
+
     for device_id, gesperrt, gemeldet_um in (await session.execute(stmt)).tuples().all():
         if gesperrt is None:
             continue
-        ergebnis[device_id] = Sperrmeldung(gesperrt=gesperrt, gemeldet_um=gemeldet_um)
+        ergebnis[device_id] = Sperrmeldung(
+            gesperrt=gesperrt,
+            gemeldet_um=gemeldet_um,
+            nach_befehl=nach_befehl.get(device_id, 0),
+        )
     return ergebnis
 
 

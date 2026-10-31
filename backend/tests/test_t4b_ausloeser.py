@@ -499,66 +499,177 @@ async def test_nach_dem_befehl_steht_ausstehend_und_dann_bestaetigt(
     die Tageszeit des Laufs, ob die Meldung vor oder nach dem Befehl liegt
     — ein Test, der morgens anders urteilt als nachmittags (§5.59).
 
-    Direkt nach dem Befehl ist die jüngste Meldung die vom Keepalive
-    **davor**: sie sagt „Rad frei", und das war bis zur Sekunde vorher
-    richtig. Die Anzeige muss dort „ausstehend" sagen und nicht
-    „fehlgeschlagen" — ein Melder, der im Normalfall rot zeigt, wird nach
-    einer Woche nicht mehr gelesen (§5.79, Befund des Betreibers vom
-    24.10.2026).
+    **Die Zeitfolge ist die aus Zimmer 107** (Betreiber, 01.11.2026) —
+    drei Meldungen um einen Befehl:
 
-    Meldet das Gerät danach „gesperrt", steht „bestätigt". Das ist der
-    Punkt, an dem die Schrittliste für 107 den Erfolg festhält.
+    ====== ===============================================================
+    10:05  Keepalive meldet „frei" (vor dem Befehl)
+    10:16  ``0x07 01`` geht hinaus
+    10:23  Keepalive meldet **„frei"** — und holt den Befehl erst
+           **danach** im Empfangsfenster ab (Class A)
+    10:34  Keepalive meldet „gesperrt"
+    ====== ===============================================================
+
+    **Die Anzeige muss bei 10:05 und bei 10:23 „ausstehend" sagen.** Um
+    10:23 sagte sie „das Gerät meldet es als frei" — ein roter Befund, elf
+    Minuten vor der Bestätigung. Ein Melder, der im Normalfall rot zeigt,
+    wird nach einer Woche nicht mehr gelesen (§5.79).
+
+    Erst ab der zweiten Meldung nach dem Befehl urteilt sie, und dann in
+    beide Richtungen. Das ist der Punkt, an dem die Schrittliste für 107
+    den Erfolg festhält.
     """
     room_id, zone_id = await _zimmer(db_session)
     dev = await _geraet(db_session, zone_id)
-    # Die Meldung von **vor** dem Befehl: Rad frei.
-    db_session.add(
-        SensorReading(
-            time=FROZEN_NOW - timedelta(minutes=5),
-            device_id=dev.id,
-            temperature=Decimal("21.0"),
-            child_lock=False,
-        )
-    )
-    await db_session.commit()
 
+    async def _meldung(zeit: datetime, gesperrt: bool) -> None:
+        db_session.add(
+            SensorReading(
+                time=zeit,
+                device_id=dev.id,
+                temperature=Decimal("21.0"),
+                child_lock=gesperrt,
+            )
+        )
+        await db_session.commit()
+
+    def _urteil(meldung: child_lock.Sperrmeldung | None) -> str:
+        assert meldung is not None
+        return child_lock.child_lock_state(
+            gewollt=True,
+            gemeldet=meldung.gesperrt,
+            nach_befehl=meldung.nach_befehl,
+            befehl_um=dev.child_lock_commanded_at,
+        )
+
+    # 10:05 — die Meldung von **vor** dem Befehl.
+    await _meldung(FROZEN_NOW - timedelta(minutes=11), gesperrt=False)
+
+    # 10:16 — der Befehl.
     await child_lock.sende_bei_aenderung(
         db_session, room_id=room_id, sperre_vorher=False, sperre_nachher=True
     )
     await db_session.commit()
     await db_session.refresh(dev)
 
-    gemeldet = await child_lock.child_lock_verdict(db_session, dev.id)
-    assert gemeldet is not None
+    assert _urteil(await child_lock.child_lock_verdict(db_session, dev.id)) == "ausstehend", (
+        "die Meldung von vor dem Befehl ist keine Antwort darauf"
+    )
+
+    # 10:23 — die erste Meldung **nach** dem Befehl, und sie sagt noch
+    # „frei". Genau hier stand der rote Befund.
+    await _meldung(FROZEN_NOW + timedelta(minutes=7), gesperrt=False)
+
+    assert _urteil(await child_lock.child_lock_verdict(db_session, dev.id)) == "ausstehend", (
+        "die erste Meldung nach dem Befehl oeffnet nur das Empfangsfenster"
+    )
+
+    # 10:34 — die zweite. Jetzt ist der Befehl zugestellt.
+    await _meldung(FROZEN_NOW + timedelta(minutes=18), gesperrt=True)
+
+    assert _urteil(await child_lock.child_lock_verdict(db_session, dev.id)) == "bestaetigt"
+
+
+@freeze_time(FROZEN_NOW)
+async def test_ein_verweigerndes_geraet_faellt_bei_der_zweiten_meldung_auf(
+    db_session: AsyncSession, funk: Funk
+) -> None:
+    """Die Gegenprobe: ein Gerät, das die Sperre wirklich verweigert.
+
+    Dieselbe Zeitfolge, nur meldet das Gerät auch bei der zweiten Meldung
+    „frei". Dann ist es eine **Antwort**, und die Anzeige sagt
+    „fehlgeschlagen".
+
+    Ohne diese Prüfung wäre die Änderung oben auch grün, wenn die Anzeige
+    **immer** „ausstehend" sagte — und ein Melder, der nie etwas sagt, ist
+    dasselbe wie keiner (§5.79).
+    """
+    room_id, zone_id = await _zimmer(db_session)
+    dev = await _geraet(db_session, zone_id)
+
+    async def _meldung(zeit: datetime) -> None:
+        db_session.add(
+            SensorReading(
+                time=zeit,
+                device_id=dev.id,
+                temperature=Decimal("21.0"),
+                child_lock=False,
+            )
+        )
+        await db_session.commit()
+
+    await _meldung(FROZEN_NOW - timedelta(minutes=11))
+    await child_lock.sende_bei_aenderung(
+        db_session, room_id=room_id, sperre_vorher=False, sperre_nachher=True
+    )
+    await db_session.commit()
+    await db_session.refresh(dev)
+
+    await _meldung(FROZEN_NOW + timedelta(minutes=7))
+    await _meldung(FROZEN_NOW + timedelta(minutes=18))
+
+    meldung = await child_lock.child_lock_verdict(db_session, dev.id)
+    assert meldung is not None
+    assert meldung.nach_befehl == 2
     assert (
         child_lock.child_lock_state(
             gewollt=True,
-            gemeldet=gemeldet.gesperrt,
-            gemeldet_um=gemeldet.gemeldet_um,
+            gemeldet=meldung.gesperrt,
+            nach_befehl=meldung.nach_befehl,
+            befehl_um=dev.child_lock_commanded_at,
+        )
+        == "fehlgeschlagen"
+    )
+
+
+@freeze_time(FROZEN_NOW)
+async def test_eine_meldung_ohne_das_feld_zaehlt_nicht_mit(
+    db_session: AsyncSession, funk: Funk
+) -> None:
+    """Eine Zeile ohne ``child_lock`` oeffnet das Urteil nicht.
+
+    **Die Luecke, die eine Mutationsprobe gezeigt hat.** Gezaehlt werden
+    die Meldungen seit dem Befehl — aber nur die, die das Feld
+    **fuehren**. Eine Befehlsantwort oder ein Frame ohne das 0x80-Bit sagt
+    nichts ueber die Sperre; zaehlte sie mit, waere das Urteil nach einer
+    einzigen echten Meldung offen und der rote Befund waere zurueck.
+
+    Dieselbe Drei-Zustands-Regel wie ueberall: ``NULL`` ist keine Aussage.
+    """
+    room_id, zone_id = await _zimmer(db_session)
+    dev = await _geraet(db_session, zone_id)
+
+    async def _meldung(zeit: datetime, gesperrt: bool | None) -> None:
+        db_session.add(
+            SensorReading(
+                time=zeit,
+                device_id=dev.id,
+                temperature=Decimal("21.0"),
+                child_lock=gesperrt,
+            )
+        )
+        await db_session.commit()
+
+    await _meldung(FROZEN_NOW - timedelta(minutes=11), gesperrt=False)
+    await child_lock.sende_bei_aenderung(
+        db_session, room_id=room_id, sperre_vorher=False, sperre_nachher=True
+    )
+    await db_session.commit()
+    await db_session.refresh(dev)
+
+    # Zwei Zeilen nach dem Befehl, aber nur **eine** fuehrt das Feld.
+    await _meldung(FROZEN_NOW + timedelta(minutes=5), gesperrt=None)
+    await _meldung(FROZEN_NOW + timedelta(minutes=7), gesperrt=False)
+
+    meldung = await child_lock.child_lock_verdict(db_session, dev.id)
+    assert meldung is not None
+    assert meldung.nach_befehl == 1, "die Zeile ohne das Feld darf nicht mitzaehlen"
+    assert (
+        child_lock.child_lock_state(
+            gewollt=True,
+            gemeldet=meldung.gesperrt,
+            nach_befehl=meldung.nach_befehl,
             befehl_um=dev.child_lock_commanded_at,
         )
         == "ausstehend"
-    ), "die Meldung von vor dem Befehl ist keine Antwort darauf"
-
-    # Jetzt meldet das Geraet den gesperrten Zustand.
-    db_session.add(
-        SensorReading(
-            time=datetime.now(tz=UTC) + timedelta(seconds=1),
-            device_id=dev.id,
-            temperature=Decimal("21.0"),
-            child_lock=True,
-        )
-    )
-    await db_session.commit()
-
-    danach = await child_lock.child_lock_verdict(db_session, dev.id)
-    assert danach is not None
-    assert (
-        child_lock.child_lock_state(
-            gewollt=True,
-            gemeldet=danach.gesperrt,
-            gemeldet_um=danach.gemeldet_um,
-            befehl_um=dev.child_lock_commanded_at,
-        )
-        == "bestaetigt"
     )

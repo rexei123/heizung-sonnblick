@@ -8189,16 +8189,40 @@ docker logs deploy-api-1 --since 3m 2>&1 | grep -i kindersicherung
 Erwartet: eine Zeile `kindersicherung gesendet dev_eui=… gewollt=True`
 je Thermostat des Zimmers.
 
-**5. Eine Keepalive-Periode warten, dann das Urteil.**
+**5. Zwei Keepalive-Perioden warten, dann das Urteil.**
 
-*Oberfläche:* nach **10 Minuten** die Geräteseite neu laden.
+*Oberfläche:* nach **etwa 20 Minuten** die Geräteseite neu laden.
 
 Erwartet: **„Rad gesperrt · bestätigt"**. Das Gerät hat das 0x80-Bit
 gemeldet, und damit ist der Befehl angekommen **und** wirksam.
 
-**Steht dort „fehlgeschlagen": melden.** Der Frame ist angekommen (Schritt
-4), aber die Einstellung sitzt nicht — das ist ein Hardware-Befund und
-kein Programmfehler.
+> **Zwei Perioden, nicht eine — und das ist Class A, keine Trägheit**
+> (Befund des Betreibers aus dem Lauf vom 01.11.2026).
+>
+> Ein Vicki **empfängt nur im Fenster nach einem eigenen Uplink**. Die
+> erste Meldung nach dem Befehl trägt deshalb noch den Zustand von
+> **vorher** — sie öffnet das Fenster, in dem das Gerät den Befehl
+> abholt. Erst die zweite berichtet das Ergebnis:
+>
+> | Zeit | Vorgang |
+> |---|---|
+> | 10:16 | drei `0x07` in die Warteschlange |
+> | 10:23 | Keepalive meldet **„frei"**, holt danach den Befehl ab |
+> | 10:34 | Keepalive meldet **„gesperrt"** |
+>
+> **Die Anzeige sagte um 10:23 „das Gerät meldet es als frei"** — ein
+> roter Befund, elf Minuten vor der Bestätigung. Das war ein Fehler im
+> Urteil und ist behoben: gezählt werden jetzt die Meldungen seit dem
+> Befehl, und gültig ist erst die zweite. Bis dahin steht
+> **„ausstehend"**, und das ist richtig.
+
+**Vor der zweiten Meldung steht „ausstehend".** Das ist der Normalfall und
+kein Grund zur Sorge; die Anzeige sagt es auch so („Bestätigung kommt mit
+dem nächsten Keepalive").
+
+**Steht nach zwei Meldungen „fehlgeschlagen": melden.** Der Frame ist
+angekommen (Schritt 4), aber die Einstellung sitzt nicht — das ist ein
+Hardware-Befund und kein Programmfehler.
 
 **6. Am Rad drehen — jetzt muss es sich sperren lassen.**
 
@@ -8250,16 +8274,18 @@ Sperren, das sich nicht zurücknehmen lässt, wäre schlimmer als keines.
 | 1 | Ausgangsstand | „Rad frei · bestätigt" |
 | 2 | Dauerhafte Sperre setzen | Knopf „gesperrt", Form „dauerhaft", Schloss in der Liste |
 | 3 | Sofort danach | „Rad gesperrt · **ausstehend**" |
+| 3a | Nach der **ersten** Meldung | weiter „ausstehend" — sie öffnet nur das Empfangsfenster |
 | 4 | Gateway | `Command received` + `queue-item enqueued`, eine api-Logzeile je Thermostat |
-| 5 | Nach 10 Minuten | „Rad gesperrt · **bestätigt**" |
+| 5 | Nach **zwei** Meldungen (ca. 20 min) | „Rad gesperrt · **bestätigt**"; davor „ausstehend" |
 | 6 | Drehung am Rad | wird am Gerät nicht angenommen |
 | 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` |
 | 8 | Aufheben | „Rad frei · bestätigt", Rad wieder drehbar |
 
 ### Abbruch und Rückweg
 
-**Abbrechen bei:** `Processing command error` in Schritt 4, „fehlgeschlagen"
-schon in Schritt 3, oder mehr `0x07`-Zeilen als Thermostate.
+**Abbrechen bei:** `Processing command error` in Schritt 4,
+„fehlgeschlagen" vor der zweiten Meldung, oder mehr `0x07`-Zeilen als
+Thermostate.
 
 **Der Rückweg ist Schritt 8** — die Sperre aufheben. Er gibt das Rad frei
 und braucht keinen Deploy und keinen Eingriff an der Datenbank. Geht auch
