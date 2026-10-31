@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Integer, select
+from sqlalchemy import select
 
 from heizung.models.enums import CommandReason, EventLogLayer
 from heizung.models.event_log import EventLog
@@ -87,6 +87,84 @@ async def latest_hard_clamp_setpoint_per_room(
     return {row.room_id: row.setpoint_out for row in rows}
 
 
+async def latest_hard_clamp_zone_setpoints(
+    session: AsyncSession,
+    room_ids: Iterable[int],
+) -> dict[int, dict[int, int]]:
+    """Pro Zimmer die Sollwerte **je Zone** aus der juengsten HARD_CLAMP-Zeile.
+
+    Rueckgabe ``{room_id: {zone_id: setpoint_c}}``. Ein fehlendes Zimmer
+    oder eine fehlende Zone heisst „dazu steht nichts in der Zeile" — der
+    Aufrufer faellt dann auf den Zimmerwert aus
+    :func:`latest_hard_clamp_setpoint_per_room` zurueck.
+
+    **Warum es diese Funktion gibt** (Befund des Betreibers, 31.10.2026).
+    Der Trace hielt bis dahin nur den **Zimmer**-Sollwert fest. Eine
+    **Zonen**-Uebersteuerung stand nirgends, und deshalb zeigten
+    Zimmerliste, Zonenkarte und Verlauf 21, waehrend das Geraet 23 fuhr.
+    Der Wert, den die Anzeige sucht, ist der, den der Dispatch je Zone
+    verwendet hat — und den schreibt er seit demselben Tag in
+    ``details['downlink_zone_status']``.
+
+    Gelesen wird **dieselbe Zeile**, aus der der Zimmerwert kommt: gleiche
+    Form, gleiches Frischefenster, gleiche Sortierung. Damit koennen
+    Zimmerwert und Zonenwert nicht aus verschiedenen Auswertungen stammen.
+
+    **Ausgepackt wird in Python, nicht in SQL.** Die Zonen stehen als
+    JSON-**Array** in der Zeile (es ist der Zustandsbericht je Zone, und
+    der hat noch andere Felder), und ein ``jsonb_array_elements`` dafuer
+    waere mehr Abfrage fuer dieselbe Information. Je Zimmer kommt genau
+    eine Zeile, die Liste hat so viele Eintraege wie das Zimmer Zonen —
+    das sind zwei.
+
+    **Beim Deploy ist das Ergebnis leer**, bis der erste Engine-Lauf je
+    Zimmer durch ist (hoechstens eine Minute, das Frischefenster ist eine
+    Stunde). Bis dahin greift der Rueckfall und es bleibt bei der alten
+    Anzeige — kein Loch, nur der alte Fehler eine Minute laenger.
+    """
+    ids = list(room_ids)
+    if not ids:
+        return {}
+
+    since = datetime.now(tz=UTC) - _HARD_CLAMP_FRESHNESS
+    stmt = (
+        select(EventLog.room_id, EventLog.details["downlink_zone_status"].label("zonen"))
+        .where(EventLog.layer == EventLogLayer.HARD_CLAMP)
+        .where(EventLog.room_id.in_(ids))
+        .where(EventLog.time > since)
+        .order_by(EventLog.room_id, EventLog.time.desc())
+        .distinct(EventLog.room_id)
+    )
+    ergebnis: dict[int, dict[int, int]] = {}
+    for room_id, zonen in (await session.execute(stmt)).all():
+        if not isinstance(zonen, list):
+            continue
+        je_zone: dict[int, int] = {}
+        for eintrag in zonen:
+            # Zeilen aus der Zeit vor dem 31.10.2026 haben kein
+            # ``setpoint_c``. Sie werden uebersprungen und nicht mit einer
+            # Null gefuellt: „steht nicht da" muss vom Wert 0 zu
+            # unterscheiden bleiben, sonst zeigte die Liste Frostschutz.
+            if not isinstance(eintrag, dict):
+                continue
+            zone_id = eintrag.get("zone_id")
+            wert = eintrag.get("setpoint_c")
+            # ``not isinstance(..., bool)``, weil ``isinstance(True, int)``
+            # wahr ist. Ein JSON-``true`` wuerde sonst als Sollwert 1
+            # durchgehen — dieselbe Falle wie in
+            # ``tests/test_geraetegrenzen_ende_zu_ende.py``.
+            if (
+                isinstance(zone_id, int)
+                and not isinstance(zone_id, bool)
+                and isinstance(wert, int)
+                and not isinstance(wert, bool)
+            ):
+                je_zone[zone_id] = wert
+        if je_zone:
+            ergebnis[int(room_id)] = je_zone
+    return ergebnis
+
+
 async def log_inferred_window_event(
     session: AsyncSession,
     result: InferredWindowResult,
@@ -122,51 +200,3 @@ async def log_inferred_window_event(
             },
         )
     )
-
-
-async def latest_hard_clamp_bad_setpoint_per_room(
-    session: AsyncSession,
-    room_ids: Iterable[int],
-) -> dict[int, int | None]:
-    """Pro Zimmer der Bad-Zielwert der juengsten ``HARD_CLAMP``-Zeile.
-
-    Quelle ist ``details->>'bad_setpoint_c'`` derselben Zeile, aus der
-    :func:`latest_hard_clamp_setpoint_per_room` ihren Wert nimmt — gleiche
-    Abfrageform, gleiches Frischefenster, gleiche Sortierung. Damit koennen
-    Zimmerwert und Bad-Wert nicht aus verschiedenen Auswertungen stammen.
-
-    ``None`` im Ergebnis heisst "dieses Zimmer hat keinen eigenen
-    Bad-Wert": entweder gibt es keine Vorlage, oder eine zimmerweite
-    Entscheidung hat gegriffen (Sommermodus, Uebersteuerung, Fenster,
-    Demontage). Die Bad-Karte zeigt dann den Zimmerwert, und das ist
-    richtig — die Engine fährt dort auch den Zimmerwert.
-
-    **Warum nicht in die bestehende Funktion gefaltet:** die liefert
-    ``Decimal`` aus einer Spalte, diese einen ``int`` aus JSONB. Ein
-    gemeinsamer Rueckgabetyp waere ein Tupel, das jeder Aufrufer
-    auspacken muss — zwei Funktionen mit je einer Bedeutung sind
-    billiger zu lesen.
-    """
-    ids = list(room_ids)
-    if not ids:
-        return {}
-
-    since = datetime.now(tz=UTC) - _HARD_CLAMP_FRESHNESS
-    stmt = (
-        select(
-            EventLog.room_id,
-            EventLog.details["bad_setpoint_c"].astext.cast(Integer).label("bad_setpoint_c"),
-        )
-        .where(EventLog.layer == EventLogLayer.HARD_CLAMP)
-        .where(EventLog.time > since)
-        .where(EventLog.room_id.in_(ids))
-        .distinct(EventLog.room_id)
-        .order_by(EventLog.room_id, EventLog.time.desc())
-    )
-    rows = (await session.execute(stmt)).all()
-    # Ausdrueckliche Umwandlung statt einer Typ-Zusicherung: dict(rows)
-    # braeuchte ein type: ignore, und eine Zusicherung, die von der
-    # installierten Paketfassung abhaengt, ist kein Typ-Wissen (§5.80).
-    # Das int() sagt zugleich, dass hier JSONB-Text durch einen Cast
-    # gekommen ist.
-    return {int(room_id): (int(wert) if wert is not None else None) for room_id, wert in rows}

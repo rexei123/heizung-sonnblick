@@ -257,6 +257,11 @@ async def test_zone_3_vicki_all_healthy_3_downlinks(
     assert len(per_zone) == 1
     assert per_zone[0] == {
         "zone_id": zone.id,
+        # Seit dem 31.10.2026 haelt der Zonen-Bericht den
+        # Zielwert fest — er ist die Quelle, aus der Zimmerliste,
+        # Zonenkarte und Verlauf den Sollwert **dieser Zone**
+        # nehmen. Hier steht der Wert des Aufrufs oben.
+        "setpoint_c": 21,
         "count_sent": 3,
         "count_failed": 0,
         "count_skipped": 0,
@@ -313,6 +318,11 @@ async def test_zone_3_vicki_2_healthy_1_silent_2_downlinks(
 
     assert per_zone[0] == {
         "zone_id": zone.id,
+        # Seit dem 31.10.2026 haelt der Zonen-Bericht den
+        # Zielwert fest — er ist die Quelle, aus der Zimmerliste,
+        # Zonenkarte und Verlauf den Sollwert **dieser Zone**
+        # nehmen. Hier steht der Wert des Aufrufs oben.
+        "setpoint_c": 21,
         "count_sent": 2,
         "count_failed": 0,
         "count_skipped": 0,
@@ -363,6 +373,11 @@ async def test_zone_3_vicki_1_in_hysteresis_band_2_downlinks(
 
     assert per_zone[0] == {
         "zone_id": zone.id,
+        # Seit dem 31.10.2026 haelt der Zonen-Bericht den
+        # Zielwert fest — er ist die Quelle, aus der Zimmerliste,
+        # Zonenkarte und Verlauf den Sollwert **dieser Zone**
+        # nehmen. Hier steht der Wert des Aufrufs oben.
+        "setpoint_c": 21,
         "count_sent": 2,
         "count_failed": 0,
         "count_skipped": 1,

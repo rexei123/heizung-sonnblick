@@ -10,6 +10,7 @@ CRUD:
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -42,7 +43,10 @@ from heizung.schemas.room_history import (
 )
 from heizung.services import betriebszeit, override_service, raumtyp_regel
 from heizung.services.business_audit_service import record_business_action
-from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
+from heizung.services.event_log import (
+    latest_hard_clamp_setpoint_per_room,
+    latest_hard_clamp_zone_setpoints,
+)
 from heizung.services.referenzzone import referenzzonen_pro_zimmer
 from heizung.services.room_history import lade_verlauf
 from heizung.services.zone_aggregates import latest_mean_temp_per_zone
@@ -188,6 +192,9 @@ async def list_rooms(
     referenzzonen = await referenzzonen_pro_zimmer(session, room_ids)
     ist_pro_zone = await latest_mean_temp_per_zone(session, referenzzonen.values())
     soll_pro_zimmer = await latest_hard_clamp_setpoint_per_room(session, room_ids)
+    # Befund des Betreibers, 31.10.2026: der Soll der **Referenzzone**, nicht
+    # der des Zimmers. Begruendung in ``_mit_ist_und_soll``.
+    soll_pro_zone = await latest_hard_clamp_zone_setpoints(session, room_ids)
 
     def _mit_ist_und_soll(room: Room) -> RoomRead:
         zone_id = referenzzonen.get(room.id)
@@ -196,12 +203,29 @@ async def list_rooms(
         # „–" nur in der Ist-Spalte.
         zonen_ist = ist_pro_zone.get(zone_id) if zone_id is not None else None
         ist = zonen_ist.mittel if zonen_ist is not None else None
+        # **Ist und Soll muessen dieselbe Zone meinen** (Befund des
+        # Betreibers aus dem Rad-Test, 31.10.2026). Das Ist war seit dem
+        # 15.10. das der Referenzzone, der Soll der des **Zimmers** — und
+        # bei einer Zonen-Uebersteuerung sind das verschiedene Zahlen. In
+        # Zimmer 107 stand „Soll 21,0 °C" neben einer aktiven
+        # Uebersteuerung auf 23; die Spalte sprach vom Zimmer, die
+        # daneben von der Zone, und niemand konnte das sehen.
+        #
+        # Der Rueckfall auf den Zimmerwert bleibt fuer zwei Faelle: ein
+        # Zimmer ohne Referenzzone (dann gibt es keinen Zonenwert, der
+        # gemeint sein koennte) und die erste Minute nach einem Deploy,
+        # bevor der Engine-Lauf den Zonenwert geschrieben hat.
+        soll = soll_pro_zimmer.get(room.id)
+        if zone_id is not None:
+            zonen_soll = soll_pro_zone.get(room.id, {}).get(zone_id)
+            if zonen_soll is not None:
+                soll = Decimal(zonen_soll)
         return RoomRead.model_validate(room).model_copy(
             update={
                 "has_active_override": room.id in rooms_with_override,
                 "reference_zone_id": zone_id,
                 "mean_temperature_c": ist,
-                "engine_setpoint_c": soll_pro_zimmer.get(room.id),
+                "engine_setpoint_c": soll,
                 "ist_allgemeinbereich": room.room_type_id in bereich_typen,
             }
         )

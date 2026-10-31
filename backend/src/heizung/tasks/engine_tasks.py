@@ -571,8 +571,24 @@ async def _dispatch_downlinks_per_zone(
           (``sent`` | ``failed`` | ``skipped_hysteresis``),
           ``hysteresis_reason``, ``error`` (str | None).
         - ``per_zone_status``: pro Zone des Raums ein Dict mit
-          ``zone_id``, ``count_sent``, ``count_failed``, ``count_skipped``,
-          ``all_failed`` (bool, true wenn count_sent==0 UND count_failed>0).
+          ``zone_id``, ``setpoint_c``, ``count_sent``, ``count_failed``,
+          ``count_skipped``, ``all_failed`` (bool, true wenn count_sent==0
+          UND count_failed>0).
+
+    **``setpoint_c`` je Zone, ab 31.10.2026** (Befund des Betreibers aus dem
+    Rad-Test): bis dahin hielt der Trace nur den **Zimmer**-Sollwert fest
+    (``EventLog.setpoint_out`` der HARD_CLAMP-Zeile) plus den Bad-Wert als
+    Sonderfall. Eine **Zonen**-Uebersteuerung stand nirgends — und damit
+    zeigten Zimmerliste, Zonenkarte und Verlauf den Zimmerwert, obwohl das
+    Geraet einen anderen fuhr. In Zimmer 107 war das „Soll 21,0 °C" neben
+    einer aktiven Uebersteuerung auf 23.
+
+    Es ist derselbe Grund, aus dem ``bad_setpoint_c`` am 18.10. in den Trace
+    kam, nur eine Ebene allgemeiner — und deshalb ersetzt dieser Wert jenen
+    Sonderfall, statt neben ihm zu stehen (§5.53). ``zone_target_setpoint_c``
+    ist die **eine** Zahl, die alles je Zone traegt: Hysterese, Abgleich,
+    ``ControlCommand`` und Downlink. Sie liegt hier schon in der Hand; sie
+    nicht aufzuschreiben war die ganze Luecke.
 
     ``target_setpoint_c`` ist bereits int aus ``engine.py``'s _quantize —
     ganzzahlig vor Hysterese-Check (RUNBOOK §10d.7 / Vicki-Hardware-Constraint).
@@ -628,6 +644,13 @@ async def _dispatch_downlinks_per_zone(
             per_zone_status.append(
                 {
                     "zone_id": zone.id,
+                    # Sprint 23 (31.10.2026): der Zielwert **dieser Zone**
+                    # gehoert in den Trace, und zwar in **jedem** Zweig.
+                    # Begruendung am Kopf der Funktion. Auch hier, wo gar
+                    # nichts gesendet wurde: der Sollwert der Zone gilt
+                    # trotzdem, und die Anzeige fragt danach, nicht nach
+                    # dem Downlink.
+                    "setpoint_c": zone_target_setpoint_c,
                     "count_sent": 0,
                     "count_failed": 0,
                     "count_skipped": 0,
@@ -933,6 +956,7 @@ async def _dispatch_downlinks_per_zone(
             per_zone_status.append(
                 {
                     "zone_id": zone.id,
+                    "setpoint_c": zone_target_setpoint_c,
                     "count_sent": 0,
                     "count_failed": 0,
                     "count_skipped": skipped_count,
@@ -1000,6 +1024,7 @@ async def _dispatch_downlinks_per_zone(
         per_zone_status.append(
             {
                 "zone_id": zone.id,
+                "setpoint_c": zone_target_setpoint_c,
                 "count_sent": count_sent,
                 "count_failed": count_failed,
                 "count_skipped": skipped_count,

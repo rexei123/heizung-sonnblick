@@ -693,7 +693,17 @@ export interface RoomHistoryPoint {
   /** Beginn des Eimers, UTC-ISO. */
   t: string;
   temperature: number | null;
+  /** Der Sollwert, der **gilt** — der der Engine für diese Zone. */
   setpoint: number | null;
+  /**
+   * Was das Gerät meldet, **nur wenn es abweicht** — sonst `null`.
+   *
+   * Zwei Felder und nicht eines, weil die Frage zwei ist: „worauf soll es
+   * stehen" und „worauf steht es". Bis zum 31.10.2026 trug `setpoint` den
+   * Geräte-Wert und beantwortete damit die zweite, während die
+   * Beschriftung im Diagramm die erste versprach.
+   */
+  geraet_setpoint: number | null;
 }
 
 export interface RoomHistoryZone {

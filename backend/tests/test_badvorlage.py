@@ -534,9 +534,17 @@ async def test_zonen_karte_zeigt_den_bad_wert(db_session: AsyncSession) -> None:
     Ohne diesen Weg zeigte die Bad-Karte 19, waehrend das Geraet 22 fuhr —
     die Zimmerseite waere die zweite Wahrheit zur Engine (§5.53).
 
-    Der Wert kommt aus derselben ``HARD_CLAMP``-Zeile wie der Zimmerwert
-    (``details->>'bad_setpoint_c'``), damit beide nicht aus verschiedenen
-    Auswertungen stammen koennen.
+    **Die Quelle hat am 31.10.2026 gewechselt** und der Test mit ihr:
+    vorher ``details['bad_setpoint_c']``, jetzt der Sollwert je Zone aus
+    ``details['downlink_zone_status']``. Das ist keine Abschwaechung,
+    sondern dieselbe Aussage aus der allgemeinen Stelle — die Bad-Vorlage
+    ist einer von drei Gruenden, aus denen eine Zone vom Zimmer abweicht,
+    und der alte Sonderfall kannte nur ihn. Die beiden anderen (eine
+    Zonen-Uebersteuerung, eine Zone ohne gesunde Geraete) waren nicht
+    abgedeckt; der erste war der Befund in Zimmer 107.
+
+    Gelesen wird weiter **dieselbe** ``HARD_CLAMP``-Zeile wie fuer den
+    Zimmerwert, damit beide nicht aus verschiedenen Auswertungen stammen.
     """
     from heizung.api.v1.heating_zones import _build_zone_read
     from heizung.models.enums import EventLogLayer
@@ -553,7 +561,14 @@ async def test_zonen_karte_zeigt_den_bad_wert(db_session: AsyncSession) -> None:
             setpoint_in=Decimal("19.0"),
             setpoint_out=Decimal("19.0"),
             reason=CommandReason.NIGHT_SETBACK,
-            details={"detail": "test", "bad_setpoint_c": 22},
+            details={
+                "detail": "test",
+                "bad_setpoint_c": 22,
+                "downlink_zone_status": [
+                    {"zone_id": schlaf_zone, "setpoint_c": 19},
+                    {"zone_id": bad_zone, "setpoint_c": 22},
+                ],
+            },
         )
     )
     await db_session.commit()
@@ -573,9 +588,13 @@ async def test_zonen_karte_zeigt_den_bad_wert(db_session: AsyncSession) -> None:
 async def test_zonen_karte_ohne_bad_wert_zeigt_den_zimmerwert(
     db_session: AsyncSession,
 ) -> None:
-    """``bad_setpoint_c: None`` heisst "Bad folgt dem Zimmer" — auch in der
-    Anzeige. Das ist der Fall nach einer Uebersteuerung oder bei offenem
-    Fenster."""
+    """Steht zur Zone nichts in der Zeile, gilt der Zimmerwert.
+
+    Das ist der Fall nach einer zimmerweiten Entscheidung — hier ein
+    offenes Fenster, das im Bad genauso gilt. Und es ist zugleich der
+    Rueckfall fuer die erste Minute nach einem Deploy, in der noch keine
+    Zeile einen Zonenwert traegt (die Zeile hier hat absichtlich keinen).
+    """
     from heizung.api.v1.heating_zones import _build_zone_read
     from heizung.models.enums import EventLogLayer
     from heizung.models.event_log import EventLog
