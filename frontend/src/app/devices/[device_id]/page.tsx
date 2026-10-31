@@ -12,6 +12,7 @@ import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
 import { DeviceAuditList } from "@/components/patterns/device-audit-list";
 import { GeraetegrenzenKarte } from "@/components/patterns/geraetegrenzen-karte";
+import { Geraetetyp } from "@/components/patterns/geraetetyp";
 import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
 import { useAuth } from "@/contexts/auth-context";
@@ -112,8 +113,18 @@ export default function DeviceDetailPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="min-w-0">
                 <DeviceLabelEdit device={device} />
-                <p className="mt-1 text-sm text-text-secondary">
-                  {device.vendor} {device.model} · {device.kind}
+                {/* Der Gerätetyp als Wort, nicht als Enum-Wert (Betreiber,
+                    31.10.2026). Hier stand `· {device.kind}` und damit
+                    „relay" bzw. „thermostat" — technisch vorhanden, aber
+                    kein Wort, das jemand liest. Mit den Relais 108 und
+                    109 ist es die Frage, mit der man auf diese Seite
+                    kommt. Begründung in `patterns/geraetetyp`. */}
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+                  <Geraetetyp kind={device.kind} className="text-sm" />
+                  <span aria-hidden>·</span>
+                  <span>
+                    {device.vendor} {device.model}
+                  </span>
                 </p>
                 {device.retired_at !== null ? (
                   <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium bg-danger-soft text-danger w-fit">
