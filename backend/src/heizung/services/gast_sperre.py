@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.enums import RoomStatus
 from heizung.models.room import Room
+from heizung.services import child_lock
 from heizung.services.business_audit_service import record_business_action
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,23 @@ async def loese_bei_checkout(
     room.guest_override_blocked = False
     room.guest_block_bis_checkout = False
 
+    # Sprint 23 T4-B: mit der Sperre endet auch die Sperre **am Rad**.
+    #
+    # Das ist der Grund, warum der Auslöser nicht nur an den beiden
+    # Knöpfen hängt: der Check-out ist kein Knopf, und ein Zimmer, dessen
+    # Rad nach der Abreise gesperrt bliebe, hätte genau das Problem
+    # zurück, das diese Datei löst — nur eine Ebene tiefer und ohne
+    # Anzeige, die es erklärt.
+    #
+    # Ein Fühler bleibt gesperrt: sein gewollter Zustand ändert sich
+    # nicht, also geht nichts hinaus.
+    befehle = await child_lock.sende_bei_aenderung(
+        session,
+        room_id=room_id,
+        sperre_vorher=war_gesperrt,
+        sperre_nachher=False,
+    )
+
     await record_business_action(
         session,
         user_id=None,
@@ -105,7 +123,11 @@ async def loese_bei_checkout(
         target_type="room",
         target_id=room_id,
         old_value={"blocked": war_gesperrt, "bis_checkout": True},
-        new_value={"blocked": False, "bis_checkout": False},
+        new_value={
+            "blocked": False,
+            "bis_checkout": False,
+            "kindersicherung": child_lock.fuer_audit(befehle),
+        },
     )
     logger.info("Gast-Sperre fuer room_id=%s mit dem Check-out geloest", room_id)
     return True
@@ -171,6 +193,19 @@ async def setze_bis_checkout(
     room.guest_override_blocked = True
     room.guest_block_bis_checkout = True
 
+    # Sprint 23 T4-B: der Funkbefehl, derselbe wie am Knopf.
+    #
+    # ``alt_blocked`` statt ``False``: war die Sperre schon dauerhaft
+    # gesetzt und wird jetzt auf „bis Check-out" umgestellt, ist das Rad
+    # bereits still und es geht nichts hinaus. Der Auslöser entscheidet
+    # das selbst — hier muss nur die Lage **vorher** stimmen.
+    befehle = await child_lock.sende_bei_aenderung(
+        session,
+        room_id=room_id,
+        sperre_vorher=alt_blocked,
+        sperre_nachher=True,
+    )
+
     await record_business_action(
         session,
         user_id=user_id,
@@ -184,6 +219,7 @@ async def setze_bis_checkout(
             # Kein ``revoked_overrides_count`` wie beim Knopf — hier wird
             # bewusst nichts widerrufen. Die fehlende Zahl ist die Aussage.
             "via": VIA_UEBERSTEUERUNG,
+            "kindersicherung": child_lock.fuer_audit(befehle),
         },
         request_ip=request_ip,
     )

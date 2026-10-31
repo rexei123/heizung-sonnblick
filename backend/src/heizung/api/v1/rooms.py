@@ -41,7 +41,7 @@ from heizung.schemas.room_history import (
     NachtFenster,
     RoomHistoryRead,
 )
-from heizung.services import betriebszeit, override_service, raumtyp_regel
+from heizung.services import betriebszeit, child_lock, override_service, raumtyp_regel
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
     latest_hard_clamp_setpoint_per_room,
@@ -478,6 +478,22 @@ async def set_override_block_state(
     # naechsten Setzen noch da (dieselbe Regel wie im Loese-Dienst).
     room.guest_block_bis_checkout = payload.bis_checkout if payload.blocked else False
 
+    # Sprint 23 T4-B: der Funkbefehl. Bis hierher war die Sperre eine
+    # Entscheidung **im System** — sie verhindert die Eingabe, aber das Rad
+    # am Heizkoerper liess sich weiter drehen. Der Rad-Test von Zimmer 107
+    # hat genau das gezeigt: ``childLock: false`` im Frame von 11:49,
+    # waehrend die Sperre stand.
+    #
+    # Gesendet wird nur, wenn sich der gewollte Zustand aendert — ein
+    # Wechsel von „dauerhaft" auf „bis Check-out" laesst das Rad gesperrt
+    # und schickt nichts (Paragraph 0 S4).
+    befehle = await child_lock.sende_bei_aenderung(
+        session,
+        room_id=room_id,
+        sperre_vorher=old_blocked,
+        sperre_nachher=payload.blocked,
+    )
+
     await record_business_action(
         session,
         user_id=user.id,
@@ -489,6 +505,11 @@ async def set_override_block_state(
             "blocked": payload.blocked,
             "bis_checkout": room.guest_block_bis_checkout,
             "revoked_overrides_count": revoked_count,
+            # Was an die Geraete ging. Eine leere Liste heisst „nichts zu
+            # tun" — bei einem Wechsel der Form oder bei einem Zimmer, in
+            # dem nur Fuehler haengen. Das muss von „Befehl gescheitert"
+            # unterscheidbar bleiben, und dafuer steht der Fehler drin.
+            "kindersicherung": child_lock.fuer_audit(befehle),
         },
         request_ip=request.client.host if request.client else None,
     )

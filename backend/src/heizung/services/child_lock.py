@@ -61,18 +61,23 @@ nimmt seither ``gewollt`` statt ``measure_only`` — der alte Parametername
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.device import Device
+from heizung.models.enums import DeviceKind
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
+from heizung.services import downlink_adapter
+
+logger = logging.getLogger(__name__)
 
 #: Die drei Aussagen. Als ``Literal`` und nicht als Enum: die Werte gehen
 #: unverändert in die API-Antwort, und ein Enum wäre eine zweite Liste
@@ -246,3 +251,196 @@ async def gast_sperren_je_geraet(
     for device_id, gesperrt in (await session.execute(stmt)).all():
         ergebnis[device_id] = bool(gesperrt)
     return ergebnis
+
+
+# ---------------------------------------------------------------------------
+# Der Auslöser: jede Änderung des gewollten Zustands sendet (Sprint 23 T4-B)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Sperrbefehl:
+    """Was an ein Gerät ging — oder warum nicht.
+
+    Geht ins Audit. Ohne diese Liste ist „Sperre gesetzt, Rad weiter frei"
+    später nicht von „Befehl nie abgeschickt" zu unterscheiden, und das
+    sind zwei verschiedene Fehler mit zwei verschiedenen Handgriffen.
+    """
+
+    device_id: int
+    dev_eui: str
+    gewollt: bool
+    gesendet: bool
+    fehler: str | None = None
+
+
+async def _thermostate_des_zimmers(session: AsyncSession, room_id: int) -> list[Device]:
+    """Die Thermostate eines Zimmers, die ein Drehrad haben können.
+
+    Drei Filter, jeder mit einem Grund:
+
+    * ``retired_at IS NULL`` — ein ausgemustertes Gerät ist nicht mehr da
+      (Paragraph 5.58).
+    * ``kind == THERMOSTAT`` — ein Relais hat kein Drehrad.
+    * über die Heizzonen des Zimmers — ein Gerät ohne Zone (Reserve-Pool)
+      ist über diesen Weg ohnehin nicht erreichbar.
+
+    **``measure_only`` wird hier ausdrücklich NICHT gefiltert**, und das
+    ist der Unterschied zu ``services/geraete_ziele``. Jene Liste
+    beantwortet „welche Geräte dürfen **gesteuert** werden" und nimmt
+    Fühler aus, weil sie keine Sollwerte bekommen sollen (S7). Hier ist es
+    umgekehrt: ein Fühler ist genau das Gerät, dessen Rad gesperrt
+    **bleiben** muss.
+
+    Die Ausnahme entsteht trotzdem — nur eine Ebene später und aus dem
+    richtigen Grund: ``soll_kindersicherung`` liefert für ein
+    ``measure_only``-Gerät in **beiden** Lagen ``True``, der gewollte
+    Zustand ändert sich also nicht, und es wird nichts gesendet. Wer
+    stattdessen hier filterte, hätte zwei Mechaniken für eine Ausnahme —
+    und die zweite würde still falsch, sobald jemand die Rolle zurücknimmt
+    (Paragraph 5.53).
+    """
+    stmt = (
+        select(Device)
+        .join(HeatingZone, Device.heating_zone_id == HeatingZone.id)
+        .where(HeatingZone.room_id == room_id)
+        .where(Device.retired_at.is_(None))
+        .where(Device.kind == DeviceKind.THERMOSTAT)
+        .order_by(Device.dev_eui)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def sende_bei_aenderung(
+    session: AsyncSession,
+    *,
+    room_id: int,
+    sperre_vorher: bool,
+    sperre_nachher: bool,
+) -> list[Sperrbefehl]:
+    """Schickt ``0x07`` an die Geräte, deren gewollter Zustand sich ändert.
+
+    **Die eine Stelle, an der aus einer Gast-Sperre ein Funkbefehl wird.**
+    Alle drei Wege, die die Sperre setzen oder lösen, rufen sie:
+
+    | Weg | Aufrufer |
+    |---|---|
+    | Sperr-Knopf in der Kopfzeile | ``api/v1/rooms.set_override_block_state`` |
+    | Häkchen im Übersteuerungs-Dialog | ``gast_sperre.setze_bis_checkout`` |
+    | Check-out löst die Sperre | ``gast_sperre.loese_bei_checkout`` |
+
+    Drei Aufrufer und **eine** Funktion, weil der vierte Weg schon zeigt,
+    was sonst passiert: ``setze_messrolle`` hat seinen Befehl selbst
+    geschickt, und bis Sprint 23 T4-B hätte das Zurücknehmen der Rolle
+    das Rad eines gast-gesperrten Zimmers freigegeben.
+
+    **Gesendet wird bei einer Änderung des gewollten Zustands, nicht bei
+    einer Änderung der Sperre.** Für ein ``measure_only``-Gerät ist das
+    Rad in beiden Lagen gesperrt; dort geht nichts hinaus. Ein Befehl, der
+    nichts ändert, kostet Batterie und eine Motorbewegung (Paragraph 0 S4)
+    — und beim Lösen der Sperre wäre er sogar falsch, weil er die Sperre
+    der Rolle aufhöbe.
+
+    **Ein Fehlschlag beim Senden hält die Sperre nicht auf.** Jedes Gerät
+    bekommt sein eigenes ``try``; was scheitert, steht mit Grund in der
+    Rückgabe und damit im Audit. Die Sperre ist zuerst eine Entscheidung
+    im System — sie wirkt über das Block-Gate in ``override_service``,
+    auch wenn kein Funkbefehl ankommt. Das Rad stillzulegen ist die
+    Zugabe, und sie darf die Entscheidung nicht blockieren.
+
+    **Kein ``0x14`` hinterher.** ``setze_messrolle`` schickt eines, und
+    das ist eine Zugabe ohne Nutzen: das Gerät meldet den Zustand ohnehin
+    in **jedem** Keepalive über das 0x80-Bit, und bei Class A wird ein
+    Downlink erst im Fenster nach dem nächsten Uplink abgeholt — die
+    Antwort auf ``0x14`` käme also einen Zyklus **nach** dem Keepalive,
+    der die Frage schon beantwortet hat. Als Befund notiert; hier wird es
+    nicht wiederholt.
+
+    **Gesendet wird innerhalb der Transaktion des Aufrufers**, wie in
+    ``setze_messrolle``. Bricht der Commit danach ab, ist ein Befehl
+    hinaus, den die Datenbank nicht kennt — sichtbar bleibt es: die
+    Geräteseite vergleicht gewollt gegen gemeldet und zeigt dann
+    „fehlgeschlagen". Die Gegenrichtung (erst committen, dann senden)
+    hätte denselben Fall mit vertauschten Rollen und wäre ein zweites
+    Muster neben dem bestehenden.
+
+    Die Transaktion committet der Aufrufer (Paragraph 5.61).
+
+    :param sperre_vorher: ``room.guest_override_blocked`` **vor** der
+        Änderung. Pflicht-Argument und nicht aus der Zeile gelesen: beim
+        Aufruf ist sie dort schon überschrieben.
+    :return: ein Eintrag je Gerät, an das etwas ging. Leer, wenn nichts
+        zu tun war.
+    """
+    # **Keine Vorab-Prüfung auf „Sperre unverändert".** Eine stand hier und
+    # ist wieder heraus: die Mutationsprobe zu „Formwechsel sendet nichts"
+    # blieb grün, als sie entfernt wurde — die Prüfung je Gerät unten fängt
+    # denselben Fall. Zwei Wächter für eine Bedingung sind einer zu viel
+    # (Paragraph 0 S6), und der zweite sah wie ein Schutz aus, der er nicht
+    # war. Was sie wirklich gespart hätte, ist eine Abfrage je Umschaltung
+    # — ein Handgriff am Tag.
+    befehle: list[Sperrbefehl] = []
+    jetzt = datetime.now(tz=UTC)
+    for geraet in await _thermostate_des_zimmers(session, room_id):
+        soll_alt = soll_kindersicherung(measure_only=geraet.measure_only, gast_sperre=sperre_vorher)
+        soll_neu = soll_kindersicherung(
+            measure_only=geraet.measure_only, gast_sperre=sperre_nachher
+        )
+        if soll_alt == soll_neu:
+            continue
+        try:
+            await downlink_adapter.set_child_lock(geraet.dev_eui, soll_neu)
+        except Exception as fehler:  # noqa: BLE001 - ein Gerät haelt die anderen nicht auf
+            logger.exception(
+                "kindersicherung_downlink_fehlgeschlagen dev_eui=%s room_id=%s gewollt=%s",
+                geraet.dev_eui,
+                room_id,
+                soll_neu,
+            )
+            befehle.append(
+                Sperrbefehl(
+                    device_id=geraet.id,
+                    dev_eui=geraet.dev_eui,
+                    gewollt=soll_neu,
+                    gesendet=False,
+                    fehler=f"{type(fehler).__name__}: {fehler}",
+                )
+            )
+            continue
+        # Der Zeitpunkt des **Sendens**, nicht der einer Bestätigung: genau
+        # danach ist jede ältere Meldung überholt, und ohne ihn zeigt die
+        # Geräteseite direkt nach dem Umschalten einen roten Befund
+        # (Befund des Betreibers, 24.10.2026, siehe ``child_lock_state``).
+        geraet.child_lock_commanded_at = jetzt
+        logger.info(
+            "kindersicherung gesendet dev_eui=%s room_id=%s gewollt=%s",
+            geraet.dev_eui,
+            room_id,
+            soll_neu,
+        )
+        befehle.append(
+            Sperrbefehl(
+                device_id=geraet.id,
+                dev_eui=geraet.dev_eui,
+                gewollt=soll_neu,
+                gesendet=True,
+            )
+        )
+    return befehle
+
+
+def fuer_audit(befehle: Sequence[Sperrbefehl]) -> list[dict[str, object]]:
+    """Die Befehle in der Form, in der sie ins ``business_audit`` gehen.
+
+    Eine eigene Funktion, weil drei Aufrufer sie brauchen und ein
+    Protokoll, das je Weg anders aussieht, beim Suchen nicht hilft.
+    """
+    return [
+        {
+            "dev_eui": b.dev_eui,
+            "gewollt": b.gewollt,
+            "gesendet": b.gesendet,
+            **({"fehler": b.fehler} if b.fehler is not None else {}),
+        }
+        for b in befehle
+    ]

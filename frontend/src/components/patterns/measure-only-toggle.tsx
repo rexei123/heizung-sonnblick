@@ -39,28 +39,43 @@ import { setzeMessrolle } from "@/lib/api/relays";
 import { darfRelaisSchalten } from "@/lib/auth/rechte";
 import type { Device } from "@/lib/api/types";
 
-/** Der Kindersicherungs-Status als Satz, den ein Mensch liest. */
-function sperrText(zustand: Device["child_lock_state"]): {
-  text: string;
-  icon: string;
-  klasse: string;
-} {
+/**
+ * Der Zustand des Rades als Satz, den ein Mensch liest.
+ *
+ * **Zwei Angaben, nicht eine** (Sprint 23 T4-B): was gelten soll („Rad
+ * gesperrt" / „Rad frei") und ob das Gerät es bestätigt hat. Vorher stand
+ * hier nur „Kindersicherung bestätigt" — das genügte, solange nur Fühler
+ * eine Sperre hatten und der gewollte Zustand damit immer „gesperrt" war.
+ *
+ * Mit der Gast-Sperre gibt es beide Richtungen, und „bestätigt" allein
+ * sagt dann nicht mehr, **was** bestätigt ist.
+ */
+function sperrText(
+  zustand: Device["child_lock_state"],
+  gewollt: boolean,
+): { text: string; icon: string; klasse: string } {
+  const was = gewollt ? "Rad gesperrt" : "Rad frei";
   if (zustand === "bestaetigt") {
     return {
-      text: "Kindersicherung bestätigt",
-      icon: "lock",
+      text: `${was} · bestätigt`,
+      icon: gewollt ? "lock" : "lock_open",
       klasse: "text-text-primary",
     };
   }
   if (zustand === "fehlgeschlagen") {
+    // Der Widerspruch wird benannt, nicht nur gefärbt: das Gerät meldet
+    // das Gegenteil, und welche Richtung das ist, entscheidet den
+    // Handgriff.
     return {
-      text: "Kindersicherung nicht gesetzt — das Gerät meldet das Rad als frei",
-      icon: "lock_open",
+      text: gewollt
+        ? "Rad gesperrt · das Gerät meldet es als frei"
+        : "Rad frei · das Gerät meldet es als gesperrt",
+      icon: gewollt ? "lock_open" : "lock",
       klasse: "text-error",
     };
   }
   return {
-    text: "Kindersicherung ausstehend — Bestätigung kommt mit dem nächsten Keepalive",
+    text: `${was} · ausstehend, Bestätigung kommt mit dem nächsten Keepalive`,
     icon: "schedule",
     klasse: "text-text-tertiary",
   };
@@ -96,7 +111,20 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
     return null;
   }
 
-  const sperre = sperrText(device.child_lock_state);
+  const sperre = sperrText(device.child_lock_state, device.rad_gesperrt_gewollt);
+  // **Gezeigt wird, sobald es eine Frage gibt** (Sprint 23 T4-B).
+  //
+  // Hier stand `device.measure_only`, mit der damals richtigen
+  // Begründung: bei einem normalen Thermostat ist das Rad absichtlich
+  // frei, und ein „bestätigt" dafür wäre eine Aussage ohne Frage.
+  //
+  // Mit der Gast-Sperre hat auch ein normales Thermostat ein gesperrtes
+  // Rad — und die Karte zeigte dafür **nichts**. Die Bedingung war nicht
+  // falsch, sie ist zu eng geworden (§5.77). Gezeigt wird jetzt, wenn das
+  // Rad gesperrt sein soll **oder** wenn Soll und Meldung auseinander
+  // liegen; verschwiegen wird nur der langweilige Fall „soll frei sein
+  // und ist frei".
+  const sperreZeigen = device.rad_gesperrt_gewollt || device.child_lock_state !== "bestaetigt";
 
   return (
     <div
@@ -120,10 +148,7 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
         </span>
       </div>
 
-      {/* Der Sperr-Status nur dann, wenn die Rolle gesetzt ist. Bei einem
-          normalen Thermostat ist das Rad absichtlich frei, und ein
-          "bestätigt" dafür wäre eine Aussage ohne Frage. */}
-      {device.measure_only && (
+      {sperreZeigen && (
         <div
           className={`mt-2 flex items-center gap-1 text-xs ${sperre.klasse}`}
           data-testid="child-lock-status"

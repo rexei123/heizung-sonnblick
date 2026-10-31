@@ -204,6 +204,15 @@ export interface Device {
    * nächsten Keepalive. Nur ``fehlgeschlagen`` ist ein Befund.
    */
   child_lock_state: "bestaetigt" | "ausstehend" | "fehlgeschlagen";
+  /**
+   * Soll das Rad dieses Geräts gesperrt sein? (Sprint 23 T4-B)
+   *
+   * „Rolle nur messen **oder** Gast-Sperre des Zimmers" — die Ausgabe von
+   * `soll_kindersicherung`. Kommt fertig vom Server, weil der Wert dort
+   * schon für das Urteil gerechnet wird; ihn hier aus zwei Gründen ein
+   * zweites Mal zusammenzusetzen wäre die zweite Wahrheit aus §5.53.
+   */
+  rad_gesperrt_gewollt: boolean;
   valve_state: ValveState;
   valve_delta_k: number | null;
   // Sprint 20e-b: gegen was Regel 3b verglichen hat — Referenzmenge, deren

@@ -34,6 +34,7 @@ const BASE_DEVICE: Device = {
   // optional zu machen waere eine Unwahrheit ueber die API.
   measure_only: false,
   child_lock_state: "ausstehend" as const,
+  rad_gesperrt_gewollt: false,
   vendor: "mclimate",
   model: "Vicki",
   label: "101",

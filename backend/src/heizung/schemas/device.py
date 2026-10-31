@@ -263,6 +263,29 @@ class DeviceRead(BaseModel):
     # fälschlich als bestätigt sehen.
     child_lock_state: Literal["bestaetigt", "ausstehend", "fehlgeschlagen"] = "ausstehend"
 
+    #: Soll das Rad dieses Geraets gesperrt sein? (Sprint 23 T4-B)
+    #:
+    #: Die Ausgabe von ``child_lock.soll_kindersicherung`` — also „Rolle
+    #: nur messen **oder** Gast-Sperre des Zimmers".
+    #:
+    #: **Warum das Feld hinausgeht und die Anzeige es nicht selbst
+    #: ausrechnet.** Die Karte zeigte den Sperr-Status bis Sprint 23 T4-B
+    #: nur fuer ``measure_only``-Geraete, mit der damals richtigen
+    #: Begruendung: bei einem normalen Thermostat ist das Rad absichtlich
+    #: frei, und ein „bestaetigt" dafuer waere eine Aussage ohne Frage.
+    #:
+    #: Mit T4-B hat ein normales Thermostat in einem gast-gesperrten
+    #: Zimmer ein **gesperrtes** Rad — und die Karte zeigte dafuer nichts.
+    #: Die Bedingung war nicht falsch, sie ist zu eng geworden
+    #: (Paragraph 5.77). Richtig ist sie am **gewollten Zustand**, und der
+    #: wird hier schon fuer ``child_lock_state`` gerechnet; ihn im Browser
+    #: ein zweites Mal aus zwei Gruenden zusammenzusetzen waere die
+    #: zweite Wahrheit aus Paragraph 5.53.
+    #:
+    #: Der Default ist ``False``: ein Geraet, dessen gewollten Zustand
+    #: niemand mitgegeben hat, soll nicht als gesperrt gelten.
+    rad_gesperrt_gewollt: bool = False
+
     last_seen_at: datetime | None
     firmware_version: str | None = None
     health_state: Literal["healthy", "degraded", "silent", "suspicious"]
