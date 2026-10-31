@@ -3,7 +3,7 @@ titel: Zimmerübersicht
 kategorie: Die Seiten
 stichworte: Zimmer, Status, belegt, reserviert, Reinigung, gesperrt, Allgemeinbereich, Etage, Übersteuern, Details
 rollen: alle
-stand: 2026-10-30
+stand: 2026-10-31
 route: /zimmer
 ---
 
@@ -61,17 +61,29 @@ Anreisen und Abreisen setzen den Status dieser Zimmer nicht mehr um.
 ## Ist und Soll
 
 **Ist** ist der Mittelwert der gesunden Thermostate im Schlafzimmer,
-**Soll** der Wert, den die Steuerung zuletzt gesetzt hat. Liegt das Ist
-mehr als zwei Grad unter dem Soll, steht die Zahl in Farbe — ein Hinweis,
-kein Alarm. Ein Zimmer darf kalt sein, wenn gerade erst angereist wurde.
+**Soll** der Wert, den die Steuerung für **dieses Schlafzimmer** zuletzt
+gesetzt hat. Beide Spalten sprechen also von derselben Zone — läuft eine
+Wunschtemperatur nur für das Schlafzimmer, steht sie hier, und nicht der
+Wert des übrigen Zimmers.
+
+Liegt das Ist mehr als zwei Grad unter dem Soll, steht die Zahl in Farbe
+— ein Hinweis, kein Alarm. Ein Zimmer darf kalt sein, wenn gerade erst
+angereist wurde.
 
 Ein Strich heißt „kein Wert": kein Gerät, kein Messwert, oder kein
 Schlafzimmer. Warum, steht auf der Zimmerseite.
 
 ## Die Spalte „Übersteuerung"
 
-Drei Zustände, nie gemischt: ein **Schloss**, wenn die Übersteuerung
-gesperrt ist; **„Aktiv"**, wenn gerade eine läuft; sonst leer.
+Zwei Marken, und sie stehen **nebeneinander**: ein **Schloss**, wenn die
+Übersteuerung gesperrt ist, und **„Aktiv"**, wenn gerade eine läuft. Ist
+beides der Fall, steht beides da; ist nichts davon der Fall, bleibt die
+Zelle leer.
+
+Beides zusammen ist der Regelfall nach „Wert setzen und gleich
+festhalten": die Wunschtemperatur läuft, und das Rad im Zimmer ist still.
+Bis zum 31.10.2026 verdeckte das Schloss das „Aktiv" — die Spalte
+verschwieg dann genau die Zahl, nach der man sie fragt.
 
 ## Neues Zimmer
 

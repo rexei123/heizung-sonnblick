@@ -61,15 +61,20 @@ const ZONE_BAD = { ...ZONE_SCHLAF, id: 202, kind: "bathroom" as const, name: "Ba
 /** Festes Fenster, damit die Erwartungen nicht mit dem Kalender wandern. */
 const BIS = Date.parse("2026-10-08T10:00:00Z");
 
-function verlauf(range: "24h" | "7d"): Record<string, unknown> {
+function verlauf(range: "24h" | "7d", opts: { abweichung?: boolean } = {}): Record<string, unknown> {
   const eimer = range === "24h" ? 10 : 60;
   const fenster = range === "24h" ? 24 * 3600_000 : 7 * 24 * 3600_000;
   const von = BIS - fenster;
+  // `geraet_setpoint` ist **meist `null`** — der Server schickt den Wert nur
+  // fuer Eimer, in denen das Geraet nicht auf dem Soll steht. Der Normalfall
+  // steht hier deshalb ohne Abweichung, und `abweichung` schaltet die Lage
+  // aus Zimmer 107 dazu: Soll 21, Geraet meldet 25.
   const punkte = (zoneVersatz: number) =>
     Array.from({ length: 12 }, (_, i) => ({
       t: new Date(von + i * eimer * 60_000).toISOString(),
       temperature: 20 + zoneVersatz + (i % 3) * 0.5,
       setpoint: i < 6 ? 21 : 18,
+      geraet_setpoint: opts.abweichung && i < 6 ? 25 : null,
     }));
   return {
     room_id: 101,
@@ -102,7 +107,7 @@ function leererVerlauf(): Record<string, unknown> {
 
 async function mockApi(
   page: Page,
-  opts: { leer?: boolean } = {},
+  opts: { leer?: boolean; abweichung?: boolean } = {},
 ): Promise<{ bereiche: string[] }> {
   const bereiche: string[] = [];
 
@@ -142,7 +147,9 @@ async function mockApi(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        opts.leer ? leererVerlauf() : verlauf(range === "7d" ? "7d" : "24h"),
+        opts.leer
+          ? leererVerlauf()
+          : verlauf(range === "7d" ? "7d" : "24h", { abweichung: opts.abweichung }),
       ),
     });
   });
@@ -205,6 +212,11 @@ test.describe("Sprint 21 A1 — Zimmer-Verlauf", () => {
     for (const name of ["Schlafzimmer", "Schlafzimmer (Soll)", "Bad", "Bad (Soll)"]) {
       await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
     }
+    // **Und keine dritte**, solange das Geraet auf dem Soll steht. Die
+    // Reihe „Geraet meldet" gibt es seit dem 31.10.2026, und sie soll im
+    // Regelfall nicht erscheinen — sonst haette jedes Zimmer dauerhaft
+    // drei Linien je Zone statt zwei.
+    await expect(page.getByText("Schlafzimmer (Gerät meldet)", { exact: true })).toHaveCount(0);
 
     // Die hinterlegten Flaechen sind beschriftet und nicht nur gefaerbt.
     await expect(page.getByText("Belegt", { exact: true })).toBeVisible();
@@ -247,6 +259,40 @@ test.describe("Sprint 21 A1 — Zimmer-Verlauf", () => {
       page.getByText("Für diesen Zeitraum liegen keine Messwerte vor."),
     ).toBeVisible();
     await expect(page.getByTestId("room-history-chart")).toHaveCount(0);
+  });
+
+  test("abweichung_des_geraets_erscheint_als_eigene_reihe", async ({ page }) => {
+    /**
+     * **Der Befund aus Zimmer 107, in der Legende.**
+     *
+     * Bis zum 31.10.2026 trug die Soll-Linie den **Geraete**-Wert. Im
+     * Rad-Test stand deshalb „Schlafzimmer (Soll): 25,0 °C", waehrend 23
+     * galt — der Gast hatte gedreht, die Sperre hatte die Drehung
+     * abgewiesen, und das Diagramm zeigte sie als Sollwert.
+     *
+     * Jetzt ist der Soll der der Engine, und der gemeldete Wert kommt als
+     * eigene, gepunktete Reihe — aber nur dort, wo er abweicht. Der
+     * Zweck von AE-74 bleibt damit erfuellt: ein nicht angekommener
+     * Downlink ist sichtbar, nur nicht mehr als Sollwert.
+     */
+    const warnungen = groessenWarnungen(page);
+    await mockApi(page, { abweichung: true });
+    await page.goto("/zimmer/101");
+
+    await page.getByRole("button", { name: "Verlauf", exact: true }).click();
+    await expect(page.getByTestId("room-history-chart")).toBeVisible();
+
+    await expect(
+      page.getByText("Schlafzimmer (Gerät meldet)", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("Bad (Gerät meldet)", { exact: true }).first()).toBeVisible();
+    // Der Soll bleibt daneben stehen — die neue Reihe ersetzt ihn nicht.
+    await expect(page.getByText("Schlafzimmer (Soll)", { exact: true }).first()).toBeVisible();
+    // Die Fusszeile sagt, was die Punkte bedeuten. Ein Tooltip allein
+    // waere die Falle aus Paragraph 5.57.
+    await expect(page.getByText(/gepunktet: gemeldeter Gerätewert/)).toBeVisible();
+
+    expect(warnungen, "recharts-Groessenwarnung in der Konsole").toEqual([]);
   });
 
   test("auch_das_geraete_diagramm_warnt_nicht_mehr", async ({ page }) => {

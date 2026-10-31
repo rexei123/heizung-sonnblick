@@ -334,31 +334,48 @@ function RoomTable({ list, loading, error }: TableProps) {
               <td className="px-3 py-2 text-text-secondary" data-testid={`soll-${r.number}`}>
                 {formatTemperature(r.engine_setpoint_c)}
               </td>
-              {/* Sprint 14d (R-B): EINE Zelle, drei exklusive Zustände —
-                  gesperrt (Lock, 12c.a) > aktive Übersteuerung ("Aktiv") > leer.
-                  Nie kombiniert. */}
+              {/* **Schloss und Übersteuerung stehen zusammen**, seit dem
+                  31.10.2026 (Befund des Betreibers aus dem Rad-Test).
+
+                  Hier stand: „EINE Zelle, drei exklusive Zustände —
+                  gesperrt > aktive Übersteuerung > leer. Nie kombiniert."
+                  (Sprint 14d R-B.) Das war richtig, solange die Sperre
+                  jede Übersteuerung ausschloss: der Sperr-Knopf hebt beim
+                  Sperren alle laufenden auf, danach konnte es keine geben.
+
+                  Mit dem Häkchen aus T4-A2 ist die Kombination der
+                  **Regelfall** — der ganze Zweck ist „Wert setzen und
+                  gleich festhalten". In Zimmer 107 stand deshalb nur ein
+                  Schloss, während 23 °C bis Check-out galten, und die
+                  Spalte verschwieg genau die Zahl, nach der man sie
+                  fragt. */}
               <td className="px-3 py-2">
-                {r.guest_override_blocked ? (
-                  <span
-                    className="material-symbols-outlined text-text-secondary"
-                    aria-label="Übersteuerung gesperrt"
-                    title="Übersteuerung gesperrt"
-                    style={{ fontSize: 18 }}
-                  >
-                    lock
-                  </span>
-                ) : r.has_active_override ? (
-                  <span
-                    className="inline-flex items-center gap-1 text-warning"
-                    aria-label="Übersteuerung aktiv"
-                    title="Übersteuerung aktiv"
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                      tune
+                <span className="inline-flex items-center gap-2">
+                  {r.guest_override_blocked ? (
+                    <span
+                      className="material-symbols-outlined text-text-secondary"
+                      aria-label="Übersteuerung gesperrt"
+                      title="Übersteuerung gesperrt"
+                      style={{ fontSize: 18 }}
+                      data-testid={`sperre-${r.number}`}
+                    >
+                      lock
                     </span>
-                    <span className="text-xs font-medium">Aktiv</span>
-                  </span>
-                ) : null}
+                  ) : null}
+                  {r.has_active_override ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-warning"
+                      aria-label="Übersteuerung aktiv"
+                      title="Übersteuerung aktiv"
+                      data-testid={`uebersteuerung-aktiv-${r.number}`}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                        tune
+                      </span>
+                      <span className="text-xs font-medium">Aktiv</span>
+                    </span>
+                  ) : null}
+                </span>
               </td>
               <td className="px-3 py-2">
                 <ZeilenKnoepfe

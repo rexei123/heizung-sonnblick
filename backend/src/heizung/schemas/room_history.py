@@ -24,15 +24,31 @@ from heizung.models.enums import HeatingZoneKind
 
 
 class HistoryPunkt(BaseModel):
-    """Ein Eimer einer Zone: Mittel der Ist-Temperatur, Maximum des Sollwerts."""
+    """Ein Eimer einer Zone: Ist-Temperatur, Sollwert, und was das Geraet meldet.
+
+    ``setpoint`` ist der **Engine-Sollwert dieser Zone** — der Wert, der
+    gilt. ``geraet_setpoint`` ist der vom Geraet gemeldete Wert, **nur wenn
+    er abweicht**, sonst ``None``.
+
+    Zwei Felder und nicht eines, weil die Frage zwei ist: „worauf soll es
+    stehen" und „worauf steht es". Bis zum 31.10.2026 trug ``setpoint`` den
+    Geraetewert und beantwortete damit die zweite, waehrend die
+    Beschriftung im Diagramm die erste versprach (Begruendung in
+    ``services/room_history``).
+
+    ``geraet_setpoint`` ist **meist leer**. Das Diagramm sieht im Normalfall
+    aus wie vorher — zwei Linien je Zone —, und die dritte erscheint genau
+    dann, wenn das Geraet nicht folgt.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     t: datetime
     temperature: Decimal | None = None
     setpoint: Decimal | None = None
+    geraet_setpoint: Decimal | None = None
 
-    @field_serializer("temperature", "setpoint")
+    @field_serializer("temperature", "setpoint", "geraet_setpoint")
     def _decimal_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 

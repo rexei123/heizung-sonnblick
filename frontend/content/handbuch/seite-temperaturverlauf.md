@@ -1,9 +1,9 @@
 ---
 titel: Temperaturverlauf
 kategorie: Die Seiten
-stichworte: Verlauf, Kurve, Historie, Auswertung, in Vorbereitung
+stichworte: Verlauf, Kurve, Historie, Auswertung, Soll, Gerät meldet, in Vorbereitung
 rollen: alle
-stand: 2026-10-25
+stand: 2026-10-31
 route: /analyse/temperaturverlauf
 ---
 
@@ -16,16 +16,28 @@ route: /analyse/temperaturverlauf
 es, was eine Auswertung braucht:
 
 - die gemessenen Temperaturen der Zonen als Kurve,
-- den Sollwert als Linie darüber — also die Antwort auf „hat die
-  Steuerung das gewollt oder ist es ihr passiert",
+- den Sollwert als gestrichelte Linie darüber — also die Antwort auf „hat
+  die Steuerung das gewollt oder ist es ihr passiert",
+- eine **gepunktete** Linie, wenn das Thermostat etwas anderes meldet als
+  den Sollwert,
 - die Belegungszeiten als Hintergrund,
 - das Nachtfenster als Band.
 
-Der Sollwert in dieser Kurve ist der **errechnete** Wert der Steuerung,
-nicht der am Gerät gemeldete. Das ist der Unterschied, der am 25.10.2026
-korrigiert wurde: vorher stand dort der Wert, den das Thermostat zuletzt
-zurückgemeldet hatte, und der kann aus einem Befehl von vor sechs Stunden
-stammen.
+Der Sollwert in dieser Kurve ist der **errechnete** Wert der Steuerung
+für diese Zone, nicht der am Gerät gemeldete.
+
+**Die gepunktete Linie ist meistens nicht da.** Sie erscheint genau dann,
+wenn das Thermostat nicht auf dem Sollwert steht — nach einem Befehl, den
+es noch nicht abgeholt hat, nach einer Handverstellung, oder weil es
+überhaupt nicht folgt. Dann stehen beide Zahlen da: was gelten soll, und
+was gilt.
+
+Dass es zwei Linien sind, ist der Stand seit dem 31.10.2026. Vorher trug
+die Soll-Linie in den meisten Zimmern den **gemeldeten** Wert des Geräts,
+und bei einer abgewiesenen Handverstellung stand dort die Zahl des Gasts
+als Sollwert. Die Korrektur vom 25.10.2026 hatte nur Zonen ohne Stellglied
+erfasst — dieser Abschnitt behauptete sie seither für alle, und das war
+vier Tage lang zu viel versprochen.
 
 ## Was fehlt
 

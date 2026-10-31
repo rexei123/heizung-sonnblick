@@ -212,14 +212,28 @@ async def _mk_device_mit_messwert(
 
 
 async def _mk_hard_clamp(
-    sm: async_sessionmaker[AsyncSession], room_id: int, setpoint: Decimal
+    sm: async_sessionmaker[AsyncSession],
+    room_id: int,
+    setpoint: Decimal,
+    *,
+    zonen: dict[int, int] | None = None,
 ) -> None:
     """Juengste HARD_CLAMP-Zeile des Zimmers — die Quelle des Soll-Werts.
 
     Der 1-h-Frische-Filter in ``latest_hard_clamp_setpoint_per_room`` ist
     der Grund fuer ``now - 1 min``: eine aeltere Zeile wuerde korrekt
     ignoriert (dafuer gibt es einen eigenen Test weiter unten).
+
+    ``zonen`` schreibt den Zustandsbericht je Zone mit, aus dem die Liste
+    seit dem 31.10.2026 den Sollwert der **Referenzzone** nimmt. ``None``
+    laesst ihn weg — das ist die Lage einer Zeile aus der Zeit davor, und
+    dafuer gibt es den Rueckfall auf den Zimmerwert.
     """
+    details: dict[str, object] = {"detail": "test"}
+    if zonen is not None:
+        details["downlink_zone_status"] = [
+            {"zone_id": zid, "setpoint_c": wert, "count_sent": 1} for zid, wert in zonen.items()
+        ]
     async with sm() as session:
         session.add(
             EventLog(
@@ -230,6 +244,7 @@ async def _mk_hard_clamp(
                 setpoint_in=setpoint,
                 setpoint_out=setpoint,
                 reason=CommandReason.OCCUPIED_SETPOINT,
+                details=details,
             )
         )
         await session.commit()
@@ -460,5 +475,81 @@ async def test_soll_aelter_als_eine_stunde_zaehlt_nicht(
         zeile = next(r for r in resp.json() if r["id"] == room)
         assert zeile["mean_temperature_c"] == 18.0
         assert zeile["engine_setpoint_c"] is None
+    finally:
+        await _cleanup(sm)
+
+
+# ---------------------------------------------------------------------------
+# Der Soll ist der der Referenzzone (Befund des Betreibers, 31.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_soll_ist_der_der_referenzzone_nicht_der_des_zimmers(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """**Der Befund, als Test.** Zimmer-Soll 21, Schlafzimmer-Soll 23.
+
+    Zimmer 107 am 30.10.2026: die Liste zeigte „Soll 21,0 °C", waehrend
+    eine Uebersteuerung auf 23 °C fuer die Zone galt und das Geraet 23
+    fuhr. Der Grund war nicht die Uebersteuerung, sondern die Spalte: das
+    **Ist** war seit dem 15.10. das der Referenzzone, der **Soll** der des
+    Zimmers. Zwei Spalten nebeneinander, die von verschiedenen Dingen
+    sprachen.
+
+    Eine Zonen-Uebersteuerung aendert den Zimmerwert nicht — sie steht in
+    ``zone_overrides`` und wird erst im Dispatch je Zone eingesetzt. Genau
+    deshalb genuegt es nicht, den Zimmerwert zu zeigen.
+    """
+    sm = async_sessionmaker(setup_engine, expire_on_commit=False)
+    s = uuid.uuid4().hex[:8]
+    try:
+        await _login_admin(http_client, sm)
+
+        room = await _mk_room(sm, f"{s}z")
+        sz = await _mk_zone(sm, room, "Schlafzimmer")
+        bad = await _mk_zone(sm, room, "Bad")
+        await _mk_device_mit_messwert(sm, sz, uuid.uuid4().hex[:8], Decimal("22.5"))
+        await _mk_hard_clamp(sm, room, Decimal("21.0"), zonen={sz: 23, bad: 21})
+
+        resp = await http_client.get("/api/v1/rooms", params={"limit": 1000})
+        assert resp.status_code == 200, resp.text
+        zeile = next(r for r in resp.json() if r["id"] == room)
+
+        assert zeile["reference_zone_id"] == sz
+        assert zeile["engine_setpoint_c"] == 23.0, (
+            "der Soll der Referenzzone, nicht der 21,0 des Zimmers"
+        )
+    finally:
+        await _cleanup(sm)
+
+
+async def test_ohne_zonenwert_bleibt_der_zimmerwert(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """Der Rueckfall, und er hat zwei echte Faelle.
+
+    Eine HARD_CLAMP-Zeile ohne Zonen-Bericht gibt es in der ersten Minute
+    nach einem Deploy — bis der erste Engine-Lauf je Zimmer durch ist —
+    und bei jeder Zeile aus der Zeit vor dem 31.10.2026. Dann gilt der
+    Zimmerwert, also die Anzeige von vorher.
+
+    Ohne diese Pruefung waere der Rueckfall unbelegt, und ein Fehler darin
+    zeigte sich als leere Spalte genau in der Minute, in der jemand nach
+    einem Deploy hinsieht.
+    """
+    sm = async_sessionmaker(setup_engine, expire_on_commit=False)
+    s = uuid.uuid4().hex[:8]
+    try:
+        await _login_admin(http_client, sm)
+
+        room = await _mk_room(sm, f"{s}r")
+        sz = await _mk_zone(sm, room, "Schlafzimmer")
+        await _mk_device_mit_messwert(sm, sz, uuid.uuid4().hex[:8], Decimal("20.0"))
+        await _mk_hard_clamp(sm, room, Decimal("19.0"))
+
+        resp = await http_client.get("/api/v1/rooms", params={"limit": 1000})
+        zeile = next(r for r in resp.json() if r["id"] == room)
+
+        assert zeile["engine_setpoint_c"] == 19.0
     finally:
         await _cleanup(sm)

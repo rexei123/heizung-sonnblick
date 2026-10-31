@@ -7,6 +7,13 @@
  * dahinter hinterlegt: Belegungen und die Nachtabsenkung. Umschalter
  * 24 Stunden / 7 Tage.
  *
+ * **Eine dritte Linie je Zone, die meist nicht da ist** (31.10.2026):
+ * „Gerät meldet", gepunktet, nur für Eimer, in denen der gemeldete Wert
+ * vom Sollwert abweicht. Der Sollwert ist seither der der Engine — bis
+ * dahin trug die Soll-Linie den **Geräte**-Wert und zeigte damit in
+ * Zimmer 107 eine abgewiesene Drehung als Sollwert an. Begründung in
+ * `services/room_history`.
+ *
  * **Was diese Komponente nicht tut: rechnen.** Die Zusammenfassung in
  * Zehn-Minuten- bzw. Stunden-Eimer macht der Server, und die
  * Nacht-Bänder kommen als fertige UTC-Zeitspannen — die Umrechnung von
@@ -163,6 +170,10 @@ function Diagramm({
         // werden — `undefined` laesst Recharts die Linie unterbrechen.
         if (punkt.temperature !== null) reihe[`temp_${zone.zone_id}`] = punkt.temperature;
         if (punkt.setpoint !== null) reihe[`soll_${zone.zone_id}`] = punkt.setpoint;
+        // Der gemeldete Wert kommt nur, wo er abweicht — der Server
+        // schickt sonst `null`. Die Reihe ist damit im Normalfall leer.
+        if (punkt.geraet_setpoint !== null && punkt.geraet_setpoint !== undefined)
+          reihe[`geraet_${zone.zone_id}`] = punkt.geraet_setpoint;
         nachZeit.set(ms, reihe);
       }
     }
@@ -262,10 +273,13 @@ function Diagramm({
 
           {/* `flatMap`: Recharts prueft seine Kinder der Reihe nach, und
               verschachtelte Arrays sind dabei eine Quelle stiller
-              Ausfaelle — zwei Linien je Zone kommen deshalb flach. */}
+              Ausfaelle — die Linien je Zone kommen deshalb flach. */}
           {daten.zones.flatMap((zone, i) => {
             const farbe = ZONEN_FARBEN[i % ZONEN_FARBEN.length];
-            return [
+            // Weicht diese Zone im Fenster irgendwo ab? Entscheidet, ob es
+            // die dritte Linie ueberhaupt gibt — Begruendung an ihr.
+            const weichtAb = zone.points.some((p) => p.geraet_setpoint !== null);
+            const linien = [
               <Line
                 key={`temp-${zone.zone_id}`}
                 type="monotone"
@@ -290,6 +304,53 @@ function Diagramm({
                 connectNulls
               />,
             ];
+            /**
+             * Die dritte Linie: **was das Gerät meldet, wenn es
+             * abweicht** (31.10.2026).
+             *
+             * Sie ist meist nicht da. Der Server schickt den Wert nur
+             * für Eimer, in denen Gerät und Sollwert auseinanderliegen
+             * — im Normalfall sieht das Diagramm deshalb aus wie
+             * vorher, zwei Linien je Zone.
+             *
+             * Erscheint sie, ist das der Befund: in Zimmer 107 lagen
+             * zwei Stunden zwischen „Soll 23" und „Gerät meldet 25",
+             * und bis dahin stand die 25 **als** Sollwert da.
+             *
+             * `connectNulls={false}` ist hier das Gegenteil der
+             * Soll-Linie, und zwar absichtlich: eine Lücke heißt „hier
+             * stimmte es", und die darf nicht überbrückt werden.
+             * Durchverbunden wäre aus der Abweichung eine Dauerlinie
+             * geworden, die nichts mehr unterscheidet.
+             *
+             * Gepunktet statt gestrichelt, damit die drei Linien einer
+             * Zone in derselben Farbe auseinanderzuhalten sind.
+             *
+             * **Die Linie wird gar nicht angelegt, wenn die Zone im
+             * Fenster nirgends abweicht.** Recharts setzt fuer jedes
+             * `<Line>` einen Legenden-Eintrag, auch fuer eines ohne
+             * einen einzigen Punkt — ohne diese Bedingung stuende
+             * „(Gerät meldet)" dauerhaft in der Legende und
+             * versprach eine Linie, die es nicht gibt. Aufgefallen
+             * ist das in der e2e-Pruefung, die genau das
+             * ausschliesst.
+             */
+            if (weichtAb) {
+              linien.push(
+                <Line
+                  key={`geraet-${zone.zone_id}`}
+                  type="stepAfter"
+                  dataKey={`geraet_${zone.zone_id}`}
+                  name={`${zone.name} (Gerät meldet)`}
+                  stroke={farbe}
+                  strokeWidth={1.5}
+                  strokeDasharray="1 3"
+                  dot={false}
+                  connectNulls={false}
+                />,
+              );
+            }
+            return linien;
           })}
         </LineChart>
       </ChartContainer>
@@ -324,7 +385,8 @@ function Diagramm({
           Nachtabsenkung
         </span>
         <span className="text-text-tertiary">
-          Gestrichelt: Sollwert · Zeiten in Ortszeit des Hotels
+          Gestrichelt: Sollwert · gepunktet: gemeldeter Gerätewert, wo er dem Soll
+          nicht entspricht · Zeiten in Ortszeit des Hotels
         </span>
       </div>
     </div>

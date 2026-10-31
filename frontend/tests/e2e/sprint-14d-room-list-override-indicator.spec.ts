@@ -7,13 +7,20 @@ import { test, expect, type Page, type Route } from "./fixtures";
  * Backend gemockt via ``page.route`` (Pattern wie Sprint 12c.a). §5.54: RegExp
  * mit ``(\?.*)?$``. ZIMMER 101 entspricht dem Cowork-Setup (nicht aufraeumen).
  *
- * Drei exklusive Zustaende in EINER Zelle (R-B):
- *  1) ``guest_override_blocked === true`` -> Lock (Bestand Sprint 12c.a)
- *  2) sonst ``has_active_override === true`` -> "Aktiv"-Indikator (tune-Icon)
- *  3) sonst leer
+ * Zwei unabhaengige Marken in EINER Zelle:
+ *  - ``guest_override_blocked === true`` -> Lock (Bestand Sprint 12c.a)
+ *  - ``has_active_override === true`` -> "Aktiv"-Indikator (tune-Icon)
  *
- * Pflicht: nie kombiniert (Lock-Zimmer zeigen NICHT zusaetzlich "Aktiv",
- * auch wenn has_active_override true ist — Lock gewinnt).
+ * **Sie stehen zusammen, seit dem 31.10.2026.** Hier stand: "drei exklusive
+ * Zustaende … nie kombiniert, Lock gewinnt". Das war richtig, solange die
+ * Sperre jede Uebersteuerung ausschloss — der Sperr-Knopf hebt beim Sperren
+ * alle laufenden auf, danach konnte es keine geben.
+ *
+ * Mit dem Haekchen aus Sprint 23 T4-A2 ist die Kombination der **Regelfall**:
+ * "Wert setzen und gleich festhalten" ist ihr ganzer Zweck. In Zimmer 107
+ * stand deshalb nur ein Schloss, waehrend 23 °C bis Check-out galten — die
+ * Spalte verschwieg genau die Zahl, nach der man sie fragt (Befund des
+ * Betreibers aus dem Rad-Test).
  */
 
 const MOCK_MITARBEITER = {
@@ -110,15 +117,29 @@ test.describe("Sprint 14d — Aktiv-Indikator in Zimmer-Uebersicht", () => {
     await expect(row102.getByLabel("Übersteuerung gesperrt")).toHaveCount(0);
   });
 
-  test("Gesperrtes Zimmer zeigt Lock (R-B-Exklusivitaet: NICHT Aktiv)", async ({ page }) => {
-    // R-B: Lock gewinnt gegen has_active_override — beide gleichzeitig
-    // wird semantisch nicht kombiniert.
-    await mockApi(page, [
-      roomMock(201, "201", { blocked: true, hasActiveOverride: true }),
-    ]);
+  test("Gesperrt UND übersteuert zeigt beides", async ({ page }) => {
+    // **Der Befund aus dem Rad-Test von Zimmer 107.** Hier prüfte dieser
+    // Test bis zum 31.10.2026 das Gegenteil: Lock gewinnt, "Aktiv" wird
+    // unterdrückt. Mit dem Häkchen aus T4-A2 ist genau diese Kombination
+    // der Regelfall, und ein Schloss allein verschweigt den Wert, der
+    // gilt.
+    await mockApi(page, [roomMock(201, "201", { blocked: true, hasActiveOverride: true })]);
     await page.goto("/zimmer");
 
     const row = page.getByRole("row").filter({ hasText: "201" });
+    await expect(row.getByLabel("Übersteuerung gesperrt")).toBeVisible();
+    await expect(row.getByLabel("Übersteuerung aktiv")).toBeVisible();
+  });
+
+  test("Gesperrt ohne Übersteuerung zeigt nur das Schloss", async ({ page }) => {
+    // Die Gegenprobe: die beiden Marken sind unabhängig, nicht gekoppelt.
+    // Ohne sie wäre die Änderung oben auch grün, wenn das Schloss das
+    // "Aktiv" mitbrächte — und dann stünde in jedem gesperrten Zimmer
+    // eine aktive Übersteuerung, die es nicht gibt.
+    await mockApi(page, [roomMock(202, "202", { blocked: true, hasActiveOverride: false })]);
+    await page.goto("/zimmer");
+
+    const row = page.getByRole("row").filter({ hasText: "202" });
     await expect(row.getByLabel("Übersteuerung gesperrt")).toBeVisible();
     await expect(row.getByLabel("Übersteuerung aktiv")).toHaveCount(0);
   });

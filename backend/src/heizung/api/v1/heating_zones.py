@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_admin, require_user
 from heizung.db import get_session
-from heizung.models.enums import HeatingZoneKind
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.room import Room
 from heizung.models.user import User
@@ -37,8 +36,8 @@ from heizung.schemas.heating_zone import (
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
-    latest_hard_clamp_bad_setpoint_per_room,
     latest_hard_clamp_setpoint_per_room,
+    latest_hard_clamp_zone_setpoints,
 )
 from heizung.services.geraetegrenzen import soll_grenzen_je_zone
 from heizung.services.zone_aggregates import (
@@ -55,7 +54,7 @@ async def _build_zone_read(
     *,
     mean_temps: dict[int, ZonenIst] | None = None,
     engine_setpoints: dict[int, Decimal | None] | None = None,
-    bad_setpoints: dict[int, int | None] | None = None,
+    zonen_setpoints: dict[int, dict[int, int]] | None = None,
     luecken: dict[int, GeraeteLuecke | None] | None = None,
 ) -> HeatingZoneRead:
     """Sprint 14d FU-5 + 14e FU-1/FU-2: HeatingZoneRead + Anreicherungen.
@@ -103,20 +102,27 @@ async def _build_zone_read(
         luecken = await geraete_luecke_per_zone(session, [zone.id])
     update["geraete_luecke"] = luecken.get(zone.id)
 
+    # **Der Sollwert dieser Zone**, nicht der des Zimmers (Befund des
+    # Betreibers, 31.10.2026).
+    #
+    # Hier stand bis dahin der Zimmerwert plus ein Sonderfall fuer Baeder.
+    # Beides ist durch **einen** Wert ersetzt: den, den der Dispatch je
+    # Zone verwendet hat (``downlink_zone_status[].setpoint_c``). Er deckt
+    # die Bad-Vorlage mit ab — sie ist einer von drei Gruenden, aus denen
+    # eine Zone vom Zimmer abweicht, und der Sonderfall kannte nur ihn.
+    #
+    # Die beiden anderen waren nicht abgedeckt, und der zweite ist der
+    # Befund: eine **Zonen**-Uebersteuerung (die Karte zeigte 21 neben
+    # ihrer eigenen aktiven Uebersteuerung auf 23) und eine Zone, deren
+    # Geraete alle ausgefallen sind.
     if engine_setpoints is None:
         engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
-    update["engine_setpoint_c"] = engine_setpoints.get(zone.room_id)
-
-    # Bad-Vorlage (18.10.2026): fuer Zonen mit ``kind=bathroom`` gilt der
-    # Bad-Zielwert, nicht der des Zimmers. Ohne diese Zeile zeigte die
-    # Bad-Karte 19, waehrend das Geraet 22 faehrt — und die Zimmerseite
-    # waere die zweite Wahrheit zur Engine (§5.53).
-    if zone.kind == HeatingZoneKind.BATHROOM:
-        if bad_setpoints is None:
-            bad_setpoints = await latest_hard_clamp_bad_setpoint_per_room(session, [zone.room_id])
-        bad_wert = bad_setpoints.get(zone.room_id)
-        if bad_wert is not None:
-            update["engine_setpoint_c"] = Decimal(bad_wert)
+    if zonen_setpoints is None:
+        zonen_setpoints = await latest_hard_clamp_zone_setpoints(session, [zone.room_id])
+    zonen_wert = zonen_setpoints.get(zone.room_id, {}).get(zone.id)
+    update["engine_setpoint_c"] = (
+        Decimal(zonen_wert) if zonen_wert is not None else engine_setpoints.get(zone.room_id)
+    )
 
     return read.model_copy(update=update)
 
@@ -186,7 +192,7 @@ async def list_heating_zones(
     # Eine Abfrage fuer alle Zonen des Zimmers, nicht eine je Karte.
     luecken = await geraete_luecke_per_zone(session, [z.id for z in zones])
     engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [room_id])
-    bad_setpoints = await latest_hard_clamp_bad_setpoint_per_room(session, [room_id])
+    zonen_setpoints = await latest_hard_clamp_zone_setpoints(session, [room_id])
     return [
         await _build_zone_read(
             session,
@@ -194,7 +200,7 @@ async def list_heating_zones(
             mean_temps=mean_temps,
             luecken=luecken,
             engine_setpoints=engine_setpoints,
-            bad_setpoints=bad_setpoints,
+            zonen_setpoints=zonen_setpoints,
         )
         for zone in zones
     ]

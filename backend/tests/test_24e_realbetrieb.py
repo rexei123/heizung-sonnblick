@@ -229,6 +229,12 @@ async def test_verlauf_einer_fuehler_zone_zeigt_den_engine_sollwert(
 
     Gezeigt wird der Engine-Wert: der Fühler stellt nichts, sein Sollwert
     ist ein Überrest und kein Zustand der Zone.
+
+    **Seit dem 31.10.2026 gilt das für jede Zone**, nicht nur für eine
+    ohne Stellglied — der Sonderfall, den dieser Test ursprünglich
+    abgesichert hat, ist durch die Regel ersetzt. Der Test bleibt, weil
+    seine Lage die konkrete war: ein eingefrorener Gerätewert, weit vom
+    Soll, in einem Zimmer, das der Betreiber angesehen hat.
     """
     room, zone_id = await _zone_mit_geraet(db_session, measure_only=True, geraete_sollwert=10)
 
@@ -241,16 +247,24 @@ async def test_verlauf_einer_fuehler_zone_zeigt_den_engine_sollwert(
     )
 
 
-async def test_verlauf_mit_stellglied_zeigt_weiter_das_geraet(
+async def test_abweichung_eines_stellenden_geraets_bleibt_sichtbar(
     db_session: AsyncSession,
 ) -> None:
     """**Die Gegenprobe, und sie ist die wichtigere.**
 
-    Bei einem Thermostat, das stellt, bleibt der Geräte-Sollwert die
-    Quelle (AE-74): ein nicht angekommener Downlink soll im Diagramm
-    **sichtbar** sein und nicht geglättet. Ohne diesen Test wäre die
-    Änderung oben auch grün, wenn der Verlauf überall den Engine-Wert
-    zeigte — und dann hätte sie eine Aussage weggenommen.
+    Der Zweck von AE-74 bleibt: ein nicht angekommener Downlink soll im
+    Diagramm **sichtbar** sein und nicht geglättet. Ohne diesen Test wäre
+    die Änderung vom 31.10.2026 auch grün, wenn der Gerätewert ganz
+    verschwunden wäre — und dann hätte sie eine Aussage weggenommen.
+
+    **Was sich geändert hat, ist die Stelle, nicht die Aussage.** Bis dahin
+    stand der Gerätewert in ``setpoint`` und damit unter der Beschriftung
+    „Soll"; genau daran ist Zimmer 107 aufgefallen, wo eine abgewiesene
+    Drehung als Sollwert dastand. Jetzt steht der Soll der Engine in
+    ``setpoint`` und der gemeldete Wert in ``geraet_setpoint`` — sichtbar
+    wie vorher, aber als das, was er ist.
+
+    Hieß bis zum 31.10.2026 ``test_verlauf_mit_stellglied_zeigt_weiter_das_geraet``.
     """
     room, zone_id = await _zone_mit_geraet(db_session, measure_only=False, geraete_sollwert=10)
 
@@ -258,8 +272,10 @@ async def test_verlauf_mit_stellglied_zeigt_weiter_das_geraet(
 
     zone = next(z for z in verlauf.zones if z.zone_id == zone_id)
     sollwerte = {p.setpoint for p in zone.points if p.setpoint is not None}
-    assert sollwerte == {Decimal(10)}, (
-        "ein stellendes Geraet behaelt seinen gemeldeten Sollwert im Verlauf"
+    gemeldet = {p.geraet_setpoint for p in zone.points if p.geraet_setpoint is not None}
+    assert sollwerte == {Decimal(BETRIEB)}, "der Sollwert ist der der Engine"
+    assert gemeldet == {Decimal(10)}, (
+        "und der gemeldete Wert bleibt sichtbar, in seiner eigenen Reihe"
     )
 
 

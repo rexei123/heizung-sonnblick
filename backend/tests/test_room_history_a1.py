@@ -225,7 +225,15 @@ async def test_fester_beleg_sollwert_sprung_und_nachtfenster(db_session: AsyncSe
     punkte = verlauf.zones[0].points
     # Der 02.10. liegt vor dem Fensterbeginn (01.10. 10:00 + 7 d = 08.10.):
     # er ist drin. Entscheidend ist die Reihenfolge und der Sprung.
-    sollwerte = [(p.t, p.setpoint) for p in punkte]
+    #
+    # **Gelesen wird ``geraet_setpoint``, seit dem 31.10.2026.** Dieser
+    # Aufbau schreibt nur Messwerte und keine Engine-Zeilen; der Sprung,
+    # den er prueft, ist also der im **gemeldeten** Wert, und der steht
+    # seither in seinem eigenen Feld. ``setpoint`` traegt den
+    # Engine-Sollwert und ist hier deshalb leer — ausdruecklich geprueft,
+    # damit die Bedeutung der beiden Felder nicht wieder verrutscht.
+    assert {p.setpoint for p in punkte} == {None}, "ohne Engine-Zeile kein Sollwert"
+    sollwerte = [(p.t, p.geraet_setpoint) for p in punkte]
     assert sollwerte == sorted(sollwerte), "Reihe muss nach Zeit sortiert sein"
 
     vor_sprung = [sp for t, sp in sollwerte if t < sprung]
@@ -275,7 +283,11 @@ async def test_24h_fasst_zehn_minuten_zu_einem_punkt_zusammen(db_session: AsyncS
     punkte = verlauf.zones[0].points
     assert len(punkte) == 1, [p.t for p in punkte]
     assert punkte[0].temperature == Decimal("21.00"), "Mittel aus 20,21,22 beidseitig"
-    assert punkte[0].setpoint == Decimal("21.00"), "Maximum, nicht Mittel"
+    # Maximum ueber die Geraete, nicht Mittel — und seit dem 31.10.2026 im
+    # Feld ``geraet_setpoint``: die Zusage gilt fuer den **gemeldeten**
+    # Wert, und nur den schreibt dieser Aufbau.
+    assert punkte[0].geraet_setpoint == Decimal("21.00"), "Maximum, nicht Mittel"
+    assert punkte[0].setpoint is None, "ohne Engine-Zeile kein Sollwert"
 
 
 async def test_7d_nutzt_stunden_eimer(db_session: AsyncSession) -> None:
