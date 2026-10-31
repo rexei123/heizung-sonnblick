@@ -7902,7 +7902,9 @@ hinter den Pflicht-Stop.
 > | 2 | Drehung am Rad wird verworfen | bestanden |
 > | 3 | Wert bleibt stehen | **erst im zweiten Anlauf** — siehe unten |
 > | 4 | Rezeption kann weiter ändern | bestanden |
-> | 5 | Abreise | **offen**, Prüfung am 31.10. um 11:15 (Test-Belegung endet 11:00) |
+> | 5 | Abreise | bestanden |
+>
+> **T4-A2 ist damit vollständig abgenommen** (Betreiber, 31.10.2026).
 >
 > **Schritt 3 war am 30.10.2026 nicht bestanden, und das war der
 > wichtigste Befund dieses Sprints.** Um 11:46 stand die Übersteuerung auf
@@ -7925,6 +7927,32 @@ hinter den Pflicht-Stop.
 >
 > Damit sind beide Schichten im Betrieb geprüft: das Flag (eine Minute)
 > und der Abgleich (bis 30 Minuten) als Netz darunter.
+>
+> **Schritt 5 im Einzelnen** (31.10.2026, ~09:26). Geprüft wurde nicht die
+> Abreise um 11:00, sondern die **gelöschte Test-Belegung** — derselbe
+> Übergang OCCUPIED → VACANT:
+>
+> | Zeit | Beobachtung |
+> |---|---|
+> | ~09:26 | Test-Belegung 107 gelöscht |
+> | danach | 107 steht auf **Frei**, **kein Schloss**, **kein „Aktiv"** |
+> | danach | Engine rechnet **18** — den Frei-Sollwert |
+> | 09:28 | Gerät **020** meldet **18,0** |
+>
+> **Warum die gelöschte Belegung den Test vollwertig macht.**
+> ``gast_sperre.loese_bei_checkout`` hängt am Statuswechsel und nicht
+> daran, **warum** er eintritt: ``sync_room_status`` leitet den Status aus
+> den aktiven Belegungen ab, und ohne Belegung ist das Zimmer frei. Der
+> Code-Pfad ist derselbe wie bei einer Abreise um 11:00.
+>
+> Nicht geprüft ist damit nur, dass eine **ablaufende** ``check_out``-Zeit
+> den Wechsel auslöst — das ist der Belegungsabgleich aus Sprint 15e und
+> steht für sich (§10ag). Die Sperre selbst ist vollständig belegt.
+>
+> **Drei Zusicherungen in einer Zeile**, und das ist der Wert dieses
+> Schritts: die Sperre ist gefallen (T4-A), die Spalte zeigt beides
+> richtig an — nämlich nichts (PR #352) —, und das Gerät hat den
+> Frei-Sollwert zwei Minuten später gemeldet.
 >
 > **Das Rad ließ sich bei diesem Test weiter drehen** — die Sperre wirkte
 > nur im System. Das ist kein Mangel dieses Tests, sondern seine Grenze:
@@ -8033,6 +8061,39 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 >
 > Dieser Test schickt den ersten `0x07` des Hauses. Er läuft **nur nach
 > ausdrücklicher Freigabe** und **nur an ein Zimmer**.
+
+> ### Kein Merge zwischen Schritt 2 und Schritt 7
+>
+> **Festlegung des Betreibers, 31.10.2026** — und sie hat einen
+> technischen Grund, der leicht untergeht.
+>
+> Ein Merge nach `develop` ist ein Deploy auf heizung-test (§0.3): der
+> Timer zieht alle fünf Minuten und rekreiert `api`, `web`,
+> `celery_worker` und `celery_beat`. **Mit dem Container sind dessen Logs
+> weg** — `docker logs --since` beginnt nach einem Neustart bei null
+> (§5.17).
+>
+> Genau darauf stützen sich zwei Schritte:
+>
+> | Schritt | braucht |
+> |---|---|
+> | 4 | `docker logs deploy-api-1 --since 3m` → die Zeile `kindersicherung gesendet` |
+> | 7 | `docker logs deploy-api-1 --since 20h` → **wie viele** `0x07` in der Nacht liefen |
+>
+> Schritt 7 ist der empfindliche. Er prüft eine Aussage über die **ganze
+> Nacht** — „es ist kein weiterer Befehl gelaufen" —, und ein Neustart um
+> drei Uhr macht sie unbeweisbar. Nicht falsch: **unbeweisbar**, und das
+> ist beim ersten Funkbefehl des Hauses dasselbe wie ein Fehlschlag.
+>
+> Der Downlink selbst überlebt einen Neustart (er liegt in der
+> ChirpStack-Queue), und die Bestätigung des Geräts steht in
+> `sensor_reading` und damit in der Datenbank. **Verloren geht nur der
+> Beweis** — und der ist hier der Zweck.
+>
+> Praktisch: offene PRs **vor** Schritt 2 mergen oder **nach** Schritt 8.
+> Das Merge-Fenster 10–12 Uhr (§0.1) fällt genau in die Beobachtungszeit,
+> wenn der Test am Vormittag beginnt — dann ist der nächste Merge der des
+> Folgetags.
 
 ### Wie viele Befehle wirklich hinausgehen
 
