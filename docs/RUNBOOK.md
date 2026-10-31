@@ -8303,13 +8303,28 @@ Für die Nachlieferung vom 31.10.2026. Baut auf §10h (Pool) und §10aj
 
 ### Was geliefert wurde
 
-| Art | DevEUI | Seriennummer |
-|---|---|---|
-| Vicki | `70b3d52dd30329c6` | `V6TF410485L19W` |
-| Vicki | `70b3d52dd30329b7` | `CKPW410470CJHU` |
-| Vicki | `70b3d52dd30329ba` | `1VFG410473HP15` |
-| Relais A | `70b3d52ddd001f23` | `FCN1865403KA7L` |
-| Relais B | `70b3d52ddd001e69` | `JD4M865217RV4U` |
+| Nummer | Art | DevEUI | Seriennummer |
+|---|---|---|---|
+| **105** | Vicki | `70b3d52dd30329c6` | `V6TF410485L19W` |
+| **106** | Vicki | `70b3d52dd30329b7` | `CKPW410470CJHU` |
+| **107** | Vicki | `70b3d52dd30329ba` | `1VFG410473HP15` |
+| **108** | Relais A | `70b3d52ddd001f23` | `FCN1865403KA7L` |
+| **109** | Relais B | `70b3d52ddd001e69` | `JD4M865217RV4U` |
+
+**Die Nummern sind fortlaufend und vom Betreiber festgelegt**
+(31.10.2026). Sie gelten als Name in ChirpStack **und** als Etikett in der
+Heizungs-Datenbank — eine Nummer, zwei Systeme, damit ein Gerät auf beiden
+Seiten gleich heisst.
+
+**Relais A ist 108, Relais B ist 109.** Die Buchstaben bleiben in diesem
+Abschnitt stehen, weil der Testplan des Betreibers sie benutzt („T3.0 an
+Relais A"); der Name des Geraets ist die Zahl.
+
+> **Die Nummer 107 ist auch eine Zimmernummer**, und in diesem RUNBOOK
+> steht 107 an vielen Stellen als *Zimmer* — in Paragraph 10aq und 10ar
+> durchgehend. **Geraet 107 ist ein Vicki im Lager**, Zimmer 107 ist ein
+> Gaestezimmer, und in Zimmer 107 haengt Geraet **020**. Wo es eng wird,
+> hilft die DevEUI: eine Zimmernummer hat keine.
 
 JoinEUI für alle Vicki: `70b3d52dd3000000`, Profil **„Heizung"**.
 
@@ -8336,10 +8351,16 @@ ohne Spalte F genügt für alles.
 
 ---
 
-### Schritt 1 — Nächste freie Nummer feststellen
+### Schritt 1 — Prüfen, dass 105–109 frei sind
 
-*SSH (Server)* — das Etikett folgt der Durchnummerierung, und die darf
-sich nicht doppeln:
+> **Das ist eine Prüfung, kein Vorschlag, und sie ist das Gate.** Die
+> Nummern sind vergeben (Tabelle oben). Ist eine davon belegt, **nicht
+> ausweichen** — melden. Eine Nummer doppelt zu belegen hiesse, zwei
+> Geräte mit demselben Namen in zwei Systemen zu führen; eine Nummer
+> stillschweigend zu überspringen hiesse, dass die Liste des Betreibers
+> und der Bestand auseinanderlaufen.
+
+*SSH (Server)* — die Etiketten der Heizungs-Datenbank:
 
 ```bash
 docker exec deploy-api-1 python -c "
@@ -8356,18 +8377,23 @@ asyncio.run(main())
 ```
 
 **Erwartung:** Etiketten `001`–`104` (bzw. `Vicki-001` bei den vier
-Testgeräten). Die drei neuen Vicki bekommen dann **105, 106, 107** — in
-der Reihenfolge der Tabelle oben.
+Testgeräten) — und **keines** von `105` bis `109`.
 
-> **Vorsicht mit der 107.** Das ist zufällig auch eine Zimmernummer, und
-> in diesem RUNBOOK steht sie an vielen Stellen als *Zimmer* 107. Das
-> Etikett `107` meint ein **Gerät**. Wenn das verwirrt: `105`–`107`
-> überspringen und bei `108` beginnen — die Nummern müssen nur eindeutig
-> sein, nicht lückenlos.
+*ChirpStack-Oberfläche* — dieselbe Frage auf der anderen Seite:
+Applications → **Heizung** → Devices, Suchfeld `10` eingeben und die
+Namensspalte lesen.
 
-Die Relais bekommen **keine** Vicki-Nummer. Etikett `Relais A` und
-`Relais B` — sie stehen in einer anderen Reihe, und eine gemeinsame
-Nummerierung würde beim Suchen zwei Dinge vermischen.
+**Erwartung:** kein Gerät mit dem Namen `105`, `106`, `107`, `108` oder
+`109`.
+
+**Abbruchkriterium:** erscheint eine dieser Nummern auf einer der beiden
+Seiten, **hier anhalten und melden**. Zwei Fälle sind denkbar und beide
+brauchen eine Entscheidung, nicht einen Handgriff:
+
+| Lage | Heisst |
+|---|---|
+| Nummer in ChirpStack, nicht in der Datenbank | ein Gerät, das angemeldet aber nie importiert wurde — oder ein Rest aus einem abgebrochenen Lauf |
+| Nummer in der Datenbank | ein Gerät trägt sie schon; welches, sagt die Abfrage oben |
 
 ### Schritt 2 — ChirpStack: fünf Geräte anlegen
 
@@ -8376,7 +8402,7 @@ device**, fünfmal.
 
 | Feld | Vicki | Relais |
 |---|---|---|
-| Name | `105`, `106`, `107` | `Relais-A`, `Relais-B` |
+| Name | `105`, `106`, `107` | `108` (A), `109` (B) |
 | Device EUI | aus der Tabelle | aus der Tabelle |
 | Join EUI | `70b3d52dd3000000` | *(Aufkleber des Geräts)* |
 | Device profile | **Heizung** | **MClimate 16ASPM** (Schritt 5) |
@@ -8440,8 +8466,8 @@ dessen Grenzen gelten würden (§10ap).
 ```bash
 cat > /tmp/relais.csv <<'CSV'
 dev_eui,serial_number,hardware_nummer
-70b3d52ddd001f23,FCN1865403KA7L,Relais A
-70b3d52ddd001e69,JD4M865217RV4U,Relais B
+70b3d52ddd001f23,FCN1865403KA7L,108
+70b3d52ddd001e69,JD4M865217RV4U,109
 CSV
 docker cp /tmp/relais.csv deploy-api-1:/tmp/relais.csv
 
@@ -8476,8 +8502,15 @@ nächsten Mal für aktuell gehalten.
 
 *Software-Oberfläche* — nachsehen:
 
-Geräte → die fünf neuen stehen in der Liste, **ohne Zone**, Status
-„noch nie gemeldet". Die Relais tragen die Art **Relais**.
+Geräte → die fünf neuen stehen als `105` bis `109` in der Liste, **ohne
+Zone**, Status „noch nie gemeldet". Unter der Nummer steht der
+**Gerätetyp**: bei `105`–`107` *Thermostat*, bei `108` und `109`
+*Relais*. Dieselbe Angabe trägt die Geräteseite neben Hersteller und
+Modell.
+
+Der Typ steht dort seit dem 31.10.2026. Vorher sah ein Relais in dieser
+Liste aus wie jedes andere Gerät — und wer bei einem Relais nach einer
+Ventilstellung sucht, sucht etwas, das es nie geben wird.
 
 ### Schritt 5 — ChirpStack: Class-C-Profil und Relais-Codec
 
@@ -8541,7 +8574,7 @@ sondern an `commissioned_at` (S3).
 
 | # | Prüfung | Erwartet |
 |---|---|---|
-| 1 | nächste freie Nummer | 105–107 frei, keine Doppelung |
+| 1 | 105–109 frei | in **beiden** Systemen, sonst anhalten und melden |
 | 2 | ChirpStack | fünf Geräte, AppKey je Gerät eingetippt |
 | 3 | Vicki-Import | `3 angelegt, 0 Konflikte`, Probelauf davor |
 | 4 | Relais-Import | `2 angelegt`, Art **Relais**, ohne Zone |
