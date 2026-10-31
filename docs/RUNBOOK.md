@@ -7886,6 +7886,43 @@ hinter den Pflicht-Stop.
 
 ## 10aq. Rad-Test „Gast kann bis Check-out nicht ändern" (Sprint 23 T4-A2) — Pflicht-Stop
 
+> ### Ergebnis: **bestanden am 31.10.2026**, Zimmer 107
+>
+> | # | Prüfung | Ergebnis |
+> |---|---|---|
+> | 1 | Setzen mit Häkchen | bestanden |
+> | 2 | Drehung am Rad wird verworfen | bestanden |
+> | 3 | Wert bleibt stehen | **erst im zweiten Anlauf** — siehe unten |
+> | 4 | Rezeption kann weiter ändern | bestanden |
+> | 5 | Abreise | **offen**, Prüfung am 31.10. um 11:15 (Test-Belegung endet 11:00) |
+>
+> **Schritt 3 war am 30.10.2026 nicht bestanden, und das war der
+> wichtigste Befund dieses Sprints.** Um 11:46 stand die Übersteuerung auf
+> 23 °C bis Check-out, um 11:49 drehte der Gast auf 25 — die Drehung wurde
+> korrekt abgewiesen, der Override blieb 23. **Und das Gerät meldete von
+> 11:49 bis 13:49 durchgehend 25,0 °C**, Ventil 18 auf 34 %, Raum 22,5 auf
+> 23,9 °C. Korrigiert hat es erst der Sechs-Stunden-Heartbeat.
+>
+> Behoben mit **T4-A2b** (PR #351, STATUS §2cm): das Sperr-Gate löst beim
+> Abweisen einen Re-Sync aus, und der Engine-Abgleich zählt unter der
+> Sperre jede Abweichung — auch innerhalb der Grenzen.
+>
+> **Der Wiederholungslauf am 31.10.2026 hat beides belegt:**
+>
+> | Zeit | Vorgang |
+> |---|---|
+> | 30.10., nach dem Deploy von #351 | der **Abgleich** holte 25 → 23 zurück |
+> | 31.10. 08:08 | Rad in 107 auf 25 gedreht |
+> | 31.10. 08:18 | Gerät meldet wieder **23,0** — ein Meldezyklus, also der **ereignisgetriebene** Weg |
+>
+> Damit sind beide Schichten im Betrieb geprüft: das Flag (eine Minute)
+> und der Abgleich (bis 30 Minuten) als Netz darunter.
+>
+> **Das Rad ließ sich bei diesem Test weiter drehen** — die Sperre wirkte
+> nur im System. Das ist kein Mangel dieses Tests, sondern seine Grenze:
+> den Befehl, der das Rad **am Gerät** stilllegt, baut T4-B. Geprüft wird
+> er in §10ar.
+
 > **Pflicht-Stop. Fünf Schritte, höchstens.** Alles an T4-A2 ist gegen
 > Mocks und gegen eine echte Datenbank geprüft. Was **nicht** geprüft
 > ist: dass ein Mensch an einem Rad an einer Wand dreht und das Zimmer
@@ -7975,5 +8012,213 @@ Geschäftsprotokoll, sondern im Engine-Protokoll des Zimmers als
 `MANUAL_OVERRIDE_BLOCKED` mit dem Grund
 `device_blocked_room_blocked`. Sie ist kein Geschäftsvorfall — niemand
 hat etwas entschieden, es wurde etwas nicht übernommen.
+
+---
+
+## 10ar. Erster `0x07` an ein echtes Gerät: Rad sperren und freigeben (Sprint 23 T4-B) — Pflicht-Stop
+
+> **Pflicht-Stop, und diesmal geht ein Befehl hinaus.** §10aq hat
+> ausdrücklich keinen Downlink erzeugt — die Sperre verwarf eine Drehung
+> und schickte dem Gerät nichts. Genau das war der Befund: im
+> `0x28`-Frame von Zimmer 107 am 30.10.2026 stand `childLock: false`, die
+> Sperre stand nur im System. T4-B legt das Rad **am Gerät** still.
+>
+> Dieser Test schickt den ersten `0x07` des Hauses. Er läuft **nur nach
+> ausdrücklicher Freigabe** und **nur an ein Zimmer**.
+
+### Wie viele Befehle wirklich hinausgehen
+
+**Zwei je Thermostat:** einer beim Sperren (`0x07 01`), einer beim
+Aufheben (`0x07 00`). Kein dritter — es gibt keine Wiederholung und keine
+Nachfrage (`0x14`) hinterher, weil das Gerät den Zustand ohnehin in
+**jedem** Keepalive über das 0x80-Bit meldet.
+
+**Aber: der Befehl geht an alle Thermostate des Zimmers, nicht an eine
+Zone.** Die Gast-Sperre ist eine Eigenschaft des **Zimmers**; hat 107
+neben dem Schlafzimmer eine Bad-Zone mit eigenem Thermostat, bekommen
+beide ihren Befehl. Das ist richtig — ein Rad, das frei bleibt, wäre eine
+halbe Sperre —, aber es ist beim Zählen zu wissen.
+
+**Vorher zählen** (die Zahl in der letzten Spalte ist die Zahl der
+Downlinks je Richtung):
+
+**SSH (heizung-test, root):**
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT r.number, hz.name AS zone, d.dev_eui, d.measure_only, d.retired_at FROM device d JOIN heating_zone hz ON d.heating_zone_id = hz.id JOIN room r ON hz.room_id = r.id WHERE r.number = '107' ORDER BY hz.name;"
+```
+
+Erwartet: mindestens eine Zeile, `measure_only = f`, `retired_at` leer.
+Eine Zeile mit `measure_only = t` bekommt **nichts** — ihr Rad ist schon
+aus der Rolle gesperrt, und das Aufheben der Gast-Sperre darf es nicht
+freigeben.
+
+### Voraussetzungen
+
+| | |
+|---|---|
+| Zimmer | **107**, ab 11:00 frei und **ohne** Sperre |
+| Gerät | montiert, online, Batterie nicht „niedrig" |
+| Dauer | 20 Minuten am ersten Tag, 5 Minuten am nächsten Morgen, dazwischen eine Nacht |
+| Freigabe | liegt vor (Betreiber, 31.10.2026) |
+
+**Warum die dauerhafte Sperre und nicht „bis Check-out":** 107 ist frei.
+Eine Sperre „bis Check-out" würde dort nie enden, und die Oberfläche
+weist sie zu Recht ab. Die dauerhafte Sperre ist die, die man von Hand
+wieder aufhebt — und genau das ist Schritt 7.
+
+### Die Schritte
+
+**1. Ausgangsstand festhalten.**
+
+*Oberfläche:* Geräteseite von 107 Schlafzimmer öffnen.
+
+Erwartet: **„Rad frei"** mit dem Vermerk **„bestätigt"**. Steht dort
+„ausstehend", hat das Gerät noch nie einen Sperr-Zustand gemeldet —
+dann vor dem Test eine Keepalive-Periode (10 Minuten) abwarten und neu
+laden.
+
+**2. Dauerhafte Sperre setzen.**
+
+*Oberfläche:* Zimmerseite 107 → Knopf oben rechts
+**„Übersteuerung sperren"** → Form **„Dauerhaft"** → bestätigen.
+
+Erwartet: der Knopf steht auf „gesperrt", und unter ihm steht die Form
+**„dauerhaft"**. In der Zimmerübersicht trägt die Zeile 107 jetzt das
+Schloss.
+
+**3. Sofort nachsehen: der Befehl ist unterwegs.**
+
+*Oberfläche:* Geräteseite 107 Schlafzimmer neu laden.
+
+Erwartet: **„Rad gesperrt"** mit **„ausstehend"**. Das ist der richtige
+Zwischenstand und **kein** Fehler: die jüngste Meldung ist die vom
+Keepalive **davor** und sagt „frei" — sie ist keine Antwort auf einen
+Befehl, der nach ihr abgeschickt wurde.
+
+**Steht dort sofort „fehlgeschlagen": stoppen und melden.** Dann ist der
+Zeitvergleich kaputt, und der Melder wäre im Normalfall rot.
+
+**4. Prüfen, dass der Befehl das Gateway erreicht hat.**
+
+*SSH (heizung-test, root):*
+
+```bash
+docker logs deploy-chirpstack-1 --since 3m 2>&1 | grep -iE "command|enqueu"
+```
+
+Erwartet: `Command received` **und** `Device queue-item enqueued` für die
+DevEUI aus der Tabelle oben. Nur `Processing command error` heißt
+Payload-Fehler (§5.13) — dann stoppen und melden.
+
+*SSH (heizung-test, root)* — was das System selbst protokolliert hat:
+
+```bash
+docker logs deploy-api-1 --since 3m 2>&1 | grep -i kindersicherung
+```
+
+Erwartet: eine Zeile `kindersicherung gesendet dev_eui=… gewollt=True`
+je Thermostat des Zimmers.
+
+**5. Eine Keepalive-Periode warten, dann das Urteil.**
+
+*Oberfläche:* nach **10 Minuten** die Geräteseite neu laden.
+
+Erwartet: **„Rad gesperrt · bestätigt"**. Das Gerät hat das 0x80-Bit
+gemeldet, und damit ist der Befehl angekommen **und** wirksam.
+
+**Steht dort „fehlgeschlagen": melden.** Der Frame ist angekommen (Schritt
+4), aber die Einstellung sitzt nicht — das ist ein Hardware-Befund und
+kein Programmfehler.
+
+**6. Am Rad drehen — jetzt muss es sich sperren lassen.**
+
+*Vor Ort:* im Zimmer am Thermostat drehen.
+
+Erwartet: **das Rad reagiert nicht** bzw. die Anzeige des Geräts nimmt
+die Drehung nicht an. Das ist der Unterschied zu §10aq: dort ließ sich
+drehen und die Drehung wurde nachträglich verworfen; hier geht sie gar
+nicht mehr.
+
+Reagiert das Rad trotzdem: **kein Abbruch**, aber melden. Die Steuerung
+ist dann unverändert in Ordnung (T4-A2b holt den Sollwert zurück), nur
+die Sperre am Gerät greift nicht.
+
+**7. Eine Nacht beobachten.**
+
+Nichts tun. Am nächsten Morgen:
+
+*Oberfläche:* Geräteseite 107 Schlafzimmer.
+
+Erwartet: weiter **„Rad gesperrt · bestätigt"**. Die Sperre soll einen
+Nachtzyklus samt Absenkung überleben, ohne dass jemand nachhilft.
+
+*SSH (heizung-test, root)* — es darf **kein** weiterer `0x07` gelaufen
+sein:
+
+```bash
+docker logs deploy-api-1 --since 20h 2>&1 | grep -ci kindersicherung
+```
+
+Erwartet: dieselbe Zahl wie am Vortag (ein Eintrag je Thermostat). Eine
+höhere Zahl heißt, dass etwas wiederholt sendet — melden.
+
+**8. Sperre aufheben und das Rad zurückgeben.**
+
+*Oberfläche:* Zimmerseite 107 → Knopf oben rechts → **aufheben**.
+
+Erwartet: Geräteseite zeigt **„Rad frei · ausstehend"**, nach einer
+Keepalive-Periode **„Rad frei · bestätigt"**, und das Rad im Zimmer lässt
+sich wieder drehen.
+
+Damit sind **beide** Richtungen geprüft, und das ist der Punkt: ein
+Sperren, das sich nicht zurücknehmen lässt, wäre schlimmer als keines.
+
+### Die Prüftabelle
+
+| # | Prüfung | Erwartet |
+|---|---|---|
+| 1 | Ausgangsstand | „Rad frei · bestätigt" |
+| 2 | Dauerhafte Sperre setzen | Knopf „gesperrt", Form „dauerhaft", Schloss in der Liste |
+| 3 | Sofort danach | „Rad gesperrt · **ausstehend**" |
+| 4 | Gateway | `Command received` + `queue-item enqueued`, eine api-Logzeile je Thermostat |
+| 5 | Nach 10 Minuten | „Rad gesperrt · **bestätigt**" |
+| 6 | Drehung am Rad | wird am Gerät nicht angenommen |
+| 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` |
+| 8 | Aufheben | „Rad frei · bestätigt", Rad wieder drehbar |
+
+### Abbruch und Rückweg
+
+**Abbrechen bei:** `Processing command error` in Schritt 4, „fehlgeschlagen"
+schon in Schritt 3, oder mehr `0x07`-Zeilen als Thermostate.
+
+**Der Rückweg ist Schritt 8** — die Sperre aufheben. Er gibt das Rad frei
+und braucht keinen Deploy und keinen Eingriff an der Datenbank. Geht auch
+das nicht, bleibt der Befehl von Hand:
+
+*SSH (heizung-test, root):*
+
+```bash
+docker exec deploy-api-1 python -c "import asyncio; from heizung.services.downlink_adapter import set_child_lock; print(asyncio.run(set_child_lock('<DEVEUI>', False)))"
+```
+
+Dieser Befehl geht **am System vorbei**: er gibt das Rad frei, die
+Datenbank weiß nichts davon, und die Geräteseite zeigt danach
+„fehlgeschlagen" (gewollt gesperrt, gemeldet frei). Das ist richtig so —
+der Widerspruch soll sichtbar sein. Er verschwindet, sobald die Sperre
+auch im System aufgehoben ist.
+
+### Was danach im Protokoll steht
+
+| Aktion | Heißt |
+|---|---|
+| `ROOM_OVERRIDE_BLOCK_TOGGLED` mit `kindersicherung: [{gewollt: true, gesendet: true}]` | Schritt 2 — Sperre gesetzt **und** Befehl hinaus |
+| dieselbe Aktion mit `gewollt: false` | Schritt 8 — Rad zurückgegeben |
+| `kindersicherung: []` | nichts gesendet. Heißt „nichts zu tun" (nur Fühler im Zimmer, oder nur die Form gewechselt) — **nicht** „nichts versucht" |
+| `gesendet: false` mit `fehler` | der Funkbefehl ist gescheitert. **Die Sperre gilt trotzdem** — sie wirkt im System, auch ohne Gerät |
+
+**Querverweise:** §10aq (der Rad-Test davor, ohne Downlink), §10an (die
+zwei Formen der Sperre), §10e (Downlink-Versuche von Hand), §5.13
+(ChirpStack verlangt `devEui` im Payload), STATUS §2co.
 
 ---

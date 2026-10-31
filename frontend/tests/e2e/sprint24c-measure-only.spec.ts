@@ -62,6 +62,9 @@ const VICKI = {
   hardware_number: null,
   measure_only: false,
   child_lock_state: "ausstehend" as const,
+  // Normales Thermostat ohne Gast-Sperre: das Rad soll frei sein. Die
+  // Fixtures darunter setzen es um, wo die Rolle oder die Sperre greift.
+  rad_gesperrt_gewollt: false,
   heating_zone: {
     id: 9,
     name: "Barbereich",
@@ -77,6 +80,7 @@ const VICKI_FUEHLER = {
   ...VICKI,
   measure_only: true,
   child_lock_state: "bestaetigt" as const,
+  rad_gesperrt_gewollt: true,
 };
 
 /** Rolle gesetzt, aber das Gerät meldet das Rad als frei. */
@@ -84,6 +88,7 @@ const VICKI_SPERRE_FEHLT = {
   ...VICKI,
   measure_only: true,
   child_lock_state: "fehlgeschlagen" as const,
+  rad_gesperrt_gewollt: true,
 };
 
 const HW_STATUS = {
@@ -202,7 +207,11 @@ test.describe("Umschalter „nur messen“", () => {
 
     const status = page.getByTestId("child-lock-status");
     await expect(status).toHaveAttribute("data-zustand", "bestaetigt");
-    await expect(status).toContainText("Kindersicherung bestätigt");
+    // Sprint 23 T4-B: der Satz nennt **beides** — was gelten soll und ob
+    // das Gerät es bestätigt hat. „Kindersicherung bestätigt" genügte,
+    // solange nur Fühler eine Sperre hatten und der gewollte Zustand
+    // damit immer „gesperrt" war.
+    await expect(status).toContainText("Rad gesperrt · bestätigt");
   });
 
   test("eine nicht gesetzte Sperre ist ein Befund, eine ausstehende nicht", async ({
@@ -213,17 +222,80 @@ test.describe("Umschalter „nur messen“", () => {
 
     const status = page.getByTestId("child-lock-status");
     await expect(status).toHaveAttribute("data-zustand", "fehlgeschlagen");
-    await expect(status).toContainText("meldet das Rad als frei");
+    await expect(status).toContainText("meldet es als frei");
   });
 
-  test("ohne Rolle gibt es keinen Sperr-Status", async ({ page }) => {
-    // Bei einem normalen Thermostat ist das Rad absichtlich frei — ein
-    // „bestätigt" dafür wäre eine Aussage ohne Frage.
-    await mock(page, { device: VICKI, nutzer: ADMIN });
+  test("ohne Rolle und ohne Sperre gibt es keinen Sperr-Status", async ({ page }) => {
+    // Bei einem normalen Thermostat, dessen Rad frei sein **soll** und
+    // frei **ist**, wäre ein „bestätigt" eine Aussage ohne Frage.
+    //
+    // Sprint 23 T4-B hat die Bedingung von `measure_only` auf den
+    // gewollten Zustand umgestellt — der Fixture trägt deshalb
+    // ausdrücklich `rad_gesperrt_gewollt: false` **und**
+    // `child_lock_state: "bestaetigt"`. Beides zusammen ist der
+    // langweilige Fall, und nur der wird verschwiegen.
+    await mock(page, {
+      device: { ...VICKI, child_lock_state: "bestaetigt" as const },
+      nutzer: ADMIN,
+    });
     await page.goto("/devices/77");
 
     await expect(page.getByTestId("measure-only-card")).toBeVisible();
     await expect(page.getByTestId("child-lock-status")).toHaveCount(0);
+  });
+
+  test("ein gast-gesperrtes Thermostat zeigt den Sperr-Status", async ({ page }) => {
+    /**
+     * **Der Befund, der diese Prüfung nötig gemacht hat.**
+     *
+     * Die Karte zeigte den Sperr-Status nur für Fühler. Mit Sprint 23
+     * T4-B hat ein **normales** Thermostat in einem gast-gesperrten
+     * Zimmer ein gesperrtes Rad — und die Karte zeigte dafür nichts.
+     *
+     * Damit wären die Schritte der Pflicht-Stop-Prüfung in RUNBOOK §10ar
+     * nicht ablesbar gewesen: sie liest an genau dieser Stelle „Rad
+     * gesperrt · ausstehend" und später „· bestätigt".
+     *
+     * Die alte Bedingung war nicht falsch, sie ist zu eng geworden
+     * (§5.77).
+     */
+    await mock(page, {
+      device: {
+        ...VICKI,
+        measure_only: false as const,
+        rad_gesperrt_gewollt: true,
+        child_lock_state: "ausstehend" as const,
+      },
+      nutzer: ADMIN,
+    });
+    await page.goto("/devices/77");
+
+    const status = page.getByTestId("child-lock-status");
+    await expect(status).toHaveAttribute("data-zustand", "ausstehend");
+    await expect(status).toContainText("Rad gesperrt · ausstehend");
+    // Und die Rolle steht weiter auf „normal" — die Sperre kommt nicht
+    // von ihr, und die Karte darf das nicht vermischen.
+    await expect(page.getByTestId("measure-only-zustand")).toContainText("Normal");
+  });
+
+  test("ein Rad, das gegen den Willen gesperrt meldet, ist ein Befund", async ({ page }) => {
+    // Die Gegenrichtung von „fehlgeschlagen": gewollt frei, gemeldet
+    // gesperrt. Vorher war dieser Fall unsichtbar, weil die Karte für ein
+    // normales Thermostat gar nichts zeigte — und ein Gast, dessen Rad
+    // ohne Grund still ist, ruft an der Rezeption an.
+    await mock(page, {
+      device: {
+        ...VICKI,
+        measure_only: false as const,
+        rad_gesperrt_gewollt: false,
+        child_lock_state: "fehlgeschlagen" as const,
+      },
+      nutzer: ADMIN,
+    });
+    await page.goto("/devices/77");
+
+    const status = page.getByTestId("child-lock-status");
+    await expect(status).toContainText("meldet es als gesperrt");
   });
 
   test("ein Mitarbeiter sieht die Rolle, aber keinen Umschalter", async ({ page }) => {

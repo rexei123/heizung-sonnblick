@@ -45,6 +45,7 @@ function geraet(opts: {
     label: "107 Schlafzimmer",
     measure_only: false,
     child_lock_state: "ausstehend",
+    rad_gesperrt_gewollt: false,
     heating_zone_id: 201,
     heating_zone: null,
     retired_at: null,

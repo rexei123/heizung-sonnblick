@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,10 +43,18 @@ from heizung.auth.dependencies import require_mitarbeiter
 from heizung.db import get_session
 from heizung.main import app
 from heizung.models.business_audit import BusinessAudit
-from heizung.models.enums import OverrideSource
+from heizung.models.device import Device
+from heizung.models.enums import (
+    DeviceKind,
+    DeviceVendor,
+    HeatingZoneKind,
+    OverrideSource,
+)
+from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
+from heizung.services import child_lock
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -216,6 +225,11 @@ async def test_patch_override_block_state_toggle_on_revokes_active_overrides(
             "blocked": True,
             "bis_checkout": False,
             "revoked_overrides_count": 2,
+            # Sprint 23 T4-B: was an die Geraete ging. Leer, weil dieses
+            # Zimmer kein Thermostat hat — und eine leere Liste heisst
+            # „nichts zu tun" und nicht „nichts versucht". Der Unterschied
+            # steht in ``child_lock.fuer_audit``.
+            "kindersicherung": [],
         }
 
 
@@ -265,6 +279,7 @@ async def test_patch_override_block_state_toggle_off_does_not_touch_overrides(
             "blocked": False,
             "bis_checkout": False,
             "revoked_overrides_count": 0,
+            "kindersicherung": [],
         }
 
 
@@ -389,3 +404,143 @@ async def test_list_rooms_ordered_floor_then_numeric(
             )
             await session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": rt_id})
             await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 23 T4-B: der Knopf schickt den Befehl ans Gerät
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def zimmer_mit_thermostat(setup_engine: AsyncEngine) -> AsyncIterator[tuple[int, str]]:
+    """Zimmer mit einer Zone und einem montierten Thermostat.
+
+    **Die Fixture oben hat absichtlich kein Gerät** — der Toggle-Zustand
+    hängt nicht daran. Für T4-B ist es umgekehrt: ohne Gerät geht kein
+    Befehl hinaus, und genau das hat die Mutationsprobe gezeigt. Ein
+    entfernter Aufruf des Auslösers liess alle Tests dieser Datei grün,
+    weil in keinem Zimmer ein Thermostat hing (§5.55).
+    """
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:8]
+    async with sessionmaker() as session:
+        rt = RoomType(name=f"t4b-{suffix}")
+        session.add(rt)
+        await session.flush()
+        room = Room(number=f"t4b-{suffix}", room_type_id=rt.id)
+        session.add(room)
+        await session.flush()
+        zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="Schlafzimmer")
+        session.add(zone)
+        await session.flush()
+        dev = Device(
+            dev_eui=f"7c107c{suffix}aa",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="Vicki",
+            heating_zone_id=zone.id,
+            health_state="healthy",
+        )
+        session.add(dev)
+        await session.commit()
+        rid, rt_id, eui = room.id, rt.id, dev.dev_eui
+
+    try:
+        yield rid, eui
+    finally:
+        async with sessionmaker() as session:
+            await session.execute(
+                text("DELETE FROM business_audit WHERE target_type='room' AND target_id=:r"),
+                {"r": rid},
+            )
+            await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": rid})
+            await session.execute(text("DELETE FROM room_type WHERE id = :r"), {"r": rt_id})
+            await session.commit()
+
+
+@pytest.fixture
+def funk(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bool]]:
+    """Fängt ``0x07`` ab. Ein Test, der funkt, hätte je nach Broker ein
+    anderes Ergebnis (§5.55)."""
+    befehle: list[tuple[str, bool]] = []
+
+    async def _senden(dev_eui: str, enabled: bool, *_a: object, **_k: object) -> str:
+        befehle.append((dev_eui, enabled))
+        return "topic"
+
+    monkeypatch.setattr(child_lock.downlink_adapter, "set_child_lock", _senden)
+    return befehle
+
+
+async def test_patch_override_block_state_sendet_kindersicherung(
+    http_client: httpx.AsyncClient,
+    setup_engine: AsyncEngine,
+    zimmer_mit_thermostat: tuple[int, str],
+    funk: list[tuple[str, bool]],
+) -> None:
+    """**Der Weg aus der Schrittliste für Zimmer 107** (RUNBOOK §10ar).
+
+    Sperre setzen über den Knopf → ``0x07 01`` an das Thermostat des
+    Zimmers, und das Protokoll sagt, dass es hinaus ist.
+
+    Dieser Test ist durch eine Mutationsprobe entstanden: ein entfernter
+    Aufruf des Auslösers in ``set_override_block_state`` liess alle Tests
+    dieser Datei grün. Geprüft war der Dienst, nicht der Endpunkt, der ihn
+    ruft — dasselbe Muster wie §5.87.
+    """
+    room_id, dev_eui = zimmer_mit_thermostat
+
+    resp = await http_client.patch(
+        f"/api/v1/rooms/{room_id}/override-block-state",
+        json={"blocked": True},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert funk == [(dev_eui, True)]
+
+    sessionmaker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with sessionmaker() as session:
+        audit = (
+            await session.execute(
+                select(BusinessAudit)
+                .where(BusinessAudit.target_type == "room")
+                .where(BusinessAudit.target_id == room_id)
+                .order_by(BusinessAudit.id.desc())
+                .limit(1)
+            )
+        ).scalar_one()
+        assert (audit.new_value or {})["kindersicherung"] == [
+            {"dev_eui": dev_eui, "gewollt": True, "gesendet": True}
+        ]
+        # Der Zeitpunkt des Befehls steht am Geraet — ohne ihn zeigt die
+        # Geraeteseite direkt danach einen roten Befund.
+        befehl_um = await session.scalar(
+            select(Device.child_lock_commanded_at).where(Device.dev_eui == dev_eui)
+        )
+        assert befehl_um is not None
+
+
+async def test_patch_override_block_state_aufheben_gibt_das_rad_frei(
+    http_client: httpx.AsyncClient,
+    zimmer_mit_thermostat: tuple[int, str],
+    funk: list[tuple[str, bool]],
+) -> None:
+    """Sperren und wieder aufheben — zwei Befehle, in beiden Richtungen.
+
+    Das ist die zweite Hälfte der Schrittliste. Ein Sperren, das sich
+    nicht zurücknehmen lässt, wäre schlimmer als keines.
+    """
+    room_id, dev_eui = zimmer_mit_thermostat
+
+    assert (
+        await http_client.patch(
+            f"/api/v1/rooms/{room_id}/override-block-state", json={"blocked": True}
+        )
+    ).status_code == 200
+    assert (
+        await http_client.patch(
+            f"/api/v1/rooms/{room_id}/override-block-state", json={"blocked": False}
+        )
+    ).status_code == 200
+
+    assert funk == [(dev_eui, True), (dev_eui, False)]

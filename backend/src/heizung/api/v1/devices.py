@@ -203,6 +203,12 @@ async def _build_device_read(
             recorded_at=reading.time,
         )
 
+    # Einmal gerechnet, zweimal gebraucht: fuer das Urteil und fuer die
+    # Frage, ob die Karte den Status zeigt. Zwei Aufrufe waeren zwei
+    # Gelegenheiten, verschiedene Gruende einzusetzen.
+    rad_gesperrt_gewollt = soll_kindersicherung(
+        measure_only=device.measure_only, gast_sperre=gast_sperre
+    )
     return read.model_copy(
         update={
             "active_override": override_read,
@@ -225,13 +231,17 @@ async def _build_device_read(
             # (Paragraph 5.79). ``gast_sperre`` ist Pflicht-Argument und
             # kommt aus einer Aggregat-Abfrage vor der Schleife.
             "child_lock_state": child_lock_state(
-                gewollt=soll_kindersicherung(
-                    measure_only=device.measure_only, gast_sperre=gast_sperre
-                ),
+                gewollt=rad_gesperrt_gewollt,
                 gemeldet=kindersicherung.gesperrt if kindersicherung is not None else None,
                 gemeldet_um=kindersicherung.gemeldet_um if kindersicherung is not None else None,
                 befehl_um=device.child_lock_commanded_at,
             ),
+            # Sprint 23 T4-B: der gewollte Zustand geht **mit** hinaus.
+            # Die Karte entscheidet daran, ob sie den Sperr-Status
+            # ueberhaupt zeigt — bis T4-B hing das an ``measure_only``
+            # allein, und ein gast-gesperrtes Normalgeraet zeigte nichts.
+            # Begruendung am Feld im Schema.
+            "rad_gesperrt_gewollt": rad_gesperrt_gewollt,
             # 20e-b: gegen was 3b verglichen hat. Vollstaendig durchgereicht,
             # nicht nur bei ``zimmer_zu_warm`` — wer wissen will, warum ein
             # warmes Zimmer *keinen* Hinweis traegt, braucht die Referenz
