@@ -7651,8 +7651,24 @@ unter „Das Abbruchkriterium".
 
 **Schritt 0 — Test-Belegung in den drei Zimmern.** *Software-Oberfläche.*
 
-Für 105, 110 und 306 je eine Belegung anlegen, Abreise **nach** dem Ende
-des Laufs (also Freitag, 06.11.).
+**Zuerst die echten Buchungen prüfen.** Für 105, 110 und 306 nachsehen, ob
+ab dem **05.11.** eine echte Buchung steht. Gibt es eine, endet die
+Test-Belegung **davor** — und wenn das den Lauf zu kurz macht, ist das der
+Befund und nicht ein Grund, die Belegung stehen zu lassen.
+
+Dann je Zimmer eine Belegung anlegen, **Abreise spätestens Donnerstag,
+05.11., 10:00** (Festlegung des Betreibers, 01.11.2026).
+
+**Warum nicht einfach bis Freitag.** Ab dem 05.11. kommen Gäste, und eine
+von Hand angelegte Belegung **hätte Vorrang vor einer echten Buchung**:
+sie ist für die Engine nicht als Test erkennbar. Ein Zimmer, das laut
+System noch belegt ist, nimmt der Anreise ihr Vorheizen — und im
+schlechtesten Fall steht am Abend eine Abreise im System, die nie
+stattgefunden hat.
+
+Der Lauf passt in die Zeit: Schritt 2 am Vormittag des 02.11., Schritt 3
+danach, Schritt 4 am 03.11., und die zwei Nächte für Schritt 5 sind die
+auf den 04. und den 05.11.
 
 *Erwartet:* die drei Zimmer stehen in der Zimmerliste auf **Belegt** und
 zeigen den Belegt-Sollwert, nicht den Frei-Sollwert.
