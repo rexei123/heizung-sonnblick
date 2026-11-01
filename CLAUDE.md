@@ -1821,9 +1821,46 @@ async def room_id(db_session):
 `uuid.uuid4().hex[:N]` umstellen, NICHT `datetime.now().strftime(...)`.
 Tageszeit-basierte Suffixe haben Parallel-Test-Race-Potenzial.
 
+**Nachtrag 01.11.2026 — absolute Zeitwerte *ohne* eingefrorene Uhr sind
+kein halber Schutz, sondern ein Ablaufdatum.**
+
+`test_soll_je_zone.py` trug im Modul-Docstring den Satz „§5.59: alle
+Zeitpunkte sind **absolute** Werte gegen ``FROZEN_NOW``" — und keinen
+einzigen `freeze_time`. Die Hälfte der Regel war befolgt, die andere
+nicht, und die Datei war damit **auf einen Tag datiert**: der Lesehelfer
+`latest_hard_clamp_zone_setpoints` vergleicht gegen ein Frischefenster von
+einer Stunde (`datetime.now(tz=UTC) - _HARD_CLAMP_FRESHNESS`), die
+Testzeile lag bei `FROZEN_NOW - 1 min`. Am 31.10.2026 war das eine Minute
+alt, am 01.11.2026 um dieselbe Uhrzeit **25 Stunden**. Zwei von elf Tests
+sind über Nacht rot geworden, ohne dass jemand eine Zeile geändert hatte —
+und sie haben die Sammel-Freigabe von drei PRs blockiert.
+
+**Warum §5.59 das nicht schon abdeckte.** Dort geht es um Fixtures, die
+`datetime.now()` benutzen und deshalb an `freeze_time` vorbeirutschen —
+also um **relative** Werte bei eingefrorener Uhr. Hier war es genau
+umgekehrt: **absolute** Werte bei laufender Uhr. Beide Fassungen haben
+dieselbe Wurzel — zwei Zeitquellen in einem Test —, und die Regel ist
+deshalb in **beide** Richtungen zu lesen.
+
+**Die Probe, und sie kostet dreißig Sekunden:** `FROZEN_NOW` auf ein
+anderes Datum setzen und die Datei noch einmal laufen lassen. Bleibt sie
+grün, hängt sie nicht am Kalender. Wird sie rot, gibt es eine zweite
+Zeitquelle — und die ist zu finden, nicht zu umgehen. Dieselbe Probe
+gehört zu jedem neuen Test, der einen **Zeitraum** prüft: Frischefenster,
+Nachtfenster, TTL, „die letzten N Stunden".
+
+**Zum Audit dieser Klasse** (§5.79): dass die Suite heute sonst grün ist,
+heißt nicht, dass keine weitere Datei datiert ist — nur, dass ihr Fenster
+heute noch passt. Wer eine solche Datei anfasst, macht die Probe oben.
+Eine Suche über alle Dateien auf einmal findet die Klasse nicht, weil das
+Muster nicht im Test steht, sondern in der **Beziehung** zwischen Test und
+abgefragtem Fenster.
+
 **Querverweise:** B-FlakyTime-1 (Hygiene-Sprint `d2d5311`), B-FlakyTime-2
 (Folge-Hot-Fix), §5.58 (Device-Lifecycle-Filter, andere Lesson aus
-demselben Sprint-Block).
+demselben Sprint-Block), §5.55 (ein grüner Lauf, der nichts geprüft hat —
+hier die Umkehrung: ein roter Lauf, der nichts gefunden hat), §5.79 (ein
+Audit gilt nur für den Stand, den es gesehen hat).
 
 ### 5.60 Race-Schutz via UPDATE-WHERE-Clause statt Python-Pre-Check (Sprint 13b.1 T5)
 
