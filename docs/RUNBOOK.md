@@ -6892,6 +6892,40 @@ ohne ChirpStack-Änderung und ohne Downlink an ein echtes Gerät.
 der vorige gehalten hat, und zwei Schritte sind Pflicht-Stopps: ohne sie
 darf kein Relais eine Last schalten.
 
+### Schritt 0 — die Angaben für den Elektriker
+
+**Aus der Hersteller-Anleitung des 16ASPM**, vom Betreiber beigebracht am
+01.11.2026. Diese Seite ist die, die mit zur Dose geht.
+
+**Klemmen:** `L` · `N` · `N` · `Lout`.
+
+**Einbauort — und das ist die Angabe, die man leicht übersieht:**
+Betriebstemperatur **0–40 °C**. Die Dose gehört deshalb **nicht direkt
+neben oder über das Panel**. Ein Infrarot-Panel gibt seine Wärme nach
+vorne und nach oben ab; ein Relais, das darüber sitzt, arbeitet im
+Dauerbetrieb am oberen Rand seines Bereichs — und sein eigener
+Überhitzungsschutz ist derselbe, der in Schritt 4 als
+**selbstheilender** Fehlerfall behandelt wird. Ein Gerät, das wegen
+seines Einbauorts regelmäßig auslöst, erzeugt dann eine Sperre nach der
+anderen.
+
+**LED am Gerät, beim Anmelden:**
+
+| Muster | Bedeutung |
+|---|---|
+| 2 s an / 1 s aus | Start |
+| 1 s an / 1 s aus | Join läuft |
+| dauerhaft an | **gejoint** |
+| Blinken im Viertelsekunden-Takt | **Join fehlgeschlagen** → AppKey prüfen |
+
+Das letzte Muster ist das nützlichste: es unterscheidet „kein Empfang"
+von „falscher Schlüssel", und beide sehen in der ChirpStack-Oberfläche
+gleich aus, nämlich als Gerät, das nie erscheint. Wer vor dem Gerät
+steht, sieht den Unterschied in vier Sekunden.
+
+**Der AppKey wird nur in der ChirpStack-Oberfläche eingetragen** — nicht
+in eine Datei, nicht in einen Chat, nicht ins Repo.
+
 ### Schritt 1 — Codec und Geräteprofil in ChirpStack
 
 **Je Server von Hand in der Oberfläche.** Es gibt keinen automatischen
@@ -6955,6 +6989,61 @@ gemessen.
 (`radio_timer`) von Befehl (`radio_set_or_flip`), Taster
 (`manual_button`) und Schutzauslösung.
 
+### Schritt 3a — der Taster am Gerät: holt der Wächter es zurück?
+
+**Zweimal kurz auf den Knopf schaltet das Relais von Hand um**
+(Hersteller-Anleitung, 01.11.2026). Damit gibt es einen Weg, das Relais
+einzuschalten, der an der Steuerung vorbeigeht — und die Frage des
+Betreibers ist die richtige: **merkt der Wächter das und schaltet es
+ab?**
+
+**Die Antwort aus dem Code lautet ja, mit zwei Bedingungen.**
+
+`rules/relais_waechter.naechste_aktion` prüft in verbindlicher
+Reihenfolge, und Regel 2 ist diese: will der Regler **AUS** und das Gerät
+**meldet EIN**, geht ein `SENDE_AUS` hinaus, mit dem Grund
+`aus_gewuenscht`. „Sicherheit vor Komfort, und AUS braucht keine
+Bedingung" — kein Mindestlauf, keine Pause, kein Timer hält es auf. Der
+Orchestrator läuft alle **60 Sekunden**.
+
+Die zwei Bedingungen:
+
+1. **Der Zustand muss ankommen.** Der Wächter kennt nur den **gemeldeten**
+   Zustand aus `relay_reading`; der Taster am Gerät schreibt dort nichts.
+   Spätestens die nächste Zustandsmeldung bringt den Wert — **ob der
+   16ASPM nach einem Tastendruck sofort sendet, lässt die Anleitung
+   offen.** Das ist eine Prüfung für den Tischversuch, siehe unten.
+2. **Das Relais muss in Betrieb genommen sein.** `relay_service.darf_schalten`
+   lässt vor gesetztem `commissioned_at` **keinen** Befehl hinaus (S3), und
+   eine stehende Schutz-Sperre blockiert ebenfalls (S4). **Im
+   Eingangstest, solange das Relais nur angelegt ist, bleibt ein von Hand
+   eingeschaltetes Relais also eingeschaltet** — und das ist richtig so:
+   ein Gerät, dessen Verhalten nach Stromrückkehr noch nicht geprüft ist,
+   soll keine Befehle bekommen. Wer es aus will, drückt noch zweimal.
+
+**Die Messung, ohne Last, am Tisch** — sie hängt an Schritt 3 an und
+kostet zwei Minuten:
+
+```
+1. 0xC1 00                   Relais AUS, Ausgangszustand
+2. zweimal kurz auf den Knopf
+3. Uhrzeit notieren
+4. Uplinks beobachten: kommt eine Zustandsmeldung, und wie schnell?
+5. 0x54 lesen                Grund der letzten Aenderung
+```
+
+| Beobachtung | Bedeutung |
+|---|---|
+| Meldung binnen Sekunden, `0x54` → `manual_button` | der Wächter greift im nächsten Takt, also binnen einer Minute |
+| Meldung erst mit dem nächsten Bericht | der Wächter greift erst dann — die Dauer in AE-78 eintragen |
+| keine Meldung | der Taster ist für die Steuerung **unsichtbar**; dann gehört er in das Handbuch als Handgriff, der nur von Hand zurückgenommen wird |
+
+**Warum das nicht erst im Betrieb auffallen darf.** Ein Relais, das von
+Hand eingeschaltet wurde und das niemand zurückholt, heizt ein Panel
+ohne Zeitgrenze — und genau dagegen ist S1 gebaut („EIN nur befristet").
+Der Taster ist der einzige Weg, der S1 umgeht. Ob die Steuerung ihn
+sieht, ist deshalb keine Nebenfrage.
+
 ### Schritt 4 — PFLICHT-STOPP: die zwei Rücklesungen
 
 **Beide, nicht eine** (S4). **Seit Sprint 24b läuft das über die
@@ -6962,6 +7051,13 @@ Oberfläche:** Geräteseite des Relais → **Provisionieren**. Der Handgriff
 schickt die vier Downlinks in der richtigen Reihenfolge (setzen, setzen,
 lesen, lesen) und zeigt danach beide Rücklesungen als bestätigt oder
 nicht bestätigt. Kein Datenbank-Zugriff mehr.
+
+**Und die Anleitung schweigt dazu.** Der Zustand nach Stromrückkehr ist
+in der Hersteller-Anleitung **nicht dokumentiert** (geprüft am 01.11.2026).
+Deshalb bleibt dieser Schritt Pflicht und wird nicht durch einen Blick
+ins Datenblatt ersetzt: `0x5E 02` setzen, rücklesen, und in Schritt 5
+die Sicherung aus und ein. Eine undokumentierte Vorgabe ist keine
+Vorgabe, sondern eine Annahme (§0 S5).
 
 Das Gerät hat zwei voneinander unabhängige
 Wege, von selbst wieder EIN zu werden, und bei beiden ist die
