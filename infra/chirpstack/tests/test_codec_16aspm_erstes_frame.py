@@ -226,3 +226,70 @@ def test_die_js_suite_laeuft_mit() -> None:
         check=False,
     )
     assert lauf.returncode == 0, f"JS-Suite rot:\n{lauf.stdout}\n{lauf.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Die Ruecklesungen und die leeren Uplinks (Befund vom 01.11.2026, 09:4x)
+# ---------------------------------------------------------------------------
+
+#: ``5f 02`` plus Keepalive, 09:48:11 — nach dem Provisionieren.
+FRAME_5F_B64 = "XwIBJAAAAAAAAOUAAAE="
+#: ``5a 00`` plus Keepalive, 09:45:03 — **vor** dem Setzen.
+FRAME_5A_B64 = "WgABJAAAAAAAAOYAAAE="
+
+
+def test_ruecklesung_stromrueckkehr_sagt_off() -> None:
+    """``5f 02`` heisst **aus** nach Stromrueckkehr.
+
+    Dieser Frame ist der Beleg, dass ``0x5E 02`` beim Provisionieren von
+    109 gesessen hat — und dass der Fehler **nicht** im Codec lag, sondern
+    danach: die Geraeteseite zeigte trotzdem „nicht bestaetigt", weil
+    ``vermerke_ruecklesung`` keinen Aufrufer hatte.
+
+    **Achtung auf die Bytes:** aus ist bei ``0x5E``/``0x5F`` die ``02``,
+    bei ``0x59``/``0x5A`` die ``01``. Deshalb stehen beide Frames hier
+    nebeneinander.
+    """
+    daten = _decode(base64.b64decode(FRAME_5F_B64))["data"]
+
+    assert daten["stateAfterPowerReturn"] == "off"
+    # Der angehaengte Keepalive muss mitkommen, sonst fehlt der Zustand.
+    assert daten["relayState"] == "ON"
+    assert daten["acVoltage_V"] == 229
+    assert daten["keepalive_included"] is True
+
+
+def test_ruecklesung_ueberhitzung_sagt_last_state() -> None:
+    """``5a 00`` heisst **letzter Zustand** — die Werksvorgabe.
+
+    Der Frame kam um 09:45, also **vor** dem Provisionieren, und sagt
+    damit nichts ueber dessen Ergebnis. Er steht hier, weil er die andere
+    Haelfte der Byte-Falle zeigt: ``00`` ist ``last_state``, und ``off``
+    waere hier ``01``.
+    """
+    daten = _decode(base64.b64decode(FRAME_5A_B64))["data"]
+
+    assert daten["stateAfterOverheatingRecovery"] == "last_state"
+    assert daten["relayState"] == "ON"
+    assert daten["acVoltage_V"] == 230
+
+
+def test_leerer_uplink_ist_kein_fehler() -> None:
+    """fPort 0 traegt nie eine Nutzlast — und ist kein Fehler.
+
+    **Befund des Betreibers, 01.11.2026:** Relais 109 schickte um
+    09:47:57 und 09:48:04 zwei leere Frames auf fPort 0, und ChirpStack
+    schrieb zweimal ``UPLINK_CODEC ERROR``. fPort 0 ist die MAC-Ebene von
+    LoRaWAN; dort steht nie etwas.
+
+    Ein Fehler, der im Normalbetrieb erscheint, nimmt den echten Fehlern
+    die Aufmerksamkeit (§5.79). „Nichts zu sagen" ist eine gueltige
+    Aussage und gehoert nicht in die Fehlerliste.
+    """
+    ergebnis = _decode(b"", fport=0)
+
+    assert ergebnis["errors"] == []
+    assert ergebnis["data"] == {}, (
+        "kein eigener report_type: der Subscriber entscheidet an dem Feld, "
+        "und ein neuer Wert waere eine Weiche, die niemand gebaut hat"
+    )

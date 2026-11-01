@@ -488,3 +488,167 @@ def test_die_antwort_auf_0x54_schlaegt_den_nebeneffekt() -> None:
     )
 
     assert werte["change_reason"] == "overheating_protection"
+
+
+# ---------------------------------------------------------------------------
+# Die Ruecklesung kommt an (Befund des Betreibers, 01.11.2026)
+# ---------------------------------------------------------------------------
+
+#: Die beiden echten Frames von Relais 109, Base64 wie in ChirpStack.
+#: ``5f 02`` + Keepalive, 09:48:11 UTC+1, nach dem Provisionieren.
+FRAME_5F_OFF = "XwIBJAAAAAAAAOUAAAE="
+#: ``5a 00`` + Keepalive, 09:45:03, **vor** dem Setzen — also ``last_state``.
+FRAME_5A_LAST_STATE = "WgABJAAAAAAAAOYAAAE="
+
+#: Was der Codec aus ``FRAME_5F_OFF`` macht (nachgerechnet mit node).
+OBJ_5F_OFF = {
+    "report_type": "command_response",
+    "stateAfterPowerReturn": "off",
+    "internalTemperature": 36,
+    "energy_raw": 0,
+    "energy_kWh": 0,
+    "power_W": 0,
+    "acVoltage_V": 229,
+    "acCurrent_mA": 0,
+    "relayState": "ON",
+    "keepalive_included": True,
+}
+
+#: Und aus ``FRAME_5A_LAST_STATE``.
+OBJ_5A_LAST_STATE = {
+    "report_type": "command_response",
+    "stateAfterOverheatingRecovery": "last_state",
+    "internalTemperature": 36,
+    "energy_raw": 0,
+    "energy_kWh": 0,
+    "power_W": 0,
+    "acVoltage_V": 230,
+    "acCurrent_mA": 0,
+    "relayState": "ON",
+    "keepalive_included": True,
+}
+
+
+@pytest.mark.asyncio
+async def test_ruecklesung_stromrueckkehr_wird_am_geraet_vermerkt() -> None:
+    """Der Frame von 09:48:11 muss „bestätigt" ergeben.
+
+    **Der Befund.** Relais 109 hat die Ruecklesung geschickt, der Codec
+    hat sie richtig dekodiert (``stateAfterPowerReturn = "off"``) — und
+    die Geraeteseite zeigte weiter „Aus nach Stromrueckkehr: nicht
+    bestaetigt". Zwischen Uplink und Anzeige lag nichts:
+    ``relay_service.vermerke_ruecklesung`` hatte **keinen Aufrufer**.
+
+    Geprueft wird **am Aufrufer** (``_persist_uplink``) und mit dem
+    **echten** Frame — nicht an der Funktion, die die ganze Zeit in
+    Ordnung war (§5.87).
+    """
+    from heizung.services import mqtt_subscriber
+    from heizung.services.mqtt_subscriber import ChirpStackUplink, _persist_uplink
+    from tests.conftest import purge_test_data_by_prefix
+
+    engine = create_async_engine(TEST_DB_URL or "", poolclass=None)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch_ziel = mqtt_subscriber.SessionLocal
+    mqtt_subscriber.SessionLocal = maker  # type: ignore[assignment]
+
+    try:
+        async with maker() as aufbau:
+            dev = await _relais(aufbau, marker="r5f")
+            # Ausgangslage wie bei 109: noch nichts bestaetigt.
+            dev.power_return_verified_at = None
+            dev.overheating_recovery_verified_at = None
+            dev.commissioned_at = None
+            dev_eui = dev.dev_eui
+            await aufbau.commit()
+
+        await _persist_uplink(
+            ChirpStackUplink.model_validate(
+                {
+                    "deviceInfo": {"devEui": dev_eui},
+                    "fCnt": 12,
+                    "fPort": 2,
+                    "time": datetime.now(tz=UTC).isoformat(),
+                    "object": dict(OBJ_5F_OFF),
+                    "data": FRAME_5F_OFF,
+                }
+            )
+        )
+
+        async with maker() as pruefung:
+            zeile = (
+                (await pruefung.execute(select(Device).where(Device.dev_eui == dev_eui)))
+                .scalars()
+                .one()
+            )
+            assert zeile.power_return_verified_at is not None, (
+                "die Ruecklesung 'off' muss den Vermerk setzen - genau das fehlte"
+            )
+            # Die zweite Achse bleibt unberuehrt: dieser Frame sagt nichts
+            # ueber den Ueberhitzungsschutz.
+            assert zeile.overheating_recovery_verified_at is None
+            # Und der Keepalive-Schwanz desselben Frames muss weiter in die
+            # Zeitreihe gehen, sonst prueft der Test nur die halbe Kette.
+            assert (
+                await pruefung.scalar(
+                    select(RelayReading.ac_voltage_v).where(RelayReading.device_id == zeile.id)
+                )
+            ) == 229
+    finally:
+        mqtt_subscriber.SessionLocal = monkeypatch_ziel  # type: ignore[assignment]
+        async with maker() as putzen:
+            await purge_test_data_by_prefix(putzen, PREFIX, dev_eui_pattern="beef%")
+            await putzen.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_last_state_loescht_den_vermerk_wieder(db_session: AsyncSession) -> None:
+    """``last_state`` ist ein **Nein**, kein „noch nicht".
+
+    Der Frame von 09:45:03 kam **vor** dem Setzen und meldet die
+    Werksvorgabe. Er darf einen bestandenen Vermerk von vorher nicht
+    stehen lassen — sonst ueberdeckt ein Erfolg von gestern ein Nein von
+    heute.
+
+    **Das ist zugleich die Begruendung, warum es keinen Zeitvergleich
+    gegen die Provisionierungszeit braucht:** nur ``off`` setzt, und
+    ``off`` kann erst nach dem Setzen gemeldet werden. Eine veraltete
+    Antwort kann den Vermerk nur **loeschen**, und das ist die sichere
+    Richtung.
+    """
+    dev = await _relais(db_session, marker="r5a")
+    dev.overheating_recovery_verified_at = datetime.now(tz=UTC) - timedelta(days=1)
+    await db_session.flush()
+
+    ergebnis = await relay_uplink._vermerke_ruecklesungen(
+        db_session, device_id=dev.id, obj=dict(OBJ_5A_LAST_STATE)
+    )
+
+    assert ergebnis == {"overheating_recovery": False}
+    assert dev.overheating_recovery_verified_at is None
+
+
+@pytest.mark.asyncio
+async def test_ein_frame_ohne_ruecklesung_ruehrt_die_vermerke_nicht_an(
+    db_session: AsyncSession,
+) -> None:
+    """Ein gewoehnlicher Keepalive darf nichts zuruecksetzen.
+
+    Der naheliegende Fehler waere, „kein Feld" wie ``last_state`` zu
+    behandeln. Dann loeschte jeder Keepalive — also alle zehn Minuten —
+    beide Vermerke, und eine Inbetriebnahme waere nie moeglich.
+    """
+    dev = await _relais(db_session, marker="rka")
+    vorher = datetime.now(tz=UTC) - timedelta(hours=2)
+    dev.power_return_verified_at = vorher
+    dev.overheating_recovery_verified_at = vorher
+    await db_session.flush()
+
+    ergebnis = await relay_uplink._vermerke_ruecklesungen(
+        db_session, device_id=dev.id, obj=dict(KEEPALIVE)
+    )
+
+    assert ergebnis == {}
+    assert dev.power_return_verified_at == vorher
+    assert dev.overheating_recovery_verified_at == vorher

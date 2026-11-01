@@ -7071,6 +7071,21 @@ schickt die vier Downlinks in der richtigen Reihenfolge (setzen, setzen,
 lesen, lesen) und zeigt danach beide Rücklesungen als bestätigt oder
 nicht bestätigt. Kein Datenbank-Zugriff mehr.
 
+**Der Handgriff dauert rund 45 Sekunden, und das ist Absicht**
+(01.11.2026). Zwischen den vier Downlinks liegen je 15 Sekunden, weil der
+16ASPM je Uplink offenbar nur **eine** Befehlsantwort anhängt: an Relais
+109 ergaben zwei Lesebefehle fünf Sekunden hintereinander **eine**
+Antwort, und nach der pausenlosen Provisionierung fehlte die Antwort auf
+`0x5A`. Die Pause steht in den Settings
+(`relay_provision_pause_s`, Vorgabe 15); `0` stellt das alte Verhalten
+her. Ohne Pause ist der Handgriff schneller und **unvollständig** — und
+eine fehlende Rücklesung sieht aus wie ein Gerät, das nicht antwortet.
+
+**Die 15 Sekunden sind abgeleitet, nicht gemessen.** Die beobachteten
+Antworten kamen 8 bzw. gut 70 Sekunden nach ihrem Befehl. Zeigt sich das
+an einem anderen Gerät anders, ist die Zahl die erste Stelle, an der man
+dreht — nicht der Mechanismus.
+
 **Und die Anleitung schweigt dazu.** Der Zustand nach Stromrückkehr ist
 in der Hersteller-Anleitung **nicht dokumentiert** (geprüft am 01.11.2026).
 Deshalb bleibt dieser Schritt Pflicht und wird nicht durch einen Blick
@@ -9113,6 +9128,12 @@ nicht in der Oberfläche (§5.22).
 *SSH (heizung-test, root).* **Das ist der Probelauf für Schritt 3:** zwei
 Lesebefehle, die nichts verändern.
 
+> **Mindestens 15 Sekunden zwischen den beiden.** Genau hier ist der
+> Befund vom 01.11.2026 entstanden: um 09:44:50 und 09:44:55 abgeschickt,
+> kam **eine** Antwort. Das Gerät hängt je Uplink offenbar nur eine
+> Befehlsantwort an. Zwei Befehle in fünf Sekunden sehen deshalb aus wie
+> ein Gerät, das nicht antwortet.
+
 ```bash
 docker exec deploy-api-1 python -c "import asyncio; from heizung.services.relay_adapter import frage_zustand_nach_stromrueckkehr as f; print(asyncio.run(f('70b3d52ddd001e69')))"
 ```
@@ -9133,12 +9154,47 @@ einen undokumentierten Wert und erfährt es nicht.
 
 *Software-Oberfläche.* Geräteseite von 109 → **Provisionieren**. Der
 Handgriff schickt die vier Downlinks in der richtigen Reihenfolge
-(setzen, setzen, lesen, lesen) und zeigt danach beide Rücklesungen als
-bestätigt oder nicht bestätigt.
+(setzen, setzen, lesen, lesen), mit **15 Sekunden Pause** zwischen ihnen —
+er dauert deshalb rund **45 Sekunden**. Danach zeigt die Geräteseite beide
+Rücklesungen als bestätigt oder nicht bestätigt.
 
 *Erwartet:* `0x5F` → `02` und `0x5A` → `01`, **beide bestätigt**. Ohne
 beide lässt sich „in Betrieb genommen" nicht setzen; die Prüfung sitzt im
 Backend (`relay_service.nimm_in_betrieb`), nicht im Formular.
+
+> #### Erster Lauf am 01.11.2026: drei Befunde, alle behoben
+>
+> **1. Die Rücklesung kam an und wurde nicht vermerkt.** Um 09:48:11
+> meldete 109 `5f 02` plus Keepalive — `stateAfterPowerReturn = "off"`,
+> also **bestanden**. Die Geräteseite zeigte weiter „nicht bestätigt".
+> Der Grund: `relay_service.vermerke_ruecklesung` hatte **keinen
+> Aufrufer**. Die Funktion war da, war getestet, und zwischen ihr und dem
+> Uplink lag nichts (§5.87 — in derselben Woche der dritte Fall dieser
+> Art an diesem Gerätepfad).
+>
+> **Kein Zeitvergleich gegen die Provisionierungszeit**, und das ist eine
+> Entscheidung mit Grund: nur `off` setzt den Vermerk, und `off` kann das
+> Gerät erst melden, **nachdem** der Befehl gesessen hat; `last_state`
+> löscht ihn. Eine veraltete Antwort kann ihn also nur löschen, und das
+> ist die sichere Richtung. Das ist der Unterschied zur Kindersicherung,
+> wo die Zeit sehr wohl zählt — dort ist das Gerät **Class A** und die
+> erste Meldung nach dem Befehl trägt noch den alten Zustand (§10ar).
+>
+> **2. Die zweite Rücklesung blieb aus** — siehe die Pause oben. Schon um
+> 09:44:50/55 ergaben zwei Lesebefehle nur eine Antwort (`5a 00` um
+> 09:45:03, also `last_state`: der Werkswert, **vor** dem Setzen).
+>
+> **3. Leere Uplinks auf fPort 0** (09:47:57, 09:48:04) erzeugten
+> `UPLINK_CODEC ERROR`. fPort 0 ist die MAC-Ebene von LoRaWAN, dort steht
+> nie eine Nutzlast. Der Codec gibt jetzt einen leeren Datenblock **ohne
+> Fehler** zurück: ein Fehler, der im Normalbetrieb erscheint, nimmt den
+> echten Fehlern die Aufmerksamkeit (§5.79).
+>
+> **Nach dem Deploy:** Codec neu einfügen (die Fassung mit dem leeren
+> Payload), dann **Provisionieren einmal wiederholen**. Erwartet sind
+> danach **beide** Rücklesungen bestätigt. Bleibt `0x5A` wieder aus, ist
+> die Pause zu kurz — dann melden, nicht an der Zahl drehen, bevor die
+> zweite Beobachtung da ist.
 
 *Rückweg:* keiner nötig — die Einstellung wirkt erst bei der nächsten
 Stromrückkehr bzw. Erholung, und beide sind in dieser Richtung die

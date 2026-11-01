@@ -73,8 +73,25 @@
 function decodeUplink(input) {
     var bytes = input.bytes;
 
+    // **Ein leerer Uplink ist kein Fehler** (Befund des Betreibers,
+    // 01.11.2026). Relais 109 schickte um 09:47:57 und 09:48:04 zwei
+    // leere Frames auf **fPort 0** — das ist die MAC-Ebene von LoRaWAN,
+    // dort steht nie eine Nutzlast. ChirpStack schrieb dafuer zweimal
+    // ``UPLINK_CODEC ERROR`` ins Log.
+    //
+    // Das ist die Sorte Melder, die man nach einer Woche ueberliest
+    // (§5.79): ein Fehler, der im Normalbetrieb erscheint, nimmt den
+    // echten Fehlern ihre Aufmerksamkeit. „Nichts zu sagen" ist eine
+    // gueltige Aussage, und sie gehoert nicht in die Fehlerliste.
+    //
+    // Zurueck kommt ein **leerer** Datenblock, kein eigener
+    // ``report_type``: der Subscriber entscheidet an diesem Feld, und ein
+    // neuer Wert waere eine Weiche, die niemand gebaut hat. Eine
+    // ``relay_reading``-Zeile aus lauter ``NULL`` ist harmlos — jeder
+    // Leser filtert sie (``relay_state`` ausdruecklich mit
+    // ``relay_on IS NOT NULL``).
     if (!bytes || bytes.length === 0) {
-        return { data: {}, errors: ['empty payload'] };
+        return { data: {}, errors: [] };
     }
 
     if (bytes[0] === 0x01) {
