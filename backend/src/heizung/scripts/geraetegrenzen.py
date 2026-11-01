@@ -72,6 +72,7 @@ from heizung.scripts.pairing.clock import REAL_CLOCK, Clock  # noqa: E402
 from heizung.services import downlink_adapter, resync_flag  # noqa: E402
 from heizung.services.geraete_ziele import (  # noqa: E402
     Ausnahme,
+    MehrdeutigeAuswahlError,
     Zielgeraet,
     lade_ziele,
     nicht_gefunden,
@@ -717,6 +718,26 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
+    # Der Abbruch bei Zweideutigkeit gilt fuer jeden Unterbefehl, und
+    # die Pruefung sitzt in ``lade_ziele`` — dort, wo die Auswahl
+    # entsteht (Paragraph 5.53).
+    try:
+        return _verteile(args)
+    except MehrdeutigeAuswahlError as exc:
+        print(f"\n{exc}")
+        print("\nAbbruch — es wird nichts gesendet.")
+        return 2
+
+
+def _verteile(args: argparse.Namespace) -> int:
+    """Startet den gewaehlten Unterbefehl — **und nur das**.
+
+    Eigene Funktion aus demselben Grund wie in ``fenstererkennung``: ein
+    Test, der ``main()`` aufruft, startet sonst mit ``asyncio.run`` einen
+    zweiten Event-Loop mitten in der pytest-Sitzung und hinterlaesst im
+    gemeinsamen Datenbank-Pool eine Verbindung an einem toten Loop
+    (Paragraph 5.14). Die Begruendung mit Fallbeispiel steht dort.
+    """
     if args.befehl == "setzen":
         return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
     if args.befehl == "abfragen":

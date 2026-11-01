@@ -355,3 +355,69 @@ def test_nachtabsenkung_ohne_fenster_waere_der_fehlalarm() -> None:
     )
     assert len(gefunden) == 1
     assert gefunden[0].trifft_abbruchkriterium is True
+
+
+# ---------------------------------------------------------------------------
+# Der Abbruch kommt beim Betreiber an (01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("unterbefehl", ["setzen", "aus", "status", "befund"])
+def test_zweideutige_auswahl_bricht_mit_rueckgabewert_2_ab(
+    unterbefehl: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nicht nur die Pruefung, auch der **Weg nach draussen** ist geprueft.
+
+    Die Pruefung sitzt in ``lade_ziele``; dieser Test faellt, wenn der
+    Fang im Werkzeug fehlt — dann kaeme ein Rueckverfolgungsprotokoll
+    statt einer Meldung, und der Rueckgabewert waere 1 statt 2. Genau
+    diese Trennung ist §5.87: die Funktion war in Ordnung, der Aufrufer
+    nicht.
+
+    **Alle vier Unterbefehle:** jeder nimmt ``--nur`` an, und jeder
+    landet in demselben Fang. Vier Faenge waeren vier Stellen, an denen
+    er spaeter fehlen kann.
+
+    **Ersetzt wird** ``_verteile`` **und nicht** ``lade_ziele``, und das
+    ist kein Umweg, sondern der Grund, warum es ``_verteile`` gibt:
+    ``lade_ziele`` zu ersetzen hiesse, ``main()`` mit seinem
+    ``asyncio.run`` laufen zu lassen — ein **zweiter** Event-Loop mitten
+    in der Suite, und der gemeinsame Datenbank-Pool haengt am Loop
+    (§5.14). Am 01.11.2026 hat genau das in einer **anderen** Datei
+    zugeschlagen. Geprueft ist damit der letzte Sprung (Ausnahme aus dem
+    Verteiler -> Meldung + Rueckgabewert 2); dass ``lade_ziele`` die
+    Ausnahme wirft, steht in ``test_geraete_ziele``, und dass sie durch
+    ``asyncio.run`` nach oben kommt, ist Python und nicht unser Code.
+    """
+    from heizung.scripts import fenstererkennung
+    from heizung.services.geraete_ziele import MehrdeutigeAuswahlError
+
+    def _mehrdeutig(*_args: object, **_kwargs: object) -> int:
+        raise MehrdeutigeAuswahlError(
+            {
+                "105": {
+                    "Etikett": ["105 / 70b3d52dd30329c6 / 207 Schlafzimmer"],
+                    "Zimmernummer": ["021 / 70b3d52dd3034de4 / 105 Schlafzimmer"],
+                }
+            }
+        )
+
+    monkeypatch.setattr(fenstererkennung, "_verteile", _mehrdeutig)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["fenstererkennung", unterbefehl, "--nur", "105"]
+        + (["--ausfuehren"] if unterbefehl in {"setzen", "aus"} else []),
+    )
+
+    rueckgabe = fenstererkennung.main()
+    ausgabe = capsys.readouterr().out
+
+    assert rueckgabe == 2
+    assert "Mehrdeutige Auswahl" in ausgabe
+    assert "es wird nichts gesendet" in ausgabe
+    # Die Trefferliste muss mitkommen — ein Abbruch ohne sie ist eine
+    # Sackgasse (Auftrag des Betreibers: „mit Liste der Treffer").
+    assert "70b3d52dd30329c6" in ausgabe
+    assert "70b3d52dd3034de4" in ausgabe
