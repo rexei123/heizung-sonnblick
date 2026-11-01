@@ -204,7 +204,13 @@ async def relais_aus(dev_eui: str) -> str:
 
 
 async def frage_zustand(dev_eui: str) -> str:
-    """``0xB1`` — Zustand abfragen. Antwort kommt im naechsten Uplink."""
+    """``0xB1`` — Zustand abfragen. Antwort kommt im naechsten Uplink.
+
+    **Handwerkzeug, Aufrufer ist der Mensch.** Im Programm ruft das
+    niemand; der Befehl dafuer steht in RUNBOOK §10at Schritt 4a. Bis
+    zum 01.11.2026 stand er nirgends, obwohl der Schritt ihn verlangt —
+    gefunden bei der Suche nach Funktionen ohne Aufrufer.
+    """
     return await send_raw_downlink(dev_eui, bytes([CMD_RELAY_STATE_GET]))
 
 
@@ -212,8 +218,13 @@ async def frage_timer(dev_eui: str) -> str:
     """``0x58`` — Zustand **und Restlaufzeit** abfragen.
 
     Die Restlaufzeit ist der Grund, warum diese Abfrage neben ``0xB1``
-    steht: sie sagt, ob ueberhaupt ein Timer laeuft. Der Waechter kann
-    damit pruefen, statt zu schliessen.
+    steht: sie sagt, ob ueberhaupt ein Timer laeuft.
+
+    **Kein Aufrufer, und das bleibt so** (Entscheidung des Betreibers,
+    01.11.2026). Hier stand "der Waechter kann damit pruefen, statt zu
+    schliessen" — er tut es nicht, und der Satz war damit ein Versprechen
+    ohne Deckung (Paragraph 5.20). Die Abfrage bleibt als Handwerkzeug fuer
+    den Tischversuch.
     """
     return await send_raw_downlink(dev_eui, bytes([CMD_TIMER_SECONDS_GET]))
 
@@ -226,6 +237,11 @@ async def frage_schaltgrund(dev_eui: str) -> str:
     Ob die Abfrage traegt, ist am Geraet zu pruefen (AE-78) — der
     Waechter verlaesst sich nicht darauf, sondern wertet den Grund aus,
     **wenn** das Geraet ihn von selbst mitschickt.
+
+    **Handwerkzeug, Aufrufer ist der Mensch.** Im Programm ruft das
+    niemand; der Befehl dafuer steht in RUNBOOK §10at Schritt 4a. Bis
+    zum 01.11.2026 stand er nirgends, obwohl der Schritt ihn verlangt —
+    gefunden bei der Suche nach Funktionen ohne Aufrufer.
     """
     return await send_raw_downlink(dev_eui, bytes([CMD_CHANGE_REASON_GET]))
 
@@ -272,16 +288,6 @@ async def setze_zustand_nach_ueberhitzung(dev_eui: str, modus: str = "off") -> s
 async def frage_zustand_nach_ueberhitzung(dev_eui: str) -> str:
     """``0x5A`` — die Einstellung zurueckleasen (S4)."""
     return await send_raw_downlink(dev_eui, bytes([CMD_OVERHEATING_RECOVERY_GET]))
-
-
-async def setze_keepalive_periode(dev_eui: str, minuten: int) -> str:
-    """``0x02`` — Keepalive-Periode setzen. Bestaetigter Downlink."""
-    return await send_raw_downlink(dev_eui, keepalive_periode_payload(minuten), confirmed=True)
-
-
-async def frage_keepalive_periode(dev_eui: str) -> str:
-    """``0x12`` — Keepalive-Periode lesen."""
-    return await send_raw_downlink(dev_eui, bytes([CMD_KEEPALIVE_PERIOD_GET]))
 
 
 async def frage_version(dev_eui: str) -> str:

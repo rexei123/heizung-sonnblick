@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path as FsPath
 from typing import Any
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -38,7 +40,6 @@ from sqlalchemy.ext.asyncio import (
 from alembic import command
 from heizung.api.v1 import relays as relays_api
 from heizung.auth.dependencies import get_current_user
-from heizung.config import get_settings
 from heizung.db import get_session
 from heizung.main import app
 from heizung.models.business_audit import BusinessAudit
@@ -77,23 +78,18 @@ async def setup_engine() -> AsyncIterator[AsyncEngine]:
 @pytest_asyncio.fixture
 async def mitgeschnitten(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Alle Downlinks der Endpunkte, ohne MQTT."""
-    protokoll: dict[str, list[Any]] = {"relay": [], "child_lock": []}
-
-    async def _rel(dev_eui: str, *args: Any, **kwargs: Any) -> str:
-        protokoll["relay"].append((dev_eui, args, kwargs))
-        return "topic"
+    protokoll: dict[str, list[Any]] = {"child_lock": []}
 
     async def _cl(dev_eui: str, *args: Any, **kwargs: Any) -> str:
         protokoll["child_lock"].append((dev_eui, args, kwargs))
         return "topic"
 
-    for name in (
-        "setze_zustand_nach_stromrueckkehr",
-        "setze_zustand_nach_ueberhitzung",
-        "frage_zustand_nach_stromrueckkehr",
-        "frage_zustand_nach_ueberhitzung",
-    ):
-        monkeypatch.setattr(relays_api.relay_adapter, name, _rel)
+    # **Kein Relais-Mitschnitt mehr.** Seit dem 01.11.2026 sendet kein
+    # Endpunkt dieses Moduls einen Relais-Downlink: die Provisionierung
+    # laeuft im Hintergrund-Auftrag, und der wird in
+    # ``test_relais_provisionierung_auftrag`` an seiner eigenen Stelle
+    # geprueft. Ein Mitschnitt, den niemand liest, ist eine Zusicherung
+    # ohne Gegenstand.
     for name in ("set_child_lock", "get_child_lock"):
         monkeypatch.setattr(relays_api.downlink_adapter, name, _cl)
     return protokoll
@@ -333,6 +329,8 @@ async def test_inbetriebnahme_mit_beiden_ruecklesungen_gelingt(
         assert geraet is not None
         geraet.power_return_verified_at = jetzt - timedelta(minutes=5)
         geraet.overheating_recovery_verified_at = jetzt - timedelta(minutes=4)
+        # Seit dem 01.11.2026 gehoert die Firmware zum Tor (Fall 109).
+        geraet.firmware_version = "1.5"
         await session.commit()
 
     antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/commission")
@@ -359,85 +357,6 @@ async def test_inbetriebnahme_mit_beiden_ruecklesungen_gelingt(
 # ---------------------------------------------------------------------------
 # Provisionierung
 # ---------------------------------------------------------------------------
-
-
-async def test_provisionierung_sendet_vier_downlinks_in_reihenfolge(
-    admin_client: httpx.AsyncClient,
-    aufbau: Aufbau,
-    mitgeschnitten: dict[str, list[Any]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Setzen, setzen, lesen, lesen — und das Ergebnis sagt „angefragt".
-
-    Die Reihenfolge ist nicht beliebig: erst beide Werte setzen, dann
-    beide abfragen, damit die Antworten einen zusammengehoerenden Stand
-    beschreiben.
-
-    **Die Pause wird mitgeschnitten, nicht abgewartet.** Seit dem
-    01.11.2026 liegen zwischen den vier Downlinks je 15 Sekunden (Befund
-    an Relais 109, Begruendung im Endpunkt). Ein Test, der das wirklich
-    abwartet, kostet 45 Sekunden je Lauf — und er prueft nichts, was
-    dieser Mitschnitt nicht auch prueft.
-    """
-    geschlafen: list[float] = []
-
-    async def _mitschnitt(dauer: float) -> None:
-        geschlafen.append(dauer)
-
-    monkeypatch.setattr("heizung.api.v1.relays.asyncio.sleep", _mitschnitt)
-
-    antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
-    assert antwort.status_code == 200, antwort.text
-    rumpf = antwort.json()
-    assert len(rumpf["gesendet"]) == 4
-    assert rumpf["gesendet"][0].startswith("0x5E 02")
-    assert rumpf["gesendet"][1].startswith("0x59 01")
-    assert rumpf["gesendet"][2].startswith("0x5F")
-    assert rumpf["gesendet"][3].startswith("0x5A")
-    assert "naechsten Uplink" in rumpf["hinweis"], (
-        "der Endpunkt darf kein Urteil behaupten — die Antworten kommen asynchron"
-    )
-    assert len(mitgeschnitten["relay"]) == 4
-    # Drei Pausen fuer vier Befehle: **zwischen** ihnen, nicht vor dem
-    # ersten. Ohne sie haengt das Geraet je Uplink nur eine Antwort an,
-    # und die Ruecklesung auf ``0x5A`` fehlt — genau der Befund vom
-    # 01.11.2026.
-    assert geschlafen == [15, 15, 15]
-
-
-async def test_ohne_pause_laeuft_es_wie_vorher(
-    admin_client: httpx.AsyncClient,
-    aufbau: Aufbau,
-    mitgeschnitten: dict[str, list[Any]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``relay_provision_pause_s = 0`` schaltet die Pause ab.
-
-    Die 15 Sekunden sind eine **Annahme ueber fremde Hardware** und keine
-    Eigenschaft unseres Systems: an Relais 109 ergaben zwei Lesebefehle
-    fuenf Sekunden hintereinander eine Antwort statt zwei. Stellt sich das
-    an einem anderen Geraet anders dar, muss die Zahl verstellbar sein —
-    und ``0`` muss das alte Verhalten zurueckgeben, sonst ist der
-    Rueckweg nur behauptet.
-    """
-    geschlafen: list[float] = []
-
-    async def _mitschnitt(dauer: float) -> None:
-        geschlafen.append(dauer)
-
-    monkeypatch.setattr("heizung.api.v1.relays.asyncio.sleep", _mitschnitt)
-    monkeypatch.setenv("RELAY_PROVISION_PAUSE_S", "0")
-    get_settings.cache_clear()
-
-    try:
-        antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
-        assert antwort.status_code == 200, antwort.text
-        assert len(antwort.json()["gesendet"]) == 4
-        assert len(mitgeschnitten["relay"]) == 4
-        assert geschlafen == [], "mit Pause 0 darf nicht geschlafen werden"
-    finally:
-        monkeypatch.delenv("RELAY_PROVISION_PAUSE_S", raising=False)
-        get_settings.cache_clear()
 
 
 async def test_provisionierung_eines_thermostats_abgewiesen(
@@ -661,3 +580,112 @@ async def test_das_protokoll_nennt_den_gewollten_zustand_und_den_grund(
     assert neu["rad_gesperrt_gewollt"] is True
     assert neu["gast_sperre"] is True
     assert neu["kindersicherung_gesendet"] is False
+
+
+# ---------------------------------------------------------------------------
+# Provisionierung als Hintergrund-Auftrag (Befund vom 01.11.2026, 10:26)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def auftrag(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Ersetzt den Celery-Auftrag; ``mock.delay`` ist der Tracker."""
+    mock = MagicMock()
+    monkeypatch.setattr("heizung.api.v1.relays.provisioniere_relais", mock)
+    return mock
+
+
+@pytest.fixture
+def lauf_frei(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[int]]:
+    """Lauf-Markierung ohne Redis: jeder Start gelingt, nichts laeuft."""
+    protokoll: dict[str, list[int]] = {"start": [], "ende": []}
+
+    def _starte(device_id: int) -> bool:
+        protokoll["start"].append(device_id)
+        return True
+
+    monkeypatch.setattr(relays_api.provision_lauf, "starte", _starte)
+    monkeypatch.setattr(relays_api.provision_lauf, "laeuft", lambda _d: False)
+    monkeypatch.setattr(relays_api.provision_lauf, "beende", lambda d: protokoll["ende"].append(d))
+    return protokoll
+
+
+async def test_provisionierung_kehrt_sofort_zurueck(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    auftrag: MagicMock,
+    lauf_frei: dict[str, list[int]],
+) -> None:
+    """**Kein Request laenger als fuenf Sekunden** — die Vorgabe des Betreibers.
+
+    **Der Befund, 01.11.2026 um 10:26.** Fuenf Downlinks mit je 15
+    Sekunden Pause sind rund 75 Sekunden. Die Oberflaeche brach nach etwa
+    30 ab (``signal is aborted without reason``), das Backend lief weiter
+    und hat alles gesendet — die Antwort auf ``0x5A`` kam um 10:28:28,
+    beide Ruecklesungen stehen seither auf bestaetigt.
+
+    **Der Handgriff war erfolgreich und sah wie ein Fehlschlag aus.** Das
+    ist die teuerste Sorte Rueckmeldung, weil der naechste Schritt ein
+    zweiter Versuch ist.
+
+    Gemessen wird die **Dauer**, nicht die Abwesenheit eines ``sleep``:
+    ein Test auf „``asyncio.sleep`` wird nicht gerufen" waere auch gruen,
+    wenn der Request aus einem anderen Grund eine Minute braucht. Die
+    Zusicherung lautet „schnell", nicht „schlaeft nicht" (§5.76).
+    """
+    vorher = time.monotonic()
+    antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
+    dauer = time.monotonic() - vorher
+
+    assert antwort.status_code == 200, antwort.text
+    assert dauer < 5, f"der Request dauerte {dauer:.1f} s - die Oberflaeche bricht vorher ab"
+
+    rumpf = antwort.json()
+    assert rumpf["laeuft"] is True
+    assert len(rumpf["geplant"]) == 5
+    assert rumpf["geplant"][0].startswith("0x04")
+    assert "geplant" in rumpf and "gesendet" not in rumpf, (
+        "der Endpunkt darf nicht behaupten, etwas gesendet zu haben - "
+        "beim Zurueckkehren ist noch nichts hinaus (§5.68)"
+    )
+    # Der Auftrag ist angestossen, mit Geraet und Benutzer.
+    auftrag.delay.assert_called_once()
+    assert auftrag.delay.call_args.args[0] == aufbau.relais_id
+
+
+async def test_zweiter_anstoss_waehrend_des_laufs_wird_abgewiesen(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    auftrag: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zwei Laeufe gleichzeitig waeren zehn Downlinks ohne Pause (S2).
+
+    Genau der Zustand, gegen den die Pause gebaut ist — und der
+    naheliegende, weil ein abgebrochener Request zum zweiten Klick
+    einlaedt.
+    """
+    monkeypatch.setattr(relays_api.provision_lauf, "starte", lambda _d: False)
+
+    antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
+
+    assert antwort.status_code == 409, antwort.text
+    assert "laeuft schon" in antwort.json()["detail"].lower()
+    auftrag.delay.assert_not_called()
+
+
+async def test_die_geraeteseite_sieht_den_laufenden_auftrag(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ohne dieses Feld gaebe es keinen Unterschied zwischen „noch nicht
+    angestossen" und „laeuft gerade" — und genau diese Luecke hat den
+    Handgriff zweimal machen lassen.
+    """
+    monkeypatch.setattr(relays_api.provision_lauf, "laeuft", lambda _d: True)
+
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+
+    assert antwort.status_code == 200, antwort.text
+    assert antwort.json()["provisionierung_laeuft"] is True

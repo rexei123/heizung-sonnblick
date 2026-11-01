@@ -86,7 +86,11 @@ function Pruefzeile({
           bestanden ? "text-text-primary" : "text-text-tertiary"
         }`}
       >
-        <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 16 }}>
+        <span
+          className="material-symbols-outlined"
+          aria-hidden
+          style={{ fontSize: 16 }}
+        >
           {bestanden ? "check_circle" : "schedule"}
         </span>
         {bestanden ? "bestätigt" : "nicht bestätigt"}
@@ -105,6 +109,13 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: schluessel,
     queryFn: () => fetchRelaisStand(deviceId),
+    // Solange ein Provisionierungs-Lauf unterwegs ist, selbst
+    // nachsehen: er dauert rund 75 Sekunden, und die Antworten kommen
+    // als Uplinks. Ohne das bliebe die Seite auf „läuft" stehen, bis
+    // jemand sie neu lädt — und das ist der Zustand, in dem man einen
+    // Handgriff zweimal macht (Befund vom 01.11.2026).
+    refetchInterval: (abfrage) =>
+      abfrage.state.data?.provisionierung_laeuft ? 5000 : false,
   });
 
   function nachAktion(text: string) {
@@ -121,7 +132,8 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
 
   const inBetrieb = useMutation({
     mutationFn: () => nimmRelaisInBetrieb(deviceId),
-    onSuccess: () => nachAktion("In Betrieb genommen. Der Regler darf jetzt schalten."),
+    onSuccess: () =>
+      nachAktion("In Betrieb genommen. Der Regler darf jetzt schalten."),
     onError: (fehler: unknown) => setMeldung(fehlerText(fehler)),
   });
 
@@ -142,28 +154,48 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
 
   if (isLoading) {
     return (
-      <div className="bg-surface rounded-lg border border-border p-4" data-testid="relay-card">
-        <span className="text-text-tertiary text-sm">Relais wird geladen …</span>
+      <div
+        className="bg-surface rounded-lg border border-border p-4"
+        data-testid="relay-card"
+      >
+        <span className="text-text-tertiary text-sm">
+          Relais wird geladen …
+        </span>
       </div>
     );
   }
 
   if (isError || data === undefined) {
     return (
-      <div className="bg-surface rounded-lg border border-border p-4" data-testid="relay-card">
-        <span className="text-error text-sm">Der Stand des Relais ist nicht abrufbar.</span>
+      <div
+        className="bg-surface rounded-lg border border-border p-4"
+        data-testid="relay-card"
+      >
+        <span className="text-error text-sm">
+          Der Stand des Relais ist nicht abrufbar.
+        </span>
       </div>
     );
   }
 
   const grund = sperrgrund(data);
   const laeuft =
-    provision.isPending || inBetrieb.isPending || ausserBetrieb.isPending || freigabe.isPending;
+    provision.isPending ||
+    inBetrieb.isPending ||
+    ausserBetrieb.isPending ||
+    freigabe.isPending;
 
   return (
-    <div className="bg-surface rounded-lg border border-border p-4" data-testid="relay-card">
+    <div
+      className="bg-surface rounded-lg border border-border p-4"
+      data-testid="relay-card"
+    >
       <div className="flex items-center gap-2 text-text-tertiary text-xs">
-        <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
+        <span
+          className="material-symbols-outlined"
+          aria-hidden
+          style={{ fontSize: 18 }}
+        >
           power_settings_new
         </span>
         <span>Relais {data.label ?? data.dev_eui}</span>
@@ -172,11 +204,17 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
       {/* Die Frage, mit der jemand auf diese Karte kommt. */}
       <div className="mt-2">
         {data.darf_schalten ? (
-          <span className="text-text-primary text-sm font-medium" data-testid="relay-darf-schalten">
+          <span
+            className="text-text-primary text-sm font-medium"
+            data-testid="relay-darf-schalten"
+          >
             Darf schalten
           </span>
         ) : (
-          <span className="text-warning text-sm font-medium" data-testid="relay-sperrgrund">
+          <span
+            className="text-warning text-sm font-medium"
+            data-testid="relay-sperrgrund"
+          >
             {grund ?? "Darf nicht schalten"}
           </span>
         )}
@@ -199,7 +237,9 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
         />
         <Zeile
           bezeichnung="Energiezähler (roh)"
-          wert={data.energy_wh === null ? "keine Meldung" : `${data.energy_wh} Wh`}
+          wert={
+            data.energy_wh === null ? "keine Meldung" : `${data.energy_wh} Wh`
+          }
         />
         <Zeile
           bezeichnung="Gehäusetemperatur"
@@ -211,13 +251,23 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
         />
         <Zeile bezeichnung="Schaltzyklen" wert={String(data.switch_cycles)} />
         <Zeile bezeichnung="Wächter" wert={data.watchdog_strategy} />
-        <Zeile bezeichnung="Firmware" wert={data.firmware_version ?? "unbekannt"} />
+        <Zeile
+          bezeichnung="Firmware"
+          wert={data.firmware_version ?? "unbekannt"}
+        />
         <Zeile
           bezeichnung="Letzter Kontakt"
-          wert={data.last_seen_at === null ? "nie" : formatDateTime(data.last_seen_at)}
+          wert={
+            data.last_seen_at === null
+              ? "nie"
+              : formatDateTime(data.last_seen_at)
+          }
         />
         {data.change_reason !== null && (
-          <Zeile bezeichnung="Letzte Änderung durch" wert={data.change_reason} />
+          <Zeile
+            bezeichnung="Letzte Änderung durch"
+            wert={data.change_reason}
+          />
         )}
       </div>
 
@@ -233,6 +283,15 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
           bestanden={data.overheating_recovery_verified}
           testId="relay-pruefung-ueberhitzung"
         />
+        {data.provisionierung_laeuft && (
+          <p
+            className="text-text-tertiary mt-1 text-xs"
+            data-testid="relay-provisionierung-laeuft"
+          >
+            Läuft — fünf Befehle mit je 15 Sekunden Abstand, rund 75 Sekunden.
+            Die Rücklesungen stehen erst danach.
+          </p>
+        )}
       </div>
 
       {darfHandeln && (
@@ -240,11 +299,13 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
           <button
             type="button"
             onClick={() => provision.mutate()}
-            disabled={laeuft}
+            disabled={laeuft || data.provisionierung_laeuft}
             data-testid="relay-provision"
             className="bg-surface-alt text-text-primary rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
           >
-            Provisionieren
+            {data.provisionierung_laeuft
+              ? "Provisionierung läuft …"
+              : "Provisionieren"}
           </button>
           {data.commissioned_at === null ? (
             <button
@@ -282,7 +343,10 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
       )}
 
       {meldung !== null && (
-        <p className="text-text-secondary mt-3 text-xs" data-testid="relay-meldung">
+        <p
+          className="text-text-secondary mt-3 text-xs"
+          data-testid="relay-meldung"
+        >
           {meldung}
         </p>
       )}

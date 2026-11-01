@@ -7071,15 +7071,29 @@ schickt die vier Downlinks in der richtigen Reihenfolge (setzen, setzen,
 lesen, lesen) und zeigt danach beide Rücklesungen als bestätigt oder
 nicht bestätigt. Kein Datenbank-Zugriff mehr.
 
-**Der Handgriff dauert rund 45 Sekunden, und das ist Absicht**
-(01.11.2026). Zwischen den vier Downlinks liegen je 15 Sekunden, weil der
-16ASPM je Uplink offenbar nur **eine** Befehlsantwort anhängt: an Relais
-109 ergaben zwei Lesebefehle fünf Sekunden hintereinander **eine**
-Antwort, und nach der pausenlosen Provisionierung fehlte die Antwort auf
-`0x5A`. Die Pause steht in den Settings
-(`relay_provision_pause_s`, Vorgabe 15); `0` stellt das alte Verhalten
-her. Ohne Pause ist der Handgriff schneller und **unvollständig** — und
-eine fehlende Rücklesung sieht aus wie ein Gerät, das nicht antwortet.
+**Der Handgriff läuft im Hintergrund, und der Knopf kehrt sofort
+zurück** (01.11.2026). Zwischen den **fünf** Downlinks — Version, setzen,
+setzen, lesen, lesen — liegen je 15 Sekunden, weil der 16ASPM je Uplink
+offenbar nur **eine** Befehlsantwort anhängt: an Relais 109 ergaben zwei
+Lesebefehle fünf Sekunden hintereinander **eine** Antwort, und nach der
+pausenlosen Provisionierung fehlte die Antwort auf `0x5A`.
+
+Das sind rund **75 Sekunden**, und solange sie im Request liefen, brach
+die Oberfläche nach etwa 30 ab (`signal is aborted without reason`). Das
+Backend lief weiter und hat alles gesendet — **der Handgriff war
+erfolgreich und sah wie ein Fehlschlag aus**, und das ist die teuerste
+Sorte Rückmeldung, weil der nächste Schritt ein zweiter Versuch ist.
+
+Seither sendet ein Hintergrund-Auftrag. Die Geräteseite zeigt
+**„Provisionierung läuft …"**, sperrt den Knopf und sieht selbst nach;
+ein zweiter Anstoß während eines Laufs wird mit **409** abgewiesen — zwei
+Läufe gleichzeitig wären zehn Downlinks ohne Pause, also genau der
+Zustand, gegen den die Pause gebaut ist.
+
+Die Pause steht in den Settings (`relay_provision_pause_s`, Vorgabe 15);
+`0` stellt das alte Verhalten her. Ohne Pause ist der Handgriff schneller
+und **unvollständig** — und eine fehlende Rücklesung sieht aus wie ein
+Gerät, das nicht antwortet.
 
 **Die 15 Sekunden sind abgeleitet, nicht gemessen.** Die beobachteten
 Antworten kamen 8 bzw. gut 70 Sekunden nach ihrem Befehl. Zeigt sich das
@@ -9153,10 +9167,15 @@ einen undokumentierten Wert und erfährt es nicht.
 ### Schritt 3 — PFLICHT-STOP: die beiden Rücklesungen setzen
 
 *Software-Oberfläche.* Geräteseite von 109 → **Provisionieren**. Der
-Handgriff schickt die vier Downlinks in der richtigen Reihenfolge
-(setzen, setzen, lesen, lesen), mit **15 Sekunden Pause** zwischen ihnen —
-er dauert deshalb rund **45 Sekunden**. Danach zeigt die Geräteseite beide
-Rücklesungen als bestätigt oder nicht bestätigt.
+Knopf kehrt **sofort** zurück; gesendet wird im Hintergrund: fünf
+Downlinks (Version, setzen, setzen, lesen, lesen) mit je **15 Sekunden
+Pause**, zusammen rund **75 Sekunden**.
+
+Die Seite zeigt währenddessen **„Provisionierung läuft …"** und sieht
+selbst nach. **Nicht zweimal drücken** — ein zweiter Anstoß wird
+abgewiesen, und zwar mit Grund: zwei Läufe gleichzeitig wären zehn
+Downlinks ohne Pause. Danach zeigt die Geräteseite beide Rücklesungen als
+bestätigt oder nicht bestätigt.
 
 *Erwartet:* `0x5F` → `02` und `0x5A` → `01`, **beide bestätigt**. Ohne
 beide lässt sich „in Betrieb genommen" nicht setzen; die Prüfung sitzt im
@@ -9225,6 +9244,24 @@ gemessen.
 *Vor Ort.* **Zweimal kurz** auf den Knopf. Siehe §10aj Schritt 3a: das
 Gerät meldet die Umschaltung mit `0x5d` von selbst, die Frage ist nur,
 **wie schnell**. Zeit notieren, danach `0x54` lesen.
+
+*SSH (heizung-test, root)* — der Grund der letzten Änderung:
+
+```bash
+docker exec deploy-api-1 python -c "import asyncio; from heizung.services.relay_adapter import frage_schaltgrund as f; print(asyncio.run(f('70b3d52ddd001e69')))"
+```
+
+Und, wenn Sie den Zustand direkt sehen wollen, mit **mindestens 15
+Sekunden Abstand** zum vorigen Befehl:
+
+```bash
+docker exec deploy-api-1 python -c "import asyncio; from heizung.services.relay_adapter import frage_zustand as f; print(asyncio.run(f('70b3d52ddd001e69')))"
+```
+
+**Diese zwei Befehle standen bisher nirgends**, obwohl der Schritt sie
+verlangt („danach `0x54` lesen"). Gefunden beim Durchsuchen des
+Relais-Pfads nach Funktionen ohne Aufrufer (01.11.2026): sie haben einen,
+nämlich den Menschen — nur wusste er nicht, wie.
 
 *Erwartet:* eine Zustandsmeldung mit `relayState` und, in der
 `0x54`-Antwort, `manual_button`.
