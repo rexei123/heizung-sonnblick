@@ -7525,6 +7525,11 @@ produktive Hardware an (S4).
 > `--ausfuehren` als **Probelauf** und sendet nichts. Der erste Lauf mit
 > `--ausfuehren` ist ein Hardware-Eingriff und braucht die Freigabe des
 > Betreibers — mit dem Protokoll unten, nicht nebenbei.
+>
+> **Für die geschlossene Woche ab 01.11.2026 gilt der Lauf weiter unten:**
+> „Der kontrollierte Lauf im geschlossenen Haus". Er nennt je Schritt die
+> Erwartung und den Rückweg — und einen **Schritt 0**, ohne den der
+> 72-Stunden-Befund nichts beweist.
 
 ### Was heute gilt
 
@@ -7656,6 +7661,224 @@ Ob zu einer Auslösung **außerhalb** der Absenkung wirklich gelüftet
 wurde. Das weiß nur, wer im Zimmer war. Der Bericht nennt Zeitpunkt, Zone
 und den Temperaturabfall der zehn Minuten davor — damit ist die Frage
 beantwortbar, aber nicht beantwortet.
+
+### Der kontrollierte Lauf im geschlossenen Haus (ab 01.11.2026)
+
+**Entscheidung des Betreibers, 01.11.2026:** das Haus ist bis Donnerstag,
+05.11., geschlossen. Die Erprobung läuft als **kontrollierter Test** — die
+Fenster öffnet der Betreiber selbst, in 105, 110 und 306.
+
+#### Ersetzt das die 72-Stunden-Variante? **Nein — nur ihre eine Hälfte.**
+
+Die beiden Teile des Protokolls stellen **gegenläufige** Fragen, und nur
+eine davon hängt an einem Gast:
+
+| | Frage | Woran sie hängt |
+|---|---|---|
+| Schritt 4 | Erkennt das Gerät ein **wirklich offenes** Fenster? | daran, dass jemand lüftet |
+| Schritt 5 (72 h) | Löst es aus, **ohne** dass gelüftet wurde — durch unsere eigene Absenkung? | an der **Uhr** |
+
+**Schritt 4 wird durch den kontrollierten Test besser, nicht nur
+ersetzt.** Im Gästebetrieb wartet man darauf, dass jemand ein Fenster
+öffnet, und weiß hinterher nicht genau wann und wie lange. Hier sind
+Zeitpunkt, Dauer und Zimmer bekannt und der Lauf ist wiederholbar. Was
+§10ao bisher „Was der Bericht nicht beantwortet" nennt — ob zu einer
+Auslösung wirklich gelüftet wurde —, ist in dieser Woche beantwortbar,
+weil es nur **einen** Menschen im Haus gibt, der ein Fenster öffnet.
+
+**Schritt 5 bleibt nötig**, denn seine Auslöser sind Nachtabsenkung,
+Check-out und Fenster-Sicherheit. Keiner davon braucht einen Gast; alle
+drei kommen von der Steuerung selbst. Und das Abbruchkriterium hängt
+genau an ihnen.
+
+#### Die Falle des leeren Hauses — und warum Schritt 0 Pflicht ist
+
+**Ohne eine Belegung gibt es keine Nachtabsenkung.** Die Absenkung in
+`rules/engine.py` (`layer_temporal`) greift nur bei `status == OCCUPIED`,
+und der Kommentar dort sagt auch warum: *„in einem leeren Zimmer gibt es
+nichts abzusenken, es ist schon auf dem Frei-Sollwert."* Ein freies
+Zimmer steht rund um die Uhr auf `t_vacant`.
+
+Folge: ein 72-Stunden-Befund in einem **leeren** Haus liefe mit hoher
+Wahrscheinlichkeit grün — und zwar nicht, weil die Erkennung ruhig ist,
+sondern weil das Ereignis, gegen das wir prüfen, **nie stattgefunden
+hat**. Das ist ein grüner Lauf ohne Aussage (§5.55), und er wäre der
+schlechtere Ausgang: er würde die Erkennung freigeben, ohne sie geprüft
+zu haben.
+
+**Deshalb beginnt der kontrollierte Lauf mit einer Test-Belegung** in
+jedem der drei Zimmer. Damit hält die Engine den Belegt-Sollwert, die
+Absenkung um 20:00 ist eine echte Absenkung, und der Befund beantwortet
+seine Frage. Derselbe Handgriff hat in §10aq schon einmal getragen — die
+Abreise wurde dort über eine gelöschte Test-Belegung geprüft.
+
+#### Befund: mit den Nummern 105–109 wird `--nur "105"` zweideutig
+
+**Gemeldet, nicht umgangen.** `--nur` wählt nach DevEUI **oder**
+Etikett **oder** Zimmernummer **oder** „Zimmer Zone"
+(`services/geraete_ziele.py`). Die drei neuen Pool-Vickis heißen nach der
+Entscheidung vom 31.10.2026 **105, 106, 107** (§10as) — und `105` ist
+zugleich die Nummer eines der drei Testzimmer.
+
+**Heute noch folgenlos:** ein Pool-Gerät ohne Zone ist eine **Ausnahme**
+(„Reserve-Pool") und bekommt keinen Befehl. Es taucht in Schritt 1 nur in
+der Ausnahmeliste auf — eine Zeile mehr zu lesen, kein falscher Downlink.
+
+**Scharf wird es bei der Zuordnung.** Sobald Gerät 105 aus dem Pool in
+eine Zone wandert — in ein beliebiges Zimmer —, trifft `--nur "105"`
+**beides**: die Thermostate von Zimmer 105 und das Gerät 105 dort, wo es
+dann sitzt. Die Zahl der Ziele stimmt dann nicht mehr mit der Erwartung,
+und wer sie nur abzählt, merkt es nicht.
+
+**Vorschlag, eigener PR:** das Werkzeug bricht bei einem **zweideutigen**
+`--nur` ab und nennt beide Treffer — dieselbe Familie wie der schon
+vorhandene Abbruch bei einem Tippfehler. Ein Lauf, der lautlos ein Gerät
+zu viel trifft, ist das Fehlerbild, gegen das dieser Abbruch gebaut
+wurde. Bis dahin: in Schritt 1 die **Namen der Ziele** lesen, nicht nur
+ihre Anzahl.
+
+#### Die Schritte
+
+Jeder Schritt nennt die Erwartung und den Rückweg. **Gilt eine Erwartung
+nicht, wird gemeldet und nicht nachjustiert** — die Begründung steht oben
+unter „Das Abbruchkriterium".
+
+---
+
+**Schritt 0 — Test-Belegung in den drei Zimmern.** *Software-Oberfläche.*
+
+Für 105, 110 und 306 je eine Belegung anlegen, Abreise **nach** dem Ende
+des Laufs (also Freitag, 06.11.).
+
+*Erwartet:* die drei Zimmer stehen in der Zimmerliste auf **Belegt** und
+zeigen den Belegt-Sollwert, nicht den Frei-Sollwert.
+
+*Zusätzlich prüfen:* auf „Temperaturen & Zeiten", dass ein **Nachtfenster
+konfiguriert** ist (20:00/06:00). Steht dort nichts, rechnet der `befund`
+mit einem Rückfallwert und sagt das auch — dann ist das Kriterium nicht
+belastbar, und der Lauf beginnt nicht.
+
+*Rückweg:* Belegungen löschen. Das ist derselbe Übergang OCCUPIED →
+VACANT wie bei einer Abreise und folgenlos.
+
+---
+
+**Schritt 1 — Probelauf, drei Geräte, nichts wird gesendet.** *SSH
+(heizung-test, root).*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+```
+
+*Erwartet:* genau **drei Ziele**, jedes mit Firmware **4.2 oder höher**,
+und darunter die Ausnahmen mit Grund. Bei „(NULL)" oder „4.1" **nicht
+ausführen** — `0x45` greift dort nicht — sondern melden.
+
+*Rückweg:* keiner nötig, der Lauf sendet ohne `--ausfuehren` nichts.
+
+---
+
+**Schritt 2 — die Messung T2.5, genau EIN Gerät, am Vormittag.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+```
+
+*Erwartet:* ein Downlink, Rücklesung mit `delta = 0.2`. **Und
+Fehlalarme** — das ist der Zweck: 0,2 °C ist der empfindlichste Wert und
+beantwortet, gegen welchen Vorwert das Gerät vergleicht. Ein Messwert,
+kein Betriebswert.
+
+*Abstand:* mindestens ein voller Tag zur nächsten Absenkung, sonst ist
+nicht zu unterscheiden, was ausgelöst hat. Im geschlossenen Haus heißt
+das: **am Vormittag setzen, nicht am Abend**.
+
+*Rückweg:* Schritt 3 überschreibt den Wert ohnehin; sofort zurück geht es
+mit `aus --nur "306 Schlafzimmer" --ausfuehren`.
+
+---
+
+**Schritt 3 — der Betriebswert auf alle drei.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+*Erwartet:* drei Downlinks, Rücklesung je Gerät mit **1,0 °C und 10
+Minuten**. Bewusst nicht der empfindlichste Wert: der Vicki-Sensor sitzt
+am Heizkörper, und jede Absenkung, die *wir* schicken, schließt das Ventil
+und kühlt ihn.
+
+*Rückweg:* der Abschaltweg unten.
+
+---
+
+**Schritt 4 — das kontrollierte Fenster.** *Vor Ort, je Zimmer.*
+
+Fenster öffnen, **15 Minuten**, Gerät nicht anfassen. **Zeit notieren** —
+Zimmer, auf und zu. Nacheinander, nicht gleichzeitig: drei getrennte
+Fenster sind drei Messungen, drei gleichzeitige sind eine.
+
+Danach, mit mindestens einer Keepalive-Periode Abstand:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 2
+```
+
+*Erwartet:* je Zimmer **eine** Auslösung, zeitlich im geöffneten Fenster,
+und auf der Zimmerseite Schicht 4 mit dem Sicherheitswert. Der Bericht
+nennt den Temperaturabfall der zehn Minuten davor — er sollte zu dem
+passen, was draußen war.
+
+*Keine Auslösung* heißt nicht „kaputt": 1,0 °C in 10 Minuten ist bei
+mildem Wetter viel. Dann die Dauer des Fensters notieren und melden; das
+ist ein Messergebnis, kein Fehler.
+
+*Rückweg:* Fenster zu. Schicht 4 fällt von selbst zurück, sobald das
+Gerät `openWindow = false` meldet.
+
+---
+
+**Schritt 5 — zwei Nächte, dann der Befund.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 72
+```
+
+*Erwartet:* **keine** Auslösung in den Absenkungen um 20:00 — und das ist
+jetzt eine Aussage, weil Schritt 0 die Absenkung überhaupt möglich macht.
+Der Bericht rechnet in **Ortszeit** und liest das Nachtfenster aus der
+Konfiguration.
+
+*Trifft das Abbruchkriterium*, druckt der Befund
+`ABBRUCHKRITIERUM GETROFFEN` und liefert Rückgabewert 3. Dann abschalten,
+dokumentieren, **in derselben Woche nicht nachjustieren**.
+
+---
+
+**Abschaltweg — gilt in jedem Schritt.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+Danach `status` zum Rücklesen, und die drei Test-Belegungen löschen. Der
+Befehl braucht keinen Deploy und keinen Eingriff an der Datenbank — er ist
+derselbe Weg, den das Abbruchkriterium vorschreibt.
+
+#### Was dieser Lauf **nicht** beantwortet
+
+Ob die Erkennung im **Gästebetrieb** ruhig bleibt. Dort kommt ein
+Verhalten dazu, das hier fehlt: jemand dreht am Rad, jemand kippt ein
+Fenster für Stunden, jemand legt ein Handtuch über den Heizkörper. Der
+kontrollierte Lauf beweist die **Mechanik** und das Abbruchkriterium
+gegen unsere **eigenen** Absenkungen. Die erste Gästewoche bleibt die
+Beobachtungszeit — nur dann mit einer Erkennung, die vorher einmal
+sauber gemessen wurde.
 
 ---
 
@@ -8149,6 +8372,43 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 
 ## 10ar. Erster `0x07` an ein echtes Gerät: Rad sperren und freigeben (Sprint 23 T4-B) — Pflicht-Stop
 
+> ### Ergebnis: **vollständig bestanden**, Zimmer 107, drei Geräte (020/021/022)
+>
+> | # | Prüfung | Ergebnis |
+> |---|---|---|
+> | 1–6 | Ausgangsstand bis Drehung am Rad | bestanden am **31.10.2026** |
+> | 7 | Eine Nacht | bestanden |
+> | 8 | Aufheben | bestanden am **01.11.2026** |
+>
+> **Schritte 1–6** (31.10.2026): 10:16 Ortszeit gingen **drei** `0x07`
+> hinaus — einer je Thermostat, wie angekündigt. 10:34 stand „Rad
+> gesperrt · bestätigt", und das Rad im Zimmer ließ sich nicht mehr
+> verstellen.
+>
+> Um **10:23** hatte dazwischen „das Gerät meldet es als frei" gestanden —
+> ein **zu frühes Urteil**, kein Fehlschlag. Der Grund ist Class A: die
+> Meldung um 10:23 trägt noch den Zustand von vorher und öffnet erst das
+> Fenster, in dem das Gerät den Befehl abholt. Behoben in PR #356
+> (STATUS §2cq); Zeile **3a** der Prüftabelle hält es jetzt fest.
+>
+> **Schritt 7** (Nacht 31.10. auf 01.11.): die Sperre hat gehalten, alle
+> drei Geräte weiter „Rad gesperrt · bestätigt". Das Log über 24 Stunden
+> zeigte **genau die drei Befehle vom 31.10. 09:16 UTC** (= 10:16
+> Ortszeit) und **keine Nachsendung**.
+>
+> **Schritt 8** (01.11.2026): **06:09 UTC** Sperre aufgehoben, drei
+> Befehle mit `gewollt=False` hinaus; **07:35 UTC** meldeten alle drei
+> „Rad frei", und das Rad im Zimmer war wieder drehbar.
+>
+> **Damit sind beide Richtungen am Gerät geprüft** — das war der Zweck
+> dieses Pflicht-Stops. Ein Sperren, das sich nicht zurücknehmen lässt,
+> wäre schlimmer als keines.
+>
+> **Ein Befund zum Befehl in Schritt 7** (Betreiber, 01.11.2026):
+> `--since 20h` war zu knapp — der Befehl lag **20,8 Stunden** zurück und
+> wäre aus dem Fenster gefallen. Steht seither auf **24h**, Begründung
+> bei Schritt 7.
+
 > **Pflicht-Stop, und diesmal geht ein Befehl hinaus.** §10aq hat
 > ausdrücklich keinen Downlink erzeugt — die Sperre verwarf eine Drehung
 > und schickte dem Gerät nichts. Genau das war der Befund: im
@@ -8159,6 +8419,10 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 > ausdrücklicher Freigabe** und **nur an ein Zimmer**.
 
 > ### Kein Merge zwischen Schritt 2 und Schritt 7
+>
+> **Aufgehoben am 01.11.2026**, nachdem Schritt 8 durch war. Der Grund
+> darunter bleibt stehen — er gilt bei jedem Wiederholungslauf dieses
+> Abschnitts erneut.
 >
 > **Festlegung des Betreibers, 31.10.2026** — und sie hat einen
 > technischen Grund, der leicht untergeht.
@@ -8174,7 +8438,7 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 > | Schritt | braucht |
 > |---|---|
 > | 4 | `docker logs deploy-api-1 --since 3m` → die Zeile `kindersicherung gesendet` |
-> | 7 | `docker logs deploy-api-1 --since 20h` → **wie viele** `0x07` in der Nacht liefen |
+> | 7 | `docker logs deploy-api-1 --since 24h` → **wie viele** `0x07` in der Nacht liefen |
 >
 > Schritt 7 ist der empfindliche. Er prüft eine Aussage über die **ganze
 > Nacht** — „es ist kein weiterer Befehl gelaufen" —, und ein Neustart um
@@ -8285,16 +8549,40 @@ docker logs deploy-api-1 --since 3m 2>&1 | grep -i kindersicherung
 Erwartet: eine Zeile `kindersicherung gesendet dev_eui=… gewollt=True`
 je Thermostat des Zimmers.
 
-**5. Eine Keepalive-Periode warten, dann das Urteil.**
+**5. Zwei Keepalive-Perioden warten, dann das Urteil.**
 
-*Oberfläche:* nach **10 Minuten** die Geräteseite neu laden.
+*Oberfläche:* nach **etwa 20 Minuten** die Geräteseite neu laden.
 
 Erwartet: **„Rad gesperrt · bestätigt"**. Das Gerät hat das 0x80-Bit
 gemeldet, und damit ist der Befehl angekommen **und** wirksam.
 
-**Steht dort „fehlgeschlagen": melden.** Der Frame ist angekommen (Schritt
-4), aber die Einstellung sitzt nicht — das ist ein Hardware-Befund und
-kein Programmfehler.
+> **Zwei Perioden, nicht eine — und das ist Class A, keine Trägheit**
+> (Befund des Betreibers aus dem Lauf vom 31.10.2026).
+>
+> Ein Vicki **empfängt nur im Fenster nach einem eigenen Uplink**. Die
+> erste Meldung nach dem Befehl trägt deshalb noch den Zustand von
+> **vorher** — sie öffnet das Fenster, in dem das Gerät den Befehl
+> abholt. Erst die zweite berichtet das Ergebnis:
+>
+> | Zeit | Vorgang |
+> |---|---|
+> | 10:16 | drei `0x07` in die Warteschlange |
+> | 10:23 | Keepalive meldet **„frei"**, holt danach den Befehl ab |
+> | 10:34 | Keepalive meldet **„gesperrt"** |
+>
+> **Die Anzeige sagte um 10:23 „das Gerät meldet es als frei"** — ein
+> roter Befund, elf Minuten vor der Bestätigung. Das war ein Fehler im
+> Urteil und ist behoben: gezählt werden jetzt die Meldungen seit dem
+> Befehl, und gültig ist erst die zweite. Bis dahin steht
+> **„ausstehend"**, und das ist richtig.
+
+**Vor der zweiten Meldung steht „ausstehend".** Das ist der Normalfall und
+kein Grund zur Sorge; die Anzeige sagt es auch so („Bestätigung kommt mit
+dem nächsten Keepalive").
+
+**Steht nach zwei Meldungen „fehlgeschlagen": melden.** Der Frame ist
+angekommen (Schritt 4), aber die Einstellung sitzt nicht — das ist ein
+Hardware-Befund und kein Programmfehler.
 
 **6. Am Rad drehen — jetzt muss es sich sperren lassen.**
 
@@ -8322,11 +8610,22 @@ Nachtzyklus samt Absenkung überleben, ohne dass jemand nachhilft.
 sein:
 
 ```bash
-docker logs deploy-api-1 --since 20h 2>&1 | grep -ci kindersicherung
+docker logs deploy-api-1 --since 24h 2>&1 | grep -ci kindersicherung
 ```
 
 Erwartet: dieselbe Zahl wie am Vortag (ein Eintrag je Thermostat). Eine
 höhere Zahl heißt, dass etwas wiederholt sendet — melden.
+
+**Warum 24 und nicht 20 Stunden.** Hier stand `--since 20h`. Am
+01.11.2026 lag der Befehl aus Schritt 2 **20,8 Stunden** zurück — er wäre
+aus dem Fenster gefallen, und das Ergebnis hätte wie „kein Befehl
+gelaufen" ausgesehen, obwohl es „nicht weit genug zurückgesehen" hieß
+(Befund des Betreibers). Zwischen Schritt 2 am Vormittag und Schritt 7 am
+nächsten Morgen liegen regelmäßig mehr als 20 Stunden.
+
+**Die Zeiten im Log sind UTC, die Oberfläche zeigt Ortszeit** (§5.79). Im
+Lauf vom 31.10.2026 war derselbe Befehl `09:16 UTC` und in der Oberfläche
+`10:16`.
 
 **8. Sperre aufheben und das Rad zurückgeben.**
 
@@ -8346,16 +8645,18 @@ Sperren, das sich nicht zurücknehmen lässt, wäre schlimmer als keines.
 | 1 | Ausgangsstand | „Rad frei · bestätigt" |
 | 2 | Dauerhafte Sperre setzen | Knopf „gesperrt", Form „dauerhaft", Schloss in der Liste |
 | 3 | Sofort danach | „Rad gesperrt · **ausstehend**" |
+| 3a | Nach der **ersten** Meldung | weiter „ausstehend" — sie öffnet nur das Empfangsfenster |
 | 4 | Gateway | `Command received` + `queue-item enqueued`, eine api-Logzeile je Thermostat |
-| 5 | Nach 10 Minuten | „Rad gesperrt · **bestätigt**" |
+| 5 | Nach **zwei** Meldungen (ca. 20 min) | „Rad gesperrt · **bestätigt**"; davor „ausstehend" |
 | 6 | Drehung am Rad | wird am Gerät nicht angenommen |
-| 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` |
+| 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` (Log `--since 24h`) |
 | 8 | Aufheben | „Rad frei · bestätigt", Rad wieder drehbar |
 
 ### Abbruch und Rückweg
 
-**Abbrechen bei:** `Processing command error` in Schritt 4, „fehlgeschlagen"
-schon in Schritt 3, oder mehr `0x07`-Zeilen als Thermostate.
+**Abbrechen bei:** `Processing command error` in Schritt 4,
+„fehlgeschlagen" vor der zweiten Meldung, oder mehr `0x07`-Zeilen als
+Thermostate.
 
 **Der Rückweg ist Schritt 8** — die Sperre aufheben. Er gibt das Rad frei
 und braucht keinen Deploy und keinen Eingriff an der Datenbank. Geht auch
@@ -8399,13 +8700,28 @@ Für die Nachlieferung vom 31.10.2026. Baut auf §10h (Pool) und §10aj
 
 ### Was geliefert wurde
 
-| Art | DevEUI | Seriennummer |
-|---|---|---|
-| Vicki | `70b3d52dd30329c6` | `V6TF410485L19W` |
-| Vicki | `70b3d52dd30329b7` | `CKPW410470CJHU` |
-| Vicki | `70b3d52dd30329ba` | `1VFG410473HP15` |
-| Relais A | `70b3d52ddd001f23` | `FCN1865403KA7L` |
-| Relais B | `70b3d52ddd001e69` | `JD4M865217RV4U` |
+| Nummer | Art | DevEUI | Seriennummer |
+|---|---|---|---|
+| **105** | Vicki | `70b3d52dd30329c6` | `V6TF410485L19W` |
+| **106** | Vicki | `70b3d52dd30329b7` | `CKPW410470CJHU` |
+| **107** | Vicki | `70b3d52dd30329ba` | `1VFG410473HP15` |
+| **108** | Relais A | `70b3d52ddd001f23` | `FCN1865403KA7L` |
+| **109** | Relais B | `70b3d52ddd001e69` | `JD4M865217RV4U` |
+
+**Die Nummern sind fortlaufend und vom Betreiber festgelegt**
+(31.10.2026). Sie gelten als Name in ChirpStack **und** als Etikett in der
+Heizungs-Datenbank — eine Nummer, zwei Systeme, damit ein Gerät auf beiden
+Seiten gleich heisst.
+
+**Relais A ist 108, Relais B ist 109.** Die Buchstaben bleiben in diesem
+Abschnitt stehen, weil der Testplan des Betreibers sie benutzt („T3.0 an
+Relais A"); der Name des Geraets ist die Zahl.
+
+> **Die Nummer 107 ist auch eine Zimmernummer**, und in diesem RUNBOOK
+> steht 107 an vielen Stellen als *Zimmer* — in Paragraph 10aq und 10ar
+> durchgehend. **Geraet 107 ist ein Vicki im Lager**, Zimmer 107 ist ein
+> Gaestezimmer, und in Zimmer 107 haengt Geraet **020**. Wo es eng wird,
+> hilft die DevEUI: eine Zimmernummer hat keine.
 
 JoinEUI für alle Vicki: `70b3d52dd3000000`, Profil **„Heizung"**.
 
@@ -8432,10 +8748,16 @@ ohne Spalte F genügt für alles.
 
 ---
 
-### Schritt 1 — Nächste freie Nummer feststellen
+### Schritt 1 — Prüfen, dass 105–109 frei sind
 
-*SSH (Server)* — das Etikett folgt der Durchnummerierung, und die darf
-sich nicht doppeln:
+> **Das ist eine Prüfung, kein Vorschlag, und sie ist das Gate.** Die
+> Nummern sind vergeben (Tabelle oben). Ist eine davon belegt, **nicht
+> ausweichen** — melden. Eine Nummer doppelt zu belegen hiesse, zwei
+> Geräte mit demselben Namen in zwei Systemen zu führen; eine Nummer
+> stillschweigend zu überspringen hiesse, dass die Liste des Betreibers
+> und der Bestand auseinanderlaufen.
+
+*SSH (Server)* — die Etiketten der Heizungs-Datenbank:
 
 ```bash
 docker exec deploy-api-1 python -c "
@@ -8452,18 +8774,23 @@ asyncio.run(main())
 ```
 
 **Erwartung:** Etiketten `001`–`104` (bzw. `Vicki-001` bei den vier
-Testgeräten). Die drei neuen Vicki bekommen dann **105, 106, 107** — in
-der Reihenfolge der Tabelle oben.
+Testgeräten) — und **keines** von `105` bis `109`.
 
-> **Vorsicht mit der 107.** Das ist zufällig auch eine Zimmernummer, und
-> in diesem RUNBOOK steht sie an vielen Stellen als *Zimmer* 107. Das
-> Etikett `107` meint ein **Gerät**. Wenn das verwirrt: `105`–`107`
-> überspringen und bei `108` beginnen — die Nummern müssen nur eindeutig
-> sein, nicht lückenlos.
+*ChirpStack-Oberfläche* — dieselbe Frage auf der anderen Seite:
+Applications → **Heizung** → Devices, Suchfeld `10` eingeben und die
+Namensspalte lesen.
 
-Die Relais bekommen **keine** Vicki-Nummer. Etikett `Relais A` und
-`Relais B` — sie stehen in einer anderen Reihe, und eine gemeinsame
-Nummerierung würde beim Suchen zwei Dinge vermischen.
+**Erwartung:** kein Gerät mit dem Namen `105`, `106`, `107`, `108` oder
+`109`.
+
+**Abbruchkriterium:** erscheint eine dieser Nummern auf einer der beiden
+Seiten, **hier anhalten und melden**. Zwei Fälle sind denkbar und beide
+brauchen eine Entscheidung, nicht einen Handgriff:
+
+| Lage | Heisst |
+|---|---|
+| Nummer in ChirpStack, nicht in der Datenbank | ein Gerät, das angemeldet aber nie importiert wurde — oder ein Rest aus einem abgebrochenen Lauf |
+| Nummer in der Datenbank | ein Gerät trägt sie schon; welches, sagt die Abfrage oben |
 
 ### Schritt 2 — ChirpStack: fünf Geräte anlegen
 
@@ -8472,7 +8799,7 @@ device**, fünfmal.
 
 | Feld | Vicki | Relais |
 |---|---|---|
-| Name | `105`, `106`, `107` | `Relais-A`, `Relais-B` |
+| Name | `105`, `106`, `107` | `108` (A), `109` (B) |
 | Device EUI | aus der Tabelle | aus der Tabelle |
 | Join EUI | `70b3d52dd3000000` | *(Aufkleber des Geräts)* |
 | Device profile | **Heizung** | **MClimate 16ASPM** (Schritt 5) |
@@ -8536,8 +8863,8 @@ dessen Grenzen gelten würden (§10ap).
 ```bash
 cat > /tmp/relais.csv <<'CSV'
 dev_eui,serial_number,hardware_nummer
-70b3d52ddd001f23,FCN1865403KA7L,Relais A
-70b3d52ddd001e69,JD4M865217RV4U,Relais B
+70b3d52ddd001f23,FCN1865403KA7L,108
+70b3d52ddd001e69,JD4M865217RV4U,109
 CSV
 docker cp /tmp/relais.csv deploy-api-1:/tmp/relais.csv
 
@@ -8572,8 +8899,15 @@ nächsten Mal für aktuell gehalten.
 
 *Software-Oberfläche* — nachsehen:
 
-Geräte → die fünf neuen stehen in der Liste, **ohne Zone**, Status
-„noch nie gemeldet". Die Relais tragen die Art **Relais**.
+Geräte → die fünf neuen stehen als `105` bis `109` in der Liste, **ohne
+Zone**, Status „noch nie gemeldet". Unter der Nummer steht der
+**Gerätetyp**: bei `105`–`107` *Thermostat*, bei `108` und `109`
+*Relais*. Dieselbe Angabe trägt die Geräteseite neben Hersteller und
+Modell.
+
+Der Typ steht dort seit dem 31.10.2026. Vorher sah ein Relais in dieser
+Liste aus wie jedes andere Gerät — und wer bei einem Relais nach einer
+Ventilstellung sucht, sucht etwas, das es nie geben wird.
 
 ### Schritt 5 — ChirpStack: Class-C-Profil und Relais-Codec
 
@@ -8637,7 +8971,7 @@ sondern an `commissioned_at` (S3).
 
 | # | Prüfung | Erwartet |
 |---|---|---|
-| 1 | nächste freie Nummer | 105–107 frei, keine Doppelung |
+| 1 | 105–109 frei | in **beiden** Systemen, sonst anhalten und melden |
 | 2 | ChirpStack | fünf Geräte, AppKey je Gerät eingetippt |
 | 3 | Vicki-Import | `3 angelegt, 0 Konflikte`, Probelauf davor |
 | 4 | Relais-Import | `2 angelegt`, Art **Relais**, ohne Zone |

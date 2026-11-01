@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { FuehlerBadge } from "@/components/patterns/fuehler-badge";
+import { Geraetetyp } from "@/components/patterns/geraetetyp";
 import { useDevices, useUpdateDevice } from "@/lib/api/hooks";
 import type { ApiError, Device } from "@/lib/api/types";
 import { useAuth } from "@/contexts/auth-context";
@@ -636,12 +637,20 @@ function LabelCell({ device: d }: { device: Device }) {
   // der drei-spaltigen Liste.
   return (
     <div className="flex items-center gap-2">
-      <Link
-        href={`/devices/${d.id}` as Route}
-        className="font-medium text-text-primary hover:text-primary"
-      >
-        {display}
-      </Link>
+      <div className="min-w-0">
+        <Link
+          href={`/devices/${d.id}` as Route}
+          className="font-medium text-text-primary hover:text-primary"
+        >
+          {display}
+        </Link>
+        {/* Der Gerätetyp als Zeile darunter (Betreiber, 31.10.2026).
+            Mit den Relais 108 und 109 stehen zwei Geräte in dieser
+            Liste, die nichts messen und kein Ventil kennen — und sie
+            sehen hier aus wie jedes andere. Begründung in
+            `patterns/geraetetyp`. */}
+        <Geraetetyp kind={d.kind} className="mt-0.5" />
+      </div>
       {/* Sprint 24c: ein Fuehler sieht in der Liste aus wie ein normales
           Thermostat. Ohne Kennzeichnung sucht jemand eine
           Ventilstellung, die es nie geben wird. */}
