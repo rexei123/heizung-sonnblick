@@ -112,7 +112,7 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
   }
 
   const sperre = sperrText(device.child_lock_state, device.rad_gesperrt_gewollt);
-  // **Der Zustand des Rades steht immer da** (Betreiber, 01.11.2026).
+  // **Der Zustand des Rades steht immer da** (Betreiber, 31.10.2026).
   //
   // Hier stand zweimal eine Bedingung, und beide waren zu eng. Zuerst
   // `device.measure_only` (Sprint 24c), mit der damals richtigen
@@ -176,7 +176,7 @@ export function MeasureOnlyToggle({ device }: { device: Device }) {
             disabled={mut.isPending}
             data-testid="measure-only-toggle"
           >
-            {/* **Die Beschriftung bleibt, wie sie war** (01.11.2026).
+            {/* **Die Beschriftung bleibt, wie sie war** (31.10.2026).
                 Beim Befund „der Knopf ragt über den Kartenrand" lag die
                 erste Vermutung auf dem langen Text — der Knopf des
                 Design-Systems trägt `whitespace-nowrap`, er bricht nicht

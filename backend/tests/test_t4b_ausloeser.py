@@ -499,7 +499,7 @@ async def test_nach_dem_befehl_steht_ausstehend_und_dann_bestaetigt(
     die Tageszeit des Laufs, ob die Meldung vor oder nach dem Befehl liegt
     — ein Test, der morgens anders urteilt als nachmittags (§5.59).
 
-    **Die Zeitfolge ist die aus Zimmer 107** (Betreiber, 01.11.2026) —
+    **Die Zeitfolge ist die aus Zimmer 107** (Betreiber, 31.10.2026) —
     drei Meldungen um einen Befehl:
 
     ====== ===============================================================

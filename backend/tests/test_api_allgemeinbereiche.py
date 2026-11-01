@@ -823,7 +823,7 @@ def test_eine_meldung_von_vor_dem_befehl_ist_ausstehend() -> None:
     Befund im Normalfall — und ein Melder, der im Normalfall rot zeigt,
     wird nach einer Woche nicht mehr gelesen (§5.79).
 
-    **Seit dem 01.11.2026 zaehlt die Anzahl statt der Zeit** — eine
+    **Seit dem 31.10.2026 zaehlt die Anzahl statt der Zeit** — eine
     Meldung von vor dem Befehl hat ``nach_befehl = 0``. Die Aussage
     dieses Tests ist unveraendert, die Bedingung deckt sie mit ab.
     """
@@ -840,7 +840,7 @@ def test_eine_meldung_von_vor_dem_befehl_ist_ausstehend() -> None:
 
 
 def test_die_erste_meldung_nach_dem_befehl_ist_noch_keine_antwort() -> None:
-    """**Der Befund aus RUNBOOK §10ar** (Betreiber, 01.11.2026).
+    """**Der Befund aus RUNBOOK §10ar** (Betreiber, 31.10.2026).
 
     Zimmer 107: 10:16 gingen drei ``0x07`` hinaus, um 10:23 meldete das
     Geraet **„frei"** — und erst **danach** holte es den Befehl im

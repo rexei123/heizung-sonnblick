@@ -255,7 +255,7 @@ export default function DeviceDetailPage() {
           </section>
 
           {/* **Diese zwei Karten gehören nicht ins Kachel-Raster**
-              (Befund des Betreibers, 01.11.2026: „der Knopf ragt über den
+              (Befund des Betreibers, 31.10.2026: „der Knopf ragt über den
               Kartenrand").
 
               Gemessen, nicht geraten: im Raster darüber (`md:grid-cols-4`)

@@ -227,7 +227,7 @@ test.describe("Umschalter „nur messen“", () => {
 
   test("auch ohne Rolle und ohne Sperre steht da, dass das Rad frei ist", async ({ page }) => {
     /**
-     * **Befund des Betreibers, 01.11.2026.** Hier prüfte dieser Test bis
+     * **Befund des Betreibers, 31.10.2026.** Hier prüfte dieser Test bis
      * dahin das Gegenteil: „soll frei sein und ist frei" wurde
      * verschwiegen, mit der Begründung „eine Aussage ohne Frage".
      *
@@ -247,7 +247,7 @@ test.describe("Umschalter „nur messen“", () => {
     await expect(page.getByTestId("child-lock-status")).toContainText("Rad frei · bestätigt");
   });
 
-  // **Die Breiten sind gemessen, nicht gewählt** (01.11.2026).
+  // **Die Breiten sind gemessen, nicht gewählt** (31.10.2026).
   //
   // Befund des Betreibers: „der Knopf ragt über den Kartenrand". Die
   // erste Vermutung war der lange Text — der macht 240 px und hätte in

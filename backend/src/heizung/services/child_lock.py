@@ -131,7 +131,7 @@ def child_lock_state(
     verweigert.
 
     **Die erste Meldung nach dem Befehl ist noch keine Antwort darauf**
-    (Befund des Betreibers aus RUNBOOK §10ar, 01.11.2026).
+    (Befund des Betreibers aus RUNBOOK §10ar, 31.10.2026).
 
     Der Grund liegt in Class A und ist keine Unschärfe, sondern die
     Bauart: ein Vicki **empfängt nur im Fenster nach einem eigenen
