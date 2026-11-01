@@ -34,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
@@ -48,9 +47,10 @@ from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
 from heizung.models.relay_reading import RelayReading
 from heizung.models.user import User
-from heizung.services import downlink_adapter, relay_adapter, relay_service
+from heizung.services import downlink_adapter, provision_lauf, relay_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.child_lock import gast_sperren_je_geraet, soll_kindersicherung
+from heizung.tasks.relay_tasks import provisioniere_relais
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +60,22 @@ DeviceIdPath = Path(..., gt=0, description="Device-Primary-Key")
 
 
 class ProvisionierungErgebnis(BaseModel):
-    """Was die Provisionierung **angefragt** hat.
+    """Was die Provisionierung **vorhat**.
 
     Bewusst nicht „bestanden": die Antworten kommen asynchron im
     naechsten Uplink, und der Subscriber vermerkt sie dann.
+
+    **Und bewusst nicht „gesendet"** (01.11.2026). Seit die fuenf
+    Downlinks in einem Hintergrund-Auftrag laufen, kehrt der Endpunkt
+    zurueck, **bevor** der erste hinaus ist — ``gesendet`` waere eine
+    Behauptung ueber etwas, das noch nicht geschehen ist (§5.68). Was
+    wirklich hinausging, steht im Audit, das der Auftrag am Ende
+    schreibt.
     """
 
     device_id: int
-    gesendet: list[str]
+    geplant: list[str]
+    laeuft: bool
     hinweis: str
 
 
@@ -138,6 +146,14 @@ class RelaisStand(BaseModel):
     watchdog_strategy: str
     darf_schalten: bool
 
+    #: Ob gerade ein Provisionierungs-Lauf unterwegs ist. Seit dem
+    #: 01.11.2026 sendet ein Hintergrund-Auftrag, und der Request kehrt
+    #: sofort zurueck — ohne dieses Feld haette die Seite keinen
+    #: Unterschied zwischen „noch nicht angestossen" und „laeuft gerade",
+    #: und genau diese Luecke hat den Betreiber einen Handgriff zweimal
+    #: machen lassen.
+    provisionierung_laeuft: bool
+
     # Jüngste Meldung
     relay_on: bool | None
     power_w: int | None
@@ -192,6 +208,7 @@ async def lies_relais(
         switch_cycles=geraet.switch_cycles,
         watchdog_strategy=geraet.watchdog_strategy,
         darf_schalten=relay_service.darf_schalten(geraet),
+        provisionierung_laeuft=await asyncio.to_thread(provision_lauf.laeuft, geraet.id),
         relay_on=zeile.relay_on if zeile is not None else None,
         power_w=zeile.power_w if zeile is not None else None,
         energy_wh=zeile.energy_wh if zeile is not None else None,
@@ -212,73 +229,71 @@ async def provisioniere(
     user: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> ProvisionierungErgebnis:
-    """Setzt und liest **beide** Rueckfallzustaende (S4).
+    """Stoesst die Provisionierung an — und kehrt **sofort** zurueck.
 
-    Vier Downlinks in dieser Reihenfolge: setzen, setzen, lesen, lesen.
-    Die Reihenfolge ist nicht beliebig — erst beide Werte setzen, dann
-    beide abfragen, damit die Antworten einen konsistenten Stand
-    beschreiben.
+    **Fuenf** Downlinks in dieser Reihenfolge: Version, setzen, setzen,
+    lesen, lesen. Die Reihenfolge ist nicht beliebig — erst beide Werte
+    setzen, dann beide abfragen, damit die Antworten einen konsistenten
+    Stand beschreiben; die Version steht vorn, weil sie unabhaengig ist
+    und das Tor in ``nimm_in_betrieb`` sie braucht.
 
     ``0x5E 02`` ist AUS nach Stromrueckkehr, ``0x59 01`` ist AUS nach
     Erholung vom Ueberhitzungsschutz. **Die Bytes sind verschieden**: bei
     ``0x5E`` ist AUS die ``02``, bei ``0x59`` die ``01``.
 
-    **Mit Pause zwischen den Downlinks, und der Handgriff dauert deshalb
-    rund 45 Sekunden** (Befund des Betreibers, 01.11.2026). An Relais 109
-    ergaben zwei Lesebefehle fuenf Sekunden hintereinander **eine**
-    Antwort, und nach der pausenlosen Provisionierung fehlte die Antwort
-    auf ``0x5A``. Das Geraet haengt offenbar je Uplink nur **eine**
-    Befehlsantwort an.
+    **Gesendet wird in einem Hintergrund-Auftrag** (Befund des Betreibers,
+    01.11.2026, 10:26). Zwischen den Downlinks liegen je 15 Sekunden, weil
+    das Geraet je Uplink nur **eine** Befehlsantwort anhaengt — das sind
+    rund 75 Sekunden, und die Oberflaeche brach nach etwa 30 ab
+    (``signal is aborted without reason``). Das Backend lief weiter und
+    hat alles gesendet; die Antwort auf ``0x5A`` kam um 10:28:28.
 
-    Die Pause steht in den Settings (``relay_provision_pause_s``, Vorgabe
-    15 s), weil sie eine Annahme ueber fremde Hardware ist und keine
-    Eigenschaft unseres Systems; ``0`` stellt das alte Verhalten her. Ohne
-    Pause ist der Handgriff schneller und **unvollstaendig** — und eine
-    fehlende Ruecklesung sieht aus wie ein Geraet, das nicht antwortet.
+    **Der Handgriff war also erfolgreich und sah wie ein Fehlschlag aus.**
+    Das ist die teuerste Sorte Rueckmeldung, weil der naechste Schritt ein
+    zweiter Versuch ist — und zwei Provisionierungen gleichzeitig waeren
+    zehn Downlinks ohne Pause, also genau der Zustand, gegen den die Pause
+    gebaut ist.
+
+    Deshalb ist die Lauf-Markierung **auch ein Tor** (S2): wer anstoesst,
+    waehrend ein Lauf laeuft, bekommt **409**. Die Geraeteseite liest
+    dieselbe Markierung und zeigt „laeuft".
+
+    **Kein Audit hier.** Es schreibt der Auftrag, wenn er fertig ist —
+    ``gesendet`` ist eine Aussage darueber, was hinausgegangen ist, und
+    hier ist noch nichts hinausgegangen (§5.68).
     """
     geraet = await _relais_oder_404(session, device_id)
-    pause = get_settings().relay_provision_pause_s
 
-    async def _pause() -> None:
-        """Zwischen den Befehlen, nicht vor dem ersten.
+    if not await asyncio.to_thread(provision_lauf.starte, device_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Fuer dieses Relais laeuft schon eine Provisionierung. "
+                "Sie dauert rund 75 Sekunden; bitte abwarten."
+            ),
+        )
 
-        Der erste trifft ein Geraet, das gerade nichts anderes zu
-        beantworten hat.
-        """
-        if pause > 0:
-            await asyncio.sleep(pause)
-
-    gesendet: list[str] = []
-    await relay_adapter.setze_zustand_nach_stromrueckkehr(geraet.dev_eui, "off")
-    gesendet.append("0x5E 02 (AUS nach Stromrueckkehr)")
-    await _pause()
-    await relay_adapter.setze_zustand_nach_ueberhitzung(geraet.dev_eui, "off")
-    gesendet.append("0x59 01 (AUS nach Ueberhitzungs-Erholung)")
-    await _pause()
-    await relay_adapter.frage_zustand_nach_stromrueckkehr(geraet.dev_eui)
-    gesendet.append("0x5F (Ruecklesung Stromrueckkehr)")
-    await _pause()
-    await relay_adapter.frage_zustand_nach_ueberhitzung(geraet.dev_eui)
-    gesendet.append("0x5A (Ruecklesung Ueberhitzung)")
-
-    await record_business_action(
-        session,
-        user_id=user.id,
-        action="RELAY_PROVISIONED",
-        target_type="device",
-        target_id=device_id,
-        old_value=None,
-        new_value={"gesendet": gesendet},
-    )
-    await session.commit()
+    geplant = [
+        "0x04 (Hardware- und Softwareversion)",
+        "0x5E 02 (AUS nach Stromrueckkehr)",
+        "0x59 01 (AUS nach Ueberhitzungs-Erholung)",
+        "0x5F (Ruecklesung Stromrueckkehr)",
+        "0x5A (Ruecklesung Ueberhitzung)",
+    ]
+    # ``.delay`` und nicht ``.apply_async(countdown=...)``: der Lauf soll
+    # sofort beginnen, nur eben nicht in diesem Request.
+    provisioniere_relais.delay(geraet.id, user.id)
 
     return ProvisionierungErgebnis(
         device_id=device_id,
-        gesendet=gesendet,
+        geplant=geplant,
+        laeuft=True,
         hinweis=(
-            "Die Antworten kommen mit dem naechsten Uplink. Erst danach "
-            "zeigt die Geraeteseite beide Ruecklesungen als bestanden, und "
-            "erst dann laesst sich das Relais in Betrieb nehmen."
+            "Laeuft — fuenf Befehle mit je 15 Sekunden Abstand, rund 75 "
+            "Sekunden. Die Antworten kommen mit dem naechsten Uplink; erst "
+            "danach zeigt die Geraeteseite beide Ruecklesungen als "
+            "bestanden, und erst dann laesst sich das Relais in Betrieb "
+            "nehmen."
         ),
     )
 
@@ -523,22 +538,3 @@ def _inbetriebnahme_ergebnis(geraet: Device) -> InbetriebnahmeErgebnis:
         power_return_verified=geraet.power_return_verified_at is not None,
         overheating_recovery_verified=geraet.overheating_recovery_verified_at is not None,
     )
-
-
-def relais_antwort(geraet: Device) -> dict[str, Any]:
-    """Die Relais-Felder fuer die Zonen- und Geraeteansicht (Paket 6).
-
-    Als Funktion und nicht als Schema-Feld: die Zonenansicht reicht sie
-    als Teilobjekt durch, die Geraeteseite flach. Zwei Schemata fuer
-    dieselben sechs Werte waeren zwei Stellen zum Nachziehen.
-    """
-    return {
-        "commissioned_at": geraet.commissioned_at,
-        "power_return_verified": geraet.power_return_verified_at is not None,
-        "overheating_recovery_verified": geraet.overheating_recovery_verified_at is not None,
-        "protection_tripped_at": geraet.protection_tripped_at,
-        "protection_kind": geraet.protection_kind,
-        "switch_cycles": geraet.switch_cycles,
-        "watchdog_strategy": geraet.watchdog_strategy,
-        "darf_schalten": relay_service.darf_schalten(geraet),
-    }

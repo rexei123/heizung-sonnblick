@@ -86,6 +86,7 @@ const STAND_NEU = {
   switch_cycles: 0,
   watchdog_strategy: "expire_and_resend",
   darf_schalten: false,
+  provisionierung_laeuft: false,
   relay_on: null,
   power_w: null,
   energy_wh: null,
@@ -138,8 +139,12 @@ async function mock(
   // registrierte Route zuerst trifft.
   await page.route("**/api/v1/**", (r: Route) => json(r, {}));
   await page.route("**/api/v1/auth/me", (r: Route) => json(r, nutzer));
-  await page.route("**/api/v1/devices/77/hardware-status", (r: Route) => json(r, HW_STATUS));
-  await page.route("**/api/v1/devices/77/sensor-readings*", (r: Route) => json(r, []));
+  await page.route("**/api/v1/devices/77/hardware-status", (r: Route) =>
+    json(r, HW_STATUS),
+  );
+  await page.route("**/api/v1/devices/77/sensor-readings*", (r: Route) =>
+    json(r, []),
+  );
   await page.route("**/api/v1/devices/77", (r: Route) => {
     if (r.request().method() !== "GET") return r.fallback();
     return json(r, DEVICE);
@@ -155,7 +160,9 @@ async function mock(
 }
 
 test.describe("Relais-Karte", () => {
-  test("ein nicht in Betrieb genommenes Relais nennt den Grund", async ({ page }) => {
+  test("ein nicht in Betrieb genommenes Relais nennt den Grund", async ({
+    page,
+  }) => {
     await mock(page, { stand: STAND_NEU, nutzer: ADMIN });
     await page.goto("/devices/77");
 
@@ -182,19 +189,19 @@ test.describe("Relais-Karte", () => {
     // Beide Zeilen „nicht bestätigt" — und das Wort „Fehler" kommt nicht
     // vor. Geprueft am Kennzeichen, nicht am Text: die Material-Ikone
     // steht im selben Element.
-    await expect(page.getByTestId("relay-pruefung-stromrueckkehr")).toHaveAttribute(
-      "data-bestanden",
-      "false",
-    );
-    await expect(page.getByTestId("relay-pruefung-ueberhitzung")).toHaveAttribute(
-      "data-bestanden",
-      "false",
-    );
+    await expect(
+      page.getByTestId("relay-pruefung-stromrueckkehr"),
+    ).toHaveAttribute("data-bestanden", "false");
+    await expect(
+      page.getByTestId("relay-pruefung-ueberhitzung"),
+    ).toHaveAttribute("data-bestanden", "false");
     await expect(karte).toContainText("nicht bestätigt");
     await expect(karte).not.toContainText("Fehler");
   });
 
-  test("ein laufendes Relais zeigt Zustand, Leistung und Zähler", async ({ page }) => {
+  test("ein laufendes Relais zeigt Zustand, Leistung und Zähler", async ({
+    page,
+  }) => {
     await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
     await page.goto("/devices/77");
 
@@ -202,22 +209,26 @@ test.describe("Relais-Karte", () => {
     await expect(page.getByTestId("relay-darf-schalten")).toBeVisible();
     await expect(karte).toContainText("1600 W");
     await expect(karte).toContainText("1234567 Wh");
-    await expect(page.getByTestId("relay-pruefung-stromrueckkehr")).toHaveAttribute(
-      "data-bestanden",
-      "true",
-    );
-    await expect(page.getByTestId("relay-pruefung-ueberhitzung")).toHaveAttribute(
-      "data-bestanden",
-      "true",
-    );
+    await expect(
+      page.getByTestId("relay-pruefung-stromrueckkehr"),
+    ).toHaveAttribute("data-bestanden", "true");
+    await expect(
+      page.getByTestId("relay-pruefung-ueberhitzung"),
+    ).toHaveAttribute("data-bestanden", "true");
   });
 
-  test("eine stehende Schutz-Sperre nennt Art und Zeitpunkt", async ({ page }) => {
+  test("eine stehende Schutz-Sperre nennt Art und Zeitpunkt", async ({
+    page,
+  }) => {
     await mock(page, { stand: STAND_GESPERRT, nutzer: ADMIN });
     await page.goto("/devices/77");
 
-    await expect(page.getByTestId("relay-sperrgrund")).toContainText("Schutz-Sperre");
-    await expect(page.getByTestId("relay-sperrgrund")).toContainText("overheating");
+    await expect(page.getByTestId("relay-sperrgrund")).toContainText(
+      "Schutz-Sperre",
+    );
+    await expect(page.getByTestId("relay-sperrgrund")).toContainText(
+      "overheating",
+    );
     await expect(page.getByTestId("relay-sperrgrund")).toContainText(
       "nur durch einen Administrator",
     );
@@ -250,14 +261,20 @@ test.describe("Relais-Karte", () => {
     await expect(page.getByTestId("relay-release")).toHaveCount(0);
   });
 
-  test("der Provisionierungs-Hinweis behauptet kein Ergebnis", async ({ page }) => {
+  test("der Provisionierungs-Hinweis behauptet kein Ergebnis", async ({
+    page,
+  }) => {
     await mock(page, { stand: STAND_NEU, nutzer: ADMIN });
     await page.route("**/api/v1/devices/77/relay/provision", (r: Route) =>
       json(r, {
         device_id: 77,
-        gesendet: ["0x5E 02", "0x59 01", "0x5F", "0x5A"],
+        // „geplant", nicht „gesendet": der Endpunkt kehrt zurück, bevor
+        // der erste Downlink hinaus ist (01.11.2026).
+        geplant: ["0x04", "0x5E 02", "0x59 01", "0x5F", "0x5A"],
+        laeuft: true,
         hinweis:
-          "Die Antworten kommen mit dem naechsten Uplink. Erst danach zeigt die " +
+          "Laeuft — fuenf Befehle mit je 15 Sekunden Abstand, rund 75 Sekunden. " +
+          "Die Antworten kommen mit dem naechsten Uplink; erst danach zeigt die " +
           "Geraeteseite beide Ruecklesungen als bestanden, und erst dann laesst " +
           "sich das Relais in Betrieb nehmen.",
       }),
@@ -267,7 +284,7 @@ test.describe("Relais-Karte", () => {
     await page.getByTestId("relay-provision").click();
     // Der Hinweis sagt, dass das Ergebnis noch nicht da ist — alles
     // andere waere eine Zusicherung ohne Deckung.
-    await expect(page.getByTestId("relay-meldung")).toContainText("naechsten Uplink");
+    await expect(page.getByTestId("relay-meldung")).toContainText("Laeuft");
   });
 
   test("ein Thermostat zeigt keine Relais-Karte", async ({ page }) => {
@@ -283,7 +300,45 @@ test.describe("Relais-Karte", () => {
     // Erst pruefen, dass die SEITE da ist -- sonst waere die Zusicherung
     // darunter falsch-gruen, und genau das ist beim ersten Versuch
     // passiert (§5.55).
-    await expect(page.getByRole("heading", { name: "Panel Barbereich" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Panel Barbereich" }),
+    ).toBeVisible();
     await expect(page.getByTestId("relay-card")).toHaveCount(0);
+  });
+
+  test("ein laufender Auftrag ist sichtbar und sperrt den Knopf", async ({
+    page,
+  }) => {
+    // **Der Befund vom 01.11.2026, 10:26.** Der Handgriff dauert rund 75
+    // Sekunden, die Oberfläche brach nach etwa 30 ab — und zeigte danach
+    // nichts, was ihn von „noch nicht angestoßen" unterschied. Genau in
+    // diesem Zustand macht man ihn zweimal, und zwei Läufe gleichzeitig
+    // wären zehn Downlinks ohne Pause.
+    await mock(page, {
+      stand: { ...STAND_NEU, provisionierung_laeuft: true },
+      nutzer: ADMIN,
+    });
+    await page.goto("/devices/77");
+
+    await expect(
+      page.getByTestId("relay-provisionierung-laeuft"),
+    ).toContainText("fünf Befehle");
+    const knopf = page.getByTestId("relay-provision");
+    await expect(knopf).toBeDisabled();
+    await expect(knopf).toContainText("läuft");
+  });
+
+  test("ohne laufenden Auftrag ist der Knopf bedienbar", async ({ page }) => {
+    // Die Gegenprobe, und sie ist nicht überflüssig: ein Knopf, der
+    // **immer** gesperrt ist, hätte denselben Test oben grün gemacht.
+    await mock(page, { stand: STAND_NEU, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    await expect(page.getByTestId("relay-provisionierung-laeuft")).toHaveCount(
+      0,
+    );
+    const knopf = page.getByTestId("relay-provision");
+    await expect(knopf).toBeEnabled();
+    await expect(knopf).toContainText("Provisionieren");
   });
 });

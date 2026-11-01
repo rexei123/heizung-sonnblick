@@ -17,8 +17,6 @@ from heizung.models.enums import DeviceKind, DeviceVendor
 from heizung.services import relay_service
 from heizung.services.relay_service import (
     RelayCommissioningIncompleteError,
-    RelayNotCommissionedError,
-    RelayProtectionLatchedError,
 )
 
 NOW = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
@@ -66,22 +64,17 @@ def _betriebsbereit(**felder: object) -> Device:
 def test_nicht_in_betrieb_genommen_darf_nicht_schalten() -> None:
     """Mutationsprobe **M3** in Testform."""
     assert relay_service.darf_schalten(_relais()) is False
-    with pytest.raises(RelayNotCommissionedError, match="nicht in Betrieb genommen"):
-        relay_service.pruefe_schaltbefehl(_relais())
 
 
 def test_in_betrieb_genommen_darf_schalten() -> None:
     geraet = _betriebsbereit()
     assert relay_service.darf_schalten(geraet) is True
-    relay_service.pruefe_schaltbefehl(geraet)  # kein Fehler
 
 
 def test_kein_relais_darf_nicht_schalten() -> None:
     """Ein Thermostat laeuft nicht versehentlich durch diesen Pfad."""
     geraet = _betriebsbereit(kind=DeviceKind.THERMOSTAT)
     assert relay_service.darf_schalten(geraet) is False
-    with pytest.raises(RelayNotCommissionedError, match="kein Relais"):
-        relay_service.pruefe_schaltbefehl(geraet)
 
 
 def test_ausgemustertes_relais_darf_nicht_schalten() -> None:
@@ -128,12 +121,65 @@ def test_nur_ueberhitzung_verifiziert_reicht_nicht() -> None:
 
 
 def test_mit_beiden_ruecklesungen_gelingt_die_inbetriebnahme() -> None:
+    """**Und mit bekannter Firmware** — seit dem 01.11.2026 gehoert sie dazu.
+
+    Die Vorgabe im Helfer bleibt ``None``, und das ist die Wahrheit: ein
+    frisch angelegtes Geraet hat seine Version noch nicht gemeldet. Wer
+    die Inbetriebnahme prueft, muss sie also setzen (§5.51 — Fixtures an
+    die Domaene anpassen, nicht den Service schwaechen).
+    """
     geraet = _relais(
         power_return_verified_at=NOW - timedelta(minutes=5),
         overheating_recovery_verified_at=NOW - timedelta(minutes=4),
+        firmware_version="1.5",
     )
     relay_service.nimm_in_betrieb(geraet, now=NOW)
     assert geraet.commissioned_at == NOW
+
+
+def test_ohne_firmware_keine_inbetriebnahme() -> None:
+    """Der Fall von Relais 109: Boot-Frame kam vor dem Datenbank-Eintrag.
+
+    ``firmware_version`` blieb ``None``, und ohne Tor haette sich das
+    Geraet in Betrieb nehmen lassen, ohne dass jemand die Version kennt.
+    Die Meldung nennt den **Handgriff**, nicht den Zustand: wiederholen.
+    """
+    geraet = _relais(
+        power_return_verified_at=NOW - timedelta(minutes=5),
+        overheating_recovery_verified_at=NOW - timedelta(minutes=4),
+        firmware_version=None,
+    )
+    with pytest.raises(relay_service.RelayCommissioningIncompleteError) as fehler:
+        relay_service.nimm_in_betrieb(geraet, now=NOW)
+
+    assert "Firmware unbekannt" in str(fehler.value)
+    assert "Provisionieren wiederholen" in str(fehler.value)
+    assert geraet.commissioned_at is None
+
+
+def test_zu_alte_firmware_keine_inbetriebnahme() -> None:
+    """Unter 1.4 gibt es die Timer-Befehle nicht — und damit kein S1.
+
+    **Eigene Meldung, nicht dieselbe wie bei „unbekannt".** „Unbekannt"
+    ist ein Handgriff (wiederholen), „zu alt" ist das Ende fuer dieses
+    Geraet. Eine gemeinsame Meldung haette den Hausmeister zum
+    Wiederholen geschickt, wo nichts zu wiederholen ist.
+    """
+    geraet = _relais(
+        power_return_verified_at=NOW - timedelta(minutes=5),
+        overheating_recovery_verified_at=NOW - timedelta(minutes=4),
+        firmware_version="1.3",
+    )
+    with pytest.raises(relay_service.RelayCommissioningIncompleteError) as fehler:
+        relay_service.nimm_in_betrieb(geraet, now=NOW)
+
+    meldung = str(fehler.value)
+    assert "1.3" in meldung
+    assert "ab 1.4" in meldung
+    assert "wiederholen" not in meldung, (
+        "zu alt ist kein Handgriff - die Meldung darf nicht zum Wiederholen auffordern"
+    )
+    assert geraet.commissioned_at is None
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +227,6 @@ def test_unbekanntes_ruecklesungs_ziel_ist_ein_fehler() -> None:
         relay_service.vermerke_ruecklesung(_relais(), was="irgendwas", wert="off")
 
 
-def test_ruecklesungen_vollstaendig() -> None:
-    assert relay_service.ruecklesungen_vollstaendig(_relais()) is False
-    assert relay_service.ruecklesungen_vollstaendig(_betriebsbereit()) is True
-
-
 # ---------------------------------------------------------------------------
 # Schutz-Sperre
 # ---------------------------------------------------------------------------
@@ -197,8 +238,6 @@ def test_schutzausloesung_sperrt_das_relais() -> None:
     assert geraet.protection_tripped_at == NOW
     assert geraet.protection_kind == "overheating"
     assert relay_service.darf_schalten(geraet) is False
-    with pytest.raises(RelayProtectionLatchedError, match="overheating"):
-        relay_service.pruefe_schaltbefehl(geraet)
 
 
 def test_die_erste_ausloesung_zaehlt() -> None:

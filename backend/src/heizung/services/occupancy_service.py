@@ -153,35 +153,6 @@ async def next_active_checkout(
     return occ.check_out if occ is not None else None
 
 
-async def next_active_checkin(
-    session: AsyncSession,
-    room_id: int,
-    *,
-    within: timedelta,
-    now: datetime | None = None,
-) -> bool:
-    """Gibt es eine aktive Belegung, deren ``check_in`` in den naechsten
-    ``within`` ab ``now`` liegt? (Sprint 9.9 T6 - PMS-Auto-Revoke).
-
-    True = Folgegast kommt direkt anschliessend, Auto-Revoke darf NICHT
-    triggern. False = Raum wirklich frei.
-    """
-    current_time = now or _now()
-    stmt = (
-        select(Occupancy.id)
-        .where(
-            and_(
-                Occupancy.room_id == room_id,
-                Occupancy.is_active.is_(True),
-                Occupancy.check_in > current_time,
-                Occupancy.check_in <= current_time + within,
-            )
-        )
-        .limit(1)
-    )
-    return await session.scalar(stmt) is not None
-
-
 async def derive_room_status(
     session: AsyncSession, room_id: int, now: datetime | None = None
 ) -> RoomStatus:
@@ -266,7 +237,6 @@ async def sync_room_status(
         room.status = new_status
         # Sprint 9.9 T6: bei Auszug device-Overrides auto-revoken.
         # Lazy import vermeidet circular dependency
-        # (override_pms_hook -> occupancy_service.next_active_checkin).
         from heizung.services.override_pms_hook import auto_revoke_on_checkout
 
         revoked = await auto_revoke_on_checkout(

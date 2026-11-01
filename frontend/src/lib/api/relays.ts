@@ -34,6 +34,11 @@ export const relaisStandSchema = z.object({
   switch_cycles: z.number(),
   watchdog_strategy: z.string(),
   darf_schalten: z.boolean(),
+  // Seit dem 01.11.2026 sendet ein Hintergrund-Auftrag, und der
+  // Request kehrt sofort zurück. Ohne dieses Feld gäbe es keinen
+  // Unterschied zwischen „noch nicht angestoßen" und „läuft gerade" —
+  // und genau diese Lücke hat den Handgriff zweimal machen lassen.
+  provisionierung_laeuft: z.boolean(),
 
   relay_on: z.boolean().nullable(),
   power_w: z.number().nullable(),
@@ -48,7 +53,10 @@ export type RelaisStand = z.infer<typeof relaisStandSchema>;
 
 const provisionierungSchema = z.object({
   device_id: z.number(),
-  gesendet: z.array(z.string()),
+  // „geplant", nicht „gesendet": der Endpunkt kehrt zurück, bevor der
+  // erste Downlink hinaus ist (01.11.2026).
+  geplant: z.array(z.string()),
+  laeuft: z.boolean(),
   hinweis: z.string(),
 });
 
@@ -73,35 +81,57 @@ const messrolleSchema = z.object({
 export type Messrolle = z.infer<typeof messrolleSchema>;
 
 export async function fetchRelaisStand(deviceId: number): Promise<RelaisStand> {
-  const data = await apiClient.get<unknown>(`/api/v1/devices/${deviceId}/relay`);
+  const data = await apiClient.get<unknown>(
+    `/api/v1/devices/${deviceId}/relay`,
+  );
   return relaisStandSchema.parse(data);
 }
 
-export async function provisioniereRelais(deviceId: number): Promise<Provisionierung> {
-  const data = await apiClient.post<unknown>(`/api/v1/devices/${deviceId}/relay/provision`, {});
+export async function provisioniereRelais(
+  deviceId: number,
+): Promise<Provisionierung> {
+  const data = await apiClient.post<unknown>(
+    `/api/v1/devices/${deviceId}/relay/provision`,
+    {},
+  );
   return provisionierungSchema.parse(data);
 }
 
-export async function nimmRelaisInBetrieb(deviceId: number): Promise<Inbetriebnahme> {
-  const data = await apiClient.post<unknown>(`/api/v1/devices/${deviceId}/relay/commission`, {});
+export async function nimmRelaisInBetrieb(
+  deviceId: number,
+): Promise<Inbetriebnahme> {
+  const data = await apiClient.post<unknown>(
+    `/api/v1/devices/${deviceId}/relay/commission`,
+    {},
+  );
   return inbetriebnahmeSchema.parse(data);
 }
 
-export async function nimmRelaisAusserBetrieb(deviceId: number): Promise<Inbetriebnahme> {
-  const data = await apiClient.delete<unknown>(`/api/v1/devices/${deviceId}/relay/commission`);
+export async function nimmRelaisAusserBetrieb(
+  deviceId: number,
+): Promise<Inbetriebnahme> {
+  const data = await apiClient.delete<unknown>(
+    `/api/v1/devices/${deviceId}/relay/commission`,
+  );
   return inbetriebnahmeSchema.parse(data);
 }
 
 export async function hebeSchutzSperreAuf(deviceId: number): Promise<void> {
-  await apiClient.post<unknown>(`/api/v1/devices/${deviceId}/relay/release-protection`, {});
+  await apiClient.post<unknown>(
+    `/api/v1/devices/${deviceId}/relay/release-protection`,
+    {},
+  );
 }
 
 export async function setzeMessrolle(
   deviceId: number,
   measureOnly: boolean,
 ): Promise<Messrolle> {
-  const data = await apiClient.patch<unknown>(`/api/v1/devices/${deviceId}/measure-only`, {
-    measure_only: measureOnly,
-  });
+  const data = await apiClient.patch<unknown>(
+    `/api/v1/devices/${deviceId}/measure-only`,
+    {
+      measure_only: measureOnly,
+    },
+  );
   return messrolleSchema.parse(data);
 }
