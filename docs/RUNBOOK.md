@@ -8053,6 +8053,43 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 
 ## 10ar. Erster `0x07` an ein echtes Gerät: Rad sperren und freigeben (Sprint 23 T4-B) — Pflicht-Stop
 
+> ### Ergebnis: **vollständig bestanden**, Zimmer 107, drei Geräte (020/021/022)
+>
+> | # | Prüfung | Ergebnis |
+> |---|---|---|
+> | 1–6 | Ausgangsstand bis Drehung am Rad | bestanden am **31.10.2026** |
+> | 7 | Eine Nacht | bestanden |
+> | 8 | Aufheben | bestanden am **01.11.2026** |
+>
+> **Schritte 1–6** (31.10.2026): 10:16 Ortszeit gingen **drei** `0x07`
+> hinaus — einer je Thermostat, wie angekündigt. 10:34 stand „Rad
+> gesperrt · bestätigt", und das Rad im Zimmer ließ sich nicht mehr
+> verstellen.
+>
+> Um **10:23** hatte dazwischen „das Gerät meldet es als frei" gestanden —
+> ein **zu frühes Urteil**, kein Fehlschlag. Der Grund ist Class A: die
+> Meldung um 10:23 trägt noch den Zustand von vorher und öffnet erst das
+> Fenster, in dem das Gerät den Befehl abholt. Behoben in PR #356
+> (STATUS §2cq); Zeile **3a** der Prüftabelle hält es jetzt fest.
+>
+> **Schritt 7** (Nacht 31.10. auf 01.11.): die Sperre hat gehalten, alle
+> drei Geräte weiter „Rad gesperrt · bestätigt". Das Log über 24 Stunden
+> zeigte **genau die drei Befehle vom 31.10. 09:16 UTC** (= 10:16
+> Ortszeit) und **keine Nachsendung**.
+>
+> **Schritt 8** (01.11.2026): **06:09 UTC** Sperre aufgehoben, drei
+> Befehle mit `gewollt=False` hinaus; **07:35 UTC** meldeten alle drei
+> „Rad frei", und das Rad im Zimmer war wieder drehbar.
+>
+> **Damit sind beide Richtungen am Gerät geprüft** — das war der Zweck
+> dieses Pflicht-Stops. Ein Sperren, das sich nicht zurücknehmen lässt,
+> wäre schlimmer als keines.
+>
+> **Ein Befund zum Befehl in Schritt 7** (Betreiber, 01.11.2026):
+> `--since 20h` war zu knapp — der Befehl lag **20,8 Stunden** zurück und
+> wäre aus dem Fenster gefallen. Steht seither auf **24h**, Begründung
+> bei Schritt 7.
+
 > **Pflicht-Stop, und diesmal geht ein Befehl hinaus.** §10aq hat
 > ausdrücklich keinen Downlink erzeugt — die Sperre verwarf eine Drehung
 > und schickte dem Gerät nichts. Genau das war der Befund: im
@@ -8063,6 +8100,10 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 > ausdrücklicher Freigabe** und **nur an ein Zimmer**.
 
 > ### Kein Merge zwischen Schritt 2 und Schritt 7
+>
+> **Aufgehoben am 01.11.2026**, nachdem Schritt 8 durch war. Der Grund
+> darunter bleibt stehen — er gilt bei jedem Wiederholungslauf dieses
+> Abschnitts erneut.
 >
 > **Festlegung des Betreibers, 31.10.2026** — und sie hat einen
 > technischen Grund, der leicht untergeht.
@@ -8078,7 +8119,7 @@ hat etwas entschieden, es wurde etwas nicht übernommen.
 > | Schritt | braucht |
 > |---|---|
 > | 4 | `docker logs deploy-api-1 --since 3m` → die Zeile `kindersicherung gesendet` |
-> | 7 | `docker logs deploy-api-1 --since 20h` → **wie viele** `0x07` in der Nacht liefen |
+> | 7 | `docker logs deploy-api-1 --since 24h` → **wie viele** `0x07` in der Nacht liefen |
 >
 > Schritt 7 ist der empfindliche. Er prüft eine Aussage über die **ganze
 > Nacht** — „es ist kein weiterer Befehl gelaufen" —, und ein Neustart um
@@ -8189,16 +8230,40 @@ docker logs deploy-api-1 --since 3m 2>&1 | grep -i kindersicherung
 Erwartet: eine Zeile `kindersicherung gesendet dev_eui=… gewollt=True`
 je Thermostat des Zimmers.
 
-**5. Eine Keepalive-Periode warten, dann das Urteil.**
+**5. Zwei Keepalive-Perioden warten, dann das Urteil.**
 
-*Oberfläche:* nach **10 Minuten** die Geräteseite neu laden.
+*Oberfläche:* nach **etwa 20 Minuten** die Geräteseite neu laden.
 
 Erwartet: **„Rad gesperrt · bestätigt"**. Das Gerät hat das 0x80-Bit
 gemeldet, und damit ist der Befehl angekommen **und** wirksam.
 
-**Steht dort „fehlgeschlagen": melden.** Der Frame ist angekommen (Schritt
-4), aber die Einstellung sitzt nicht — das ist ein Hardware-Befund und
-kein Programmfehler.
+> **Zwei Perioden, nicht eine — und das ist Class A, keine Trägheit**
+> (Befund des Betreibers aus dem Lauf vom 31.10.2026).
+>
+> Ein Vicki **empfängt nur im Fenster nach einem eigenen Uplink**. Die
+> erste Meldung nach dem Befehl trägt deshalb noch den Zustand von
+> **vorher** — sie öffnet das Fenster, in dem das Gerät den Befehl
+> abholt. Erst die zweite berichtet das Ergebnis:
+>
+> | Zeit | Vorgang |
+> |---|---|
+> | 10:16 | drei `0x07` in die Warteschlange |
+> | 10:23 | Keepalive meldet **„frei"**, holt danach den Befehl ab |
+> | 10:34 | Keepalive meldet **„gesperrt"** |
+>
+> **Die Anzeige sagte um 10:23 „das Gerät meldet es als frei"** — ein
+> roter Befund, elf Minuten vor der Bestätigung. Das war ein Fehler im
+> Urteil und ist behoben: gezählt werden jetzt die Meldungen seit dem
+> Befehl, und gültig ist erst die zweite. Bis dahin steht
+> **„ausstehend"**, und das ist richtig.
+
+**Vor der zweiten Meldung steht „ausstehend".** Das ist der Normalfall und
+kein Grund zur Sorge; die Anzeige sagt es auch so („Bestätigung kommt mit
+dem nächsten Keepalive").
+
+**Steht nach zwei Meldungen „fehlgeschlagen": melden.** Der Frame ist
+angekommen (Schritt 4), aber die Einstellung sitzt nicht — das ist ein
+Hardware-Befund und kein Programmfehler.
 
 **6. Am Rad drehen — jetzt muss es sich sperren lassen.**
 
@@ -8226,11 +8291,22 @@ Nachtzyklus samt Absenkung überleben, ohne dass jemand nachhilft.
 sein:
 
 ```bash
-docker logs deploy-api-1 --since 20h 2>&1 | grep -ci kindersicherung
+docker logs deploy-api-1 --since 24h 2>&1 | grep -ci kindersicherung
 ```
 
 Erwartet: dieselbe Zahl wie am Vortag (ein Eintrag je Thermostat). Eine
 höhere Zahl heißt, dass etwas wiederholt sendet — melden.
+
+**Warum 24 und nicht 20 Stunden.** Hier stand `--since 20h`. Am
+01.11.2026 lag der Befehl aus Schritt 2 **20,8 Stunden** zurück — er wäre
+aus dem Fenster gefallen, und das Ergebnis hätte wie „kein Befehl
+gelaufen" ausgesehen, obwohl es „nicht weit genug zurückgesehen" hieß
+(Befund des Betreibers). Zwischen Schritt 2 am Vormittag und Schritt 7 am
+nächsten Morgen liegen regelmäßig mehr als 20 Stunden.
+
+**Die Zeiten im Log sind UTC, die Oberfläche zeigt Ortszeit** (§5.79). Im
+Lauf vom 31.10.2026 war derselbe Befehl `09:16 UTC` und in der Oberfläche
+`10:16`.
 
 **8. Sperre aufheben und das Rad zurückgeben.**
 
@@ -8250,16 +8326,18 @@ Sperren, das sich nicht zurücknehmen lässt, wäre schlimmer als keines.
 | 1 | Ausgangsstand | „Rad frei · bestätigt" |
 | 2 | Dauerhafte Sperre setzen | Knopf „gesperrt", Form „dauerhaft", Schloss in der Liste |
 | 3 | Sofort danach | „Rad gesperrt · **ausstehend**" |
+| 3a | Nach der **ersten** Meldung | weiter „ausstehend" — sie öffnet nur das Empfangsfenster |
 | 4 | Gateway | `Command received` + `queue-item enqueued`, eine api-Logzeile je Thermostat |
-| 5 | Nach 10 Minuten | „Rad gesperrt · **bestätigt**" |
+| 5 | Nach **zwei** Meldungen (ca. 20 min) | „Rad gesperrt · **bestätigt**"; davor „ausstehend" |
 | 6 | Drehung am Rad | wird am Gerät nicht angenommen |
-| 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` |
+| 7 | Nach einer Nacht | unverändert „bestätigt", **kein** weiterer `0x07` (Log `--since 24h`) |
 | 8 | Aufheben | „Rad frei · bestätigt", Rad wieder drehbar |
 
 ### Abbruch und Rückweg
 
-**Abbrechen bei:** `Processing command error` in Schritt 4, „fehlgeschlagen"
-schon in Schritt 3, oder mehr `0x07`-Zeilen als Thermostate.
+**Abbrechen bei:** `Processing command error` in Schritt 4,
+„fehlgeschlagen" vor der zweiten Meldung, oder mehr `0x07`-Zeilen als
+Thermostate.
 
 **Der Rückweg ist Schritt 8** — die Sperre aufheben. Er gibt das Rad frei
 und braucht keinen Deploy und keinen Eingriff an der Datenbank. Geht auch
