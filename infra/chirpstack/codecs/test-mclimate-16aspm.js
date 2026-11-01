@@ -65,7 +65,12 @@ var kaShort = decodeUplink({ bytes: hex('011700'), fPort: 1 });
 check('zu kurzer Keepalive meldet Fehler', kaShort.errors.length, 1);
 check('zu kurzer Keepalive liefert keine Daten', kaShort.data, {});
 
-check('leere Nutzlast', decodeUplink({ bytes: [], fPort: 1 }).errors, ['empty payload']);
+// Leere Nutzlast: **kein Fehler** (Befund des Betreibers, 01.11.2026).
+// fPort 0 traegt nie etwas, und zwei solche Frames erzeugten zweimal
+// UPLINK_CODEC ERROR im ChirpStack-Log. Hier stand bis dahin
+// ['empty payload'].
+check('leere Nutzlast meldet keinen Fehler', decodeUplink({ bytes: [], fPort: 0 }).errors, []);
+check('leere Nutzlast liefert leere Daten', decodeUplink({ bytes: [], fPort: 0 }).data, {});
 
 // ---------------------------------------------------------------------------
 // Befehlsantworten

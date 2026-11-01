@@ -31,6 +31,7 @@ ist. Alles andere waere eine Zusicherung ohne Deckung.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -221,16 +222,42 @@ async def provisioniere(
     ``0x5E 02`` ist AUS nach Stromrueckkehr, ``0x59 01`` ist AUS nach
     Erholung vom Ueberhitzungsschutz. **Die Bytes sind verschieden**: bei
     ``0x5E`` ist AUS die ``02``, bei ``0x59`` die ``01``.
+
+    **Mit Pause zwischen den Downlinks, und der Handgriff dauert deshalb
+    rund 45 Sekunden** (Befund des Betreibers, 01.11.2026). An Relais 109
+    ergaben zwei Lesebefehle fuenf Sekunden hintereinander **eine**
+    Antwort, und nach der pausenlosen Provisionierung fehlte die Antwort
+    auf ``0x5A``. Das Geraet haengt offenbar je Uplink nur **eine**
+    Befehlsantwort an.
+
+    Die Pause steht in den Settings (``relay_provision_pause_s``, Vorgabe
+    15 s), weil sie eine Annahme ueber fremde Hardware ist und keine
+    Eigenschaft unseres Systems; ``0`` stellt das alte Verhalten her. Ohne
+    Pause ist der Handgriff schneller und **unvollstaendig** — und eine
+    fehlende Ruecklesung sieht aus wie ein Geraet, das nicht antwortet.
     """
     geraet = await _relais_oder_404(session, device_id)
+    pause = get_settings().relay_provision_pause_s
+
+    async def _pause() -> None:
+        """Zwischen den Befehlen, nicht vor dem ersten.
+
+        Der erste trifft ein Geraet, das gerade nichts anderes zu
+        beantworten hat.
+        """
+        if pause > 0:
+            await asyncio.sleep(pause)
 
     gesendet: list[str] = []
     await relay_adapter.setze_zustand_nach_stromrueckkehr(geraet.dev_eui, "off")
     gesendet.append("0x5E 02 (AUS nach Stromrueckkehr)")
+    await _pause()
     await relay_adapter.setze_zustand_nach_ueberhitzung(geraet.dev_eui, "off")
     gesendet.append("0x59 01 (AUS nach Ueberhitzungs-Erholung)")
+    await _pause()
     await relay_adapter.frage_zustand_nach_stromrueckkehr(geraet.dev_eui)
     gesendet.append("0x5F (Ruecklesung Stromrueckkehr)")
+    await _pause()
     await relay_adapter.frage_zustand_nach_ueberhitzung(geraet.dev_eui)
     gesendet.append("0x5A (Ruecklesung Ueberhitzung)")
 

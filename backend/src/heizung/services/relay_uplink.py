@@ -101,6 +101,69 @@ async def ist_relais(session: AsyncSession, device_id: int) -> bool:
     return art == DeviceKind.RELAY
 
 
+#: Welches Codec-Feld welche Ruecklesung belegt. Die Namen links sind die
+#: des Codecs, die rechts die von ``relay_service.vermerke_ruecklesung``.
+RUECKLESUNGEN: dict[str, str] = {
+    "stateAfterPowerReturn": "power_return",
+    "stateAfterOverheatingRecovery": "overheating_recovery",
+}
+
+
+async def _vermerke_ruecklesungen(
+    session: AsyncSession, *, device_id: int, obj: dict[str, Any]
+) -> dict[str, bool]:
+    """Haelt die Antworten auf ``0x5F`` und ``0x5A`` am Geraet fest.
+
+    **Der Befund des Betreibers, 01.11.2026, und er ist der dritte dieser
+    Art an diesem Geraet.** Relais 109 hat die Ruecklesung geschickt, der
+    Codec hat sie richtig dekodiert — und die Geraeteseite zeigte weiter
+    „Aus nach Stromrueckkehr: nicht bestaetigt". Der Frame
+    (``5f 02`` plus Keepalive, 09:48:11) trug ``stateAfterPowerReturn =
+    "off"``, also ein **bestandenes** Ergebnis.
+
+    Der Grund: ``relay_service.vermerke_ruecklesung`` hatte **keinen
+    Aufrufer**. Die Funktion ist seit Sprint 24b da, ist getestet, und
+    zwischen ihr und dem Uplink lag nichts. Das ist §5.87 in Reinform —
+    und in derselben Woche zum dritten Mal in diesem Geraetepfad: die
+    Firmware kam nicht an, der Tastendruck verlor seinen Grund, und jetzt
+    die Ruecklesung. Alle drei Male war die Funktion in Ordnung.
+
+    **Kein Zeitvergleich gegen die Provisionierungszeit**, und das ist
+    eine Entscheidung mit Begruendung. Es gilt die **jüngste** Meldung:
+
+    * Nur ``off`` setzt den Vermerk, und ``off`` kann das Geraet erst
+      melden, **nachdem** ``0x5E 02`` bzw. ``0x59 01`` gesessen hat. Eine
+      veraltete Antwort kann den Vermerk also nicht faelschlich setzen.
+    * ``last_state`` **loescht** ihn (so war die Funktion schon gebaut).
+      Eine veraltete Antwort kann ihn damit nur loeschen — die sichere
+      Richtung, denn ohne Vermerk gibt es keine Inbetriebnahme.
+
+    Das ist der Unterschied zur Kindersicherung, wo die Zeit **sehr wohl**
+    zaehlt: dort ist das Geraet Class A, und die erste Meldung nach dem
+    Befehl traegt noch den alten Zustand (§10ar). Ein 16ASPM ist Class C,
+    bekommt den Befehl sofort und antwortet danach.
+
+    Belegt mit den beiden Frames vom 01.11.2026: ``5a 00`` um 09:45 (vor
+    dem Setzen, ``last_state``) und ``5f 02`` um 09:48 (nach dem Setzen,
+    ``off``).
+    """
+    gefunden = {
+        was: str(obj[feld]) for feld, was in RUECKLESUNGEN.items() if obj.get(feld) is not None
+    }
+    if not gefunden:
+        return {}
+
+    geraet = await session.get(Device, device_id)
+    if geraet is None:
+        logger.warning("ruecklesung ohne Geraet in der DB device_id=%s", device_id)
+        return {}
+
+    return {
+        was: relay_service.vermerke_ruecklesung(geraet, was=was, wert=wert)
+        for was, wert in gefunden.items()
+    }
+
+
 async def verarbeite_relais_uplink(
     session: AsyncSession,
     *,
@@ -125,6 +188,10 @@ async def verarbeite_relais_uplink(
         "power_w": werte["power_w"],
         "sperre_gesetzt": False,
     }
+
+    protokoll["ruecklesungen"] = await _vermerke_ruecklesungen(
+        session, device_id=device_id, obj=obj
+    )
 
     art = obj.get(FELD_AUSLOESUNG)
     if art is None:
