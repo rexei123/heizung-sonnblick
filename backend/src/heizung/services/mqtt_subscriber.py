@@ -538,6 +538,24 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
                     session, device_id=device_id, art=str(protokoll.get("schutzart"))
                 )
                 emit_relay_protection_alert(nutzlast)
+            # Die Version aus demselben Frame festhalten (Befund vom
+            # 01.11.2026). Ein Relais schickt im ersten Uplink nach dem
+            # Join seine ``0x04``-Antwort mit — und sie lief bisher ins
+            # Leere: ``_handle_firmware_version_report`` steht im
+            # Antwort-Zweig der Thermostate, und dieser Zweig kehrt
+            # vorher zurueck. ``device.firmware_version`` blieb damit
+            # leer, obwohl das Geraet sie gemeldet hat.
+            #
+            # Das ist nicht kosmetisch: unter Software 1.4 gibt es die
+            # Timer-Befehle nicht, und ohne Timer ist „EIN nur
+            # befristet" (S1) nicht erfuellbar. Die Inbetriebnahme haengt
+            # also an einer Zahl, die nirgends stand.
+            #
+            # **Dieselbe Funktion wie bei den Thermostaten**, nicht eine
+            # zweite daneben: sie prueft nur auf ``dev_eui`` und kennt
+            # kein Geraeteart (§5.53). Sie oeffnet ihre eigene Sitzung
+            # und kehrt sofort zurueck, wenn das Feld fehlt.
+            await _handle_firmware_version_report(uplink)
             return
 
         # Sprint 11 T2 (AE-53): Plausi-Filter auf Ist-Temperatur. Werte
