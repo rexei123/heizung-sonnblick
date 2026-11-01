@@ -7544,6 +7544,11 @@ produktive Hardware an (S4).
 > `--ausfuehren` als **Probelauf** und sendet nichts. Der erste Lauf mit
 > `--ausfuehren` ist ein Hardware-Eingriff und braucht die Freigabe des
 > Betreibers — mit dem Protokoll unten, nicht nebenbei.
+>
+> **Für die geschlossene Woche ab 01.11.2026 gilt der Lauf weiter unten:**
+> „Der kontrollierte Lauf im geschlossenen Haus". Er nennt je Schritt die
+> Erwartung und den Rückweg — und einen **Schritt 0**, ohne den der
+> 72-Stunden-Befund nichts beweist.
 
 ### Was heute gilt
 
@@ -7675,6 +7680,224 @@ Ob zu einer Auslösung **außerhalb** der Absenkung wirklich gelüftet
 wurde. Das weiß nur, wer im Zimmer war. Der Bericht nennt Zeitpunkt, Zone
 und den Temperaturabfall der zehn Minuten davor — damit ist die Frage
 beantwortbar, aber nicht beantwortet.
+
+### Der kontrollierte Lauf im geschlossenen Haus (ab 01.11.2026)
+
+**Entscheidung des Betreibers, 01.11.2026:** das Haus ist bis Donnerstag,
+05.11., geschlossen. Die Erprobung läuft als **kontrollierter Test** — die
+Fenster öffnet der Betreiber selbst, in 105, 110 und 306.
+
+#### Ersetzt das die 72-Stunden-Variante? **Nein — nur ihre eine Hälfte.**
+
+Die beiden Teile des Protokolls stellen **gegenläufige** Fragen, und nur
+eine davon hängt an einem Gast:
+
+| | Frage | Woran sie hängt |
+|---|---|---|
+| Schritt 4 | Erkennt das Gerät ein **wirklich offenes** Fenster? | daran, dass jemand lüftet |
+| Schritt 5 (72 h) | Löst es aus, **ohne** dass gelüftet wurde — durch unsere eigene Absenkung? | an der **Uhr** |
+
+**Schritt 4 wird durch den kontrollierten Test besser, nicht nur
+ersetzt.** Im Gästebetrieb wartet man darauf, dass jemand ein Fenster
+öffnet, und weiß hinterher nicht genau wann und wie lange. Hier sind
+Zeitpunkt, Dauer und Zimmer bekannt und der Lauf ist wiederholbar. Was
+§10ao bisher „Was der Bericht nicht beantwortet" nennt — ob zu einer
+Auslösung wirklich gelüftet wurde —, ist in dieser Woche beantwortbar,
+weil es nur **einen** Menschen im Haus gibt, der ein Fenster öffnet.
+
+**Schritt 5 bleibt nötig**, denn seine Auslöser sind Nachtabsenkung,
+Check-out und Fenster-Sicherheit. Keiner davon braucht einen Gast; alle
+drei kommen von der Steuerung selbst. Und das Abbruchkriterium hängt
+genau an ihnen.
+
+#### Die Falle des leeren Hauses — und warum Schritt 0 Pflicht ist
+
+**Ohne eine Belegung gibt es keine Nachtabsenkung.** Die Absenkung in
+`rules/engine.py` (`layer_temporal`) greift nur bei `status == OCCUPIED`,
+und der Kommentar dort sagt auch warum: *„in einem leeren Zimmer gibt es
+nichts abzusenken, es ist schon auf dem Frei-Sollwert."* Ein freies
+Zimmer steht rund um die Uhr auf `t_vacant`.
+
+Folge: ein 72-Stunden-Befund in einem **leeren** Haus liefe mit hoher
+Wahrscheinlichkeit grün — und zwar nicht, weil die Erkennung ruhig ist,
+sondern weil das Ereignis, gegen das wir prüfen, **nie stattgefunden
+hat**. Das ist ein grüner Lauf ohne Aussage (§5.55), und er wäre der
+schlechtere Ausgang: er würde die Erkennung freigeben, ohne sie geprüft
+zu haben.
+
+**Deshalb beginnt der kontrollierte Lauf mit einer Test-Belegung** in
+jedem der drei Zimmer. Damit hält die Engine den Belegt-Sollwert, die
+Absenkung um 20:00 ist eine echte Absenkung, und der Befund beantwortet
+seine Frage. Derselbe Handgriff hat in §10aq schon einmal getragen — die
+Abreise wurde dort über eine gelöschte Test-Belegung geprüft.
+
+#### Befund: mit den Nummern 105–109 wird `--nur "105"` zweideutig
+
+**Gemeldet, nicht umgangen.** `--nur` wählt nach DevEUI **oder**
+Etikett **oder** Zimmernummer **oder** „Zimmer Zone"
+(`services/geraete_ziele.py`). Die drei neuen Pool-Vickis heißen nach der
+Entscheidung vom 31.10.2026 **105, 106, 107** (§10as) — und `105` ist
+zugleich die Nummer eines der drei Testzimmer.
+
+**Heute noch folgenlos:** ein Pool-Gerät ohne Zone ist eine **Ausnahme**
+(„Reserve-Pool") und bekommt keinen Befehl. Es taucht in Schritt 1 nur in
+der Ausnahmeliste auf — eine Zeile mehr zu lesen, kein falscher Downlink.
+
+**Scharf wird es bei der Zuordnung.** Sobald Gerät 105 aus dem Pool in
+eine Zone wandert — in ein beliebiges Zimmer —, trifft `--nur "105"`
+**beides**: die Thermostate von Zimmer 105 und das Gerät 105 dort, wo es
+dann sitzt. Die Zahl der Ziele stimmt dann nicht mehr mit der Erwartung,
+und wer sie nur abzählt, merkt es nicht.
+
+**Vorschlag, eigener PR:** das Werkzeug bricht bei einem **zweideutigen**
+`--nur` ab und nennt beide Treffer — dieselbe Familie wie der schon
+vorhandene Abbruch bei einem Tippfehler. Ein Lauf, der lautlos ein Gerät
+zu viel trifft, ist das Fehlerbild, gegen das dieser Abbruch gebaut
+wurde. Bis dahin: in Schritt 1 die **Namen der Ziele** lesen, nicht nur
+ihre Anzahl.
+
+#### Die Schritte
+
+Jeder Schritt nennt die Erwartung und den Rückweg. **Gilt eine Erwartung
+nicht, wird gemeldet und nicht nachjustiert** — die Begründung steht oben
+unter „Das Abbruchkriterium".
+
+---
+
+**Schritt 0 — Test-Belegung in den drei Zimmern.** *Software-Oberfläche.*
+
+Für 105, 110 und 306 je eine Belegung anlegen, Abreise **nach** dem Ende
+des Laufs (also Freitag, 06.11.).
+
+*Erwartet:* die drei Zimmer stehen in der Zimmerliste auf **Belegt** und
+zeigen den Belegt-Sollwert, nicht den Frei-Sollwert.
+
+*Zusätzlich prüfen:* auf „Temperaturen & Zeiten", dass ein **Nachtfenster
+konfiguriert** ist (20:00/06:00). Steht dort nichts, rechnet der `befund`
+mit einem Rückfallwert und sagt das auch — dann ist das Kriterium nicht
+belastbar, und der Lauf beginnt nicht.
+
+*Rückweg:* Belegungen löschen. Das ist derselbe Übergang OCCUPIED →
+VACANT wie bei einer Abreise und folgenlos.
+
+---
+
+**Schritt 1 — Probelauf, drei Geräte, nichts wird gesendet.** *SSH
+(heizung-test, root).*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+```
+
+*Erwartet:* genau **drei Ziele**, jedes mit Firmware **4.2 oder höher**,
+und darunter die Ausnahmen mit Grund. Bei „(NULL)" oder „4.1" **nicht
+ausführen** — `0x45` greift dort nicht — sondern melden.
+
+*Rückweg:* keiner nötig, der Lauf sendet ohne `--ausfuehren` nichts.
+
+---
+
+**Schritt 2 — die Messung T2.5, genau EIN Gerät, am Vormittag.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+```
+
+*Erwartet:* ein Downlink, Rücklesung mit `delta = 0.2`. **Und
+Fehlalarme** — das ist der Zweck: 0,2 °C ist der empfindlichste Wert und
+beantwortet, gegen welchen Vorwert das Gerät vergleicht. Ein Messwert,
+kein Betriebswert.
+
+*Abstand:* mindestens ein voller Tag zur nächsten Absenkung, sonst ist
+nicht zu unterscheiden, was ausgelöst hat. Im geschlossenen Haus heißt
+das: **am Vormittag setzen, nicht am Abend**.
+
+*Rückweg:* Schritt 3 überschreibt den Wert ohnehin; sofort zurück geht es
+mit `aus --nur "306 Schlafzimmer" --ausfuehren`.
+
+---
+
+**Schritt 3 — der Betriebswert auf alle drei.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+*Erwartet:* drei Downlinks, Rücklesung je Gerät mit **1,0 °C und 10
+Minuten**. Bewusst nicht der empfindlichste Wert: der Vicki-Sensor sitzt
+am Heizkörper, und jede Absenkung, die *wir* schicken, schließt das Ventil
+und kühlt ihn.
+
+*Rückweg:* der Abschaltweg unten.
+
+---
+
+**Schritt 4 — das kontrollierte Fenster.** *Vor Ort, je Zimmer.*
+
+Fenster öffnen, **15 Minuten**, Gerät nicht anfassen. **Zeit notieren** —
+Zimmer, auf und zu. Nacheinander, nicht gleichzeitig: drei getrennte
+Fenster sind drei Messungen, drei gleichzeitige sind eine.
+
+Danach, mit mindestens einer Keepalive-Periode Abstand:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 2
+```
+
+*Erwartet:* je Zimmer **eine** Auslösung, zeitlich im geöffneten Fenster,
+und auf der Zimmerseite Schicht 4 mit dem Sicherheitswert. Der Bericht
+nennt den Temperaturabfall der zehn Minuten davor — er sollte zu dem
+passen, was draußen war.
+
+*Keine Auslösung* heißt nicht „kaputt": 1,0 °C in 10 Minuten ist bei
+mildem Wetter viel. Dann die Dauer des Fensters notieren und melden; das
+ist ein Messergebnis, kein Fehler.
+
+*Rückweg:* Fenster zu. Schicht 4 fällt von selbst zurück, sobald das
+Gerät `openWindow = false` meldet.
+
+---
+
+**Schritt 5 — zwei Nächte, dann der Befund.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung befund --stunden 72
+```
+
+*Erwartet:* **keine** Auslösung in den Absenkungen um 20:00 — und das ist
+jetzt eine Aussage, weil Schritt 0 die Absenkung überhaupt möglich macht.
+Der Bericht rechnet in **Ortszeit** und liest das Nachtfenster aus der
+Konfiguration.
+
+*Trifft das Abbruchkriterium*, druckt der Befund
+`ABBRUCHKRITIERUM GETROFFEN` und liefert Rückgabewert 3. Dann abschalten,
+dokumentieren, **in derselben Woche nicht nachjustieren**.
+
+---
+
+**Abschaltweg — gilt in jedem Schritt.** *SSH.*
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
+    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+```
+
+Danach `status` zum Rücklesen, und die drei Test-Belegungen löschen. Der
+Befehl braucht keinen Deploy und keinen Eingriff an der Datenbank — er ist
+derselbe Weg, den das Abbruchkriterium vorschreibt.
+
+#### Was dieser Lauf **nicht** beantwortet
+
+Ob die Erkennung im **Gästebetrieb** ruhig bleibt. Dort kommt ein
+Verhalten dazu, das hier fehlt: jemand dreht am Rad, jemand kippt ein
+Fenster für Stunden, jemand legt ein Handtuch über den Heizkörper. Der
+kontrollierte Lauf beweist die **Mechanik** und das Abbruchkriterium
+gegen unsere **eigenen** Absenkungen. Die erste Gästewoche bleibt die
+Beobachtungszeit — nur dann mit einer Erkennung, die vorher einmal
+sauber gemessen wurde.
 
 ---
 
