@@ -604,6 +604,70 @@ RuntimeError: Task got Future <Future pending cb=[BaseProtocol._on_waiter_comple
 
 Zusaetzlich: `pool_pre_ping=False` in `db.py`, sonst pingt der Pool im falschen Loop.
 
+**Nachtrag 01.11.2026 — ein Test, der ``main()`` aufruft, startet einen
+zweiten Loop, und der Schaden erscheint in einer anderen Datei.**
+
+Zwei neue Tests sollten belegen, dass ein Werkzeug den Abbruch bei
+zweideutigem ``--nur`` nach draussen traegt. Sie riefen ``main()``, und
+``main()`` ruft ``asyncio.run``. Damit lief in der pytest-Sitzung ein
+**zweiter** Event-Loop: die Verbindung wurde auf ihm geoeffnet,
+``asyncio.run`` schloss ihn wieder, und im gemeinsamen Pool blieb eine
+Verbindung an einem toten Loop zurueck.
+
+**Rot wurde daraufhin ein Test in einer ganz anderen Datei**:
+``test_geraetegrenzen_ende_zu_ende::test_codec_ausgabe_landet_als_grenzen_am_geraet``
+mit der Meldung „die 0x15-Antwort hat keine Zeile erzeugt" — 0 Zeilen
+statt 1. Einzeln lief er gruen, mit seinen Nachbarn in Suite-Reihenfolge
+auch. Nur der Gesamtlauf fiel, und zwar an der Stelle, die den Pool als
+naechste benutzte.
+
+**Was die Diagnose so teuer macht, ist nicht der Loop, sondern das
+Schweigen.** Der betroffene Schreibpfad faengt seine Fehler defensiv ab
+und loggt sie (dieselbe Form wie
+``_handle_firmware_version_report``). Die kaputte Verbindung erzeugte
+also keinen Fehlschlag am Tatort, sondern **eine fehlende Zeile am
+Zielort** — und das sieht aus wie ein kaputter Subscriber, nicht wie ein
+kaputter Pool. Wer der Fehlermeldung glaubt, sucht im falschen Modul.
+
+**Regel:** Ein Test darf die ``main()``-Funktion eines CLI-Werkzeugs
+**nicht** aufrufen, solange die Suite einen eigenen Event-Loop fuehrt.
+Wer den Fang, die Rueckgabewerte oder die Meldungen von ``main()``
+pruefen will, trennt den Verteiler ab:
+
+```python
+def main() -> int:
+    ...
+    try:
+        return _verteile(args)          # <- das ist die Naht
+    except MehrdeutigeAuswahlError as exc:
+        ...
+        return 2
+
+
+def _verteile(args) -> int:
+    if args.befehl == "setzen":
+        return asyncio.run(_befehl_setzen(args))
+    ...
+```
+
+Der Test ersetzt dann ``_verteile`` und startet **keinen** Loop. Geprueft
+ist damit genau der Sprung, der uns gehoert — Ausnahme aus dem Verteiler
+zu Meldung und Rueckgabewert. Dass eine Ausnahme durch ``asyncio.run``
+nach oben kommt, ist Python und braucht keinen Test.
+
+**Und die Diagnose-Spur, falls es wieder passiert:** ein Test, der
+einzeln gruen ist und nur im Gesamtlauf faellt, **und** dessen Meldung
+„es wurde nichts geschrieben" lautet, ist ein Kandidat fuer diese
+Ursache. Die Frage ist dann nicht „wer schreibt falsch", sondern „wer hat
+vorher einen Loop geschlossen". ``grep -rn "asyncio.run" backend/tests``
+ist der erste Griff.
+
+**Querverweise:** §5.14 (die Wurzel: asyncpg-Verbindungen haengen am
+Loop), §5.39 (Cross-Test-Leakage, die andere Sorte Nachbarschaftsschaden),
+§5.87 (den Aufrufer pruefen — der Anlass fuer diese Tests), §5.76
+(Wirkung statt Mechanik: hier hat ein defensives ``except`` die Mechanik
+verborgen).
+
 ### 5.15 `event_log` wird beim manuellen Cleanup NICHT mit-cleared (Sprint 9.10 Lesson)
 
 Engine-Decision-Panel zeigt Stale-Trace, wenn nur `control_command` geleert wird:

@@ -410,17 +410,38 @@ def main() -> int:
     # Die Pruefung selbst sitzt in ``lade_ziele`` — also dort, wo die
     # Auswahl entsteht, und damit auch fuer jedes kuenftige Werkzeug.
     try:
-        if args.befehl == "setzen":
-            return asyncio.run(_befehl_setzen(args, enabled=True))
-        if args.befehl == "aus":
-            return asyncio.run(_befehl_setzen(args, enabled=False))
-        if args.befehl == "status":
-            return asyncio.run(_befehl_status(args))
-        return asyncio.run(_befehl_befund(args))
+        return _verteile(args)
     except MehrdeutigeAuswahlError as exc:
         print(f"\n{exc}")
         print("\nAbbruch — es wird nichts gesendet.")
         return 2
+
+
+def _verteile(args: argparse.Namespace) -> int:
+    """Startet den gewaehlten Unterbefehl — **und nur das**.
+
+    **Eigene Funktion, damit der Fang in** ``main`` **ohne Event-Loop
+    pruefbar ist.** Ein Test, der ``main()`` aufruft, startet sonst mit
+    ``asyncio.run`` einen **zweiten** Loop mitten in der pytest-Sitzung.
+    Der gemeinsame Datenbank-Pool haengt am Loop (Paragraph 5.14): die
+    Verbindung wird auf dem neuen Loop geoeffnet, ``asyncio.run``
+    schliesst ihn wieder, und der naechste Nutzer des Pools bekommt eine
+    Verbindung an einem toten Loop.
+
+    Genau das ist am 01.11.2026 passiert, und der Schaden lag **in einer
+    anderen Datei**: ``test_geraetegrenzen_ende_zu_ende`` sah danach
+    „die 0x15-Antwort hat keine Zeile erzeugt" — der Schreibpfad dort
+    faengt seine Fehler defensiv ab und schweigt, also sah es wie ein
+    kaputter Subscriber aus und nicht wie ein kaputter Pool. Einzeln lief
+    der Test gruen.
+    """
+    if args.befehl == "setzen":
+        return asyncio.run(_befehl_setzen(args, enabled=True))
+    if args.befehl == "aus":
+        return asyncio.run(_befehl_setzen(args, enabled=False))
+    if args.befehl == "status":
+        return asyncio.run(_befehl_status(args))
+    return asyncio.run(_befehl_befund(args))
 
 
 if __name__ == "__main__":

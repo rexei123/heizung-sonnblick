@@ -376,15 +376,25 @@ def test_zweideutige_auswahl_bricht_mit_rueckgabewert_2_ab(
     diese Trennung ist §5.87: die Funktion war in Ordnung, der Aufrufer
     nicht.
 
-    **Alle vier Unterbefehle**, und das ist der Punkt des Parameters:
-    der Fang steht an **einer** Stelle, und dieser Test ist der Beleg,
-    dass er fuer jeden gilt. Vier Faenge waeren vier Stellen, an denen
+    **Alle vier Unterbefehle:** jeder nimmt ``--nur`` an, und jeder
+    landet in demselben Fang. Vier Faenge waeren vier Stellen, an denen
     er spaeter fehlen kann.
+
+    **Ersetzt wird** ``_verteile`` **und nicht** ``lade_ziele``, und das
+    ist kein Umweg, sondern der Grund, warum es ``_verteile`` gibt:
+    ``lade_ziele`` zu ersetzen hiesse, ``main()`` mit seinem
+    ``asyncio.run`` laufen zu lassen — ein **zweiter** Event-Loop mitten
+    in der Suite, und der gemeinsame Datenbank-Pool haengt am Loop
+    (§5.14). Am 01.11.2026 hat genau das in einer **anderen** Datei
+    zugeschlagen. Geprueft ist damit der letzte Sprung (Ausnahme aus dem
+    Verteiler -> Meldung + Rueckgabewert 2); dass ``lade_ziele`` die
+    Ausnahme wirft, steht in ``test_geraete_ziele``, und dass sie durch
+    ``asyncio.run`` nach oben kommt, ist Python und nicht unser Code.
     """
     from heizung.scripts import fenstererkennung
     from heizung.services.geraete_ziele import MehrdeutigeAuswahlError
 
-    async def _mehrdeutig(*_args: object, **_kwargs: object) -> None:
+    def _mehrdeutig(*_args: object, **_kwargs: object) -> int:
         raise MehrdeutigeAuswahlError(
             {
                 "105": {
@@ -394,7 +404,7 @@ def test_zweideutige_auswahl_bricht_mit_rueckgabewert_2_ab(
             }
         )
 
-    monkeypatch.setattr(fenstererkennung, "lade_ziele", _mehrdeutig)
+    monkeypatch.setattr(fenstererkennung, "_verteile", _mehrdeutig)
     monkeypatch.setattr(
         "sys.argv",
         ["fenstererkennung", unterbefehl, "--nur", "105"]

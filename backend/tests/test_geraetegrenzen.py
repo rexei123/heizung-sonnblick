@@ -328,11 +328,15 @@ def test_zweideutige_auswahl_bricht_auch_bei_den_grenzen_ab(
     Dass die Fenstererkennung einen Test dafuer hat, sagt ueber dieses
     Werkzeug nichts (Paragraph 5.87) — genau diese Sorte Luecke ist der
     Grund fuer den Parameter.
+
+    Ersetzt wird ``_verteile``, damit kein zweiter Event-Loop in der
+    Suite laeuft (Paragraph 5.14); die Begruendung mit Fallbeispiel steht
+    im Docstring von ``fenstererkennung._verteile``.
     """
     from heizung.scripts import geraetegrenzen as werkzeug
     from heizung.services.geraete_ziele import MehrdeutigeAuswahlError
 
-    async def _mehrdeutig(*_args: object, **_kwargs: object) -> None:
+    def _mehrdeutig(*_args: object, **_kwargs: object) -> int:
         raise MehrdeutigeAuswahlError(
             {
                 "105": {
@@ -342,7 +346,7 @@ def test_zweideutige_auswahl_bricht_auch_bei_den_grenzen_ab(
             }
         )
 
-    monkeypatch.setattr(werkzeug, "lade_ziele", _mehrdeutig)
+    monkeypatch.setattr(werkzeug, "_verteile", _mehrdeutig)
     monkeypatch.setattr(
         "sys.argv",
         ["geraetegrenzen", unterbefehl, "--nur", "105"]

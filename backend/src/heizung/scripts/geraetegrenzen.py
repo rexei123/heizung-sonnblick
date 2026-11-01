@@ -722,17 +722,29 @@ def main() -> int:
     # die Pruefung sitzt in ``lade_ziele`` — dort, wo die Auswahl
     # entsteht (Paragraph 5.53).
     try:
-        if args.befehl == "setzen":
-            return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
-        if args.befehl == "abfragen":
-            return asyncio.run(_befehl_setzen(args, nur_abfragen=True))
-        if args.befehl == "sollwert-probe":
-            return asyncio.run(_befehl_sollwertprobe(args))
-        return asyncio.run(_befehl_vergleich(args))
+        return _verteile(args)
     except MehrdeutigeAuswahlError as exc:
         print(f"\n{exc}")
         print("\nAbbruch — es wird nichts gesendet.")
         return 2
+
+
+def _verteile(args: argparse.Namespace) -> int:
+    """Startet den gewaehlten Unterbefehl — **und nur das**.
+
+    Eigene Funktion aus demselben Grund wie in ``fenstererkennung``: ein
+    Test, der ``main()`` aufruft, startet sonst mit ``asyncio.run`` einen
+    zweiten Event-Loop mitten in der pytest-Sitzung und hinterlaesst im
+    gemeinsamen Datenbank-Pool eine Verbindung an einem toten Loop
+    (Paragraph 5.14). Die Begruendung mit Fallbeispiel steht dort.
+    """
+    if args.befehl == "setzen":
+        return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
+    if args.befehl == "abfragen":
+        return asyncio.run(_befehl_setzen(args, nur_abfragen=True))
+    if args.befehl == "sollwert-probe":
+        return asyncio.run(_befehl_sollwertprobe(args))
+    return asyncio.run(_befehl_vergleich(args))
 
 
 if __name__ == "__main__":
