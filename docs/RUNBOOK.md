@@ -6933,7 +6933,12 @@ Weg; ein Repo-Codec ist **nicht** der ChirpStack-Stand (§5.22, hat beim
 Vicki zwei Sprints Verifikationsarbeit gekostet).
 
 1. ChirpStack-Oberfläche → Device profiles → **Add device profile**
-   - Name: `MClimate 16ASPM`
+   - Name: frei waehlbar — angelegt ist `Relais 16ASPM` (Betreiber,
+     01.11.2026). **Nichts im Programm greift auf den Profilnamen zu:** in
+     der Datenbank steht `MC-LW-16ASPM-01` als `device.model`, das ist
+     unser eigenes Feld, und `provision_devices.py` arbeitet mit der
+     Profil-ID. Hier stand bis dahin `MClimate 16ASPM` als waere es
+     verbindlich.
    - Region: **EU868**
    - MAC version / Regional parameters: wie beim Vicki-Profil
    - **Device-supports class C: an.** Das ist der Unterschied zum Vicki.
@@ -7010,9 +7015,23 @@ Die zwei Bedingungen:
 
 1. **Der Zustand muss ankommen.** Der Wächter kennt nur den **gemeldeten**
    Zustand aus `relay_reading`; der Taster am Gerät schreibt dort nichts.
-   Spätestens die nächste Zustandsmeldung bringt den Wert — **ob der
-   16ASPM nach einem Tastendruck sofort sendet, lässt die Anleitung
-   offen.** Das ist eine Prüfung für den Tischversuch, siehe unten.
+
+   **Das Gerät meldet die Umschaltung von selbst.** Hier stand zuerst, die
+   Hersteller-**Anleitung** lasse das offen — das war richtig über die
+   Anleitung und falsch über unseren Stand: `0x5d` ist „manuelle
+   Umschaltung am Taster", der Codec dekodiert es seit Sprint 24 mit
+   `relayState` und `manualSwitch`, und `werte_aus_codec` schreibt den
+   Zustand in `relay_reading`. Die Kette ist vollständig; der Wächter
+   greift im nächsten Takt, also binnen einer Minute.
+
+   Der Fehler war die Reihenfolge der Quellen: ich habe eine Lücke in der
+   Anleitung gemeldet, ohne vorher im **eigenen** Codec nachzusehen — und
+   dort stand die Antwort (§5.68, eine Ebene tiefer: nicht der
+   Server-Zustand, sondern der eigene Code-Zustand).
+
+   **Offen bleibt die Dauer**, nicht das Ob: ob `0x5d` binnen Sekunden
+   hinausgeht oder erst mit dem nächsten Bericht. Das ist die Prüfung für
+   den Tischversuch, siehe unten.
 2. **Das Relais muss in Betrieb genommen sein.** `relay_service.darf_schalten`
    lässt vor gesetztem `commissioned_at` **keinen** Befehl hinaus (S3), und
    eine stehende Schutz-Sperre blockiert ebenfalls (S4). **Im
@@ -9023,3 +9042,163 @@ sondern an `commissioned_at` (S3).
 Zuordnung), §5.22 (Codec ist Handarbeit je Server), STATUS §2cp.
 
 ---
+
+## 10at. Relais 109 ohne Last in Gang bringen (01.11.2026) — mit Pflicht-Stops
+
+**Für wen:** den Betreiber, am Tisch. **Kein Panel angeschlossen**, bis
+jeder Schritt hier grün ist. Jeder Befehl zuerst als **Probelauf**, dann
+mit Ihrer Freigabe.
+
+> ### Was schon belegt ist
+>
+> Relais **109** (`70b3d52ddd001e69`) hat am 01.11.2026 um **07:35:18
+> UTC** seinen ersten Uplink geschickt — fPort 2, fCnt 1, SF12, ohne Last,
+> Relais von Hand eingeschaltet. Aus dem Frame selbst, nach der
+> Codec-Korrektur vollständig dekodiert:
+>
+> | Antwort | Wert | Bedeutung |
+> |---|---|---|
+> | `0x04` | HW **2.1**, FW **1.5** | **≥ 1.4 → die Timer-Befehle gibt es** |
+> | `0x12` | 10 min | Keepalive-Periode, Werkswert |
+> | `0x19` | 600 s | Join-Wiederholung, Werkswert |
+> | `0x1B` | unbestätigt | Uplink-Art, Werkswert |
+> | `0x1D` | 2 / 24 h | Funk-Wachhund, beide Werkswerte |
+> | `0xA4` | **EU868** | passt zum angelegten Profil |
+> | `0x01` | 228 V, 0 W, 0 mA, 0 kWh, **EIN** | Keepalive |
+>
+> **Null bei Leistung, Strom und Energie ist kein Defekt.** Ströme unter
+> 100 mA misst das Gerät nicht (Hersteller-Doku); ohne Last steht dort
+> null. Dass die **Spannung** mit 228 V dasteht, ist der Nachweis, dass
+> gemessen wird.
+>
+> **Firmware 1.5 ist damit bestätigt** — die Bedingung aus §10aj Schritt 2
+> („unter 1.4 ist der Pilot mit diesem Gerät beendet") ist erfüllt.
+
+> ### Und eine Korrektur: `1d 02` ist **nicht** der Zustand nach Stromrückkehr
+>
+> `1d 02 18` ist die Antwort auf **`0x1D`**, den **Funk-Wachhund**: Byte 1
+> = 2 (bestätigte Uplinks ohne ACK, plus 7 Minuten), Byte 2 = 0x18 = 24
+> Stunden für unbestätigte. Beides Werkswerte, beides hat mit dem Relais
+> nichts zu tun.
+>
+> **Der Zustand nach Stromrückkehr steht im ersten Frame gar nicht.** Er
+> wird mit **`0x5F`** gelesen und mit **`0x5E`** gesetzt. `0x5E 02` bleibt
+> also ein echtes Setzen und nicht bloß ein Rücklesen — und Schritt 3
+> unten bleibt Pflicht. Der Unterschied ist kein Formalismus: in der
+> Hersteller-Anleitung ist der Zustand nach Stromrückkehr **nicht
+> dokumentiert** (§10aj Schritt 4), wir wissen ihn also erst, wenn das
+> Gerät ihn gemeldet hat.
+
+### Schritt 1 — Codec einfügen und nachsehen
+
+*ChirpStack-Oberfläche.* Device profiles → Ihr 16ASPM-Profil → Tab
+**Codec** → Payload codec `JavaScript functions` → Inhalt von
+`infra/chirpstack/codecs/mclimate-16aspm.js` **vollständig** hinein.
+Nicht ergänzen, nicht mischen.
+
+*Erwartet:* beim nächsten Keepalive (höchstens 10 Minuten) zeigt der
+`object`-Block im **Events-Tab** `relayState`, `power_W`, `acVoltage_V`
+und `report_type`. Steht dort nichts, ist der Codec nicht gelaufen — bei
+der Goja-Engine heißt das meist ein Syntaxfehler, und sie meldet ihn
+nicht in der Oberfläche (§5.22).
+
+*Zusätzlich:* auf der Geräteseite von 109 steht danach die **Firmware
+1.5**. Sie kam vorher nicht an — der Relais-Zweig des Subscribers hat die
+`0x04`-Antwort verworfen, behoben am 01.11.2026.
+
+*Rückweg:* keiner nötig. Ein Codec sendet nichts.
+
+### Schritt 2 — die beiden Zustände **lesen**, bevor etwas gesetzt wird
+
+*SSH (heizung-test, root).* **Das ist der Probelauf für Schritt 3:** zwei
+Lesebefehle, die nichts verändern.
+
+```bash
+docker exec deploy-api-1 python -c "import asyncio; from heizung.services.relay_adapter import frage_zustand_nach_stromrueckkehr as f; print(asyncio.run(f('70b3d52ddd001e69')))"
+```
+
+```bash
+docker exec deploy-api-1 python -c "import asyncio; from heizung.services.relay_adapter import frage_zustand_nach_ueberhitzung as f; print(asyncio.run(f('70b3d52ddd001e69')))"
+```
+
+*Erwartet:* zwei Antworten im Events-Tab, `0x5F` und `0x5A`. **Achtung
+auf die Bytes:** AUS ist bei `0x5E`/`0x5F` die **`02`**, bei
+`0x59`/`0x5A` die **`01`**. Dieselbe Bedeutung, verschiedene Werte, und
+`0x59` kennt überhaupt kein „ON" — wer die Zuordnung überträgt, sendet
+einen undokumentierten Wert und erfährt es nicht.
+
+*Rückweg:* keiner. Lesebefehle.
+
+### Schritt 3 — PFLICHT-STOP: die beiden Rücklesungen setzen
+
+*Software-Oberfläche.* Geräteseite von 109 → **Provisionieren**. Der
+Handgriff schickt die vier Downlinks in der richtigen Reihenfolge
+(setzen, setzen, lesen, lesen) und zeigt danach beide Rücklesungen als
+bestätigt oder nicht bestätigt.
+
+*Erwartet:* `0x5F` → `02` und `0x5A` → `01`, **beide bestätigt**. Ohne
+beide lässt sich „in Betrieb genommen" nicht setzen; die Prüfung sitzt im
+Backend (`relay_service.nimm_in_betrieb`), nicht im Formular.
+
+*Rückweg:* keiner nötig — die Einstellung wirkt erst bei der nächsten
+Stromrückkehr bzw. Erholung, und beide sind in dieser Richtung die
+sichere Seite.
+
+### Schritt 4 — PFLICHT-STOP: T3.0, was bedeutet „previous state"?
+
+*SSH, ohne Last.* Der Versuch, der den Wächter-Entwurf entscheidet
+(AE-78 §4). Vollständig in §10aj Schritt 3; hier die Kurzform für 109:
+
+```
+1. 0xC1 00                   Relais AUS, Ausgangszustand
+2. 0x57 01 00 3C             EIN für 60 s
+3. nach ~20 s: 0x57 01 00 3C erneut EIN für 60 s
+4. beobachten (0xB1, Keepalive, 0x54)
+```
+
+*Erwartet:* eine von **zwei** Beobachtungen, und beide sind ein
+Ergebnis — fällt es bei ~80 s ab, darf `REFRESH` freigegeben werden;
+bleibt es EIN, bleibt `REFRESH` gesperrt und `EXPIRE_AND_RESEND` ist der
+einzige Weg. **Ergebnis in AE-78 eintragen**, es wird nicht zweimal
+gemessen.
+
+*Rückweg:* `0xC1 00`.
+
+### Schritt 4a — der Taster am Gerät
+
+*Vor Ort.* **Zweimal kurz** auf den Knopf. Siehe §10aj Schritt 3a: das
+Gerät meldet die Umschaltung mit `0x5d` von selbst, die Frage ist nur,
+**wie schnell**. Zeit notieren, danach `0x54` lesen.
+
+*Erwartet:* eine Zustandsmeldung mit `relayState` und, in der
+`0x54`-Antwort, `manual_button`.
+
+*Rückweg:* noch einmal zweimal kurz drücken. Solange 109 **nicht** in
+Betrieb genommen ist, schaltet die Steuerung es nicht ab — das ist
+Absicht (S3).
+
+### Schritt 5 — Stromausfalltest, weiter ohne Last
+
+*Vor Ort.* `0x5E 02` ist gesetzt (Schritt 3), Relais per Timer EIN, dann
+**Sicherung aus und wieder ein**.
+
+*Erwartet:* das Relais ist **AUS**.
+
+Kommt es EIN zurück, hat die Einstellung nicht gesessen, und `0x5F` hat
+vorher etwas anderes gemeldet — dann ist der Befund die **Abweichung
+zwischen Rücklesung und Verhalten**, und das ist ein eigener Pflicht-Stop.
+
+*Rückweg:* `0xC1 00`.
+
+### Erst danach: Panel anschließen
+
+**Nicht vorher**, und das ist keine Vorsicht aus Prinzip: alle fünf
+Schritte prüfen Eigenschaften, die über ein 1600-W-Panel entscheiden —
+ob ein Timer abläuft, ob das Gerät nach einem Stromausfall von selbst
+wieder einschaltet, ob ein Taster die Steuerung umgeht. Jede dieser
+Fragen ist am Tisch in Minuten beantwortet und an der Wand in Stunden.
+
+**Für 108 gilt dieselbe Liste**, mindestens aber Schritt 1 bis 3: T3.0
+wird einmal gemessen (am Gerät auf dem Tisch), die **Rücklesungen** aber
+je Gerät — sie sind eine Einstellung im Gerät und keine Eigenschaft des
+Typs.

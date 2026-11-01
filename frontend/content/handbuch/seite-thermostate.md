@@ -93,9 +93,9 @@ die Belegungsliste überwacht und fertig ist.
 ### Der Knopf am Relais
 
 **Zweimal kurz auf den Knopf schaltet ein Relais von Hand um.** Das ist
-eine Eigenschaft des Geräts, kein Handgriff des Programms — die
-Steuerung weiß davon erst, wenn das Relais seinen neuen Zustand
-**meldet**.
+eine Eigenschaft des Geräts, kein Handgriff des Programms — und das
+Relais **meldet den Druck von selbst**, die Steuerung erfährt es also
+ohne Nachfragen.
 
 Was dann passiert, hängt davon ab, ob das Relais **in Betrieb genommen**
 ist:
