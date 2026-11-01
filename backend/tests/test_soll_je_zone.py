@@ -26,7 +26,12 @@ Diese Datei prüft den Lesepfad und den Verlauf. Die Zimmerliste steht in
 ``test_badvorlage.py`` (dort lag der Sonderfall).
 
 DB-Tests; skip ohne ``TEST_DATABASE_URL`` (§5.50, lokal gelaufen).
-§5.59: alle Zeitpunkte sind **absolute** Werte gegen ``FROZEN_NOW``.
+§5.59: alle Zeitpunkte sind **absolute** Werte gegen ``FROZEN_NOW`` — und
+deshalb friert **jeder** Test die Uhr auf diesen Zeitpunkt ein. Absolute
+Werte ohne eingefrorene Uhr sind kein halber Schutz, sondern ein
+Ablaufdatum: der Lesehelfer vergleicht gegen ein Frischefenster von einer
+Stunde, und ohne ``freeze_time`` lief diese Datei genau am Tag ihrer
+Entstehung (31.10.2026) gruen und ab dem naechsten Morgen rot.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from freezegun import freeze_time
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from heizung.api.v1.heating_zones import _build_zone_read
@@ -197,6 +203,7 @@ async def _hard_clamp(
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW)
 async def test_helfer_liest_die_zonen_aus_der_juengsten_zeile(db_session: AsyncSession) -> None:
     """``{room_id: {zone_id: wert}}`` aus ``downlink_zone_status``."""
     room, schlaf, bad = await _zimmer(db_session)
@@ -207,6 +214,7 @@ async def test_helfer_liest_die_zonen_aus_der_juengsten_zeile(db_session: AsyncS
     assert ergebnis == {room.id: {schlaf: ZONE, bad: 22}}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_zeile_ohne_zonen_bericht_liefert_nichts(db_session: AsyncSession) -> None:
     """Eine Zeile aus der Zeit davor ergibt **keinen** Eintrag.
 
@@ -220,6 +228,7 @@ async def test_zeile_ohne_zonen_bericht_liefert_nichts(db_session: AsyncSession)
     assert await latest_hard_clamp_zone_setpoints(db_session, [room.id]) == {}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_wahrheitswert_wird_nicht_als_sollwert_gelesen(db_session: AsyncSession) -> None:
     """``true`` im Feld ist **kein** Sollwert von 1.
 
@@ -235,6 +244,7 @@ async def test_wahrheitswert_wird_nicht_als_sollwert_gelesen(db_session: AsyncSe
     assert await latest_hard_clamp_zone_setpoints(db_session, [room.id]) == {}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_alte_zeile_zaehlt_nicht(db_session: AsyncSession) -> None:
     """Dasselbe Frischefenster wie der Zimmerwert: eine Stunde.
 
@@ -253,6 +263,7 @@ async def test_alte_zeile_zaehlt_nicht(db_session: AsyncSession) -> None:
     assert await latest_hard_clamp_zone_setpoints(db_session, [room.id]) == {}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_leere_eingabe_fragt_nicht(db_session: AsyncSession) -> None:
     """Keine IDs, keine Abfrage — dieselbe Zusage wie bei den Nachbarn."""
     assert await latest_hard_clamp_zone_setpoints(db_session, []) == {}
@@ -263,6 +274,7 @@ async def test_leere_eingabe_fragt_nicht(db_session: AsyncSession) -> None:
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW)
 async def test_zonenkarte_zeigt_den_wert_ihrer_uebersteuerung(db_session: AsyncSession) -> None:
     """**Der Befund an der Zonenkarte.** Karte zeigte 21 neben ihrer eigenen 23.
 
@@ -301,6 +313,7 @@ async def test_zonenkarte_zeigt_den_wert_ihrer_uebersteuerung(db_session: AsyncS
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW)
 async def test_verlauf_zeigt_den_engine_soll_und_die_abweichung_daneben(
     db_session: AsyncSession,
 ) -> None:
@@ -329,6 +342,7 @@ async def test_verlauf_zeigt_den_engine_soll_und_die_abweichung_daneben(
     assert {p.geraet_setpoint for p in zone.points} == {Decimal(GEDREHT)}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_ohne_abweichung_bleibt_die_geraete_reihe_leer(db_session: AsyncSession) -> None:
     """**Die Gegenprobe, und sie ist die wichtigere.**
 
@@ -350,6 +364,7 @@ async def test_ohne_abweichung_bleibt_die_geraete_reihe_leer(db_session: AsyncSe
     )
 
 
+@freeze_time(FROZEN_NOW)
 async def test_verlauf_ohne_zonenwert_nimmt_den_zimmerwert(db_session: AsyncSession) -> None:
     """Der Rückfall gilt auch im Verlauf, Eimer für Eimer.
 
@@ -368,6 +383,7 @@ async def test_verlauf_ohne_zonenwert_nimmt_den_zimmerwert(db_session: AsyncSess
     assert {p.setpoint for p in zone.points} == {Decimal(ZIMMER)}
 
 
+@freeze_time(FROZEN_NOW)
 async def test_zwei_zonen_bekommen_ihre_eigenen_sollwerte(db_session: AsyncSession) -> None:
     """Zwei Zonen, zwei Werte, eine Zeile.
 
@@ -391,6 +407,7 @@ async def test_zwei_zonen_bekommen_ihre_eigenen_sollwerte(db_session: AsyncSessi
 # ---------------------------------------------------------------------------
 
 
+@freeze_time(FROZEN_NOW)
 async def test_was_der_dispatch_schreibt_liest_der_helfer(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
