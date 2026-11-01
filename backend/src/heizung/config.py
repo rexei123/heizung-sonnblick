@@ -305,6 +305,25 @@ class Settings(BaseSettings):
     # jedem Tick angefunkt, und jeder Downlink ist Sendezeit (§0 S4).
     relay_max_versuche: int = 3
 
+    # Pause zwischen den vier Downlinks der Provisionierung.
+    #
+    # **Befund des Betreibers, 01.11.2026, an Relais 109.** Zwei
+    # Lesebefehle fuenf Sekunden hintereinander (09:44:50 und 09:44:55)
+    # ergaben **eine** Antwort. Nach der Provisionierung — vier Downlinks
+    # ohne Pause — kam die Antwort auf ``0x5F``, die auf ``0x5A`` nicht.
+    # Das Geraet scheint je Uplink nur eine Befehlsantwort anzuhaengen.
+    #
+    # 15 s ist aus den beobachteten Zeiten abgeleitet, nicht gemessen: die
+    # Antworten kamen 8 s bzw. gut 70 s nach ihrem Befehl, das Geraet
+    # antwortet also zuegig (Class C). Vier Downlinks mit drei Pausen
+    # heissen **rund 45 Sekunden** Laufzeit fuer den Handgriff
+    # „Provisionieren" — das steht so im Endpunkt und in RUNBOOK §10at.
+    #
+    # Verstellbar, weil die Zahl eine Annahme ueber fremde Hardware ist
+    # und keine Eigenschaft unseres Systems. ``0`` schaltet die Pause ab
+    # und stellt das Verhalten von vorher her.
+    relay_provision_pause_s: int = 15
+
     # --- Ventil-Hinweise, Regel 3 und 3b (Sprint 20e, T7/T10) -------------
     # Zwei Hinweise aus demselben Fenster ueber ``sensor_reading``, beide
     # read-time abgeleitet (``services/valve_health.py``):

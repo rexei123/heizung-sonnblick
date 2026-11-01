@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import (
 from alembic import command
 from heizung.api.v1 import relays as relays_api
 from heizung.auth.dependencies import get_current_user
+from heizung.config import get_settings
 from heizung.db import get_session
 from heizung.main import app
 from heizung.models.business_audit import BusinessAudit
@@ -364,13 +365,27 @@ async def test_provisionierung_sendet_vier_downlinks_in_reihenfolge(
     admin_client: httpx.AsyncClient,
     aufbau: Aufbau,
     mitgeschnitten: dict[str, list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Setzen, setzen, lesen, lesen — und das Ergebnis sagt „angefragt".
 
     Die Reihenfolge ist nicht beliebig: erst beide Werte setzen, dann
     beide abfragen, damit die Antworten einen zusammengehoerenden Stand
     beschreiben.
+
+    **Die Pause wird mitgeschnitten, nicht abgewartet.** Seit dem
+    01.11.2026 liegen zwischen den vier Downlinks je 15 Sekunden (Befund
+    an Relais 109, Begruendung im Endpunkt). Ein Test, der das wirklich
+    abwartet, kostet 45 Sekunden je Lauf — und er prueft nichts, was
+    dieser Mitschnitt nicht auch prueft.
     """
+    geschlafen: list[float] = []
+
+    async def _mitschnitt(dauer: float) -> None:
+        geschlafen.append(dauer)
+
+    monkeypatch.setattr("heizung.api.v1.relays.asyncio.sleep", _mitschnitt)
+
     antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
     assert antwort.status_code == 200, antwort.text
     rumpf = antwort.json()
@@ -383,6 +398,46 @@ async def test_provisionierung_sendet_vier_downlinks_in_reihenfolge(
         "der Endpunkt darf kein Urteil behaupten — die Antworten kommen asynchron"
     )
     assert len(mitgeschnitten["relay"]) == 4
+    # Drei Pausen fuer vier Befehle: **zwischen** ihnen, nicht vor dem
+    # ersten. Ohne sie haengt das Geraet je Uplink nur eine Antwort an,
+    # und die Ruecklesung auf ``0x5A`` fehlt — genau der Befund vom
+    # 01.11.2026.
+    assert geschlafen == [15, 15, 15]
+
+
+async def test_ohne_pause_laeuft_es_wie_vorher(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    mitgeschnitten: dict[str, list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``relay_provision_pause_s = 0`` schaltet die Pause ab.
+
+    Die 15 Sekunden sind eine **Annahme ueber fremde Hardware** und keine
+    Eigenschaft unseres Systems: an Relais 109 ergaben zwei Lesebefehle
+    fuenf Sekunden hintereinander eine Antwort statt zwei. Stellt sich das
+    an einem anderen Geraet anders dar, muss die Zahl verstellbar sein —
+    und ``0`` muss das alte Verhalten zurueckgeben, sonst ist der
+    Rueckweg nur behauptet.
+    """
+    geschlafen: list[float] = []
+
+    async def _mitschnitt(dauer: float) -> None:
+        geschlafen.append(dauer)
+
+    monkeypatch.setattr("heizung.api.v1.relays.asyncio.sleep", _mitschnitt)
+    monkeypatch.setenv("RELAY_PROVISION_PAUSE_S", "0")
+    get_settings.cache_clear()
+
+    try:
+        antwort = await admin_client.post(f"/api/v1/devices/{aufbau.relais_id}/relay/provision")
+        assert antwort.status_code == 200, antwort.text
+        assert len(antwort.json()["gesendet"]) == 4
+        assert len(mitgeschnitten["relay"]) == 4
+        assert geschlafen == [], "mit Pause 0 darf nicht geschlafen werden"
+    finally:
+        monkeypatch.delenv("RELAY_PROVISION_PAUSE_S", raising=False)
+        get_settings.cache_clear()
 
 
 async def test_provisionierung_eines_thermostats_abgewiesen(
