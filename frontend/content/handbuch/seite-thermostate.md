@@ -1,9 +1,9 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais
 rollen: alle
-stand: 2026-10-29
+stand: 2026-11-01
 route: /devices
 ---
 
@@ -89,6 +89,26 @@ nicht in Betrieb**: die Geräteart gibt es im Programm, montiert ist
 keines, geschaltet wird keines. Die ausstehende Messung dazu heißt
 **Relais-Test T3.0** — nicht zu verwechseln mit dem Listen-Wächter, der
 die Belegungsliste überwacht und fertig ist.
+
+### Der Knopf am Relais
+
+**Zweimal kurz auf den Knopf schaltet ein Relais von Hand um.** Das ist
+eine Eigenschaft des Geräts, kein Handgriff des Programms — die
+Steuerung weiß davon erst, wenn das Relais seinen neuen Zustand
+**meldet**.
+
+Was dann passiert, hängt davon ab, ob das Relais **in Betrieb genommen**
+ist:
+
+| Zustand des Relais | Von Hand eingeschaltet |
+|---|---|
+| in Betrieb genommen | die Steuerung schaltet es wieder ab, sobald die Meldung da ist — sie will AUS, und AUS hat Vorrang |
+| nur angelegt (Eingangstest) | es **bleibt an**. Vor der Inbetriebnahme schickt die Steuerung bewusst keinen Befehl |
+
+**Für Sie heißt das:** während des Eingangstests nimmt nur derselbe
+Knopf das Einschalten zurück — noch einmal zweimal kurz drücken. Im
+Betrieb braucht es den Knopf nicht; wer ein Panel warm haben will,
+nimmt die Übersteuerung im Programm, weil die ein Ende hat.
 
 ## Bezeichnung ändern
 
