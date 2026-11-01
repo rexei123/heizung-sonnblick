@@ -40,6 +40,16 @@ und zwar bei jedem Tick. Wo die Grenze nicht nachweisbar steht, wird nicht
 gesendet (§0 S4, S6). Der Abgleich ist eine Nachbesserung, kein
 Sicherheitsmelder — er darf warten.
 
+**Zwei Zwecke, eine Mechanik** (Sprint 24e). Seit der Abgleich auch die
+**Kindersicherung** nachbessert, traegt jeder Aufruf ein ``zweck``: die
+Drosselung und der Zaehler sind je Zweck getrennt, der Code ist es nicht.
+Getrennte Schluessel sind dabei keine Formsache — ohne sie wuerde eine
+Nachsendung des Sollwerts die Nachsendung der Sperre fuer dasselbe Geraet
+eine halbe Stunde aussperren, und der Fehler saehe aus wie ein Geraet, das
+nicht antwortet. Ein zweites Modul mit derselben Redis-Mechanik waere die
+andere Antwort gewesen, und sie waere die schlechtere: dann gibt es zwei
+Stellen, an denen ``MAX_VERSUCHE`` steht (§5.53).
+
 Mechanik analog zu ``engine_lock`` (AE-40) und ``resync_flag`` (AE-63):
 synchroner Redis-Client, fork-safe Pool, eigene Connection pro Aufruf. Die
 Aufrufer im Worker legen ihn per ``asyncio.to_thread`` daneben, damit der
@@ -93,8 +103,28 @@ ZAEHLER_TTL_S = 14400
 # Eigenschaft des LoRaWAN-Fensters, keine Betriebspraeferenz.
 ABGLEICH_MIN_ABSTAND_S = 900
 
-_DROSSEL = "engine:abgleich:drossel:{dev_eui}"
-_ZAEHLER = "engine:abgleich:versuche:{dev_eui}"
+# Wofuer nachgesendet wird. Dieselbe Mechanik, getrennte Zaehlung — sonst
+# wuerde eine Nachsendung des Sollwerts die Nachsendung der Kindersicherung
+# fuer dasselbe Geraet aussperren, und umgekehrt.
+ZWECK_SOLLWERT = "sollwert"
+ZWECK_SPERRE = "sperre"
+
+# Die Schluessel des Sollwert-Abgleichs bleiben **unveraendert**, und das ist
+# eine Entscheidung und kein Versehen: ein Deploy, der sie umbenennt, loescht
+# jede stehende Drosselung auf einen Schlag, und der naechste Tick darf dann
+# an **jedes** abweichende Geraet senden. Ein Refactor, der einen Schwall
+# Downlinks ausloest, waere der teure Weg zu einer sauberen Namensform
+# (§0 S4).
+_SCHLUESSEL: dict[str, tuple[str, str]] = {
+    ZWECK_SOLLWERT: (
+        "engine:abgleich:drossel:{dev_eui}",
+        "engine:abgleich:versuche:{dev_eui}",
+    ),
+    ZWECK_SPERRE: (
+        "engine:abgleich:sperre:drossel:{dev_eui}",
+        "engine:abgleich:sperre:versuche:{dev_eui}",
+    ),
+}
 
 
 def _zu_int(wert: object, *, standard: int = 0) -> int:
@@ -129,22 +159,29 @@ def _zu_int(wert: object, *, standard: int = 0) -> int:
     return standard
 
 
-def _drossel_key(dev_eui: str) -> str:
-    return _DROSSEL.format(dev_eui=dev_eui.lower())
+def _drossel_key(dev_eui: str, zweck: str = ZWECK_SOLLWERT) -> str:
+    return _SCHLUESSEL[zweck][0].format(dev_eui=dev_eui.lower())
 
 
-def _zaehler_key(dev_eui: str) -> str:
-    return _ZAEHLER.format(dev_eui=dev_eui.lower())
+def _zaehler_key(dev_eui: str, zweck: str = ZWECK_SOLLWERT) -> str:
+    return _SCHLUESSEL[zweck][1].format(dev_eui=dev_eui.lower())
 
 
-def versuche(dev_eui: str) -> int:
+def versuche(dev_eui: str, *, zweck: str = ZWECK_SOLLWERT) -> int:
     """Wie viele erfolglose Nachsendungen stehen fuer dieses Geraet?
 
     ``0`` auch bei Redis-Ausfall — die Entscheidung, ob ueberhaupt gesendet
     wird, trifft ``darf_senden``, und die sagt dann Nein.
+
+    ``zweck`` trennt die Zaehlung je Nachbesserung (Sollwert, Sperre). Er
+    hat einen **Default**, und das ist der Unterschied zu
+    ``child_lock.soll_kindersicherung``, wo ein vergessenes Argument eine
+    falsche Entscheidung ergaebe: hier ergibt es eine **geteilte**
+    Drosselung, also eine Nachsendung, die ausbleibt — sichtbar und
+    harmlos gegen den Preis, jeden Bestandsaufrufer anzufassen (§0 S6).
     """
     try:
-        rohwert = redis_client.get_redis_client().get(_zaehler_key(dev_eui))
+        rohwert = redis_client.get_redis_client().get(_zaehler_key(dev_eui, zweck))
     except redis.RedisError:
         logger.warning(
             "engine_abgleich.versuche: Redis nicht erreichbar fuer %s",
@@ -157,7 +194,7 @@ def versuche(dev_eui: str) -> int:
     return _zu_int(rohwert)
 
 
-def darf_senden(dev_eui: str) -> bool:
+def darf_senden(dev_eui: str, *, zweck: str = ZWECK_SOLLWERT) -> bool:
     """Darf fuer dieses Geraet **jetzt** eine Nachsendung raus?
 
     Prueft und setzt die Sperre in einem Schritt (``SET NX``), damit zwei
@@ -169,11 +206,11 @@ def darf_senden(dev_eui: str) -> bool:
     :return: ``True`` genau dann, wenn gesendet werden darf. Bei
         Redis-Ausfall ``False`` (siehe Modul-Kopf).
     """
-    if versuche(dev_eui) >= MAX_VERSUCHE:
+    if versuche(dev_eui, zweck=zweck) >= MAX_VERSUCHE:
         return False
     try:
         gesetzt = redis_client.get_redis_client().set(
-            _drossel_key(dev_eui), "1", ex=DROSSEL_TTL_S, nx=True
+            _drossel_key(dev_eui, zweck), "1", ex=DROSSEL_TTL_S, nx=True
         )
         return bool(gesetzt)
     except redis.RedisError:
@@ -187,7 +224,7 @@ def darf_senden(dev_eui: str) -> bool:
         return False
 
 
-def versuch_gezaehlt(dev_eui: str) -> int:
+def versuch_gezaehlt(dev_eui: str, *, zweck: str = ZWECK_SOLLWERT) -> int:
     """Zaehlt eine Nachsendung und gibt den neuen Stand zurueck.
 
     Wird **nach** dem Senden gerufen. Der Zaehler ist absichtlich nicht an
@@ -198,11 +235,11 @@ def versuch_gezaehlt(dev_eui: str) -> int:
     """
     try:
         client = redis_client.get_redis_client()
-        stand = _zu_int(client.incr(_zaehler_key(dev_eui)))
+        stand = _zu_int(client.incr(_zaehler_key(dev_eui, zweck)))
         # TTL nur beim ersten Hochzaehlen setzen, sonst verschiebt sich das
         # Fenster mit jedem Versuch nach hinten und laeuft nie ab.
         if stand == 1:
-            client.expire(_zaehler_key(dev_eui), ZAEHLER_TTL_S)
+            client.expire(_zaehler_key(dev_eui, zweck), ZAEHLER_TTL_S)
         return stand
     except redis.RedisError:
         logger.warning(
@@ -213,7 +250,7 @@ def versuch_gezaehlt(dev_eui: str) -> int:
         return 0
 
 
-def erfolg_gemeldet(dev_eui: str) -> None:
+def erfolg_gemeldet(dev_eui: str, *, zweck: str = ZWECK_SOLLWERT) -> None:
     """Loescht den Zaehler — das Geraet steht auf dem Engine-Soll.
 
     Wird bei jedem Tick fuer jedes uebereinstimmende Geraet gerufen, nicht
@@ -226,7 +263,7 @@ def erfolg_gemeldet(dev_eui: str) -> None:
     das gerade zusammenpasst, braucht ohnehin keine Nachsendung.
     """
     try:
-        redis_client.get_redis_client().delete(_zaehler_key(dev_eui))
+        redis_client.get_redis_client().delete(_zaehler_key(dev_eui, zweck))
     except redis.RedisError:
         logger.warning(
             "engine_abgleich.erfolg_gemeldet: Redis nicht erreichbar fuer %s",
