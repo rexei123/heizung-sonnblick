@@ -96,7 +96,8 @@ from heizung.rules.zweipunkt import (
     einschalt_versatz,
     entscheide,
 )
-from heizung.services import relay_adapter, relay_service, relay_state
+from heizung.services import provision_lauf, relay_adapter, relay_service, relay_state
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
 from heizung.tasks.engine_tasks import _task_session
@@ -477,3 +478,107 @@ def _loesche_offen(geraet: Device) -> None:
     geraet.pending_target_on = None
     geraet.pending_since = None
     geraet.pending_attempts = 0
+
+
+# ---------------------------------------------------------------------------
+# Provisionierung als Hintergrund-Auftrag (01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@app.task(name="heizung.provisioniere_relais", bind=True)
+def provisioniere_relais(self: Any, device_id: int, user_id: int | None) -> dict[str, Any]:  # noqa: ARG001 - bind=True
+    """Schickt die fuenf Provisionierungs-Downlinks, mit Pausen.
+
+    **Warum das nicht mehr im HTTP-Request laeuft** (Befund des
+    Betreibers, 01.11.2026, 10:26): fuenf Downlinks mit je 15 Sekunden
+    Pause sind rund 75 Sekunden, und die Oberflaeche brach nach etwa 30
+    Sekunden ab (``signal is aborted without reason``). Das Backend lief
+    weiter und hat alles gesendet — die Antwort auf ``0x5A`` kam um
+    10:28:28, beide Ruecklesungen stehen seither auf bestaetigt.
+
+    **Der Handgriff war also erfolgreich und sah wie ein Fehlschlag aus.**
+    Das ist die teuerste Sorte Rueckmeldung, weil der naechste Schritt ein
+    zweiter Versuch ist — und zwei Provisionierungen gleichzeitig waeren
+    zehn Downlinks ohne Pause, also genau der Zustand, gegen den die Pause
+    gebaut ist.
+
+    Der Endpunkt setzt die Lauf-Markierung und kehrt sofort zurueck; dieser
+    Auftrag sendet und loescht sie am Ende. Das Urteil faellt wie vorher
+    der Subscriber, wenn die Antworten kommen.
+    """
+    return asyncio.run(_provisioniere_async(device_id, user_id))
+
+
+async def _provisioniere_async(device_id: int, user_id: int | None) -> dict[str, Any]:
+    """Die fuenf Downlinks in der Reihenfolge Version, setzen, setzen, lesen, lesen.
+
+    Die Version steht vorn, weil sie unabhaengig ist und das Tor in
+    ``relay_service.nimm_in_betrieb`` sie braucht.
+
+    **Die Markierung wird in einem ``finally`` geloescht**, auch wenn ein
+    Downlink scheitert: sonst bliebe das Relais bis zum Ablauf der TTL
+    gesperrt, und der naechste Versuch waere drei Minuten lang ein 409.
+    """
+    pause = get_settings().relay_provision_pause_s
+    gesendet: list[str] = []
+    fehler: str | None = None
+
+    async def _pause() -> None:
+        if pause > 0:
+            await asyncio.sleep(pause)
+
+    try:
+        async with _task_session() as session:
+            geraet = await session.get(Device, device_id)
+            if geraet is None or geraet.kind != DeviceKind.RELAY:
+                logger.warning("provisionierung: device_id=%s ist kein Relais", device_id)
+                return {"device_id": device_id, "gesendet": [], "fehler": "kein Relais"}
+            dev_eui = geraet.dev_eui
+
+        await relay_adapter.frage_version(dev_eui)
+        gesendet.append("0x04 (Hardware- und Softwareversion)")
+        await _pause()
+        await relay_adapter.setze_zustand_nach_stromrueckkehr(dev_eui, "off")
+        gesendet.append("0x5E 02 (AUS nach Stromrueckkehr)")
+        await _pause()
+        await relay_adapter.setze_zustand_nach_ueberhitzung(dev_eui, "off")
+        gesendet.append("0x59 01 (AUS nach Ueberhitzungs-Erholung)")
+        await _pause()
+        await relay_adapter.frage_zustand_nach_stromrueckkehr(dev_eui)
+        gesendet.append("0x5F (Ruecklesung Stromrueckkehr)")
+        await _pause()
+        await relay_adapter.frage_zustand_nach_ueberhitzung(dev_eui)
+        gesendet.append("0x5A (Ruecklesung Ueberhitzung)")
+    except Exception as exc:  # noqa: BLE001 - der Lauf soll nicht stumm enden
+        fehler = f"{type(exc).__name__}: {exc}"
+        logger.exception(
+            "provisionierung abgebrochen device_id=%s nach %s Befehlen",
+            device_id,
+            len(gesendet),
+        )
+    finally:
+        await asyncio.to_thread(provision_lauf.beende, device_id)
+
+    # **Das Audit schreibt der Auftrag, nicht der Endpunkt**, und zwar erst
+    # jetzt: ``gesendet`` ist eine Aussage darueber, was hinausgegangen
+    # ist. Ein Eintrag beim Anfordern haette behauptet, was noch nicht
+    # geschehen war (§5.68).
+    async with _task_session() as session:
+        await record_business_action(
+            session,
+            user_id=user_id,
+            action="RELAY_PROVISIONED",
+            target_type="device",
+            target_id=device_id,
+            old_value=None,
+            new_value={"gesendet": gesendet, "fehler": fehler},
+        )
+        await session.commit()
+
+    logger.info(
+        "provisionierung fertig device_id=%s befehle=%s fehler=%s",
+        device_id,
+        len(gesendet),
+        fehler,
+    )
+    return {"device_id": device_id, "gesendet": gesendet, "fehler": fehler}

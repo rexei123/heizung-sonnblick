@@ -43,10 +43,9 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
+from heizung.services import relay_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -84,32 +83,6 @@ def darf_schalten(geraet: Device) -> bool:
     if geraet.commissioned_at is None:
         return False
     return geraet.protection_tripped_at is None
-
-
-def pruefe_schaltbefehl(geraet: Device) -> None:
-    """Wie ``darf_schalten``, aber mit sprechendem Fehler.
-
-    Fuer Aufrufer, die einen Befehl absetzen wollen: ein ``bool`` sagt
-    nicht, **warum** nicht, und bei einer Sicherheitszusicherung ist das
-    der wichtigere Teil der Information.
-    """
-    if geraet.kind != DeviceKind.RELAY:
-        raise RelayNotCommissionedError(
-            f"device_id={geraet.id} ist kein Relais (kind={geraet.kind})"
-        )
-    if geraet.retired_at is not None:
-        raise RelayNotCommissionedError(f"device_id={geraet.id} ist ausgemustert")
-    if geraet.commissioned_at is None:
-        raise RelayNotCommissionedError(
-            f"device_id={geraet.id} ist nicht in Betrieb genommen (S3) — "
-            "nur Lese- und Konfigurationsbefehle zulaessig"
-        )
-    if geraet.protection_tripped_at is not None:
-        raise RelayProtectionLatchedError(
-            f"device_id={geraet.id} hat eine stehende Schutz-Sperre "
-            f"({geraet.protection_kind}, seit {geraet.protection_tripped_at.isoformat()}) — "
-            "Freigabe nur durch einen Admin"
-        )
 
 
 def vermerke_ruecklesung(
@@ -153,14 +126,6 @@ def vermerke_ruecklesung(
     return bestanden
 
 
-def ruecklesungen_vollstaendig(geraet: Device) -> bool:
-    """Ob **beide** Ruecklesungen bestanden sind (S4)."""
-    return (
-        geraet.power_return_verified_at is not None
-        and geraet.overheating_recovery_verified_at is not None
-    )
-
-
 def nimm_in_betrieb(geraet: Device, *, now: datetime | None = None) -> None:
     """Setzt ``commissioned_at`` — nur mit beiden Ruecklesungen (S3 + S4).
 
@@ -175,17 +140,46 @@ def nimm_in_betrieb(geraet: Device, *, now: datetime | None = None) -> None:
     Pruefung auf ``overheating_recovery_verified_at``, laesst sich ein
     Relais in Betrieb nehmen, das nach dem Abkuehlen von selbst wieder
     einschaltet.
+
+    **Seit dem 01.11.2026 gehoert die Firmware dazu** (Auftrag des
+    Betreibers). ``firmware_hat_timer`` stand seit Sprint 24b da,
+    dokumentiert wie ein Tor — und hatte **keinen Aufrufer**. Die Pruefung
+    war ein Handgriff in RUNBOOK §10aj Schritt 2, also eine Zusicherung,
+    die auf Disziplin beruhte statt auf Code (§5.20).
+
+    Der Anlass ist konkret: Relais 109 hatte ``firmware_version = None``,
+    weil sein Boot-Frame **vor** dem Datenbank-Eintrag kam. Ohne dieses
+    Tor haette sich das Geraet in Betrieb nehmen lassen, ohne dass
+    jemand die Version kennt — und unter 1.4 gibt es die Timer-Befehle
+    nicht, also keine befristete Einschaltung (S1).
     """
     fehlt = []
     if geraet.power_return_verified_at is None:
         fehlt.append("Zustand nach Stromrueckkehr (0x5E/0x5F)")
     if geraet.overheating_recovery_verified_at is None:
         fehlt.append("Zustand nach Ueberhitzungs-Erholung (0x59/0x5A)")
+    if geraet.firmware_version is None:
+        fehlt.append("Firmware unbekannt – Provisionieren wiederholen")
 
     if fehlt:
         raise RelayCommissioningIncompleteError(
             f"device_id={geraet.id} kann nicht in Betrieb genommen werden — "
             f"nicht verifiziert: {', '.join(fehlt)}"
+        )
+
+    # **Das Firmware-Tor, und es ist von der fehlenden Firmware getrennt.**
+    # „Unbekannt" ist ein Handgriff (Provisionieren wiederholen), „zu alt"
+    # ist das Ende fuer dieses Geraet — zwei verschiedene Nachrichten fuer
+    # zwei verschiedene Handlungen. Eine gemeinsame („Firmware nicht in
+    # Ordnung") haette den Hausmeister zum Wiederholen geschickt, wo nichts
+    # zu wiederholen ist.
+    if not relay_adapter.firmware_hat_timer(geraet.firmware_version):
+        raise RelayCommissioningIncompleteError(
+            f"device_id={geraet.id} kann nicht in Betrieb genommen werden — "
+            f"Software {geraet.firmware_version}, die Timer-Befehle "
+            f"0x55-0x58 gibt es erst ab "
+            f"{relay_adapter.FIRMWARE_MIT_TIMER[0]}.{relay_adapter.FIRMWARE_MIT_TIMER[1]}. "
+            "Ohne Timer ist 'EIN nur befristet' (S1) nicht erfuellbar."
         )
 
     geraet.commissioned_at = now or datetime.now(tz=UTC)
@@ -234,11 +228,3 @@ def hebe_schutz_sperre_auf(geraet: Device) -> None:
     )
     geraet.protection_tripped_at = None
     geraet.protection_kind = None
-
-
-async def lade_relais(session: AsyncSession, device_id: int) -> Device | None:
-    """Laedt ein Relais. ``None``, wenn es keines ist oder nicht existiert."""
-    geraet = await session.get(Device, device_id)
-    if geraet is None or geraet.kind != DeviceKind.RELAY:
-        return None
-    return geraet
