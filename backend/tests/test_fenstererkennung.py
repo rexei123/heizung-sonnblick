@@ -355,3 +355,59 @@ def test_nachtabsenkung_ohne_fenster_waere_der_fehlalarm() -> None:
     )
     assert len(gefunden) == 1
     assert gefunden[0].trifft_abbruchkriterium is True
+
+
+# ---------------------------------------------------------------------------
+# Der Abbruch kommt beim Betreiber an (01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("unterbefehl", ["setzen", "aus", "status", "befund"])
+def test_zweideutige_auswahl_bricht_mit_rueckgabewert_2_ab(
+    unterbefehl: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nicht nur die Pruefung, auch der **Weg nach draussen** ist geprueft.
+
+    Die Pruefung sitzt in ``lade_ziele``; dieser Test faellt, wenn der
+    Fang im Werkzeug fehlt — dann kaeme ein Rueckverfolgungsprotokoll
+    statt einer Meldung, und der Rueckgabewert waere 1 statt 2. Genau
+    diese Trennung ist §5.87: die Funktion war in Ordnung, der Aufrufer
+    nicht.
+
+    **Alle vier Unterbefehle**, und das ist der Punkt des Parameters:
+    der Fang steht an **einer** Stelle, und dieser Test ist der Beleg,
+    dass er fuer jeden gilt. Vier Faenge waeren vier Stellen, an denen
+    er spaeter fehlen kann.
+    """
+    from heizung.scripts import fenstererkennung
+    from heizung.services.geraete_ziele import MehrdeutigeAuswahlError
+
+    async def _mehrdeutig(*_args: object, **_kwargs: object) -> None:
+        raise MehrdeutigeAuswahlError(
+            {
+                "105": {
+                    "Etikett": ["105 / 70b3d52dd30329c6 / 207 Schlafzimmer"],
+                    "Zimmernummer": ["021 / 70b3d52dd3034de4 / 105 Schlafzimmer"],
+                }
+            }
+        )
+
+    monkeypatch.setattr(fenstererkennung, "lade_ziele", _mehrdeutig)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["fenstererkennung", unterbefehl, "--nur", "105"]
+        + (["--ausfuehren"] if unterbefehl in {"setzen", "aus"} else []),
+    )
+
+    rueckgabe = fenstererkennung.main()
+    ausgabe = capsys.readouterr().out
+
+    assert rueckgabe == 2
+    assert "Mehrdeutige Auswahl" in ausgabe
+    assert "es wird nichts gesendet" in ausgabe
+    # Die Trefferliste muss mitkommen — ein Abbruch ohne sie ist eine
+    # Sackgasse (Auftrag des Betreibers: „mit Liste der Treffer").
+    assert "70b3d52dd30329c6" in ausgabe
+    assert "70b3d52dd3034de4" in ausgabe

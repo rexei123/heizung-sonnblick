@@ -7889,3 +7889,74 @@ Zeitlinie oben nennt bei jeder Zeile ihre Zone (§5.79): im Log steht UTC,
 in der Oberfläche Ortszeit. Zwei Uhrzeiten ohne Einheit nebeneinander
 waren am 26.09.2026 der Anlass für einen Fehlalarm, der zwanzig Tage lang
 jeden Morgen kam.
+
+## 2cs. Zweideutiges `--nur` bricht ab (2026-11-01)
+
+**Keine Migration.** Entscheidung des Betreibers, gemeldet im Rahmen von
+§10ao und am selben Tag gebaut.
+
+### Der Befund
+
+`--nur` wählt nach DevEUI **oder** Etikett **oder** Zimmernummer **oder**
+„Zimmer Zone". Mit den Gerätenamen **105–109** ist `105` beides: Etikett
+eines Vickis und Nummer eines Testzimmers. Trifft beides, ist die Zahl der
+Ziele um eins zu hoch — und der Lauf wird abgezählt („stehen genau drei
+Ziele da?"). Wer die Zahl prüft und nicht die Namen, sieht ein Gerät, das
+er vergessen zu haben glaubt.
+
+### Die Regel: **zwei Wege**, nicht zwei Treffer
+
+Abgebrochen wird, wenn **eine** Angabe auf **zwei verschiedenen Wegen**
+trifft — etwa als Etikett des einen und als Zimmernummer anderer Geräte.
+Rückgabewert 2, es wird nichts gesendet, und beide Trefferlisten stehen in
+der Meldung. Ein Abbruch ohne die Liste wäre eine Sackgasse.
+
+**Zwei Dinge sind ausdrücklich kein Abbruch:**
+
+* **Mehrere Treffer auf demselben Weg.** Eine Zimmernummer trifft alle
+  Thermostate ihres Zimmers; genau dafür ist sie da. Die naheliegende
+  Fassung „mehr als ein Treffer" hätte §10ar unbenutzbar gemacht — dort
+  gehen drei `0x07` an **ein** Zimmer. Mutationsprobe A2 ist genau diese
+  Fassung, und sie fällt.
+* **Ein gleichnamiges Gerät im Reserve-Pool.** Gezählt werden nur
+  **Ziele**, keine Ausnahmen. Ein Pool-Vicki bekommt keinen Befehl; ihn
+  mitzuzählen hieße, dass **jeder** Lauf mit `--nur "105"` abbricht,
+  solange 105–109 im Lager liegen — mitten in der T2-Erprobung dieser
+  Woche, die `--nur "105"` für das **Zimmer** benutzt. Das wäre ein
+  Abbruch ohne Gefahr. Scharf wird die Zweideutigkeit in dem Augenblick,
+  in dem eines der Geräte einer Zone zugeordnet ist (Probe A4).
+
+### Wo die Prüfung sitzt
+
+In `services/geraete_ziele.lade_ziele` — dort, wo die Auswahl **entsteht**.
+Damit gilt sie für die Fenstererkennung (`0x45`), für die Gerätegrenzen
+(`0x08`) und für jedes künftige Werkzeug, ohne dass es jemand dort
+einbauen muss. Der Fang nach draußen steht je Werkzeug an **einer** Stelle
+um den ganzen Befehlsverteiler, nicht je Unterbefehl: vier Fänge wären
+vier Stellen, an denen er später fehlen kann (§5.53).
+
+### Geprüft
+
+| | |
+|---|---|
+| neue Tests | **3** (Auswahl) + **4** (Werkzeug, je Unterbefehl) |
+| Backend-Suite | siehe CI |
+| `ruff` / `mypy` | grün |
+| Mutationsproben | **4, alle rot** |
+
+| | Eingebauter Fehler | Fällt |
+|---|---|---|
+| A1 | Prüfung nicht gerufen | „Etikett und Zimmernummer zugleich bricht ab" |
+| **A2** | Zweideutigkeit = „mehr als ein Treffer" | **„eine Zimmernummer für mehrere Thermostate ist eindeutig"** |
+| A3 | Fang im Werkzeug entfernt | alle vier Unterbefehle |
+| **A4** | Ausnahmen zählen mit | **„ein Pool-Gerät mit demselben Namen bricht nicht ab"** |
+
+**A2 und A4 sind die beiden Fassungen, die ich fast gebaut hätte.** Beide
+hätten den Abbruch *strenger* gemacht und dabei etwas blockiert, was
+richtig ist — A2 den Lauf an einem Zimmer, A4 die T2-Erprobung dieser
+Woche. Ein Wächter, der den Normalfall anhält, wird abgeschaltet (§5.79).
+
+Der Test am Werkzeug ist über die vier Unterbefehle **parametrisiert**,
+und das ist der Beleg für die Entscheidung „ein Fang statt vier": die
+Prüfung war in Ordnung, der Aufrufer ist die Stelle, an der sie verloren
+geht (§5.87).

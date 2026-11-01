@@ -72,6 +72,7 @@ from heizung.scripts.pairing.clock import REAL_CLOCK, Clock  # noqa: E402
 from heizung.services import downlink_adapter, resync_flag  # noqa: E402
 from heizung.services.geraete_ziele import (  # noqa: E402
     Ausnahme,
+    MehrdeutigeAuswahlError,
     Zielgeraet,
     lade_ziele,
     nicht_gefunden,
@@ -717,13 +718,21 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    if args.befehl == "setzen":
-        return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
-    if args.befehl == "abfragen":
-        return asyncio.run(_befehl_setzen(args, nur_abfragen=True))
-    if args.befehl == "sollwert-probe":
-        return asyncio.run(_befehl_sollwertprobe(args))
-    return asyncio.run(_befehl_vergleich(args))
+    # Der Abbruch bei Zweideutigkeit gilt fuer jeden Unterbefehl, und
+    # die Pruefung sitzt in ``lade_ziele`` — dort, wo die Auswahl
+    # entsteht (Paragraph 5.53).
+    try:
+        if args.befehl == "setzen":
+            return asyncio.run(_befehl_setzen(args, nur_abfragen=False))
+        if args.befehl == "abfragen":
+            return asyncio.run(_befehl_setzen(args, nur_abfragen=True))
+        if args.befehl == "sollwert-probe":
+            return asyncio.run(_befehl_sollwertprobe(args))
+        return asyncio.run(_befehl_vergleich(args))
+    except MehrdeutigeAuswahlError as exc:
+        print(f"\n{exc}")
+        print("\nAbbruch — es wird nichts gesendet.")
+        return 2
 
 
 if __name__ == "__main__":

@@ -87,6 +87,7 @@ from heizung.services.fenstererkennung import (  # noqa: E402
 )
 from heizung.services.geraete_ziele import (  # noqa: E402
     Ausnahme,
+    MehrdeutigeAuswahlError,
     Zielgeraet,
     lade_ziele,
     nicht_gefunden,
@@ -403,13 +404,23 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    if args.befehl == "setzen":
-        return asyncio.run(_befehl_setzen(args, enabled=True))
-    if args.befehl == "aus":
-        return asyncio.run(_befehl_setzen(args, enabled=False))
-    if args.befehl == "status":
-        return asyncio.run(_befehl_status(args))
-    return asyncio.run(_befehl_befund(args))
+    # **Der Abbruch bei Zweideutigkeit steht hier und nicht je Befehl.**
+    # Er gilt fuer jeden der vier Unterbefehle, und ein Fang je Befehl
+    # waere vier Stellen, an denen er spaeter fehlen kann (Paragraph 5.53).
+    # Die Pruefung selbst sitzt in ``lade_ziele`` — also dort, wo die
+    # Auswahl entsteht, und damit auch fuer jedes kuenftige Werkzeug.
+    try:
+        if args.befehl == "setzen":
+            return asyncio.run(_befehl_setzen(args, enabled=True))
+        if args.befehl == "aus":
+            return asyncio.run(_befehl_setzen(args, enabled=False))
+        if args.befehl == "status":
+            return asyncio.run(_befehl_status(args))
+        return asyncio.run(_befehl_befund(args))
+    except MehrdeutigeAuswahlError as exc:
+        print(f"\n{exc}")
+        print("\nAbbruch — es wird nichts gesendet.")
+        return 2
 
 
 if __name__ == "__main__":

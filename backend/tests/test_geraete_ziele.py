@@ -43,6 +43,7 @@ from heizung.services.geraete_ziele import (
     GRUND_NUR_MESSEN,
     GRUND_OHNE_ZONE,
     Ausnahme,
+    MehrdeutigeAuswahlError,
     Zielgeraet,
     ausnahme_grund,
     lade_ziele,
@@ -240,6 +241,196 @@ async def test_lade_ziele_nimmt_nur_messen_und_pool_wirklich_aus(
         assert nur_dieses[0].bezeichnung == f"t2-{suffix} Schlafzimmer"
     finally:
         for d in (montiert, fuehler, pool):
+            await db_session.execute(text("DELETE FROM device WHERE id = :i"), {"i": d.id})
+        await db_session.execute(text("DELETE FROM heating_zone WHERE id = :i"), {"i": zone.id})
+        await db_session.execute(text("DELETE FROM room WHERE id = :i"), {"i": room.id})
+        await db_session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": rt.id})
+        await db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Abbruch bei zweideutigem ``--nur`` (Entscheidung des Betreibers, 01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_etikett_und_zimmernummer_zugleich_bricht_ab(db_session: AsyncSession) -> None:
+    """``--nur "105"`` darf nicht lautlos ein Geraet zu viel treffen.
+
+    **Der Anlass.** ``--nur`` waehlt nach DevEUI **oder** Etikett
+    **oder** Zimmernummer **oder** „Zimmer Zone". Mit den
+    Geraetenamen 105-109 ist ``105`` beides: Etikett eines Vickis und
+    Nummer eines Testzimmers. Trifft beides, ist die Zahl der Ziele um
+    eins zu hoch — und wer sie abzaehlt, sieht ein Geraet, das er
+    vergessen zu haben glaubt.
+
+    Geprueft wird hier der **scharfe** Fall: das gleichnamige Geraet
+    haengt in einer Zone und ist damit ein Ziel.
+    """
+    suffix = uuid.uuid4().hex[:6]
+    nummer = f"z{suffix}"  # spielt die Rolle der Zimmernummer „105"
+
+    rt = RoomType(name=f"md-{suffix}")
+    db_session.add(rt)
+    await db_session.flush()
+    zimmer_a = Room(number=nummer, room_type_id=rt.id)
+    zimmer_b = Room(number=f"and-{suffix}", room_type_id=rt.id)
+    db_session.add_all([zimmer_a, zimmer_b])
+    await db_session.flush()
+    zone_a = HeatingZone(room_id=zimmer_a.id, kind=HeatingZoneKind.BEDROOM, name="Schlafzimmer")
+    zone_b = HeatingZone(room_id=zimmer_b.id, kind=HeatingZoneKind.BEDROOM, name="Schlafzimmer")
+    db_session.add_all([zone_a, zone_b])
+    await db_session.flush()
+
+    # Zwei Thermostate im Zimmer mit dieser Nummer …
+    im_zimmer = [
+        Device(
+            dev_eui=f"ee0{i}{suffix}ee0{i}",
+            label=f"imzimmer-{i}-{suffix}",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="vicki",
+            heating_zone_id=zone_a.id,
+        )
+        for i in (1, 2)
+    ]
+    # … und ein Geraet, dessen **Etikett** dieselbe Zeichenfolge ist,
+    # zugeordnet in einem anderen Zimmer.
+    gleichnamig = Device(
+        dev_eui=f"ff00{suffix}ff00",
+        label=nummer,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=zone_b.id,
+    )
+    db_session.add_all([*im_zimmer, gleichnamig])
+    await db_session.commit()
+
+    try:
+        with pytest.raises(MehrdeutigeAuswahlError) as fehler:
+            await lade_ziele(db_session, nur=[nummer])
+
+        text_der_meldung = str(fehler.value)
+        assert "Etikett" in text_der_meldung
+        assert "Zimmernummer" in text_der_meldung
+        # **Die Trefferliste gehoert in die Meldung** (Auftrag des
+        # Betreibers): wer abbricht, muss sehen, welche Geraete gemeint
+        # sein koennten — sonst ist der Abbruch eine Sackgasse.
+        assert gleichnamig.dev_eui in text_der_meldung
+        for d in im_zimmer:
+            assert d.dev_eui in text_der_meldung
+    finally:
+        for d in (*im_zimmer, gleichnamig):
+            await db_session.execute(text("DELETE FROM device WHERE id = :i"), {"i": d.id})
+        for z in (zone_a, zone_b):
+            await db_session.execute(text("DELETE FROM heating_zone WHERE id = :i"), {"i": z.id})
+        for r in (zimmer_a, zimmer_b):
+            await db_session.execute(text("DELETE FROM room WHERE id = :i"), {"i": r.id})
+        await db_session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": rt.id})
+        await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_eine_zimmernummer_fuer_mehrere_thermostate_ist_eindeutig(
+    db_session: AsyncSession,
+) -> None:
+    """Mehrere Treffer auf **demselben** Weg sind kein Fehler.
+
+    Eine Zimmernummer trifft alle Thermostate ihres Zimmers — genau
+    dafuer ist sie da. Ein Abbruch hier waere die naheliegende und
+    falsche Fassung derselben Regel, und sie haette §10ar unbenutzbar
+    gemacht: dort gehen drei ``0x07`` an **ein** Zimmer.
+    """
+    suffix = uuid.uuid4().hex[:6]
+    rt = RoomType(name=f"me-{suffix}")
+    db_session.add(rt)
+    await db_session.flush()
+    room = Room(number=f"m{suffix}", room_type_id=rt.id)
+    db_session.add(room)
+    await db_session.flush()
+    zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="Schlafzimmer")
+    db_session.add(zone)
+    await db_session.flush()
+    geraete = [
+        Device(
+            dev_eui=f"ab0{i}{suffix}ab0{i}",
+            label=f"drei-{i}-{suffix}",
+            kind=DeviceKind.THERMOSTAT,
+            vendor=DeviceVendor.MCLIMATE,
+            model="vicki",
+            heating_zone_id=zone.id,
+        )
+        for i in (1, 2, 3)
+    ]
+    db_session.add_all(geraete)
+    await db_session.commit()
+
+    try:
+        ziele, _ = await lade_ziele(db_session, nur=[room.number])
+        assert {z.dev_eui for z in ziele} == {d.dev_eui for d in geraete}
+    finally:
+        for d in geraete:
+            await db_session.execute(text("DELETE FROM device WHERE id = :i"), {"i": d.id})
+        await db_session.execute(text("DELETE FROM heating_zone WHERE id = :i"), {"i": zone.id})
+        await db_session.execute(text("DELETE FROM room WHERE id = :i"), {"i": room.id})
+        await db_session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": rt.id})
+        await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_ein_pool_geraet_mit_demselben_namen_bricht_nicht_ab(
+    db_session: AsyncSession,
+) -> None:
+    """Solange das gleichnamige Geraet im Lager liegt, laeuft alles weiter.
+
+    **Das ist der Fall dieser Woche**, und er darf den T2-Lauf nicht
+    aufhalten: die neuen Vickis heissen 105-109 und liegen ohne Zone im
+    Reserve-Pool, waehrend ``--nur "105"`` das **Zimmer** 105 meint. Ein
+    Pool-Geraet ist eine Ausnahme und bekommt keinen Befehl — ein
+    Abbruch waere ein Abbruch ohne Gefahr.
+
+    Scharf wird es erst bei der **Zuordnung**, und genau das prueft der
+    Test darueber.
+    """
+    suffix = uuid.uuid4().hex[:6]
+    nummer = f"p{suffix}"
+    rt = RoomType(name=f"mp-{suffix}")
+    db_session.add(rt)
+    await db_session.flush()
+    room = Room(number=nummer, room_type_id=rt.id)
+    db_session.add(room)
+    await db_session.flush()
+    zone = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="Schlafzimmer")
+    db_session.add(zone)
+    await db_session.flush()
+    im_zimmer = Device(
+        dev_eui=f"cd00{suffix}cd00",
+        label=f"imzimmer-{suffix}",
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=zone.id,
+    )
+    im_pool = Device(
+        dev_eui=f"de00{suffix}de00",
+        label=nummer,
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        heating_zone_id=None,
+    )
+    db_session.add_all([im_zimmer, im_pool])
+    await db_session.commit()
+
+    try:
+        ziele, ausnahmen = await lade_ziele(db_session, nur=[nummer])
+        assert [z.dev_eui for z in ziele] == [im_zimmer.dev_eui]
+        # Das Pool-Geraet steht als Ausnahme **mit Grund** da und nicht
+        # stillschweigend nicht da.
+        assert {a.dev_eui: a.grund for a in ausnahmen}.get(im_pool.dev_eui) == GRUND_OHNE_ZONE
+    finally:
+        for d in (im_zimmer, im_pool):
             await db_session.execute(text("DELETE FROM device WHERE id = :i"), {"i": d.id})
         await db_session.execute(text("DELETE FROM heating_zone WHERE id = :i"), {"i": zone.id})
         await db_session.execute(text("DELETE FROM room WHERE id = :i"), {"i": room.id})

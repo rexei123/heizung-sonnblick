@@ -305,3 +305,54 @@ async def test_ohne_antwort_steht_none_und_der_schluessel_fehlt_nicht(
     befunde = await ist_grenzen_je_geraet(db_session, [-1, -2])
     assert befunde == {-1: None, -2: None}
     assert await ist_grenzen_je_geraet(db_session, []) == {}
+
+
+# ---------------------------------------------------------------------------
+# Der Abbruch bei zweideutigem --nur gilt auch hier (01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("unterbefehl", ["setzen", "abfragen", "vergleich"])
+def test_zweideutige_auswahl_bricht_auch_bei_den_grenzen_ab(
+    unterbefehl: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """**Zwei Werkzeuge, dieselbe Auswahl — also zwei Faenge.**
+
+    Die Pruefung sitzt in ``lade_ziele`` und gilt damit automatisch; der
+    **Weg nach draussen** gilt nicht automatisch. Ohne den Fang hier gaebe
+    es ein Rueckverfolgungsprotokoll statt einer Meldung, und zwar an dem
+    Werkzeug, das ``0x08`` an hundert Geraete schickt.
+
+    Dass die Fenstererkennung einen Test dafuer hat, sagt ueber dieses
+    Werkzeug nichts (Paragraph 5.87) — genau diese Sorte Luecke ist der
+    Grund fuer den Parameter.
+    """
+    from heizung.scripts import geraetegrenzen as werkzeug
+    from heizung.services.geraete_ziele import MehrdeutigeAuswahlError
+
+    async def _mehrdeutig(*_args: object, **_kwargs: object) -> None:
+        raise MehrdeutigeAuswahlError(
+            {
+                "105": {
+                    "Etikett": ["105 / 70b3d52dd30329c6 / 207 Schlafzimmer"],
+                    "Zimmernummer": ["021 / 70b3d52dd3034de4 / 105 Schlafzimmer"],
+                }
+            }
+        )
+
+    monkeypatch.setattr(werkzeug, "lade_ziele", _mehrdeutig)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["geraetegrenzen", unterbefehl, "--nur", "105"]
+        + (["--ausfuehren"] if unterbefehl == "setzen" else []),
+    )
+
+    rueckgabe = werkzeug.main()
+    ausgabe = capsys.readouterr().out
+
+    assert rueckgabe == 2
+    assert "Mehrdeutige Auswahl" in ausgabe
+    assert "es wird nichts gesendet" in ausgabe
+    assert "70b3d52dd30329c6" in ausgabe
