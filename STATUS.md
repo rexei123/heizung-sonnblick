@@ -7668,3 +7668,131 @@ Alle neuen Tests ziehen ihre Nummer je Lauf.
 **Die Liste ist nicht ausgeführt.** Sie läuft nach dem nächsten
 T4-B-Zwischenstand, auf Entscheidung des Betreibers. Der erste Handgriff
 daran ist Schritt 1 und kostet nichts.
+
+## 2cr. Das erste Frame von Relais 109 (2026-11-01)
+
+**Keine Migration.** Codec-Korrektur, zwei Schreibpfade, §10at neu.
+
+Relais **109** (`70b3d52ddd001e69`) hat um **07:35:18 UTC** seinen ersten
+Uplink geschickt — fPort 2, fCnt 1, SF12, ohne Last, von Hand
+eingeschaltet. Der Betreiber hat die Rohbytes mitgeschickt **und den
+Fehler selbst gefunden**:
+
+```
+04 21 15 | 12 0a | 19 78 | 1b 00 | 1d 02 18 | a4 00 |
+01 1f 00 00 00 00 00 00 e4 00 00 01
+```
+
+### 1. `0x04` war fünf Bytes lang und ist drei
+
+`responseLength(0x04)` stand auf **5**, weil die Vendor-Schreibweise
+`0x04{HW_major}{HW_minor}{FW_major}{FW_minor}` wie vier Bytes aussieht. Es
+sind **drei** Bytes mit Nibble-Split. Der Dekoder sprang zwei Bytes zu
+weit, landete mitten in der nächsten Antwort und brach mit
+`unknown command code 0x19` ab — **alles** nach der Version war verloren,
+auch der angehängte Keepalive mit Relais-Zustand und Netzspannung.
+
+**Dieselbe Korrektur gab es im Haus schon.** Beim Vicki ist diese Stelle
+am 11.05.2026 berichtigt worden (Sprint 9.11x.c), mit dem Satz in
+`docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md` §1, die
+Vendor-Beschreibung sei „ungenau". Beim zweiten Gerät ist sie **nicht
+mitgewandert**. Das ist §5.79 in Reinform: eine Lehre gilt für den Stand,
+an dem sie gezogen wurde.
+
+### 2. Vier Antworten kannte der Codec gar nicht
+
+Alle vier schickt das Gerät im ersten Uplink nach dem Join unaufgefordert
+mit. Zugeordnet nach Hersteller-Doku (abgerufen 01.11.2026):
+
+| Code | Bedeutung | Im Frame | Form |
+|---|---|---|---|
+| `0x19` | Join-Wiederholung | 600 s | 2 Bytes, T[s] = XX · 5 |
+| `0x1B` | Uplink-Art | unbestätigt | 2 Bytes |
+| `0x1D` | Funk-Wachhund | 2 / 24 h | 3 Bytes |
+| `0xA4` | LoRaWAN-Region | **EU868** | 2 Bytes |
+
+Alle vier stehen auf **Werkswerten**, und das ist selbst ein Befund: das
+Gerät ist unkonfiguriert, wie es sein soll.
+
+### 3. Eine Korrektur am Betreiber-Befund: `1d 02` ist nicht der Stromrückkehr-Zustand
+
+Die Lesart war „`1d 02` = Zustand nach Stromrückkehr, falls schon AUS ist
+`0x5E 02` nur noch Rücklesen". **Nein.** `1d 02 18` ist die Antwort auf
+`0x1D`, den **Funk-Wachhund** (2 bestätigte Uplinks + 7 min, 24 h
+unbestätigt). Der Zustand nach Stromrückkehr steht im Frame **gar nicht**;
+er wird mit `0x5F` gelesen. **`0x5E 02` bleibt ein echtes Setzen**, und
+der Pflicht-Stop bleibt stehen — die Anleitung dokumentiert diesen Zustand
+nicht, wir wissen ihn erst, wenn das Gerät ihn gemeldet hat.
+
+### 4. Zwei Schreibpfade, die ins Leere liefen
+
+**Die Firmware kam nie an.** `_handle_firmware_version_report` steht im
+Antwort-Zweig der Thermostate, und der Relais-Zweig kehrt **vorher**
+zurück. `device.firmware_version` blieb leer, obwohl das Gerät die Zahl im
+ersten Frame mitschickt. Das ist nicht kosmetisch: unter Software 1.4
+fehlen die Timer-Befehle, und ohne Timer ist „EIN nur befristet" (S1)
+nicht erfüllbar — die Entscheidung über die Inbetriebnahme hing an einer
+Zahl, die nirgends stand. Jetzt ruft der Relais-Zweig **dieselbe**
+Funktion; sie prüft nur auf `dev_eui` und kennt keine Geräteart (§5.53).
+
+**Der Tastendruck verlor seinen Grund.** Der Codec dekodiert `0x5d`
+(„manuelle Umschaltung am Taster") seit Sprint 24 als `manualSwitch`, und
+`werte_aus_codec` hat das Feld verworfen. In der Zeitreihe stand „ging an"
+ohne Grund — und ein Relais, das ohne Grund angeht, ist genau die Zeile,
+bei der jemand nachfragt (S3). Eingetragen wird jetzt `manual_button`,
+dasselbe Wort, das `0x54` liefert; `0x54` hat Vorrang, weil es die
+**Antwort auf die Frage** ist und nicht der Nebeneffekt einer Meldung.
+Keine Migration — `change_reason` ist `String(40)`.
+
+### 5. Eine Temperatur, die nach oben kippen konnte
+
+Ab FW 1.3 ist Bit 7 im Keepalive das **Vorzeichen** (Hersteller-Doku).
+Vorzeichenlos gelesen wurde aus −2 °C eine **130 °C** — und 130 steht in
+derselben Spalte, in der jemand nach einer Überhitzung sucht. 109 meldet
+FW 1.5 und ist betroffen; im ersten Frame war Bit 7 frei (0x1f = 31 °C)
+und der Fehler deshalb unsichtbar.
+
+### 6. Und ein Test, der nie gelaufen ist
+
+`infra/chirpstack/codecs/test-mclimate-16aspm.js` liegt seit Sprint 24 im
+Repo — rund 400 Zeilen Codec-Tests. **Kein Workflow ruft sie, kein pytest
+sammelt sie.** Sie hat bei jedem Fehler geschwiegen, und der
+Längen-Fehler in `0x04` sah sechs Tage lang grün aus. Das war nicht einmal
+ein grüner Lauf ohne Aussage (§5.55), sondern **kein Lauf**. Der Aufruf
+ist eine Zeile; das Fehlen war eine Lücke, keine Entscheidung. Nebenbei
+zeigt sie: die Decode-Seite von `0x04` war im 16ASPM **überhaupt nie**
+geprüft, nur die Encode-Seite.
+
+### Geprüft
+
+| | |
+|---|---|
+| Fixture | **genau dieser Frame**, Base64 wie in ChirpStack |
+| neue Tests | 4 (ChirpStack-Werkzeuge) + 3 (Backend) |
+| ChirpStack-Suite | **41 passed** |
+| Backend-Suite | siehe CI |
+| `ruff` / `mypy` (beide Bäume) | grün |
+| Mutationsproben | **7, alle rot** |
+
+| | Eingebauter Fehler | Fällt |
+|---|---|---|
+| C1 | `0x04` wieder Länge 5 | ganzes Frame |
+| C2 | `0x04` byteweise statt Nibbles | Version 33.21 statt 2.1 |
+| C3 | `0x19` aus der Längentabelle | ab Byte 5 alles |
+| **C4** | `0x1D` auf Länge 2 | **Region und Keepalive** |
+| C5 | Keepalive-Temperatur ohne Vorzeichen | −2 °C wird 130 |
+| R1 | Firmware-Aufruf im Relais-Zweig weg | Version bleibt leer |
+| R2/R3 | `manualSwitch` verworfen / Vorrang getauscht | Grund fehlt / falsch |
+
+**C4 ist die lehrreichste:** eine falsche Länge bei einer Antwort, die der
+Test gar nicht prüft, nimmt alles Folgende mit. Deshalb prüft der Test
+nicht einzelne Felder, sondern **den ganzen Datenblock plus die leere
+Fehlerliste**.
+
+### §10at ist neu
+
+Der konkrete Lauf für 109 ohne Last: sechs Schritte, je Schritt Erwartung
+und Rückweg, zwei Pflicht-Stops (Rücklesungen, T3.0) und ein Probelauf vor
+jedem Befehl, der etwas setzt. Schritt 2 ist der Probelauf für Schritt 3 —
+**erst `0x5F` und `0x5A` lesen, dann setzen.** Das Panel kommt erst
+danach.

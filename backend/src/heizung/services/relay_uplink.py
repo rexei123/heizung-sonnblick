@@ -70,7 +70,21 @@ def werte_aus_codec(
         "fcnt": fcnt,
         "relay_on": None if zustand is None else zustand == "ON",
         "timer_remaining_s": obj.get("relayTimerRemaining_s"),
-        "change_reason": obj.get("relayChangeReason"),
+        # Der Taster am Geraet kommt als ``0x5d`` und setzt im Codec
+        # ``manualSwitch``. Das wurde bis zum 01.11.2026 **verworfen**: der
+        # Zustandswechsel stand in der Zeitreihe, der Grund nicht — im
+        # Audit also „ging an", nicht „jemand hat gedrueckt" (S3).
+        #
+        # Eingetragen wird dasselbe Wort, das ``0x54`` liefert
+        # (``manual_button``), und keine zweite Schreibweise fuer dieselbe
+        # Sache (§5.53). Keine Migration: ``change_reason`` ist
+        # ``String(40)``.
+        #
+        # ``0x54`` hat Vorrang. Es ist die **Antwort auf die Frage** nach
+        # dem Grund; ``manualSwitch`` ist der Nebeneffekt einer Meldung.
+        # Traegt ein Frame beides, ist die Antwort die genauere Quelle.
+        "change_reason": obj.get("relayChangeReason")
+        or ("manual_button" if obj.get("manualSwitch") else None),
         "power_w": obj.get("power_W"),
         # Der Codec liefert kWh als Dezimalzahl; gespeichert wird der
         # Rohzaehler in Wh. ``energy_raw`` ist genau das.

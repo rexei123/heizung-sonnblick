@@ -354,3 +354,137 @@ def test_frische_relais_meldung_ergibt_healthy() -> None:
     assert _basis_state_from_age(None, jetzt, schwellen) == "silent", (
         "ohne Meldung bleibt es silent — das war der Zustand JEDES Relais"
     )
+
+
+# ---------------------------------------------------------------------------
+# Die Version aus demselben Frame (Befund vom 01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_relais_firmware_aus_dem_ersten_frame_wird_gespeichert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein Relais meldet ``0x04`` im ersten Uplink — und es muss ankommen.
+
+    **Der Befund.** ``_handle_firmware_version_report`` steht im
+    Antwort-Zweig der Thermostate, und der Relais-Zweig kehrt **vorher**
+    zurueck. ``device.firmware_version`` blieb damit leer, obwohl das
+    Geraet die Zahl im ersten Frame nach dem Join mitschickt. Bei Relais
+    109 war das am 01.11.2026 ``1.5``.
+
+    Das ist nicht kosmetisch: unter Software 1.4 fehlen die
+    Timer-Befehle, und ohne Timer ist „EIN nur befristet" (S1) nicht
+    erfuellbar. Die Entscheidung über die Inbetriebnahme hing an einer
+    Zahl, die nirgends stand.
+
+    **Geprueft wird am Aufrufer** (``_persist_uplink``), nicht an der
+    Hilfsfunktion. Genau diese Trennung war der Fehler — die
+    Hilfsfunktion war die ganze Zeit in Ordnung, sie wurde nur nicht
+    gerufen (§5.87).
+
+    **Und mit einer zweiten Sitzung gelesen.** ``_persist_uplink``
+    committet selbst; wer in derselben Sitzung nachsieht, sieht auch
+    einen fehlenden Commit (§5.87, zweiter Teil).
+    """
+    from heizung.services import mqtt_subscriber
+    from heizung.services.mqtt_subscriber import ChirpStackUplink, _persist_uplink
+    from tests.conftest import purge_test_data_by_prefix
+
+    engine = create_async_engine(TEST_DB_URL or "", poolclass=None)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(mqtt_subscriber, "SessionLocal", maker)
+
+    try:
+        async with maker() as aufbau:
+            dev = await _relais(aufbau, marker="fw")
+            dev.firmware_version = None
+            dev_eui = dev.dev_eui
+            await aufbau.commit()
+
+        uplink = ChirpStackUplink.model_validate(
+            {
+                "deviceInfo": {"devEui": dev_eui},
+                "fCnt": 1,
+                "fPort": 2,
+                "time": datetime.now(tz=UTC).isoformat(),
+                # Der Ausgang des korrigierten Codecs fuer das erste Frame
+                # von 109: Version **und** angehaengter Keepalive.
+                "object": {
+                    "report_type": "command_response",
+                    "hw_version": "2.1",
+                    "firmware_version": "1.5",
+                    "lorawanRegion": "EU868",
+                    **KEEPALIVE,
+                },
+                "data": "BCEVEgoZeBsAHQIYpAABHwAAAAAAAOQAAAE=",
+            }
+        )
+        await _persist_uplink(uplink)
+
+        async with maker() as pruefung:
+            gespeichert = await pruefung.scalar(
+                select(Device.firmware_version).where(Device.dev_eui == dev_eui)
+            )
+            assert gespeichert == "1.5", (
+                "Die Version aus dem ersten Frame muss am Geraet stehen - "
+                "vorher blieb sie leer, weil der Relais-Zweig vorher zurueckkehrt"
+            )
+            # Die Zeitreihe aus demselben Frame, damit der Test nicht
+            # gruen ist, wenn der Relais-Zweig gar nicht gelaufen ist.
+            zustand = await pruefung.scalar(
+                select(RelayReading.relay_on).where(
+                    RelayReading.device_id.in_(select(Device.id).where(Device.dev_eui == dev_eui))
+                )
+            )
+            assert zustand is True, "derselbe Frame muss auch die Zeitreihe schreiben"
+    finally:
+        async with maker() as putzen:
+            await purge_test_data_by_prefix(putzen, PREFIX, dev_eui_pattern="beef%")
+            await putzen.commit()
+        await engine.dispose()
+
+
+def test_tasterdruck_steht_mit_grund_in_der_zeitreihe() -> None:
+    """``0x5d`` ist ein Grund und nicht nur ein Zustandswechsel.
+
+    **Der Befund vom 01.11.2026.** Der Codec dekodiert den Tastendruck
+    seit Sprint 24 (``manualSwitch``), und ``werte_aus_codec`` hat das
+    Feld verworfen. In der Zeitreihe stand damit „ging an" ohne Grund —
+    und ein Relais, das ohne Grund angeht, ist genau die Zeile, bei der
+    jemand nachfragt (S3).
+
+    Eingetragen wird dasselbe Wort wie bei ``0x54``, nicht ein zweites
+    fuer dieselbe Sache (§5.53).
+    """
+    werte = relay_uplink.werte_aus_codec(
+        {"report_type": "command_response", "relayState": "ON", "manualSwitch": True},
+        device_id=1,
+        zeit=datetime.now(tz=UTC),
+        fcnt=7,
+    )
+
+    assert werte["relay_on"] is True
+    assert werte["change_reason"] == "manual_button"
+
+
+def test_die_antwort_auf_0x54_schlaegt_den_nebeneffekt() -> None:
+    """Traegt ein Frame beides, gilt ``0x54``.
+
+    ``relayChangeReason`` ist die **Antwort auf die Frage** nach dem
+    Grund, ``manualSwitch`` der Nebeneffekt einer Meldung. Zwei Quellen
+    fuer ein Feld brauchen eine Reihenfolge, sonst entscheidet die
+    Schreibweise des Codes (§5.53).
+    """
+    werte = relay_uplink.werte_aus_codec(
+        {
+            "relayState": "OFF",
+            "manualSwitch": True,
+            "relayChangeReason": "overheating_protection",
+        },
+        device_id=1,
+        zeit=datetime.now(tz=UTC),
+        fcnt=8,
+    )
+
+    assert werte["change_reason"] == "overheating_protection"

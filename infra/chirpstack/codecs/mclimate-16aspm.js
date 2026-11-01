@@ -93,7 +93,24 @@ function responseLength(code) {
     if (code === 0x12) { return 2; }
     if (code === 0x58) { return 4; }
     if (code === 0x5d) { return 2; }
-    if (code === 0x04) { return 5; }
+    // 0x04 ist **3** Bytes, nicht 5: die Versionen stecken als Nibbles in
+    // je einem Byte. Hier stand 5, weil die Vendor-Schreibweise
+    // "0x04{HW_major}{HW_minor}{FW_major}{FW_minor}" wie vier Bytes
+    // aussieht. Genau diese Stelle ist beim Vicki schon einmal korrigiert
+    // worden (Sprint 9.11x.c, docs/vendor/mclimate-vicki/
+    // 04-commands-cheat-sheet.md §1) — und die Korrektur ist beim zweiten
+    // Geraet nicht mitgewandert. Nachgewiesen am ersten Frame von Relais
+    // 109 (01.11.2026): ``04 21 15`` → HW 2.1, FW 1.5, und mit Laenge 5
+    // sprang der Dekoder mitten in die naechste Antwort (§5.79).
+    if (code === 0x04) { return 3; }
+    // Netzwerk-Einstellungen, die das Geraet im ersten Uplink nach dem
+    // Join unaufgefordert mitschickt. Alle drei aus der Hersteller-Doku
+    // ("Network-related settings", abgerufen 01.11.2026) und am Frame von
+    // 109 belegt.
+    if (code === 0x19) { return 2; }   // Join-Wiederholung: T[s] = XX * 5
+    if (code === 0x1b) { return 2; }   // Uplink-Art: 00 unbestaetigt, 01 bestaetigt
+    if (code === 0x1d) { return 3; }   // Funk-Wachhund: bestaetigt, unbestaetigt
+    if (code === 0xa4) { return 2; }   // LoRaWAN-Region
     // Schutz-Ereignisse: Zaehler plus Messwert.
     if (code === 0x60) { return 3; }   // Ueberhitzung: Zaehler + °C
     if (code === 0x61) { return 4; }   // Ueberspannung: Zaehler + V (16 Bit)
@@ -119,6 +136,18 @@ function signedTemp(value) {
 
 function relayStateName(value) {
     return value === 0x01 ? 'ON' : 'OFF';
+}
+
+// 0xA4 — die Region steckt in der Firmware und ist nicht verstellbar; der
+// Befehl berichtet sie nur. Ein unbekannter Wert wird **nicht** geraten,
+// sondern als Rohzahl gemeldet: eine falsche Regionsangabe waere eine
+// Behauptung ueber das Funknetz (§5.68).
+function lorawanRegionName(value) {
+    if (value === 0x00) { return 'EU868'; }
+    if (value === 0x01) { return 'AS923'; }
+    if (value === 0x02) { return 'AU915'; }
+    if (value === 0x03) { return 'US915'; }
+    return 'unknown(' + value + ')';
 }
 
 // 0x54 — Grund der letzten Relais-Zustandsaenderung. Die Namen sind die
@@ -165,7 +194,19 @@ function decodeKeepalive(bytes, offset) {
     }
 
     data.report_type = 'keepalive';
-    data.internalTemperature = bytes[offset + 1];
+    // Ab FW 1.3 ist Bit 7 das Vorzeichen (Hersteller-Doku „Keep-alive",
+    // abgerufen 01.11.2026). Vorzeichenlos gelesen wuerde aus -2 °C eine
+    // 130 °C — und das ist kein Anzeigefehler, sondern ein Wert, der an
+    // der Ueberhitzungs-Schwelle als Ausloesung gelesen werden kann.
+    // Relais 109 meldet FW 1.5, ist also betroffen; im ersten Frame war
+    // Bit 7 frei (0x1f = 31 °C) und der Fehler deshalb unsichtbar.
+    //
+    // **Ohne Firmware-Weiche**, und das ist eine Entscheidung: der Codec
+    // kennt die Firmware beim Dekodieren nicht (sie steht in einer
+    // anderen Antwort, nicht im Keepalive). Fuer FW <= 1.2 waere die
+    // Weiche ohnehin folgenlos — ein gesetztes Bit 7 hiesse dort ueber
+    // 127 °C, und bei der Temperatur gibt es kein Geraet mehr, das meldet.
+    data.internalTemperature = signedTemp(bytes[offset + 1]);
 
     // Bewusst Multiplikation statt `<< 24`: `<<` ist in JS signiert und
     // kippt den Zaehler ab 0x80000000 ins Negative. Der offizielle
@@ -285,8 +326,27 @@ function decodeCommandResponses(bytes) {
             data.relayState = relayStateName(bytes[i + 1]);
             data.manualSwitch = true;
         } else if (code === 0x04) {
-            data.hardwareVersion = bytes[i + 1] + '.' + bytes[i + 2];
-            data.softwareVersion = bytes[i + 3] + '.' + bytes[i + 4];
+            // Nibbles, nicht Bytes — und dieselben Feldnamen wie im
+            // Vicki-Codec. Zwei Namen fuer dieselbe Zahl waeren zwei
+            // Wahrheiten, und der Subscriber liest hausweit
+            // ``firmware_version`` (§5.53).
+            data.hw_version = ((bytes[i + 1] >> 4) & 0x0f) + '.' + (bytes[i + 1] & 0x0f);
+            data.firmware_version = ((bytes[i + 2] >> 4) & 0x0f) + '.' + (bytes[i + 2] & 0x0f);
+        } else if (code === 0x19) {
+            // T[s] = XX * 5. Werkswert 0x78 = 600 s.
+            data.joinRetryPeriod_s = bytes[i + 1] * 5;
+        } else if (code === 0x1b) {
+            data.uplinkType = bytes[i + 1] === 0x01 ? 'confirmed' : 'unconfirmed';
+        } else if (code === 0x1d) {
+            // Byte 1: bestaetigte Uplinks ohne ACK, plus 7 Minuten
+            // (0x00 = aus). Byte 2: unbestaetigte in Stunden (0x00 = aus).
+            // Die Rohwerte bleiben roh — die Umrechnung auf Minuten
+            // braucht die Keepalive-Periode und gehoert nicht in den
+            // Codec.
+            data.watchdogConfirmed = bytes[i + 1];
+            data.watchdogUnconfirmed_h = bytes[i + 2];
+        } else if (code === 0xa4) {
+            data.lorawanRegion = lorawanRegionName(bytes[i + 1]);
         }
 
         i += len;
