@@ -382,6 +382,32 @@ export interface HardwareStatusResponse {
 }
 
 /**
+ * ``PaketverlustAntwort`` aus ``schemas/device.py`` (02.11.2026).
+ *
+ * **Eine Messung, keine Schätzung.** Der LoRaWAN-Zähler läuft lückenlos
+ * hoch, auch über die Frames, die niemand gehört hat.
+ *
+ * ``anteil_prozent`` ist ``null``, wenn im Fenster weniger als zwei
+ * Frames liegen — das ist **nicht** 0 %. Wer hier eine Null anzeigt,
+ * behauptet einen gemessenen Funk, den es nicht gibt.
+ *
+ * ``neustarts`` sind Rücksetzungen des Zählers (Neustart, Rejoin) und
+ * kein Verlust; ``doppelt`` ist Mehrfachempfang über zwei Gateways.
+ */
+export interface PaketverlustAntwort {
+  empfangen: number;
+  erwartet: number;
+  verloren: number;
+  anteil_prozent: number | null;
+  neustarts: number;
+  doppelt: number;
+  ohne_zaehler: number;
+  stunden: number;
+  von: string | null;
+  bis: string | null;
+}
+
+/**
  * API-Fehler-Schema (FastAPI default: { detail: string | object[] }).
  *
  * Sprint 13b.2 B-Sprint13b2-4 (AE-59): optionales ``error_code``-Feld

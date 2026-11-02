@@ -117,6 +117,29 @@ async def _relais_oder_404(session: AsyncSession, device_id: int) -> Device:
     return geraet
 
 
+class OffenerBefehl(BaseModel):
+    """Ein abgesetzter Schaltbefehl, dessen Bestaetigung aussteht.
+
+    **Diese Angabe hatte bis zum 02.11.2026 keinen Leser ausser dem
+    Orchestrator.** Ein Relais, das seit Stunden keine Bestaetigung
+    liefert, stand als Alarm im Log und sonst nirgends — und das Log
+    liest niemand ohne Anlass (§5.76). Seit der Alarm den offenen Stand
+    nicht mehr loescht (AE-78 §14), lebt er ausserdem beliebig lange;
+    ohne Anzeige waere er damit ein dauerhaft unsichtbarer Zustand.
+    """
+
+    #: Was der Befehl erreichen wollte.
+    ziel_ein: bool
+    #: Wann er zuletzt abgesetzt wurde.
+    seit: datetime
+    #: Wie oft, einschliesslich des ersten Mals.
+    versuche: int
+    #: Ob der Alarm dazu schon heraus ist. Danach wird nur noch
+    #: gedrosselt wiederholt — die Schwelle steht in den Settings, und
+    #: die Oberflaeche soll sie nicht zum zweiten Mal kennen (§5.73).
+    gemeldet: bool
+
+
 class RelaisStand(BaseModel):
     """Alles, was die Zonen- und Geraeteansicht ueber ein Relais zeigt.
 
@@ -154,6 +177,9 @@ class RelaisStand(BaseModel):
     #: machen lassen.
     provisionierung_laeuft: bool
 
+    #: Ein unbestaetigter Schaltbefehl, falls einer offen ist.
+    offener_befehl: OffenerBefehl | None
+
     # Jüngste Meldung
     relay_on: bool | None
     power_w: int | None
@@ -162,6 +188,25 @@ class RelaisStand(BaseModel):
     gehaeusetemperatur_alarm: bool
     reading_time: datetime | None
     change_reason: str | None
+
+
+def _offener_befehl(geraet: Device) -> OffenerBefehl | None:
+    """Liest den offenen Stand vom Geraet und sagt, ob er gemeldet ist.
+
+    ``gemeldet`` wird **hier** abgeleitet und nicht in der Oberflaeche:
+    die Schwelle ``relay_max_versuche`` steht in den Settings, und eine
+    zweite Kenntnis davon im Frontend waere beim ersten Nachjustieren
+    falsch (dasselbe Muster wie bei den Batterie-Stufen, §5.73).
+    """
+    if geraet.pending_target_on is None or geraet.pending_since is None:
+        return None
+    versuche = geraet.pending_attempts or 1
+    return OffenerBefehl(
+        ziel_ein=geraet.pending_target_on,
+        seit=geraet.pending_since,
+        versuche=versuche,
+        gemeldet=versuche > get_settings().relay_max_versuche,
+    )
 
 
 @router.get(
@@ -209,6 +254,7 @@ async def lies_relais(
         watchdog_strategy=geraet.watchdog_strategy,
         darf_schalten=relay_service.darf_schalten(geraet),
         provisionierung_laeuft=await asyncio.to_thread(provision_lauf.laeuft, geraet.id),
+        offener_befehl=_offener_befehl(geraet),
         relay_on=zeile.relay_on if zeile is not None else None,
         power_w=zeile.power_w if zeile is not None else None,
         energy_wh=zeile.energy_wh if zeile is not None else None,

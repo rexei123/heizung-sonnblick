@@ -40,6 +40,24 @@ export const relaisStandSchema = z.object({
   // und genau diese Lücke hat den Handgriff zweimal machen lassen.
   provisionierung_laeuft: z.boolean(),
 
+  // Der unbestätigte Schaltbefehl. Bis zum 02.11.2026 hatte dieser
+  // Zustand keinen Leser außer dem Orchestrator: ein Relais, das seit
+  // Stunden nicht bestätigt, stand als Alarm im Log und sonst nirgends
+  // (§5.76). Seit der Alarm den offenen Stand nicht mehr löscht, lebt er
+  // außerdem beliebig lange.
+  //
+  // ``gemeldet`` kommt **aus dem Backend**: die Schwelle steht in den
+  // Settings, und eine zweite Kenntnis davon hier wäre beim ersten
+  // Nachjustieren falsch (§5.73).
+  offener_befehl: z
+    .object({
+      ziel_ein: z.boolean(),
+      seit: z.string(),
+      versuche: z.number(),
+      gemeldet: z.boolean(),
+    })
+    .nullable(),
+
   relay_on: z.boolean().nullable(),
   power_w: z.number().nullable(),
   energy_wh: z.number().nullable(),

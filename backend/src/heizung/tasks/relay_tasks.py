@@ -131,6 +131,7 @@ def waechter_schwellen() -> WaechterSchwellen:
         refresh_abstand=timedelta(seconds=s.relay_refresh_intervall_s),
         bestaetigungs_frist=timedelta(seconds=s.relay_bestaetigungs_frist_s),
         max_versuche=s.relay_max_versuche,
+        backoff_max=timedelta(seconds=s.relay_backoff_max_s),
     )
 
 
@@ -309,6 +310,20 @@ async def _steuere_eine_zone(
             _loesche_offen(geraet)
             continue
 
+        # Der offene Stand widerspricht dem jetzigen Wunsch, und es geht
+        # nichts hinaus: dann gehoert er geloescht. Sonst bremst sein
+        # Backoff einen Befehl, den niemand mehr will — und
+        # ``pending_since`` wuerde als ``letzter_ein_befehl`` weiter in die
+        # REFRESH-Rechnung eingehen.
+        if (
+            befehl.aktion is WaechterAktion.NICHTS
+            and offen is not None
+            and offen.ziel_ein != gewuenscht_ein
+        ):
+            _loesche_offen(geraet)
+            ergebnis["verworfen"] = ergebnis.get("verworfen", 0) + 1
+            continue
+
         # Unbekannter Zustand: **fragen**, nicht schweigen.
         #
         # Der Waechter schaltet bei unbekanntem Zustand bewusst nicht ein
@@ -339,7 +354,20 @@ async def _steuere_eine_zone(
                 offen.ziel_ein if offen else None,
                 offen.versuche if offen else 0,
             )
-            _loesche_offen(geraet)
+            # **Den offenen Stand nicht loeschen** (02.11.2026). Die erste
+            # Fassung tat das, und damit begann der naechste Durchlauf die
+            # Zaehlung von vorn: drei Versuche, Alarm, loeschen, drei
+            # Versuche — eine Endlosschleife mit einem Downlink je Minute,
+            # genau das, was der Betreiber am 01.11. zwischen 11:22 und
+            # 11:28 gesehen hat. ``max_versuche`` hat dabei nichts
+            # begrenzt, sondern nur getaktet, wie oft ein Alarm kommt.
+            #
+            # Der Versuch wird hochgezaehlt, ohne zu senden. Damit meldet
+            # der naechste Durchlauf nicht erneut (der Alarm haengt an
+            # ``versuche == max_versuche``) und wartet die gedrosselte
+            # Frist ab, gerechnet ab dem letzten **Senden**.
+            if offen is not None:
+                geraet.pending_attempts = offen.versuche + 1
             continue
 
         if befehl.aktion is WaechterAktion.SENDE_EIN:
@@ -469,9 +497,19 @@ def _offener_befehl(geraet: Device) -> Offen | None:
 
 
 def _setze_offen(geraet: Device, *, ziel_ein: bool, jetzt: datetime, offen: Offen | None) -> None:
+    """Haelt den abgesetzten Befehl fest.
+
+    **Die Versuchszaehlung gilt je Ziel, nicht je Geraet.** Ersetzt ein
+    AUS ein unbestaetigtes EIN, beginnt sie bei 1 — es ist ein anderer
+    Befehl, und das erschoepfte Budget des EIN duerfte den Backoff des
+    AUS nicht von vornherein kappen. Ohne diese Unterscheidung waere die
+    Freigabe vom 02.11. (ein widersprechender offener Befehl wird
+    ersetzt) an der Stelle wieder eingesammelt, an der sie wirken soll.
+    """
+    weiterzaehlen = offen is not None and offen.ziel_ein == ziel_ein
     geraet.pending_target_on = ziel_ein
     geraet.pending_since = jetzt
-    geraet.pending_attempts = (offen.versuche + 1) if offen is not None else 1
+    geraet.pending_attempts = (offen.versuche + 1) if weiterzaehlen and offen else 1
 
 
 def _loesche_offen(geraet: Device) -> None:

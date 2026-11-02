@@ -15,6 +15,7 @@ import type {
   DeviceRetireRequest,
   DeviceUpdate,
   HardwareStatusResponse,
+  PaketverlustAntwort,
   SensorReading,
   SensorReadingsQuery,
 } from "./types";
@@ -107,6 +108,18 @@ export const devicesApi = {
 
   hardwareStatus: (id: number): Promise<HardwareStatusResponse> =>
     apiClient.get<HardwareStatusResponse>(`${BASE}/${id}/hardware-status`),
+
+  /**
+   * Paketverlust aus Lücken im Frame-Zähler (02.11.2026).
+   *
+   * Für Relais **und** Vickis dieselbe Rechnung; die Tabelle wählt das
+   * Backend nach der Geräteart. Begründung in
+   * ``services/paketverlust.py``.
+   */
+  paketverlust: (id: number, stunden = 24): Promise<PaketverlustAntwort> =>
+    apiClient.get<PaketverlustAntwort>(
+      `${BASE}/${id}/paketverlust?stunden=${stunden}`,
+    ),
 
   // Sprint 13b.1 (AE-57): Lifecycle-Endpoints — Pool-Lookup, atomarer
   // Tausch (alte Vicki retired + Pool-Device uebernimmt Zone in einer

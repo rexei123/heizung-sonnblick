@@ -305,6 +305,21 @@ class Settings(BaseSettings):
     # jedem Tick angefunkt, und jeder Downlink ist Sendezeit (§0 S4).
     relay_max_versuche: int = 3
 
+    # Obergrenze der Verdopplung der Bestaetigungsfrist.
+    #
+    # **Befund des Betreibers, 01.11.2026, 11:22 bis 11:28 an Relais
+    # 109:** jede Minute ein Downlink, sieben Stueck, jeder bei SF12 ueber
+    # RX2 mit 1,32 s Sendezeit. Die feste Frist von 60 s lag genau auf dem
+    # Tick-Intervall, und der Alarm loeschte den offenen Stand — die
+    # Zaehlung begann danach von vorn, ``relay_max_versuche`` hat also
+    # nichts begrenzt.
+    #
+    # 30 Minuten sind die Antwort auf die Frage, wie oft ein
+    # unerreichbares Geraet noch angefunkt werden soll: oft genug, dass es
+    # nach einer Funkstoerung von selbst zurueckkommt, selten genug, dass
+    # die Sendezeit nicht ins Gewicht faellt (1,3 s je halbe Stunde).
+    relay_backoff_max_s: int = 1800
+
     # Pause zwischen den vier Downlinks der Provisionierung.
     #
     # **Befund des Betreibers, 01.11.2026, an Relais 109.** Zwei

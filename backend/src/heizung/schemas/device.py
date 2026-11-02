@@ -500,3 +500,42 @@ class HardwareStatusResponse(BaseModel):
         gt=0,
         description="Fenster-Groesse in Minuten (heute 30, Quelle: WINDOW_STALE_THRESHOLD_MIN)",
     )
+
+
+class PaketverlustAntwort(BaseModel):
+    """Verlust aus Luecken im Frame-Zaehler (02.11.2026).
+
+    **Eine Messung, keine Schaetzung.** Der LoRaWAN-Zaehler laeuft
+    lueckenlos hoch, auch bei den Frames, die niemand gehoert hat — die
+    Differenz zwischen Spanne und Zeilen ist also der Verlust.
+
+    ``anteil_prozent`` ist ``None``, wenn im Fenster weniger als zwei
+    Frames liegen. Das ist nicht 0 %: ohne zwei Frames gibt es keine
+    Luecke, die man sehen koennte.
+
+    Quelle und Begruendung: ``services/paketverlust.py``.
+    """
+
+    empfangen: int = Field(..., ge=0, description="Zeilen mit Zaehler, Doppelte einmal")
+    erwartet: int = Field(..., ge=0, description="Vom Geraet gesendete Frames im Fenster")
+    verloren: int = Field(..., ge=0, description="erwartet - empfangen")
+    anteil_prozent: Decimal | None = Field(
+        default=None,
+        description="Verlust in Prozent, eine Stelle. None bei weniger als zwei Frames.",
+    )
+    neustarts: int = Field(
+        ..., ge=0, description="Ruecksetzungen des Zaehlers (Neustart, Rejoin). Kein Verlust."
+    )
+    doppelt: int = Field(..., ge=0, description="Mehrfach empfangene Frames. Kein Verlust.")
+    ohne_zaehler: int = Field(..., ge=0, description="Zeilen ohne Zaehler, nicht gerechnet")
+    stunden: int = Field(..., gt=0, description="Laenge des Fensters in Stunden")
+    von: datetime | None = Field(default=None, description="Zeitpunkt der ersten Zeile im Fenster")
+    bis: datetime | None = Field(default=None, description="Zeitpunkt der letzten Zeile im Fenster")
+
+    # Derselbe Wachposten wie bei ``DeviceRead``: ein ``Decimal`` geht
+    # ohne diesen Serialisierer als **String** nach draussen, und im
+    # Hinweistext wirft dann ``.toFixed()``. Das Modell steht deshalb in
+    # ``MODELLE`` in ``test_decimal_serialisierung.py``.
+    @field_serializer("anteil_prozent")
+    def _anteil_als_zahl(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
