@@ -9731,3 +9731,119 @@ wie ein halber Vorwärtsschritt.
 (die drei Belegungslisten), §10p (Deploy-Sperre), §10q (DB-Backups, von
 C7 **nicht** berührt), §10u (Rückfall auf einen Stand), §5.79 (ein Audit
 gilt für den Stand, den es gesehen hat).
+
+## 10ax. Boost abnehmen (Oberfläche, nach dem Deploy)
+
+**Reine Oberflächen-Prüfung, kein SSH, keine Hardware.** Dauer rund 15
+Minuten. Jeder Schritt nennt, was zu sehen sein muss — und was es heißt,
+wenn dort etwas anderes steht.
+
+**Vorher:** der Deploy muss durch sein. Der Boost braucht Migration
+`0036` (Spalte und Quelle) **und** `0037` (der hausweite Wert 23,0).
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT version_num FROM alembic_version;"
+```
+
+*Erwartet:* `0037_boost_temperatur` oder später. Steht dort `0036_boost`,
+ist der Wert noch nicht gesetzt, und **jeder** Boost wird mit
+„Boost-Temperatur nicht eingestellt" abgewiesen — dann ist nicht der
+Boost kaputt, sondern die Migration nicht gelaufen.
+
+### Schritt 1 — ein belegtes Zimmer, der gute Fall
+
+*Software-Oberfläche, als **Administrator**.* **Zimmer** → ein belegtes
+Zimmer → Knopf **„Temperatur"**.
+
+| Was | Erwartung |
+|---|---|
+| Der Knopf | heißt **„Temperatur"**, ist drückbar |
+| Oben im Fenster | die Zeile **Boost** mit dem Knopf **„Boost bis HH:MM"** |
+| Die Uhrzeit | der **Nachtbeginn** des Zimmers (im Haus 22:00). Nach 22:00 steht dort das **Nachtende** |
+| Darunter | die gewohnte Temperatur-Eingabe je Heizzone |
+
+**Die Uhrzeit ist die eigentliche Prüfung.** Steht dort eine Zeit 24
+Stunden in der Zukunft, rechnet der Boost mit der falschen Regel; steht
+„Boost" ohne Zeit, kommt kein Ende aus dem Nachtfenster.
+
+*Jetzt drücken.* *Erwartet:* unter der Zeile steht **„Boost läuft bis
+HH:MM"**, der Knopf ist für den Augenblick gesperrt.
+
+*Fenster schließen.* *Erwartet in der Spalte „Übersteuerung"* der Zeile:
+ein **Flammen-Zeichen** und **„Boost bis HH:MM"** — nicht „Aktiv".
+
+*Rückweg:* **„Temperatur"** erneut öffnen und in der Temperatur-Eingabe
+unten **„Übersteuerung aufheben"**. Ein Boost ist eine Übersteuerung; er
+wird genauso aufgehoben.
+
+### Schritt 2 — ein freies Zimmer
+
+*Dasselbe in einem Zimmer ohne Belegung.*
+
+*Erwartet:* der Knopf **„Temperatur"** ist **drückbar**, der Boost geht,
+die **Temperatur-Eingabe unten weist ab** („nur bei belegten Zimmern").
+
+**Das ist der Unterschied, um den es bei dieser Funktion geht**
+(Festlegung vom 31.10.: eine Regel für belegt und frei). Ist der Knopf
+hier grau, fehlt dem Zimmer das Nachtfenster — der Grund steht am
+Mauszeiger.
+
+### Schritt 3 — zweimal boosten
+
+*Im selben Zimmer den Boost noch einmal drücken.*
+
+*Erwartet:* es geht, und die Spalte zeigt danach dieselbe Endzeit. Ein
+laufender Boost schließt den nächsten **nicht** aus; sonst wäre der Knopf
+nach dem ersten Druck bis zur Nacht tot.
+
+### Schritt 4 — die Abweisungen, eine nach der anderen
+
+Jede zeigt den Grund **am Mauszeiger** über dem Knopf und, wo der Knopf
+drückbar bleibt, in der Boost-Zeile im Fenster.
+
+| Lage | Wo | Erwartung |
+|---|---|---|
+| **laufende Übersteuerung** (Wert setzen, Fenster schließen, wieder öffnen) | Boost-Zeile | Knopf **grau**, Satz: „Übersteuerung aktiv (23 °C bis HH:MM) – Wert dort ändern". Der Knopf „Temperatur" bleibt **drückbar** |
+| **dauerhaft gesperrt** (Zimmerseite → Kopfzeile → sperren) | Knopf „Temperatur" | **grau**, „Dauerhaft gesperrt" |
+| **Allgemeinbereich** (Bar, Rezeption, Spa) | Boost-Zeile | Knopf **grau**, „Allgemeinbereich – Übersteuerung über Zimmerseite". „Temperatur" bleibt **drückbar** — ein Bereich wird dort weiter übersteuert |
+| **Sommermodus** (Szenarien → Sommermodus ein) | Knopf „Temperatur" | **grau**, „Sommermodus aktiv". **Danach wieder ausschalten** |
+
+**Die Sperre schlägt die laufende Übersteuerung.** Ein gesperrtes Zimmer,
+in dem eine Übersteuerung läuft, muss „Dauerhaft gesperrt" melden — nicht
+„Wert dort ändern". Der zweite Satz schickte die Rezeption an eine
+Stelle, an der sie nichts ändern kann.
+
+### Schritt 5 — beide Rollen
+
+*Abmelden, als **Mitarbeiter** anmelden.*
+
+*Erwartet:* derselbe Weg, dieselben Knöpfe, dieselben Gründe. Der Boost
+ist `require_mitarbeiter` wie jede Übersteuerung — die Rezeption soll ihn
+drücken können.
+
+*Und die Gegenprobe:* ein Benutzer **ohne** diese Rolle sieht den Knopf
+„Temperatur" gar nicht. Steht er da, ist die Rechteprüfung in der
+Oberfläche falsch; abgewiesen würde die Anfrage trotzdem (403).
+
+### Schritt 6 — das Protokoll
+
+*Software-Oberfläche.* **Zimmerseite → Historie** (oder Einstellungen →
+Protokoll).
+
+*Erwartet* je Boost eine Zeile **„Rezeption (Boost)"** mit Wert, Endzeit
+und dem Benutzer, der gedrückt hat. Steht dort „Rezeption (24 h)", ist
+die Quelle falsch gespeichert — dann trägt jede Zeile in Historie und
+Audit eine Dauer, die nicht stimmt.
+
+### Was in dieser Abnahme **nicht** geprüft wird
+
+| | |
+|---|---|
+| **Die Wirkung am Heizkörper** | Der Boost setzt einen Sollwert; ob der Raum warm wird, ist die Engine und die Hardware. Das prüft §10ao / der Betrieb |
+| **Die Kappung** | Ein Boost wird wie jede Übersteuerung in Layer 5 an den Zonen-Grenzen gekappt. Wer das prüfen will, setzt die Grenzen tiefer als 23 und sieht im Engine-Trace nach |
+| **Der Boost-Wert selbst** | Er steht in den Daten (23,0) und ist in der Oberfläche **nicht** einstellbar — offener Punkt in AE-83 §9 |
+
+**Querverweise:** AE-83 (die Entscheidungen und ihre Begründung),
+`docs/status/2026-11-02-boost.md`, `docs/status/2026-11-02-boost-wert.md`
+(die Korrektur am Wert), §10ao (Fenstererkennung — der andere
+Oberflächen-Durchgang dieser Woche).
