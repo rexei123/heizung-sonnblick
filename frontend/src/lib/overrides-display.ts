@@ -36,6 +36,10 @@ export const SOURCE_LABEL: Record<OverrideSource, string> = {
   // Sprint 24d: die Dauer steht hier **nicht** im Etikett, weil sie je
   // Eintrag verschieden ist — sie steht als Endzeit daneben.
   frontend_bereich: "Allgemeinbereich (Mitarbeiter)",
+  // Die Endzeit steht hier **nicht** im Etikett: sie ist je Eintrag
+  // verschieden (das Nachtfenster des Zimmers) und steht als Endzeit
+  // daneben. Eine Zahl hier wäre eine zweite Wahrheit (§5.77).
+  frontend_boost: "Boost (Mitarbeiter)",
   frontend_4h: "4 Stunden (Mitarbeiter, alt)",
   frontend_midnight: "Bis Mitternacht (Mitarbeiter, alt)",
 };
@@ -46,6 +50,7 @@ export const SOURCE_ICON: Record<OverrideSource, string> = {
   frontend_24h: "schedule",
   frontend_checkout: "logout",
   frontend_bereich: "storefront",
+  frontend_boost: "local_fire_department",
   frontend_4h: "schedule",
   frontend_midnight: "bedtime",
 };

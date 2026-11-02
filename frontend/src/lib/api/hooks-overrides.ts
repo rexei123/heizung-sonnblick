@@ -112,3 +112,23 @@ export function useRevokeOverride(
     },
   });
 }
+
+/**
+ * Boost: ein Klick, ohne Rumpf (02.11.2026).
+ *
+ * Dieselben Verwerfungen wie `useCreateRoomOverride` — ein Boost **ist**
+ * eine Übersteuerung, nur mit Wert und Ende aus dem Backend. Die
+ * Zimmerliste (`["rooms"]`) gehört dazu, weil die Spalte dort die
+ * Kennzeichnung und die Endzeit zeigt.
+ */
+export function useBoostRoom(roomId: number): UseMutationResult<ManualOverride, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => overridesApi.boost(roomId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.allForRoom(roomId) });
+      qc.invalidateQueries({ queryKey: ["room", roomId] });
+      qc.invalidateQueries({ queryKey: ["rooms"] });
+    },
+  });
+}

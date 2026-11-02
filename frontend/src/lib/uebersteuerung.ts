@@ -37,6 +37,17 @@ export type Zimmerlage = Pick<
   "status" | "guest_override_blocked" | "guest_block_bis_checkout" | "ist_allgemeinbereich"
 >;
 
+/**
+ * Was der **Temperatur-Knopf** in der Zimmerliste braucht (02.11.2026).
+ *
+ * Die Boost-Felder kommen aus dem Listen-Endpoint, weil die Entscheidung
+ * „ginge ein Boost" am Nachtfenster des Zimmers, am Sommermodus und an
+ * einer laufenden Übersteuerung hängt — alles Dinge, die das Backend
+ * kennt und die Oberfläche nicht nachrechnen soll (§5.53).
+ */
+export type Knopflage = Zimmerlage &
+  Pick<Room, "boost_moeglich" | "boost_grund" | "boost_hinweis" | "boost_ende">;
+
 export type Uebersteuerungsgrund = "dauerhaft_gesperrt" | "nicht_belegt";
 
 export interface Uebersteuerungslage {
@@ -139,5 +150,88 @@ export function uebersteuerungslage(room: Zimmerlage | undefined): Uebersteuerun
     sperreBisCheckout,
     nichtBelegt,
     istBereich,
+  };
+}
+
+
+/**
+ * Der Zustand des Knopfes „Temperatur" in der Zimmerliste.
+ *
+ * **Er öffnet zwei Wege**, und seit dem 02.11.2026 sind es wirklich zwei:
+ * einen Wert setzen (die Übersteuerung) oder Boost. Deshalb ist er
+ * drückbar, solange **einer** von beiden geht — und ausgegraut erst,
+ * wenn keiner geht.
+ *
+ * **Festlegung des Betreibers vom 01.11.2026:** „Kein Knopf ohne
+ * sichtbaren Grund." Die Beschriftung bleibt dabei „Temperatur" und
+ * wechselt nicht in den Grund; der Grund hängt als Tooltip und
+ * `sr-only`-Text am umschließenden Element (§5.57, wie in #350).
+ *
+ * **Die Reihenfolge der Gründe ist verbindlich**, weil genau einer
+ * angezeigt wird:
+ *
+ * 1. **Sommermodus** — es heizt nichts, und zwar im ganzen Haus. Ein
+ *    gesetzter Wert hätte dort keine Wirkung (Engine-Layer 0 greift vor
+ *    Layer 3), und ein Knopf, der etwas Wirkungsloses anbietet, ist
+ *    schlimmer als keiner.
+ * 2. **Dauerhafte Sperre** — eine Entscheidung über das Zimmer, und der
+ *    einzige Grund, der auch einen Allgemeinbereich trifft.
+ * 3. Geht einer der beiden Wege: **drückbar**.
+ * 4. Sonst der Satz des Backends (kein Nachtfenster, kein Boost-Wert)
+ *    oder, wenn keiner da ist, der Satz zur Belegung.
+ *
+ * **Warum Punkt 1 den Knopf auch dann sperrt, wenn eine Übersteuerung
+ * technisch ginge.** Im Sommermodus greift Engine-Layer 0 vor Layer 3:
+ * der gesetzte Wert hätte keine Wirkung. Das ist eine Festlegung des
+ * Betreibers und keine Ableitung aus dem Dienst — der Dienst nimmt sie
+ * an.
+ *
+ * **Ein Allgemeinbereich ist hier NICHT ausgegraut, und das ist eine
+ * offene Frage.** Die Festlegung vom 01.11.2026 nennt
+ * „Allgemeinbereich – Übersteuerung über Zimmerseite" als Grund für
+ * einen ausgegrauten Knopf. Dagegen steht die Entscheidung vom
+ * 30.10.2026, mit der der Knopf in der Liste entstanden ist: ein Bereich
+ * ist dort **nicht** gesperrt, weil `override_service.create` ihn mit
+ * der Quelle `frontend_bereich` am Belegungs-Gate vorbeiführt und die
+ * Zimmerseite den Weg anbietet
+ * (`zimmerliste-uebersteuern-knopf.spec.ts` trägt die Begründung).
+ *
+ * Den Knopf jetzt zu sperren würde eine Möglichkeit wegnehmen, die seit
+ * drei Tagen da ist. Der Satz des Betreibers steht deshalb dort, wo er
+ * ohne Verlust gilt: als Grund für den **Boost**, den ein Bereich
+ * tatsächlich nicht bekommt (er braucht eine frei gewählte Dauer, kein
+ * Nachtfenster). Ob der ganze Knopf dort grau werden soll, ist eine
+ * Zeile hier — und eine Frage an den Betreiber.
+ */
+export interface Knopfzustand {
+  erlaubt: boolean;
+  hinweis: string | null;
+  /** Nur Boost geht, ein Wert nicht — der Dialog sagt das dann auch. */
+  nurBoost: boolean;
+}
+
+export function temperaturknopf(room: Knopflage | undefined): Knopfzustand {
+  if (room === undefined) {
+    return { erlaubt: true, hinweis: null, nurBoost: false };
+  }
+
+  const lage = uebersteuerungslage(room);
+
+  if (room.boost_grund === "sommermodus") {
+    return { erlaubt: false, hinweis: "Sommermodus aktiv", nurBoost: false };
+  }
+  if (lage.sperreDauerhaft) {
+    return { erlaubt: false, hinweis: "Dauerhaft gesperrt", nurBoost: false };
+  }
+  if (lage.erlaubt) {
+    return { erlaubt: true, hinweis: null, nurBoost: false };
+  }
+  if (room.boost_moeglich) {
+    return { erlaubt: true, hinweis: null, nurBoost: true };
+  }
+  return {
+    erlaubt: false,
+    hinweis: room.boost_hinweis ?? lage.hinweis,
+    nurBoost: false,
   };
 }

@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-from heizung.models.enums import Orientation, RoomStatus
+from heizung.models.enums import Orientation, OverrideSource, RoomStatus
 
 
 class RoomCreate(BaseModel):
@@ -61,10 +61,41 @@ class RoomRead(BaseModel):
     # Sprint 14d (R-A): Bool-Indikator „Zimmer hat >= 1 aktive Uebersteuerung"
     # fuer die Zimmer-Liste. Default False; NUR der Listen-Endpoint
     # (``list_rooms``) befuellt ihn via Batch-Aggregat
-    # (``override_service.get_rooms_with_active_override``). Einzel-/Write-
+    # (``override_service.stand_je_zimmer``). Einzel-/Write-
     # Responses (get/create/update) lassen ihn auf False — dort nicht
     # konsumiert (RoomTable liest ausschliesslich die Liste).
     has_active_override: bool = False
+
+    # ------------------------------------------------------------------
+    # Welche Uebersteuerung gilt, und ob ein Boost ginge (02.11.2026)
+    # ------------------------------------------------------------------
+    # ``has_active_override`` sagt „eine laeuft" und verschweigt
+    # **welche**. Fuer die Liste reicht das seit dem 02.11. nicht mehr:
+    # ein Boost wird dort eigens gekennzeichnet (Flammen-Zeichen und
+    # „Boost bis HH:MM"), und dafuer braucht die Zeile Quelle und Ablauf.
+    #
+    # Das Bool bleibt daneben stehen und wird weiter gefuellt. Es zu
+    # entfernen waere eine Verengung der API an einer Stelle, an der
+    # andere Leser daran haengen koennen — und es ist aus den beiden
+    # neuen Feldern nicht herzuleiten, ohne die Aktiv-Regel zu
+    # wiederholen.
+    uebersteuerung_quelle: OverrideSource | None = None
+    uebersteuerung_ende: datetime | None = None
+
+    #: Ob ein Boost gerade moeglich waere. ``False`` ohne ``boost_grund``
+    #: heisst „nicht beurteilt" — nur der Listen-Endpunkt beurteilt.
+    boost_moeglich: bool = False
+    #: Maschinenlesbare Marke des Grundes (``services/boost``). Gehoert
+    #: ins Feld und nicht in einen Satz, an dem die Oberflaeche entlang
+    #: vergleichen muesste (§5.64).
+    boost_grund: str | None = None
+    #: Der Satz fuer den Menschen. Er steht am Knopf als Tooltip und als
+    #: ``sr-only``-Text — ein Knopf ohne sichtbaren Grund ist das, was
+    #: §5.57 beschreibt.
+    boost_hinweis: str | None = None
+    #: Das Ende, das ein Boost **haette**. Steht in der Beschriftung des
+    #: Knopfes („Boost bis 22:00"), damit er vorher sagt, was er tut.
+    boost_ende: datetime | None = None
 
     # ------------------------------------------------------------------
     # Allgemeinbereich (Sprint 24d)

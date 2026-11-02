@@ -228,6 +228,15 @@ class OverrideSource(enum.StrEnum):
                       Sprint 24d, S6.
     ``frontend_checkout``  Rezeption setzt "bis Check-out". Ablauf
                       ``next_checkout_at``.
+    ``frontend_boost``  Ein Klick auf „Boost bis HH:MM". Wert und Ablauf
+                      kommen vom Server: der Wert aus
+                      ``rule_config.boost_temperature`` (oder, wenn dort
+                      nichts steht, ``guest_override_max`` derselben
+                      Kette), der Ablauf aus dem **naechsten Wechsel des
+                      Nachtfensters des Zimmers**. Braucht **keine**
+                      Belegung — Festlegung des Betreibers vom
+                      31.10.2026: „eine Regel fuer belegt und frei".
+                      Einzelheiten in ``services/boost.py``.
     ``frontend_4h``   **Historisch.** Rezeption setzte "fuer 4 Stunden",
                       Ablauf now + 4 h. Seit Fix A nicht mehr waehlbar.
     ``frontend_midnight``  **Historisch.** Rezeption setzte "bis
@@ -266,6 +275,7 @@ class OverrideSource(enum.StrEnum):
     FRONTEND_24H = "frontend_24h"
     FRONTEND_BEREICH = "frontend_bereich"
     FRONTEND_CHECKOUT = "frontend_checkout"
+    FRONTEND_BOOST = "frontend_boost"
     #: Historisch, seit Fix A (20.10.2026) nicht mehr waehlbar. Bleibt als
     #: Wert erhalten, weil die Historie ihre Etiketten braucht.
     FRONTEND_4H = "frontend_4h"

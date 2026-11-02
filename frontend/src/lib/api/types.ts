@@ -503,6 +503,34 @@ export interface Room {
   // Backend RoomRead befüllt es nur im Listen-Endpoint (sonst false).
   has_active_override: boolean;
 
+  // Welche Übersteuerung gilt, und ob ein Boost ginge (02.11.2026, §5.63).
+  // Wie `has_active_override` befüllt **nur** der Listen-Endpoint diese
+  // Felder.
+  //
+  // `has_active_override` sagt „eine läuft" und verschweigt **welche** —
+  // für die Kennzeichnung eines Boosts (Flammen-Zeichen, „Boost bis
+  // HH:MM") braucht die Zeile die Quelle.
+  uebersteuerung_quelle: OverrideSource | null;
+  uebersteuerung_ende: string | null;
+
+  /** Ob ein Boost gerade möglich wäre. */
+  boost_moeglich: boolean;
+  /**
+   * Maschinenlesbare Marke des Grundes (`services/boost`). Der
+   * Diskriminator gehört ins Feld und nicht in den Satz (§5.64).
+   */
+  boost_grund: string | null;
+  /**
+   * Der Satz für den Menschen. Er steht am Knopf als Tooltip **und** als
+   * `sr-only`-Text — kein Knopf ohne sichtbaren Grund (§5.57).
+   */
+  boost_hinweis: string | null;
+  /**
+   * Das Ende, das ein Boost **hätte**. Steht in der Beschriftung des
+   * Knopfes, damit er vorher sagt, was er tut.
+   */
+  boost_ende: string | null;
+
   // Ist und Soll der Referenzzone (15.10.2026, §5.63). Wie
   // `has_active_override` befüllt **nur** der Listen-Endpoint diese drei
   // Felder; Einzel-Responses liefern `null`.
@@ -990,6 +1018,25 @@ export type OverrideSource =
   | "frontend_checkout"
   /** Sprint 24d: Allgemeinbereich, Dauer frei gewählt (bis 24 h). */
   | "frontend_bereich"
+  /**
+   * 02.11.2026: ein Klick, Wert und Ende kommen vom Server. Das Ende ist
+   * der nächste Wechsel des Nachtfensters **des Zimmers** — der Knopf
+   * trägt es in seiner Beschriftung (Boost bis 22:00).
+   *
+   * Steht **nicht** in `FrontendOverrideSource`: der Boost ist keine
+   * Dauer-Auswahl, er hat seinen eigenen Weg
+   * (`POST /rooms/[id]/boost`, ohne Rumpf).
+   *
+   * In diesem Kommentar steht bewusst weder ein Semikolon noch ein
+   * einzelnes Anführungszeichen: der Spiegel-Test in
+   * `test_override_quellen_spiegel._ts_union` liest die Union mit zwei
+   * Regexen — bis zum Ende der Anweisung und dann paarweise über die
+   * Anführungszeichen. Ein Semikolon schneidet die halbe Union ab, ein
+   * einzelnes Anführungszeichen verschiebt die Paarbildung und
+   * verschluckt die Werte danach. Beide Fehler sind beim Schreiben
+   * dieses Kommentars passiert.
+   */
+  | "frontend_boost"
   /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */
   | "frontend_4h"
   /** Historisch, seit Fix A (20.10.2026) nicht mehr wählbar. */

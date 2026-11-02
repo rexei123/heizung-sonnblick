@@ -665,6 +665,7 @@ const OVERRIDE_SOURCE_LABEL: Record<OverrideSource, string> = {
   device: "Drehring am Thermostat (vermutet, alt)",
   frontend_24h: "Rezeption (24 h)",
   frontend_bereich: "Rezeption (Bereich)",
+  frontend_boost: "Rezeption (Boost)",
   frontend_checkout: "Rezeption (bis Check-out)",
   frontend_4h: "Rezeption (4 h, alt)",
   frontend_midnight: "Rezeption (bis Mitternacht, alt)",

@@ -36,6 +36,19 @@ import { test, expect, type Page, type Route } from "./fixtures";
  * Knopf dort seit Sprint 24d an (`sprint24d-allgemeinbereiche.spec.ts`
  * prüft genau das). Eine Liste, die ihn sperrt, wäre die dritte Meinung
  * zu einer Frage, die zwei Stellen schon beantworten.
+ *
+ * **Nachtrag 02.11.2026.** Der Knopf heißt jetzt „Temperatur" und öffnet
+ * zwei Wege: einen Wert setzen oder Boost. Die Prüfungen hier gelten
+ * weiter dem ersten — die Lage setzt `boost_moeglich: false`, damit sie
+ * genau das prüfen und nicht zufällig den Boost. Der Boost hat seine
+ * eigene Datei (`boost-zimmerliste.spec.ts`).
+ *
+ * Die Festlegung vom 01.11.2026 nennt „Allgemeinbereich – Übersteuerung
+ * über Zimmerseite" als Grund für einen grauen Knopf. Das würde die
+ * Abweichung oben zurücknehmen und eine Möglichkeit wegnehmen, die seit
+ * dem 30.10. da ist; der Satz steht deshalb am **Boost** und nicht am
+ * Knopf, und die Frage liegt beim Betreiber
+ * (`lib/uebersteuerung.ts::temperaturknopf`).
  */
 
 const ADMIN = {
@@ -86,6 +99,9 @@ interface RaumLage {
   bisCheckout?: boolean;
   bereich?: boolean;
   aktiverOverride?: boolean;
+  /** 02.11.2026: ob ein Boost ginge. Vorgabe **nein**, damit die
+      Pruefungen hier der Uebersteuerung gelten und nicht dem Boost. */
+  boostMoeglich?: boolean;
 }
 
 function raum(lage: RaumLage = {}): Record<string, unknown> {
@@ -104,6 +120,12 @@ function raum(lage: RaumLage = {}): Record<string, unknown> {
     guest_block_bis_checkout: lage.bisCheckout ?? false,
     ist_allgemeinbereich: lage.bereich ?? false,
     has_active_override: lage.aktiverOverride ?? false,
+    uebersteuerung_quelle: lage.aktiverOverride ? "frontend_24h" : null,
+    uebersteuerung_ende: lage.aktiverOverride ? "2026-10-31T09:00:00Z" : null,
+    boost_moeglich: lage.boostMoeglich ?? false,
+    boost_grund: (lage.boostMoeglich ?? false) ? null : "kein_nachtfenster",
+    boost_hinweis: null,
+    boost_ende: (lage.boostMoeglich ?? false) ? "2026-10-30T21:00:00Z" : null,
     notes: null,
     created_at: "2026-04-01T10:00:00Z",
     updated_at: "2026-10-30T06:00:00Z",
@@ -247,7 +269,11 @@ test.describe("Zimmerübersicht — Übersteuern direkt in der Liste", () => {
     await page.goto("/zimmer");
 
     await expect(page.getByTestId("uebersteuern-101")).toBeDisabled();
-    await expect(page.getByText(/Übersteuerung gesperrt/).first()).toBeAttached();
+    // Der Satz ist seit dem 02.11.2026 der des Betreibers: „Dauerhaft
+    // gesperrt". Vorher stand hier „Übersteuerung gesperrt — bitte zuerst
+    // die Sperre aufheben"; der Knopf öffnet jetzt zwei Wege, und der
+    // kürzere Satz gilt für beide.
+    await expect(page.getByText("Dauerhaft gesperrt").first()).toBeAttached();
   });
 
   test("gesperrt bis Check-out: der Knopf bleibt drückbar", async ({ page }) => {
