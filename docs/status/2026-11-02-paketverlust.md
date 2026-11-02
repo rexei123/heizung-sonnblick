@@ -93,9 +93,36 @@ bekommt nur, was **lesend** ist, auf **jeder** Seite einer Art vorkommt
 und keinen Zustand trägt. Alles, was etwas ändert, bekommt keinen: ein
 Test, der eine Mutation nicht mockt, soll umfallen.
 
-**Die Lehre für mich ist die Reihenfolge**: nach einer Änderung an einer
-geteilten Seite ist der **ganze** e2e-Lauf die Prüfung, nicht die neue
-Datei. 312 Tests, 2,7 Minuten.
+**Und der Standard-Mock hat nur die halbe Ursache behoben.** CI blieb rot:
+zwölf weitere Tests fielen, weil ihr eigener Catch-all-Mock
+(`page.route("**/api/v1/**")`) `[]` für diesen Weg liefert — und
+`[].anteil_prozent` ist `undefined`, `undefined.toFixed()` wirft, **die
+ganze Geräteseite blieb leer**. In den Tests fehlte dann genau die Karte,
+die sie prüfen.
+
+Der Mock war der Anlass, nicht die Lehre: **eine Antwort, die nicht zum
+Typ passt, kommt im Betrieb genauso vor** (alter Server, halber Deploy,
+Proxy-Fehlerseite), und eine Kachel darf die Seite nicht mitnehmen. Die
+Karte prüft den Typ jetzt **zur Laufzeit** — eine Annotation gilt für den
+Code, nicht für die Antwort. Ein eigener Test schickt `[]` und prüft, dass
+die Kachel „—" zeigt **und der Rest der Seite steht**.
+
+### Und ein Fehler bei mir, der zweimal denselben Namen hat
+
+**Mein lokaler Gesamtlauf war grün, während CI rot war — zweimal.**
+Grund: `playwright.config.ts` hat lokal `reuseExistingServer: true`, und
+in einer langen Sitzung bedient der geerbte Server den **ersten** Build.
+Alle Läufe danach prüfen Code, der nicht mehr da ist.
+
+Das ist §5.55 wörtlich („ein geerbter Server bedient den alten Build"),
+und die Lesson nennt sogar die Abhilfe, die ich dann auch genommen habe:
+**einen eigenen Port**. Mit `PORT=3124` fiel derselbe Lauf lokal sofort
+um — zwölf Tests, in einer Minute.
+
+**Die Lehre für mich ist die Reihenfolge, und sie hat jetzt zwei Teile:**
+nach einer Änderung an einer geteilten Seite ist der **ganze** e2e-Lauf
+die Prüfung, nicht die neue Datei — und er gilt nur auf einem **frischen
+Port**. 340 Tests, 2,2 Minuten.
 
 ### Nebenbei nachgezogen
 
