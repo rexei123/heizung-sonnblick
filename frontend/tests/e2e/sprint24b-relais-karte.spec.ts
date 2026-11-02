@@ -94,6 +94,7 @@ const STAND_NEU = {
   gehaeusetemperatur_alarm: false,
   reading_time: null,
   change_reason: null,
+  offener_befehl: null,
 };
 
 /** Dasselbe Relais in Betrieb, eingeschaltet. */
@@ -110,6 +111,30 @@ const STAND_LAEUFT = {
   switch_cycles: 4,
   reading_time: "2026-10-24T07:55:00Z",
   change_reason: "radio_timer",
+};
+
+/** Mit einem EIN, das seit vier Versuchen nicht bestaetigt ist. */
+const STAND_UNBESTAETIGT = {
+  ...STAND_LAEUFT,
+  relay_on: false,
+  power_w: 0,
+  offener_befehl: {
+    ziel_ein: true,
+    seit: "2026-10-24T07:50:00Z",
+    versuche: 2,
+    gemeldet: false,
+  },
+};
+
+/** Dasselbe, nachdem der Alarm heraus ist. */
+const STAND_GEMELDET = {
+  ...STAND_UNBESTAETIGT,
+  offener_befehl: {
+    ziel_ein: true,
+    seit: "2026-10-24T07:20:00Z",
+    versuche: 5,
+    gemeldet: true,
+  },
 };
 
 /** Und mit stehender Schutz-Sperre. */
@@ -215,6 +240,44 @@ test.describe("Relais-Karte", () => {
     await expect(
       page.getByTestId("relay-pruefung-ueberhitzung"),
     ).toHaveAttribute("data-bestanden", "true");
+  });
+
+  test("der Zaehler sagt, was er zaehlt", async ({ page }) => {
+    // **Der Befund vom 01.11.2026.** Die Geraeteseite zeigte
+    // „Schaltzyklen 0", obwohl 109 im T3.0-Lauf mehrfach geschaltet
+    // hatte. Der Zaehler war richtig -- gezaehlt wird nur, was der
+    // Orchestrator gesendet und das Geraet bestaetigt hat, und T3.0 lief
+    // von Hand daran vorbei. Das Etikett versprach mehr.
+    await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    await expect(page.getByTestId("relay-card")).toContainText(
+      "Schaltzyklen der Steuerung",
+    );
+  });
+
+  test("ein unbestaetigter Befehl ist sichtbar", async ({ page }) => {
+    // Bis zum 02.11.2026 hatte dieser Zustand keinen Leser ausser dem
+    // Orchestrator: ein Relais, das seit Stunden nicht bestaetigt, stand
+    // als Alarm im Log und sonst nirgends.
+    await mock(page, { stand: STAND_UNBESTAETIGT, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toContainText("Unbestätigter Befehl");
+    await expect(karte).toContainText("EIN, 2 Versuche");
+    await expect(karte).not.toContainText("gedrosselt");
+  });
+
+  test("nach dem Alarm sagt die Karte, dass nur noch gedrosselt gesendet wird", async ({
+    page,
+  }) => {
+    await mock(page, { stand: STAND_GEMELDET, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toContainText("EIN, 5 Versuche");
+    await expect(karte).toContainText("gemeldet, wird nur noch gedrosselt");
   });
 
   test("eine stehende Schutz-Sperre nennt Art und Zeitpunkt", async ({
