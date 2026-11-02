@@ -45,9 +45,10 @@ from heizung.schemas.device import (
     DeviceRetireRequest,
     DeviceUpdate,
     HardwareStatusResponse,
+    PaketverlustAntwort,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
-from heizung.services import override_service
+from heizung.services import override_service, paketverlust
 from heizung.services.battery_health import BatteryVerdict, battery_verdicts
 from heizung.services.child_lock import (
     Sperrmeldung,
@@ -856,6 +857,44 @@ async def get_hardware_status(
         last_seen=last_seen,
         frames_in_window=frames_in_window,
         window_minutes=WINDOW_STALE_THRESHOLD_MIN,
+    )
+
+
+@router.get(
+    "/{device_id}/paketverlust",
+    response_model=PaketverlustAntwort,
+    summary="Paketverlust aus Luecken im Frame-Zaehler",
+)
+async def get_paketverlust(
+    device_id: int = DeviceIdPath,
+    stunden: int = Query(24, ge=1, le=168, description="Laenge des Fensters in Stunden"),
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> PaketverlustAntwort:
+    """Wie viele Uplinks im Fenster verloren gingen.
+
+    **Fuer Relais und Vickis dieselbe Rechnung**, nur eine andere
+    Tabelle — beide fuehren ``fcnt``. Die Begruendung und die Behandlung
+    von Neustarts stehen in ``services/paketverlust.py``.
+
+    Reine Lese-Aggregation. Keine Engine, kein Cache: die Zahl ist zwei
+    Abfragen wert, und ein zwischengespeicherter Wert waere im
+    interessanten Moment — jemand steht am Geraet und ruettelt an der
+    Antenne — gerade der falsche.
+    """
+    geraet = await _get_or_404(session, device_id)
+    v = await paketverlust.fuer_geraet(session, geraet, stunden=stunden)
+    return PaketverlustAntwort(
+        empfangen=v.empfangen,
+        erwartet=v.erwartet,
+        verloren=v.verloren,
+        anteil_prozent=v.anteil,
+        neustarts=v.neustarts,
+        doppelt=v.doppelt,
+        ohne_zaehler=v.ohne_zaehler,
+        stunden=v.stunden,
+        von=v.von,
+        bis=v.bis,
     )
 
 

@@ -306,6 +306,7 @@ def _get_paths(setup: _Setup) -> list[tuple[str, str]]:
         ("devices_detail", f"/api/v1/devices/{did}"),
         ("devices_sensor_readings", f"/api/v1/devices/{did}/sensor-readings"),
         ("devices_hardware_status", f"/api/v1/devices/{did}/hardware-status"),
+        ("devices_paketverlust", f"/api/v1/devices/{did}/paketverlust"),
         ("global_config_get", "/api/v1/global-config"),
         ("heating_zones_list", f"/api/v1/rooms/{rid}/heating-zones"),
         ("heating_zones_detail", f"/api/v1/rooms/{rid}/heating-zones/{zid}"),

@@ -12,6 +12,7 @@ import { ZoneHealthBadge } from "@/components/patterns/zone-health-badge";
 import { Input } from "@/components/ui/input";
 import { DeviceAuditList } from "@/components/patterns/device-audit-list";
 import { GeraetegrenzenKarte } from "@/components/patterns/geraetegrenzen-karte";
+import { PaketverlustKarte } from "@/components/patterns/paketverlust-karte";
 import { Geraetetyp } from "@/components/patterns/geraetetyp";
 import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
@@ -254,6 +255,13 @@ export default function DeviceDetailPage() {
               tone="default"
               testId="kpi-ventilstellung"
             />
+            {/* 02.11.2026: Verlust aus Luecken im Frame-Zaehler. Steht
+                im Kachel-Raster, weil es eine Zahl ist und kein
+                Bedienelement -- und direkt neben „Signal", weil beide
+                dieselbe Frage beantworten: RSSI sagt, wie laut das
+                Geraet ankommt, der Verlust sagt, wie viel ueberhaupt
+                ankommt. Fuer Relais und Vickis gleich. */}
+            <PaketverlustKarte deviceId={device.id} />
             <WindowBackplateCard reading={snapshot} />
             {/* Sprint 23 T1.5: was am Geraet steht — aus der Antwort auf
                 0x15, nicht aus dem, was wir gesendet haben. */}

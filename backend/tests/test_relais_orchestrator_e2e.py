@@ -473,6 +473,100 @@ async def test_szenario_2_nach_timer_ablauf_wird_neu_gesetzt(
 
 
 # ---------------------------------------------------------------------------
+# Der Waechter funkt nicht jede Minute (Freigabe 02.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_ohne_bestaetigung_nicht_jede_minute_ein_downlink(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+) -> None:
+    """**Der Befund des Betreibers vom 01.11.2026, 11:22 bis 11:28.**
+
+    Je Minute ein Downlink an Relais 109, sieben Stueck, jeder bei SF12
+    ueber RX2 mit 1,32 Sekunden Sendezeit. Die Ursache war nicht die
+    fehlende Bestaetigung, sondern dass der Alarm den offenen Stand
+    geloescht hat: der naechste Durchlauf begann die Zaehlung von vorn.
+
+    Hier laufen **elf** Durchlaeufe im Minutentakt, und das Geraet
+    antwortet nie. Vorher waeren das elf Downlinks gewesen. Jetzt sind es
+    drei und ein Alarm — und der Alarm genau einmal.
+    """
+    jetzt = datetime.now(tz=UTC)
+    await _messwert(setup_engine, aufbau.fuehler_id, "19.0", vor_minuten=0)
+
+    alarme = 0
+    for minute in range(11):
+        e = await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=minute))
+        alarme += e["alarme"]
+
+    assert [g[0] for g in gesendet] == ["ein", "ein", "ein"], (
+        f"drei Versuche in elf Minuten, nicht elf: {gesendet}"
+    )
+    assert alarme == 1, "der Alarm kommt einmal, nicht bei jedem Durchlauf"
+
+    geraet = await _geraet(setup_engine, aufbau.relais_id)
+    assert geraet.pending_target_on is True, "der offene Stand bleibt stehen"
+    assert geraet.pending_attempts == 4, "hochgezaehlt, damit der Alarm nicht erneut meldet"
+    assert geraet.switch_cycles == 0
+
+
+async def test_ein_haengendes_ein_wird_nicht_wiederholt_wenn_der_regler_aus_will(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+) -> None:
+    """**Punkt 3 der Freigabe, am ganzen Weg.**
+
+    Ein EIN geht hinaus und bleibt unbestaetigt — der Fall, der bei 30 %
+    Uplink-Verlust der Regelfall ist. Dann wird der Raum warm, und der
+    Regler will AUS.
+
+    Die erste Fassung gab dem offenen Befehl Vorrang und haette das
+    **EIN** wiederholt, also den Befehl, den niemand mehr wollte. Jetzt
+    wird der offene Stand verworfen.
+
+    Gesendet wird hier nichts, und das ist richtig: der gemeldete Zustand
+    ist AUS. Dass das Relais in Wahrheit heizen koennte, ist die Sorte
+    Wissen, die wir nicht haben — der zweite Teil des Tests zeigt, was
+    passiert, wenn der Uplink spaeter doch ankommt.
+    """
+    jetzt = datetime.now(tz=UTC)
+
+    # --- 1. Zone kalt: ein EIN geht hinaus und bleibt unbestaetigt.
+    await _messwert(setup_engine, aufbau.fuehler_id, "19.0", vor_minuten=0)
+    await relay_tasks._steuere_relais_zonen_async(now=jetzt)
+    assert gesendet == [("ein", aufbau.relais_eui, 1800)]
+
+    # --- 2. Zone warm, Frist abgelaufen. Keine Wiederholung des EIN.
+    await _messwert(setup_engine, aufbau.fuehler_id, "21.5", vor_minuten=0)
+    e = await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(seconds=90))
+
+    assert len(gesendet) == 1, f"das EIN darf nicht wiederholt werden: {gesendet}"
+    zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
+    assert zone.get("verworfen") == 1, "der widersprechende offene Stand ist geloescht"
+
+    geraet = await _geraet(setup_engine, aufbau.relais_id)
+    assert geraet.pending_target_on is None
+    assert geraet.pending_attempts == 0
+
+    # --- 3. Der verlorene Uplink kommt doch: das Relais meldet EIN.
+    #
+    # Jetzt ist der Zustand bekannt, der Wunsch ist AUS — und das AUS
+    # geht hinaus. Ohne Schritt 2 haette hier der erschoepfte
+    # Versuchszaehler des EIN gestanden und die Drossel des AUS von
+    # vornherein gekappt.
+    await _relais_meldet(setup_engine, aufbau.relais_id, True)
+    await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=12))
+
+    assert gesendet[-1] == ("aus", aufbau.relais_eui, None)
+    geraet = await _geraet(setup_engine, aufbau.relais_id)
+    assert geraet.pending_target_on is False
+    assert geraet.pending_attempts == 1, "ein neuer Befehl zaehlt von vorn"
+
+
+# ---------------------------------------------------------------------------
 # Unbekannter Zustand: fragen statt schweigen
 # ---------------------------------------------------------------------------
 
