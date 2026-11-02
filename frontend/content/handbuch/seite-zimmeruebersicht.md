@@ -1,33 +1,64 @@
 ---
 titel: Zimmerübersicht
 kategorie: Die Seiten
-stichworte: Zimmer, Status, belegt, reserviert, Reinigung, gesperrt, Allgemeinbereich, Etage, Übersteuern, Details
+stichworte: Zimmer, Status, belegt, reserviert, Reinigung, gesperrt, Allgemeinbereich, Etage, Temperatur, Boost, Details
 rollen: alle
-stand: 2026-10-31
+stand: 2026-11-02
 route: /zimmer
 ---
 
 Die Liste aller Zimmer und Allgemeinbereiche, mit Nummer, Etage,
 Orientierung und Status — dazu Ist und Soll des Schlafzimmers und, ganz
-rechts, die zwei Knöpfe für jede Zeile.
+rechts, die zwei Knöpfe für jede Zeile: **Temperatur** und
+**Details**.
 
-## Übersteuern, ohne die Seite zu wechseln
+## Temperatur: zwei Wege, ohne die Seite zu wechseln
 
-**„Übersteuern" öffnet die Temperatur-Eingabe direkt in der Liste.** Es
-ist dieselbe Eingabe wie auf der Zimmerseite im Reiter „Übersteuerung":
-ein Wert je Heizzone, die Dauer, der Grund, und das Häkchen „Gast kann bis
+**„Temperatur" öffnet beide Wege direkt in der Liste** — oben den Boost,
+darunter die Temperatur-Eingabe.
+
+### Boost
+
+**Ein Klick, und das Zimmer heizt bis zum Nachtbeginn.** Der Knopf sagt
+vorher, bis wann: „Boost bis 22:00". Wert und Endzeit kommen aus den
+Einstellungen des Hauses; es ist nichts auszuwählen.
+
+**Das Ende ist der nächste Wechsel des Nachtfensters.** Am Tag ist das der
+Nachtbeginn, in der Nacht das Nachtende — danach gilt wieder die normale
+Regel. Es gibt **kein Mindestmaß**: ein Boost um 21:55 endet um 22:00, und
+der Knopf zeigt das vorher.
+
+**Ein Boost geht auch in einem freien Zimmer.** Das ist der Unterschied zur
+Temperatur-Eingabe darunter: eine Wunschtemperatur gilt nur für belegte
+Zimmer, ein Boost auch für ein Zimmer, das in einer Stunde bezogen wird.
+
+**Läuft schon eine Übersteuerung, geht kein Boost** — der Hinweis nennt
+dann den Wert, die Endzeit und die Stelle, an der er zu ändern ist. Das ist
+Absicht: ein Boost, der einen von der Rezeption gesetzten Wert
+überschreibt, wäre eine Überraschung.
+
+### Temperatur-Eingabe
+
+Dieselbe Eingabe wie auf der Zimmerseite im Reiter „Übersteuerung": ein
+Wert je Heizzone, die Dauer, der Grund, und das Häkchen „Gast kann bis
 Check-out nicht ändern" mit denselben Regeln.
 
 Nach dem Abschicken bleibt das Fenster offen und zeigt den gesetzten Wert
 mit seiner Restzeit — das ist die Bestätigung. Wer es schließt, steht
-wieder in der Liste, und die Spalte „Übersteuerung" sagt dann „Aktiv".
+wieder in der Liste, und die Spalte „Übersteuerung" sagt dann, was gilt.
 
-**Wann der Knopf grau ist**, mit dem Grund als Hinweis am Mauszeiger:
+### Wann der Knopf grau ist
+
+Der Knopf heißt auch dann „Temperatur" und bleibt stehen; der Grund steht
+am Mauszeiger und wird vorgelesen. Grau wird er erst, wenn **keiner** der
+beiden Wege geht:
 
 | Grau, weil | Was zu tun ist |
 |---|---|
-| Das Zimmer ist nicht belegt | Eine Wunschtemperatur gilt nur für belegte Zimmer. Ab dem Check-in geht es wieder. |
-| Die Übersteuerung ist dauerhaft gesperrt | Zuerst die Sperre aufheben — der Knopf dafür steht in der Kopfzeile der Zimmerseite. |
+| **Sommermodus aktiv** | Es heizt im ganzen Haus nichts. Ein Wert hätte hier keine Wirkung. |
+| **Dauerhaft gesperrt** | Zuerst die Sperre aufheben — der Knopf dafür steht in der Kopfzeile der Zimmerseite. |
+| **Kein Nachtfenster konfiguriert** | Ohne Nachtfenster gibt es kein Ende für einen Boost. Die Zeiten stehen unter Einstellungen → Temperaturen und Zeiten. |
+| **Zimmer ist nicht belegt** | Steht nur, wenn auch kein Boost geht. Ab dem Check-in geht die Eingabe wieder. |
 
 Eine Sperre **bis Check-out** lässt den Knopf stehen. Sie nimmt dem Gast
 das Rad, nicht der Rezeption die Eingabe: ein vereinbarter Wert lässt sich
@@ -35,8 +66,10 @@ weiter korrigieren, ohne die Sperre dafür zwischendurch zu lösen.
 
 Ein **Allgemeinbereich** lässt sich ebenfalls übersteuern — dort mit einer
 Dauer in Stunden statt mit „Bis Check-out", weil ein Bereich keine Abreise
-hat. Am Handy stehen beide Knöpfe nur als Symbol da; der Name steht am
-Mauszeiger und wird vorgelesen.
+hat. **Einen Boost bekommt er nicht**: ohne Abreise und ohne Nachtfenster
+im Sinne eines Zimmers gibt es kein Ende, auf das er laufen könnte. Am
+Handy stehen beide Knöpfe nur als Symbol da; der Name steht am Mauszeiger
+und wird vorgelesen.
 
 **„Details"** führt wie bisher auf die Zimmerseite, mit Stammdaten,
 Heizzonen, Geräten, Verlauf und Engine.
@@ -76,9 +109,21 @@ Schlafzimmer. Warum, steht auf der Zimmerseite.
 ## Die Spalte „Übersteuerung"
 
 Zwei Marken, und sie stehen **nebeneinander**: ein **Schloss**, wenn die
-Übersteuerung gesperrt ist, und **„Aktiv"**, wenn gerade eine läuft. Ist
+Übersteuerung gesperrt ist, und die laufende Übersteuerung selbst. Ist
 beides der Fall, steht beides da; ist nichts davon der Fall, bleibt die
 Zelle leer.
+
+**Die laufende Übersteuerung nennt ihre Endzeit**, und ein Boost ist eigens
+gekennzeichnet:
+
+| Marke | Bedeutung |
+|---|---|
+| 🔥 **Boost bis 22:00** | Ein Boost läuft und endet zum Nachtbeginn |
+| **Aktiv bis 09:00** | Eine gewöhnliche Übersteuerung läuft, mit ihrer Endzeit |
+
+Bis zum 02.11.2026 stand dort nur „Aktiv" — die Spalte verschwieg damit
+die Endzeit, und ein Boost war von einer 24-Stunden-Eingabe nicht zu
+unterscheiden.
 
 Beides zusammen ist der Regelfall nach „Wert setzen und gleich
 festhalten": die Wunschtemperatur läuft, und das Rad im Zimmer ist still.

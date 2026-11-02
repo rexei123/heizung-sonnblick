@@ -233,6 +233,9 @@ def test_compute_expires_at_kennt_jede_quelle() -> None:
     ``ValueError`` das **gewollte** Verhalten (AE-58, das OCCUPIED-Gate
     garantiert den Wert). Deshalb wird er mitgegeben.
 
+    ``frontend_boost`` braucht ``boost_ende`` — der Zeitpunkt haengt am
+    Nachtfenster des Zimmers und ist hier nicht zu rechnen (02.11.2026).
+
     ``frontend_bereich`` braucht aus demselben Grund ``dauer_minuten``
     (Sprint 24d): dort steckt die Frist in der Anfrage und nicht im Namen
     der Quelle. Beide Pflicht-Angaben werden hier mitgegeben, damit der
@@ -244,7 +247,11 @@ def test_compute_expires_at_kennt_jede_quelle() -> None:
 
     for quelle in OverrideSource:
         frist = override_service.compute_expires_at(
-            quelle, now, next_checkout_at=checkout, dauer_minuten=120
+            quelle,
+            now,
+            next_checkout_at=checkout,
+            dauer_minuten=120,
+            boost_ende=now + timedelta(hours=3),
         )
         assert frist > now, f"{quelle.value}: Frist liegt nicht in der Zukunft ({quelle}: {frist})"
 
