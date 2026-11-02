@@ -7645,3 +7645,175 @@ ignoriert. Fuer ``0x45`` (T2) bleibt FW >= 4.2 ein Stop-Kriterium.
 | **Automatischer Auslöser** | §5, bewusst nicht gebaut. Mit abgeschlossenem Rollout ist der Druck geringer: die Grenzen stehen, und eine Aenderung am Raumtyp ist ein seltener Handgriff, dem ein ``setzen`` folgen kann |
 | **Zahlen aus dem Relais-Pfad** | §8.3, gemeldet und nicht geaendert |
 | **Zonen-Karte im Bad** | die Kappungs-Anzeige rechnet dort mit den Grenzen der Vorlage. Greift eine zimmerweite Entscheidung (Fenster, Sommer), folgt das Bad dem Zimmerwert — die Anzeige weiss das nicht und zeigt die Vorlage-Grenzen. Selten und harmlos, aber genannt |
+
+
+# AE-83 — Boost: ein Klick, Wert und Ende vom Server (02.11.2026)
+
+**Entscheider:** Betreiber, Festlegungen vom 31.10.2026 (vier Punkte) und
+vom 01.11.2026 (zwei Punkte). **Stand:** gebaut.
+
+## 1. Die Frage
+
+Die Rezeption soll ein Zimmer mit **einem** Klick warm machen können,
+ohne Wert und Dauer zu wählen. Der häufige Fall ist ein Gast, dem es zu
+kalt ist, und ein Zimmer, das in einer Stunde bezogen wird.
+
+Die vorhandene Übersteuerung kann das nicht: sie verlangt einen Wert, eine
+Dauer, und sie gilt nur in **belegten** Zimmern (AE-58).
+
+## 2. Die sechs Festlegungen und was daraus folgt
+
+| Festlegung | Folge im Code |
+|---|---|
+| **1.** Eine aktive `frontend_*`-Übersteuerung schließt Boost aus — mit Grund, Variante (c) | `boost.AUSSCHLIESSENDE_QUELLEN`, Satz wörtlich wie festgelegt |
+| **2.** Eine Regel für belegt und frei; Ende = `night_start` **des Zimmers** | eigene Quelle `frontend_boost`, die am OCCUPIED-Gate vorbeigeht |
+| **3.** Ohne Nachtfenster: abweisen, keine erfundene Dauer | `GRUND_KEIN_NACHTFENSTER` |
+| **4.** Kein Mindestmaß — 21:55 endet um 22:00 | keine Untergrenze; die Endzeit steht **am Knopf** |
+| **5.** Aktiver Boost: eigene Kennzeichnung **mit Endzeit** | `local_fire_department` + „Boost bis 22:00" in der Spalte |
+| **6.** Beide Wege gesperrt: Beschriftung bleibt „Temperatur", ausgegraut, Grund als Tooltip **und** `sr-only` | `lib/uebersteuerung.ts::temperaturknopf` |
+
+**Zu Festlegung 1, warum Variante (c).** Weder „Boost ersetzt sie" noch
+„Boost legt sich darüber". Der Grund gegen beide ist #340: dort hat ein
+Knopf eine Übersteuerung mitgenommen, die eine Zeile zuvor entstanden war.
+Ein Boost, der einen von der Rezeption gesetzten Wert ersetzt, ist dieselbe
+Klasse Überraschung. `device` und `device_manual` werden wie üblich
+ersetzt — das macht der Stapel-Abbau in `override_service.create`, hier ist
+nichts zu tun.
+
+**Ein laufender Boost schließt den nächsten nicht aus.** Er steht deshalb
+nicht in `AUSSCHLIESSENDE_QUELLEN`: sonst wäre der Knopf nach dem ersten
+Druck bis zur Nacht tot, und der Stapel-Abbau räumt den alten ohnehin weg.
+
+## 3. Das Ende: eine Ableitung, die den Nachtfall mit abdeckt
+
+Festlegung 2 nennt `night_start`. Gebaut ist **der nächste Wechsel des
+Nachtfensters**: im Tag ist das `night_start` — genau wie festgelegt —, in
+der Nacht `night_end`.
+
+**Warum.** „Immer der nächste `night_start`" wäre um 23:00 bei Nachtbeginn
+22:00 ein Boost von **23 Stunden**. Das ist nicht, was das Wort verspricht,
+und es wäre die Dauer, die niemand gewählt hat. Beide Fälle sind derselbe
+Satz: der Boost endet, wenn die nächste Temperatur-Regel übernimmt.
+
+Die Grenze `>= night_start` gehört dabei zur **Nacht** — dieselbe Lesart
+wie `rules/engine._is_in_night_window`. Zwei Lesarten derselben Grenze
+wären die Drift aus §5.53: die Engine senkt ab, der Boost rechnet noch mit
+Tag.
+
+Ein Nachtfenster ohne Ausdehnung (`night_start == night_end`) hat keinen
+Wechsel und wird wie „nicht konfiguriert" behandelt. Ohne diesen Zweig
+liefe die Rechnung in ein Ende **morgen zur selben Uhrzeit**.
+
+## 4. Der Wert: `rule_config`, mit einem Rückfall
+
+`boost_temperature` liegt in `rule_config` und nicht in `global_config`
+(Migration `0036_boost`, additiv). Damit folgt er derselben Kette wie jeder
+Sollwert: Zimmer schlägt Raumtyp schlägt hausweit. Ein Bad darf einen
+anderen Boost haben als ein Zimmer.
+
+**Steht nirgends ein Wert, gilt `guest_override_max` derselben Kette.**
+Ohne diesen Rückfall wäre die Funktion am Tag des Einbaus tot — die Spalte
+ist nach der Migration überall `NULL`, und der Betreiber müsste erst eine
+Zahl eintragen, die ihm niemand genannt hat. Der Höchstwert, den die
+Rezeption ohnehin eingeben darf, ist die Zahl, die schon im Haus steht.
+Steht auch dort nichts, wird abgewiesen.
+
+**Gekappt wird nicht im Boost.** Die Grenzen je Zone wirken weiter unten
+(Engine-Layer 5, `geraetegrenzen`). Ein Boost hat dieselbe Obergrenze wie
+jede andere Übersteuerung und nicht eine eigene; zwei Kappungen wären zwei
+Wahrheiten.
+
+## 5. Eine eigene Quelle, kein `frontend_24h` mit anderem Wert
+
+`frontend_boost` ist ein neuer Wert im CHECK der Spalte
+`manual_override.source` (Migration `0036`, Erweiterung eines CHECK ist
+additiv). Drei Gründe, und jeder allein würde reichen:
+
+- Der Boost braucht **keine Belegung**.
+- Seine **Dauer kommt vom Nachtfenster** und nicht aus dem Namen der
+  Quelle. Bei `frontend_24h` steckt die Dauer im Wert; hier steht sie in
+  `expires_at` und sonst nirgends.
+- Die Oberfläche kennzeichnet ihn eigens, und das geht nur, wenn die Zeile
+  unterscheidbar ist.
+
+Hätte die Rezeption für einen Boost `frontend_24h` geschrieben, trüge jede
+Zeile in Historie und Audit eine Dauer, die nicht stimmt — dieselbe
+Abwägung wie in `0029` und `0032`.
+
+## 6. Ein Endpunkt ohne Rumpf
+
+`POST /rooms/{id}/boost` nimmt **nichts** an. Wert und Ende rechnet
+`services/boost`; ein Feld, das man setzen kann, wird irgendwann gesetzt —
+und dann gäbe es einen zweiten Weg, eine Übersteuerung mit beliebigem Wert
+anzulegen, der das OCCUPIED-Gate nicht hat.
+
+Die Gates von `override_service.create` gelten unverändert: Sperre, offenes
+Fenster, Stapel-Abbau. Die Boost-eigene Lage (Sommermodus, Nachtfenster,
+Wert, laufende Übersteuerung) steht davor.
+
+## 7. Die Reihenfolge der Gründe ist Teil der Zusicherung
+
+Der Mensch bekommt **einen** Satz zu sehen, und es soll der richtige sein:
+
+1. **Sommermodus** — es heizt überhaupt nichts.
+2. **Dauerhafte Sperre** — eine Entscheidung über das Zimmer.
+3. **Allgemeinbereich** — dort gibt es einen anderen Weg, und der Satz
+   nennt ihn.
+4. **Kein Nachtfenster** — ohne Ende kein Boost.
+5. **Kein Boost-Wert** — ohne Wert kein Boost.
+6. **Aktive Übersteuerung** — zuletzt, weil sie die einzige ist, die sich
+   von selbst löst.
+
+Ein Test hält Punkt 2 vor Punkt 6 ausdrücklich fest: ein gesperrtes Zimmer
+mit laufender Übersteuerung soll „Dauerhaft gesperrt" melden und nicht
+„Wert dort ändern" — der zweite Satz schickte die Rezeption an eine Stelle,
+an der sie nichts ändern kann.
+
+## 8. Die Liste nennt jetzt Quelle und Ablauf
+
+`has_active_override` sagt „eine läuft" und verschweigt **welche**. Für
+Festlegung 5 braucht die Zeile die Quelle, also kommen
+`uebersteuerung_quelle` und `uebersteuerung_ende` dazu — über **eine**
+Abfrage für die ganze Seite (`override_service.get_active_je_zimmer`), mit
+derselben Rangfolge wie `get_active`.
+
+Dasselbe für die Boost-Lage: `boost.lage_je_zimmer` macht vier Abfragen für
+alle Zimmer und nicht vier je Zimmer. Bei 104 Zeilen wäre das sonst das
+N+1-Muster, das R-D für diese Liste ausdrücklich ausgeschlossen hat (§5.73:
+wenn read-time, dann gehoben und nicht je Zeile).
+
+`has_active_override` bleibt daneben stehen. Es zu entfernen wäre eine
+Verengung der API, und es ist aus den beiden neuen Feldern nicht
+herzuleiten, ohne die Aktiv-Regel zu wiederholen.
+
+## 9. Was offen bleibt
+
+**Der Allgemeinbereich.** Festlegung 6 nennt „Allgemeinbereich –
+Übersteuerung über Zimmerseite" als Grund für einen **grauen** Knopf.
+Dagegen steht die Entscheidung vom 30.10.2026, mit der der Knopf in der
+Liste entstanden ist: ein Bereich ist dort **nicht** gesperrt, weil
+`override_service.create` ihn mit der Quelle `frontend_bereich` am
+Belegungs-Gate vorbeiführt und die Zimmerseite den Weg anbietet.
+
+Den Knopf jetzt zu sperren würde eine Möglichkeit wegnehmen, die seit drei
+Tagen da ist. Der Satz steht deshalb dort, wo er ohne Verlust gilt: als
+Grund für den **Boost**, den ein Bereich tatsächlich nicht bekommt. Ob der
+ganze Knopf dort grau werden soll, ist eine Zeile in
+`temperaturknopf` — und eine Frage an den Betreiber.
+
+**Der Boost-Wert ist nirgends in der Oberfläche einstellbar.** Er kommt aus
+`rule_config`, und dort führt heute kein Formular hin. Solange der Rückfall
+auf `guest_override_max` greift, ist das kein Mangel; wer den Boost höher
+will als den Gast-Höchstwert, braucht ein Feld. Nicht gebaut, weil niemand
+es verlangt hat (S6).
+
+**Der Sommermodus sperrt den Knopf ganz.** Das trifft auch die gewöhnliche
+Übersteuerung, die der Dienst annehmen würde — sie hätte nur keine Wirkung,
+weil Engine-Layer 0 vor Layer 3 greift. Das ist eine Entscheidung über die
+Oberfläche und keine Ableitung aus dem Dienst; sie steht hier, damit sie
+nicht als Fehler gelesen wird.
+
+**Querverweise:** AE-58 (Override-Modell, OCCUPIED-Gate), AE-52 (Fenster),
+AE-60 (Zeitzonen), §5.53 (eine Wahrheit), §5.57 (kein Knopf ohne
+sichtbaren Grund), §5.64 (Diskriminator ins Feld), §5.73 (read-time
+gehoben), `docs/status/2026-11-02-boost.md`.

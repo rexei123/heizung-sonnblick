@@ -76,6 +76,16 @@ class RuleConfig(Base):
     t_long_vacant: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
 
     # Gast-Override
+    # Der Wert, auf den ein Boost setzt (02.11.2026). Steht hier und
+    # nicht in ``global_config``, weil er damit derselben Kette folgt wie
+    # jeder andere Sollwert: Zimmer schlaegt Raumtyp schlaegt hausweit.
+    #
+    # ``None`` ist kein Fehler: ohne gesetzten Wert nimmt
+    # ``services/boost`` ``guest_override_max`` derselben Kette. Der Boost
+    # setzt dann auf den hoechsten Wert, den die Rezeption ohnehin
+    # eingeben koennte -- und nicht auf eine ausgedachte Zahl.
+    boost_temperature: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
+
     guest_override_min: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
     guest_override_max: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
     guest_override_duration_minutes: Mapped[int | None] = mapped_column(Integer)
