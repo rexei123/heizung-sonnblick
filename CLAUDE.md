@@ -288,7 +288,9 @@ In dieser Reihenfolge:
 
 0. CLAUDE.md §0 + §0.1 — Stabilitätsregeln und Autonomie-Default. Nicht überspringbar.
 1. `CONTEXT.md` — Boot-Anker, aktueller Stand, nächster Schritt
-2. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags
+2. `STATUS.md` — Gesamtstand, alle Sprints, aktuelle URLs, Tags. Die
+   Einträge **ab 02.11.2026** liegen als eigene Dateien in
+   `docs/status/` (`ls docs/status/` statt Index, siehe §3.5)
 3. `docs/SPEC-FRAMEWORK.md` — verbindliche Code- und Doku-Regeln
 4. `docs/WORKFLOW.md` — 5-Phasen-Feature-Flow mit User-Gates
 5. `docs/RUNBOOK.md` — Operations, Rescue, UFW, GHCR-PAT, Domain
@@ -300,7 +302,17 @@ In dieser Reihenfolge:
 2. **Branch-Naming:** `feat/sprintN-<slug>` für Features, `chore/<slug>` für Wartung, `fix/<slug>` für Bugs.
 3. **Tag-Pattern:** `v0.<minor>.<sprint>-<slug>` (z. B. `v0.1.5-lorawan-foundation`).
 4. **Commit-Trailer:** `Co-Authored-By: Claude` nur wenn explizit gewünscht. Bei Claude-Code-Commits: `Co-Authored-By: Claude` immer dranhängen.
-5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. STATUS.md wird am Ende jedes Sprints ergänzt.
+5. **Doku-Pflicht:** Jeder Sprint hat einen Feature-Brief in
+   `docs/features/YYYY-MM-DD-sprintN-<slug>.md`. Der Status-Eintrag ist
+   **ab 02.11.2026 eine neue Datei** `docs/status/YYYY-MM-DD-<slug>.md`
+   und wird **nicht** mehr an `STATUS.md` angehängt — zwei Branches
+   kollidieren sonst am Dateiende, auch wenn sie inhaltlich nichts
+   gemeinsam haben, und `git checkout --theirs` nimmt dabei die ganze
+   Datei statt des strittigen Abschnitts (einmal fast passiert, §2cs bei
+   #361). Begründung und Abgrenzung in `docs/status/README.md`. Der
+   Altbestand §2a-§2cv bleibt in `STATUS.md`, es gibt **keinen Index**,
+   und die **Kopfzeile** von `STATUS.md` bleibt dort und wird weiter im
+   selben PR nachgezogen (§5.26) — sie darf kollidieren.
 6. **Sprache:** Deutsch, Sie-Form, sachlich, maximal kurz, hohe Inhaltsdichte, keine Floskeln.
 7. **Befehl-Markierung:** Jeden Befehl explizit als **PowerShell (lokal)**, **SSH (Server)** oder **Claude Code (im Repo)** kennzeichnen.
 8. **Kritisches Denken:** Bei besseren Alternativen widersprechen. Nicht Ja-Sager sein.
