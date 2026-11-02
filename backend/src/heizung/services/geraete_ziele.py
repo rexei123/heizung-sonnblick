@@ -23,6 +23,18 @@ den zweiten verbirgt.
   Befehl an ein Geraet ohne Einsatzort hat keinen Adressaten.
 * **ausgemustert**: es ist nicht mehr da.
 * **kein Thermostat**: ein Relais hat kein Drehrad und misst nicht.
+
+**Und die Auswahl muss eindeutig sein** (Entscheidung des Betreibers,
+01.11.2026). ``--nur`` trifft nach DevEUI, Etikett, Zimmernummer oder
+„Zimmer Zone"; mit den Geraetenamen 105-109 ist ``105`` beides. Trifft
+eine Angabe auf **zwei verschiedenen Wegen**, bricht ``lade_ziele`` ab und
+nennt beide Trefferlisten — Begruendung in
+:class:`MehrdeutigeAuswahlError`. Mehrere Treffer auf **demselben** Weg
+sind kein Fehler, und Ausnahmen zaehlen nicht mit.
+
+Die Pruefung steht hier und nicht in den Werkzeugen, aus demselben Grund
+wie die Ausnahmen: zwei Auswahllisten waeren zwei Wahrheiten darueber,
+welche Geraete Befehle bekommen.
 """
 
 from __future__ import annotations
@@ -134,15 +146,21 @@ async def lade_ziele(
     )
     ziele: list[Zielgeraet] = []
     ausnahmen: list[Ausnahme] = []
+    #: Je gesuchter Angabe: auf welchem **Weg** sie getroffen hat und wen.
+    #: Daraus entsteht der Abbruch bei Zweideutigkeit, siehe unten.
+    treffer: dict[str, dict[str, list[str]]] = {}
 
     for geraet, zone_name, room_number in (await session.execute(stmt)).all():
+        etikett = geraet.label.lower() if geraet.label else None
+        zimmer = room_number.lower() if room_number else None
+        zimmer_zone = f"{room_number} {zone_name}".lower() if room_number and zone_name else None
         namen = {geraet.dev_eui.lower()}
-        if geraet.label:
-            namen.add(geraet.label.lower())
-        if room_number:
-            namen.add(room_number.lower())
-            if zone_name:
-                namen.add(f"{room_number} {zone_name}".lower())
+        if etikett:
+            namen.add(etikett)
+        if zimmer:
+            namen.add(zimmer)
+            if zimmer_zone:
+                namen.add(zimmer_zone)
         if gesucht is not None and namen.isdisjoint(gesucht):
             continue
 
@@ -150,6 +168,24 @@ async def lade_ziele(
         if grund is not None:
             ausnahmen.append(Ausnahme(dev_eui=geraet.dev_eui, label=geraet.label, grund=grund))
             continue
+
+        # **Gezaehlt wird erst hier, also nur fuer Geraete, die wirklich
+        # einen Befehl bekaemen.** Ein Pool-Vicki mit dem Etikett „105"
+        # ist eine Ausnahme und bekommt nichts; ihn mitzuzaehlen wuerde
+        # jeden Lauf mit ``--nur "105"`` abbrechen, solange die neuen
+        # Geraete im Lager liegen — und das waere ein Abbruch ohne Gefahr.
+        # Scharf wird die Zweideutigkeit genau in dem Augenblick, in dem
+        # das Geraet einer Zone zugeordnet ist und damit ein Ziel wird.
+        if gesucht is not None:
+            _notiere_treffer(
+                treffer,
+                gesucht,
+                dev_eui=geraet.dev_eui,
+                etikett=etikett,
+                zimmer=zimmer,
+                zimmer_zone=zimmer_zone,
+                beschreibung=_beschreibung(geraet.dev_eui, geraet.label, room_number, zone_name),
+            )
 
         ziele.append(
             Zielgeraet(
@@ -163,7 +199,100 @@ async def lade_ziele(
             )
         )
 
+    _pruefe_eindeutigkeit(treffer)
     return ziele, ausnahmen
+
+
+#: Die Wege, auf denen ``--nur`` ein Geraet treffen kann, in der
+#: Reihenfolge, in der geprueft wird. Je Geraet gilt **ein** Weg: der
+#: erste, der passt. Sonst waere ein Geraet, dessen Etikett zufaellig
+#: seine eigene Zimmernummer ist, mit sich selbst zweideutig.
+WEG_DEVEUI = "DevEUI"
+WEG_ETIKETT = "Etikett"
+WEG_ZIMMER_ZONE = "Zimmer und Zone"
+WEG_ZIMMER = "Zimmernummer"
+
+
+def _beschreibung(
+    dev_eui: str, label: str | None, room_number: str | None, zone_name: str | None
+) -> str:
+    """Eine Zeile, die ein Geraet benennt, ohne Rueckfrage."""
+    ort = f"{room_number} {zone_name}" if room_number and zone_name else "ohne Zone"
+    return f"{label or '(ohne Etikett)'} / {dev_eui} / {ort}"
+
+
+def _notiere_treffer(
+    treffer: dict[str, dict[str, list[str]]],
+    gesucht: set[str],
+    *,
+    dev_eui: str,
+    etikett: str | None,
+    zimmer: str | None,
+    zimmer_zone: str | None,
+    beschreibung: str,
+) -> None:
+    """Haelt fest, auf welchem Weg eine gesuchte Angabe getroffen hat."""
+    for s in gesucht:
+        if s == dev_eui.lower():
+            weg = WEG_DEVEUI
+        elif etikett is not None and s == etikett:
+            weg = WEG_ETIKETT
+        elif zimmer_zone is not None and s == zimmer_zone:
+            weg = WEG_ZIMMER_ZONE
+        elif zimmer is not None and s == zimmer:
+            weg = WEG_ZIMMER
+        else:
+            continue
+        treffer.setdefault(s, {}).setdefault(weg, []).append(beschreibung)
+
+
+class MehrdeutigeAuswahlError(Exception):
+    """Eine Angabe in ``--nur`` trifft auf **zwei verschiedenen Wegen**.
+
+    **Der Anlass, 01.11.2026.** ``--nur`` waehlt nach DevEUI **oder**
+    Etikett **oder** Zimmernummer **oder** „Zimmer Zone". Mit den neuen
+    Geraetenamen 105-109 ist ``105`` beides: das Etikett eines
+    Pool-Vickis und die Nummer eines Testzimmers. Solange das Geraet im
+    Pool liegt, ist es eine Ausnahme und bekommt keinen Befehl — sobald es
+    einer Zone zugeordnet ist, trifft ``--nur "105"`` die Thermostate von
+    Zimmer 105 **und** das Geraet 105 dort, wo es dann sitzt.
+
+    **Gezaehlt werden deshalb nur Ziele, keine Ausnahmen.** Ein Abbruch,
+    solange die neuen Geraete im Lager liegen, waere ein Abbruch ohne
+    Gefahr — und er fiele mitten in die T2-Erprobung, die ``--nur "105"``
+    fuer das **Zimmer** 105 benutzt.
+
+    **Warum ein Abbruch und keine Warnung.** Der Lauf wird abgezaehlt
+    („stehen genau drei Ziele da?"), und eine Zahl, die um eins zu hoch
+    ist, sieht nach einem Geraet aus, das man vergessen hatte. Das ist
+    dieselbe Familie wie der Abbruch bei einem Tippfehler: ein Lauf, der
+    lautlos ein Geraet zu viel trifft, ist schlimmer als einer, der nicht
+    laeuft.
+
+    **Mehrere Treffer auf demselben Weg sind kein Fehler.** Eine
+    Zimmernummer trifft alle Thermostate ihres Zimmers — genau dafuer ist
+    sie da.
+    """
+
+    def __init__(self, treffer: dict[str, dict[str, list[str]]]) -> None:
+        self.treffer = treffer
+        zeilen: list[str] = []
+        for angabe, wege in sorted(treffer.items()):
+            zeilen.append(f"  {angabe!r} trifft auf {len(wege)} Wegen:")
+            for weg, wen in sorted(wege.items()):
+                for eintrag in wen:
+                    zeilen.append(f"    als {weg}: {eintrag}")
+        super().__init__(
+            "Mehrdeutige Auswahl - bitte genauer angeben "
+            "(DevEUI oder 'Zimmer Zone' sind immer eindeutig):\n" + "\n".join(zeilen)
+        )
+
+
+def _pruefe_eindeutigkeit(treffer: dict[str, dict[str, list[str]]]) -> None:
+    """Bricht ab, wenn eine Angabe auf zwei verschiedenen Wegen trifft."""
+    mehrdeutig = {angabe: wege for angabe, wege in treffer.items() if len(wege) > 1}
+    if mehrdeutig:
+        raise MehrdeutigeAuswahlError(mehrdeutig)
 
 
 def nicht_gefunden(

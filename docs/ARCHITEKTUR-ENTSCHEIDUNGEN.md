@@ -6562,6 +6562,111 @@ liegt in RUNBOOK §10ak; sie beantwortet die Frage in einer Zeile.
 
 ---
 
+## 14. Nachtrag 02.11.2026: die Wiederholung bekommt eine Bremse
+
+**Befund des Betreibers, 01.11.2026, zwischen 11:22 und 11:28.** An
+Relais 109 ging **jede Minute** ein Downlink hinaus, sieben Stück.
+Jeder bei SF12 über RX2, also 1,32 Sekunden Sendezeit — rund neun
+Sekunden Sendezeit des Gateways in sieben Minuten, an ein Gerät, das
+nicht antwortete.
+
+### Warum `relay_max_versuche` nichts begrenzt hat
+
+Die Zahl stand auf 3, und trotzdem waren es sieben Versuche. Die Kette:
+
+```
+t0      senden, versuche=1
+t0+60   Frist (60 s) abgelaufen -> senden, versuche=2
+t0+120  senden, versuche=3
+t0+180  versuche >= 3 -> ALARM, und der Orchestrator loescht den offenen Stand
+t0+240  offen ist None, der Regler will weiter EIN -> senden, versuche=1 ...
+```
+
+**Der Alarm hat seine eigene Spur gelöscht, und damit begann die
+Zählung von vorn.** `max_versuche` hat nicht die Versuche begrenzt,
+sondern nur getaktet, wie oft ein Alarm kommt. Dazu lag die feste Frist
+von 60 Sekunden genau auf dem Tick-Intervall des Orchestrators: jeder
+Durchlauf erzeugte einen Versuch.
+
+Das ist §5.79 in Maschinenform — ein Melder, der sich selbst
+zurückstellt, überwacht nichts.
+
+### Drei Entscheidungen, freigegeben am 02.11.2026
+
+**1. Die Frist verdoppelt sich je Versuch**, gekappt bei einer halben
+Stunde (`relay_backoff_max_s`, Vorgabe 1800). 60 s, 120 s, 240 s, 480 s,
+960 s, dann 1800 s. In der ersten Stunde sind das sechs Downlinks statt
+sechzig.
+
+**2. Der Alarm löscht den offenen Stand nicht mehr.** Er kommt **genau
+einmal**, nämlich bei `versuche == max_versuche`; der Aufrufer zählt den
+Versuch hoch, ohne zu senden. Alles darüber ist gedrosselte
+Wiederholung ohne weitere Meldung.
+
+**Nicht gebaut wurde das endgültige Aufgeben**, obwohl „dann Befund"
+genau so zu lesen gewesen wäre. Der Grund steht in der Messung
+desselben Tages: der Uplink-Verlust an 109 lag bei rund 30 %. Ein Relais
+an der Funkgrenze verliert damit irgendwann drei Bestätigungen in
+Folge — kein Ausnahmefall, sondern der Regelfall —, und der Wächter
+hätte es **dauerhaft** stillgelegt, ohne dass am Gerät etwas kaputt ist.
+Der Preis für den Weg zurück ist ein Downlink je halbe Stunde, also 1,3
+Sekunden Sendezeit. Das ist die billigere Seite des Tauschs.
+
+**3. Ein offener Befehl, der dem jetzigen Wunsch widerspricht, wird
+nicht wiederholt.** Bisher hatte der offene Befehl Vorrang vor allem
+anderen. Der Fall, der das kippt:
+
+> Ein EIN geht hinaus, das Gerät schaltet, der bestätigende Uplink geht
+> verloren. Für uns ist das Relais damit AUS, während es heizt. Der Raum
+> wird warm, der Zweipunktregler will AUS — und der Wächter sieht nur
+> den offenen Befehl und **wiederholt das EIN**.
+
+Der offene Stand wird jetzt übergangen; die Wunsch-Regeln entscheiden,
+und der Aufrufer ersetzt ihn oder löscht ihn. Die Sorge, die hinter dem
+alten Vorrang stand — zwei unbestätigte Befehle könnten sich
+überlagern — bleibt unbegründet: es gibt genau **einen** offenen Stand
+je Gerät, und er wird ersetzt, nicht ergänzt.
+
+**Die Versuchszählung beginnt beim Ersetzen von vorn**, weil es ein
+anderer Befehl ist. Ohne diese Unterscheidung wäre die Entscheidung an
+der Stelle wieder eingesammelt, an der sie wirken soll: der frische
+Befehl erbte das erschöpfte Budget, wartete sofort die gedrosselten 30
+Minuten ab, und der Alarm bliebe aus, weil er an
+`versuche == max_versuche` hängt.
+
+### Was dabei auffiel
+
+**Der Zweig „ersetzter Befehl" ist nur unter `REFRESH` erreichbar.** Nach
+der Bestätigungsregel hat jeder verbleibende offene Befehl ein Ziel,
+das dem gemeldeten Zustand widerspricht; widerspricht es zusätzlich dem
+Wunsch, dann stimmt der gemeldete Zustand mit dem Wunsch überein — und
+dann ist unter `EXPIRE_AND_RESEND` nichts zu senden. Unter `REFRESH`
+schon: dort frischt der Wächter ein laufendes EIN auf. Der Zweig ist
+also Vorsorge für eine Strategie, die noch nicht in Betrieb ist, und
+der Test sagt das.
+
+**Der Backoff hätte einen Absturz im Schaltpfad erzeugt.** `timedelta *
+2**98` läuft mit `OverflowError: Python int too large to convert to C
+int` über, und die Kappung des Ergebnisses kommt zu spät. Weil der
+offene Stand jetzt beliebig lange lebt, wächst `versuche` auch beliebig
+weit — bei einem Downlink je halbe Stunde ist das nach zwei Tagen
+Funkstille erreicht. Gekappt wird deshalb der **Exponent**. Gefunden hat
+das der Test mit 99 Versuchen, nicht der Entwurf.
+
+### Was offen bleibt
+
+**Der aufgegebene Zustand ist in der Oberfläche nicht zu sehen.**
+`pending_target_on`, `pending_since` und `pending_attempts` haben heute
+keinen Leser außer dem Orchestrator. Ein Relais, das seit Stunden keine
+Bestätigung liefert, steht als Alarm im Log und sonst nirgends — und das
+Log liest niemand ohne Anlass (§5.76). Vorgeschlagen für den PR zur
+Paketverlust-Anzeige, der die Relais-Karte ohnehin anfasst.
+
+**Querverweise:** §5.79 (ein Melder, der sich selbst zurückstellt),
+§5.76 (Wirkung überwachen statt Mechanik), §0 S4 (jeder Downlink ist
+Sendezeit), AE-78 §4 (T3.0 und die Strategie `REFRESH`),
+`docs/status/2026-11-02-waechter-backoff.md`.
+
 # AE-79 — Das Handbuch liegt im Repo und wandert mit dem Pull Request
 
 **Datum:** 25.10.2026 · **Stand:** umgesetzt (Paket 1) · **Betrifft:**

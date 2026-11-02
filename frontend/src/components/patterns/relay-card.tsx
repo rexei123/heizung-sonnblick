@@ -61,6 +61,34 @@ function Zeile({ bezeichnung, wert }: { bezeichnung: string; wert: string }) {
   );
 }
 
+/**
+ * Der Satz zu einem unbestätigten Schaltbefehl.
+ *
+ * **Warum der Zustand überhaupt sichtbar ist.** Bis zum 02.11.2026
+ * stand ein Relais, das seit Stunden nicht bestätigt, als Alarm im Log
+ * und sonst nirgends — und das Log liest niemand ohne Anlass (§5.76).
+ * Seit der Alarm den offenen Stand nicht mehr löscht (AE-78 §14), lebt
+ * er außerdem beliebig lange.
+ *
+ * **„gemeldet" kommt aus dem Backend** und wird hier nicht gerechnet:
+ * die Schwelle steht in den Settings, und eine zweite Kenntnis davon
+ * hier wäre beim ersten Nachjustieren falsch (§5.73).
+ */
+function unbestaetigt(offen: {
+  ziel_ein: boolean;
+  seit: string;
+  versuche: number;
+  gemeldet: boolean;
+}): string {
+  const ziel = offen.ziel_ein ? "EIN" : "AUS";
+  const versuche =
+    offen.versuche === 1 ? "ein Versuch" : `${offen.versuche} Versuche`;
+  const schluss = offen.gemeldet
+    ? " — gemeldet, wird nur noch gedrosselt wiederholt"
+    : "";
+  return `${ziel}, ${versuche} seit ${formatDateTime(offen.seit)}${schluss}`;
+}
+
 function Pruefzeile({
   bezeichnung,
   bestanden,
@@ -249,8 +277,23 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
               : `${data.internal_temperature_raw}${data.gehaeusetemperatur_alarm ? " — über der Warnschwelle" : ""}`
           }
         />
-        <Zeile bezeichnung="Schaltzyklen" wert={String(data.switch_cycles)} />
+        {/* **„Schaltzyklen der Steuerung", nicht „Schaltzyklen."** Gezählt
+            wird nur, wenn ein Befehl bestätigt wird, den der
+            Orchestrator gesendet hat. Der T3.0-Lauf am 01.11.2026 ging
+            von Hand über ``python -c`` am Wächter vorbei — dort stand
+            danach „0", obwohl das Relais mehrfach geschaltet hatte. Der
+            Zähler war richtig, das Etikett versprach mehr. */}
+        <Zeile
+          bezeichnung="Schaltzyklen der Steuerung"
+          wert={String(data.switch_cycles)}
+        />
         <Zeile bezeichnung="Wächter" wert={data.watchdog_strategy} />
+        {data.offener_befehl !== null && (
+          <Zeile
+            bezeichnung="Unbestätigter Befehl"
+            wert={unbestaetigt(data.offener_befehl)}
+          />
+        )}
         <Zeile
           bezeichnung="Firmware"
           wert={data.firmware_version ?? "unbekannt"}
