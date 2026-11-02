@@ -1,9 +1,9 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk
 rollen: alle
-stand: 2026-11-01
+stand: 2026-11-02
 route: /devices
 ---
 
@@ -63,6 +63,32 @@ Werkzeug auf dem Server — der Weg steht im Betriebshandbuch
 von selbst am Gerät.** Das ist Absicht: ein Klick würde sonst bis zu
 45 Funkbefehle auslösen.
 
+## Paketverlust
+
+Auf der Detailseite eines Geräts steht neben **Signal** die Kachel
+**Paketverlust**. Sie sagt, wie viel von dem, was das Gerät gesendet hat,
+überhaupt angekommen ist — und zwar gemessen, nicht geschätzt: jede
+Meldung trägt eine laufende Nummer, auch die verlorenen. Fehlen Nummern,
+fehlen Meldungen.
+
+**Was ein hoher Wert bedeutet.** Die Temperaturen werden lückenhaft, und
+Schaltbefehle bleiben unbestätigt — bei einem Relais wiederholt die
+Steuerung dann, mit wachsendem Abstand. Über **10 %** ist der Bereich, in
+dem das regelmäßig passiert; der Wert steht dann in Gelb, über 25 % in
+Rot.
+
+**Ein Strich ist nicht null.** Liegen weniger als zwei Meldungen im
+Fenster, gibt es keine Lücke, die man sehen könnte. Die Kachel schreibt
+dann einen Strich und sagt im Hinweis, warum — eine Null würde einen
+Funk behaupten, der nicht gemessen wurde.
+
+**Ein Neustart ist kein Verlust.** Nach einem Batteriewechsel oder einem
+Stromausfall beginnt die Nummernfolge von vorn. Die Kachel erkennt das,
+rechnet beide Teile getrennt und weist den Neustart eigens aus.
+
+**Was die Kachel nicht beantwortet, ist die Richtung.** Eine verlorene
+Meldung kann am Funkweg, am Gateway oder am Netz dahinter liegen.
+
 ## nur messen
 
 Der Schalter sitzt auf der Zimmer-Detailseite im Tab „Geräte". Ein Gerät
@@ -84,11 +110,16 @@ Hinweis unter dem Schalter sagt es.
 
 ## Relais
 
-Für die Infrarot-Heizkörper ist ein Relais-Pfad **vorbereitet, aber
-nicht in Betrieb**: die Geräteart gibt es im Programm, montiert ist
-keines, geschaltet wird keines. Die ausstehende Messung dazu heißt
-**Relais-Test T3.0** — nicht zu verwechseln mit dem Listen-Wächter, der
-die Belegungsliste überwacht und fertig ist.
+Für die Infrarot-Heizkörper gibt es den Relais-Pfad im Programm. **Das
+erste Gerät ist angelegt und geprüft** (109, Eingang, seit 01.11.2026) —
+es hängt an der Zuleitung, ein Panel ist noch nicht angeschlossen, und
+geschaltet wird noch nichts.
+
+Die Messung, von der das abhing, ist durch: der Relais-Test **T3.0** hat
+am 01.11.2026 ergeben, dass ein abgelaufener Timer das Relais abfallen
+lässt. Damit trägt die Grundregel des Pfades — **ein Relais wird nie
+dauerhaft eingeschaltet, sondern immer nur auf Zeit.** Fällt die
+Steuerung aus, geht das Panel von selbst aus.
 
 ### Der Knopf am Relais
 

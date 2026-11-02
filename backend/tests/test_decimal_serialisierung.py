@@ -46,6 +46,7 @@ from heizung.schemas.device import (
     DeviceActiveOverrideRead,
     DeviceLatestReadingRead,
     DeviceRead,
+    PaketverlustAntwort,
 )
 from heizung.schemas.sensor_reading import SensorReadingRead
 
@@ -58,6 +59,7 @@ MODELLE: list[type[BaseModel]] = [
     DeviceActiveOverrideRead,
     SensorReadingRead,
     DashboardKpiRead,
+    PaketverlustAntwort,
 ]
 
 
