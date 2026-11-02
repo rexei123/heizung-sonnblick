@@ -19,6 +19,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -109,6 +110,7 @@ class Aufbau:
         self.rt_id = rt_id
 
 
+@asynccontextmanager
 async def _zimmer(
     engine: AsyncEngine,
     *,
@@ -121,6 +123,21 @@ async def _zimmer(
     guest_max: str | None = None,
 ) -> AsyncIterator[Aufbau]:
     """Ein Zimmer mit genau der Lage, die der jeweilige Test braucht.
+
+    **Kontextmanager und nicht ``async for``** (Berichtigung vom
+    02.11.2026). Die erste Fassung war ein nackter Generator, und die
+    Tests liefen ihn mit ``async for ... in _zimmer(...)``. Das raeumt
+    nur auf, wenn der Generator auch beendet wird — bei vier von neun
+    Zimmern geschah das nicht, und sie blieben samt ihrer
+    ``rule_config``-Zeile in der Test-Datenbank stehen.
+
+    Aufgefallen ist es in einer **anderen** Datei:
+    ``test_allgemeinbereiche::test_hausstandard_nutzung_zaehlt_eigene_werte``
+    zaehlt ROOM-Zeilen mit ``night_start`` und erwartet 0 — es waren 4.
+    Genau das Fehlerbild aus Paragraph 5.39, und genau die Begruendung
+    fuer die zwei Schichten dort: ein Kontextmanager raeumt deterministisch
+    (``async with``), und der Praefix-Putz unten faengt ab, was ein
+    Abbruch mitten im Test liegen laesst.
 
     Die Regelwerte kommen als **ROOM**-Zeile. Das ist der Rang, der jeden
     anderen schlaegt, und damit haengt kein Test an einer hausweiten
@@ -189,14 +206,49 @@ async def _zimmer(
 
 @pytest_asyncio.fixture
 async def freies_zimmer(setup_engine: AsyncEngine) -> AsyncIterator[Aufbau]:
-    async for a in _zimmer(setup_engine):
+    async with _zimmer(setup_engine) as a:
         yield a
 
 
 @pytest_asyncio.fixture
 async def belegtes_zimmer(setup_engine: AsyncEngine) -> AsyncIterator[Aufbau]:
-    async for a in _zimmer(setup_engine, belegt=True):
+    async with _zimmer(setup_engine, belegt=True) as a:
         yield a
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _putz(setup_engine: AsyncEngine) -> AsyncIterator[None]:
+    """Zweite Schicht gegen Reste (Paragraph 5.39).
+
+    Der Kontextmanager raeumt deterministisch — solange der Test ihn
+    verlaesst. Ein Abbruch mitten im ``async with`` (``KeyboardInterrupt``,
+    ein harter Fehler im Teardown) laesst trotzdem etwas liegen, und was
+    hier liegen bleibt, faellt in einer **anderen** Datei auf: am
+    02.11.2026 waren es vier ROOM-Zeilen mit ``night_start``, und rot
+    wurde ``test_allgemeinbereiche``.
+
+    Geraeumt wird vor **und** nach jedem Test, ueber den Praefix. Vorher,
+    weil ein Rest aus einem abgebrochenen Lauf sonst den naechsten
+    begleitet.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+
+    async def _weg() -> None:
+        async with maker() as session:
+            for tabelle in ("manual_override", "occupancy", "rule_config", "event_log"):
+                await session.execute(
+                    text(
+                        f"DELETE FROM {tabelle} WHERE room_id IN "
+                        "(SELECT id FROM room WHERE number LIKE 'bo-%')"
+                    )
+                )
+            await session.execute(text("DELETE FROM room WHERE number LIKE 'bo-%'"))
+            await session.execute(text("DELETE FROM room_type WHERE name LIKE 'boost-%'"))
+            await session.commit()
+
+    await _weg()
+    yield
+    await _weg()
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -275,7 +327,7 @@ async def test_ohne_boostwert_gilt_der_hoechstwert_des_gastes(
     hat. Der Hoechstwert, den die Rezeption ohnehin eingeben darf, ist
     die Zahl, die schon im Haus steht.
     """
-    async for a in _zimmer(setup_engine, boost_wert=None, guest_max="23.0"):
+    async with _zimmer(setup_engine, boost_wert=None, guest_max="23.0") as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 201, antwort.text
         assert Decimal(str(antwort.json()["setpoint"])) == Decimal("23.0")
@@ -305,7 +357,7 @@ async def test_ein_boost_darf_einen_laufenden_boost_ersetzen(
 async def test_dauerhafte_sperre_weist_ab(
     http_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
-    async for a in _zimmer(setup_engine, gesperrt=True):
+    async with _zimmer(setup_engine, gesperrt=True) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "dauerhaft_gesperrt"
@@ -321,7 +373,7 @@ async def test_sperre_bis_checkout_laesst_den_boost_durch(
     (Sprint 23 T4-A2). Ohne diesen Test waere der Boost die eine Quelle,
     die sie nicht kennt.
     """
-    async for a in _zimmer(setup_engine, belegt=True, gesperrt=True, bis_checkout=True):
+    async with _zimmer(setup_engine, belegt=True, gesperrt=True, bis_checkout=True) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 201, antwort.text
 
@@ -330,7 +382,7 @@ async def test_allgemeinbereich_weist_ab_und_nennt_den_anderen_weg(
     http_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
     """Der Satz nennt den Weg, der dort gilt — nicht nur das Verbot."""
-    async for a in _zimmer(setup_engine, buchbar=False):
+    async with _zimmer(setup_engine, buchbar=False) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "allgemeinbereich"
@@ -346,7 +398,7 @@ async def test_ohne_nachtfenster_wird_abgewiesen(
     eine dauerhafte Uebersteuerung — genau das, was die Funktion nicht
     sein soll.
     """
-    async for a in _zimmer(setup_engine, nacht=None):
+    async with _zimmer(setup_engine, nacht=None) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "kein_nachtfenster"
@@ -361,7 +413,7 @@ async def test_nachtfenster_ohne_ausdehnung_wird_abgewiesen(
     selben Uhrzeit** — ein Boost von 24 Stunden, und zwar fuer eine
     Konfiguration, die aus der Sicht des Lesers gar keine ist.
     """
-    async for a in _zimmer(setup_engine, nacht=(time(22, 0), time(22, 0))):
+    async with _zimmer(setup_engine, nacht=(time(22, 0), time(22, 0))) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "kein_nachtfenster"
@@ -370,7 +422,7 @@ async def test_nachtfenster_ohne_ausdehnung_wird_abgewiesen(
 async def test_ohne_jeden_wert_wird_abgewiesen(
     http_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
-    async for a in _zimmer(setup_engine, boost_wert=None, guest_max=None):
+    async with _zimmer(setup_engine, boost_wert=None, guest_max=None) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "kein_boostwert"
@@ -410,7 +462,7 @@ async def test_die_sperre_schlaegt_die_laufende_uebersteuerung(
     zweite Satz schickte die Rezeption an eine Stelle, an der sie nichts
     aendern kann.
     """
-    async for a in _zimmer(setup_engine, belegt=True, gesperrt=True, bis_checkout=True):
+    async with _zimmer(setup_engine, belegt=True, gesperrt=True, bis_checkout=True) as a:
         gesetzt = await http_client.post(
             f"/api/v1/rooms/{a.room_id}/overrides",
             json={"setpoint": "23", "source": "frontend_24h"},
@@ -516,7 +568,7 @@ async def test_die_liste_nennt_den_grund_wenn_kein_boost_geht(
     Regelkette stehen. Die Oberflaeche zeigt ihn als Tooltip und als
     ``sr-only``-Text.
     """
-    async for a in _zimmer(setup_engine, nacht=None):
+    async with _zimmer(setup_engine, nacht=None) as a:
         zeile = await _zeile(http_client, a.room_id)
         assert zeile["boost_moeglich"] is False
         assert zeile["boost_grund"] == "kein_nachtfenster"
