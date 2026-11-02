@@ -75,6 +75,28 @@ verschwiegen.
 | Doppelte als Empfang gezählt | Einheiten-Test |
 | `--seit` als UTC gelesen | Einheiten-Test (eine Stunde Versatz) |
 
+### Was CI gefunden hat und der lokale Lauf nicht
+
+**Eine neue Anfrage auf einer geteilten Seite bringt jede Spec-Datei
+dieser Seite zu Fall.** Die Kachel fragt auf **jeder** Geräteseite
+`GET /devices/{id}/paketverlust`, und der Rückhalt in
+`tests/e2e/fixtures.ts` lässt keine ungemockte API-Anfrage durch — mit
+Absicht, denn ungemockt ginge sie über den Rewrite an heizung-test. Die
+eigene Spec hatte ihren Mock, die neun anderen nicht: **23 Fehlschläge
+in vier Dateien**, und lokal unsichtbar, weil ich nur die neue Datei
+laufen ließ.
+
+Behoben mit einem **Standard** in der Hülle, wie bei `/auth/me`: eine
+Liste, die jede künftige Spec mitpflegen muss, läuft lautlos
+auseinander. Die Grenze steht daneben und ist eng — einen Standard
+bekommt nur, was **lesend** ist, auf **jeder** Seite einer Art vorkommt
+und keinen Zustand trägt. Alles, was etwas ändert, bekommt keinen: ein
+Test, der eine Mutation nicht mockt, soll umfallen.
+
+**Die Lehre für mich ist die Reihenfolge**: nach einer Änderung an einer
+geteilten Seite ist der **ganze** e2e-Lauf die Prüfung, nicht die neue
+Datei. 312 Tests, 2,7 Minuten.
+
 ### Nebenbei nachgezogen
 
 Der Handbuch-Artikel „Thermostate" behauptete, der Relais-Pfad sei
