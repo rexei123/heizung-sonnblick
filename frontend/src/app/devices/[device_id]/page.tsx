@@ -141,6 +141,13 @@ export default function DeviceDetailPage() {
                   <HardwareStatusBadge
                     deviceId={device.id}
                     isPool={device.heating_zone_id === null}
+                    rolle={
+                      device.kind === "relay"
+                        ? "relais"
+                        : device.measure_only
+                          ? "fuehler"
+                          : "thermostat"
+                    }
                     variant="detailed"
                   />
                 </div>
