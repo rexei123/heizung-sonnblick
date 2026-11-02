@@ -75,6 +75,10 @@ export const QUELLE_LABEL: Record<string, string> = {
   raumtyp: "Raumtyp",
   global: "hausweit",
   raumtyp_vorgabe: "Raumtyp (Vorgabe)",
+  // Der Weg ist ein anderer als bei „Raumtyp": die Werte gelten für
+  // die **Bad-Zonen aller Zimmer** (`rules.engine._bad_zielwert`),
+  // nicht für Zimmer dieses Typs — den gibt es mit 0 Zimmern.
+  bad_vorlage: "Bad-Vorlage",
 };
 
 export async function fetchWirksamkeit(): Promise<WirksamkeitRaumtyp[]> {

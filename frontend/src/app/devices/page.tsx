@@ -483,6 +483,7 @@ function DeviceRow({ device: d }: { device: Device }) {
         <HardwareStatusBadge
           deviceId={d.id}
           isPool={d.heating_zone_id === null}
+          rolle={d.kind === "relay" ? "relais" : d.measure_only ? "fuehler" : "thermostat"}
           variant="detailed"
         />
         {/*

@@ -36,6 +36,13 @@ export function ThermostatBubble({ device }: { device: Device }) {
           <HardwareStatusBadge
             deviceId={device.id}
             isPool={device.heating_zone_id === null}
+            rolle={
+              device.kind === "relay"
+                ? "relais"
+                : device.measure_only
+                  ? "fuehler"
+                  : "thermostat"
+            }
             variant="compact"
           />
         </div>
