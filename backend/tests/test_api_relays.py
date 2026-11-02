@@ -689,3 +689,95 @@ async def test_die_geraeteseite_sieht_den_laufenden_auftrag(
 
     assert antwort.status_code == 200, antwort.text
     assert antwort.json()["provisionierung_laeuft"] is True
+
+
+# ---------------------------------------------------------------------------
+# Der unbestaetigte Befehl auf der Geraeteseite (02.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_ohne_offenen_befehl_steht_dort_nichts(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.status_code == 200, antwort.text
+    assert antwort.json()["offener_befehl"] is None
+
+
+async def test_ein_offener_befehl_wird_ausgewiesen(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: Any,
+) -> None:
+    """**Der Zustand, der bis zum 02.11.2026 keinen Leser hatte.**
+
+    Ein Relais, das seit Stunden keine Bestaetigung liefert, stand als
+    Alarm im Log und sonst nirgends -- und das Log liest niemand ohne
+    Anlass (Paragraph 5.76).
+    """
+    seit = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    await _setze_offen(setup_engine, aufbau.relais_id, ziel_ein=True, seit=seit, versuche=2)
+
+    offen = (await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")).json()[
+        "offener_befehl"
+    ]
+
+    assert offen["ziel_ein"] is True
+    assert offen["versuche"] == 2
+    assert offen["gemeldet"] is False, "zwei Versuche sind unter relay_max_versuche"
+
+
+async def test_gemeldet_kommt_aus_den_settings_und_nicht_aus_der_oberflaeche(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: Any,
+) -> None:
+    """Die Schwelle steht in ``relay_max_versuche``, Vorgabe 3.
+
+    Sie **hier** abzuleiten und nicht im Frontend ist dieselbe
+    Entscheidung wie bei den Batterie-Stufen (Paragraph 5.73): eine
+    zweite Kenntnis der Schwelle in der Oberflaeche waere beim ersten
+    Nachjustieren falsch.
+    """
+    seit = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    await _setze_offen(setup_engine, aufbau.relais_id, ziel_ein=False, seit=seit, versuche=5)
+
+    offen = (await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")).json()[
+        "offener_befehl"
+    ]
+
+    assert offen["ziel_ein"] is False
+    assert offen["versuche"] == 5
+    assert offen["gemeldet"] is True, "ueber relay_max_versuche: der Alarm ist heraus"
+
+    # Die Grenze von beiden Seiten. Bei **genau** drei Versuchen geht der
+    # Alarm in diesem Durchlauf erst hinaus; "gemeldet" heisst, dass er
+    # schon heraus ist, und das ist der Zaehler danach. Ohne diese Zeile
+    # waere ">=" statt ">" nicht zu unterscheiden.
+    await _setze_offen(setup_engine, aufbau.relais_id, ziel_ein=False, seit=seit, versuche=3)
+    grenze = (await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")).json()[
+        "offener_befehl"
+    ]
+    assert grenze["gemeldet"] is False, "bei genau max_versuche geht der Alarm erst hinaus"
+
+
+async def _setze_offen(
+    engine: Any,
+    device_id: int,
+    *,
+    ziel_ein: bool,
+    seit: datetime,
+    versuche: int,
+) -> None:
+    """Schreibt einen offenen Stand, wie der Orchestrator ihn hinterlaesst."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text(
+                "UPDATE device SET pending_target_on = :z, pending_since = :s, "
+                "pending_attempts = :v WHERE id = :d"
+            ),
+            {"z": ziel_ein, "s": seit, "v": versuche, "d": device_id},
+        )
+        await session.commit()
