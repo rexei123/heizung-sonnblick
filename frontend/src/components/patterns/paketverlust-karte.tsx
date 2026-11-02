@@ -54,6 +54,25 @@ export function PaketverlustKarte({ deviceId }: { deviceId: number }) {
 
   const v = abfrage.data;
 
+  // **Eine Kachel darf die Seite nicht mitnehmen.**
+  //
+  // Der Befund kam aus CI (02.11.2026): zwölf Tests der Geräteseite
+  // fielen um, weil ihr Catch-all-Mock `[]` für diesen Weg liefert.
+  // `[].anteil_prozent` ist `undefined`, `undefined.toFixed()` wirft, und
+  // die ganze Seite bleibt leer — in den Tests fehlte dann die Karte, die
+  // sie eigentlich prüfen.
+  //
+  // Der Mock ist nicht die Lehre, sondern der Anlass: eine Antwort, die
+  // nicht zum Typ passt, kommt im Betrieb genauso vor (alter Server,
+  // halber Deploy, Proxy-Fehlerseite). Geprüft wird deshalb der **Typ
+  // zur Laufzeit** und nicht nur beim Übersetzen — die Annotation gilt
+  // für den Code, nicht für die Antwort.
+  const anteil = typeof v?.anteil_prozent === "number" ? v.anteil_prozent : null;
+  const zahlenDa =
+    typeof v?.verloren === "number" &&
+    typeof v?.erwartet === "number" &&
+    typeof v?.stunden === "number";
+
   return (
     <div
       className="bg-surface rounded-lg border border-border p-4"
@@ -68,19 +87,15 @@ export function PaketverlustKarte({ deviceId }: { deviceId: number }) {
 
       <div className="mt-2">
         <p
-          className={`text-base font-medium ${ton(v?.anteil_prozent ?? null)}`}
+          className={`text-base font-medium ${ton(anteil)}`}
           data-testid="paketverlust-anteil"
         >
-          {abfrage.isLoading
-            ? "…"
-            : v?.anteil_prozent === null || v === undefined
-              ? "—"
-              : `${v.anteil_prozent.toFixed(1)} %`}
+          {abfrage.isLoading ? "…" : anteil === null ? "—" : `${anteil.toFixed(1)} %`}
         </p>
 
-        {v !== undefined && (
+        {zahlenDa && v !== undefined && (
           <p className="text-text-tertiary text-xs mt-1" data-testid="paketverlust-hinweis">
-            {v.anteil_prozent === null ? (
+            {anteil === null ? (
               <>
                 Unter zwei Frames in {v.stunden} h — noch keine Lücke zu sehen.
                 Das ist nicht 0 %.
@@ -88,13 +103,13 @@ export function PaketverlustKarte({ deviceId }: { deviceId: number }) {
             ) : (
               <>
                 {v.verloren} von {v.erwartet} Frames fehlen, {v.stunden} h
-                {v.bis !== null && <> · zuletzt {formatRelative(v.bis)}</>}
+                {typeof v.bis === "string" && <> · zuletzt {formatRelative(v.bis)}</>}
               </>
             )}
           </p>
         )}
 
-        {v !== undefined && v.neustarts > 0 && (
+        {typeof v?.neustarts === "number" && v.neustarts > 0 && (
           <p className="text-text-tertiary text-xs mt-1" data-testid="paketverlust-neustarts">
             {v.neustarts === 1 ? "Ein Neustart" : `${v.neustarts} Neustarts`} des
             Zählers — nicht als Verlust gerechnet.

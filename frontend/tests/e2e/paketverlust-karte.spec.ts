@@ -154,6 +154,29 @@ test.describe("Paketverlust auf der Geräteseite", () => {
     );
   });
 
+  test("eine Antwort, die nicht zum Typ passt, nimmt die Seite nicht mit", async ({
+    page,
+  }) => {
+    // **Der Befund aus CI vom 02.11.2026.** Zwölf Tests der Geräteseite
+    // fielen um, weil ihr Catch-all-Mock `[]` für diesen Weg liefert:
+    // `[].anteil_prozent` ist `undefined`, `undefined.toFixed()` wirft,
+    // und die ganze Seite blieb leer.
+    //
+    // Der Mock war der Anlass, nicht die Lehre — eine Antwort, die nicht
+    // zum Typ passt, kommt im Betrieb genauso vor (alter Server, halber
+    // Deploy, Proxy-Fehlerseite). Eine Kachel darf die Seite nicht
+    // mitnehmen.
+    await mockSeite(page, LEER);
+    await page.route(/.*\/api\/v1\/devices\/9\/paketverlust(\?.*)?$/, (r: Route) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+    await page.goto("/devices/9");
+
+    await expect(page.getByTestId("paketverlust-anteil")).toHaveText("—");
+    // Und der Rest der Seite steht: das ist die eigentliche Prüfung.
+    await expect(page.getByTestId("relay-card")).toBeVisible();
+  });
+
   test("eine Rücksetzung des Zählers wird als Neustart ausgewiesen", async ({ page }) => {
     await mockSeite(page, {
       empfangen: 12,
