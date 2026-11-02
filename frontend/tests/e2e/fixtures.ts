@@ -63,7 +63,11 @@ export const STANDARD_ADMIN = {
   last_login_at: "2026-10-14T06:00:00Z",
 };
 
-export const test = basis.extend<{ ungemockteApiAnfragen: void; angemeldet: void }>({
+export const test = basis.extend<{
+  ungemockteApiAnfragen: void;
+  angemeldet: void;
+  paketverlustStandard: void;
+}>({
   /**
    * Rückhalt: eine API-Anfrage, die kein Mock abdeckt, verlässt den
    * Browser nicht — und der Test fällt mit dem Pfad in der Meldung.
@@ -137,6 +141,63 @@ export const test = basis.extend<{ ungemockteApiAnfragen: void; angemeldet: void
           "API_PROXY_TARGET gegangen (tests/proxy-ziel.ts). Jede dieser " +
           "Routen braucht ein page.route() im Test.",
       ).toEqual([]);
+    },
+    { auto: true },
+  ],
+
+  /**
+   * Standard-Antwort für den Paketverlust einer Geräteseite (02.11.2026).
+   *
+   * **Der Anlass.** Die Kachel „Paketverlust" fragt auf **jeder**
+   * Geräteseite `GET /devices/{id}/paketverlust`. Mit dem Rückhalt oben
+   * heißt das: neun Spec-Dateien, die eine Geräteseite öffnen, fallen um
+   * — nicht weil sie etwas Falsches prüfen, sondern weil die Seite eine
+   * Anfrage mehr stellt. Im Lauf vom 02.11.2026 waren es 23 Fehlschläge
+   * in vier Dateien.
+   *
+   * **Warum ein Standard und nicht neun Mocks.** Eine Liste, die jede
+   * künftige Spec-Datei mitpflegen muss, läuft auseinander — und zwar
+   * lautlos, weil das Vergessen erst in CI auffällt. Derselbe Grund wie
+   * bei `/auth/me` darunter: der Normalfall gehört in die Hülle, die
+   * Ausnahme in den Test.
+   *
+   * **Die Grenze dieses Musters, und sie ist eng:** hier darf nur
+   * stehen, was **lesend** ist, auf **jeder** Seite einer Art
+   * vorkommt und **keinen Zustand** trägt, den ein Test prüfen könnte.
+   * Alles, was etwas ändert, bekommt niemals einen Standard — ein Test,
+   * der eine Mutation nicht mockt, soll umfallen.
+   *
+   * Ein eigener `page.route()` im Test gewinnt gegen diesen hier
+   * (Playwright nimmt die zuletzt registrierte Route zuerst), und
+   * `paketverlust-karte.spec.ts` nutzt das.
+   */
+  paketverlustStandard: [
+    async ({ page, ungemockteApiAnfragen }, use) => {
+      void ungemockteApiAnfragen;
+
+      await page.route(/.*\/api\/v1\/devices\/\d+\/paketverlust(\?.*)?$/, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            // Ein Gerät ohne Lücke und mit zu wenigen Frames: die Kachel
+            // zeigt dann einen Strich. Absichtlich der unauffälligste
+            // Zustand — ein Standard soll keinem Test eine Zahl
+            // unterschieben, auf die er nicht gefasst ist.
+            empfangen: 1,
+            erwartet: 1,
+            verloren: 0,
+            anteil_prozent: null,
+            neustarts: 0,
+            doppelt: 0,
+            ohne_zaehler: 0,
+            stunden: 24,
+            von: null,
+            bis: null,
+          }),
+        }),
+      );
+      await use();
     },
     { auto: true },
   ],

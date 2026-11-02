@@ -9442,3 +9442,129 @@ Fragen ist am Tisch in Minuten beantwortet und an der Wand in Stunden.
 wird einmal gemessen (am Gerät auf dem Tisch), die **Rücklesungen** aber
 je Gerät — sie sind eine Einstellung im Gerät und keine Eigenschaft des
 Typs.
+
+## 10au. Funkqualität am Endplatz auswerten (Relais 109, ab 02.11.2026)
+
+**Wofür.** 109 steht seit **Montag, 02.11.2026, etwa 07:05** am Endplatz
+in der Dose am Eingang — nur Zuleitung, kein Panel, zurückgenommen. Nach
+12 bis 24 Stunden entscheidet die Messung, ob das Relais-Profil ein
+eigenes ADR-Plugin bekommt (DR3, `nbTrans` 2).
+
+**Warum erst jetzt.** Die Messung vom 01.11. (rund 30 % Verlust, RSSI
+−106 bis −113 dBm) entstand, als das Relais noch nicht in der Dose saß.
+Eine Datenrate gegen eine provisorische Position zu wählen heißt, gegen
+die falsche Zahl zu optimieren.
+
+### Schritt 1 — Verlust aus den Zähler-Lücken
+
+**SSH (heizung-test, root):**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --geraet 109 --seit "2026-11-02 07:05"
+```
+
+`--seit` ist **Ortszeit**. Das Werkzeug liest nur; es hat keinen
+`--ausführen`-Schalter, weil es nichts sendet.
+
+*Erwartet:* eine Zeile mit `empf.`, `erw.`, `verl.`, `Verlust`,
+`Neust.`, erster und letzter Meldung. Zum Vergleich daneben die Vickis:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --seit "2026-11-02 07:05"
+```
+
+**Der Vergleich ist die eigentliche Aussage.** Ein Verlust von 10 % am
+Relais heißt wenig, wenn die Vickis im selben Zeitraum 8 % haben — dann
+ist es das Haus und nicht die Dose.
+
+*Was die Zahlen heißen:*
+
+| Spalte | Bedeutung |
+|---|---|
+| `empf.` | angekommene Meldungen (Doppelte einmal) |
+| `erw.` | gesendete Meldungen, aus der Spanne der Zähler |
+| `Verlust` | `verl. / erw.`, eine Stelle |
+| `Neust.` | Rücksetzungen des Zählers. **Kein Verlust** |
+| `—` im Verlust | unter zwei Meldungen im Fenster. **Nicht 0 %** |
+
+Dieselbe Zahl steht auf der **Geräteseite** in der Kachel
+„Paketverlust", dort für die letzten 24 Stunden.
+
+### Schritt 2 — RSSI, SNR und die Datenrate aus ChirpStack
+
+**Für Relais speichern wir diese drei nicht.** `sensor_reading` führt
+`rssi_dbm` und `snr_db`, `relay_reading` nicht, und die Datenrate
+speichern wir für **kein** Gerät. In der Ausgabe von Schritt 1 stehen
+dort deshalb Striche.
+
+*Oberfläche ChirpStack:* **Applications → heizung → Devices → 109 →
+Reiter mit den Metriken.** Dort stehen je Stunde:
+
+| Diagramm | was ablesen |
+|---|---|
+| Received / Errors | Zahl der Uplinks je Stunde, Einbrüche sichtbar |
+| RSSI | der Mittelwert je Stunde, Bereich über das Fenster |
+| SNR | dito |
+| **DR** | Verteilung der Datenraten. **Die Zahl für die Entscheidung** |
+
+**Was in DR zu sehen sein muss:** steht dort durchgehend `5` (also SF7),
+obwohl RSSI unter −110 dBm liegt, ist das der strukturelle Befund —
+ChirpStacks Standard-Algorithmus **senkt die Datenrate nie**, er erhöht
+sie nur. Dann hilft kein Nachjustieren am Gerät, sondern nur ein eigener
+Algorithmus für das Profil.
+
+### Schritt 3 — die Entscheidung
+
+| Befund | Weg |
+|---|---|
+| Verlust **unter 5 %** und RSSI besser als −105 dBm | nichts tun. Die Dose ist gut genug |
+| Verlust **5 bis 15 %** | ADR-Plugin im Rotationsfenster (Mittwoch), DR3 ohne `nbTrans` |
+| Verlust **über 15 %** | ADR-Plugin mit DR3 **und** `nbTrans 2`; zusätzlich prüfen, ob die Dose anders liegen kann |
+| Vickis haben denselben Verlust | kein Relais-Problem. Gateway und Standort prüfen, nicht das Profil |
+
+**Das Plugin wird nicht zwischendurch ausgerollt.** Es ist eine Datei auf
+dem Server plus eine Zeile in `chirpstack.toml` plus ein Neustart von
+ChirpStack — das gehört in das Rotationsfenster am Mittwoch und nicht in
+einen laufenden Betriebstag.
+
+### Die Notfall-Option, die nicht ausgeführt wird
+
+Es gibt einen Weg **ohne** Server-Eingriff, und er steht hier als
+Rückfall, nicht als Plan: zwei Gerätebefehle, die der Betreiber selbst
+über ChirpStack → 109 → Queue einträgt, **beide fPort 1, unconfirmed**,
+**in dieser Reihenfolge**:
+
+| # | Hex | Bedeutung | Rücklesung |
+|---|---|---|---|
+| 1 | `1C 00 18` | Wachhund für **bestätigte** Uplinks **aus** | `1D` → erwartet `1D 00 18` |
+| 2 | `11 01` | Uplinks **bestätigt** — das Gerät wiederholt ohne ACK | `1B` → erwartet `1B 01` |
+
+**Schritt 1 ist nicht optional, und er muss zuerst kommen.** Der Wachhund
+in Byte 1 zählt bestätigte Uplinks ohne ACK und führt danach einen
+**Neustart des Geräts** aus; Werkswert `02`, also nach zwei
+unbestätigten Uplinks plus sieben Minuten. Bei 30 % Verlust stellt man
+damit ein Gerät ein, das sich regelmäßig selbst neu startet.
+
+**Die Datenrate ändert dieser Weg nicht** — DR5 bleibt. Er behebt den
+Verlust durch Wiederholung, nicht durch einen besseren Link, und er
+verdoppelt bis verdreifacht die Sendezeit des Geräts. Beide
+Einstellungen überstehen Neustart und Rejoin (Geräte-Einstellungen,
+keine Session-Parameter), aber **keinen** Werksreset.
+
+**Kein Befehl ohne Freigabe des Betreibers.**
+
+### Was hier nicht steht, weil es nicht existiert
+
+**Es gibt keinen 16ASPM-Befehl für ADR, Datenrate, Spreizfaktor oder
+Sendeleistung.** Die Hersteller-Seite „network-related settings"
+dokumentiert vier Befehle: `0x10`/`0x19` (Join-Wiederholung),
+`0x1C`/`0x1D` (Funk-Wachhund), `0x11`/`0x1B` (Uplink-Art) und `0xA4`
+(Region, nur lesbar). Und ChirpStacks Warteschlange nimmt
+Anwendungs-Nutzlasten — `LinkADRReq` ist ein MAC-Befehl, den der Server
+selbst schickt; er lässt sich dort nicht eintippen.
+
+**Querverweise:** §10at (109 ohne Last in Gang bringen), AE-78 §14 (der
+Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`.
+
