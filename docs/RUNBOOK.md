@@ -6384,7 +6384,7 @@ cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
 ```
 
 - **`STAGE`** entscheidet, welche Caddy-Datei gilt
-  (`Caddyfile.${STAGE}`, `docker-compose.prod.yml:338`). Davon hängt C3
+  (`Caddyfile.${STAGE}`, `docker-compose.prod.yml:338`, Stand 02.11.2026). Davon hängt C3
   ab. Steht dort etwas anderes als `test` oder `main`, bricht der
   Caddy-Start — dann melden, nicht rotieren.
 - **`SMTP_ENABLED`** entscheidet, ob C1 überhaupt etwas tut. Steht dort
@@ -6396,7 +6396,7 @@ cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
 
 | Wert | Warum |
 |---|---|
-| `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:339`), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
+| `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:330`, Stand 02.11.2026), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
 | `CHIRPSTACK_BASIC_AUTH_HASH` — **Entscheidung vom 21.10.** | Es bleibt bei **keiner** zusätzlichen Basic-Auth vor ChirpStack. Der Wert verschwindet aus Compose und `.env.example`, der Kommentar in `Caddyfile.test` wird korrigiert — eigener kleiner PR **nach** diesem (B-22-4). |
 | `CHIRPSTACK_API_SECRET`, MQTT-Werte, DB-Passwörter, `SECRET_KEY` | Teil 1, am 20.10. erledigt. |
 | `PIN_SHA` | Kein Geheimnis, sondern der Rückfallpunkt (§10u). |
@@ -6442,15 +6442,30 @@ nicht sieht, fällt das erst beim Versand auf.
 **Prüfen — mit einer echten Mail über den echten Pfad:**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T api python - <<'PY'
-from heizung.services.mailer import send_mail
-r = send_mail(recipient=None, subject="Rotation Teil 2 — Probe", body="Wenn diese Mail ankommt, stimmt SMTP_PASSWORD.")
-print("ok" if r.ok else f"FEHLER: {r.error}")
-PY
+docker exec deploy-api-1 python -m heizung.scripts.send_test_mail
 ```
 
-`recipient=None` nimmt die Alarm-Adresse aus `global_config` — dieselbe,
-die ein echter Alarm nehmen würde. Erwartung: `ok`, und die Mail kommt an.
+Ohne `--to` geht die Nachricht an die Alarm-Adresse aus den Einstellungen
+(`global_config.alert_email`) — dieselbe, die ein echter Alarm nimmt. Der
+Befehl zeigt vorher die wirksame SMTP-Einstellung **ohne das Passwort**,
+schreibt danach die drei Versandfelder auf `global_config` (also genau
+das, was die Oberfläche zeigt) und berührt **keine** Wiederholungsbremse.
+Erwartung: `[OK]`, und die Mail kommt an.
+
+> **Korrektur vom 02.11.2026, und sie gehört hierher, weil sie die
+> Prüfung selbst betraf.** Hier stand ein Python-Schnipsel mit
+> `send_mail(recipient=None, …)` und `r.ok` / `r.error`. Drei Fehler in
+> vier Zeilen: `MailResult` hat `sent`, `reason` und `detail` und
+> **kein** `ok` — der Aufruf wäre mit `AttributeError` abgebrochen;
+> `recipient=None` heißt in `mailer.send_mail` ausdrücklich „kein
+> Empfänger eingetragen" und löst **keine** Auflösung der Alarm-Adresse
+> aus, es wäre also nie eine Mail hinausgegangen; und das Werkzeug, das
+> genau diesen Handgriff kann, gab es schon.
+>
+> Nichts davon wäre beim Rotieren aufgefallen — der Befehl hätte einen
+> Fehler geworfen, und der sieht aus wie ein SMTP-Problem. §5.79 in
+> Reinform: eine Prüfanweisung ist eine Aussage über den Code, den sie
+> aufruft, und sie verfällt mit ihm.
 
 **Dazu der Zustand, den die Oberfläche zeigt** (Einstellungen → API &
 Webhooks):
@@ -6556,7 +6571,7 @@ die Oberfläche nicht.
 **Zwei Fallen, beide schon im Repo vermerkt:**
 
 **1. Der Hash enthält `$`, und die müssen in der `.env` verdoppelt
-werden.** `docker-compose.prod.yml:340` sagt es: „bcrypt-Hash, doppelte
+werden.** `docker-compose.prod.yml:334` sagt es (Stand 02.11.2026): „bcrypt-Hash, doppelte
 `$$` in `.env` wegen Compose-Interpolation". `caddy hash-password` gibt
 `$2a$14$…` aus; in die `.env` gehört `$$2a$$14$$…`.
 
@@ -6850,6 +6865,57 @@ Steht dort ein Fehler, ist §5.7 der erste Verdacht (`safe.directory`).
 — Basic-Auth mit dem **neuen** Passwort aus C3, Anmeldung, Dashboard mit
 Zahlen. Steht dort „Wert nicht verfügbar“, ist der `api`-Container nicht
 bereit.
+
+### C7 — alte Backups löschen (02.11.2026)
+
+**Erst wenn die Prüfliste oben vollständig grün ist.** Die Backups sind
+der Rückweg jedes Blocks; sie zu löschen, während noch eine Prüfung
+offen ist, nimmt genau das weg, was man dann braucht.
+
+**Was gelöscht wird, und nur das:** die `.env`- und
+`passwd`-Sicherungen, die bei den Rotationen entstanden sind. Nicht die
+Datenbank-Backups (§10q) und nicht der Snapshot.
+
+**Erst zeigen, dann löschen** — zwei getrennte Befehle, weil der erste
+die Liste ist, die man liest:
+
+```bash
+ls -la /opt/heizung-sonnblick/infra/deploy/.env.bak-* /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-* 2>/dev/null
+```
+
+**Die jüngste Sicherung bleibt.** Sie ist der Rückweg für die Tage nach
+der Rotation — ein Wert, der erst beim nächsten Alarm auffällt (C1), ist
+drei Tage später noch zurückzuholen. Alles Ältere kann gehen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && ls -t .env.bak-* 2>/dev/null | tail -n +2
+cd /opt/heizung-sonnblick/infra/mosquitto/config && ls -t passwd.bak-* 2>/dev/null | tail -n +2
+```
+
+Diese zwei Befehle **zeigen**, was weg soll. Erst wenn die Liste stimmt:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && ls -t .env.bak-* 2>/dev/null | tail -n +2 | xargs -r shred -u
+cd /opt/heizung-sonnblick/infra/mosquitto/config && ls -t passwd.bak-* 2>/dev/null | tail -n +2 | xargs -r shred -u
+```
+
+**`shred -u` und nicht `rm`:** in diesen Dateien stehen die **alten**
+Geheimnisse im Klartext. Ein `rm` gibt die Blöcke frei und löscht den
+Inhalt nicht — bei einem Wert, der gerade deshalb rotiert wurde, weil er
+sichtbar war, ist das der falsche Abschluss.
+
+**Prüfen:**
+
+```bash
+ls -la /opt/heizung-sonnblick/infra/deploy/.env.bak-* /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-* 2>/dev/null | wc -l
+```
+
+Erwartung: **2** (je eine jüngste Sicherung). Steht dort 0, ist auch die
+jüngste weg — das ist kein Schaden am Betrieb, aber der Rückweg fehlt,
+und das gehört notiert.
+
+**Rückweg:** keiner. Das ist der Punkt des Blocks, und deshalb steht er
+zuletzt.
 
 ### Rückweg, wenn SSH nicht wiederkommt
 
@@ -9295,3 +9361,373 @@ Fragen ist am Tisch in Minuten beantwortet und an der Wand in Stunden.
 wird einmal gemessen (am Gerät auf dem Tisch), die **Rücklesungen** aber
 je Gerät — sie sind eine Einstellung im Gerät und keine Eigenschaft des
 Typs.
+
+## 10au. Funkqualität am Endplatz auswerten (Relais 109, ab 02.11.2026)
+
+**Wofür.** 109 steht seit **Montag, 02.11.2026, etwa 07:05** am Endplatz
+in der Dose am Eingang — nur Zuleitung, kein Panel, zurückgenommen. Nach
+12 bis 24 Stunden entscheidet die Messung, ob das Relais-Profil ein
+eigenes ADR-Plugin bekommt (DR3, `nbTrans` 2).
+
+**Warum erst jetzt.** Die Messung vom 01.11. (rund 30 % Verlust, RSSI
+−106 bis −113 dBm) entstand, als das Relais noch nicht in der Dose saß.
+Eine Datenrate gegen eine provisorische Position zu wählen heißt, gegen
+die falsche Zahl zu optimieren.
+
+### Schritt 1 — Verlust aus den Zähler-Lücken
+
+**SSH (heizung-test, root):**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --geraet 109 --seit "2026-11-02 07:05"
+```
+
+`--seit` ist **Ortszeit**. Das Werkzeug liest nur; es hat keinen
+`--ausführen`-Schalter, weil es nichts sendet.
+
+*Erwartet:* eine Zeile mit `empf.`, `erw.`, `verl.`, `Verlust`,
+`Neust.`, erster und letzter Meldung. Zum Vergleich daneben die Vickis:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --seit "2026-11-02 07:05"
+```
+
+**Der Vergleich ist die eigentliche Aussage.** Ein Verlust von 10 % am
+Relais heißt wenig, wenn die Vickis im selben Zeitraum 8 % haben — dann
+ist es das Haus und nicht die Dose.
+
+*Was die Zahlen heißen:*
+
+| Spalte | Bedeutung |
+|---|---|
+| `empf.` | angekommene Meldungen (Doppelte einmal) |
+| `erw.` | gesendete Meldungen, aus der Spanne der Zähler |
+| `Verlust` | `verl. / erw.`, eine Stelle |
+| `Neust.` | Rücksetzungen des Zählers. **Kein Verlust** |
+| `—` im Verlust | unter zwei Meldungen im Fenster. **Nicht 0 %** |
+
+Dieselbe Zahl steht auf der **Geräteseite** in der Kachel
+„Paketverlust", dort für die letzten 24 Stunden.
+
+### Schritt 2 — RSSI, SNR und die Datenrate aus ChirpStack
+
+**Für Relais speichern wir diese drei nicht.** `sensor_reading` führt
+`rssi_dbm` und `snr_db`, `relay_reading` nicht, und die Datenrate
+speichern wir für **kein** Gerät. In der Ausgabe von Schritt 1 stehen
+dort deshalb Striche.
+
+*Oberfläche ChirpStack:* **Applications → heizung → Devices → 109 →
+Reiter mit den Metriken.** Dort stehen je Stunde:
+
+| Diagramm | was ablesen |
+|---|---|
+| Received / Errors | Zahl der Uplinks je Stunde, Einbrüche sichtbar |
+| RSSI | der Mittelwert je Stunde, Bereich über das Fenster |
+| SNR | dito |
+| **DR** | Verteilung der Datenraten. **Die Zahl für die Entscheidung** |
+
+**Was in DR zu sehen sein muss:** steht dort durchgehend `5` (also SF7),
+obwohl RSSI unter −110 dBm liegt, ist das der strukturelle Befund —
+ChirpStacks Standard-Algorithmus **senkt die Datenrate nie**, er erhöht
+sie nur. Dann hilft kein Nachjustieren am Gerät, sondern nur ein eigener
+Algorithmus für das Profil.
+
+### Schritt 3 — die Entscheidung
+
+| Befund | Weg |
+|---|---|
+| Verlust **unter 5 %** und RSSI besser als −105 dBm | nichts tun. Die Dose ist gut genug |
+| Verlust **5 bis 15 %** | ADR-Plugin im Rotationsfenster (Mittwoch), DR3 ohne `nbTrans` |
+| Verlust **über 15 %** | ADR-Plugin mit DR3 **und** `nbTrans 2`; zusätzlich prüfen, ob die Dose anders liegen kann |
+| Vickis haben denselben Verlust | kein Relais-Problem. Gateway und Standort prüfen, nicht das Profil |
+
+**Das Plugin wird nicht zwischendurch ausgerollt.** Es ist eine Datei auf
+dem Server plus eine Zeile in `chirpstack.toml` plus ein Neustart von
+ChirpStack — das gehört in das Rotationsfenster am Mittwoch und nicht in
+einen laufenden Betriebstag.
+
+### Die Notfall-Option, die nicht ausgeführt wird
+
+Es gibt einen Weg **ohne** Server-Eingriff, und er steht hier als
+Rückfall, nicht als Plan: zwei Gerätebefehle, die der Betreiber selbst
+über ChirpStack → 109 → Queue einträgt, **beide fPort 1, unconfirmed**,
+**in dieser Reihenfolge**:
+
+| # | Hex | Bedeutung | Rücklesung |
+|---|---|---|---|
+| 1 | `1C 00 18` | Wachhund für **bestätigte** Uplinks **aus** | `1D` → erwartet `1D 00 18` |
+| 2 | `11 01` | Uplinks **bestätigt** — das Gerät wiederholt ohne ACK | `1B` → erwartet `1B 01` |
+
+**Schritt 1 ist nicht optional, und er muss zuerst kommen.** Der Wachhund
+in Byte 1 zählt bestätigte Uplinks ohne ACK und führt danach einen
+**Neustart des Geräts** aus; Werkswert `02`, also nach zwei
+unbestätigten Uplinks plus sieben Minuten. Bei 30 % Verlust stellt man
+damit ein Gerät ein, das sich regelmäßig selbst neu startet.
+
+**Die Datenrate ändert dieser Weg nicht** — DR5 bleibt. Er behebt den
+Verlust durch Wiederholung, nicht durch einen besseren Link, und er
+verdoppelt bis verdreifacht die Sendezeit des Geräts. Beide
+Einstellungen überstehen Neustart und Rejoin (Geräte-Einstellungen,
+keine Session-Parameter), aber **keinen** Werksreset.
+
+**Kein Befehl ohne Freigabe des Betreibers.**
+
+### Was hier nicht steht, weil es nicht existiert
+
+**Es gibt keinen 16ASPM-Befehl für ADR, Datenrate, Spreizfaktor oder
+Sendeleistung.** Die Hersteller-Seite „network-related settings"
+dokumentiert vier Befehle: `0x10`/`0x19` (Join-Wiederholung),
+`0x1C`/`0x1D` (Funk-Wachhund), `0x11`/`0x1B` (Uplink-Art) und `0xA4`
+(Region, nur lesbar). Und ChirpStacks Warteschlange nimmt
+Anwendungs-Nutzlasten — `LinkADRReq` ist ein MAC-Befehl, den der Server
+selbst schickt; er lässt sich dort nicht eintippen.
+
+**Querverweise:** §10at (109 ohne Last in Gang bringen), AE-78 §14 (der
+Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`.
+
+## 10av. ADR-Plugin für das Relais-Profil einbauen (vorbereitet, Stand 02.11.2026)
+
+**Nur ausführen, wenn die Messung aus §10au es verlangt** (Verlust über
+5 % am Relais **und** deutlich niedriger bei den Vickis). Der Einbau
+gehört in das Rotationsfenster am Mittwoch, nicht in einen laufenden
+Betriebstag: ChirpStack muss dafür neu starten, und daran hängen rund
+hundert Vickis.
+
+**Was die Datei tut.** `DR3` (SF9) festnageln, jeden Uplink zweimal
+senden (`nbTrans 2`), volle Sendeleistung — **nur** für Geräte mit dem
+Profil „Relais 16ASPM". Die Begründung steht im Kopf der Datei
+`infra/chirpstack/configuration/adr-plugins/relais-feste-datenrate.js`.
+
+**Warum überhaupt ein Plugin.** Es gibt im 16ASPM-Befehlssatz **keinen**
+Befehl für ADR, Datenrate, Spreizfaktor oder Sendeleistung, und
+ChirpStacks Warteschlange nimmt Anwendungs-Nutzlasten — `LinkADRReq` ist
+ein MAC-Befehl, den der Server selbst schickt. Dazu: ADR läuft nur, wenn
+das Gerät das ADR-Bit setzt, und der Standard-Algorithmus **senkt die
+Datenrate nie**. Das ist der strukturelle Grund, warum 109 auf DR5
+festhängt.
+
+**Warum nicht `region_eu868.toml`.** `min_dr`/`max_dr` dort gelten
+**regionsweit**, also für alle hundert Vickis. Das Plugin wird dagegen je
+**Geräteprofil** zugewiesen.
+
+### Schritt 1 — zwei Zeilen im Repo, ein PR
+
+Die Plugin-Datei liegt schon im Repo und ist durch CI geprüft
+(`infra/chirpstack/tests/test_adr_plugin_relais.py`). Fehlen nur die zwei
+Zeilen, die sie **aktiv** machen — und die bewusst noch nicht da sind:
+
+**a)** `infra/chirpstack/configuration/chirpstack.toml`, im Abschnitt
+`[network]`:
+
+```toml
+adr_plugins=[
+  "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
+]
+```
+
+**b)** `infra/deploy/docker-compose.prod.yml`, im Init-Sidecar
+`chirpstack-init`, hinter die beiden `envsubst`-Zeilen:
+
+```sh
+cp -r /template/adr-plugins /output/
+```
+
+**Diese zweite Zeile ist der Punkt, an dem es sonst scheitert.** Der
+Sidecar rendert nur `chirpstack.toml` und `region_eu868.toml` in das
+Volume, das ChirpStack als `/etc/chirpstack` sieht. Ohne das `cp` steht
+der Pfad in der Konfiguration und die Datei ist im Container nicht da —
+und ChirpStack sagt dazu **nichts Aussagekräftiges**.
+
+*Erwartet:* CI grün, PR gemergt, Deploy auf heizung-test gelaufen.
+
+### Schritt 2 — nachsehen, ob ChirpStack läuft
+
+**SSH (heizung-test, root):**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps chirpstack
+```
+
+Das `-f` ist nicht optional (§5.0, §5.78).
+
+*Erwartet:* `running`. Steht dort `restarting`, ist das Plugin oder der
+Pfad falsch — **Rückweg sofort**, siehe unten.
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+    logs --tail 50 chirpstack
+```
+
+### Schritt 3 — das Plugin dem Profil zuweisen
+
+*Oberfläche ChirpStack:* **Device profiles → „Relais 16ASPM" → ADR
+algorithm**. Dort muss jetzt
+**„Relais 16ASPM: feste Datenrate DR3, zwei Wiederholungen"** in der
+Auswahl stehen.
+
+**Steht es nicht in der Liste, hat ChirpStack die Datei nicht geladen.**
+Das ist der einzige verlässliche Hinweis darauf; eine Fehlermeldung gibt
+es nicht. Dann zurück zu Schritt 1b.
+
+Auswählen, speichern. **Die Vickis bleiben unberührt** — ihr Profil
+behält „Default ADR algorithm".
+
+### Schritt 4 — Wirkung prüfen, nicht Mechanik
+
+Die Zuweisung allein beweist nichts (§5.76). Geprüft wird an den
+**nächsten Uplinks**:
+
+*Oberfläche ChirpStack:* **Devices → 109 → Metriken → DR.**
+
+*Erwartet:* innerhalb von zwei bis drei Keepalive-Zyklen (also rund 30
+Minuten) steht dort `3` statt `5`. Der Server schickt den `LinkADRReq`
+mit dem nächsten Downlink-Fenster; bei Class C ist das schnell.
+
+Danach §10au Schritt 1 erneut laufen lassen und den Verlust vergleichen:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --geraet 109 --stunden 2
+```
+
+*Erwartet:* der Verlust fällt deutlich. Fällt er **nicht**, ist der Link
+nicht das Problem — dann liegt es an der Dose, am Gateway oder am Haus,
+und das Plugin gehört zurückgenommen, weil es dann nur Sendezeit kostet.
+
+### Rückweg
+
+**Der schnelle:** im Geräteprofil den ADR-Algorithmus zurück auf
+**„Default ADR algorithm"**. Wirkt sofort für das Profil, braucht keinen
+Neustart. Die Datenrate zieht der Standard-Algorithmus wieder hoch,
+sobald der Link es erlaubt.
+
+**Der vollständige:** die beiden Zeilen aus Schritt 1 zurücknehmen (ein
+Revert des PR), Deploy abwarten, ChirpStack läuft dann wieder ohne
+Plugin.
+
+**Wenn ChirpStack nach dem Deploy nicht startet**, ist der schnelle Weg
+nicht verfügbar — dann zählt nur der Revert. Deshalb steht Schritt 2 vor
+Schritt 3 und nicht danach.
+
+### Was dabei zu wissen ist
+
+**`nbTrans 2` verdoppelt die Sendezeit des Geräts.** Bei DR3 und
+Keepalive alle zehn Minuten sind das 3,2 s/h, also 0,09 % — die
+1-%-Grenze ist nicht in Sicht. Sendezeit ist hier kein Argument.
+
+**Ein Downlink in RX1 nimmt die Datenrate des Uplinks**, wird also von
+51 ms auf 165 ms langsamer. Das bleibt weit unter den 1319 ms, die ein
+Class-C-Downlink über RX2 bei DR0/SF12 ohnehin kostet.
+
+**Für 108 gilt dasselbe ohne weiteres Zutun**: das Plugin hängt am
+Profil, nicht am Gerät.
+
+**Querverweise:** §10au (die Messung, von der das abhängt), §10at (109
+ohne Last), AE-78 §14, `docs/status/2026-11-02-adr-plugin.md`.
+
+
+## 10aw. Rotation Teil 2: die Laufliste für den 04.11.2026
+
+**Was das hier ist.** Die Blöcke stehen in §10ab Teil 2 mit allen
+Befehlen und Begründungen; sie werden hier **nicht wiederholt** — zwei
+Fassungen desselben Befehls sind eine Fehlerquelle und keine Hilfe
+(§5.53). Diese Seite ist die **Reihenfolge**, die Zeitfenster, die
+Abbruchregeln und das, was sich seit dem geplanten Termin vom 27.10.
+geändert hat.
+
+### Nachgeprüft am 02.11.2026 gegen `develop`
+
+Ein Audit gilt für den Stand, den es gesehen hat (§5.79). Geprüft wurde
+jede Aussage von §10ab Teil 2, die auf Code oder Konfiguration zeigt:
+
+| Geprüft | Befund |
+|---|---|
+| `SMTP_*`-Namen in `config.Settings` | unverändert (`smtp_enabled`, `_host`, `_port`, `_user`, `_password`, `_from`, `_security`) |
+| `OCCUPANCY_IMPORT_TOKEN` | unverändert |
+| `HOTEL_BASIC_AUTH_HASH`, `STAGE` | unverändert, Compose-Zeilen 333 und 338 |
+| **C1-Prüfung** | **war falsch** — korrigiert, siehe unten |
+| Zeilennummern in Compose | leicht verschoben (330/333/338 statt 338/339/340), in §10ab nachgezogen |
+| `gateway-ug65` (C4) | weiter in `mosquitto/config/acl` und `passwd.example` — der Block bleibt nötig |
+| `CHIRPSTACK_BASIC_AUTH_HASH` | **weiter in Compose (`:330`) und `.env.example` (`:52`)**, und der irreführende Kommentar in `Caddyfile.test:5` steht auch noch. B-22-4 ist **nicht** erledigt — unverändert **kein** Teil dieser Rotation |
+| genau **eine** `basicauth`-Regel in `Caddyfile.test` (`:47`) | bestätigt: der ChirpStack-Host hat keine, C5 ist der einzige Schutz davor |
+
+**Die eine Korrektur, und sie ist die wichtigste Zeile dieser Seite.**
+Die Prüfung in C1 rief `send_mail(recipient=None, …)` und las `r.ok`.
+`MailResult` hat kein `ok` (sondern `sent`, `reason`, `detail`), und
+`recipient=None` heißt im Mailer „kein Empfänger eingetragen" — es wäre
+nie eine Mail hinausgegangen, und der `AttributeError` hätte wie ein
+SMTP-Problem gewirkt. C1 prüft jetzt mit
+`python -m heizung.scripts.send_test_mail`, dem Werkzeug, das es für
+genau diesen Handgriff schon gab.
+
+### Reihenfolge und Zeitfenster
+
+| | Block | Fenster | Dauer |
+|---|---|---|---|
+| **0** | Schritt 0.0 bis 0.6 aus §10ab **Teil 1** (tmux, Stand, Backup, Deploy-Sperre, Helfer `SQL`/`ENV_NEU`, Ausgangsmessung) | vorher | 10 min |
+| **0.3** | Namensliste und die zwei Werte `STAGE` / `SMTP_ENABLED` (§10ab Teil 2) | vorher | 5 min |
+| **C1** | SMTP-Passwort | jederzeit | 10 min |
+| **C2** | `OCCUPANCY_IMPORT_TOKEN` | **nach 08:30, fertig vor 15:30** | 10 min |
+| **C3** | `HOTEL_BASIC_AUTH_HASH` | jederzeit | 10 min |
+| **C4** | `gateway-ug65` entfernen | jederzeit | 10 min |
+| **C5** | ChirpStack-Admin (C5.1 **zuerst**, dann C5.2) | jederzeit | 10 min |
+| **C6** | apt-Updates und Neustart, danach die Prüfliste | **zuletzt** | 20 min |
+| **C7** | alte Backups löschen | **nach** grüner Prüfliste | 5 min |
+
+**Das einzige echte Zeitfenster ist C2** (§10ai: drei Listen um 08:30,
+15:30, 19:30). Vormittags ist es bequem offen. Alles andere hat keinen
+Zeitbezug — **außer C6**, das zuletzt kommt, weil ein Neustart beiläufig
+prüft, ob die rotierten Werte einen Kaltstart überstehen.
+
+### Vier Regeln, in jedem Schritt
+
+1. **`ENV_NEU` vor jedem `docker compose`** — auch in den Rückwegen.
+   Begründung in §10ab Teil 1, „Die Env-Falle": ohne den Helfer nimmt
+   Compose die Shell-Umgebung und erzeugt Container mit **alten**
+   Werten, ohne etwas zu melden. Dazu `--no-deps` an jedem
+   `force-recreate`.
+2. **Je Schritt eine Prüfung und ein Rückweg**, und beide stehen in
+   §10ab Teil 2 beim Block. Wer einen Block ohne seine Prüfung
+   verlässt, hat ihn nicht gemacht.
+3. **Keine Werte auf dem Bildschirm.** Kein `cat .env`, kein `echo` des
+   neuen Werts, kein `grep` mit sichtbarem Wert — die Prüfungen in §10ab
+   sind so geschrieben, dass sie **Eigenschaften** zeigen (ein `grep -c`
+   auf die `$$`-Verdopplung, ein Zähler, ein Zeitstempel) und nicht
+   Inhalte. Der Anlass ist der Screenshot vom 19.09.2026, der diese
+   ganze Rotation ausgelöst hat. Neue Werte gehen in den
+   Passwort-Manager, nicht in die Shell-History.
+4. **Kein `do-release-upgrade`.** C6 macht `apt-get update`,
+   `apt-get -y upgrade`, `apt-get -y autoremove` — Pakete der
+   **laufenden** Ubuntu-Fassung. Ein Distributions-Upgrade ist ein
+   anderer Vorgang mit anderem Risiko (Python-Fassung, Docker,
+   systemd-Units) und gehört nicht in einen Rotations-Termin. Auch
+   nicht `full-upgrade`/`dist-upgrade`: das darf Pakete **entfernen**,
+   um Abhängigkeiten aufzulösen, und was es entfernt, sieht man erst
+   danach.
+
+### Abbrechen ist erlaubt, und zwar blockweise
+
+Nach **jedem** Block ist ein sauberer Halt möglich: die Werte sind
+unabhängig voneinander, und jeder Block hat seinen Rückweg. Was **nicht**
+geht, ist C2 halb — Token auf dem Server, aber nicht bei mailparser. Der
+Block hat deshalb eine feste Reihenfolge (erzeugen, bei mailparser
+eintragen, Server, bei mailparser speichern), und sie ist dort begründet.
+
+**Wenn etwas unklar ist: abbrechen und melden.** Für C5.2 steht es
+ausdrücklich im Block („wer die Stelle nicht findet, bricht ab und
+meldet"), und es gilt für alle: ein halber Rückweg ist derselbe Fehler
+wie ein halber Vorwärtsschritt.
+
+### Was nach der Rotation offen bleibt
+
+| | |
+|---|---|
+| **B-22-4** | Der Kommentar in `Caddyfile.test:5` behauptet eine Basic-Auth vor ChirpStack, die es nicht gibt — §5.77 in der sicherheitsrelevanten Richtung. Dazu `CHIRPSTACK_BASIC_AUTH_HASH` in Compose und `.env.example`, ohne Leser. Eigener kleiner PR, **nicht** nebenbei im Termin |
+| **§10a.1** | legt `gateway-ug65` beim Einrichten an. Solange das so steht, kommt der User beim nächsten Neuaufbau zurück — gehört in denselben PR wie C4 |
+
+**Querverweise:** §10ab (Teil 1 und Teil 2 — die Blöcke selbst), §10ai
+(die drei Belegungslisten), §10p (Deploy-Sperre), §10q (DB-Backups, von
+C7 **nicht** berührt), §10u (Rückfall auf einen Stand), §5.79 (ein Audit
+gilt für den Stand, den es gesehen hat).
