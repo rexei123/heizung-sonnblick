@@ -9421,3 +9421,143 @@ selbst schickt; er lässt sich dort nicht eintippen.
 **Querverweise:** §10at (109 ohne Last in Gang bringen), AE-78 §14 (der
 Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`.
 
+## 10av. ADR-Plugin für das Relais-Profil einbauen (vorbereitet, Stand 02.11.2026)
+
+**Nur ausführen, wenn die Messung aus §10au es verlangt** (Verlust über
+5 % am Relais **und** deutlich niedriger bei den Vickis). Der Einbau
+gehört in das Rotationsfenster am Mittwoch, nicht in einen laufenden
+Betriebstag: ChirpStack muss dafür neu starten, und daran hängen rund
+hundert Vickis.
+
+**Was die Datei tut.** `DR3` (SF9) festnageln, jeden Uplink zweimal
+senden (`nbTrans 2`), volle Sendeleistung — **nur** für Geräte mit dem
+Profil „Relais 16ASPM". Die Begründung steht im Kopf der Datei
+`infra/chirpstack/configuration/adr-plugins/relais-feste-datenrate.js`.
+
+**Warum überhaupt ein Plugin.** Es gibt im 16ASPM-Befehlssatz **keinen**
+Befehl für ADR, Datenrate, Spreizfaktor oder Sendeleistung, und
+ChirpStacks Warteschlange nimmt Anwendungs-Nutzlasten — `LinkADRReq` ist
+ein MAC-Befehl, den der Server selbst schickt. Dazu: ADR läuft nur, wenn
+das Gerät das ADR-Bit setzt, und der Standard-Algorithmus **senkt die
+Datenrate nie**. Das ist der strukturelle Grund, warum 109 auf DR5
+festhängt.
+
+**Warum nicht `region_eu868.toml`.** `min_dr`/`max_dr` dort gelten
+**regionsweit**, also für alle hundert Vickis. Das Plugin wird dagegen je
+**Geräteprofil** zugewiesen.
+
+### Schritt 1 — zwei Zeilen im Repo, ein PR
+
+Die Plugin-Datei liegt schon im Repo und ist durch CI geprüft
+(`infra/chirpstack/tests/test_adr_plugin_relais.py`). Fehlen nur die zwei
+Zeilen, die sie **aktiv** machen — und die bewusst noch nicht da sind:
+
+**a)** `infra/chirpstack/configuration/chirpstack.toml`, im Abschnitt
+`[network]`:
+
+```toml
+adr_plugins=[
+  "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
+]
+```
+
+**b)** `infra/deploy/docker-compose.prod.yml`, im Init-Sidecar
+`chirpstack-init`, hinter die beiden `envsubst`-Zeilen:
+
+```sh
+cp -r /template/adr-plugins /output/
+```
+
+**Diese zweite Zeile ist der Punkt, an dem es sonst scheitert.** Der
+Sidecar rendert nur `chirpstack.toml` und `region_eu868.toml` in das
+Volume, das ChirpStack als `/etc/chirpstack` sieht. Ohne das `cp` steht
+der Pfad in der Konfiguration und die Datei ist im Container nicht da —
+und ChirpStack sagt dazu **nichts Aussagekräftiges**.
+
+*Erwartet:* CI grün, PR gemergt, Deploy auf heizung-test gelaufen.
+
+### Schritt 2 — nachsehen, ob ChirpStack läuft
+
+**SSH (heizung-test, root):**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps chirpstack
+```
+
+Das `-f` ist nicht optional (§5.0, §5.78).
+
+*Erwartet:* `running`. Steht dort `restarting`, ist das Plugin oder der
+Pfad falsch — **Rückweg sofort**, siehe unten.
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
+    logs --tail 50 chirpstack
+```
+
+### Schritt 3 — das Plugin dem Profil zuweisen
+
+*Oberfläche ChirpStack:* **Device profiles → „Relais 16ASPM" → ADR
+algorithm**. Dort muss jetzt
+**„Relais 16ASPM: feste Datenrate DR3, zwei Wiederholungen"** in der
+Auswahl stehen.
+
+**Steht es nicht in der Liste, hat ChirpStack die Datei nicht geladen.**
+Das ist der einzige verlässliche Hinweis darauf; eine Fehlermeldung gibt
+es nicht. Dann zurück zu Schritt 1b.
+
+Auswählen, speichern. **Die Vickis bleiben unberührt** — ihr Profil
+behält „Default ADR algorithm".
+
+### Schritt 4 — Wirkung prüfen, nicht Mechanik
+
+Die Zuweisung allein beweist nichts (§5.76). Geprüft wird an den
+**nächsten Uplinks**:
+
+*Oberfläche ChirpStack:* **Devices → 109 → Metriken → DR.**
+
+*Erwartet:* innerhalb von zwei bis drei Keepalive-Zyklen (also rund 30
+Minuten) steht dort `3` statt `5`. Der Server schickt den `LinkADRReq`
+mit dem nächsten Downlink-Fenster; bei Class C ist das schnell.
+
+Danach §10au Schritt 1 erneut laufen lassen und den Verlust vergleichen:
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
+    --geraet 109 --stunden 2
+```
+
+*Erwartet:* der Verlust fällt deutlich. Fällt er **nicht**, ist der Link
+nicht das Problem — dann liegt es an der Dose, am Gateway oder am Haus,
+und das Plugin gehört zurückgenommen, weil es dann nur Sendezeit kostet.
+
+### Rückweg
+
+**Der schnelle:** im Geräteprofil den ADR-Algorithmus zurück auf
+**„Default ADR algorithm"**. Wirkt sofort für das Profil, braucht keinen
+Neustart. Die Datenrate zieht der Standard-Algorithmus wieder hoch,
+sobald der Link es erlaubt.
+
+**Der vollständige:** die beiden Zeilen aus Schritt 1 zurücknehmen (ein
+Revert des PR), Deploy abwarten, ChirpStack läuft dann wieder ohne
+Plugin.
+
+**Wenn ChirpStack nach dem Deploy nicht startet**, ist der schnelle Weg
+nicht verfügbar — dann zählt nur der Revert. Deshalb steht Schritt 2 vor
+Schritt 3 und nicht danach.
+
+### Was dabei zu wissen ist
+
+**`nbTrans 2` verdoppelt die Sendezeit des Geräts.** Bei DR3 und
+Keepalive alle zehn Minuten sind das 3,2 s/h, also 0,09 % — die
+1-%-Grenze ist nicht in Sicht. Sendezeit ist hier kein Argument.
+
+**Ein Downlink in RX1 nimmt die Datenrate des Uplinks**, wird also von
+51 ms auf 165 ms langsamer. Das bleibt weit unter den 1319 ms, die ein
+Class-C-Downlink über RX2 bei DR0/SF12 ohnehin kostet.
+
+**Für 108 gilt dasselbe ohne weiteres Zutun**: das Plugin hängt am
+Profil, nicht am Gerät.
+
+**Querverweise:** §10au (die Messung, von der das abhängt), §10at (109
+ohne Last), AE-78 §14, `docs/status/2026-11-02-adr-plugin.md`.
+
