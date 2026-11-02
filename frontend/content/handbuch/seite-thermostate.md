@@ -141,6 +141,30 @@ Knopf das Einschalten zurück — noch einmal zweimal kurz drücken. Im
 Betrieb braucht es den Knopf nicht; wer ein Panel warm haben will,
 nimmt die Übersteuerung im Programm, weil die ein Ende hat.
 
+### Zwei Zeilen auf der Relais-Karte, die leicht falsch gelesen werden
+
+**„Schaltzyklen der Steuerung"** zählt, was die Steuerung geschaltet und
+das Relais bestätigt hat — nicht, wie oft das Relais insgesamt
+geschaltet hat. Ein Druck auf den Knopf am Gerät und ein Befehl von Hand
+zählen dort nicht mit. Vor dem 02.11.2026 hieß die Zeile nur
+„Schaltzyklen" und versprach damit mehr, als sie zählt.
+
+**„Unbestätigter Befehl"** steht nur da, wenn gerade ein Schaltbefehl
+offen ist: das Relais hat ihn noch nicht bestätigt. Das ist für sich
+genommen normal — ein Befehl braucht einen Uplink, bis er bestätigt
+ist. Interessant wird die Zeile, wenn dort viele Versuche stehen:
+
+| Was dort steht | Was es heißt |
+|---|---|
+| „EIN, ein Versuch seit 10:42" | normal. Die Bestätigung ist unterwegs |
+| „AUS, 3 Versuche seit 10:20" | der Funk trägt schlecht. Die Steuerung wartet zwischen den Versuchen immer länger |
+| „… — gemeldet, wird nur noch gedrosselt wiederholt" | die Steuerung hat das im Protokoll gemeldet und versucht es nur noch alle halbe Stunde. **Hier lohnt ein Blick**, erst recht wenn es stundenlang so steht |
+
+**Dass die Versuche seltener werden, ist Absicht.** Jeder Funkbefehl
+kostet Sendezeit, und ein Gerät, das nicht antwortet, würde sonst jede
+Minute angefunkt. Aufgegeben wird aber nicht: sobald das Relais wieder
+zu hören ist, geht es weiter.
+
 ## Bezeichnung ändern
 
 Die Bezeichnung lässt sich in der Liste direkt bearbeiten; mit Escape

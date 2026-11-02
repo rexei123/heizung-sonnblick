@@ -38,6 +38,15 @@ wurde. Das ist dieselbe Trennung, die Sprint 20f zugrunde liegt: was wir
 gesendet haben, steht in ``control_command``; was am Geraet gilt, steht
 im Uplink. Bei Class C ist die Antwort schnell, aber nicht garantiert.
 
+**Und weil sie nicht garantiert ist, braucht die Wiederholung eine
+Bremse** (02.11.2026). Die Frist verdoppelt sich je Versuch und ist bei
+einer halben Stunde gekappt; nach ``max_versuche`` kommt **einmal** ein
+Alarm, danach laeuft die gedrosselte Wiederholung weiter. Endgueltig
+aufzugeben waere die naheliegende und falschere Variante: ein Geraet an
+der Funkgrenze verliert irgendwann drei Bestaetigungen in Folge, und der
+Waechter haette es damit dauerhaft stillgelegt — ohne dass am Geraet
+etwas kaputt ist. Einzelheiten in ``_frist``.
+
 Diese Datei entscheidet nur. Senden, Speichern und Alarmieren macht der
 Aufrufer — so bleiben S1 und S2 ohne Datenbank pruefbar.
 """
@@ -60,7 +69,8 @@ class WaechterAktion(enum.StrEnum):
     SENDE_AUS = "sende_aus"
     #: Es laeuft ein Befehl, auf dessen Bestaetigung noch gewartet wird.
     WARTE = "warte"
-    #: Nach ``max_versuche`` ohne Bestaetigung: melden, nicht weiter senden.
+    #: Nach ``max_versuche`` ohne Bestaetigung: **einmal** melden. Danach
+    #: wird weiter versucht, aber nur noch im Abstand ``backoff_max``.
     ALARM = "alarm"
     #: Nichts zu tun — der bestaetigte Zustand ist der gewuenschte.
     NICHTS = "nichts"
@@ -88,10 +98,14 @@ class WaechterSchwellen:
     timer_refresh: timedelta
     #: Abstand zwischen zwei Auffrischungen bei ``REFRESH``.
     refresh_abstand: timedelta
-    #: Wie lange auf eine Bestaetigung gewartet wird, bevor neu gesendet wird.
+    #: Wie lange auf eine Bestaetigung gewartet wird, bevor neu gesendet
+    #: wird — fuer den **ersten** Versuch. Danach verdoppelt sie sich.
     bestaetigungs_frist: timedelta
-    #: Nach so vielen erfolglosen Versuchen kommt der Alarm.
+    #: Nach so vielen erfolglosen Versuchen kommt der Alarm. Danach wird
+    #: weiter versucht, aber nur noch im Abstand ``backoff_max``.
     max_versuche: int
+    #: Obergrenze der Verdopplung. Mehr dazu in ``_frist``.
+    backoff_max: timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,39 +138,70 @@ def naechste_aktion(
 
     Reihenfolge, verbindlich:
 
-    1. **Offener Befehl** — erst die Bestaetigung, dann Neues.
-    2. **AUS gewuenscht** — Sicherheit vor Komfort, und AUS braucht
+    1. **Bestaetigung** — ein offener Befehl, den das Geraet gemeldet
+       hat, ist erledigt.
+    2. **Ein offener Befehl, der dem jetzigen Wunsch widerspricht, wird
+       nicht wiederholt** (02.11.2026, Punkt 3 der Freigabe). Er wird
+       uebergangen; die Wunsch-Regeln entscheiden, und der Aufrufer
+       ersetzt oder loescht den offenen Stand.
+    3. **Offener Befehl**, der zum Wunsch passt: Frist mit Backoff,
+       Alarm, Wiederholung.
+    4. **AUS gewuenscht** — Sicherheit vor Komfort, und AUS braucht
        keine Bedingung.
-    3. **Zustand unbekannt** — kein EIN.
-    4. **EIN gewuenscht** nach Strategie.
+    5. **Zustand unbekannt** — kein EIN.
+    6. **EIN gewuenscht** nach Strategie.
     """
     # 1. Ein abgesetzter Befehl wartet auf seine Bestaetigung.
-    if offen is not None:
-        if bestaetigt_ein is offen.ziel_ein:
-            # Bestaetigt. Der Aufrufer loescht ``offen`` und zaehlt bei
-            # einem EIN einen Schaltzyklus. Wir sagen hier nur, dass
-            # nichts mehr zu senden ist.
-            return Waechterbefehl(WaechterAktion.NICHTS, "bestaetigt")
+    if offen is not None and bestaetigt_ein is offen.ziel_ein:
+        # Bestaetigt. Der Aufrufer loescht ``offen`` und zaehlt bei einem
+        # EIN einen Schaltzyklus. Wir sagen hier nur, dass nichts mehr zu
+        # senden ist.
+        return Waechterbefehl(WaechterAktion.NICHTS, "bestaetigt")
 
-        if now - offen.seit < schwellen.bestaetigungs_frist:
+    # 2./3. Ein offener Befehl bremst nur, solange er noch gewollt ist.
+    #
+    # **Der Fall, der diese Bedingung noetig macht.** Ein EIN geht
+    # hinaus, das Geraet schaltet, der bestaetigende Uplink geht
+    # verloren (am Relais 109 gemessen: rund 30 % Verlust). Fuer uns ist
+    # das Relais damit AUS, waehrend es heizt — der Raum wird warm, der
+    # Zweipunktregler will AUS. Ohne diese Bedingung sieht der Waechter
+    # nur den offenen Befehl und **wiederholt das EIN**, also genau das,
+    # was niemand mehr will.
+    #
+    # Die Sorge, die in der ersten Fassung hinter dem Vorrang stand —
+    # zwei unbestaetigte Befehle koennten sich ueberlagern — bleibt
+    # unbegruendet: es gibt genau **einen** offenen Stand je Geraet, und
+    # er wird ersetzt, nicht ergaenzt. Die Versuchszaehlung beginnt beim
+    # Ersetzen von vorn, weil es ein anderer Befehl ist.
+    if offen is not None and offen.ziel_ein == gewuenscht_ein:
+        if now - offen.seit < _frist(offen.versuche, schwellen):
             return Waechterbefehl(WaechterAktion.WARTE, "frist_laeuft")
 
-        if offen.versuche >= schwellen.max_versuche:
+        if offen.versuche == schwellen.max_versuche:
+            # **Einmal** melden. Der Aufrufer zaehlt den Versuch hoch,
+            # ohne zu senden; der naechste Durchlauf landet unten in der
+            # gedrosselten Wiederholung und meldet nicht erneut.
             return Waechterbefehl(
                 WaechterAktion.ALARM,
                 f"keine_bestaetigung_nach_{offen.versuche}_versuchen",
             )
 
-        # Frist abgelaufen, Versuche noch offen: denselben Befehl erneut.
+        # Frist abgelaufen: denselben Befehl erneut. Jenseits von
+        # ``max_versuche`` ist das die gedrosselte Wiederholung — die
+        # Frist steht dann auf ``backoff_max``.
+        gedrosselt = "_gedrosselt" if offen.versuche > schwellen.max_versuche else ""
         if offen.ziel_ein:
             return Waechterbefehl(
                 WaechterAktion.SENDE_EIN,
-                f"wiederholung_{offen.versuche + 1}",
+                f"wiederholung{gedrosselt}_{offen.versuche + 1}",
                 sekunden=int(_timer(strategie, schwellen).total_seconds()),
             )
-        return Waechterbefehl(WaechterAktion.SENDE_AUS, f"wiederholung_{offen.versuche + 1}")
+        return Waechterbefehl(
+            WaechterAktion.SENDE_AUS,
+            f"wiederholung{gedrosselt}_{offen.versuche + 1}",
+        )
 
-    # 2. AUS gewuenscht.
+    # 4. AUS gewuenscht.
     if not gewuenscht_ein:
         if bestaetigt_ein is True:
             return Waechterbefehl(WaechterAktion.SENDE_AUS, "aus_gewuenscht")
@@ -166,11 +211,11 @@ def naechste_aktion(
         # Zwangs-AUS des Reglers, der einen bekannten Zustand sieht.
         return Waechterbefehl(WaechterAktion.NICHTS, "bereits_aus")
 
-    # 3. EIN gewuenscht, aber der Zustand ist unbekannt.
+    # 5. EIN gewuenscht, aber der Zustand ist unbekannt.
     if bestaetigt_ein is None:
         return Waechterbefehl(WaechterAktion.NICHTS, "zustand_unbekannt")
 
-    # 4. EIN gewuenscht.
+    # 6. EIN gewuenscht.
     if not bestaetigt_ein:
         return Waechterbefehl(
             WaechterAktion.SENDE_EIN,
@@ -200,6 +245,52 @@ def naechste_aktion(
             sekunden=int(schwellen.timer_refresh.total_seconds()),
         )
     return Waechterbefehl(WaechterAktion.NICHTS, "auffrischung_noch_nicht_faellig")
+
+
+def _frist(versuche: int, schwellen: WaechterSchwellen) -> timedelta:
+    """Wie lange nach dem ``versuche``-ten Versuch gewartet wird.
+
+    Verdopplung je Versuch, gekappt bei ``backoff_max``:
+
+    ======== ======
+    Versuche Frist
+    ======== ======
+    1        60 s
+    2        120 s
+    3        240 s
+    4        480 s
+    5        960 s
+    6+       1800 s (Kappung)
+    ======== ======
+
+    **Der Anlass ist eine Messung des Betreibers am 01.11.2026.** Zwischen
+    11:22 und 11:28 ging **jede Minute** ein Downlink an Relais 109 —
+    sieben Stueck, jeder bei SF12 ueber RX2 mit 1,32 Sekunden Sendezeit,
+    also rund neun Sekunden Sendezeit des Gateways in sieben Minuten. Die
+    feste Frist von 60 Sekunden lag damit genau auf dem Tick-Intervall:
+    jeder Durchlauf erzeugte einen Versuch.
+
+    **Dass ``max_versuche`` das nicht begrenzt hat, war der eigentliche
+    Befund.** Der Alarm loeschte den offenen Stand, und der naechste
+    Durchlauf begann die Zaehlung von vorn — ``max_versuche`` hat also nur
+    getaktet, wie oft ein Alarm kommt, und nichts begrenzt. Ein Melder,
+    der sich selbst zurueckstellt, ueberwacht nichts (§5.79).
+
+    Mit der Kappung bei einer halben Stunde bleibt ein unerreichbares
+    Geraet bei **einem** Downlink je 30 Minuten — 1,3 Sekunden Sendezeit,
+    statt 79 Sekunden wie bisher. In der ersten Stunde sind es sechs
+    Downlinks statt sechzig.
+    """
+    # **Der Exponent wird gekappt, nicht nur das Ergebnis.** Ein offener
+    # Stand lebt jetzt beliebig lange (der Alarm loescht ihn nicht mehr),
+    # und ``versuche`` waechst entsprechend. ``timedelta * 2**98``
+    # ueberlaeuft mit ``OverflowError: Python int too large to convert to
+    # C int`` — mitten im Schaltpfad, und das ``min`` danach kommt zu
+    # spaet. Gefunden hat das der Test mit 99 Versuchen; bei einem
+    # Downlink je halbe Stunde ist das nach zwei Tagen Funkstille
+    # erreicht. 20 ist weit jenseits jeder Kappung und sicher.
+    faktor: int = 2 ** min(max(0, versuche - 1), 20)
+    return min(schwellen.bestaetigungs_frist * faktor, schwellen.backoff_max)
 
 
 def _timer(strategie: WatchdogStrategy, schwellen: WaechterSchwellen) -> timedelta:
