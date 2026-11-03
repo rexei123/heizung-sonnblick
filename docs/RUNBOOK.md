@@ -6384,7 +6384,7 @@ cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
 ```
 
 - **`STAGE`** entscheidet, welche Caddy-Datei gilt
-  (`Caddyfile.${STAGE}`, `docker-compose.prod.yml:338`). Davon hängt C3
+  (`Caddyfile.${STAGE}`, `docker-compose.prod.yml:338`, Stand 02.11.2026). Davon hängt C3
   ab. Steht dort etwas anderes als `test` oder `main`, bricht der
   Caddy-Start — dann melden, nicht rotieren.
 - **`SMTP_ENABLED`** entscheidet, ob C1 überhaupt etwas tut. Steht dort
@@ -6396,7 +6396,7 @@ cd /opt/heizung-sonnblick/infra/deploy && grep -E '^(STAGE|SMTP_ENABLED)=' .env
 
 | Wert | Warum |
 |---|---|
-| `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:339`), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
+| `CHIRPSTACK_BASIC_AUTH_HASH` | **Wird nicht benutzt.** Compose übergibt ihn an Caddy (`:330`, Stand 02.11.2026), aber in `Caddyfile.test` steht er **nur in einem Kommentar** (Zeile 5) — keine einzige `basicauth`-Regel liest ihn, und der ChirpStack-Host-Block (ab Zeile 89) hat gar keine. In `Caddyfile.main` kommt der ChirpStack-Block überhaupt nicht vor. Siehe unten. |
 | `CHIRPSTACK_BASIC_AUTH_HASH` — **Entscheidung vom 21.10.** | Es bleibt bei **keiner** zusätzlichen Basic-Auth vor ChirpStack. Der Wert verschwindet aus Compose und `.env.example`, der Kommentar in `Caddyfile.test` wird korrigiert — eigener kleiner PR **nach** diesem (B-22-4). |
 | `CHIRPSTACK_API_SECRET`, MQTT-Werte, DB-Passwörter, `SECRET_KEY` | Teil 1, am 20.10. erledigt. |
 | `PIN_SHA` | Kein Geheimnis, sondern der Rückfallpunkt (§10u). |
@@ -6442,15 +6442,30 @@ nicht sieht, fällt das erst beim Versand auf.
 **Prüfen — mit einer echten Mail über den echten Pfad:**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T api python - <<'PY'
-from heizung.services.mailer import send_mail
-r = send_mail(recipient=None, subject="Rotation Teil 2 — Probe", body="Wenn diese Mail ankommt, stimmt SMTP_PASSWORD.")
-print("ok" if r.ok else f"FEHLER: {r.error}")
-PY
+docker exec deploy-api-1 python -m heizung.scripts.send_test_mail
 ```
 
-`recipient=None` nimmt die Alarm-Adresse aus `global_config` — dieselbe,
-die ein echter Alarm nehmen würde. Erwartung: `ok`, und die Mail kommt an.
+Ohne `--to` geht die Nachricht an die Alarm-Adresse aus den Einstellungen
+(`global_config.alert_email`) — dieselbe, die ein echter Alarm nimmt. Der
+Befehl zeigt vorher die wirksame SMTP-Einstellung **ohne das Passwort**,
+schreibt danach die drei Versandfelder auf `global_config` (also genau
+das, was die Oberfläche zeigt) und berührt **keine** Wiederholungsbremse.
+Erwartung: `[OK]`, und die Mail kommt an.
+
+> **Korrektur vom 02.11.2026, und sie gehört hierher, weil sie die
+> Prüfung selbst betraf.** Hier stand ein Python-Schnipsel mit
+> `send_mail(recipient=None, …)` und `r.ok` / `r.error`. Drei Fehler in
+> vier Zeilen: `MailResult` hat `sent`, `reason` und `detail` und
+> **kein** `ok` — der Aufruf wäre mit `AttributeError` abgebrochen;
+> `recipient=None` heißt in `mailer.send_mail` ausdrücklich „kein
+> Empfänger eingetragen" und löst **keine** Auflösung der Alarm-Adresse
+> aus, es wäre also nie eine Mail hinausgegangen; und das Werkzeug, das
+> genau diesen Handgriff kann, gab es schon.
+>
+> Nichts davon wäre beim Rotieren aufgefallen — der Befehl hätte einen
+> Fehler geworfen, und der sieht aus wie ein SMTP-Problem. §5.79 in
+> Reinform: eine Prüfanweisung ist eine Aussage über den Code, den sie
+> aufruft, und sie verfällt mit ihm.
 
 **Dazu der Zustand, den die Oberfläche zeigt** (Einstellungen → API &
 Webhooks):
@@ -6556,7 +6571,7 @@ die Oberfläche nicht.
 **Zwei Fallen, beide schon im Repo vermerkt:**
 
 **1. Der Hash enthält `$`, und die müssen in der `.env` verdoppelt
-werden.** `docker-compose.prod.yml:340` sagt es: „bcrypt-Hash, doppelte
+werden.** `docker-compose.prod.yml:334` sagt es (Stand 02.11.2026): „bcrypt-Hash, doppelte
 `$$` in `.env` wegen Compose-Interpolation". `caddy hash-password` gibt
 `$2a$14$…` aus; in die `.env` gehört `$$2a$$14$$…`.
 
@@ -6851,6 +6866,57 @@ Steht dort ein Fehler, ist §5.7 der erste Verdacht (`safe.directory`).
 Zahlen. Steht dort „Wert nicht verfügbar“, ist der `api`-Container nicht
 bereit.
 
+### C7 — alte Backups löschen (02.11.2026)
+
+**Erst wenn die Prüfliste oben vollständig grün ist.** Die Backups sind
+der Rückweg jedes Blocks; sie zu löschen, während noch eine Prüfung
+offen ist, nimmt genau das weg, was man dann braucht.
+
+**Was gelöscht wird, und nur das:** die `.env`- und
+`passwd`-Sicherungen, die bei den Rotationen entstanden sind. Nicht die
+Datenbank-Backups (§10q) und nicht der Snapshot.
+
+**Erst zeigen, dann löschen** — zwei getrennte Befehle, weil der erste
+die Liste ist, die man liest:
+
+```bash
+ls -la /opt/heizung-sonnblick/infra/deploy/.env.bak-* /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-* 2>/dev/null
+```
+
+**Die jüngste Sicherung bleibt.** Sie ist der Rückweg für die Tage nach
+der Rotation — ein Wert, der erst beim nächsten Alarm auffällt (C1), ist
+drei Tage später noch zurückzuholen. Alles Ältere kann gehen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && ls -t .env.bak-* 2>/dev/null | tail -n +2
+cd /opt/heizung-sonnblick/infra/mosquitto/config && ls -t passwd.bak-* 2>/dev/null | tail -n +2
+```
+
+Diese zwei Befehle **zeigen**, was weg soll. Erst wenn die Liste stimmt:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && ls -t .env.bak-* 2>/dev/null | tail -n +2 | xargs -r shred -u
+cd /opt/heizung-sonnblick/infra/mosquitto/config && ls -t passwd.bak-* 2>/dev/null | tail -n +2 | xargs -r shred -u
+```
+
+**`shred -u` und nicht `rm`:** in diesen Dateien stehen die **alten**
+Geheimnisse im Klartext. Ein `rm` gibt die Blöcke frei und löscht den
+Inhalt nicht — bei einem Wert, der gerade deshalb rotiert wurde, weil er
+sichtbar war, ist das der falsche Abschluss.
+
+**Prüfen:**
+
+```bash
+ls -la /opt/heizung-sonnblick/infra/deploy/.env.bak-* /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-* 2>/dev/null | wc -l
+```
+
+Erwartung: **2** (je eine jüngste Sicherung). Steht dort 0, ist auch die
+jüngste weg — das ist kein Schaden am Betrieb, aber der Rückweg fehlt,
+und das gehört notiert.
+
+**Rückweg:** keiner. Das ist der Punkt des Blocks, und deshalb steht er
+zuletzt.
+
 ### Rückweg, wenn SSH nicht wiederkommt
 
 **Nach drei Minuten ohne SSH nicht weiter warten.** Die
@@ -7095,10 +7161,14 @@ Die Pause steht in den Settings (`relay_provision_pause_s`, Vorgabe 15);
 und **unvollständig** — und eine fehlende Rücklesung sieht aus wie ein
 Gerät, das nicht antwortet.
 
-**Die 15 Sekunden sind abgeleitet, nicht gemessen.** Die beobachteten
-Antworten kamen 8 bzw. gut 70 Sekunden nach ihrem Befehl. Zeigt sich das
-an einem anderen Gerät anders, ist die Zahl die erste Stelle, an der man
-dreht — nicht der Mechanismus.
+**Die 15 Sekunden sind inzwischen belegt** (01.11.2026, drei
+Beobachtungen an 109): bei **5 Sekunden** Abstand kam nur **eine** von
+zwei Antworten, bei **15** kamen **alle fünf** der Provisionierung, bei
+**20** beide von zwei. Die Antwort selbst braucht rund **14 Sekunden** —
+das blockiert nichts, denn das Gerät hängt sie an den nächsten Uplink.
+Die Pause hält die **Befehle** auseinander und wartet nicht auf
+Antworten. Zeigt sich das an einem anderen Gerät anders, ist die Zahl die
+erste Stelle, an der man dreht — nicht der Mechanismus.
 
 **Und die Anleitung schweigt dazu.** Der Zustand nach Stromrückkehr ist
 in der Hersteller-Anleitung **nicht dokumentiert** (geprüft am 01.11.2026).
@@ -9118,6 +9188,25 @@ mit Ihrer Freigabe.
 > dokumentiert** (§10aj Schritt 4), wir wissen ihn also erst, wenn das
 > Gerät ihn gemeldet hat.
 
+> ### Ergebnis bis Schritt 5: **bestanden am 01.11.2026**
+>
+> | Schritt | Prüfung | Ergebnis |
+> |---|---|---|
+> | 1 | Codec einfügen | bestanden — Frame vollständig dekodiert, keine Fehlermeldung |
+> | 2 | beide Zustände lesen | `0x5F` → `off`, `0x5A` → `last_state` (**vor** dem Setzen) |
+> | 3 | Rücklesungen setzen | bestanden — `0x5A` kam um 10:28:28 mit `off`, beide bestätigt |
+> | 4 | **T3.0** | bestanden, Bedeutung **(b)**: Klick AUS nach 80 s, Wiederholung ~11:05. `REFRESH` darf freigegeben werden (AE-78 §4) |
+> | 5 | Stromausfalltest | bestanden — Sicherung ~10:31, Rejoin 10:31:48, Boot-Frame 10:34:39 mit `relayState OFF` |
+>
+> **Der Stromausfalltest ist der stärkste der fünf**, weil er die
+> Einstellung nicht zurückliest, sondern ihre **Wirkung** prüft: das
+> Gerät war stromlos und kam AUS zurück. Eine Rücklesung sagt, was im
+> Gerät steht; dieser Versuch sagt, was es tut (§5.76).
+>
+> **Drei Befunde aus dem Lauf sind in #362 und #363 behoben** — die
+> Rücklesung wurde nicht vermerkt, die zweite Antwort blieb aus, leere
+> Uplinks waren ein Fehler im Log. Einzelheiten in STATUS §2ct und §2cu.
+
 ### Schritt 1 — Codec einfügen und nachsehen
 
 *ChirpStack-Oberfläche.* Device profiles → Ihr 16ASPM-Profil → Tab
@@ -9282,6 +9371,130 @@ vorher etwas anderes gemeldet — dann ist der Befund die **Abweichung
 zwischen Rücklesung und Verhalten**, und das ist ein eigener Pflicht-Stop.
 
 *Rückweg:* `0xC1 00`.
+
+### Schritt 6 — zuordnen, in Betrieb nehmen, Taster, dann Panel
+
+**T3.0 ist bestanden** (01.11.2026, Bedeutung **(b)**, AE-78 §4). Damit
+ist 109 geprüft: Firmware 1.5, Stromrückkehr AUS — und zwar an einem
+**echten** Stromausfall belegt —, Überhitzungs-Erholung AUS, Timer-Ablauf
+gemessen. Ab hier geht es um den Betrieb.
+
+#### a) Zuordnen — Rezeption / Eingang
+
+*Software-Oberfläche.* **Zimmerseite „Rezeption" → Reiter „Geräte" →
+Knopf „Gerät zuordnen"** → 109 wählen, Zone **Eingang**.
+
+Die Liste zeigt dort nur Geräte **ohne Zone**; ein zugeordnetes Gerät
+taucht nicht auf. Der zweite Weg wäre der Pairing-Assistent unter
+`/devices/pair` (Gerät → Zimmer → Heizzone → Etikett) — der ist für die
+Montage von vielen gedacht, für ein einzelnes Gerät ist der Reiter
+kürzer.
+
+*Erwartet:* 109 steht im Reiter „Geräte" der Rezeption mit Zone
+„Eingang", und auf der Geräteseite steht die Zone.
+
+**Noch schaltet nichts.** `commissioned_at` ist leer, und ohne diesen
+Wert lässt `relay_service.darf_schalten` keinen Befehl hinaus (S3). Die
+Zuordnung allein ist also gefahrlos — das ist die Reihenfolge und kein
+Zufall.
+
+*Rückweg:* im selben Reiter trennen (Knopf „Gerät von Heizzone trennen").
+
+#### b) In Betrieb nehmen
+
+*Software-Oberfläche.* Geräteseite 109 → **In Betrieb nehmen**.
+
+*Erwartet:* es gelingt. Das Firmware-Tor sieht **1.5**, beide
+Rücklesungen sind bestätigt. Danach zeigt die Karte `darf schalten: ja`.
+
+Scheitert es mit **„Firmware unbekannt – Provisionieren wiederholen"**,
+ist die Version nicht in der Datenbank — dann einmal **Provisionieren**
+(läuft im Hintergrund, rund 75 Sekunden) und erneut versuchen.
+
+*Rückweg:* **Zurücknehmen** auf derselben Seite. Wichtig und leicht zu
+übersehen: das Zurücknehmen **schaltet das Relais nicht aus**; ein
+laufender Timer läuft ab. Wer sofort AUS will, nimmt den Taster oder den
+Befehl von Hand.
+
+#### c) Der Taster — und ob der Wächter ihn zurückholt
+
+**Vorher prüfen, was der Regler will.** Der Wächter schickt AUS nur,
+wenn der Zweipunktregler der Zone **AUS will**. Ist die Rezeption gerade
+unter ihrem Sollwert, will er EIN — dann bleibt das von Hand
+eingeschaltete Relais an, und der Versuch beweist nichts. Auf der
+Zonenkarte steht Soll und Ist; liegt das Ist **über** dem Soll (oder im
+Totband), ist der Augenblick richtig.
+
+*Vor Ort.* **Zweimal kurz** auf den Knopf → das Relais klickt EIN.
+Uhrzeit notieren.
+
+*Erwartet, in dieser Reihenfolge:*
+
+| Wann | Wo | Was |
+|---|---|---|
+| binnen Sekunden | Geräteseite 109 | **„Letzte Änderung durch: `manual_button`"** und Zustand EIN |
+| binnen ~60 s | Geräteseite 109 | Zustand **AUS**, und **„Letzte Änderung durch: `radio_set_or_flip`"** |
+
+**Die zwei Gründe nacheinander sind der Beweis.** `manual_button` heißt
+„jemand hat gedrückt", `radio_set_or_flip` heißt „ein Befehl hat
+geschaltet". Nur der Wechsel von einem zum anderen zeigt, dass die
+Steuerung den Handgriff gesehen **und** beantwortet hat; der Zustand AUS
+allein könnte auch ein abgelaufener Timer sein (`radio_timer`).
+
+**Dass das Gerät den Tastendruck von selbst meldet, steht im Codec**
+(`0x5d`) und ist seit dem 01.11.2026 auch in `relay_reading` als Grund
+gespeichert — vorher stand dort „ging an" ohne Grund.
+
+Bleibt es EIN, obwohl der Regler AUS wollte: melden. Dann sieht der
+Wächter den Zustand nicht, und das ist ein Befund, kein Handgriff.
+
+*Rückweg:* noch einmal zweimal drücken.
+
+#### d) Panel anschließen, Funktionstest mit Last
+
+**Erst jetzt.** *Vor Ort, Elektriker* — Klemmen `L`, `N`, `N`, `Lout`,
+und die Dose **nicht** neben oder über dem Panel (Betriebstemperatur
+0–40 °C, §10aj Schritt 0).
+
+*Erwartet beim ersten Einschalten:*
+
+| Größe | Erwartung | woran man es sieht |
+|---|---|---|
+| Leistung | rund **1600 W** | Geräteseite, „Leistung" |
+| Spannung | 225–235 V | dieselbe Karte |
+| Strom | rund 7000 mA | dieselbe Karte |
+| Gehäusetemperatur | **unter 40 °C** | Geräteseite; ohne Last stabil 35–37 °C |
+
+**Die Temperatur ist die Größe, die man im Auge behält**, und zwar nicht
+nur beim ersten Einschalten: ohne Last liegt 109 bei 35–37 °C, also schon
+im oberen Drittel des zulässigen Bereichs. Was eine Last daraus macht,
+ist die eigentliche Frage. Die Oberfläche warnt ab dem Wert aus den
+Settings (`relay_gehaeusetemperatur_alarm`, Vorgabe 40).
+
+Löst der Überhitzungsschutz aus, **sperrt das System das Relais** und nur
+ein Admin hebt die Sperre auf (S4). Das ist Absicht: das Gerät erholt
+sich von selbst, und ohne Sperre wäre der Vorfall nach einer Minute
+unsichtbar.
+
+*Rückweg:* Sicherung aus. Und auf der Geräteseite **Zurücknehmen**, damit
+der Regler nicht weiter schaltet — in dieser Reihenfolge, sonst schaltet
+er in eine stromlose Last.
+
+#### Dieselbe Liste für 108 (Bar)
+
+| Schritt | 109 | 108 |
+|---|---|---|
+| Zuordnen | Rezeption / Eingang | **Bar / Barbereich** |
+| T3.0 | bestanden, gilt für den **Typ** | **entfällt** — einmal gemessen |
+| Rücklesungen | bestätigt | **je Gerät neu** (§10aj Schritt 4) |
+| Stromausfalltest | bestanden | **je Gerät neu**, ohne Last |
+| Firmware | 1.5 | prüfen, **≥ 1.4** |
+
+**T3.0 wird nicht wiederholt** — gemessen wurde eine Eigenschaft der
+Firmware, nicht des einzelnen Geräts. **Die Rücklesungen schon**: sie
+sind eine Einstellung **im** Gerät, und 108 hat sie noch nie bekommen.
+Dasselbe gilt für den Stromausfalltest; er prüft, ob die Einstellung an
+diesem Stück Hardware sitzt.
 
 ### Erst danach: Panel anschließen
 
@@ -9594,3 +9807,244 @@ Profil, nicht am Gerät.
 **Querverweise:** §10au (die Messung, von der das abhängt), §10at (109
 ohne Last), AE-78 §14, `docs/status/2026-11-02-adr-plugin.md`.
 
+
+## 10aw. Rotation Teil 2: die Laufliste für den 04.11.2026
+
+**Was das hier ist.** Die Blöcke stehen in §10ab Teil 2 mit allen
+Befehlen und Begründungen; sie werden hier **nicht wiederholt** — zwei
+Fassungen desselben Befehls sind eine Fehlerquelle und keine Hilfe
+(§5.53). Diese Seite ist die **Reihenfolge**, die Zeitfenster, die
+Abbruchregeln und das, was sich seit dem geplanten Termin vom 27.10.
+geändert hat.
+
+### Nachgeprüft am 02.11.2026 gegen `develop`
+
+Ein Audit gilt für den Stand, den es gesehen hat (§5.79). Geprüft wurde
+jede Aussage von §10ab Teil 2, die auf Code oder Konfiguration zeigt:
+
+| Geprüft | Befund |
+|---|---|
+| `SMTP_*`-Namen in `config.Settings` | unverändert (`smtp_enabled`, `_host`, `_port`, `_user`, `_password`, `_from`, `_security`) |
+| `OCCUPANCY_IMPORT_TOKEN` | unverändert |
+| `HOTEL_BASIC_AUTH_HASH`, `STAGE` | unverändert, Compose-Zeilen 333 und 338 |
+| **C1-Prüfung** | **war falsch** — korrigiert, siehe unten |
+| Zeilennummern in Compose | leicht verschoben (330/333/338 statt 338/339/340), in §10ab nachgezogen |
+| `gateway-ug65` (C4) | weiter in `mosquitto/config/acl` und `passwd.example` — der Block bleibt nötig |
+| `CHIRPSTACK_BASIC_AUTH_HASH` | **weiter in Compose (`:330`) und `.env.example` (`:52`)**, und der irreführende Kommentar in `Caddyfile.test:5` steht auch noch. B-22-4 ist **nicht** erledigt — unverändert **kein** Teil dieser Rotation |
+| genau **eine** `basicauth`-Regel in `Caddyfile.test` (`:47`) | bestätigt: der ChirpStack-Host hat keine, C5 ist der einzige Schutz davor |
+
+**Die eine Korrektur, und sie ist die wichtigste Zeile dieser Seite.**
+Die Prüfung in C1 rief `send_mail(recipient=None, …)` und las `r.ok`.
+`MailResult` hat kein `ok` (sondern `sent`, `reason`, `detail`), und
+`recipient=None` heißt im Mailer „kein Empfänger eingetragen" — es wäre
+nie eine Mail hinausgegangen, und der `AttributeError` hätte wie ein
+SMTP-Problem gewirkt. C1 prüft jetzt mit
+`python -m heizung.scripts.send_test_mail`, dem Werkzeug, das es für
+genau diesen Handgriff schon gab.
+
+### Reihenfolge und Zeitfenster
+
+| | Block | Fenster | Dauer |
+|---|---|---|---|
+| **0** | Schritt 0.0 bis 0.6 aus §10ab **Teil 1** (tmux, Stand, Backup, Deploy-Sperre, Helfer `SQL`/`ENV_NEU`, Ausgangsmessung) | vorher | 10 min |
+| **0.3** | Namensliste und die zwei Werte `STAGE` / `SMTP_ENABLED` (§10ab Teil 2) | vorher | 5 min |
+| **C1** | SMTP-Passwort | jederzeit | 10 min |
+| **C2** | `OCCUPANCY_IMPORT_TOKEN` | **nach 08:30, fertig vor 15:30** | 10 min |
+| **C3** | `HOTEL_BASIC_AUTH_HASH` | jederzeit | 10 min |
+| **C4** | `gateway-ug65` entfernen | jederzeit | 10 min |
+| **C5** | ChirpStack-Admin (C5.1 **zuerst**, dann C5.2) | jederzeit | 10 min |
+| **C6** | apt-Updates und Neustart, danach die Prüfliste | **zuletzt** | 20 min |
+| **C7** | alte Backups löschen | **nach** grüner Prüfliste | 5 min |
+
+**Das einzige echte Zeitfenster ist C2** (§10ai: drei Listen um 08:30,
+15:30, 19:30). Vormittags ist es bequem offen. Alles andere hat keinen
+Zeitbezug — **außer C6**, das zuletzt kommt, weil ein Neustart beiläufig
+prüft, ob die rotierten Werte einen Kaltstart überstehen.
+
+### Das ADR-Plugin ist nicht Teil dieses Termins
+
+**Entscheidung des Betreibers vom 03.11.2026, nach der Messung aus
+§10au:** das Plugin wird **nicht** ausgerollt. Es bleibt vorbereitet und
+unverändert in §10av — die Datei liegt im Repo, die zwei Zeilen, die sie
+aktiv machen würden, sind weiter nicht gesetzt.
+
+**Der Grund steht in der Zahl.** 109 am Endplatz, 02.11. 07:05 bis
+03.11.: **137 von 140 Meldungen, 2,1 % Verlust, keine Rücksetzung des
+Zählers**. Die Vickis im selben Fenster 0 bis 1,4 %. Ein Plugin, das die
+Datenrate senkt und jeden Uplink doppelt sendet, hätte hier nichts zu
+beheben — und es kostet einen Neustart von ChirpStack, an dem rund
+hundert Vickis hängen.
+
+**Warum das hier steht, obwohl nie ein Block dafür geplant war.** Diese
+Laufliste hatte keinen Plugin-Schritt; der Einbau hing an §10av und an
+der Messung, nicht an dieser Rotation. Wer am Morgen des 04.11. nach dem
+Plugin sucht — es stand am 02.11. als „Mittwoch, falls die Messung es
+verlangt" im Raum —, findet hier die Antwort statt eine Lücke.
+
+### Vier Regeln, in jedem Schritt
+
+1. **`ENV_NEU` vor jedem `docker compose`** — auch in den Rückwegen.
+   Begründung in §10ab Teil 1, „Die Env-Falle": ohne den Helfer nimmt
+   Compose die Shell-Umgebung und erzeugt Container mit **alten**
+   Werten, ohne etwas zu melden. Dazu `--no-deps` an jedem
+   `force-recreate`.
+2. **Je Schritt eine Prüfung und ein Rückweg**, und beide stehen in
+   §10ab Teil 2 beim Block. Wer einen Block ohne seine Prüfung
+   verlässt, hat ihn nicht gemacht.
+3. **Keine Werte auf dem Bildschirm.** Kein `cat .env`, kein `echo` des
+   neuen Werts, kein `grep` mit sichtbarem Wert — die Prüfungen in §10ab
+   sind so geschrieben, dass sie **Eigenschaften** zeigen (ein `grep -c`
+   auf die `$$`-Verdopplung, ein Zähler, ein Zeitstempel) und nicht
+   Inhalte. Der Anlass ist der Screenshot vom 19.09.2026, der diese
+   ganze Rotation ausgelöst hat. Neue Werte gehen in den
+   Passwort-Manager, nicht in die Shell-History.
+4. **Kein `do-release-upgrade`.** C6 macht `apt-get update`,
+   `apt-get -y upgrade`, `apt-get -y autoremove` — Pakete der
+   **laufenden** Ubuntu-Fassung. Ein Distributions-Upgrade ist ein
+   anderer Vorgang mit anderem Risiko (Python-Fassung, Docker,
+   systemd-Units) und gehört nicht in einen Rotations-Termin. Auch
+   nicht `full-upgrade`/`dist-upgrade`: das darf Pakete **entfernen**,
+   um Abhängigkeiten aufzulösen, und was es entfernt, sieht man erst
+   danach.
+
+### Abbrechen ist erlaubt, und zwar blockweise
+
+Nach **jedem** Block ist ein sauberer Halt möglich: die Werte sind
+unabhängig voneinander, und jeder Block hat seinen Rückweg. Was **nicht**
+geht, ist C2 halb — Token auf dem Server, aber nicht bei mailparser. Der
+Block hat deshalb eine feste Reihenfolge (erzeugen, bei mailparser
+eintragen, Server, bei mailparser speichern), und sie ist dort begründet.
+
+**Wenn etwas unklar ist: abbrechen und melden.** Für C5.2 steht es
+ausdrücklich im Block („wer die Stelle nicht findet, bricht ab und
+meldet"), und es gilt für alle: ein halber Rückweg ist derselbe Fehler
+wie ein halber Vorwärtsschritt.
+
+### Was nach der Rotation offen bleibt
+
+| | |
+|---|---|
+| **B-22-4** | Der Kommentar in `Caddyfile.test:5` behauptet eine Basic-Auth vor ChirpStack, die es nicht gibt — §5.77 in der sicherheitsrelevanten Richtung. Dazu `CHIRPSTACK_BASIC_AUTH_HASH` in Compose und `.env.example`, ohne Leser. Eigener kleiner PR, **nicht** nebenbei im Termin |
+| **§10a.1** | legt `gateway-ug65` beim Einrichten an. Solange das so steht, kommt der User beim nächsten Neuaufbau zurück — gehört in denselben PR wie C4 |
+
+**Querverweise:** §10ab (Teil 1 und Teil 2 — die Blöcke selbst), §10ai
+(die drei Belegungslisten), §10p (Deploy-Sperre), §10q (DB-Backups, von
+C7 **nicht** berührt), §10u (Rückfall auf einen Stand), §10av (das
+ADR-Plugin — vorbereitet, nach der Messung vom 03.11. nicht ausgerollt),
+§5.79 (ein Audit gilt für den Stand, den es gesehen hat).
+
+## 10ax. Boost abnehmen (Oberfläche, nach dem Deploy)
+
+**Reine Oberflächen-Prüfung, kein SSH, keine Hardware.** Dauer rund 15
+Minuten. Jeder Schritt nennt, was zu sehen sein muss — und was es heißt,
+wenn dort etwas anderes steht.
+
+**Vorher:** der Deploy muss durch sein. Der Boost braucht Migration
+`0036` (Spalte und Quelle) **und** `0037` (der hausweite Wert 23,0).
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT version_num FROM alembic_version;"
+```
+
+*Erwartet:* `0037_boost_temperatur` oder später. Steht dort `0036_boost`,
+ist der Wert noch nicht gesetzt, und **jeder** Boost wird mit
+„Boost-Temperatur nicht eingestellt" abgewiesen — dann ist nicht der
+Boost kaputt, sondern die Migration nicht gelaufen.
+
+### Schritt 1 — ein belegtes Zimmer, der gute Fall
+
+*Software-Oberfläche, als **Administrator**.* **Zimmer** → ein belegtes
+Zimmer → Knopf **„Temperatur"**.
+
+| Was | Erwartung |
+|---|---|
+| Der Knopf | heißt **„Temperatur"**, ist drückbar |
+| Oben im Fenster | die Zeile **Boost** mit dem Knopf **„Boost bis HH:MM"** |
+| Die Uhrzeit | der **Nachtbeginn** des Zimmers (im Haus 22:00). Nach 22:00 steht dort das **Nachtende** |
+| Darunter | die gewohnte Temperatur-Eingabe je Heizzone |
+
+**Die Uhrzeit ist die eigentliche Prüfung.** Steht dort eine Zeit 24
+Stunden in der Zukunft, rechnet der Boost mit der falschen Regel; steht
+„Boost" ohne Zeit, kommt kein Ende aus dem Nachtfenster.
+
+*Jetzt drücken.* *Erwartet:* unter der Zeile steht **„Boost läuft bis
+HH:MM"**, der Knopf ist für den Augenblick gesperrt.
+
+*Fenster schließen.* *Erwartet in der Spalte „Übersteuerung"* der Zeile:
+ein **Flammen-Zeichen** und **„Boost bis HH:MM"** — nicht „Aktiv".
+
+*Rückweg:* **„Temperatur"** erneut öffnen und in der Temperatur-Eingabe
+unten **„Übersteuerung aufheben"**. Ein Boost ist eine Übersteuerung; er
+wird genauso aufgehoben.
+
+### Schritt 2 — ein freies Zimmer
+
+*Dasselbe in einem Zimmer ohne Belegung.*
+
+*Erwartet:* der Knopf **„Temperatur"** ist **drückbar**, der Boost geht,
+die **Temperatur-Eingabe unten weist ab** („nur bei belegten Zimmern").
+
+**Das ist der Unterschied, um den es bei dieser Funktion geht**
+(Festlegung vom 31.10.: eine Regel für belegt und frei). Ist der Knopf
+hier grau, fehlt dem Zimmer das Nachtfenster — der Grund steht am
+Mauszeiger.
+
+### Schritt 3 — zweimal boosten
+
+*Im selben Zimmer den Boost noch einmal drücken.*
+
+*Erwartet:* es geht, und die Spalte zeigt danach dieselbe Endzeit. Ein
+laufender Boost schließt den nächsten **nicht** aus; sonst wäre der Knopf
+nach dem ersten Druck bis zur Nacht tot.
+
+### Schritt 4 — die Abweisungen, eine nach der anderen
+
+Jede zeigt den Grund **am Mauszeiger** über dem Knopf und, wo der Knopf
+drückbar bleibt, in der Boost-Zeile im Fenster.
+
+| Lage | Wo | Erwartung |
+|---|---|---|
+| **laufende Übersteuerung** (Wert setzen, Fenster schließen, wieder öffnen) | Boost-Zeile | Knopf **grau**, Satz: „Übersteuerung aktiv (23 °C bis HH:MM) – Wert dort ändern". Der Knopf „Temperatur" bleibt **drückbar** |
+| **dauerhaft gesperrt** (Zimmerseite → Kopfzeile → sperren) | Knopf „Temperatur" | **grau**, „Dauerhaft gesperrt" |
+| **Allgemeinbereich** (Bar, Rezeption, Spa) | Boost-Zeile | Knopf **grau**, „Allgemeinbereich – Übersteuerung über Zimmerseite". „Temperatur" bleibt **drückbar** — ein Bereich wird dort weiter übersteuert |
+| **Sommermodus** (Szenarien → Sommermodus ein) | Knopf „Temperatur" | **grau**, „Sommermodus aktiv". **Danach wieder ausschalten** |
+
+**Die Sperre schlägt die laufende Übersteuerung.** Ein gesperrtes Zimmer,
+in dem eine Übersteuerung läuft, muss „Dauerhaft gesperrt" melden — nicht
+„Wert dort ändern". Der zweite Satz schickte die Rezeption an eine
+Stelle, an der sie nichts ändern kann.
+
+### Schritt 5 — beide Rollen
+
+*Abmelden, als **Mitarbeiter** anmelden.*
+
+*Erwartet:* derselbe Weg, dieselben Knöpfe, dieselben Gründe. Der Boost
+ist `require_mitarbeiter` wie jede Übersteuerung — die Rezeption soll ihn
+drücken können.
+
+*Und die Gegenprobe:* ein Benutzer **ohne** diese Rolle sieht den Knopf
+„Temperatur" gar nicht. Steht er da, ist die Rechteprüfung in der
+Oberfläche falsch; abgewiesen würde die Anfrage trotzdem (403).
+
+### Schritt 6 — das Protokoll
+
+*Software-Oberfläche.* **Zimmerseite → Historie** (oder Einstellungen →
+Protokoll).
+
+*Erwartet* je Boost eine Zeile **„Rezeption (Boost)"** mit Wert, Endzeit
+und dem Benutzer, der gedrückt hat. Steht dort „Rezeption (24 h)", ist
+die Quelle falsch gespeichert — dann trägt jede Zeile in Historie und
+Audit eine Dauer, die nicht stimmt.
+
+### Was in dieser Abnahme **nicht** geprüft wird
+
+| | |
+|---|---|
+| **Die Wirkung am Heizkörper** | Der Boost setzt einen Sollwert; ob der Raum warm wird, ist die Engine und die Hardware. Das prüft §10ao / der Betrieb |
+| **Die Kappung** | Ein Boost wird wie jede Übersteuerung in Layer 5 an den Zonen-Grenzen gekappt. Wer das prüfen will, setzt die Grenzen tiefer als 23 und sieht im Engine-Trace nach |
+| **Der Boost-Wert selbst** | Er steht unter Einstellungen → Temperaturen & Zeiten → Globale Temperaturen als vierte Zeile „Boost" (18–25 °C). Diese Abnahme prüft den **Boost**, nicht die Einstellung; wer sie prüfen will, ändert den Wert dort und sieht, dass der nächste Boost ihn nimmt |
+
+**Querverweise:** AE-83 (die Entscheidungen und ihre Begründung),
+`docs/status/2026-11-02-boost.md`, `docs/status/2026-11-02-boost-wert.md`
+(die Korrektur am Wert), §10ao (Fenstererkennung — der andere
+Oberflächen-Durchgang dieser Woche).

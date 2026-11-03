@@ -21,6 +21,7 @@ ist (Default lebt nur im ORM-Modell, Raw-SQL umgeht das).
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -937,4 +938,78 @@ def test_migration_0020_allows_multiple_null_hardware_number(
                         text("DELETE FROM device WHERE id = :id"),
                         {"id": dev_id},
                     )
+            conn.commit()
+
+
+@pytest.mark.skipif(not TEST_DB_URL, reason=SKIP_REASON)
+def test_migration_0037_setzt_den_hausweiten_boost_wert(alembic_cfg: Config) -> None:
+    """``0037`` setzt die hausweite ``boost_temperature`` auf 23,0 — wenn leer.
+
+    **Warum diese Migration es wert ist, geprueft zu werden.** Sie ist der
+    Ersatz fuer einen Rueckfall, der fachlich falsch war: der erste
+    Entwurf nahm ``guest_override_max``, wenn ``boost_temperature`` leer
+    war. Das ist die **Gast-Obergrenze** und kann 25 sein, waehrend der
+    festgelegte Boost-Wert 23 ist (Widerspruch des Betreibers vom
+    02.11.2026). Der Wert steht jetzt in den Daten — und wenn die
+    Migration ihn nicht setzt, weist der Boost ab, statt ein Maximum zu
+    heizen.
+
+    Geprueft werden **beide** Richtungen: eine leere Zeile bekommt 23,0,
+    eine gesetzte bleibt. Das zweite ist der Fall, der im Betrieb
+    vorkommt — ``0036`` ist seit dem 02.11. in ``develop``, jemand kann
+    den Wert vorher von Hand gesetzt haben, und ihn zurueck auf 23 zu
+    ziehen waere eine stille Aenderung an einer wirksamen Einstellung.
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "0036_boost")
+
+    sync_url = TEST_DB_URL.replace("+asyncpg", "")
+    engine = create_engine(sync_url)
+
+    leer_id: int | None = None
+    gesetzt_id: int | None = None
+    try:
+        with engine.connect() as conn:
+            # Die hausweiten Zeilen dieses Tests. ``scope='global'`` darf
+            # mehrfach vorkommen (kein UNIQUE), beide werden also erfasst.
+            leer_id = conn.execute(
+                text(
+                    "INSERT INTO rule_config (scope, boost_temperature) "
+                    "VALUES ('global', NULL) RETURNING id"
+                )
+            ).scalar_one()
+            gesetzt_id = conn.execute(
+                text(
+                    "INSERT INTO rule_config (scope, boost_temperature) "
+                    "VALUES ('global', 21.0) RETURNING id"
+                )
+            ).scalar_one()
+            conn.commit()
+
+        command.upgrade(alembic_cfg, "0037_boost_temperatur")
+
+        with engine.connect() as conn:
+            leer = conn.execute(
+                text("SELECT boost_temperature FROM rule_config WHERE id = :id"),
+                {"id": leer_id},
+            ).scalar_one()
+            gesetzt = conn.execute(
+                text("SELECT boost_temperature FROM rule_config WHERE id = :id"),
+                {"id": gesetzt_id},
+            ).scalar_one()
+
+        assert leer == Decimal("23.0"), f"leere Zeile sollte 23,0 bekommen, ist {leer!r}"
+        assert gesetzt == Decimal("21.0"), (
+            f"gesetzte Zeile darf nicht ueberschrieben werden, ist {gesetzt!r}"
+        )
+    finally:
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as conn:
+            for rc_id in (gesetzt_id, leer_id):
+                if rc_id is not None:
+                    conn.execute(text("DELETE FROM rule_config WHERE id = :id"), {"id": rc_id})
             conn.commit()

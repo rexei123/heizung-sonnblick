@@ -1,9 +1,9 @@
 ---
 titel: Temperaturen & Zeiten
 kategorie: Die Seiten
-stichworte: Hausstandard, Nachtabsenkung, Vorheizen, Sollwert, global, Vorrang
+stichworte: Hausstandard, Nachtabsenkung, Vorheizen, Sollwert, global, Vorrang, Boost
 rollen: admin
-stand: 2026-10-25
+stand: 2026-11-02
 route: /einstellungen/temperaturen-zeiten
 ---
 
@@ -21,12 +21,23 @@ alle — was hier steht, ist Betriebswissen.
 | Zimmer belegt | Gast eingecheckt | 16–26 °C |
 | Zimmer frei | kein Gast | 10–22 °C |
 | Nachtabsenkung | im Nachtfenster | 14–22 °C |
+| Boost | solange ein Boost läuft | 18–25 °C |
+
+**Der Boost ist der einzige Wert hier, der eine Dauer hat.** Die drei
+darüber gelten, solange der Zustand gilt; der Boost gilt, bis die
+nächste Nachtabsenkung beginnt. Geändert wird er hier, gestartet wird er
+in der Zimmerübersicht über „Temperatur". Eine Änderung wirkt auf den
+**nächsten** Boost, nicht auf einen laufenden.
 
 **„Nicht festgelegt" ist eine Entscheidung, keine Lücke.** Steht ein Feld
 leer, entscheidet der Raumtyp. Im Haus ist das der Normalfall für
 „belegt" und „frei": nur die Nachtabsenkung ist hausweit gesetzt, die
 beiden anderen Werte kommen aus den Raumtypen. Neben jedem Feld steht,
 wie viele Räume den Wert tatsächlich nutzen.
+
+Beim Boost steht diese Zahl **nicht** daneben, und das ist kein Fehler:
+Raumtypen tragen keinen eigenen Boost-Wert, es gibt also nichts zu
+zählen. Der Wert gilt hausweit.
 
 ## Globale Zeiten
 

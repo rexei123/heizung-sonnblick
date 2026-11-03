@@ -23,8 +23,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RuleConfigGlobalRead(BaseModel):
-    """Ausgabe fuer GET /api/v1/rule-configs/global — die 6 Engine-Felder
-    plus ID + Timestamps."""
+    """Ausgabe fuer GET /api/v1/rule-configs/global — die Engine-Felder
+    plus ID + Timestamps.
+
+    Seit dem 02.11.2026 sind es **sieben**: ``boost_temperature`` ist
+    dazugekommen (AE-83).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,6 +36,11 @@ class RuleConfigGlobalRead(BaseModel):
     t_occupied: Decimal | None
     t_vacant: Decimal | None
     t_night: Decimal | None
+    #: Zieltemperatur eines Boosts (02.11.2026). Steht auf derselben
+    #: Seite wie die drei darueber, weil es dieselbe Art von Wert ist:
+    #: eine hausweite Vorgabe, die ein Raumtyp oder ein Zimmer
+    #: uebersteuern kann.
+    boost_temperature: Decimal | None
     night_start: time | None
     night_end: time | None
     preheat_minutes_before_checkin: int | None
@@ -51,6 +60,12 @@ class RuleConfigGlobalUpdate(BaseModel):
     t_occupied: Decimal | None = Field(default=None, ge=Decimal("16.0"), le=Decimal("26.0"))
     t_vacant: Decimal | None = Field(default=None, ge=Decimal("10.0"), le=Decimal("22.0"))
     t_night: Decimal | None = Field(default=None, ge=Decimal("14.0"), le=Decimal("22.0"))
+    #: Bereich 18-25, Festlegung des Betreibers vom 02.11.2026. Unten
+    #: eng, weil ein Boost unter dem Belegt-Sollwert keinen Sinn hat;
+    #: oben am Hoechstwert, den die Geraetegrenzen im Haus zulassen
+    #: (Zimmer 15-25, Bad 18-25). Ein Boost darueber waere eine Zahl,
+    #: die Layer 5 ohnehin kappt.
+    boost_temperature: Decimal | None = Field(default=None, ge=Decimal("18.0"), le=Decimal("25.0"))
     night_start: time | None = None
     night_end: time | None = None
     preheat_minutes_before_checkin: int | None = Field(default=None, ge=0, le=240)
