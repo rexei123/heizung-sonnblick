@@ -9935,6 +9935,30 @@ ADR-Plugin — vorbereitet, nach der Messung vom 03.11. nicht ausgerollt),
 
 ## 10ax. Boost abnehmen (Oberfläche, nach dem Deploy)
 
+> **Bestanden am 03.11.2026, 07:1x bis 07:30, durch den Betreiber.** Die
+> Anleitung bleibt stehen — sie gilt wieder nach jedem Deploy, der an
+> Boost, Nachtfenster oder Übersteuerung etwas ändert.
+>
+> | Geprüft | Befund |
+> |---|---|
+> | freies Zimmer 52, Boost gesetzt | Soll **23** |
+> | Thermostat 002 | meldet `targetTemperature` **23** um **07:19** |
+> | Engine-Schicht | **„Boost (Mitarbeiter)" bis 20:00** |
+> | Beenden | zurück auf **15** |
+> | Übersteuerung gesperrt | Knopf **grau** |
+> | Bar (Allgemeinbereich) | Boost **grau mit Grund** |
+> | Rolle Mitarbeiter | wie vorgesehen |
+>
+> **Der Weg vom Klick bis zum Gerät ist damit belegt**, und zwar an der
+> Stelle, an der er bisher nur geplant war: nicht die Oberfläche hat 23
+> angezeigt, sondern das Thermostat hat 23 gemeldet.
+>
+> **Ein Befund aus der Abnahme ist in einem eigenen PR behoben:** der Kopf
+> der Engine-Seite nannte bei laufendem Boost „Grund: Frei-Sollwert ·
+> Sollwert aus: hausweit". Er las den Grund aus der **Basis-Schicht**
+> statt aus der Schicht, die den Wert gesetzt hat. Der Wert daneben war
+> richtig, die Begründung gehörte zu einer anderen Zeile.
+
 **Reine Oberflächen-Prüfung, kein SSH, keine Hardware.** Dauer rund 15
 Minuten. Jeder Schritt nennt, was zu sehen sein muss — und was es heißt,
 wenn dort etwas anderes steht.
@@ -9960,7 +9984,7 @@ Zimmer → Knopf **„Temperatur"**.
 |---|---|
 | Der Knopf | heißt **„Temperatur"**, ist drückbar |
 | Oben im Fenster | die Zeile **Boost** mit dem Knopf **„Boost bis HH:MM"** |
-| Die Uhrzeit | der **Nachtbeginn** des Zimmers (im Haus 22:00). Nach 22:00 steht dort das **Nachtende** |
+| Die Uhrzeit | der **Nachtbeginn** des Zimmers, aus Einstellungen → Temperaturen und Zeiten. Liegt die Gegenwart **im** Nachtfenster, steht dort das **Nachtende** |
 | Darunter | die gewohnte Temperatur-Eingabe je Heizzone |
 
 **Die Uhrzeit ist die eigentliche Prüfung.** Steht dort eine Zeit 24

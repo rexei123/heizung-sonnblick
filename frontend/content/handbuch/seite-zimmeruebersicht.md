@@ -3,7 +3,7 @@ titel: Zimmerübersicht
 kategorie: Die Seiten
 stichworte: Zimmer, Status, belegt, reserviert, Reinigung, gesperrt, Allgemeinbereich, Etage, Temperatur, Boost, Details
 rollen: alle
-stand: 2026-11-02
+stand: 2026-11-03
 route: /zimmer
 ---
 
@@ -20,15 +20,18 @@ darunter die Temperatur-Eingabe.
 ### Boost
 
 **Ein Klick, und das Zimmer heizt bis zum Nachtbeginn.** Der Knopf sagt
-vorher, bis wann: „Boost bis 22:00". Wert und Endzeit kommen aus den
-Einstellungen des Hauses; es ist nichts auszuwählen. Der Wert steht unter
-Einstellungen → Temperaturen und Zeiten → Globale Temperaturen als vierte
-Zeile „Boost".
+vorher, bis wann — er trägt den Nachtbeginn des Zimmers, im Haus derzeit
+„Boost bis 20:00". Wert und Endzeit kommen aus den Einstellungen des
+Hauses; es ist nichts auszuwählen. Beide stehen unter Einstellungen →
+Temperaturen und Zeiten: die Zeiten oben, der Wert als vierte Zeile
+„Boost" unter Globale Temperaturen. **Wird das Nachtfenster verschoben,
+verschiebt sich die Uhrzeit am Knopf mit** — die Zahl hier ist der Stand
+des Hauses und keine feste Eigenschaft.
 
 **Das Ende ist der nächste Wechsel des Nachtfensters.** Am Tag ist das der
 Nachtbeginn, in der Nacht das Nachtende — danach gilt wieder die normale
-Regel. Es gibt **kein Mindestmaß**: ein Boost um 21:55 endet um 22:00, und
-der Knopf zeigt das vorher.
+Regel. Es gibt **kein Mindestmaß**: ein Boost fünf Minuten vor dem
+Nachtbeginn endet nach fünf Minuten, und der Knopf zeigt das vorher.
 
 **Ein Boost geht auch in einem freien Zimmer.** Das ist der Unterschied zur
 Temperatur-Eingabe darunter: eine Wunschtemperatur gilt nur für belegte
@@ -120,7 +123,7 @@ gekennzeichnet:
 
 | Marke | Bedeutung |
 |---|---|
-| 🔥 **Boost bis 22:00** | Ein Boost läuft und endet zum Nachtbeginn |
+| 🔥 **Boost bis 20:00** | Ein Boost läuft und endet zum Nachtbeginn — die Uhrzeit ist die des Hauses |
 | **Aktiv bis 09:00** | Eine gewöhnliche Übersteuerung läuft, mit ihrer Endzeit |
 
 Bis zum 02.11.2026 stand dort nur „Aktiv" — die Spalte verschwieg damit
