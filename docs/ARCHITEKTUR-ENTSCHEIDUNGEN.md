@@ -7784,12 +7784,37 @@ liefe die Rechnung in ein Ende **morgen zur selben Uhrzeit**.
 Sollwert: Zimmer schlägt Raumtyp schlägt hausweit. Ein Bad darf einen
 anderen Boost haben als ein Zimmer.
 
-**Steht nirgends ein Wert, gilt `guest_override_max` derselben Kette.**
-Ohne diesen Rückfall wäre die Funktion am Tag des Einbaus tot — die Spalte
-ist nach der Migration überall `NULL`, und der Betreiber müsste erst eine
-Zahl eintragen, die ihm niemand genannt hat. Der Höchstwert, den die
-Rezeption ohnehin eingeben darf, ist die Zahl, die schon im Haus steht.
-Steht auch dort nichts, wird abgewiesen.
+**Der Wert kommt nur von dort. Eine Daten-Migration setzt ihn**
+(`0037_boost_temperatur`): die hausweite Zeile bekommt **23,0**, wenn sie
+leer ist. Steht trotzdem nirgends einer, wird abgewiesen mit
+„Boost-Temperatur nicht eingestellt".
+
+### Korrektur vom 02.11.2026: kein Rückfall auf `guest_override_max`
+
+Hier stand: steht kein Boost-Wert, gelte `guest_override_max` derselben
+Kette — „der höchste Wert, den die Rezeption ohnehin eingeben darf".
+Begründung war, die Funktion wäre am Tag des Einbaus sonst tot, weil die
+Spalte nach `0036` überall `NULL` ist.
+
+**Der Betreiber hat widersprochen, und er hat recht.**
+`guest_override_max` ist die **Gast-Obergrenze**; sie kann 25 sein,
+während der festgelegte Boost-Wert **23** ist. Ein Rückfall auf eine
+Grenze, die eine andere Frage beantwortet, macht aus einem Boost
+stillschweigend das Maximum — und zwar an der Stelle, an der es niemandem
+auffällt, weil beides eine plausible Zahl ist.
+
+**Der Fehler in meiner Begründung war nicht die Zahl, sondern die
+Vertauschung von zwei Fragen.** „Was darf der Gast höchstens einstellen"
+und „worauf heizt ein Boost" haben verschiedene Antworten, und dass die
+erste zufällig verfügbar war, macht sie nicht zur zweiten. Dasselbe
+Muster wie §5.73 (Prozent statt Spannung): ein Wert, der in der Nähe
+liegt, ist kein Wert, der dasselbe bedeutet.
+
+**Das richtige Mittel gegen „am Tag des Einbaus tot" ist eine
+Daten-Migration** und nicht ein Rückfall. Sie setzt den Wert, den der
+Betreiber genannt hat, dorthin, wo er hingehört — und wenn sie ihn nicht
+setzen kann (keine hausweite Zeile), weist der Boost ab und sagt, was
+fehlt. Ein Rückfall hätte stattdessen geheizt und nichts gesagt.
 
 **Gekappt wird nicht im Boost.** Die Grenzen je Zone wirken weiter unten
 (Engine-Layer 5, `geraetegrenzen`). Ein Boost hat dieselbe Obergrenze wie
@@ -7875,10 +7900,13 @@ ganze Knopf dort grau werden soll, ist eine Zeile in
 `temperaturknopf` — und eine Frage an den Betreiber.
 
 **Der Boost-Wert ist nirgends in der Oberfläche einstellbar.** Er kommt aus
-`rule_config`, und dort führt heute kein Formular hin. Solange der Rückfall
-auf `guest_override_max` greift, ist das kein Mangel; wer den Boost höher
-will als den Gast-Höchstwert, braucht ein Feld. Nicht gebaut, weil niemand
-es verlangt hat (S6).
+`rule_config`, und dort führt heute kein Formular hin. Mit der Migration
+`0037` steht er auf 23,0, also auf dem festgelegten Wert; wer ihn ändern
+will, braucht heute SQL. Das ist der **stärkste** offene Punkt dieses
+ADR — nicht weil er schwierig wäre, sondern weil eine Zahl ohne Weg zu
+ihr beim nächsten Nachjustieren einen Eingriff in die Datenbank
+erzwingt. Nicht gebaut, weil niemand es verlangt hat (S6), und hier
+benannt, damit es nicht in Vergessenheit gerät.
 
 **Der Sommermodus sperrt den Knopf ganz.** Das trifft auch die gewöhnliche
 Übersteuerung, die der Dienst annehmen würde — sie hätte nur keine Wirkung,
