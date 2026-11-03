@@ -36,6 +36,7 @@ from heizung.schemas.manual_override import (
     ManualOverrideResponse,
     ManualOverrideRevoke,
 )
+from heizung.services import boost as boost_service
 from heizung.services import gast_sperre, override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.geraetegrenzen import Grenzen, soll_grenzen_je_zone
@@ -343,6 +344,92 @@ async def create_room_override(
     await session.refresh(override)
     # Sprint 9.9a Hotfix A1: Engine-Re-Eval anstossen, damit Layer 3 sofort
     # greift (analog zu occupancies.py - AE-07).
+    _evaluate_room_task.delay(room_id)
+    return override
+
+
+@router.post(
+    "/rooms/{room_id}/boost",
+    response_model=ManualOverrideResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Boost: ein Klick, Wert und Ende kommen vom Server",
+)
+async def boost_room(
+    request: Request,
+    room_id: int = RoomIdPath,
+    user: User = Depends(require_mitarbeiter),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> ManualOverride:
+    """Macht ein Zimmer warm, bis das Nachtfenster wechselt.
+
+    **Kein Rumpf, und das ist der Punkt.** Wert und Ende rechnet
+    ``services/boost``; die Rezeption waehlt nichts aus. Ein Endpunkt mit
+    Rumpf waere ein zweiter Weg, eine Uebersteuerung mit beliebigem Wert
+    anzulegen — und zwar einer, der das OCCUPIED-Gate nicht hat
+    (Festlegung 2: Boost gilt auch im freien Zimmer).
+
+    **Dieselben Gates wie jede Uebersteuerung.** Die Anlage laeuft durch
+    ``override_service.create``: Sperre, offenes Fenster, Stapel-Abbau.
+    Was hier davor steht, ist die Boost-eigene Lage — Sommermodus,
+    Nachtfenster, Wert, und eine laufende Uebersteuerung (Festlegung 1,
+    Variante c: Boost ersetzt sie **nicht**, sondern wird abgewiesen).
+
+    **Gekappt wird nicht hier.** Die Grenzen je Zone wirken weiter unten
+    (Engine-Layer 5). Ein Boost hat dieselbe Obergrenze wie jede andere
+    Uebersteuerung und nicht eine eigene.
+    """
+    await _ensure_room_exists(session, room_id)
+    room = await session.get(Room, room_id)
+    if room is None:  # pragma: no cover - ``_ensure_room_exists`` hat geprueft
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zimmer nicht gefunden")
+
+    now = datetime.now(tz=UTC)
+    lage = await boost_service.lage(session, room, jetzt=now)
+    if not lage.moeglich:
+        raise boost_service.BoostNichtMoeglichError(
+            lage.hinweis or "Boost ist hier nicht moeglich",
+            grund=lage.grund or "unbekannt",
+        )
+
+    # ``assert`` und nicht ``if``: ``Boostlage`` sichert zu, dass bei
+    # ``moeglich`` beides gesetzt ist. Ein ``if`` hier waere ein zweiter
+    # Vertrag neben dem der Datenklasse.
+    assert lage.ende is not None and lage.wert is not None  # noqa: S101
+
+    expires_at = override_service.compute_expires_at(
+        OverrideSource.FRONTEND_BOOST, now, boost_ende=lage.ende
+    )
+
+    override = await override_service.create(
+        session,
+        room_id=room_id,
+        setpoint=lage.wert,
+        source=OverrideSource.FRONTEND_BOOST,
+        expires_at=expires_at,
+        reason="Boost",
+        created_by=user.email,
+    )
+
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="MANUAL_OVERRIDE_SET",
+        target_type="room",
+        target_id=room_id,
+        old_value=None,
+        new_value={
+            "override_id": override.id,
+            "setpoint": lage.wert,
+            "source": OverrideSource.FRONTEND_BOOST.value,
+            "expires_at": expires_at,
+            "gast_sperre_bis_checkout": False,
+        },
+        request_ip=request.client.host if request.client else None,
+    )
+    await session.commit()
+    await session.refresh(override)
+    # Wie bei der gewoehnlichen Uebersteuerung: Layer 3 soll sofort
+    # greifen und nicht erst beim naechsten Takt (AE-07).
     _evaluate_room_task.delay(room_id)
     return override
 

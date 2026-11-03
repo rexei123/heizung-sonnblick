@@ -1,8 +1,10 @@
 """Sprint 14d — Override-Sichtbarkeit (Block A + FU-5).
 
 Prueft:
-- ``override_service.get_rooms_with_active_override`` (EXISTS-Semantik:
-  room-scope/zone-scope -> true, revoked/expired -> false).
+- ``override_service.stand_je_zimmer`` (EXISTS-Semantik:
+  room-scope/zone-scope -> ``aktiv``, revoked/expired -> nicht enthalten;
+  und seit dem 02.11.2026 zusaetzlich **welcher** zimmerweite Eintrag
+  gewinnt).
 - ``GET /api/v1/rooms`` befuellt ``has_active_override`` und macht dafuer
   **genau einen** ``manual_override``-Query (R-D: kein N+1).
 - ``GET /api/v1/rooms/{id}/heating-zones`` liefert ``active_override`` (FU-5).
@@ -189,7 +191,20 @@ async def _cleanup(sm: async_sessionmaker[AsyncSession]) -> None:
         await session.commit()
 
 
-async def test_get_rooms_with_active_override_semantics(setup_engine: AsyncEngine) -> None:
+async def test_stand_je_zimmer_semantik(setup_engine: AsyncEngine) -> None:
+    """Dieselbe EXISTS-Semantik wie vorher, dazu der Gewinner.
+
+    **Umgezogen am 02.11.2026.** ``get_rooms_with_active_override`` gab
+    nur das Bool und ist in ``stand_je_zimmer`` aufgegangen: die Liste
+    braucht seit der Boost-Kennzeichnung auch **welche** Uebersteuerung
+    gilt, und zwei Abfragen haetten die R-D-Pruefung unten gebrochen.
+
+    Der Fall ``room_b`` ist der interessante: dort laeuft eine
+    **zonenweite** Uebersteuerung. ``aktiv`` ist wahr — die Spalte zeigt
+    sie —, ``zimmerweite`` bleibt ``None``, und die Zeile schreibt dann
+    „Aktiv" ohne Endzeit. Eine zonenweite Endzeit in einer Zimmerzeile
+    waere eine Aussage ueber das Zimmer, die nur fuer eine Zone gilt.
+    """
     sm = async_sessionmaker(setup_engine, expire_on_commit=False)
     s = uuid.uuid4().hex[:8]
     try:
@@ -212,12 +227,16 @@ async def test_get_rooms_with_active_override_semantics(setup_engine: AsyncEngin
         )
 
         async with sm() as session:
-            result = await override_service.get_rooms_with_active_override(session)
+            stand = await override_service.stand_je_zimmer(
+                session, [room_a, room_b, room_c, room_d]
+            )
 
-        assert room_a in result, "room-scope-Override -> true"
-        assert room_b in result, "zone-scope-Override -> true"
-        assert room_c not in result, "revoked -> false"
-        assert room_d not in result, "expired -> false"
+        assert stand[room_a].aktiv, "room-scope-Override -> aktiv"
+        assert stand[room_a].zimmerweite is not None, "und er ist der Gewinner"
+        assert stand[room_b].aktiv, "zone-scope-Override -> aktiv"
+        assert stand[room_b].zimmerweite is None, "aber keine zimmerweite Endzeit"
+        assert room_c not in stand, "revoked -> nicht enthalten"
+        assert room_d not in stand, "expired -> nicht enthalten"
     finally:
         await _cleanup(sm)
 

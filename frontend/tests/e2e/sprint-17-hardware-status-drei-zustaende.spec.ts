@@ -63,6 +63,17 @@ const POOL_DEVICE = {
   heating_zone: null,
 };
 
+/** Dasselbe Gerät in der Rolle „nur messen" — Befund 056, 01.11.2026. */
+const FUEHLER_DEVICE = { ...SAMPLE_DEVICE, measure_only: true };
+
+/** Ein Relais. Es hat keine Halterung — Befund 109, 01.11.2026. */
+const RELAIS_DEVICE = {
+  ...SAMPLE_DEVICE,
+  kind: "relay",
+  model: "16ASPM",
+  measure_only: false,
+};
+
 /** Antwort des hardware-status-Endpoints für den jeweiligen Zustand. */
 const HW = {
   montiert: {
@@ -198,6 +209,64 @@ test.describe("Sprint 17 C9 / Sprint 20 — vier Montage-Zustände", () => {
     // Das ist ausdruecklich NICHT "Nicht montiert" — der Unterschied ist der
     // Punkt dieses Sprints.
     await expect(badge).not.toContainText("Nicht montiert");
+  });
+
+  test("ein Fühler ist nicht rot, auch wenn er nicht montiert meldet", async ({
+    page,
+  }) => {
+    // **Befund des Betreibers vom 01.11.2026 an Gerät 056.** Dort stand
+    // „Nicht montiert" in Rot. Ein Fühler misst die Raumluft; ob er auf
+    // einem Ventil sitzt, ist für seine Aufgabe ohne Belang — Rot
+    // behauptet einen Mangel, wo keiner ist.
+    await mockDetailPage(page, HW.nichtMontiert, FUEHLER_DEVICE);
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const badge = page.getByTestId("hardware-status").first();
+    const pille = badge.locator("span").first();
+    await expect(pille).toContainText("Fühler");
+    await expect(badge).toContainText("misst nur — Montage ohne Belang");
+    // Die Farbe ist die eigentliche Aussage.
+    await expect(pille).not.toHaveClass(/text-danger/);
+    await expect(badge).not.toContainText("Nicht montiert");
+  });
+
+  test("ein Relais fragt die Montage nicht und sagt das auch", async ({ page }) => {
+    // **Befund des Betreibers vom 01.11.2026 an Relais 109:** „Keine
+    // Daten (30 Min)", obwohl das Relais sendet. Der Endpunkt zählt
+    // `sensor_reading`, ein Relais schreibt nach `relay_reading` — und es
+    // hat überhaupt keine Halterung.
+    await mockDetailPage(page, HW.keineDaten, RELAIS_DEVICE);
+    let gefragt = 0;
+    await page.route(/.*\/api\/v1\/devices\/\d+\/hardware-status(\?.*)?$/, (route) => {
+      gefragt += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(HW.keineDaten),
+      });
+    });
+    // Die Geräteseite zeigt für ein Relais zusätzlich die Relais-Karte.
+    // Ohne diesen Mock schlägt der Rückhalt aus `fixtures.ts` zu — und
+    // zwar zu Recht: die Anfrage ginge über den Rewrite nach draußen.
+    await page.route(/.*\/api\/v1\/devices\/\d+\/relay(\?.*)?$/, (route) =>
+      route.fulfill({ status: 404, contentType: "application/json", body: "{}" }),
+    );
+    await page.goto(`/devices/${DEVICE_ID}`);
+
+    const badge = page.getByTestId("hardware-status").first();
+    await expect(badge).toContainText("Relais");
+    await expect(badge).toContainText("keine Halterung");
+    await expect(badge).not.toContainText("Keine Daten");
+
+    // **Und die Abfrage bleibt aus.** Ein Weg, dessen Antwort man
+    // ohnehin verwirft, ist eine Anfrage, die niemand braucht.
+    //
+    // Die Zähl-Route steht oben **nach** `mockDetailPage`: Playwright
+    // nimmt die zuletzt registrierte Route zuerst. Davor registriert
+    // wurde sie verdeckt, der Zähler blieb immer 0 — eine Zusicherung,
+    // die nichts prüft. Gefunden hat das die Mutationsprobe „Relais
+    // fragt doch", die zuerst überlebt hat.
+    expect(gefragt).toBe(0);
   });
 
   test("compact-Variante zeigt dieselben Zustände, Unterzeile im Tooltip", async ({

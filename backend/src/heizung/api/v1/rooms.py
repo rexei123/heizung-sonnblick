@@ -42,6 +42,7 @@ from heizung.schemas.room_history import (
     RoomHistoryRead,
 )
 from heizung.services import betriebszeit, child_lock, override_service, raumtyp_regel
+from heizung.services import boost as boost_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
     latest_hard_clamp_setpoint_per_room,
@@ -180,7 +181,20 @@ async def list_rooms(
 
     # Sprint 14d (R-A/R-D): EIN Batch-Aggregat fuer den Override-Indikator,
     # KEIN per-room-Lookup (kein N+1 wie devices._build_device_read).
-    rooms_with_override = await override_service.get_rooms_with_active_override(session)
+    # 02.11.2026: **eine** Abfrage fuer beide Fragen — „laeuft eine" und
+    # „welche gilt". Die zweite braucht die Spalte seit der
+    # Boost-Kennzeichnung mit Endzeit.
+    uebersteuerungen = await override_service.stand_je_zimmer(session, [room.id for room in rooms])
+
+    # Die Boost-Lage als Mengenzugriff: vier Abfragen fuer die ganze Seite
+    # und nicht vier je Zimmer (§5.73). Der Stand von oben wird
+    # mitgegeben, damit es bei **einer** ``manual_override``-Abfrage
+    # bleibt (R-D).
+    boostlagen = await boost_service.lage_je_zimmer(
+        session,
+        rooms,
+        aktive={rid: eintrag.zimmerweite for rid, eintrag in uebersteuerungen.items()},
+    )
 
     # Sprint 24d: welche Raumtypen Allgemeinbereiche sind — eine Abfrage
     # fuer die ganze Seite, nicht eine je Zeile.
@@ -222,7 +236,19 @@ async def list_rooms(
                 soll = Decimal(zonen_soll)
         return RoomRead.model_validate(room).model_copy(
             update={
-                "has_active_override": room.id in rooms_with_override,
+                "has_active_override": (
+                    stand.aktiv if (stand := uebersteuerungen.get(room.id)) else False
+                ),
+                "uebersteuerung_quelle": (
+                    stand.zimmerweite.source if stand and stand.zimmerweite else None
+                ),
+                "uebersteuerung_ende": (
+                    stand.zimmerweite.expires_at if stand and stand.zimmerweite else None
+                ),
+                "boost_moeglich": lage.moeglich if (lage := boostlagen.get(room.id)) else False,
+                "boost_grund": lage.grund if lage else None,
+                "boost_hinweis": lage.hinweis if lage else None,
+                "boost_ende": lage.ende if lage else None,
                 "reference_zone_id": zone_id,
                 "mean_temperature_c": ist,
                 "engine_setpoint_c": soll,

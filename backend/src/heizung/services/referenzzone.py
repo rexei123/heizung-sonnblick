@@ -91,7 +91,7 @@ async def referenzzonen_pro_zimmer(
     """Pro Zimmer die ``zone_id`` der Referenzzone.
 
     **Eine** Query ueber alle uebergebenen Zimmer (kein N+1, Pattern wie
-    ``override_service.get_rooms_with_active_override``). Zimmer ohne
+    ``override_service.stand_je_zimmer``). Zimmer ohne
     Referenzzone fehlen im Ergebnis — der Konsument leitet auf ``None``.
 
     Gefiltert wird bereits in SQL auf :data:`REFERENZ_NAMEN`; die
