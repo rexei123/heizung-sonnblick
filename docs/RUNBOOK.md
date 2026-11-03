@@ -9308,6 +9308,17 @@ eigenes ADR-Plugin bekommt (DR3, `nbTrans` 2).
 Eine Datenrate gegen eine provisorische Position zu wählen heißt, gegen
 die falsche Zahl zu optimieren.
 
+> **Gelaufen am 03.11.2026, und das Ergebnis steht in Schritt 3.** 109 am
+> Endplatz: **137 von 140 Meldungen, 2,1 % Verlust, keine Rücksetzung des
+> Zählers**; die Vickis im selben Fenster 0 bis 1,4 %, darunter zwei bei
+> RSSI −115/−116 dBm mit 0 % und 0,7 %. **Entscheidung des Betreibers: das
+> ADR-Plugin wird nicht ausgerollt** und bleibt vorbereitet (§10av).
+> Begründung, Hypothese zum 01.11. und die Anlässe, bei denen neu zu
+> messen ist: AE-78 §15, `docs/status/2026-11-03-funkauswertung.md`.
+>
+> Die Anleitung bleibt stehen — sie gilt wieder, wenn 109 mit Panel an
+> seinen endgültigen Platz kommt oder ein zweites Relais weiter weg sitzt.
+
 ### Schritt 1 — Verlust aus den Zähler-Lücken
 
 **SSH (heizung-test, root):**
@@ -9366,16 +9377,28 @@ Reiter mit den Metriken.** Dort stehen je Stunde:
 obwohl RSSI unter −110 dBm liegt, ist das der strukturelle Befund —
 ChirpStacks Standard-Algorithmus **senkt die Datenrate nie**, er erhöht
 sie nur. Dann hilft kein Nachjustieren am Gerät, sondern nur ein eigener
-Algorithmus für das Profil.
+Algorithmus für das Profil — **wenn** der Verlust einen Eingriff verlangt.
+Am 03.11. tat er es nicht: SF7 festzuhängen ist unschön und war hier
+folgenlos.
 
 ### Schritt 3 — die Entscheidung
 
 | Befund | Weg |
 |---|---|
-| Verlust **unter 5 %** und RSSI besser als −105 dBm | nichts tun. Die Dose ist gut genug |
+| Verlust **unter 5 %** | nichts tun. Die Dose ist gut genug — **unabhängig vom Pegel** |
 | Verlust **5 bis 15 %** | ADR-Plugin im Rotationsfenster (Mittwoch), DR3 ohne `nbTrans` |
 | Verlust **über 15 %** | ADR-Plugin mit DR3 **und** `nbTrans 2`; zusätzlich prüfen, ob die Dose anders liegen kann |
 | Vickis haben denselben Verlust | kein Relais-Problem. Gateway und Standort prüfen, nicht das Profil |
+
+**Der Verlust entscheidet, der Pegel erklärt — korrigiert am 03.11.2026.**
+Hier stand in Zeile 1 zusätzlich „und RSSI besser als −105 dBm", als
+zweite Bedingung. Die Messung widerlegt sie mit dem eigenen Haus: 099 und
+095 stehen bei −115 bis −116 dBm und verlieren 0 % und 0,7 %. Für 109
+gibt es die Zahl außerdem gar nicht — `relay_reading` führt sie nicht
+(Schritt 2) —, und damit hätte die Tabelle für die tatsächliche Lage
+**keine** Zeile getroffen: zu gut für Zeile 2 und 3, Zeile 1 nicht
+belegbar. RSSI und SNR bleiben in Schritt 2, aber als **Erklärung** eines
+gemessenen Verlusts und nicht als Vorhersage (AE-78 §15).
 
 **Das Plugin wird nicht zwischendurch ausgerollt.** Es ist eine Datei auf
 dem Server plus eine Zeile in `chirpstack.toml` plus ein Neustart von
@@ -9421,7 +9444,17 @@ selbst schickt; er lässt sich dort nicht eintippen.
 **Querverweise:** §10at (109 ohne Last in Gang bringen), AE-78 §14 (der
 Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`.
 
-## 10av. ADR-Plugin für das Relais-Profil einbauen (vorbereitet, Stand 02.11.2026)
+## 10av. ADR-Plugin für das Relais-Profil einbauen (vorbereitet und nicht ausgerollt, Stand 03.11.2026)
+
+> **Nicht ausgerollt — Entscheidung des Betreibers vom 03.11.2026.** Die
+> Messung aus §10au hat es nicht verlangt: **2,1 % Verlust** an 109 am
+> Endplatz, Vickis 0 bis 1,4 %. Das Plugin behebt nichts, was gemessen
+> wurde, und kostet einen Neustart von ChirpStack.
+>
+> **Die Anleitung bleibt deshalb unverändert stehen, nicht als Altlast.**
+> Sie gilt, sobald 109 mit Panel an seinen endgültigen Platz kommt, ein
+> zweites Relais weiter weg sitzt, oder der Verlust bei unveränderten
+> Vickis über 5 % steigt. Begründung: AE-78 §15.
 
 **Nur ausführen, wenn die Messung aus §10au es verlangt** (Verlust über
 5 % am Relais **und** deutlich niedriger bei den Vickis). Der Einbau
