@@ -9308,7 +9308,7 @@ eigenes ADR-Plugin bekommt (DR3, `nbTrans` 2).
 Eine Datenrate gegen eine provisorische Position zu wählen heißt, gegen
 die falsche Zahl zu optimieren.
 
-> **Gelaufen am 03.11.2026, und das Ergebnis steht in Schritt 3.** 109 am
+> **Gelaufen am 03.11.2026, und hier steht das Ergebnis.** 109 am
 > Endplatz: **137 von 140 Meldungen, 2,1 % Verlust, keine Rücksetzung des
 > Zählers**; die Vickis im selben Fenster 0 bis 1,4 %, darunter zwei bei
 > RSSI −115/−116 dBm mit 0 % und 0,7 %. **Entscheidung des Betreibers: das
