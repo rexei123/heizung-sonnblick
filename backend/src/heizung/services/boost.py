@@ -30,11 +30,16 @@ was das Wort verspricht. Beide Faelle sind derselbe Satz: der Boost endet,
 wenn die naechste Temperatur-Regel uebernimmt.
 
 **Der Wert kommt aus ``rule_config.boost_temperature``**, derselben Kette
-wie jeder Sollwert (Zimmer > Raumtyp > hausweit). Steht dort nichts, gilt
-``guest_override_max`` derselben Kette: der Boost setzt dann auf den
-hoechsten Wert, den die Rezeption ohnehin haette eingeben koennen — und
-nicht auf eine Zahl, die sich jemand ausgedacht hat. Steht auch dort
-nichts, wird abgewiesen.
+wie jeder Sollwert (Zimmer > Raumtyp > hausweit), und **nur** von dort.
+Migration ``0037`` setzt die hausweite Zeile auf 23,0, wenn sie leer ist
+— den Wert, den der Betreiber festgelegt hat. Steht trotzdem nirgends
+einer, wird abgewiesen mit „Boost-Temperatur nicht eingestellt".
+
+**Kein Rueckfall auf eine andere Spalte**, und das ist eine Korrektur:
+der erste Entwurf nahm ``guest_override_max``, wenn nichts gesetzt war.
+Das ist die **Gast-Obergrenze** und kann 25 sein, waehrend der Boost-Wert
+23 ist — ein Rueckfall darauf macht aus einem Boost stillschweigend das
+Maximum (Widerspruch des Betreibers vom 02.11.2026).
 
 **Gekappt wird nicht hier.** Die Grenzen je Zone wirken weiter unten
 (Engine-Layer 5 und ``geraetegrenzen``), und das ist richtig: ein Boost
@@ -237,14 +242,25 @@ def beurteile(
             False, GRUND_KEIN_NACHTFENSTER, "Kein Nachtfenster konfiguriert", None, None
         )
 
+    # **Kein Rueckfall auf eine andere Spalte** (Widerspruch des
+    # Betreibers vom 02.11.2026). Der erste Entwurf nahm hier
+    # ``guest_override_max``, wenn ``boost_temperature`` leer war. Das ist
+    # fachlich falsch: ``guest_override_max`` ist die **Gast-Obergrenze**
+    # und kann 25 sein, waehrend der festgelegte Boost-Wert 23 ist. Ein
+    # Rueckfall auf eine Grenze, die eine andere Frage beantwortet, macht
+    # aus einem Boost stillschweigend das Maximum — und zwar dort, wo
+    # niemand hinsieht, weil beides eine plausible Zahl ist.
+    #
+    # Der Wert steht deshalb ausdruecklich in den Daten; Migration
+    # ``0037`` setzt die hausweite Zeile auf 23,0, wenn sie leer ist.
+    # Steht er trotzdem nirgends, wird abgewiesen — mit einem Grund, der
+    # sagt, was zu tun ist.
     wert = resolve_rule_field(kette, "boost_temperature")
-    if wert is None:
-        wert = resolve_rule_field(kette, "guest_override_max")
     if not isinstance(wert, Decimal):
         return Boostlage(
             False,
             GRUND_KEIN_WERT,
-            "Kein Boost-Wert konfiguriert – Boost-Temperatur oder Höchstwert setzen",
+            "Boost-Temperatur nicht eingestellt",
             None,
             None,
         )

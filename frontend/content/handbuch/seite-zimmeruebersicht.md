@@ -21,7 +21,9 @@ darunter die Temperatur-Eingabe.
 
 **Ein Klick, und das Zimmer heizt bis zum Nachtbeginn.** Der Knopf sagt
 vorher, bis wann: „Boost bis 22:00". Wert und Endzeit kommen aus den
-Einstellungen des Hauses; es ist nichts auszuwählen.
+Einstellungen des Hauses; es ist nichts auszuwählen. Der Wert steht unter
+Einstellungen → Temperaturen und Zeiten → Globale Temperaturen als vierte
+Zeile „Boost".
 
 **Das Ende ist der nächste Wechsel des Nachtfensters.** Am Tag ist das der
 Nachtbeginn, in der Nacht das Nachtende — danach gilt wieder die normale

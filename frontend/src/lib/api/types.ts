@@ -951,6 +951,12 @@ export interface RuleConfigGlobal {
   t_occupied: string | null;
   t_vacant: string | null;
   t_night: string | null;
+  /**
+   * Zieltemperatur eines Boosts (02.11.2026, AE-83). Wie die drei
+   * darüber ein `Decimal` aus dem Backend — als String, damit nichts
+   * unterwegs gerundet wird.
+   */
+  boost_temperature: string | null;
   night_start: string | null;
   night_end: string | null;
   preheat_minutes_before_checkin: number | null;
@@ -962,6 +968,8 @@ export interface RuleConfigGlobalUpdate {
   t_occupied?: string;
   t_vacant?: string;
   t_night?: string;
+  /** Bereich 18–25 °C, geprüft in Zod **und** in Pydantic. */
+  boost_temperature?: string;
   night_start?: string;
   night_end?: string;
   preheat_minutes_before_checkin?: number;

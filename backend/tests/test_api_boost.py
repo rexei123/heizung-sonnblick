@@ -316,21 +316,29 @@ async def test_der_boost_loest_eine_auswertung_aus(
     assert _kein_celery == [freies_zimmer.room_id]
 
 
-async def test_ohne_boostwert_gilt_der_hoechstwert_des_gastes(
+async def test_die_gast_obergrenze_ist_kein_boost_wert(
     http_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
-    """**Warum es diesen Rueckfall gibt.**
+    """**Widerspruch des Betreibers vom 02.11.2026, und er hat recht.**
 
-    ``boost_temperature`` ist nach der Migration ueberall ``NULL``. Ohne
-    Rueckfall waere die Funktion am Tag des Einbaus tot — und der
-    Betreiber muesste erst eine Zahl eintragen, die ihm niemand genannt
-    hat. Der Hoechstwert, den die Rezeption ohnehin eingeben darf, ist
-    die Zahl, die schon im Haus steht.
+    Der erste Entwurf nahm ``guest_override_max``, wenn
+    ``boost_temperature`` leer war — „der hoechste Wert, den die
+    Rezeption ohnehin eingeben darf". Das ist fachlich falsch:
+    ``guest_override_max`` ist die **Gast-Obergrenze** und kann 25 sein,
+    waehrend der festgelegte Boost-Wert **23** ist.
+
+    Ein Rueckfall auf eine Grenze, die eine andere Frage beantwortet,
+    macht aus einem Boost stillschweigend das Maximum — und zwar dort, wo
+    niemand hinsieht, weil beides eine plausible Zahl ist.
+
+    Dieser Test haelt fest, dass die Obergrenze **nicht** einspringt: 25
+    steht da, und der Boost wird trotzdem abgewiesen.
     """
-    async with _zimmer(setup_engine, boost_wert=None, guest_max="23.0") as a:
+    async with _zimmer(setup_engine, boost_wert=None, guest_max="25.0") as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
-        assert antwort.status_code == 201, antwort.text
-        assert Decimal(str(antwort.json()["setpoint"])) == Decimal("23.0")
+        assert antwort.status_code == 409, antwort.text
+        assert antwort.json()["grund"] == "kein_boostwert"
+        assert antwort.json()["detail"] == "Boost-Temperatur nicht eingestellt"
 
 
 async def test_ein_boost_darf_einen_laufenden_boost_ersetzen(
@@ -422,10 +430,17 @@ async def test_nachtfenster_ohne_ausdehnung_wird_abgewiesen(
 async def test_ohne_jeden_wert_wird_abgewiesen(
     http_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
+    """Und der Grund sagt, was zu tun ist — nicht, was fehlt.
+
+    „Boost-Temperatur nicht eingestellt" ist der Satz des Betreibers. Er
+    nennt die **Einstellung** und nicht die Spalte; wer ihn liest, weiss,
+    wo er hin muss.
+    """
     async with _zimmer(setup_engine, boost_wert=None, guest_max=None) as a:
         antwort = await http_client.post(f"/api/v1/rooms/{a.room_id}/boost")
         assert antwort.status_code == 409, antwort.text
         assert antwort.json()["grund"] == "kein_boostwert"
+        assert antwort.json()["detail"] == "Boost-Temperatur nicht eingestellt"
 
 
 async def test_eine_laufende_uebersteuerung_weist_den_boost_ab(
