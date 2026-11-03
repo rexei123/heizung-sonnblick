@@ -6667,6 +6667,111 @@ Paketverlust-Anzeige, der die Relais-Karte ohnehin anfasst.
 Sendezeit), AE-78 §4 (T3.0 und die Strategie `REFRESH`),
 `docs/status/2026-11-02-waechter-backoff.md`.
 
+## 15. Nachtrag 03.11.2026: die Messung am Endplatz, und das Plugin bleibt liegen
+
+**Entscheidung des Betreibers:** das vorbereitete ADR-Plugin (§10av) wird
+**nicht** ausgerollt. Es bleibt unverändert im Repo; die zwei Zeilen, die
+es aktiv machen würden, sind weiter nicht gesetzt.
+
+### Die Messung
+
+109 steht seit **02.11.2026 etwa 07:05** am Endplatz in der Dose am
+Eingang — nur Zuleitung, kein Panel, zurückgenommen. Ausgewertet am
+03.11. nach §10au.
+
+| Gerät | empf. / erw. | Verlust | Rücksetzungen |
+|---|---|---|---|
+| **109** (Relais, Endplatz) | **137 / 140** | **2,1 %** | **0** |
+| Vickis, Bereich über alle | | 0 bis 1,4 % | |
+| 099, bei RSSI −115/−116 dBm | | 0 % | |
+| 095, bei RSSI −115/−116 dBm | | 0,7 % | |
+
+**Der Befund ist eindeutig in Richtung „nichts tun".** Ein Plugin, das die
+Datenrate auf DR3 senkt und jeden Uplink zweimal sendet, behebt 2,1 %
+nicht — es tauscht sie gegen die mehrfache Sendezeit und gegen einen
+Neustart von ChirpStack, an dem rund hundert Vickis hängen.
+
+### Die Entscheidungstabelle in §10au war falsch — und für diese Messung nicht einmal entscheidbar
+
+Zeile 1 lautete „Verlust **unter 5 %** **und** RSSI besser als **−105
+dBm** → nichts tun". Beides zusammen, als Bedingung.
+
+**Die zweite Hälfte widerlegt das eigene Haus.** 099 und 095 stehen bei
+**−115 bis −116 dBm** und verlieren 0 % beziehungsweise 0,7 %. Der Pegel
+allein sagt also nichts über den Verlust; es sagt ihn erst der Abstand
+zur Empfindlichkeitsgrenze des Spreizfaktors, und die liegt bei SF7 und
+BW 125 laut Datenblatt bei etwa −123 dBm. Bis dorthin ist ein Paket da
+oder nicht da, aber nicht halb da.
+
+**Und für 109 gibt es die Zahl überhaupt nicht.** `relay_reading` führt
+weder `rssi_dbm` noch `snr_db`; der Wert ist nur in ChirpStack ablesbar
+(§10au Schritt 2). Für die tatsächlich gemessene Lage — 2,1 % Verlust,
+RSSI nicht erhoben — hätte die Tabelle damit **keine** Zeile getroffen:
+zu gut für Zeile 2 und 3, und Zeile 1 nicht belegbar.
+
+Korrigiert, mit einem Satz: **der Verlust entscheidet, der Pegel
+erklärt.** RSSI und SNR bleiben in Schritt 2, aber als Erklärung eines
+gemessenen Verlusts, nicht als Vorhersage. Das ist §5.77 in einer
+Entscheidungstabelle — eine Schwelle, die niemand nachgerechnet hat,
+liest sich unter Druck wie ein Befund.
+
+### Die Hypothese zum 01.11.: der Wächter hat auf die eigene Messung gefunkt
+
+Am 01.11. ergab die Rechnung von Hand **rund 30 % Verlust** an 109. Im
+selben Zeitfenster, 11:22 bis 11:28, ging **jede Minute** ein Downlink an
+dasselbe Gerät — sieben Stück, jeder bei SF12 über RX2, also 1,32 s
+Sendezeit (§14).
+
+Zwei Wirkungen, und nur eine reicht weit:
+
+1. **Das Gateway ist halbduplex: während es sendet, hört es nicht.** Neun
+   Sekunden Sendezeit in sieben Minuten sind rund **2 %** des Fensters —
+   die richtige Größenordnung für ein paar Prozent und ausdrücklich
+   **nicht** für dreißig.
+2. **Der Neustart.** In der Reihe vom 01.11. liegt einer
+   (`docs/status/2026-11-02-paketverlust.md`: `fCnt` 8, Neustart, dann
+   13), in der Reihe vom 02./03.11. **keiner**. Ein Neustart kostet die
+   Frames über Boot und Rejoin, und in einer Reihe von einem Dutzend
+   Zählerwerten dominiert dieses eine Loch den Prozentsatz. Genau das tut
+   der Geräte-Wachhund nach zwei bestätigten Uplinks ohne ACK plus sieben
+   Minuten (§10au, „Die Notfall-Option").
+
+**Die Hypothese lautet deshalb nicht „Funkloch behoben", sondern: die
+30 % waren kein Zustand der Funkstrecke, sondern einer, in dem Steuerung
+und Gerät gegeneinander gearbeitet haben** — und die Lücke hat das
+Neustart-Fenster mitgezählt.
+
+**Was diese Messung nicht kann: die beiden Ursachen trennen.** Zwischen
+dem 01.11. und dem 02.11. haben sich **zwei** Dinge geändert — die
+Position (provisorisch → Dose am Endplatz) und die Bremse am Wächter.
+Welcher Anteil wem gehört, ist aus diesen Zahlen nicht zu beantworten.
+Das steht hier, damit niemand später die eine Hälfte als belegt liest.
+
+**Dazu der Unterschied in der Belastbarkeit.** Die 30 % stammen aus
+**vier fehlenden Frames** in einer von Hand aus den ChirpStack-Ereignissen
+gelesenen Reihe, die 2,1 % aus **140 erwarteten** über einen Tag. Das sind
+nicht zwei Messungen derselben Art, und die erste war es, die den Bedarf
+nach einem Plugin begründet hat.
+
+### Wann die Frage wiederkommt
+
+§10av bleibt deshalb unverändert stehen, nicht als Altlast, sondern weil
+sich die Lage ändern wird:
+
+| Anlass | warum dann neu zu messen ist |
+|---|---|
+| 109 kommt an seinen endgültigen Platz **mit Panel** | ein Panel vor der Antenne ist eine andere Funkstrecke als eine offene Dose |
+| ein zweites Relais, weiter weg | 109 ist der heute schlechteste Platz, nicht der denkbar schlechteste |
+| Verlust über 5 % bei unveränderten Vickis | dann ist es das Gerät oder der Platz, und nicht das Haus |
+
+**Querverweise:** §14 (die Bremse am Wächter — die andere Hälfte der
+Hypothese), §10au (die Auswertung, jetzt mit Ergebnis und korrigierter
+Tabelle), §10av (das Plugin: vorbereitet, nicht ausgerollt), §10aw (die
+Laufliste vom 04.11. — das Plugin ist nicht Teil des Termins), §5.77
+(eine Verneinung, die niemand nachprüft), §5.68 (Behauptung gegen
+Befund), `docs/status/2026-11-03-funkauswertung.md`,
+`docs/status/2026-11-02-waechter-backoff.md`.
+
 # AE-79 — Das Handbuch liegt im Repo und wandert mit dem Pull Request
 
 **Datum:** 25.10.2026 · **Stand:** umgesetzt (Paket 1) · **Betrifft:**
