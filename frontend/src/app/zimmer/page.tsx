@@ -14,8 +14,8 @@ import { useRoomTypes } from "@/lib/api/hooks-room-types";
 import { useCreateRoom, useRooms } from "@/lib/api/hooks-rooms";
 import { useAuth } from "@/contexts/auth-context";
 import { darfStammdatenAendern, darfTemperaturAendern } from "@/lib/auth/rechte";
-import { formatTemperature } from "@/lib/format";
-import { uebersteuerungslage } from "@/lib/uebersteuerung";
+import { formatTemperature, formatTime } from "@/lib/format";
+import { temperaturknopf } from "@/lib/uebersteuerung";
 import type {
   ApiError,
   Room,
@@ -362,19 +362,7 @@ function RoomTable({ list, loading, error }: TableProps) {
                       lock
                     </span>
                   ) : null}
-                  {r.has_active_override ? (
-                    <span
-                      className="inline-flex items-center gap-1 text-warning"
-                      aria-label="Übersteuerung aktiv"
-                      title="Übersteuerung aktiv"
-                      data-testid={`uebersteuerung-aktiv-${r.number}`}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                        tune
-                      </span>
-                      <span className="text-xs font-medium">Aktiv</span>
-                    </span>
-                  ) : null}
+                  {r.has_active_override ? <UebersteuerungsMarke room={r} /> : null}
                 </span>
               </td>
               <td className="px-3 py-2">
@@ -392,6 +380,55 @@ function RoomTable({ list, loading, error }: TableProps) {
           Dialog steht hier also im Markup, aber nicht in der Tabelle. */}
       <UebersteuernDialog room={offenesZimmer} onClose={() => setOffenesZimmer(null)} />
     </div>
+  );
+}
+
+/**
+ * Was in der Spalte „Übersteuerung" steht, wenn eine läuft.
+ *
+ * **Ein Boost bekommt eine eigene Kennzeichnung mit Endzeit**
+ * (Festlegung des Betreibers vom 01.11.2026): Flammen-Zeichen und
+ * „Boost bis 20:00". Nicht nur die Endzeit — ohne das Wort wäre der
+ * Unterschied zu einer gewöhnlichen Übersteuerung nicht zu sehen, und
+ * genau der ist die Information: ein Boost endet mit dem Nachtfenster
+ * und nicht nach 24 Stunden.
+ *
+ * **Für jede andere Quelle bleibt es bei „Aktiv".** Die Spalte ist
+ * schmal, und die Quelle steht auf der Zimmerseite im Klartext. Was hier
+ * dazukommt, ist die **Endzeit** — bis zum 02.11.2026 stand dort nur
+ * „Aktiv", und die Spalte verschwieg damit genau die Zahl, nach der man
+ * sie fragt.
+ */
+function UebersteuerungsMarke({ room }: { room: Room }) {
+  const istBoost = room.uebersteuerung_quelle === "frontend_boost";
+  const ende = room.uebersteuerung_ende;
+  const bis = ende !== null ? formatTime(ende) : null;
+  const text = istBoost
+    ? bis !== null
+      ? `Boost bis ${bis}`
+      : "Boost"
+    : bis !== null
+      ? `Aktiv bis ${bis}`
+      : "Aktiv";
+
+  const name = istBoost
+    ? bis !== null
+      ? `Boost aktiv bis ${bis}`
+      : "Boost aktiv"
+    : "Übersteuerung aktiv";
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-warning"
+      aria-label={name}
+      title={name}
+      data-testid={`uebersteuerung-aktiv-${room.number}`}
+    >
+      <span className="material-symbols-outlined" style={{ fontSize: 18 }} aria-hidden>
+        {istBoost ? "local_fire_department" : "tune"}
+      </span>
+      <span className="text-xs font-medium">{text}</span>
+    </span>
   );
 }
 
@@ -418,28 +455,28 @@ interface ZeilenKnoepfeProps {
  * Benutzergruppen erreicht.
  */
 function ZeilenKnoepfe({ room, darfTemperatur, onUebersteuern }: ZeilenKnoepfeProps) {
-  const lage = uebersteuerungslage(room);
+  const knopf = temperaturknopf(room);
   const grundId = `uebersteuern-grund-${room.id}`;
 
   return (
     <div className="flex items-center justify-end gap-1">
       {darfTemperatur ? (
-        <span title={lage.hinweis ?? "Übersteuern"}>
+        <span title={knopf.hinweis ?? "Temperatur setzen oder Boost"}>
           <Button
-            variant="secondary"
-            icon="tune"
-            className="px-3 sm:px-4"
+            variant="ghost"
+            icon="thermostat"
+            className="rounded-full px-3 hover:text-error sm:px-4"
             onClick={onUebersteuern}
-            disabled={!lage.erlaubt}
-            aria-label={`Zimmer ${room.number} übersteuern`}
-            aria-describedby={lage.hinweis ? grundId : undefined}
+            disabled={!knopf.erlaubt}
+            aria-label={`Temperatur für Zimmer ${room.number}`}
+            aria-describedby={knopf.hinweis ? grundId : undefined}
             data-testid={`uebersteuern-${room.number}`}
           >
-            <span className="hidden sm:inline">Übersteuern</span>
+            <span className="hidden sm:inline">Temperatur</span>
           </Button>
-          {lage.hinweis ? (
+          {knopf.hinweis ? (
             <span id={grundId} className="sr-only">
-              {lage.hinweis}
+              {knopf.hinweis}
             </span>
           ) : null}
         </span>
@@ -448,7 +485,7 @@ function ZeilenKnoepfe({ room, darfTemperatur, onUebersteuern }: ZeilenKnoepfePr
           ein Kind) — das Zeichen steht deshalb im Link, und zwar hinter
           der Beschriftung: ein Pfeil nach rechts vor dem Wort zeigt in die
           falsche Richtung. */}
-      <Button variant="ghost" className="px-3 sm:px-4" asChild>
+      <Button variant="ghost" className="rounded-full px-3 hover:text-error sm:px-4" asChild>
         <Link
           href={`/zimmer/${room.id}` as never}
           aria-label={`Details zu Zimmer ${room.number}`}

@@ -677,3 +677,80 @@ async def test_diese_datei_hinterlaesst_keine_rule_config_zeilen(
         .limit(1)
     )
     assert zimmer_zeilen is None, "eine Betriebszeit-Zeile ist geblieben"
+
+
+# ---------------------------------------------------------------------------
+# Die Bad-Vorlage in der Vorschau (Befund des Betreibers, 01.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_vorschau_rechnet_fuer_die_bad_vorlage_mit_ihrer_kette(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**Der Befund:** die Seite zeigte fuer „Bad" die hausweiten Werte.
+
+    Gemeldet am 01.11.2026: „Raumtypen -> Bad -> Was davon gilt zeigt
+    hausweit 21/15/19, laut ``_bad_zielwert`` gilt die Bad-Vorlage
+    22/18/22." Die Vorschau rechnete mit der Kette fuer ein **Zimmer
+    dieses Typs** — und so ein Zimmer gibt es nicht, der Raumtyp ist 0
+    Zimmern zugeordnet. Gewirkt haben seine Spalten die ganze Zeit ueber
+    ``rules.engine._bad_zielwert``, wo sie als eigene ROOM_TYPE-Zeile
+    auftreten.
+
+    Der Name der Vorlage ist eine Einstellung
+    (``BAD_VORLAGE_ROOM_TYPE``); der Test setzt ihn auf den Raumtyp, den
+    er selbst angelegt hat, statt den Namen des Hauses zu erwarten.
+    """
+    await _hausstandard(db_session, frei=HAUSWEIT_FREI, nacht=HAUSWEIT_NACHT)
+    _, rt = await _zimmer(db_session, buchbar=True)
+
+    from heizung.config import get_settings
+    from heizung.rules import badvorlage
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("BAD_VORLAGE_ROOM_TYPE", rt.name)
+    get_settings.cache_clear()
+    try:
+        assert await badvorlage.lade_bad_vorlage(db_session) is not None, (
+            "die Vorlage muss gefunden werden, sonst prueft der Test nichts"
+        )
+        befunde = await raumtyp_regel.wirksamkeit(db_session)
+    finally:
+        get_settings.cache_clear()
+
+    mein = next(b for b in befunde if b.room_type_id == rt.id)
+    frei = next(f for f in mein.felder if f.feld == "default_t_vacant")
+
+    assert frei.angezeigt == Decimal(BETRIEB)
+    assert frei.wirksam == Decimal(BETRIEB), "die Spalte der Vorlage gilt, nicht die hausweite"
+    assert frei.quelle == "bad_vorlage"
+
+
+async def test_ohne_vorlage_bleibt_die_kette_wie_sie_war(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Gegenprobe. Ohne Vorlage gewinnt die hausweite Zeile weiter.
+
+    Ohne diesen Test waere nicht zu unterscheiden, ob die Vorschau die
+    Vorlage erkennt oder ob sie jetzt **jedem** Raumtyp seine Spalte
+    zuspricht — und das waere eine Anzeige, die ueberall das Falsche
+    behauptet statt an einer Stelle.
+    """
+    await _hausstandard(db_session, frei=HAUSWEIT_FREI, nacht=HAUSWEIT_NACHT)
+    _, rt = await _zimmer(db_session, buchbar=True)
+
+    from heizung.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("BAD_VORLAGE_ROOM_TYPE", "")
+    get_settings.cache_clear()
+    try:
+        befunde = await raumtyp_regel.wirksamkeit(db_session)
+    finally:
+        get_settings.cache_clear()
+
+    mein = next(b for b in befunde if b.room_type_id == rt.id)
+    frei = next(f for f in mein.felder if f.feld == "default_t_vacant")
+
+    assert frei.wirksam == Decimal(HAUSWEIT_FREI)
+    assert frei.quelle == "global"

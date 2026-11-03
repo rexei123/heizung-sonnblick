@@ -142,6 +142,13 @@ export default function DeviceDetailPage() {
                   <HardwareStatusBadge
                     deviceId={device.id}
                     isPool={device.heating_zone_id === null}
+                    rolle={
+                      device.kind === "relay"
+                        ? "relais"
+                        : device.measure_only
+                          ? "fuehler"
+                          : "thermostat"
+                    }
                     variant="detailed"
                   />
                 </div>
@@ -673,6 +680,7 @@ const OVERRIDE_SOURCE_LABEL: Record<OverrideSource, string> = {
   device: "Drehring am Thermostat (vermutet, alt)",
   frontend_24h: "Rezeption (24 h)",
   frontend_bereich: "Rezeption (Bereich)",
+  frontend_boost: "Rezeption (Boost)",
   frontend_checkout: "Rezeption (bis Check-out)",
   frontend_4h: "Rezeption (4 h, alt)",
   frontend_midnight: "Rezeption (bis Mitternacht, alt)",

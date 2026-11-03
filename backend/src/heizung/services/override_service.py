@@ -18,6 +18,8 @@ optional via ``heating_zone_id``, Check-out revoked ALLE Quellen
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, ClassVar
@@ -287,6 +289,7 @@ def compute_expires_at(
     next_checkout_at: datetime | None = None,
     hotel_config: GlobalConfig | None = None,
     dauer_minuten: int | None = None,
+    boost_ende: datetime | None = None,
 ) -> datetime:
     """Default-Ablauf je Quelle, anschliessend 7-Tage-Hard-Cap.
 
@@ -301,6 +304,13 @@ def compute_expires_at(
       Aufrufer nicht still auf einen anderen Wert faellt.
     - ``frontend_midnight``  -> ``heute 23:59`` Hotel-Timezone —
       **historisch**, wie oben.
+    - ``frontend_boost``     -> ``boost_ende`` (Pflicht). Der Zeitpunkt
+      kommt aus ``services/boost``: der naechste Wechsel des
+      Nachtfensters **des Zimmers**. Er kann hier nicht gerechnet werden,
+      weil er die Regelkette und die Zeitzone braucht — dieselbe Lage wie
+      bei ``frontend_checkout``, und dieselbe Antwort: der Aufrufer
+      liefert ihn, und ``None`` ist ein Vertragsbruch und kein stiller
+      Vorgabewert.
 
     **Was sich geaendert hat, und was das kostet.** ``device`` lief vorher
     bis zum Check-out (bei einem langen Aufenthalt bis zu 7 Tage),
@@ -363,6 +373,17 @@ def compute_expires_at(
         local_now = now.astimezone(tz)
         local_midnight = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
         raw = local_midnight.astimezone(UTC)
+    elif source == OverrideSource.FRONTEND_BOOST:
+        # Festlegung des Betreibers vom 31.10.2026: das Ende haengt am
+        # Nachtfenster des Zimmers. ``services/boost.lage`` rechnet es;
+        # hier laeuft es nur noch durch den 7-Tage-Hard-Cap, damit es
+        # **eine** Stelle gibt, an der eine Frist gekappt wird.
+        if boost_ende is None:
+            raise ValueError(
+                f"boost_ende darf nicht None sein fuer source={source.value} "
+                "— es kommt aus services/boost.lage und ist Pflicht"
+            )
+        raw = boost_ende
     elif source == OverrideSource.FRONTEND_CHECKOUT:
         # Sprint 12a T2 (AE-58): Fallback-Pfad ``now+7d`` entfaellt. Mit
         # vorgeschaltetem OCCUPIED-Gate (siehe ``create``) gibt es immer
@@ -395,6 +416,7 @@ _FRONTEND_QUELLEN: frozenset[OverrideSource] = frozenset(
         OverrideSource.FRONTEND_4H,
         OverrideSource.FRONTEND_MIDNIGHT,
         OverrideSource.FRONTEND_BEREICH,
+        OverrideSource.FRONTEND_BOOST,
     }
 )
 
@@ -529,6 +551,19 @@ async def create(
         quantized = _kappe_an_raumtyp(quantized, raumtyp)
     elif ist_bereich and source in _FRONTEND_QUELLEN:
         raise BereichsQuelleFalschError(room_id, source, ist_bereich=True)
+    elif source == OverrideSource.FRONTEND_BOOST:
+        # **Festlegung des Betreibers vom 31.10.2026: „eine Regel fuer
+        # belegt und frei".** Ein Boost darf also auch in ein freies
+        # Zimmer gehen -- der haeufige Fall ist ein Zimmer, das in einer
+        # Stunde bezogen wird und jetzt kalt ist.
+        #
+        # Das ist eine Ausnahme von AE-58, und sie ist eng: der Boost
+        # waehlt weder Wert noch Dauer (beides rechnet
+        # ``services/boost``), er endet am naechsten Wechsel des
+        # Nachtfensters, und die Sperre sowie das offene Fenster weisen
+        # ihn weiter ab. Eine gewoehnliche Uebersteuerung bleibt auf
+        # belegte Zimmer beschraenkt.
+        pass
     else:
         room_status = await derive_room_status(session, room_id, now)
         if room_status != RoomStatus.OCCUPIED:
@@ -613,6 +648,7 @@ _QUELLEN_RANG: dict[OverrideSource, int] = {
     OverrideSource.FRONTEND_24H: 0,
     OverrideSource.FRONTEND_BEREICH: 0,
     OverrideSource.FRONTEND_CHECKOUT: 0,
+    OverrideSource.FRONTEND_BOOST: 0,
 }
 
 # ``revoked_reason``, wenn ein neuer Override einen aelteren derselben Zone
@@ -779,32 +815,74 @@ async def get_active(
     return result.scalar_one_or_none()
 
 
-async def get_rooms_with_active_override(session: AsyncSession) -> set[int]:
-    """Sprint 14d (R-A/R-D): ``room_id`` aller Zimmer mit >= 1 aktivem Override.
+@dataclass(frozen=True, slots=True)
+class Uebersteuerungsstand:
+    """Was eine Zeile der Zimmerliste ueber Uebersteuerungen sagt.
 
-    Bool-Aggregat fuer die Zimmer-Liste (RoomRead.has_active_override): EIN
-    Query ueber ``manual_override``, distinct ``room_id``, ohne per-room-Loop
-    (R-D — das per-Device-N+1-Muster aus ``devices._build_device_read`` wird
-    bewusst NICHT auf die Liste uebertragen).
+    **Zwei Fragen, eine Abfrage.** „Laeuft ueberhaupt eine" und „welche
+    gilt" sind verschiedene Fragen, und die Liste braucht beide: das
+    Schloss-und-Aktiv-Paar in der Spalte haengt an der ersten, die
+    Kennzeichnung eines Boosts mit Endzeit an der zweiten. Zwei Abfragen
+    waeren zwei Zeitpunkte ``now`` und damit zwei Wahrheiten ueber
+    dasselbe Fenster.
 
-    Aktiv-Filter identisch zu ``get_active`` / ``count_active_overrides``:
-    ``revoked_at IS NULL AND expires_at > now``. Zone-Scope- (``heating_zone_id``
-    gesetzt) und Room-Scope-Overrides (``heating_zone_id IS NULL``) zaehlen
-    gleichermassen — gefragt ist nur „Zimmer hat ueberhaupt eine aktive
-    Uebersteuerung". OCCUPIED wird nicht erneut geprueft: Overrides entstehen
-    nur in OCCUPIED-Zimmern (AE-58 Create-Gate) und werden bei Check-out
-    revoked (``revoke_all_active_overrides``); eine Status-Re-Pruefung hier
-    waere ein per-room ``derive_room_status`` und wuerde R-D verletzen.
+    ``aktiv`` zaehlt **zonenweite und zimmerweite** Eintraege — gefragt
+    ist, ob ueberhaupt eine laeuft. ``zimmerweite`` ist der gewinnende
+    **zimmerweite** Eintrag und ``None``, wenn nur eine zonenweite
+    laeuft; die Spalte schreibt dann „Aktiv" ohne Endzeit, und die
+    Einzelheiten stehen auf der Zimmerseite.
     """
+
+    aktiv: bool
+    zimmerweite: ManualOverride | None
+
+
+async def stand_je_zimmer(
+    session: AsyncSession, room_ids: Sequence[int]
+) -> dict[int, Uebersteuerungsstand]:
+    """Der Uebersteuerungs-Stand je Zimmer, in EINER Abfrage.
+
+    **Eine und nicht eine je Zimmer.** Bei 104 Zeilen waere das sonst das
+    N+1-Muster, das R-D fuer diese Liste ausdruecklich ausgeschlossen hat;
+    ``test_list_rooms_has_active_override_single_query`` zaehlt die
+    ``manual_override``-Statements mit und besteht auf **einem**.
+
+    Die Rangfolge ist dieselbe wie in ``get_active`` — sie kommt aus
+    ``_QUELLEN_RANG``, also aus derselben Quelle, und ist hier nicht zum
+    zweiten Mal aufgeschrieben (Paragraph 5.53).
+
+    Vorher standen hier zwei Funktionen: ``get_rooms_with_active_override``
+    (nur das Bool) und, kurzzeitig, ``get_active_je_zimmer``. Sie sind
+    zusammengelegt, weil die Liste beides zugleich braucht und zwei
+    Abfragen die R-D-Pruefung gebrochen haetten.
+    """
+    if not room_ids:
+        return {}
+
     now = _now()
+    quellen_rang = case(_QUELLEN_RANG, value=ManualOverride.source, else_=0)
     stmt = (
-        select(ManualOverride.room_id)
+        select(ManualOverride)
+        .where(ManualOverride.room_id.in_(room_ids))
         .where(ManualOverride.revoked_at.is_(None))
         .where(ManualOverride.expires_at > now)
-        .distinct()
+        .order_by(
+            ManualOverride.room_id,
+            quellen_rang,
+            ManualOverride.created_at.desc(),
+        )
     )
-    result = await session.execute(stmt)
-    return set(result.scalars().all())
+
+    treffer: dict[int, Uebersteuerungsstand] = {}
+    for eintrag in (await session.execute(stmt)).scalars().all():
+        vorher = treffer.get(eintrag.room_id)
+        zimmerweite = vorher.zimmerweite if vorher is not None else None
+        if zimmerweite is None and eintrag.heating_zone_id is None:
+            # Die Reihenfolge liefert den Gewinner zuerst; alles danach
+            # zum selben Zimmer ist der Stapel darunter.
+            zimmerweite = eintrag
+        treffer[eintrag.room_id] = Uebersteuerungsstand(aktiv=True, zimmerweite=zimmerweite)
+    return treffer
 
 
 async def get_history(

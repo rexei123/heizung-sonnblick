@@ -40,7 +40,31 @@ const DT_TZ = new Intl.DateTimeFormat("de-AT", {
   timeZoneName: "short",
 });
 
+/** Nur die Uhrzeit, in Hotel-Zeit ("20:00"). */
+const T = new Intl.DateTimeFormat("de-AT", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: HOTEL_TIMEZONE,
+});
+
 const RTF = new Intl.RelativeTimeFormat("de-AT", { numeric: "auto" });
+
+/**
+ * Nur die Uhrzeit, in **Hotel-Zeit** ("20:00").
+ *
+ * Fuer Beschriftungen, in denen das Datum nichts beitraegt, weil der
+ * Zeitpunkt ohnehin heute oder morgen frueh liegt — „Boost bis 20:00".
+ * Sobald eine solche Uhrzeit neben einer **anderen** Uhrzeit steht oder
+ * mit einer Schwelle verglichen wird, ist ``formatDateTimeTz`` die
+ * richtige Wahl: dort ist die fehlende Einheit kein Platzgewinn, sondern
+ * die Falle vom 26.09.2026 (siehe dort).
+ */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "–";
+  return T.format(d);
+}
 
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "–";
