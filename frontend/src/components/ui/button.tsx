@@ -19,6 +19,10 @@ import { cn } from "@/lib/utils";
  *   - "destructive" Outline rot. Loeschen / Deaktivieren / Archivieren.
  *                   Strategie schreibt Confirm-Dialog vor — siehe ConfirmDialog.
  *   - "ghost"       Transparent + Primary-Text. Tertiaer.
+ *                   Ausnahme Zimmerliste: dort ist die Schrift schwarz
+ *                   (Vorgabe Betreiber 31.10.2026) — die Begruendung steht
+ *                   an ZEILEN_KNOPF_KLASSEN in app/zimmer/page.tsx, damit
+ *                   niemand den Aufruf dort fuer einen Fehler haelt.
  *
  * Sizes: sm (h-9 px-4) | md (h-10 px-5) | lg (h-11 px-6) — §6.1.
  *
