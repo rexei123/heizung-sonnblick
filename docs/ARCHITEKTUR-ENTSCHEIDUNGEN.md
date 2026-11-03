@@ -5482,6 +5482,59 @@ die Lücken später für geprüft hält (§5.83):
 
 ## 4. Der Befund, der den Wächter-Entwurf entscheidet
 
+> ### Gemessen am 01.11.2026 an Relais 109: **Bedeutung (b)**, der Entwurf trägt
+>
+> | | |
+> |---|---|
+> | Gerät | **109**, `70b3d52ddd001e69`, ohne Last |
+> | Firmware | **1.5** (HW 2.1), gelesen aus dem Boot-Frame |
+> | Versuch | `0x57 01 00 3C` bei T0 **und** bei T+20 s |
+> | Beobachtung | **Klick AUS nach 80 Sekunden** (Stoppuhr), Wiederholung ~11:05 mit gleichem Ergebnis |
+> | Ergebnis | **(b)** — „previous state" ist der **dauerhafte** Zustand, hier `0x5E 02` = AUS |
+>
+> **`REFRESH` darf damit freigegeben werden.** Die Auffrischung findet das
+> Relais EIN, schreibt aber **nicht** EIN als Rückfallzustand fest; nach
+> Ablauf des letzten Timers fällt es ab. Die Sicherheitseigenschaft des
+> Entwurfs — ein stummer Server lässt das Relais von selbst abfallen —
+> trägt.
+>
+> **Die Umstellung des Wächters auf `REFRESH` ist ein eigener PR** und
+> braucht die Freigabe des Betreibers (Festlegung vom 01.11.2026).
+> `EXPIRE_AND_RESEND` bleibt bis dahin die Strategie; sie ist nicht
+> falsch, nur teurer (zwei Downlinks je Zyklus statt einem).
+>
+> **Vorbedingung dieser Messung war die Provisionierung**, und das ist
+> kein Formalismus: bei `0x5E` = `00` („last state", die Werksvorgabe)
+> wäre der dauerhafte Zustand der **letzte** gewesen, und die Messung
+> hätte (a) ergeben, ohne dass das Gerät sich anders verhält. Gemessen
+> wurde also nicht „was bedeutet previous state", sondern „was bedeutet
+> es **bei gesetztem** `0x5E 02`" — und genau so wird es betrieben.
+>
+> **Nebenbefund zur Antwortzeit, und er bestätigt die Pause von 15
+> Sekunden statt sie infrage zu stellen.** Zwei Zustandsfragen (`0xB1`)
+> um 11:00:25 und 11:00:45 — also **20 Sekunden** auseinander — wurden
+> **beide** beantwortet (`b1 00` = AUS), jeweils rund **14 Sekunden**
+> nach der Frage. Zusammen mit den beiden anderen Beobachtungen ergibt
+> das:
+>
+> | Abstand der Befehle | Antworten | wann |
+> |---|---|---|
+> | **5 s** | nur **eine** von zwei | 01.11., 09:44:50/55 |
+> | **15 s** | **alle fünf** (Provisionierung) | 01.11., 10:26 → letzte Antwort 10:28:28 |
+> | **20 s** | **beide** von zwei | 01.11., 11:00:25/45 |
+>
+> **Fünfzehn Sekunden genügen also, und die 14 Sekunden sind kein
+> Gegenargument:** die Antwort braucht so lange, aber sie blockiert
+> nichts — das Gerät hängt sie an den nächsten Uplink, und der kommt
+> ohnehin erst danach. Die Pause soll die **Befehle** auseinanderhalten,
+> nicht auf Antworten warten.
+>
+> Hier stand zunächst „eine Sekunde Rand, zu knapp, Vorschlag 20". Das
+> war falsch gerechnet — und die Zeile, die es widerlegt, stand schon im
+> Bericht des Betreibers: der Lauf von 10:26 **mit** 15 Sekunden hat alle
+> fünf Antworten bekommen. Der Wert bleibt bei 15.
+
+
 Der Entwurf lautet: EIN **nur** über `0x57` mit 15 Minuten, Auffrischung
 alle 5 Minuten, damit ein stummer Server das Relais von selbst abfallen
 lässt. Die Sicherheitseigenschaft hängt vollständig an Lücke 2 oben.
@@ -5521,10 +5574,30 @@ Timer-Ablauf von Befehl, Taster und Schutzauslösung.
 `0x1C` setzt „device radio communication watch-dog parameters". Nach den
 Handbüchern **anderer** MClimate-Geräte führt dieser Wächter einen
 **Neustart des Geräts** aus, wenn über eine Frist kein Downlink kam —
-nicht ein Abschalten des Relais. **Für das 16ASPM ist das nicht
-belegt**; die 16ASPM-Seite dazu habe ich nicht gelesen, und eine Angabe
-aus dem Handbuch eines anderen Geräts ist keine Angabe über dieses
-(§5.79).
+nicht ein Abschalten des Relais.
+
+**Nachgelesen am 01.11.2026, und für das 16ASPM bestätigt.** Die Seite
+„Network-related settings" der 16ASPM-Doku beschreibt `0x1C` mit zwei
+Werten: Byte 1 die Zahl bestätigter Uplinks ohne ACK plus sieben Minuten,
+Byte 2 die Stunden für unbestätigte. Beispiel der Doku: `1C0300` heißt
+bei fünf Minuten Keepalive „confirmed **reset** nach 3 × 5 + 7 = 22
+Minuten". Es ist also ein **Neustart**, kein Abschalten — die Vermutung
+aus den anderen Handbüchern trifft zu.
+
+Hier stand bis dahin, die 16ASPM-Seite sei nicht gelesen. Das war
+richtig; jetzt ist sie gelesen, und die Angabe steht mit Quelle da statt
+als Analogie (§5.79).
+
+**Relais 109 meldet die Werkswerte** `1d 02 18`, also 2 (bestätigt) und
+0x18 = 24 Stunden (unbestätigt) — der Wachhund ist aktiv und auf
+Vorgabe.
+
+**Die Gefahr, die der nächste Absatz beschreibt, ist durch die
+Provisionierung abgewendet** und nicht durch Glück: ein Neustart trifft
+auf `0x5E`, und dort steht nach der Provisionierung `02` (AUS) statt der
+Werksvorgabe `00` („last state"). Das ist der zweite Grund, warum
+`0x5E 02` eine Provisionierungs-Pflicht ist und keine Reaktion — der
+erste steht unten.
 
 Falls es zutrifft, ist es sogar gefährlich: ein Neustart trifft auf
 `0x5E` = `00` „Last state" (**die Vorgabe**), und das Relais käme in dem

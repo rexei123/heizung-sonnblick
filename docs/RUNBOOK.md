@@ -7161,10 +7161,14 @@ Die Pause steht in den Settings (`relay_provision_pause_s`, Vorgabe 15);
 und **unvollständig** — und eine fehlende Rücklesung sieht aus wie ein
 Gerät, das nicht antwortet.
 
-**Die 15 Sekunden sind abgeleitet, nicht gemessen.** Die beobachteten
-Antworten kamen 8 bzw. gut 70 Sekunden nach ihrem Befehl. Zeigt sich das
-an einem anderen Gerät anders, ist die Zahl die erste Stelle, an der man
-dreht — nicht der Mechanismus.
+**Die 15 Sekunden sind inzwischen belegt** (01.11.2026, drei
+Beobachtungen an 109): bei **5 Sekunden** Abstand kam nur **eine** von
+zwei Antworten, bei **15** kamen **alle fünf** der Provisionierung, bei
+**20** beide von zwei. Die Antwort selbst braucht rund **14 Sekunden** —
+das blockiert nichts, denn das Gerät hängt sie an den nächsten Uplink.
+Die Pause hält die **Befehle** auseinander und wartet nicht auf
+Antworten. Zeigt sich das an einem anderen Gerät anders, ist die Zahl die
+erste Stelle, an der man dreht — nicht der Mechanismus.
 
 **Und die Anleitung schweigt dazu.** Der Zustand nach Stromrückkehr ist
 in der Hersteller-Anleitung **nicht dokumentiert** (geprüft am 01.11.2026).
@@ -9184,6 +9188,25 @@ mit Ihrer Freigabe.
 > dokumentiert** (§10aj Schritt 4), wir wissen ihn also erst, wenn das
 > Gerät ihn gemeldet hat.
 
+> ### Ergebnis bis Schritt 5: **bestanden am 01.11.2026**
+>
+> | Schritt | Prüfung | Ergebnis |
+> |---|---|---|
+> | 1 | Codec einfügen | bestanden — Frame vollständig dekodiert, keine Fehlermeldung |
+> | 2 | beide Zustände lesen | `0x5F` → `off`, `0x5A` → `last_state` (**vor** dem Setzen) |
+> | 3 | Rücklesungen setzen | bestanden — `0x5A` kam um 10:28:28 mit `off`, beide bestätigt |
+> | 4 | **T3.0** | bestanden, Bedeutung **(b)**: Klick AUS nach 80 s, Wiederholung ~11:05. `REFRESH` darf freigegeben werden (AE-78 §4) |
+> | 5 | Stromausfalltest | bestanden — Sicherung ~10:31, Rejoin 10:31:48, Boot-Frame 10:34:39 mit `relayState OFF` |
+>
+> **Der Stromausfalltest ist der stärkste der fünf**, weil er die
+> Einstellung nicht zurückliest, sondern ihre **Wirkung** prüft: das
+> Gerät war stromlos und kam AUS zurück. Eine Rücklesung sagt, was im
+> Gerät steht; dieser Versuch sagt, was es tut (§5.76).
+>
+> **Drei Befunde aus dem Lauf sind in #362 und #363 behoben** — die
+> Rücklesung wurde nicht vermerkt, die zweite Antwort blieb aus, leere
+> Uplinks waren ein Fehler im Log. Einzelheiten in STATUS §2ct und §2cu.
+
 ### Schritt 1 — Codec einfügen und nachsehen
 
 *ChirpStack-Oberfläche.* Device profiles → Ihr 16ASPM-Profil → Tab
@@ -9348,6 +9371,130 @@ vorher etwas anderes gemeldet — dann ist der Befund die **Abweichung
 zwischen Rücklesung und Verhalten**, und das ist ein eigener Pflicht-Stop.
 
 *Rückweg:* `0xC1 00`.
+
+### Schritt 6 — zuordnen, in Betrieb nehmen, Taster, dann Panel
+
+**T3.0 ist bestanden** (01.11.2026, Bedeutung **(b)**, AE-78 §4). Damit
+ist 109 geprüft: Firmware 1.5, Stromrückkehr AUS — und zwar an einem
+**echten** Stromausfall belegt —, Überhitzungs-Erholung AUS, Timer-Ablauf
+gemessen. Ab hier geht es um den Betrieb.
+
+#### a) Zuordnen — Rezeption / Eingang
+
+*Software-Oberfläche.* **Zimmerseite „Rezeption" → Reiter „Geräte" →
+Knopf „Gerät zuordnen"** → 109 wählen, Zone **Eingang**.
+
+Die Liste zeigt dort nur Geräte **ohne Zone**; ein zugeordnetes Gerät
+taucht nicht auf. Der zweite Weg wäre der Pairing-Assistent unter
+`/devices/pair` (Gerät → Zimmer → Heizzone → Etikett) — der ist für die
+Montage von vielen gedacht, für ein einzelnes Gerät ist der Reiter
+kürzer.
+
+*Erwartet:* 109 steht im Reiter „Geräte" der Rezeption mit Zone
+„Eingang", und auf der Geräteseite steht die Zone.
+
+**Noch schaltet nichts.** `commissioned_at` ist leer, und ohne diesen
+Wert lässt `relay_service.darf_schalten` keinen Befehl hinaus (S3). Die
+Zuordnung allein ist also gefahrlos — das ist die Reihenfolge und kein
+Zufall.
+
+*Rückweg:* im selben Reiter trennen (Knopf „Gerät von Heizzone trennen").
+
+#### b) In Betrieb nehmen
+
+*Software-Oberfläche.* Geräteseite 109 → **In Betrieb nehmen**.
+
+*Erwartet:* es gelingt. Das Firmware-Tor sieht **1.5**, beide
+Rücklesungen sind bestätigt. Danach zeigt die Karte `darf schalten: ja`.
+
+Scheitert es mit **„Firmware unbekannt – Provisionieren wiederholen"**,
+ist die Version nicht in der Datenbank — dann einmal **Provisionieren**
+(läuft im Hintergrund, rund 75 Sekunden) und erneut versuchen.
+
+*Rückweg:* **Zurücknehmen** auf derselben Seite. Wichtig und leicht zu
+übersehen: das Zurücknehmen **schaltet das Relais nicht aus**; ein
+laufender Timer läuft ab. Wer sofort AUS will, nimmt den Taster oder den
+Befehl von Hand.
+
+#### c) Der Taster — und ob der Wächter ihn zurückholt
+
+**Vorher prüfen, was der Regler will.** Der Wächter schickt AUS nur,
+wenn der Zweipunktregler der Zone **AUS will**. Ist die Rezeption gerade
+unter ihrem Sollwert, will er EIN — dann bleibt das von Hand
+eingeschaltete Relais an, und der Versuch beweist nichts. Auf der
+Zonenkarte steht Soll und Ist; liegt das Ist **über** dem Soll (oder im
+Totband), ist der Augenblick richtig.
+
+*Vor Ort.* **Zweimal kurz** auf den Knopf → das Relais klickt EIN.
+Uhrzeit notieren.
+
+*Erwartet, in dieser Reihenfolge:*
+
+| Wann | Wo | Was |
+|---|---|---|
+| binnen Sekunden | Geräteseite 109 | **„Letzte Änderung durch: `manual_button`"** und Zustand EIN |
+| binnen ~60 s | Geräteseite 109 | Zustand **AUS**, und **„Letzte Änderung durch: `radio_set_or_flip`"** |
+
+**Die zwei Gründe nacheinander sind der Beweis.** `manual_button` heißt
+„jemand hat gedrückt", `radio_set_or_flip` heißt „ein Befehl hat
+geschaltet". Nur der Wechsel von einem zum anderen zeigt, dass die
+Steuerung den Handgriff gesehen **und** beantwortet hat; der Zustand AUS
+allein könnte auch ein abgelaufener Timer sein (`radio_timer`).
+
+**Dass das Gerät den Tastendruck von selbst meldet, steht im Codec**
+(`0x5d`) und ist seit dem 01.11.2026 auch in `relay_reading` als Grund
+gespeichert — vorher stand dort „ging an" ohne Grund.
+
+Bleibt es EIN, obwohl der Regler AUS wollte: melden. Dann sieht der
+Wächter den Zustand nicht, und das ist ein Befund, kein Handgriff.
+
+*Rückweg:* noch einmal zweimal drücken.
+
+#### d) Panel anschließen, Funktionstest mit Last
+
+**Erst jetzt.** *Vor Ort, Elektriker* — Klemmen `L`, `N`, `N`, `Lout`,
+und die Dose **nicht** neben oder über dem Panel (Betriebstemperatur
+0–40 °C, §10aj Schritt 0).
+
+*Erwartet beim ersten Einschalten:*
+
+| Größe | Erwartung | woran man es sieht |
+|---|---|---|
+| Leistung | rund **1600 W** | Geräteseite, „Leistung" |
+| Spannung | 225–235 V | dieselbe Karte |
+| Strom | rund 7000 mA | dieselbe Karte |
+| Gehäusetemperatur | **unter 40 °C** | Geräteseite; ohne Last stabil 35–37 °C |
+
+**Die Temperatur ist die Größe, die man im Auge behält**, und zwar nicht
+nur beim ersten Einschalten: ohne Last liegt 109 bei 35–37 °C, also schon
+im oberen Drittel des zulässigen Bereichs. Was eine Last daraus macht,
+ist die eigentliche Frage. Die Oberfläche warnt ab dem Wert aus den
+Settings (`relay_gehaeusetemperatur_alarm`, Vorgabe 40).
+
+Löst der Überhitzungsschutz aus, **sperrt das System das Relais** und nur
+ein Admin hebt die Sperre auf (S4). Das ist Absicht: das Gerät erholt
+sich von selbst, und ohne Sperre wäre der Vorfall nach einer Minute
+unsichtbar.
+
+*Rückweg:* Sicherung aus. Und auf der Geräteseite **Zurücknehmen**, damit
+der Regler nicht weiter schaltet — in dieser Reihenfolge, sonst schaltet
+er in eine stromlose Last.
+
+#### Dieselbe Liste für 108 (Bar)
+
+| Schritt | 109 | 108 |
+|---|---|---|
+| Zuordnen | Rezeption / Eingang | **Bar / Barbereich** |
+| T3.0 | bestanden, gilt für den **Typ** | **entfällt** — einmal gemessen |
+| Rücklesungen | bestätigt | **je Gerät neu** (§10aj Schritt 4) |
+| Stromausfalltest | bestanden | **je Gerät neu**, ohne Last |
+| Firmware | 1.5 | prüfen, **≥ 1.4** |
+
+**T3.0 wird nicht wiederholt** — gemessen wurde eine Eigenschaft der
+Firmware, nicht des einzelnen Geräts. **Die Rücklesungen schon**: sie
+sind eine Einstellung **im** Gerät, und 108 hat sie noch nie bekommen.
+Dasselbe gilt für den Stromausfalltest; er prüft, ob die Einstellung an
+diesem Stück Hardware sitzt.
 
 ### Erst danach: Panel anschließen
 
