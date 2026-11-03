@@ -532,12 +532,48 @@ function DevicesInRoom({
   );
 }
 
+/**
+ * Die gemeinsamen Klassen der drei Geräte-Aktionen „Tauschen",
+ * „Stilllegen" und „Trennen".
+ *
+ * **Schwarz statt grau, und beim Überfahren kein Farbwechsel** — Vorgabe
+ * des Betreibers vom 31.10.2026 („Schrift schwarz"), am 03.11.2026 auf
+ * diese Stelle ausgedehnt. Dasselbe Muster wie `ZEILEN_KNOPF_KLASSEN` in
+ * `app/zimmer/page.tsx`.
+ *
+ * **Was weg ist:** `hover:text-primary` an „Tauschen" und
+ * `hover:text-error` an „Stilllegen" und „Trennen". Die drei standen
+ * nebeneinander und wurden beim Überfahren in **drei verschiedene
+ * Farben** umgefärbt — eine davon genau die Primärfarbe, die die Vorgabe
+ * ausschließt.
+ *
+ * **Der Hinweis „hier ist etwas anklickbar" liegt jetzt auf der
+ * Unterstreichung.** Anders als bei den Pillen in der Zimmerliste geht
+ * hier kein Hintergrund: die drei sind randloser Text ohne Innenabstand,
+ * eine Fläche dahinter wäre ein Kasten um zwei Wörter. `hover:underline`
+ * ist die Form, die das Repo für textförmige Bedienelemente schon
+ * durchgehend benutzt (13 Stellen, z. B. „Detail →" in derselben Zeile).
+ *
+ * **`transition-colors` ist mit entfallen**, weil keine Farbe mehr
+ * wechselt. Eine Überblendung für einen Wechsel, den es nicht gibt, ist
+ * kein Schaden, aber eine Behauptung über den Code, die nicht stimmt.
+ *
+ * **Was absichtlich nicht schwarz ist:** „Detail →" in derselben Zeile.
+ * Das ist ein **Link** in der Link-Darstellung der ganzen Anwendung
+ * (`text-primary hover:underline`, 13 Stellen). Ihn hier allein
+ * umzufärben macht die Zimmerseite zur Ausnahme; ihn überall umzufärben
+ * ist eine Entscheidung über das Design-System und nicht über diese
+ * Zeile. Liegt beim Betreiber.
+ */
+const GERAETE_AKTION_KLASSEN =
+  "inline-flex items-center gap-1 text-xs text-text-primary hover:underline";
+
 function ReplaceDeviceButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-primary transition-colors"
+      className={GERAETE_AKTION_KLASSEN}
       aria-label="Thermostat tauschen"
       title="Thermostat tauschen"
     >
@@ -554,7 +590,7 @@ function RetireDeviceButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error transition-colors"
+      className={GERAETE_AKTION_KLASSEN}
       aria-label="Thermostat stilllegen"
       title="Thermostat stilllegen"
     >
@@ -571,7 +607,7 @@ function DetachButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error transition-colors"
+      className={GERAETE_AKTION_KLASSEN}
       aria-label="Gerät von Heizzone trennen"
     >
       <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>
