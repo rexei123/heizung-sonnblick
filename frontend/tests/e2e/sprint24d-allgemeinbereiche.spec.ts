@@ -514,6 +514,11 @@ test.describe("Allgemeinbereiche", () => {
         t_occupied: null,
         t_vacant: null,
         t_night: "19.0",
+        // 02.11.2026: die Antwort traegt sieben Felder, seit „Boost" die
+        // vierte Zeile ist. Ohne diesen Wert waere die Zeile leer und der
+        // Zaehler unten drei statt zwei — der Test wuerde dann die neue
+        // Zeile pruefen und nicht die zwei, um die es ihm geht.
+        boost_temperature: "23.0",
         night_start: "20:00:00",
         night_end: "06:00:00",
         preheat_minutes_before_checkin: 60,
@@ -540,9 +545,10 @@ test.describe("Allgemeinbereiche", () => {
     ).toBeVisible();
     await page.getByRole("tab", { name: "Globale Temperaturen" }).click();
 
-    // Zwei leere Felder sagen das, eines zeigt seine Zahl.
+    // Zwei leere Felder sagen das, zwei zeigen ihre Zahl.
     await expect(page.getByText("nicht festgelegt — Raumtyp entscheidet")).toHaveCount(2);
     await expect(page.getByText("19.0 °C")).toBeVisible();
+    await expect(page.getByText("23.0 °C")).toBeVisible();
   });
 
   test("die Zonen-Art Allgemeinbereich ist wählbar", async ({ page }) => {

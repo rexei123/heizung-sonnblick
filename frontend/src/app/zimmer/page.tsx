@@ -220,6 +220,10 @@ interface TableProps {
  * sondern 104 davon. Die Reihenfolge trägt die Gewichtung: „Übersteuern"
  * steht links mit Umrandung, „Details" rechts als Text, so wie der Link
  * vorher aussah.
+ *
+ * **Die Schriftfarbe ist seit dem 03.11.2026 schwarz und nicht das
+ * Brand-Rosé** — Vorgabe des Betreibers vom 31.10.2026. Begründung und
+ * die drei Zustände stehen an `ZEILEN_KNOPF_KLASSEN` weiter unten.
  */
 function RoomTable({ list, loading, error }: TableProps) {
   // Sprint 22 T5 / `rechte.ts`: `POST /rooms/{id}/overrides` ist
@@ -432,6 +436,32 @@ function UebersteuerungsMarke({ room }: { room: Room }) {
   );
 }
 
+/**
+ * Die gemeinsamen Klassen der beiden Zeilen-Knöpfe.
+ *
+ * **`text-text-primary` hebt die Schriftfarbe von `ghost` auf** — Vorgabe
+ * des Betreibers vom 31.10.2026: „Schrift schwarz". `ghost` liefert aus
+ * dem Design-System `text-primary`, also das Brand-Rosé; bei 104 Zeilen
+ * mal zwei Knöpfen ist das zweihundertmal Signalfarbe für etwas, das
+ * keinen Alarm meldet. Schwarz ist hier die Beschriftung einer
+ * Schaltfläche und nicht ein Hinweis.
+ *
+ * **Der Hintergrund bleibt `bg-primary-soft` aus `ghost`** (hell rosé),
+ * und nur er zeigt beim Überfahren, dass hier etwas anklickbar ist. Das
+ * frühere `hover:text-error` ist weg: eine Schrift, die beim Überfahren
+ * rot wird, nimmt die Vorgabe genau dann zurück, wenn man hinsieht.
+ *
+ * **Gesperrt bleibt unverändert** — `disabled:opacity-50` steht im
+ * Grundstil des Knopfs. Mit schwarzer Schrift wird daraus erst wirklich
+ * Grau; vorher war es blasses Rosé.
+ *
+ * Eine Konstante und nicht zweimal derselbe String: die beiden Knöpfe
+ * stehen nebeneinander in einer Zeile und müssen gleich aussehen. Zwei
+ * Fassungen laufen beim nächsten Griff auseinander, und das sieht niemand
+ * (§5.53).
+ */
+const ZEILEN_KNOPF_KLASSEN = "rounded-full px-3 text-text-primary sm:px-4";
+
 interface ZeilenKnoepfeProps {
   room: Room;
   darfTemperatur: boolean;
@@ -465,7 +495,7 @@ function ZeilenKnoepfe({ room, darfTemperatur, onUebersteuern }: ZeilenKnoepfePr
           <Button
             variant="ghost"
             icon="thermostat"
-            className="rounded-full px-3 hover:text-error sm:px-4"
+            className={ZEILEN_KNOPF_KLASSEN}
             onClick={onUebersteuern}
             disabled={!knopf.erlaubt}
             aria-label={`Temperatur für Zimmer ${room.number}`}
@@ -485,7 +515,7 @@ function ZeilenKnoepfe({ room, darfTemperatur, onUebersteuern }: ZeilenKnoepfePr
           ein Kind) — das Zeichen steht deshalb im Link, und zwar hinter
           der Beschriftung: ein Pfeil nach rechts vor dem Wort zeigt in die
           falsche Richtung. */}
-      <Button variant="ghost" className="rounded-full px-3 hover:text-error sm:px-4" asChild>
+      <Button variant="ghost" className={ZEILEN_KNOPF_KLASSEN} asChild>
         <Link
           href={`/zimmer/${room.id}` as never}
           aria-label={`Details zu Zimmer ${room.number}`}

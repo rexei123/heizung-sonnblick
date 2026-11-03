@@ -6667,6 +6667,111 @@ Paketverlust-Anzeige, der die Relais-Karte ohnehin anfasst.
 Sendezeit), AE-78 §4 (T3.0 und die Strategie `REFRESH`),
 `docs/status/2026-11-02-waechter-backoff.md`.
 
+## 15. Nachtrag 03.11.2026: die Messung am Endplatz, und das Plugin bleibt liegen
+
+**Entscheidung des Betreibers:** das vorbereitete ADR-Plugin (§10av) wird
+**nicht** ausgerollt. Es bleibt unverändert im Repo; die zwei Zeilen, die
+es aktiv machen würden, sind weiter nicht gesetzt.
+
+### Die Messung
+
+109 steht seit **02.11.2026 etwa 07:05** am Endplatz in der Dose am
+Eingang — nur Zuleitung, kein Panel, zurückgenommen. Ausgewertet am
+03.11. nach §10au.
+
+| Gerät | empf. / erw. | Verlust | Rücksetzungen |
+|---|---|---|---|
+| **109** (Relais, Endplatz) | **137 / 140** | **2,1 %** | **0** |
+| Vickis, Bereich über alle | | 0 bis 1,4 % | |
+| 099, bei RSSI −115/−116 dBm | | 0 % | |
+| 095, bei RSSI −115/−116 dBm | | 0,7 % | |
+
+**Der Befund ist eindeutig in Richtung „nichts tun".** Ein Plugin, das die
+Datenrate auf DR3 senkt und jeden Uplink zweimal sendet, behebt 2,1 %
+nicht — es tauscht sie gegen die mehrfache Sendezeit und gegen einen
+Neustart von ChirpStack, an dem rund hundert Vickis hängen.
+
+### Die Entscheidungstabelle in §10au war falsch — und für diese Messung nicht einmal entscheidbar
+
+Zeile 1 lautete „Verlust **unter 5 %** **und** RSSI besser als **−105
+dBm** → nichts tun". Beides zusammen, als Bedingung.
+
+**Die zweite Hälfte widerlegt das eigene Haus.** 099 und 095 stehen bei
+**−115 bis −116 dBm** und verlieren 0 % beziehungsweise 0,7 %. Der Pegel
+allein sagt also nichts über den Verlust; es sagt ihn erst der Abstand
+zur Empfindlichkeitsgrenze des Spreizfaktors, und die liegt bei SF7 und
+BW 125 laut Datenblatt bei etwa −123 dBm. Bis dorthin ist ein Paket da
+oder nicht da, aber nicht halb da.
+
+**Und für 109 gibt es die Zahl überhaupt nicht.** `relay_reading` führt
+weder `rssi_dbm` noch `snr_db`; der Wert ist nur in ChirpStack ablesbar
+(§10au Schritt 2). Für die tatsächlich gemessene Lage — 2,1 % Verlust,
+RSSI nicht erhoben — hätte die Tabelle damit **keine** Zeile getroffen:
+zu gut für Zeile 2 und 3, und Zeile 1 nicht belegbar.
+
+Korrigiert, mit einem Satz: **der Verlust entscheidet, der Pegel
+erklärt.** RSSI und SNR bleiben in Schritt 2, aber als Erklärung eines
+gemessenen Verlusts, nicht als Vorhersage. Das ist §5.77 in einer
+Entscheidungstabelle — eine Schwelle, die niemand nachgerechnet hat,
+liest sich unter Druck wie ein Befund.
+
+### Die Hypothese zum 01.11.: der Wächter hat auf die eigene Messung gefunkt
+
+Am 01.11. ergab die Rechnung von Hand **rund 30 % Verlust** an 109. Im
+selben Zeitfenster, 11:22 bis 11:28, ging **jede Minute** ein Downlink an
+dasselbe Gerät — sieben Stück, jeder bei SF12 über RX2, also 1,32 s
+Sendezeit (§14).
+
+Zwei Wirkungen, und nur eine reicht weit:
+
+1. **Das Gateway ist halbduplex: während es sendet, hört es nicht.** Neun
+   Sekunden Sendezeit in sieben Minuten sind rund **2 %** des Fensters —
+   die richtige Größenordnung für ein paar Prozent und ausdrücklich
+   **nicht** für dreißig.
+2. **Der Neustart.** In der Reihe vom 01.11. liegt einer
+   (`docs/status/2026-11-02-paketverlust.md`: `fCnt` 8, Neustart, dann
+   13), in der Reihe vom 02./03.11. **keiner**. Ein Neustart kostet die
+   Frames über Boot und Rejoin, und in einer Reihe von einem Dutzend
+   Zählerwerten dominiert dieses eine Loch den Prozentsatz. Genau das tut
+   der Geräte-Wachhund nach zwei bestätigten Uplinks ohne ACK plus sieben
+   Minuten (§10au, „Die Notfall-Option").
+
+**Die Hypothese lautet deshalb nicht „Funkloch behoben", sondern: die
+30 % waren kein Zustand der Funkstrecke, sondern einer, in dem Steuerung
+und Gerät gegeneinander gearbeitet haben** — und die Lücke hat das
+Neustart-Fenster mitgezählt.
+
+**Was diese Messung nicht kann: die beiden Ursachen trennen.** Zwischen
+dem 01.11. und dem 02.11. haben sich **zwei** Dinge geändert — die
+Position (provisorisch → Dose am Endplatz) und die Bremse am Wächter.
+Welcher Anteil wem gehört, ist aus diesen Zahlen nicht zu beantworten.
+Das steht hier, damit niemand später die eine Hälfte als belegt liest.
+
+**Dazu der Unterschied in der Belastbarkeit.** Die 30 % stammen aus
+**vier fehlenden Frames** in einer von Hand aus den ChirpStack-Ereignissen
+gelesenen Reihe, die 2,1 % aus **140 erwarteten** über einen Tag. Das sind
+nicht zwei Messungen derselben Art, und die erste war es, die den Bedarf
+nach einem Plugin begründet hat.
+
+### Wann die Frage wiederkommt
+
+§10av bleibt deshalb unverändert stehen, nicht als Altlast, sondern weil
+sich die Lage ändern wird:
+
+| Anlass | warum dann neu zu messen ist |
+|---|---|
+| 109 kommt an seinen endgültigen Platz **mit Panel** | ein Panel vor der Antenne ist eine andere Funkstrecke als eine offene Dose |
+| ein zweites Relais, weiter weg | 109 ist der heute schlechteste Platz, nicht der denkbar schlechteste |
+| Verlust über 5 % bei unveränderten Vickis | dann ist es das Gerät oder der Platz, und nicht das Haus |
+
+**Querverweise:** §14 (die Bremse am Wächter — die andere Hälfte der
+Hypothese), §10au (die Auswertung, jetzt mit Ergebnis und korrigierter
+Tabelle), §10av (das Plugin: vorbereitet, nicht ausgerollt), §10aw (die
+Laufliste vom 04.11. — das Plugin ist nicht Teil des Termins), §5.77
+(eine Verneinung, die niemand nachprüft), §5.68 (Behauptung gegen
+Befund), `docs/status/2026-11-03-funkauswertung.md`,
+`docs/status/2026-11-02-waechter-backoff.md`.
+
 # AE-79 — Das Handbuch liegt im Repo und wandert mit dem Pull Request
 
 **Datum:** 25.10.2026 · **Stand:** umgesetzt (Paket 1) · **Betrifft:**
@@ -7899,14 +8004,38 @@ Grund für den **Boost**, den ein Bereich tatsächlich nicht bekommt. Ob der
 ganze Knopf dort grau werden soll, ist eine Zeile in
 `temperaturknopf` — und eine Frage an den Betreiber.
 
-**Der Boost-Wert ist nirgends in der Oberfläche einstellbar.** Er kommt aus
-`rule_config`, und dort führt heute kein Formular hin. Mit der Migration
-`0037` steht er auf 23,0, also auf dem festgelegten Wert; wer ihn ändern
-will, braucht heute SQL. Das ist der **stärkste** offene Punkt dieses
-ADR — nicht weil er schwierig wäre, sondern weil eine Zahl ohne Weg zu
-ihr beim nächsten Nachjustieren einen Eingriff in die Datenbank
-erzwingt. Nicht gebaut, weil niemand es verlangt hat (S6), und hier
-benannt, damit es nicht in Vergessenheit gerät.
+### Nachtrag 02.11.2026: der Boost-Wert ist einstellbar, und das war nie offen
+
+Hier stand, der Wert sei „nirgends in der Oberfläche einstellbar", das
+sei der stärkste offene Punkt, und gebaut sei es nicht, „weil niemand es
+verlangt hat (S6)".
+
+**Der letzte Halbsatz war falsch.** Der Betreiber hat es am 31.10.2026
+verlangt — „die Boost-Temperatur soll in den globalen
+Temperatur-Einstellungen änderbar sein" — und das stand in der
+ursprünglichen Vorgabe, nicht in einem Wunsch danach. Ich habe es beim
+Bauen übersehen und es dann als **offenen Punkt mit Begründung**
+eingetragen. Das ist die unangenehmere Hälfte: eine vergessene Vorgabe,
+die als bewusste Entscheidung aussieht, wird nicht mehr nachgefragt.
+
+**Gebaut** (02.11.2026): „Boost" ist die **vierte Zeile** unter
+Einstellungen → Temperaturen & Zeiten → Globale Temperaturen, in
+derselben Darstellung wie „Zimmer belegt", „Zimmer frei" und
+„Nachtabsenkung" — Inline-Bearbeitung, Speichern beim Verlassen des
+Feldes, Protokoll je geändertem Feld.
+
+| | |
+|---|---|
+| **Bereich** | 18–25 °C, in Zod **und** in Pydantic |
+| **Unten** | 18, weil ein Boost unter dem Belegt-Sollwert keinen Sinn hat |
+| **Oben** | 25, der Höchstwert der Gerätegrenzen im Haus (Zimmer 15–25, Bad 18–25). Darüber wäre eine Zahl, die Layer 5 ohnehin kappt |
+| **Hinweistext** | „Zieltemperatur für Boost; endet mit der nächsten Nachtabsenkung" |
+| **Rollen** | ändern nur Administratoren (`PATCH /rule-configs/global` ist `require_admin`), lesen alle Angemeldeten — wie bei den drei Zeilen darüber |
+
+**Ohne die Nutzungszahl**, die die anderen Felder tragen („wie viele
+Raumtypen nehmen diesen Wert"). Sie kommt aus `hausstandard_nutzung` und
+zählt je Feld gegen eine Spalte auf `room_type`; für den Boost gibt es
+die nicht. Eine erfundene Zahl wäre schlimmer als keine.
 
 **Der Sommermodus sperrt den Knopf ganz.** Das trifft auch die gewöhnliche
 Übersteuerung, die der Dienst annehmen würde — sie hätte nur keine Wirkung,
