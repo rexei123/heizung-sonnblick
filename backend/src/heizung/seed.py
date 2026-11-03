@@ -110,6 +110,9 @@ async def _seed_global_rule(session: AsyncSession) -> None:
         t_occupied=Decimal("21.0"),
         t_vacant=Decimal("18.0"),
         t_night=Decimal("19.0"),
+        # 02.11.2026: der festgelegte Boost-Wert. Migration 0037 setzt ihn
+        # in bestehenden Datenbanken; hier steht er fuer eine frische.
+        boost_temperature=Decimal("23.0"),
         night_start=time(0, 0),
         night_end=time(6, 0),
         preheat_minutes_before_checkin=90,

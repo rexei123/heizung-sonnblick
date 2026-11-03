@@ -7899,14 +7899,38 @@ Grund für den **Boost**, den ein Bereich tatsächlich nicht bekommt. Ob der
 ganze Knopf dort grau werden soll, ist eine Zeile in
 `temperaturknopf` — und eine Frage an den Betreiber.
 
-**Der Boost-Wert ist nirgends in der Oberfläche einstellbar.** Er kommt aus
-`rule_config`, und dort führt heute kein Formular hin. Mit der Migration
-`0037` steht er auf 23,0, also auf dem festgelegten Wert; wer ihn ändern
-will, braucht heute SQL. Das ist der **stärkste** offene Punkt dieses
-ADR — nicht weil er schwierig wäre, sondern weil eine Zahl ohne Weg zu
-ihr beim nächsten Nachjustieren einen Eingriff in die Datenbank
-erzwingt. Nicht gebaut, weil niemand es verlangt hat (S6), und hier
-benannt, damit es nicht in Vergessenheit gerät.
+### Nachtrag 02.11.2026: der Boost-Wert ist einstellbar, und das war nie offen
+
+Hier stand, der Wert sei „nirgends in der Oberfläche einstellbar", das
+sei der stärkste offene Punkt, und gebaut sei es nicht, „weil niemand es
+verlangt hat (S6)".
+
+**Der letzte Halbsatz war falsch.** Der Betreiber hat es am 31.10.2026
+verlangt — „die Boost-Temperatur soll in den globalen
+Temperatur-Einstellungen änderbar sein" — und das stand in der
+ursprünglichen Vorgabe, nicht in einem Wunsch danach. Ich habe es beim
+Bauen übersehen und es dann als **offenen Punkt mit Begründung**
+eingetragen. Das ist die unangenehmere Hälfte: eine vergessene Vorgabe,
+die als bewusste Entscheidung aussieht, wird nicht mehr nachgefragt.
+
+**Gebaut** (02.11.2026): „Boost" ist die **vierte Zeile** unter
+Einstellungen → Temperaturen & Zeiten → Globale Temperaturen, in
+derselben Darstellung wie „Zimmer belegt", „Zimmer frei" und
+„Nachtabsenkung" — Inline-Bearbeitung, Speichern beim Verlassen des
+Feldes, Protokoll je geändertem Feld.
+
+| | |
+|---|---|
+| **Bereich** | 18–25 °C, in Zod **und** in Pydantic |
+| **Unten** | 18, weil ein Boost unter dem Belegt-Sollwert keinen Sinn hat |
+| **Oben** | 25, der Höchstwert der Gerätegrenzen im Haus (Zimmer 15–25, Bad 18–25). Darüber wäre eine Zahl, die Layer 5 ohnehin kappt |
+| **Hinweistext** | „Zieltemperatur für Boost; endet mit der nächsten Nachtabsenkung" |
+| **Rollen** | ändern nur Administratoren (`PATCH /rule-configs/global` ist `require_admin`), lesen alle Angemeldeten — wie bei den drei Zeilen darüber |
+
+**Ohne die Nutzungszahl**, die die anderen Felder tragen („wie viele
+Raumtypen nehmen diesen Wert"). Sie kommt aus `hausstandard_nutzung` und
+zählt je Feld gegen eine Spalte auf `room_type`; für den Boost gibt es
+die nicht. Eine erfundene Zahl wäre schlimmer als keine.
 
 **Der Sommermodus sperrt den Knopf ganz.** Das trifft auch die gewöhnliche
 Übersteuerung, die der Dienst annehmen würde — sie hätte nur keine Wirkung,

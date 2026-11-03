@@ -148,9 +148,17 @@ async def global_rule_config(setup_engine: AsyncEngine) -> AsyncIterator[int]:
 # ---------------------------------------------------------------------------
 
 
-async def test_get_global_returns_six_fields(
+async def test_get_global_liefert_genau_diese_felder(
     http_client: httpx.AsyncClient, global_rule_config: int
 ) -> None:
+    """Die Menge unten ist die Wahrheit, nicht der Funktionsname.
+
+    Hier stand ``..._returns_six_fields``, und mit ``boost_temperature``
+    (02.11.2026, AE-83) waren es sieben — ein Name, der beim naechsten
+    Feld wieder falsch ist. Eine Zahl im Namen eines Tests ist dieselbe
+    Sorte Aussage wie eine Zahl im Handbuch (CLAUDE.md Goldene Regel 13):
+    sie gilt fuer einen Stand und verfaellt still.
+    """
     resp = await http_client.get("/api/v1/rule-configs/global")
 
     assert resp.status_code == 200, resp.text
@@ -160,6 +168,7 @@ async def test_get_global_returns_six_fields(
         "t_occupied",
         "t_vacant",
         "t_night",
+        "boost_temperature",
         "night_start",
         "night_end",
         "preheat_minutes_before_checkin",
@@ -189,6 +198,89 @@ async def test_rule_config_patch_validates_temp_range(
     # Innerhalb: 21 ist OK
     resp = await http_client.patch("/api/v1/rule-configs/global", json={"t_occupied": "21.5"})
     assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Boost-Temperatur (02.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_boost_temperatur_hat_ihren_eigenen_bereich(
+    http_client: httpx.AsyncClient, global_rule_config: int
+) -> None:
+    """Bereich 18-25, Festlegung des Betreibers.
+
+    **Beide Grenzen, und beide knapp daneben.** Ein Test, der nur einen
+    gueltigen Wert setzt, besteht auch ohne jede Validierung — und einer,
+    der nur weit ausserhalb prueft, besteht auch mit einem falschen
+    Bereich. Geprueft wird deshalb 17,9 / 18,0 und 25,0 / 25,1.
+    """
+    for wert in ("17.9", "25.1"):
+        resp = await http_client.patch(
+            "/api/v1/rule-configs/global", json={"boost_temperature": wert}
+        )
+        assert resp.status_code == 422, f"{wert} muss abgewiesen werden: {resp.text}"
+
+    for wert in ("18.0", "25.0", "23.0"):
+        resp = await http_client.patch(
+            "/api/v1/rule-configs/global", json={"boost_temperature": wert}
+        )
+        assert resp.status_code == 200, f"{wert} muss angenommen werden: {resp.text}"
+
+
+async def test_boost_temperatur_kommt_als_dezimalzahl_zurueck(
+    http_client: httpx.AsyncClient, global_rule_config: int
+) -> None:
+    """Kein Float unterwegs.
+
+    Dieselbe Pruefung wie fuer die drei Werte darueber
+    (``test_rule_config_patch_decimal_not_float``): 23,5 muss 23,5
+    bleiben und nicht 23,499999 werden.
+    """
+    resp = await http_client.patch(
+        "/api/v1/rule-configs/global", json={"boost_temperature": "23.5"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert Decimal(str(resp.json()["boost_temperature"])) == Decimal("23.5")
+
+    gelesen = await http_client.get("/api/v1/rule-configs/global")
+    assert Decimal(str(gelesen.json()["boost_temperature"])) == Decimal("23.5")
+
+
+async def test_boost_temperatur_schreibt_ein_audit(
+    http_client: httpx.AsyncClient, global_rule_config: int, setup_engine: AsyncEngine
+) -> None:
+    """Wie jede andere Aenderung an einem wirksamen Wert.
+
+    Der Boost-Wert aendert, womit das Haus heizt — eine Aenderung daran
+    gehoert ins Protokoll, mit altem und neuem Wert und dem Admin, der
+    sie gemacht hat.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM config_audit WHERE column_name = 'boost_temperature'")
+        )
+        await session.commit()
+
+    resp = await http_client.patch(
+        "/api/v1/rule-configs/global", json={"boost_temperature": "24.0"}
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with maker() as session:
+        zeilen = (
+            await session.execute(
+                text(
+                    "SELECT old_value, new_value FROM config_audit "
+                    "WHERE column_name = 'boost_temperature' ORDER BY ts DESC"
+                )
+            )
+        ).all()
+
+    assert len(zeilen) == 1, f"genau ein Audit-Eintrag erwartet, waren {len(zeilen)}"
+    assert "24.0" in str(zeilen[0][1])
 
 
 # ---------------------------------------------------------------------------

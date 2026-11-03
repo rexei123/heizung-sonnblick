@@ -344,6 +344,37 @@ export default function TemperaturenZeitenPage() {
                 onSaveError={setErrorToast}
               />
             </SettingRow>
+            {/* 02.11.2026, Festlegung des Betreibers vom 31.10.: die
+                Boost-Temperatur gehört in die globalen Temperaturen.
+                Dieselbe Darstellung wie die drei darüber — es ist
+                dieselbe Art von Wert: eine hausweite Vorgabe, die ein
+                Raumtyp oder ein Zimmer übersteuern kann.
+
+                **Ohne Nutzungszahl.** `hinweis` hängt die Zahl „wie
+                viele Raumtypen nehmen diesen Wert" an, und sie kommt aus
+                `hausstandard_nutzung`; dort wird je Feld gegen eine
+                Spalte auf `room_type` gezählt, und die gibt es für den
+                Boost nicht. Eine erfundene Zahl wäre schlimmer als
+                keine — `hinweis` gibt bei unbekanntem Feld den
+                Grundtext zurück, und das ist hier richtig. */}
+            <SettingRow
+              label="Boost"
+              hint={hinweis(
+                "boost_temperature",
+                "Zieltemperatur für Boost; endet mit der nächsten Nachtabsenkung. Bereich 18–25 °C.",
+              )}
+            >
+              <InlineEditCell
+                readOnly={!darfAendern}
+                value={data.boost_temperature ?? ""}
+                variant="decimal"
+                validator={tempValidator(18, 25)}
+                format={offenOder(formatCelsius)}
+                ariaLabel="Boost"
+                onSave={(v) => saveField({ boost_temperature: v })}
+                onSaveError={setErrorToast}
+              />
+            </SettingRow>
           </SettingsList>
         </TabsContent>
       </Tabs>

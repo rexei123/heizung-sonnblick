@@ -10009,7 +10009,7 @@ Audit eine Dauer, die nicht stimmt.
 |---|---|
 | **Die Wirkung am Heizkörper** | Der Boost setzt einen Sollwert; ob der Raum warm wird, ist die Engine und die Hardware. Das prüft §10ao / der Betrieb |
 | **Die Kappung** | Ein Boost wird wie jede Übersteuerung in Layer 5 an den Zonen-Grenzen gekappt. Wer das prüfen will, setzt die Grenzen tiefer als 23 und sieht im Engine-Trace nach |
-| **Der Boost-Wert selbst** | Er steht in den Daten (23,0) und ist in der Oberfläche **nicht** einstellbar — offener Punkt in AE-83 §9 |
+| **Der Boost-Wert selbst** | Er steht unter Einstellungen → Temperaturen & Zeiten → Globale Temperaturen als vierte Zeile „Boost" (18–25 °C). Diese Abnahme prüft den **Boost**, nicht die Einstellung; wer sie prüfen will, ändert den Wert dort und sieht, dass der nächste Boost ihn nimmt |
 
 **Querverweise:** AE-83 (die Entscheidungen und ihre Begründung),
 `docs/status/2026-11-02-boost.md`, `docs/status/2026-11-02-boost-wert.md`
