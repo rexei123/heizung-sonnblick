@@ -1,7 +1,7 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk, montiert, Fühler
 rollen: alle
 stand: 2026-11-02
 route: /devices
@@ -36,6 +36,25 @@ Funkstille. Daneben steht die Spannung in Volt; bei „unbekannt" steht
 bewusst keine Zahl, weil unter drei Messwerten keine Aussage möglich ist.
 
 **Im Lager.** Keiner Zone zugeordnet. Reserve für einen Tausch.
+
+### Die Montage-Pille sagt nur etwas, wenn die Frage passt
+
+Neben jedem Gerät steht, ob es **montiert** ist. Die Frage trifft aber
+nicht jedes Gerät, und seit dem 02.11.2026 sagt die Pille das auch:
+
+| Pille | Bedeutung |
+|---|---|
+| **Montiert** | sitzt auf der Halterung |
+| **Nicht montiert** (rot) | sitzt nicht, obwohl es regeln soll — ein Mangel |
+| **Im Lager** (grau) | meldet sich, ist keiner Zone zugeordnet |
+| **Keine Daten (30 Min)** (grau) | kein Frame, der die Montage überhaupt melden würde |
+| **Fühler** (grau) | Gerät auf „nur messen". Ob es auf einem Ventil sitzt, ist für seine Aufgabe ohne Belang |
+| **Relais** (grau) | ein Relais hat keine Halterung. Die Montage wird dort nicht gemeldet |
+
+Die letzten zwei sind neu, und beide gehen auf Befunde zurück: Gerät 056
+(nur messen) stand auf „Nicht montiert" in **Rot**, obwohl ein Fühler
+genau das tun darf; Relais 109 stand auf „Keine Daten", obwohl es sendet
+— die Montage-Meldung kommt von Thermostaten, und ein Relais hat keine.
 
 ## Grenzen am Gerät
 

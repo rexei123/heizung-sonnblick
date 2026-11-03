@@ -61,12 +61,38 @@
  * Für einen echten Online-Indikator wäre ``device.last_seen_at`` die Quelle
  * (wird vom MQTT-Subscriber gepflegt, heute in keiner Ansicht gerendert) —
  * eigener Badge, eigener Sprint.
+ *
+ * **02.11.2026: der Badge kennt die Rolle, weil die Frage nicht für jedes
+ * Gerät gilt.** Zwei Befunde des Betreibers, und beide sind dieselbe Sache
+ * von zwei Seiten:
+ *
+ * | Befund | Was falsch war |
+ * |---|---|
+ * | Relais 109 stand auf „Keine Daten (30 Min)", obwohl es sendet | Der Endpunkt zählt ``sensor_reading``; ein Relais schreibt nach ``relay_reading``. Es hat auch **keine Halterung** — die Frage trifft es nicht |
+ * | Gerät 056 (``measure_only``) stand auf „Nicht montiert" in **Rot** | Ein Fühler misst die Raumluft. Ob er auf einem Ventil sitzt, ist für seine Aufgabe ohne Belang — Rot behauptet einen Mangel, wo keiner ist |
+ *
+ * Der Badge bekommt deshalb die ``rolle`` als Pflicht-Prop, wie ``isPool``
+ * und aus demselben Grund: ein Default würde die Unterscheidung genau dort
+ * verschlucken, wo sie gebraucht wird.
+ *
+ * **Für ein Relais wird gar nicht gefragt.** Die Abfrage bleibt aus (nicht
+ * nur ihr Ergebnis ungenutzt) — ein Weg, dessen Antwort man ohnehin
+ * verwirft, ist eine Anfrage, die niemand braucht.
  */
 
 import { useHardwareStatus } from "@/lib/api/hooks";
 import { formatRelative } from "@/lib/format";
 
 type Variant = "compact" | "detailed";
+
+/**
+ * Wofür das Gerät da ist — und damit, ob die Montage-Frage es trifft.
+ *
+ * `thermostat` regelt (Montage ist ein Mangel, wenn sie fehlt),
+ * `fuehler` misst nur (`measure_only`), `relais` schaltet und hat keine
+ * Halterung.
+ */
+export type Geraeterolle = "thermostat" | "fuehler" | "relais";
 
 interface Props {
   deviceId: number;
@@ -77,10 +103,22 @@ interface Props {
    * genau dort verschlucken, wo sie gebraucht wird.
    */
   isPool: boolean;
+  /**
+   * Die Rolle. Pflicht-Prop aus demselben Grund wie ``isPool``: ob
+   * „nicht montiert" ein Mangel ist, hängt daran — und bei einem Relais
+   * ist die Frage gar nicht gestellt.
+   */
+  rolle: Geraeterolle;
   variant?: Variant;
 }
 
-type MountState = "montiert" | "nicht_montiert" | "im_lager" | "keine_daten";
+type MountState =
+  | "montiert"
+  | "nicht_montiert"
+  | "im_lager"
+  | "keine_daten"
+  | "fuehler"
+  | "relais";
 
 interface StateConfig {
   label: string;
@@ -112,10 +150,43 @@ const CONFIG: Record<MountState, StateConfig> = {
     icon: "help",
     badgeClass: "bg-surface-alt text-text-tertiary",
   },
+  fuehler: {
+    // Neutral, nicht rot: ein Fuehler misst die Raumluft. Ob er auf einem
+    // Ventil sitzt, ist fuer seine Aufgabe ohne Belang.
+    label: "Fühler",
+    icon: "sensors",
+    badgeClass: "bg-surface-alt text-text-tertiary",
+  },
+  relais: {
+    // Ein Relais hat keine Halterung. Die Pille sagt, was es ist, statt
+    // eine Frage zu beantworten, die es nicht trifft.
+    label: "Relais",
+    icon: "power",
+    badgeClass: "bg-surface-alt text-text-tertiary",
+  },
 };
 
-export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: Props) {
-  const { data, isLoading, error } = useHardwareStatus(deviceId);
+export function HardwareStatusBadge({
+  deviceId,
+  isPool,
+  rolle,
+  variant = "compact",
+}: Props) {
+  const istRelais = rolle === "relais";
+  // Fuer ein Relais wird nicht gefragt. ``deviceId: null`` schaltet die
+  // Abfrage im Hook ab (``enabled``) — ein Weg, dessen Antwort man ohnehin
+  // verwirft, ist eine Anfrage, die niemand braucht.
+  const { data, isLoading, error } = useHardwareStatus(istRelais ? null : deviceId);
+
+  if (istRelais) {
+    return (
+      <Pille
+        config={CONFIG.relais}
+        subline="keine Halterung — die Montage wird nicht gemeldet"
+        variant={variant}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -148,9 +219,14 @@ export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: P
       ? "montiert"
       : data.frames_in_window === 0
         ? "keine_daten"
-        : isPool
-          ? "im_lager"
-          : "nicht_montiert";
+        : rolle === "fuehler"
+          ? // **Vor** ``isPool``, und das ist eine Aussage: ein Fuehler im
+            // Lager ist genauso wenig ein Mangel wie ein zugeordneter, und
+            // „Im Lager" waere bei einem zugeordneten Fuehler falsch.
+            "fuehler"
+          : isPool
+            ? "im_lager"
+            : "nicht_montiert";
 
   const config = CONFIG[state];
   // „noch nicht gemeldet" gilt nur, wenn im Fenster gar kein Frame kam.
@@ -172,9 +248,24 @@ export function HardwareStatusBadge({ deviceId, isPool, variant = "compact" }: P
     : data.last_seen
       ? `Montiert zuletzt: ${formatRelative(data.last_seen)}`
       : data.frames_in_window > 0
-        ? "meldet sich, nicht montiert"
+        ? rolle === "fuehler"
+          ? "misst nur — Montage ohne Belang"
+          : "meldet sich, nicht montiert"
         : "noch nicht gemeldet";
 
+  return <Pille config={config} subline={subline} variant={variant} />;
+}
+
+/** Pille und Unterzeile — einmal, weil drei Zweige sie brauchen. */
+function Pille({
+  config,
+  subline,
+  variant,
+}: {
+  config: StateConfig;
+  subline: string;
+  variant: Variant;
+}) {
   const pill = (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${config.badgeClass}`}

@@ -480,6 +480,7 @@ function DevicesInRoom({
                     <HardwareStatusBadge
                       deviceId={d.id}
                       isPool={d.heating_zone_id === null}
+                      rolle={d.kind === "relay" ? "relais" : d.measure_only ? "fuehler" : "thermostat"}
                       variant="compact"
                     />
                   </div>

@@ -9681,6 +9681,26 @@ genau diesen Handgriff schon gab.
 Zeitbezug — **außer C6**, das zuletzt kommt, weil ein Neustart beiläufig
 prüft, ob die rotierten Werte einen Kaltstart überstehen.
 
+### Das ADR-Plugin ist nicht Teil dieses Termins
+
+**Entscheidung des Betreibers vom 03.11.2026, nach der Messung aus
+§10au:** das Plugin wird **nicht** ausgerollt. Es bleibt vorbereitet und
+unverändert in §10av — die Datei liegt im Repo, die zwei Zeilen, die sie
+aktiv machen würden, sind weiter nicht gesetzt.
+
+**Der Grund steht in der Zahl.** 109 am Endplatz, 02.11. 07:05 bis
+03.11.: **137 von 140 Meldungen, 2,1 % Verlust, keine Rücksetzung des
+Zählers**. Die Vickis im selben Fenster 0 bis 1,4 %. Ein Plugin, das die
+Datenrate senkt und jeden Uplink doppelt sendet, hätte hier nichts zu
+beheben — und es kostet einen Neustart von ChirpStack, an dem rund
+hundert Vickis hängen.
+
+**Warum das hier steht, obwohl nie ein Block dafür geplant war.** Diese
+Laufliste hatte keinen Plugin-Schritt; der Einbau hing an §10av und an
+der Messung, nicht an dieser Rotation. Wer am Morgen des 04.11. nach dem
+Plugin sucht — es stand am 02.11. als „Mittwoch, falls die Messung es
+verlangt" im Raum —, findet hier die Antwort statt eine Lücke.
+
 ### Vier Regeln, in jedem Schritt
 
 1. **`ENV_NEU` vor jedem `docker compose`** — auch in den Rückwegen.
@@ -9729,8 +9749,9 @@ wie ein halber Vorwärtsschritt.
 
 **Querverweise:** §10ab (Teil 1 und Teil 2 — die Blöcke selbst), §10ai
 (die drei Belegungslisten), §10p (Deploy-Sperre), §10q (DB-Backups, von
-C7 **nicht** berührt), §10u (Rückfall auf einen Stand), §5.79 (ein Audit
-gilt für den Stand, den es gesehen hat).
+C7 **nicht** berührt), §10u (Rückfall auf einen Stand), §10av (das
+ADR-Plugin — vorbereitet, nach der Messung vom 03.11. nicht ausgerollt),
+§5.79 (ein Audit gilt für den Stand, den es gesehen hat).
 
 ## 10ax. Boost abnehmen (Oberfläche, nach dem Deploy)
 

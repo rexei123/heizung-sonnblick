@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from heizung.models.enums import RuleConfigScope
 from heizung.models.room_type import RoomType
 from heizung.models.rule_config import RuleConfig
+from heizung.rules.badvorlage import lade_bad_vorlage
 
 
 class RegelSync(StrEnum):
@@ -153,7 +154,11 @@ class FeldBefund:
     wirksam: Decimal | None
     #: Woher der wirksame Wert kommt: ``raumtyp`` / ``global`` /
     #: ``raumtyp_vorgabe`` (die Spalte selbst, weil niemand sonst den Wert
-    #: setzt) — dieselben Marken wie im Engine-Trace.
+    #: setzt) / ``bad_vorlage`` — die ersten drei sind dieselben Marken
+    #: wie im Engine-Trace, die vierte ist der Weg ueber
+    #: ``rules.engine._bad_zielwert``: dort stehen die Spalten der Vorlage
+    #: auf ROOM_TYPE-Rang und gelten fuer die **Bad-Zonen aller Zimmer**,
+    #: nicht fuer Zimmer dieses Typs.
     quelle: str
 
 
@@ -201,6 +206,23 @@ async def wirksamkeit(
     je_typ = {z.room_type_id: z for z in zeilen if z.scope == RuleConfigScope.ROOM_TYPE}
     hausweit = next((z for z in zeilen if z.scope == RuleConfigScope.GLOBAL), None)
 
+    # **Die Bad-Vorlage steht auf ROOM_TYPE-Rang, genau wie ein Bereich.**
+    #
+    # Befund des Betreibers vom 01.11.2026: die Seite zeigte fuer „Bad"
+    # die hausweiten 21/15/19 als wirksam, obwohl die Engine der Vorlage
+    # 22/18/22 folgt. Die Anzeige rechnete mit der Kette fuer ein
+    # **Zimmer dieses Typs** — und so ein Zimmer gibt es nicht, der
+    # Raumtyp ist 0 Zimmern zugeordnet. Gewirkt haben seine Spalten die
+    # ganze Zeit ueber ``rules.engine._bad_zielwert``, und dort treten sie
+    # als eigene ROOM_TYPE-Zeile auf (``rules/badvorlage``).
+    #
+    # Die Anzeige rechnet jetzt mit **derselben** Kette. Das ist der
+    # Unterschied zwischen „die Zahl ist falsch" und „die Zahl antwortet
+    # auf eine andere Frage": gefragt wird, was gilt, und fuer diesen
+    # Raumtyp gilt die Vorlage.
+    vorlage = await lade_bad_vorlage(session)
+    bad_vorlage_id = vorlage.id if vorlage is not None else None
+
     befunde: list[RaumtypBefund] = []
     for rt in raumtypen:
         typ_zeile = je_typ.get(rt.id)
@@ -212,6 +234,13 @@ async def wirksamkeit(
             if aus_typ is not None:
                 # Eine ausdrueckliche ROOM_TYPE-Zeile gewinnt immer.
                 wirksam, quelle = aus_typ, "raumtyp"
+            elif rt.id == bad_vorlage_id:
+                # Die Vorlage wirkt ueber ``_bad_zielwert``, und dort
+                # stehen ihre Spalten auf ROOM_TYPE-Rang. Eigene Marke,
+                # weil der **Weg** ein anderer ist: der Wert gilt nicht
+                # fuer Zimmer dieses Typs, sondern fuer die Bad-Zonen
+                # aller Zimmer.
+                wirksam, quelle = angezeigt, "bad_vorlage"
             elif not rt.is_bookable:
                 # Allgemeinbereich: die Spalte steht auf ROOM_TYPE-Rang
                 # (``rules.engine.bereichs_kette``) und schlaegt damit die
