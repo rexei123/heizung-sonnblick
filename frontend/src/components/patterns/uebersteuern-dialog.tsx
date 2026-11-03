@@ -99,9 +99,11 @@ export function UebersteuernDialog({ room, onClose }: Props) {
  * deshalb keinen Rumpf.
  *
  * **Die Endzeit steht in der Beschriftung** (Festlegung des Betreibers
- * vom 31.10.2026): „Boost bis 22:00". Kein Mindestmaß — ein Boost um
- * 21:55 endet um 22:00, und der Knopf sagt das vorher. Deshalb darf die
- * Zeit nicht fehlen: ohne sie wäre der Knopf eine Zusage ohne Inhalt.
+ * vom 31.10.2026): „Boost bis 20:00", wobei die Uhrzeit der Nachtbeginn
+ * des Hauses ist und mit ihm wandert. Kein Mindestmaß — ein Boost kurz
+ * davor endet kurz danach, und der Knopf sagt das vorher. Deshalb darf
+ * die Zeit nicht fehlen: ohne sie wäre der Knopf eine Zusage ohne
+ * Inhalt.
  *
  * **Geht es nicht, steht der Grund da** und nicht nur ein grauer Knopf
  * (§5.57). Der Satz kommt aus dem Backend, weil dort die Regelkette und
