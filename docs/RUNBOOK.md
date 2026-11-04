@@ -6782,19 +6782,78 @@ an**. Das UG65 spricht Basic Station gegen `chirpstack-gateway-bridge`,
 und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).
 
 **Erst belegen, dann entfernen.** Ein User, den niemand braucht, ist
-schnell gesagt und schwer zurückgeholt:
+schnell gesagt und schwer zurückgeholt.
+
+> **Die Prüfung dieses Blocks ist am 04.11.2026 ersetzt worden, weil die
+> alte nichts bewies.** Sie zählte sieben Tage Protokoll auf den
+> Benutzernamen und erwartete 0. Drei Lagen ergeben dieselbe 0:
+>
+> 1. **Niemand benutzt den User** — die Lage, die der Block annahm.
+> 2. **Jemand ist seit acht Tagen verbunden.** Ein MQTT-Client meldet sich
+>    **einmal** an und bleibt dann hängen. Die Anmeldezeile fällt aus dem
+>    Fenster, die Verbindung nicht.
+> 3. **Jemand versucht es dauernd und scheitert.** Mosquitto schreibt den
+>    Benutzernamen **nur bei einer erfolgreichen** Anmeldung hin; bei einer
+>    abgewiesenen steht dort die Client-ID oder `<unknown>`. Ein Gerät, das
+>    immer scheitert, nennt seinen Namen dem Protokoll nie.
+>
+> Lage 3 ist am 04.11. tatsächlich aufgefallen: ein Gerät aus dem Netz des
+> Hauses klopft alle paar Sekunden ohne gültige Anmeldung, und zwar
+> **schon vor** diesem Termin.
+
+**Schritt 1 — wer ist gerade verbunden?** Das ist die Frage, die die alte
+Prüfung stellen wollte:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && ENV_BRAUCHE MQTT_HEIZUNG_PASSWORD && docker compose -f docker-compose.prod.yml exec -T mosquitto mosquitto_sub -h localhost -u heizung-api -P "$MQTT_HEIZUNG_PASSWORD" -t '$SYS/broker/clients/connected' -C 1 -W 5
+```
+
+Erwartung: **4** — `chirpstack`, die Gateway-Bridge, die
+ChirpStack-Integration und der `heizung-api`-Subscriber. Steht dort
+**mehr**, ist ein Client verbunden, den diese Liste nicht kennt, und das
+ist genau der Fall, den Lage 2 beschreibt: **abbrechen und melden.**
+
+**Schritt 2 — den Suchbegriff am Broker kalibrieren, dann suchen.** Die
+Zeile einer erfolgreichen Anmeldung nennt den Benutzernamen; in welcher
+Form, sagt der Broker am besten selbst. Erst an einem User nachsehen, von
+dem wir **wissen**, dass er verbunden ist:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto 2>&1 | grep -i "new client connected" | tail -5
+```
+
+Diese Ausgabe zeigt die tatsächliche Schreibweise (bei Mosquitto 2.0
+etwa `… as <clientid> (p2, c1, k60, u'chirpstack')`). **Mit dieser
+Schreibweise** dann nach dem fraglichen User suchen — über das **ganze**
+verfügbare Protokoll, nicht über ein Fenster:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto 2>&1 | grep -ci "u'gateway-ug65'"
+```
+
+Erwartung **0**. Findet sich etwas, hat der User sich angemeldet —
+**abbrechen und melden.**
+
+**Schritt 3 — und dann das Gerät selbst ansehen.** Das ist der einzige
+Schritt, der Lage 3 erreicht, und er ist eine direkte Ablesung:
+UG65-Oberfläche → Application → **Packet Forwarder**. Trägt das Gerät das
+Profil aus §10a.1/§10a.2 noch, dann ist der User **nicht verwaist**,
+sondern wird von einem Gerät benutzt, dem nur das Passwort fehlt —
+`MQTT_GATEWAY_UG65_PASSWORD` gibt es in der Server-`.env` nämlich nicht
+mehr. **Dann ist das Entfernen falsch**, und die richtige Frage ist, ob
+das Profil am Gerät abgeschaltet gehört.
 
 ```bash
 grep -ri "gateway-ug65" /opt/heizung-sonnblick/infra/ | grep -v "config/passwd"
 ```
 
-```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto --since 168h 2>&1 | grep -ci "gateway-ug65"
-```
+Erwartung: **nur** Kommentare oder nichts.
 
-Erwartung: der erste Befehl findet **nur** Kommentare oder nichts, der
-zweite **0**. Findet der zweite etwas, meldet sich doch jemand damit an —
-dann **abbrechen** und melden.
+**Was auch alle drei Schritte nicht leisten.** Sie zeigen Benutzung, ihr
+Ausbleiben zeigt keine Unbenutztheit — wer nie erfolgreich verbunden war
+und das Profil inzwischen anders heißt, hinterlässt nirgends eine Spur.
+Deshalb ist der Rückweg unten kein Anhang, sondern Teil des Plans, und
+deshalb wird die Uplink-Zählung **vorher** gemacht.
 
 ```bash
 cd /opt/heizung-sonnblick
@@ -6816,7 +6875,27 @@ sperrt **alle** MQTT-User aus, nicht nur den entfernten.
 docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto --since 4m | grep -ci "not authorised"
 ```
 
-Erwartung **0** nach dem Neustart.
+> **Hier stand „Erwartung 0", und das war falsch.** Korrigiert am
+> 04.11.2026: ein Gerät aus dem Netz des Hauses klopft alle paar Sekunden
+> ohne gültige Anmeldung, **unabhängig von diesem Block**. Die Zahl ist
+> also schon vorher größer als 0, und zwar in der Größenordnung von
+> Dutzenden je vier Minuten.
+>
+> **Richtig ist ein Vergleich, nicht ein Absolutwert.** Dieselbe Zählung
+> **vor** dem Neustart machen und aufschreiben; danach darf sie nicht
+> **steigen**. Steigt sie, hat das Entfernen einen Client ausgesperrt, der
+> den User gebraucht hat.
+>
+> Warum die alte Erwartung gefährlich war: sie hätte bei jedem Lauf
+> „gefallen" ausgewiesen — aus einem Grund, der mit dem Block nichts zu
+> tun hat. Ein Prüfkriterium, das immer fehlschlägt, wird nach dem zweiten
+> Mal ignoriert, und dann merkt man den echten Fall nicht mehr.
+
+**Und der Gateway-Status gehört dazu.** Der Neustart von `mosquitto` hat
+am 04.11. die Uplinks zum Stehen gebracht, bis das Gateway stromlos
+gemacht wurde. Nach diesem Neustart also den Gateway-Status in ChirpStack
+ansehen und nicht annehmen, dass er von selbst zurückkommt — die
+Begründung steht in `docs/status/2026-11-04-rotation-teil2.md`, Befund 2.
 
 **Rückweg:** `passwd` aus dem Backup zurückkopieren, `stat` prüfen,
 `mosquitto` neu erzeugen. Der User ist damit wieder da.
