@@ -6667,11 +6667,18 @@ unverändert zurückkopiert, nicht erneut verdoppelt.
 > den User trotzdem. Genau so ein Klopfer ist am 04.11. aufgefallen, aus
 > dem Netz des Hauses.
 >
-> **Vor einem zweiten Versuch:** den **Benutzernamen** in den
-> abgewiesenen Anmeldungen lesen. Steht dort `gateway-ug65`, ist der User
-> nicht verwaist, sondern wird von einem Gerät benutzt, dem nur das
-> Passwort fehlt — dann ist das Entfernen falsch und die Frage eine
-> andere. Protokoll: `docs/status/2026-11-04-rotation-teil2.md`,
+> **Vor einem zweiten Versuch: in die UG65-Oberfläche sehen**, unter
+> Packet Forwarder. Trägt das Gerät das Profil aus §10a.2 noch, dann ist
+> der User **nicht verwaist**, sondern wird von einem Gerät benutzt, dem
+> nur das Passwort fehlt — und das Entfernen ist falsch.
+>
+> **Nicht** im Broker-Protokoll nach dem Benutzernamen suchen: Mosquitto
+> schreibt bei einer **abgewiesenen** Anmeldung die Client-ID oder
+> `<unknown>` hin, nie den Benutzernamen — der steht ausschließlich in
+> der Zeile einer **erfolgreichen** Anmeldung. Ein Gerät, das immer
+> scheitert, nennt seinen Benutzernamen dort also nie. Brauchbar ist die
+> Client-ID zusammen mit der `New connection from …`-Zeile unmittelbar
+> davor. Protokoll: `docs/status/2026-11-04-rotation-teil2.md`,
 > Befunde 2, 4 und 5.
 
 **Befund vom 20.10.:** der User steht in

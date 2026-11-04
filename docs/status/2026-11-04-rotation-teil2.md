@@ -140,10 +140,21 @@ und die Uplinks laufen daneben über Basic Station. Das wäre **eine**
 Ursache für zwei Beobachtungen und macht den „fremden" Klopfer zum eigenen
 Gerät.
 
-**Das ist nicht bewiesen.** Es hängt an einer Angabe, die niemand
-nachgesehen hat: dem Benutzernamen in den abgewiesenen Anmeldungen. Steht
-dort `gateway-ug65`, ist die Sache erklärt. Steht dort etwas anderes,
-klopft wirklich etwas Fremdes, und das ist eine andere Frage.
+**Das ist nicht bewiesen, und der naheliegende Beweis geht nicht.** Man
+würde den **Benutzernamen** in den abgewiesenen Anmeldungen lesen wollen —
+den schreibt Mosquitto aber nicht hin. Bei einer gescheiterten Anmeldung
+steht dort die **Client-ID** oder `<unknown>`, und die Adresse nur in der
+Verbindungszeile davor; der Benutzername erscheint ausschließlich in der
+Zeile einer **erfolgreichen** Anmeldung. Ein Gerät, das immer scheitert,
+nennt seinen Benutzernamen dem Protokoll also nie.
+
+**Was stattdessen trägt, ist der Blick auf das Gerät.** In der
+UG65-Oberfläche steht unter Packet Forwarder, ob das Profil aus §10a.2
+noch aktiv ist und auf welchen Benutzernamen es zeigt. Das ist eine
+direkte Ablesung und braucht keine Protokoll-Forensik. Zweitbeste Quelle:
+die **Client-ID** in der `not authorised`-Zeile, zusammen mit der
+`New connection from 213.153.54.49`-Zeile unmittelbar davor — die beiden
+gehören zusammen und sagen zumindest, *welches* Gerät klopft.
 
 **Deshalb wird nichts geschlossen, bevor das gelesen ist.** Ein intern
 gebundener Port ist richtig — aber wenn die Compose-Begründung stimmt und
@@ -175,7 +186,7 @@ Dieselbe Ursache wie Befund 1, deshalb derselbe PR.
 | | |
 |---|---|
 | **C6** | Server-Neustart, verschoben — neuer Termin offen |
-| **Befund 4** | Benutzername in den abgewiesenen Anmeldungen lesen, dann entscheiden |
+| **Befund 4** | UG65-Oberfläche: trägt das Gerät das Packet-Forwarder-Profil aus §10a.2 noch? Dann entscheiden |
 | **Befund 2** | Startzeit des Bridge-Containers lesen, dann weitersuchen |
 | **danach** | Relais 109 Taster-Test und Panel, Relais 108, T2-Fenstertest, Paket 3 |
 
