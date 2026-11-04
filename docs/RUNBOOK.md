@@ -606,6 +606,21 @@ sudo docker exec deploy-mosquitto-1 \
 
 ### 10a.2 UG65-Reconfigure
 
+> **Dieser Weg ist seit dem 20.10.2026 nicht mehr der Betriebszustand, und
+> seit dem 04.11.2026 ist er von außen auch nicht mehr erreichbar.** Das
+> Gateway spricht **Basic Station** gegen `chirpstack-gateway-bridge`, und
+> `MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` nicht mehr
+> (§10ab, „B3 entfällt"). Port 1883 ist ab 04.11. nur noch an `127.0.0.1`
+> gebunden — ein Gateway im Hausnetz kommt dort nicht mehr an.
+>
+> **Offen ist, ob das Gerät dieses Profil noch trägt.** Am 04.11. hat ein
+> Gerät aus dem Netz des Hauses alle paar Sekunden ohne gültige Anmeldung
+> geklopft; die naheliegende Erklärung ist genau dieses Profil mit einem
+> Passwort, das es serverseitig nicht mehr gibt. **Nachgesehen ist das
+> nicht.** Wer in die UG65-Oberfläche kommt: hier steht, wo es steht — und
+> wenn das Profil aktiv ist, gehört es abgeschaltet, weil es ohnehin nichts
+> mehr erreicht. Siehe `docs/status/2026-11-04-rotation-teil2.md`, Befund 4.
+
 UG65 Web-UI (LAN-IP) -> Application -> Packet Forwarder -> ID 1 -> Edit:
 
 - User Credentials: **ON**
