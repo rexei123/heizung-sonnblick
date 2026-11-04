@@ -1055,7 +1055,7 @@ export type OverrideSource =
   /**
    * 02.11.2026: ein Klick, Wert und Ende kommen vom Server. Das Ende ist
    * der nächste Wechsel des Nachtfensters **des Zimmers** — der Knopf
-   * trägt es in seiner Beschriftung („Boost bis 20:00" im Haus).
+   * trägt es in seiner Beschriftung (Boost bis 20:00 im Haus).
    *
    * Steht **nicht** in `FrontendOverrideSource`: der Boost ist keine
    * Dauer-Auswahl, er hat seinen eigenen Weg
