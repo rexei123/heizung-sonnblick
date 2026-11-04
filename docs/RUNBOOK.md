@@ -517,14 +517,14 @@ docker run --rm --network heizung-sonnblick_default -v "${PWD}/infra/chirpstack/
 
 Verifikation:
 ```powershell
-docker compose exec db psql -U heizung -d heizung -c "SELECT time, device_id, fcnt, temperature, setpoint FROM sensor_reading ORDER BY time DESC LIMIT 5;"
+docker compose exec -T db psql -U heizung -d heizung -c "SELECT time, device_id, fcnt, temperature, setpoint FROM sensor_reading ORDER BY time DESC LIMIT 5;"
 (Invoke-WebRequest -UseBasicParsing http://localhost:8000/api/v1/devices/1/sensor-readings).Content
 ```
 
 ### 10.4 MQTT live mitlauschen
 
 ```powershell
-docker compose exec mosquitto mosquitto_sub -h localhost -p 1883 -t 'application/#' -v
+docker compose exec -T mosquitto mosquitto_sub -h localhost -p 1883 -t 'application/#' -v
 ```
 
 ### 10.5 Subscriber-Logs
@@ -537,8 +537,8 @@ docker compose logs -f api | Select-String -Pattern "uplink|MQTT"
 
 - **„relation 'user' does not exist" beim ChirpStack-Login:** `pg_trgm`-Extension fehlt. Fix:
   ```powershell
-  docker compose exec chirpstack-postgres psql -U chirpstack -d chirpstack -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-  docker compose exec chirpstack-postgres psql -U chirpstack -d chirpstack -c "DROP TABLE IF EXISTS __diesel_schema_migrations;"
+  docker compose exec -T chirpstack-postgres psql -U chirpstack -d chirpstack -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+  docker compose exec -T chirpstack-postgres psql -U chirpstack -d chirpstack -c "DROP TABLE IF EXISTS __diesel_schema_migrations;"
   docker compose restart chirpstack
   ```
   Bei frischer Installation greift jetzt `infra/chirpstack/postgres-init/01-extensions.sql` automatisch.
@@ -2889,7 +2889,7 @@ Prod-Pattern `deploy-api-1`):
 
 ```bash
 # SSH (Prod-Server, root), im Deploy-Verzeichnis
-docker compose -f infra/deploy/docker-compose.prod.yml exec api \
+docker compose -f infra/deploy/docker-compose.prod.yml exec -T api \
   python -m heizung.scripts.sync_room_statuses
 ```
 
@@ -4094,7 +4094,7 @@ baut es deshalb nach:
 **SSH (Server, root):**
 
 ```bash
-docker compose -f infra/deploy/docker-compose.prod.yml exec db psql -U heizung -d heizung -c "
+docker compose -f infra/deploy/docker-compose.prod.yml exec -T db psql -U heizung -d heizung -c "
 SELECT d.label, d.dev_eui,
        count(*) AS messwerte,
        bool_and(sr.setpoint >= sr.temperature + 3.0 AND sr.valve_position <= 0) AS ventil_klemmt,
@@ -5115,6 +5115,36 @@ Sitzung genügt:
 ```bash
 tmux set -g escape-time 50
 ```
+
+**Befehle mit `docker compose` einzeln einfügen, nicht als Block.** Das ist
+am 04.11.2026 Geld wert geworden: ein eingefügter `docker compose`-Aufruf
+hat die **Folgezeilen aus derselben Einfügung verschluckt**. Sie sind
+nicht ausgeführt und auch nicht sichtbar liegengeblieben — sie waren weg.
+
+**Warum das gefährlicher ist als ein Fehler:** eine Fehlermeldung sieht
+man. Hier läuft der erste Befehl, die Shell kommt zurück, und der Rest
+existiert nicht mehr. **Es sieht aus wie Erfolg.** In einer Laufliste, die
+Blöcke zum Kopieren anbietet, ist das die schlechteste Eigenschaft, die
+ein Handgriff haben kann.
+
+**Der Mechanismus, soweit er feststeht:** `docker compose exec` und
+`docker compose run` laufen **ohne `-T`** interaktiv und ziehen die
+Standardeingabe an sich — was dahinter eingefügt wurde, wird zur Eingabe
+des **Containers**. Deshalb trägt in dieser Datei seit dem 04.11. jeder
+`exec`-Aufruf ein `-T`.
+
+**Nicht erklärt ist damit der beobachtete Fall**, denn dort stand ein
+`docker compose restart`, und `restart` liest keine Eingabe. Die
+naheliegende Erklärung ist die Fortschrittsanzeige von Compose v2, die
+das Terminal für ihre Darstellung in Anspruch nimmt — **das ist eine
+Vermutung und nicht nachgesehen.** Die Regel oben gilt unabhängig davon,
+weil sie den Fall nicht erklären muss, um ihn zu verhindern.
+
+**Zwei Stellen, an denen das Anhängen Absicht ist** und auch bleibt: die
+Init-Sidecars werden mit `up --force-recreate --no-deps` **ohne `-d`**
+gestartet, damit ihr Exit-Code sichtbar wird. Diese Aufrufe hängen sich
+also absichtlich an das Terminal — und gehören damit erst recht allein
+eingefügt.
 
 **0.1 Rückfallpunkt notieren.**
 
