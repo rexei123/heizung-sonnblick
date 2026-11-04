@@ -21,6 +21,7 @@ import type {
   HeatingZone,
   OverrideSource,
 } from "@/lib/api/types";
+import { formatTime } from "@/lib/format";
 import { SOURCE_ICON, SOURCE_LABEL, useRemainingTime } from "@/lib/overrides-display";
 
 import {
@@ -203,9 +204,87 @@ function groupByEvaluation(entries: EventLogEntry[]): EvalGroup[] {
   return [...map.values()].sort((a, b) => b.time.localeCompare(a.time));
 }
 
+/**
+ * Die Schicht, die den gezeigten Wert gesetzt hat.
+ *
+ * **Der Anlass, 03.11.2026 (Boost-Abnahme §10ax).** Der Kopf nannte bei
+ * laufendem Boost „Grund: Frei-Sollwert · Sollwert aus: hausweit",
+ * während daneben 23 °C stand. Beides war für sich richtig und zusammen
+ * falsch: die **Zahl** kam aus `hard_clamp`, also vom Ende der Kette, der
+ * **Grund** aus `base_target`, also vom Anfang. Zwei Zeilen derselben
+ * Tabelle, als ein Satz gelesen.
+ *
+ * Der Fehler ist nicht boost-eigen. **Jede** Übersteuerung erzeugte ihn
+ * — eine Wunschtemperatur ebenso —, und er wächst mit dem Abstand der
+ * beiden Schichten: je mehr dazwischen passiert, desto falscher der
+ * Grund. Aufgefallen ist er am Boost, weil dort zum ersten Mal jemand
+ * den Kopf gegen den Trace darunter gehalten hat.
+ *
+ * **Gewählt ist die letzte Schicht, die den Wert verändert hat**, nicht
+ * die letzte überhaupt. Begründung: `hard_clamp` steht immer am Ende und
+ * trägt laut §5.23 den durchgereichten Grund — darauf allein zu bauen
+ * hieße, sich auf das Durchreichen in **jeder** Schicht zu verlassen,
+ * und es verschweigt, welche Schicht entschieden hat. Die Veränderung
+ * selbst ist das belastbarere Merkmal: `setpoint_in != setpoint_out` ist
+ * eine Beobachtung, keine Zusicherung.
+ *
+ * **Rückwärts durch die Pipeline**, damit die **späteste** Änderung
+ * gewinnt — genau die ist die wirksame.
+ *
+ * Nicht gefunden wird eine Schicht, die den Wert belässt und trotzdem der
+ * Grund ist. Das kann vorkommen (eine Absenkung, die zufällig denselben
+ * Wert ergibt); dann nennt der Kopf die Schicht davor. Ein stiller
+ * Irrtum, aber ein kleinerer als der bisherige: er verwechselt zwei
+ * Schichten mit **demselben** Wert, nicht zwei mit verschiedenen.
+ *
+ * `manual_override_blocked` ist ausgenommen — die Zeile ist
+ * off-pipeline, hat eine synthetische `evaluation_id` und keine
+ * Geschwister (§5.52).
+ */
+function wirksameSchicht(gruppe: EvalGroup): EventLogEntry | undefined {
+  const pipeline = gruppe.entries.filter((e) => e.layer !== "manual_override_blocked");
+  for (let i = pipeline.length - 1; i >= 0; i--) {
+    const e = pipeline[i];
+    if (e.setpoint_in === null || e.setpoint_out === null) continue;
+    if (parseFloat(e.setpoint_in) !== parseFloat(e.setpoint_out)) return e;
+  }
+  return pipeline.find((e) => e.layer === "base_target");
+}
+
+/**
+ * Der Grund für den Kopf: bei einer Übersteuerung ihr Etikett samt
+ * Endzeit, sonst der Grund der Schicht.
+ *
+ * **Warum nicht einfach `grundText`.** Der gäbe hier „Manuell" — richtig
+ * und nutzlos. Was der Betreiber wissen will, steht in der Quelle: wer
+ * den Wert gesetzt hat und bis wann. Das Etikett ist dasselbe wie im
+ * Trace darunter (`SOURCE_LABEL`), damit Kopf und Tabelle nicht zwei
+ * Namen für eine Sache führen.
+ *
+ * **Die Endzeit kommt in Hotel-Zeit** (`formatTime`), wie am Knopf in
+ * der Zimmerübersicht. Fehlt sie, bleibt das Etikett allein stehen —
+ * eine Übersteuerung ohne Endzeit ist möglich, und eine erfundene Zeit
+ * wäre schlimmer als keine.
+ *
+ * Geprüft wird `details.source` und nicht die Schicht: trägt eine
+ * künftige Schicht ebenfalls eine Quelle, gilt dasselbe für sie.
+ */
+function kopfGrund(eintrag: EventLogEntry): string {
+  const rohe = eintrag.details?.["source"];
+  if (typeof rohe === "string" && rohe in SOURCE_LABEL) {
+    const etikett = SOURCE_LABEL[rohe as OverrideSource];
+    const ende = eintrag.details?.["expires_at"];
+    if (typeof ende === "string") return `${etikett} bis ${formatTime(ende)}`;
+    return etikett;
+  }
+  return grundText(eintrag.reason ?? null, eintrag.details ?? null);
+}
+
 function SummaryCard({ latest }: { latest: EvalGroup }) {
   const setpoint = latest.finalSetpoint;
-  const baseEntry = latest.entries.find((e) => e.layer === "base_target");
+  // Die Schicht, die den Wert gesetzt hat — nicht die erste der Kette.
+  // Der Grund daneben muss zu der Zahl gehoeren, die ueber ihm steht.
+  const wirksam = wirksameSchicht(latest);
   // Stale-Hinweis: wenn die juengste Evaluation > 1 h zurueck — Engine
   // sollte alle 60 s laufen (Sprint 9.7 Scheduler), oder wir haben einen Bug.
   const ageMs = Date.now() - new Date(latest.time).getTime();
@@ -215,23 +294,37 @@ function SummaryCard({ latest }: { latest: EvalGroup }) {
     <div className="bg-surface border border-border rounded-md p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-baseline gap-3">
-          <span className="text-3xl font-medium text-primary">
+          {/* Eigene Marke, weil derselbe Wert auch im Trace darunter
+              steht: der Fehler vom 03.11. war genau, dass Zahl und Grund
+              hier aus verschiedenen Zeilen kamen — ein Test muss die
+              Zahl **dieses** Kopfes greifen koennen. */}
+          <span
+            className="text-3xl font-medium text-primary"
+            data-testid="trace-sollwert"
+          >
             {setpoint !== null ? `${setpoint}°C` : "—"}
           </span>
           <span className="text-base text-text-secondary">aktueller Sollwert</span>
         </div>
         {windowOpen ? <WindowOpenIndicator since={windowOpen.since} /> : null}
       </div>
-      {baseEntry?.reason ? (
+      {wirksam?.reason ? (
         <p className="mt-2 text-base text-text-secondary">
           Grund:{" "}
           <strong className="text-text-primary" data-testid="trace-grund">
-            {grundText(baseEntry.reason, baseEntry.details ?? null)}
+            {kopfGrund(wirksam)}
           </strong>
-          {quelleText(baseEntry.details ?? null) !== null ? (
+          {/* „Sollwert aus" sagt, aus welcher ``rule_config``-Zeile der
+              Wert kommt. Das hat nur die Basis-Schicht; bei einer
+              Uebersteuerung kommt der Wert aus der Uebersteuerung, und
+              der Zusatz verschwindet von selbst, weil ihre Details kein
+              ``sollwert_quelle`` tragen. Vorher stand dort „hausweit",
+              wenn ein Boost lief — eine Herkunft fuer einen Wert, der
+              gar nicht von dort kam. */}
+          {quelleText(wirksam.details ?? null) !== null ? (
             <span className="text-text-tertiary" data-testid="trace-quelle">
               {" "}
-              · Sollwert aus: {quelleText(baseEntry.details ?? null)}
+              · Sollwert aus: {quelleText(wirksam.details ?? null)}
             </span>
           ) : null}
         </p>
