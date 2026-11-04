@@ -6358,6 +6358,14 @@ genauso Pflicht:
 | **`tmux`** | Schritt 0.0 von Teil 1, inklusive `escape-time 50` |
 | **Backup zuerst** | Schritt 0.2 und 0.4 von Teil 1 |
 
+> **Gelaufen am 04.11.2026.** C2, C3, C5 und C7 sind erledigt, **C1 ist
+> ausgelassen** (Anlass entfallen, siehe dort), **C6 verschoben**, **C4
+> ausgeführt und zurückgenommen** (siehe dort). C5 hat die Annahme
+> widerlegt, auf die der Block gebaut war: `admin/admin` war **nicht**
+> aktiv. Zwei Störungen am laufenden Betrieb, beide hier eingearbeitet —
+> Protokoll und sechs Befunde in
+> `docs/status/2026-11-04-rotation-teil2.md`.
+
 ### Schritt 0.3 — was auf dem Server wirklich steht
 
 **Teil 1 hat gezeigt, warum dieser Schritt nicht übersprungen wird:** drei
@@ -6419,6 +6427,16 @@ ist. Hier wird es **nicht** nebenbei entschieden.
 ---
 
 ### C1 — die SMTP-Zugangsdaten
+
+> **Am 04.11.2026 ausgelassen, und der Anlass ist damit entfallen.** Der
+> Block war dafür geschrieben, ein Passwort zu ersetzen, das auf einem
+> Bildschirmfoto gelandet war. Das App-Passwort „Hotel Heizung", das der
+> Server benutzt, ist am **20.09.** angelegt worden — der Screenshot ist
+> vom **19.09.**, das Passwort im Betrieb gab es zu diesem Zeitpunkt noch
+> nicht, und es wurde nie gezeigt. **Dieser Block steht hier als
+> Anleitung für den nächsten Anlass, nicht als offene Aufgabe.** Die
+> Prüfung mit `send_test_mail` bleibt richtig und ist unabhängig davon
+> jederzeit brauchbar.
 
 **Wirkung:** nur der Mailversand (Alarme aus §10l, der
 Belegungs-Wächter). **Keine** Wirkung auf die Regelung. Von allen Werten
@@ -6633,6 +6651,29 @@ unverändert zurückkopiert, nicht erneut verdoppelt.
 
 ### C4 — den verwaisten Mosquitto-User `gateway-ug65` entfernen (B-22-3)
 
+> **Am 04.11.2026 ausgeführt und wieder zurückgenommen. Diesen Block
+> nicht erneut laufen lassen, bevor zwei Dinge gelesen sind.** Nach dem
+> Mosquitto-Neustart kam **kein Uplink** mehr; die MQTT-Clients verbanden
+> sich neu, das Gateway UG65 stand aber ab 07:11:45 offline und kam erst
+> nach Stromtrennung um 07:48 zurück. Der Zusammenhang zum entfernten
+> User ist **nicht** erwiesen — der Neustart allein erklärt es auch —
+> aber zurückgenommen wurde beides.
+>
+> **Die Prüfung, auf der dieser Block steht, trägt nicht.** „Sieben Tage
+> keine Anmeldung" beweist bei dauerhaft verbundenen MQTT-Clients nichts:
+> die Anmeldung steht einmal am Anfang im Protokoll und danach nie
+> wieder. Und ein Gerät, das sich alle paar Sekunden **erfolglos**
+> anmeldet, erzeugt überhaupt keine erfolgreiche Anmeldung — und braucht
+> den User trotzdem. Genau so ein Klopfer ist am 04.11. aufgefallen, aus
+> dem Netz des Hauses.
+>
+> **Vor einem zweiten Versuch:** den **Benutzernamen** in den
+> abgewiesenen Anmeldungen lesen. Steht dort `gateway-ug65`, ist der User
+> nicht verwaist, sondern wird von einem Gerät benutzt, dem nur das
+> Passwort fehlt — dann ist das Entfernen falsch und die Frage eine
+> andere. Protokoll: `docs/status/2026-11-04-rotation-teil2.md`,
+> Befunde 2, 4 und 5.
+
 **Befund vom 20.10.:** der User steht in
 `infra/mosquitto/config/passwd`, aber **kein Dienst meldet sich damit
 an**. Das UG65 spricht Basic Station gegen `chirpstack-gateway-bridge`,
@@ -6771,6 +6812,14 @@ keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
 ---
 
 ### C6 — Server-Neustart (apt-Updates)
+
+> **Am 04.11.2026 verschoben, Termin offen.** Der Block ist damit die
+> einzige Aufgabe aus Teil 2, die unverändert offen steht. Die Begründung
+> unten gilt weiter, mit einem Zusatz aus dem 04.11.: ein Kaltstart prüft
+> auch, ob das Gateway nach einer serverseitigen Unterbrechung von selbst
+> zurückkommt — am 04.11. tat es das **nicht** (Befund 2). Wer C6
+> nachholt, sollte den Gateway-Status danach ausdrücklich ansehen und
+> nicht annehmen.
 
 **Letzter Block, nach allen Werten.** Begründung: ein Neustart prüft
 beiläufig, ob alles, was in dieser Rotation geändert wurde, einen
@@ -9816,6 +9865,21 @@ Fassungen desselben Befehls sind eine Fehlerquelle und keine Hilfe
 (§5.53). Diese Seite ist die **Reihenfolge**, die Zeitfenster, die
 Abbruchregeln und das, was sich seit dem geplanten Termin vom 27.10.
 geändert hat.
+
+> **Gelaufen am 04.11.2026, und hier steht das Ergebnis.** Vier Blöcke
+> erledigt (C2, C3, C5, C7), **C1 ausgelassen**, **C6 verschoben**, **C4
+> ausgeführt und wieder zurückgenommen**. Zwei Blöcke haben den Betrieb
+> gestört: C3 hat Caddy von 06:59 bis 07:04 in einen Crashloop geschickt
+> (die `.env` war richtig, die **Umgebung** zerstört — siehe die
+> Korrektur in §10ab C3), und nach dem Mosquitto-Neustart in C4 kam bis
+> 07:48 **kein Uplink** mehr, bis das Gateway stromlos gemacht wurde.
+> **C1 entfällt dauerhaft:** das Gmail-App-Passwort ist am 20.09.
+> angelegt worden, der Screenshot, der den Anlass gab, ist vom 19.09. —
+> das Passwort im Betrieb ist jünger als der Anlass. **C4 nicht
+> wiederholen**, bevor der Benutzername in den abgewiesenen
+> Mosquitto-Anmeldungen gelesen ist; die Prüfung „sieben Tage keine
+> Anmeldung" trägt nicht (§10ab C4). Sechs Befunde und das vollständige
+> Protokoll: `docs/status/2026-11-04-rotation-teil2.md`.
 
 ### Nachgeprüft am 02.11.2026 gegen `develop`
 
