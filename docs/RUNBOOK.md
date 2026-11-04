@@ -574,7 +574,8 @@ sudo openssl rand -hex 32     # Wert in MQTT_HEIZUNG_PASSWORD eintragen
 sudo nano infra/deploy/.env
 
 # 2. passwd-Datei erzeugen (.env muss vorher gesetzt sein)
-set -a; . infra/deploy/.env; set +a
+. infra/deploy/env-neu.sh; ENV_LESEN
+ENV_BRAUCHE MQTT_CHIRPSTACK_PASSWORD MQTT_HEIZUNG_PASSWORD   # bei FEHLER hier anhalten
 sudo touch infra/mosquitto/config/passwd
 sudo docker run --rm -v "$PWD/infra/mosquitto/config:/conf" \
   eclipse-mosquitto:2 \
@@ -1551,7 +1552,7 @@ Prüfen, welche Konten es gibt und welche Rolle sie haben:
 
 ```bash
 # SSH (Prod-Server, root)
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c "SELECT email, role, is_active FROM \"user\" ORDER BY role, email;"
@@ -1619,7 +1620,7 @@ der bisherigen §10h.0).
 
 ```bash
 # SSH (Prod-Server, root), im Deploy-Verzeichnis
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
 "SELECT (SELECT count(*) FROM room) AS zimmer,
@@ -1804,7 +1805,7 @@ docker compose -f docker-compose.prod.yml logs chirpstack --since 10m 2>&1 \
 von 001. Zusätzlich muss innerhalb weniger Minuten ein Uplink ankommen:
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
 "SELECT max(time) FROM sensor_reading s
@@ -2282,7 +2283,7 @@ wurde, was noch offen ist, und ob eine Zone doppelt belegt ist.
 
 ```bash
 # SSH (Prod-Server, root)
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
 \echo '=== 1. Heute zugeordnet ==='
@@ -2365,7 +2366,7 @@ Nach fünf Minuten die Seite neu laden. Steht dort dann immer noch
 
 ```bash
 # SSH (Prod-Server, root)
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c   "SELECT d.label AS nr, d.health_state AS geraet, z.health_state AS zone,
           r.number AS zimmer, z.name AS zone_name,
           to_char(max(s.time) AT TIME ZONE 'Europe/Vienna','DD.MM HH24:MI')
@@ -2410,7 +2411,7 @@ Alle 14 Pilotgeräte melden `attached_backplate=true`, keines ist auf
 `health_state='silent'` gewechselt.
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
 "SELECT r.number AS zimmer, z.name AS zone, d.label AS nummer,
@@ -2439,7 +2440,7 @@ ein schlechtes Erdgeschoss hinter vier guten Etagen.
 
 ```bash
 # Zeitfenster als Parameter: hier 24 Stunden.
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN
 docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v fenster="'24 hours'" -c "
 SELECT r.floor AS etage, r.number AS zimmer, z.name AS zone, d.label AS nummer,
@@ -4900,7 +4901,7 @@ Reihenfolge, und sie dauert mit Abfragen rund 20 Minuten.
 **SSH (heizung-test, root):**
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && echo "DB=$POSTGRES_DB USER=$POSTGRES_USER"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && echo "DB=$POSTGRES_DB USER=$POSTGRES_USER"
 ```
 
 Zeigt die Zeile `DB=… USER=…`, ist alles geladen. Zeigt sie `DB= USER=`,
@@ -5202,14 +5203,37 @@ verfällt die Sperre, auch wenn die Sitzung abbricht.
 
 ```bash
 cd /opt/heizung-sonnblick/infra/deploy
-SQL() { docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -tAc "$1"; }
-ENV_NEU() { set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a; export IMAGE_TAG="develop-$(git -C /opt/heizung-sonnblick rev-parse --short HEAD)"; echo "IMAGE_TAG=$IMAGE_TAG"; }
+. /opt/heizung-sonnblick/infra/deploy/env-neu.sh
 ENV_NEU
 SQL "SELECT max(time) AS juengster_frame, count(*) FILTER (WHERE time > now() - interval '15 minutes') AS frames_15min FROM sensor_reading;"
 ```
 
 Die Zahl `frames_15min` ist der Vergleichswert für **jede** Prüfung in
 Block B. Aufschreiben.
+
+**Die Helfer stehen seit dem 04.11.2026 in einer Datei im Repo**
+(`infra/deploy/env-neu.sh`) und nicht mehr als Zeile zum Kopieren hier.
+Der Grund ist keine Schönheit: die alte Zeile hat an diesem Tag Caddy von
+06:59 bis 07:04 in einen Crashloop geschickt. Was sie falsch gemacht hat
+und warum es keine andere richtige Antwort gibt, steht gleich darunter in
+„Die Env-Falle". Die Datei definiert vier Aufrufe und `SQL`:
+
+| Aufruf | wofür |
+|---|---|
+| `ENV_NEU` | vor **jedem** `docker compose`. Lädt die Werte und setzt `IMAGE_TAG` auf den Stand des Servers. Sagt laut, welchen Tag |
+| `ENV_LESEN` | vor einer **Abfrage**. Lädt dieselben Werte, setzt **keinen** `IMAGE_TAG` und bleibt still — damit eine Antwort, die aus einer Zahl besteht, nicht zwischen zwei Zeilen Rauschen steht |
+| `ENV_BRAUCHE NAME…` | bevor ein Wert als **Argument** in einen Shell-Befehl geht. Bricht ab, wenn er fehlt — `mosquitto_passwd -b` würde sonst stillschweigend ein leeres Passwort anlegen |
+| `PRUEF_HASH_UMGEBUNG NAME…` | die Prüfung, die am 04.11. gefehlt hat: sieht auf Datei **und** Umgebung, nennt keinen Wert |
+
+Die Datei ist in `backend/tests/test_env_neu.py` geprüft, fünfzehn Fälle.
+Das ist der Unterschied zu vorher: an einer Zeile in Prosa kann niemand
+einen Test festmachen.
+
+**Eine Abhängigkeit, die man einmal wissen muss:** die Datei kommt mit dem
+Repo. Der Server muss auf einem Stand sein, der sie enthält — das ist
+Schritt 0.1 (`git pull`), und wer ihn überspringt, bekommt bei
+`. ./env-neu.sh` ein „No such file or directory". Das ist die harmlose
+Fehlermeldung an dieser Stelle; die gefährliche war die alte.
 
 ---
 
@@ -5218,12 +5242,16 @@ Block B. Aufschreiben.
 **Diese Stelle hat am 20.10. rund zwei Minuten Uplinks gekostet.** Sie
 gehört vor Block A gelesen, nicht nachgeschlagen.
 
+**Und am 04.11. rund fünf Minuten Basic-Auth.** Dieselbe Stelle, ein
+zweiter Mechanismus — der untenstehende Abschnitt „Die zweite Hälfte der
+Falle" ist am 04.11. dazugekommen und ist der Grund, warum die Helfer
+jetzt in einer Datei stehen.
+
 `docker compose` löst `${VAR}` in der Compose-Datei **zuerst aus der
-Umgebung der Sitzung** auf und erst dann aus der `.env`. Wer die Datei
-oben mit `set -a; . ./.env` geladen hat — Schritt 0.6 tut das, für `SQL` —
-trägt ab da **Kopien** aller Werte in der Shell. Ein `sed` schreibt dann
-die Datei neu, die Shell behält den **alten** Wert, und `compose` nimmt
-ihn.
+Umgebung der Sitzung** auf und erst dann aus der `.env`. Wer die Datei mit
+`set -a; . ./.env` lädt, trägt ab da **Kopien** aller Werte in der Shell.
+Ein `sed` schreibt dann die Datei neu, die Shell behält den **alten**
+Wert, und `compose` nimmt ihn.
 
 **Was am 20.10. passiert ist:** A3 hat `CHIRPSTACK_DB_PASSWORD` in der
 Datenbank und in der `.env` geändert. `chirpstack-init` rendert seine
@@ -5236,6 +5264,48 @@ Lauf mit frisch geladener Umgebung wiederholt wurde.
 `docker compose`-Aufruf `ENV_NEU` ausführen. Auch in den Rückwegen — dort
 ist der stale Wert besonders tückisch, weil man dann glaubt,
 zurückgedreht zu haben.
+
+### Die zweite Hälfte der Falle — Werte mit Dollarzeichen (04.11.2026)
+
+**Die erste Hälfte kostet den alten Wert. Die zweite macht aus dem Wert
+eine Zahl.**
+
+Ein bcrypt-Hash enthält Dollarzeichen. In der `.env` stehen sie
+**verdoppelt**, weil `compose` die Verdopplung zu einem Zeichen auflöst
+(§10ab C3 sagt das, und `docker-compose.prod.yml` auch). Lädt die
+**Shell** dieselbe Datei, löst sie die Verdopplung zur
+**Prozessnummer** auf. Danach trägt die Sitzung eine Zahl, `compose`
+nimmt die Umgebung vor der Datei, und Caddy bekommt Zeichenfolge statt
+Hash: `base64-decoding password … byte 46`, Crashloop, **alle**
+ausgesperrt. Am 04.11. von 06:59 bis 07:04, und **auch der Weg zurück war
+kaputt** — der alte Hash wurde genauso zerstört wie der neue.
+
+**Daraus folgt die einzige richtige Antwort, und sie ist nicht
+„vorsichtiger sourcen":**
+
+> **Ein Wert mit Dollarzeichen gehört nicht in die Umgebung.** `compose`
+> muss ihn selbst aus der `.env` lesen, weil nur `compose` die Verdopplung
+> richtig auflöst. Die Umgebung kann ihn **nur falsch** tragen — als
+> Prozessnummer, wenn die Shell expandiert, oder mit doppelten
+> Dollarzeichen, wenn sie es nicht tut.
+
+Genau das tut `env-neu.sh`: es liest die `.env` ohne Expansion, legt
+`$`-Werte **nicht** in die Umgebung, nennt deren **Namen** (nie die
+Werte), und entfernt einen schon vorhandenen Wert — wer vorher von Hand
+`set -a; . ./.env` getippt hat, wird damit geputzt statt bestätigt.
+
+**Zwei Dinge kommen dabei gratis mit.** `. .env` **führt** Backticks und
+`$(…)` in Werten aus; gelesen wird jetzt, nicht interpretiert. Und ein
+`#` innerhalb eines Wertes bleibt Teil des Wertes — die Shell hat dort
+einen Kommentar gesehen, `compose` nicht, und da die Werte für `compose`
+gedacht sind, ist `compose` der Maßstab.
+
+**Was am 04.11. wirklich gefehlt hat, war aber die Prüfung.** Die
+Kontrolle vor dem Neustart war ein `grep` auf die **Datei**. Die Datei
+war in Ordnung. Kaputt war die Umgebung, und darauf sah niemand hin.
+**Eine Prüfung, die eine andere Stelle ansieht als die, die der nächste
+Befehl benutzt, ist keine Prüfung.** Dafür gibt es jetzt
+`PRUEF_HASH_UMGEBUNG`.
 
 **Welche Werte betroffen sind** (Interpolation `${…}`, löst über die
 Umgebung auf):
@@ -5374,7 +5444,7 @@ docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up
 
 ```bash
 curl -s https://heizung.hoteltec.at/health
-set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+. /opt/heizung-sonnblick/infra/deploy/env-neu.sh; ENV_LESEN
 SQL "SELECT count(*) FROM room;"
 SQL "SELECT max(time) FROM event_log;"
 ```
@@ -5451,7 +5521,7 @@ Neustart, keine `error`-Zeilen zur Datenbank. Dann die Wirkung, nicht die
 Mechanik:
 
 ```bash
-set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+. /opt/heizung-sonnblick/infra/deploy/env-neu.sh; ENV_LESEN
 SQL "SELECT count(*) FROM sensor_reading WHERE time > now() - interval '5 minutes';"
 ```
 
@@ -5585,7 +5655,7 @@ damit den richtigen Stand trägt.
 
 ```bash
 sleep 300
-set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+. /opt/heizung-sonnblick/infra/deploy/env-neu.sh; ENV_LESEN
 SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min, max(time) AS juengster FROM sensor_reading;"
 docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs api --tail 40 | grep -iE "mqtt|auth|refused"
 ```
@@ -5808,7 +5878,7 @@ docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ex
 zusammenfasst:
 
 ```bash
-set -a; . /opt/heizung-sonnblick/infra/deploy/.env; set +a
+. /opt/heizung-sonnblick/infra/deploy/env-neu.sh; ENV_LESEN
 SQL "SELECT count(DISTINCT device_id) AS geraete_30min, count(*) AS frames_30min FROM sensor_reading WHERE time > now() - interval '30 minutes';"
 SQL "SELECT max(time) FROM event_log;"
 ```
@@ -6471,7 +6541,7 @@ Erwartung: `[OK]`, und die Mail kommt an.
 Webhooks):
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT last_mail_attempt_at, last_mail_ok_at, last_mail_error FROM global_config WHERE id = 1;"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT last_mail_attempt_at, last_mail_ok_at, last_mail_error FROM global_config WHERE id = 1;"
 ```
 
 `last_mail_ok_at` muss von jetzt sein und `last_mail_error` leer. Steht
@@ -6543,7 +6613,7 @@ mailparser, dann Server — wäre es genauso lang; entscheidend ist, dass es
 („Reprocess“/„Send test“). Danach muss eine Zeile im Protokoll stehen:
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT ts, action, new_value->>'result' AS ergebnis FROM business_audit WHERE target_type = 'occupancy_import' ORDER BY ts DESC LIMIT 3;"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT ts, action, new_value->>'result' AS ergebnis FROM business_audit WHERE target_type = 'occupancy_import' ORDER BY ts DESC LIMIT 3;"
 ```
 
 Erwartung: eine neue Zeile. `result` darf `already_processed` oder
@@ -6593,14 +6663,31 @@ ENV_NEU
 docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps caddy
 ```
 
-**Vor dem Neustart die Verdopplung prüfen** — ohne den Wert zu zeigen:
+**Vor dem Neustart prüfen** — ohne den Wert zu zeigen:
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && grep '^HOTEL_BASIC_AUTH_HASH=' .env | grep -c '\$\$2a\$\$'
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && PRUEF_HASH_UMGEBUNG HOTEL_BASIC_AUTH_HASH CHIRPSTACK_BASIC_AUTH_HASH
 ```
 
-Erwartung **1**. Steht dort 0, fehlt die Verdopplung, und Caddy bekommt
-einen zerstückelten Hash.
+Erwartung: zwei Zeilen `OK:`. Die Prüfung sieht auf **zwei** Stellen, und
+das ist der Unterschied zur Fassung, die am 04.11. versagt hat:
+
+| Meldung | heißt |
+|---|---|
+| `OK: … nur in der .env, mit verdoppelten Dollarzeichen` | so soll es sein |
+| `FEHLER: … steht in der Umgebung` | **hier anhalten.** `compose` würde diesen Wert nehmen und nicht den aus der Datei. `unset` auf den Namen, oder `ENV_NEU` — das putzt ihn mit |
+| `FEHLER: … fehlt in der .env oder die Dollarzeichen sind nicht verdoppelt` | die Verdopplung fehlt, Caddy bekäme einen zerstückelten Hash |
+
+**Warum die alte Prüfung nicht gereicht hat, und das ist die Lehre vom
+04.11.:** sie war ein `grep` auf die **Datei** und bestand, während die
+**Umgebung** den zerstörten Wert trug. Caddy lief danach von 06:59 bis
+07:04 im Crashloop und sperrte alle aus — mit einer Datei, die die ganze
+Zeit richtig war. Eine Prüfung muss auf die Stelle sehen, die der nächste
+Befehl benutzt.
+
+**Der Notausgang, wenn es doch passiert:** `unset HOTEL_BASIC_AUTH_HASH CHIRPSTACK_BASIC_AUTH_HASH`,
+dann den `compose`-Aufruf wiederholen. Das ist, was am 04.11. vor Ort
+geholfen hat. Seit `env-neu.sh` tut `ENV_NEU` dasselbe von allein.
 
 **Prüfen:**
 
@@ -6622,12 +6709,20 @@ intern auf `localhost:8000/health`, gar nicht über Caddy.
 ```bash
 cd /opt/heizung-sonnblick/infra/deploy
 sudo nano .env        # alten Hash aus dem Backup, mit $$
+. ./env-neu.sh && PRUEF_HASH_UMGEBUNG HOTEL_BASIC_AUTH_HASH
 ENV_NEU
 docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps caddy
 ```
 
 Der alte Hash steht im Backup **schon verdoppelt** — er wird
 unverändert zurückkopiert, nicht erneut verdoppelt.
+
+**Die Prüfung steht im Rückweg aus einem bestimmten Grund.** Am 04.11.
+war der Rückweg **genauso kaputt wie der Weg hin**: der alte Hash wurde
+auf demselben Weg zerstört wie der neue, und man sitzt dann vor einem
+Caddy, der mit dem Wert nicht läuft, von dem man gerade sicher weiß, dass
+er früher funktioniert hat. Das ist die Stelle, an der man anfängt, am
+Backup zu zweifeln. Ein Rückweg ohne eigene Prüfung ist kein Rückweg.
 
 ---
 
@@ -6832,7 +6927,7 @@ ist ihr Soll, kein Fehler.
 **2. Frames kommen an** (etwa 50 in fünf Minuten bei rund 100 Geräten):
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT count(*) AS frames_5min, max(time) AS juengster FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT count(*) AS frames_5min, max(time) AS juengster FROM sensor_reading WHERE time > now() - interval '5 minutes';"
 ```
 
 Deutlich weniger als 50 ist ein Befund: dann läuft der Funkweg nicht
@@ -6842,7 +6937,7 @@ Reihenfolge prüfen).
 **3. Die Engine rechnet wieder:**
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT max(time) AS juengste_auswertung FROM event_log;"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT max(time) AS juengste_auswertung FROM event_log;"
 ```
 
 Erwartung: nicht älter als zwei Minuten. Ist der Wert alt, läuft
@@ -9967,7 +10062,7 @@ wenn dort etwas anderes steht.
 `0036` (Spalte und Quelle) **und** `0037` (der hausweite Wert 23,0).
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && set -a && . ./.env && set +a && SQL "SELECT version_num FROM alembic_version;"
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT version_num FROM alembic_version;"
 ```
 
 *Erwartet:* `0037_boost_temperatur` oder später. Steht dort `0036_boost`,
