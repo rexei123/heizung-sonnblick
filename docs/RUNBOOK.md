@@ -10347,3 +10347,158 @@ Audit eine Dauer, die nicht stimmt.
 `docs/status/2026-11-02-boost.md`, `docs/status/2026-11-02-boost-wert.md`
 (die Korrektur am Wert), §10ao (Fenstererkennung — der andere
 Oberflächen-Durchgang dieser Woche).
+
+---
+
+## 10ay. Nach einem Neustart von Mosquitto, Caddy oder der Bridge: das Gateway prüfen (ab 04.11.2026)
+
+**Was das hier ist.** Eine Regel, die nach dem 04.11.2026 entstanden ist,
+und die Begründung dazu. Sie gilt für **jeden** Neustart dieser drei
+Dienste — in einer Rotation, bei einem Deploy, beim Suchen eines Fehlers.
+
+> **Korrigiert am 04.11.2026, nachdem die Containerzeiten gelesen waren.**
+> Die erste Fassung dieses Abschnitts hielt den Neustart der Bridge für die
+> mögliche Behebung und wollte das an `RestartCount` entscheiden. Das war
+> falsch: Bridge und ChirpStack liefen an diesem Morgen **ab 07:39:59
+> frisch**, und das Gateway blieb trotzdem weg, bis um **07:48** der
+> Stecker gezogen wurde. **Die Behebung ist bis auf Weiteres die
+> Stromtrennung am Gateway.** Alles darunter ist entsprechend geändert.
+
+**Was passiert ist** — Ortszeit, der Server rechnet in UTC (+1 h):
+
+| Zeit | was |
+|---|---|
+| 06:59–07:04 | Caddy-Crashloop (§10ab C3) |
+| 07:11:45 | letzter Statistiksatz des Gateways |
+| 07:12 | `mosquitto` neu erzeugt (§10ab C4), danach **kein Uplink mehr** |
+| 07:39:59 | `chirpstack` **und** `chirpstack-gateway-bridge` laufen frisch |
+| 07:48 | **Stromtrennung am Gateway** — danach kommt es zurück |
+
+Zwischen 07:40 und 07:48 lief also eine **frische** Bridge, und das
+Gateway war nicht da. Acht Minuten sind kein Beweis, dass es nie von
+selbst gekommen wäre — sie sind der Beweis, dass es **nicht in der Zeit
+kommt, die im Betrieb zur Verfügung steht**. 36 Minuten ohne Messwerte
+sind das Ergebnis.
+
+**Der Satz, der die Regel trägt:** das Gateway verbindet sich nach einer
+serverseitigen Unterbrechung **nicht von selbst neu**, und dass alle
+MQTT-Clients im Protokoll wieder auftauchen, sagt darüber **nichts**. Die
+Clients sind nicht das Gateway.
+
+> **Die Folge für die Planung, und sie ist die unbequeme:** wer
+> `mosquitto`, `caddy` oder die Bridge neu startet, muss damit rechnen,
+> **am Gateway stehen zu müssen**. Diese drei Dienste werden deshalb nicht
+> neu gestartet, solange niemand ans Gerät kommt — nicht aus der Ferne,
+> nicht abends, nicht während einer Anreise. Das Gateway hängt im
+> Technikraum; wer das aus dem Urlaub tut, hat die Anlage bis zur Rückkehr
+> ohne Messwerte.
+
+### Die Regel
+
+**1. Vor dem Neustart zwei Dinge aufschreiben: die Uplink-Zahl und die
+Containerzeiten.**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min, max(time) AS juengster FROM sensor_reading;"
+```
+
+```bash
+docker inspect -f '{{.Name}} gestartet={{.State.StartedAt}} Neustarts={{.RestartCount}}' $(docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps -q chirpstack-gateway-bridge mosquitto chirpstack api)
+```
+
+> **Warum die Zeiten vorher gelesen werden — die Lehre aus dem 04.11.:**
+> Schritt 2 unten erzeugt die Container **neu**. Damit stehen `gestartet`
+> und `Neustarts` auf dem Neustart von Schritt 2 — und die Frage, ob die
+> Bridge beim Mosquitto-Neustart **von sich aus** mitgegangen ist, lässt
+> sich danach **nicht mehr beantworten**. Genau das ist am 04.11.
+> passiert: die Zahlen wurden erst nach der Behebung gelesen und zeigten
+> den Rettungsversuch, nicht den Vorfall. Der Handgriff, der hilft,
+> löscht die Spur — also wird sie vorher gesichert.
+
+**2. Nach einem Neustart von `mosquitto`: die drei Dienste, die daran
+hängen, ebenfalls neu erzeugen** — in dieser Reihenfolge:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_NEU && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack chirpstack-gateway-bridge api
+```
+
+Begründung: alle drei halten eine MQTT-Verbindung, und eine halb
+wiederhergestellte Verbindung ist schwerer zu erkennen als eine, die neu
+aufgebaut wurde. **`--no-deps`** steht da, damit nicht die halbe Anlage
+mitgeht.
+
+**Dieser Schritt holt das Gateway nicht zurück.** Er ist Hygiene auf der
+Serverseite, damit nach der Stromtrennung eine saubere Gegenstelle
+bereitsteht — nicht die Behebung. Am 04.11. war er um 07:39:59 getan und
+hat acht Minuten lang nichts geändert.
+
+**3. Den Gateway-Status in ChirpStack ansehen** — und zwar als erste
+Frage, nicht als letzte: ChirpStack-UI → Tenants → Hotel Sonnblick →
+Gateways. Das UG65 muss **online** sein und „Last seen" unter 30 Sekunden
+tragen.
+
+> **Warum 30 Sekunden und nicht „kürzlich":** die Bridge schickt
+> Gateway-Statistik alle 30 Sekunden (`stats_interval` in
+> `infra/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml`). Ein
+> „Last seen" von zwei Minuten ist deshalb kein Ausreißer, sondern ein
+> **Befund**.
+
+**4. Die Uplinks erneut zählen** — derselbe Befehl wie Schritt 1.
+Erwartung: `juengster` ist jünger als der Neustart, und `frames_5min`
+nähert sich dem Wert von vorher.
+
+**Und beim Warten mitlesen, ob das Gateway überhaupt klopft:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -f /var/log/caddy/cs-test.access.log' | grep --line-buffered router
+```
+
+Das ist der Zugangsweg des Gateways: Caddy nimmt `/router*` auf dem
+ChirpStack-Hostnamen an und reicht es an `chirpstack-gateway-bridge:3001`
+weiter (`infra/caddy/Caddyfile.test`, Abschnitt
+`{$CHIRPSTACK_HOSTNAME}`). **Kommt in zwei Minuten keine Zeile, versucht
+das Gerät es nicht** — dann ist Warten sinnlos und Schritt 5 fällig.
+Kommen Zeilen mit Fehlerstatus, liegt es am Weg und nicht am Gerät. Mit
+Strg-C beenden.
+
+**5. Die Behebung: das Gateway stromlos machen.** Stecker ziehen, zehn
+Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
+**Das ist am 04.11. das Einzige gewesen, was geholfen hat** — kein
+serverseitiger Handgriff hat das Gateway zurückgeholt.
+
+### Was die Zahlen beantworten, und was nicht
+
+**Beantwortet: eine frische Bridge genügt nicht.** Container, die um
+07:39:59 neu erzeugt wurden, hatten acht Minuten Zeit; das Gateway kam
+erst mit dem Stecker. Die Hypothese der ersten Fassung — „die Bridge geht
+mit, also muss das Gateway neu verbinden, also ist ihr Neustart die
+Behebung" — ist damit **erledigt**. Der zweite Teil der Kette stimmt
+nicht: das Gateway *müsste* neu verbinden, es *tut* es nicht.
+
+**Nicht mehr beantwortbar: ob die Bridge um 07:12 von sich aus
+mitgegangen ist.** Das `--force-recreate` um 07:39:59 hat neue Container
+erzeugt und damit `gestartet` und `Neustarts` zurückgesetzt. Die Frage
+bleibt offen und ist beim nächsten Vorfall mit Schritt 1 zu beantworten —
+sie ist nicht mehr dringend, weil die Behebung ohnehin nicht dort liegt.
+
+**Offen und beim Gerät:** ob der Basic-Station-Reconnect am UG65
+einstellbar ist. `ping_interval` und `read_timeout` der Bridge regeln,
+wie schnell die **Bridge** eine tote Sitzung bemerkt und aufräumt; ob das
+**Gateway** neu verbindet, entscheidet dessen eigene Implementierung.
+Serverseitig gibt es **keinen** Schalter, der das Gateway zurückholt —
+die Frage gehört an die UG65-Oberfläche. Der Mitlese-Befehl in Schritt 4
+grenzt sie ein: klopft das Gerät gar nicht, ist es seine Seite.
+
+**Was hier ausdrücklich nicht behauptet wird.** Dass der entfernte
+Mosquitto-User (§10ab C4) mit dem Ausfall zu tun hatte, ist **nicht**
+erwiesen; der Neustart allein erklärt ihn ebenso gut. Dass der
+Caddy-Crashloop die Ursache war, ist **widerlegt** — er lief 06:59–07:04,
+das Gateway meldete sich danach noch bis 07:11:45 und hat ihn überlebt.
+Und ein einzelner Vorfall sagt nicht, ob das Gateway **immer** so
+reagiert; die Regel ist deshalb eine Prüfung und keine Diagnose.
+
+**Querverweise:** `docs/status/2026-11-04-gateway-reconnect.md` (Befund 2,
+das Protokoll des Vorfalls), §10ab C4 (der Block, in dessen Rahmen es
+passiert ist), §10ab C3 (der Caddy-Crashloop desselben Morgens),
+§10a.2 (die UG65-Oberfläche), §5.76 in `CLAUDE.md` (Wirkung überwachen
+statt Mechanik — Schritt 4 zählt Uplinks, nicht Verbindungen).
