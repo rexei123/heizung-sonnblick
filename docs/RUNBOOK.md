@@ -10072,3 +10072,112 @@ Audit eine Dauer, die nicht stimmt.
 `docs/status/2026-11-02-boost.md`, `docs/status/2026-11-02-boost-wert.md`
 (die Korrektur am Wert), §10ao (Fenstererkennung — der andere
 Oberflächen-Durchgang dieser Woche).
+
+---
+
+## 10ay. Nach einem Neustart von Mosquitto, Caddy oder der Bridge: das Gateway prüfen (ab 04.11.2026)
+
+**Was das hier ist.** Eine Regel, die nach dem 04.11.2026 entstanden ist,
+und die Begründung dazu. Sie gilt für **jeden** Neustart dieser drei
+Dienste — in einer Rotation, bei einem Deploy, beim Suchen eines Fehlers.
+
+**Was passiert ist.** Im Rahmen von §10ab C4 wurde `mosquitto` um 07:12
+neu erzeugt. Die MQTT-Clients verbanden sich neu: Bridge,
+ChirpStack-Gateway, Integration, `heizung-api`-Subscriber. Trotzdem kam
+**kein einziger Uplink** mehr. Das Gateway UG65 stand in ChirpStack ab
+07:11:45 offline und kam erst nach **Stromtrennung am Gateway** um 07:48
+zurück — also nach **36 Minuten**, in denen die Steuerung keine Messwerte
+hatte.
+
+**Der Satz, der die Regel trägt:** das Gateway verbindet sich nach einer
+serverseitigen Unterbrechung **nicht zuverlässig von selbst neu**, und
+dass alle MQTT-Clients im Protokoll wieder auftauchen, sagt darüber
+**nichts**. Die Clients sind nicht das Gateway.
+
+### Die Regel
+
+**1. Vor dem Neustart die Uplinks zählen und die Zahl aufschreiben.**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_LESEN && SQL "SELECT count(*) FILTER (WHERE time > now() - interval '5 minutes') AS frames_5min, max(time) AS juengster FROM sensor_reading;"
+```
+
+**2. Nach einem Neustart von `mosquitto`: die drei Dienste, die daran
+hängen, ebenfalls neu erzeugen** — in dieser Reihenfolge:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && . ./env-neu.sh && ENV_NEU && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack chirpstack-gateway-bridge api
+```
+
+Begründung: alle drei halten eine MQTT-Verbindung, und eine halb
+wiederhergestellte Verbindung ist schwerer zu erkennen als eine, die neu
+aufgebaut wurde. **`--no-deps`** steht da, damit nicht die halbe Anlage
+mitgeht.
+
+**3. Den Gateway-Status in ChirpStack ansehen** — und zwar als erste
+Frage, nicht als letzte: ChirpStack-UI → Tenants → Hotel Sonnblick →
+Gateways. Das UG65 muss **online** sein und „Last seen" unter 30 Sekunden
+tragen.
+
+> **Warum 30 Sekunden und nicht „kürzlich":** die Bridge schickt
+> Gateway-Statistik alle 30 Sekunden
+> (`stats_interval` in
+> `infra/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml`). Ein
+> „Last seen" von zwei Minuten ist deshalb kein Ausreißer, sondern ein
+> **Befund**.
+
+**4. Die Uplinks erneut zählen** — derselbe Befehl wie Schritt 1.
+Erwartung: `juengster` ist jünger als der Neustart, und `frames_5min`
+nähert sich dem Wert von vorher.
+
+**5. Kommt nichts: das Gateway stromlos machen.** Stecker ziehen, zehn
+Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
+**Das ist am 04.11. das Einzige gewesen, was geholfen hat** — kein
+serverseitiger Handgriff hat das Gateway zurückgeholt.
+
+### Was wir über die Ursache wissen, und was nicht
+
+**Die Zeitstempel zeigen auf den Neustart, nicht auf Caddy.** Der
+Caddy-Crashloop lief an diesem Morgen von 06:59 bis 07:04 (§10ab C3). Das
+Gateway meldete sich **danach noch bis 07:11:45** — es hat den
+Caddy-Ausfall also überlebt. Das ist zugleich der Beweis, dass es sich
+nach einer Unterbrechung grundsätzlich wieder melden **kann**.
+
+**Die Kette, und sie ist eine Hypothese:** die Bridge ist der
+**WebSocket-Server** für Basic Station (`bind` in ihrer Konfiguration),
+das Gateway ist der Client. Verliert die Bridge ihre MQTT-Verbindung und
+**startet ihr Container neu** (`restart: always`), fallen damit **alle**
+Basic-Station-Sitzungen weg — und das Gateway müsste von sich aus neu
+verbinden. Ein reiner MQTT-Reconnect **ohne** Neustart würde die
+WebSocket-Sitzungen dagegen nicht anfassen.
+
+**Was das entscheidet, ist eine einzige Zahl, und sie ist noch nicht
+gelesen:**
+
+```bash
+docker inspect -f '{{.Name}} gestartet={{.State.StartedAt}} Neustarts={{.RestartCount}}' $(docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps -q chirpstack-gateway-bridge mosquitto chirpstack api)
+```
+
+| Ausgabe für die Bridge | heißt |
+|---|---|
+| `Neustarts` **größer 0**, `gestartet` beim Mosquitto-Neustart | der Container ist mitgegangen, die Kette oben stimmt — dann ist die Regel in Schritt 2 nicht nur Vorsicht, sondern die Behebung |
+| `Neustarts` **0**, `gestartet` beim letzten Deploy | die Bridge lief durch. Dann liegt es **nicht** an ihr, und die Suche geht zur WebSocket-Strecke durch Caddy (`/router*` → `chirpstack-gateway-bridge:3001`) |
+
+**Was auf unserer Seite konfigurierbar ist — und was nicht.** Auf der
+Serverseite gibt es **keinen** Schalter, der das Gateway zurückholt.
+`ping_interval` und `read_timeout` der Bridge regeln, wie schnell die
+**Bridge** eine tote Sitzung bemerkt und aufräumt; ob das **Gateway** neu
+verbindet, entscheidet dessen eigene Basic-Station-Implementierung. Die
+Frage „ist der Reconnect einstellbar?" gehört damit an die
+UG65-Oberfläche und nicht in diese Datei — und sie ist offen.
+
+**Was hier ausdrücklich nicht behauptet wird.** Dass der entfernte
+Mosquitto-User (§10ab C4) mit dem Ausfall zu tun hatte, ist **nicht**
+erwiesen; der Neustart allein erklärt ihn ebenso gut. Und ein einzelner
+Vorfall sagt nicht, ob das Gateway **immer** so reagiert — die Regel ist
+deshalb eine Prüfung und keine Diagnose.
+
+**Querverweise:** `docs/status/2026-11-04-rotation-teil2.md` (Befund 2,
+das Protokoll des Vorfalls), §10ab C4 (der Block, in dessen Rahmen es
+passiert ist), §10ab C3 (der Caddy-Crashloop desselben Morgens),
+§10a.2 (die UG65-Oberfläche).
