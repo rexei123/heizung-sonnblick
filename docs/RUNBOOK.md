@@ -10466,6 +10466,79 @@ Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
 **Das ist am 04.11. das Einzige gewesen, was geholfen hat** — kein
 serverseitiger Handgriff hat das Gateway zurückgeholt.
 
+> **Nie den Antennenstecker lösen, solange das Gateway Strom hat.** Ein
+> Sender, der in einen offenen Stecker sendet, bekommt seine Leistung
+> reflektiert zurück, und das kann die Endstufe beschädigen. Das Gateway
+> sendet Downlinks, sobald ein Gerät ein Empfangsfenster öffnet — der
+> Moment lässt sich nicht abwarten und nicht vorhersehen. Also: **erst
+> stromlos, dann am Stecker.**
+
+### 6. Nach der Stromtrennung: die Funkqualität prüfen (ab 05.11.2026)
+
+**Die Stromtrennung ist die Behebung — aber sie hat einen Preis, den am
+04.11. niemand gemessen hat.** Das Gateway kam zurück, und zwar
+**schlechter**:
+
+| Zeitraum (Ortszeit) | SNR | RSSI | Uplinks/h | Geräte |
+|---|---|---|---|---|
+| bis 04.11. **06:00** | 8,6–9,0 | **−96** | ~605 | 103–104 |
+| 04.11. **07:00** (Ausfallstunde) | 7,8 | −97 | 227 | 103 |
+| ab 04.11. **08:00** | **6,0–6,9** | **−99/−100** | ~580 | 99–103 |
+
+Rund **4 dB schlechter im RSSI, 2,3 dB im SNR**, hausweit, und es hielt
+an. **38 von 103 Geräten** verloren über 3 dB, verteilt über alle
+Etagen — das sind nicht hundert Geräte gleichzeitig, das ist der
+Empfänger.
+
+Die Geräte mit der geringsten Reserve fielen dabei aus dem Netz. Gerät
+**021 (Zimmer 107 Kinderzimmer)** war vorher gesund (SNR +6,3, 144
+Uplinks am Tag) und meldete danach **6 Uplinks am Tag** bei SNR −9,7;
+sein RSSI fiel von −105 auf **−114**, also auf den Rauschboden.
+
+**Der Befund ist erst am 05.11. aufgefallen, und zwar zufällig** — bei
+der Suche nach einem vermuteten Funkloch in den Zimmern 107/109/110. Es
+war keines: die Zimmernachbarn derselben Räume waren in Ordnung. Genau
+deshalb gibt es diese Prüfung.
+
+**Die Prüfung — SSH (heizung-test, root).** Dieselbe Stunde heute gegen
+gestern, hausweit. Der Vergleich mit dem **Vortag** ist bewusst gewählt
+und nicht ein gleitendes Mehrtagesmittel: ein Mittel, das die Störung
+schon enthält, verdünnt sich selbst und schweigt nach zwei Tagen.
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(h.std,'HH24:00') AS stunde, round(h.snr::numeric,1) AS snr_heute, round(g.snr::numeric,1) AS snr_gestern, round((h.snr-g.snr)::numeric,1) AS delta_snr, round(h.rssi::numeric,0) AS rssi_heute, round(g.rssi::numeric,0) AS rssi_gestern, h.up AS up_heute, g.up AS up_gestern FROM (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) h LEFT JOIN (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') + interval '1 day' AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '36 hours' AND time < now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) g USING (std) ORDER BY h.std;"
+```
+
+**Der Schwellwert:**
+
+| `delta_snr` | heißt |
+|---|---|
+| **−2,0 dB oder schlechter**, über mehrere Stunden | **Befund.** Am 04.11. waren es −2,0 bis −2,4 dB in jeder Stunde |
+| −1,0 bis −2,0 dB | beobachten, am nächsten Tag erneut |
+| besser als −1,0 dB | im Rahmen |
+
+**Eine einzelne Stunde zählt nicht.** Die Ausfallstunde selbst und die
+Stunden danach sind aus anderen Gründen verzerrt (weniger Uplinks,
+andere Geräte). Erst drei aufeinanderfolgende Stunden unter −2 dB sind
+ein Befund.
+
+**Und was dann?** Der Verdacht geht zuerst an die **Antenne**, nicht an
+die Geräte: Stecker nicht ganz fest, Antenne verdreht oder verbogen. Ein
+Gerätetausch in einem schwachen Zimmer bringt nichts, wenn der Empfänger
+4 dB verloren hat. **Erst stromlos machen, dann am Stecker** (siehe
+oben).
+
+**Die Einzelgeräte dazu**, wenn der hausweite Wert einen Befund zeigt —
+drei Stunden je Fenster, weil ein schwaches Gerät pro Stunde zu wenige
+Meldungen hat:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT d.label, r.number||' '||z.name AS ort, to_char(time_bucket('3 hours', s.time) AT TIME ZONE 'Europe/Vienna','DD.MM. HH24:00') AS fenster, count(*) AS uplinks, round(avg(s.snr_db)::numeric,1) AS snr, round(avg(s.rssi_dbm)::numeric,0) AS rssi FROM sensor_reading s JOIN device d ON d.id=s.device_id JOIN heating_zone z ON z.id=d.heating_zone_id JOIN room r ON r.id=z.room_id WHERE s.time > now() - interval '27 hours' AND s.snr_db IS NOT NULL GROUP BY 1,2,time_bucket('3 hours', s.time) HAVING avg(s.snr_db) < 0 ORDER BY 1, time_bucket('3 hours', s.time);"
+```
+
+Er zeigt nur Fenster mit **negativem SNR** — die Geräte, die tatsächlich
+an der Grenze sind, statt aller 107.
+
 ### Was die Zahlen beantworten, und was nicht
 
 **Beantwortet: eine frische Bridge genügt nicht.** Container, die um
