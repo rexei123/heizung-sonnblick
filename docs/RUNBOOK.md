@@ -10551,6 +10551,35 @@ die Ursache eine Kalibrierung beim harten Neustart war.
 > Minuten vom Netz — **nicht** während einer Anreise, eines Montagegangs
 > oder eines Eingangstests.
 
+> ### Die Bedingung an das Messfenster: kein Deploy darin
+>
+> **Von Schritt 1 bis Schritt 4 darf kein Merge nach `develop` laufen**,
+> und auch kein Deploy von Hand. Jeder Merge startet `api`, `web`,
+> `celery_worker` und `celery_beat` neu (§0.3), und **der
+> MQTT-Subscriber läuft im `api`-Container** — ein Deploy hinterlässt
+> also eine Lücke im Meldungsstrom.
+>
+> **Warum das die Messung zerstört und nicht nur stört:** Schritt 1 und
+> Schritt 4 vergleichen Mittelwerte über 30 Minuten. Fällt eine
+> Ingest-Lücke in eines der beiden Fenster, fehlen dort Meldungen —
+> und zwar nicht gleichmäßig, sondern bevorzugt von den Geräten, die
+> gerade gesendet hätten. Der Vergleich beantwortet dann nicht mehr
+> „hat der Neustart geholfen", sondern „welches Fenster hatte die
+> Lücke". Eine Zahl, die zwei Fragen gleichzeitig beantwortet,
+> beantwortet keine.
+>
+> **Es gibt bewusst keine Uhrzeit dazu.** Der Merge-Fenster-Regel aus
+> §0.3 ist damit nichts hinzugefügt und nichts weggenommen: die
+> Bedingung ist **„kein Deploy im Messfenster"**, nicht „morgens" oder
+> „nach den Merges". Wer die Prüfung vor die Merges legt, hat dasselbe
+> erreicht wie jemand, der danach lange genug wartet — und eine
+> Uhrzeit im RUNBOOK wäre in vier Wochen falsch (§5.77).
+>
+> **Praktisch heißt das:** entweder die Prüfung **vor** dem
+> Merge-Fenster, oder nach dem letzten Deploy so lange warten, bis der
+> Meldungsstrom nachweislich wieder normal läuft (der Befehl aus
+> Schritt 3) — und **dann** den Vorher-Wert nehmen, nicht davor.
+
 **Schritt 1 — den Vorher-Wert notieren.** SSH (heizung-test, root):
 
 ```bash
