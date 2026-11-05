@@ -154,13 +154,20 @@ Befehle verschluckt, ist schlimmer als der Zustand heute. Vorlage:
 `GETDEL`) und `engine_abgleich.darf_senden`, das bei Redis-Ausfall
 protokolliert und fortfährt.
 
-**Offen, Pflicht-Stop:** **der Boost.** `services/boost.py` legt eine
-Übersteuerung an, die Engine versendet sie — also läuft er heute durch
-denselben Pfad und würde entprellt. Ein Boost ist aber die eine
-Sollwertänderung, die der Gast **sofort spüren soll**. Entweder er
-umgeht das Entprellen, oder er bekommt das untere Ende des Fensters.
-**Das ist eine Produktentscheidung, keine technische** — sie gehört in
-den Stop vor T1.
+**Der Boost umgeht das Entprellen** (Entscheidung des Betreibers,
+05.11.2026). `services/boost.py` legt eine Übersteuerung an, die Engine
+versendet sie — er läuft heute durch denselben Pfad und würde entprellt.
+Ein Boost ist aber die eine Sollwertänderung, die der Gast **sofort
+spüren soll**; eine Minute Verzögerung wäre genau dort teuer, wo jemand
+auf Wirkung wartet und sonst noch einmal drückt.
+
+**Was daraus für den Bau folgt:** das Entprellen braucht einen
+Umgehungsweg, und der muss am **Anlass** hängen, nicht am Wert. Ein
+Vergleich „ist das ein Boost-Sollwert" wäre eine Vermutung über die
+Absicht; die `reason` bzw. die Quelle der Übersteuerung ist der Befund.
+Ein Boost-Downlink setzt dabei das Entprell-Fenster für dieses Gerät
+**zurück**, statt es zu ignorieren — sonst folgt dem sofortigen Boost
+eine Minute später der gesammelte alte Wert und nimmt ihn zurück.
 
 ### T2 — `acknowledged_at` füllen, als reine Buchführung
 
@@ -217,27 +224,76 @@ stellt in Einreihungsfolge zu, also kommen Konfigurationsbefehle **vor**
 einem entprellten Sollwert an — Grenzen zuerst, dann der Wert, der sie
 einhalten muss.
 
-**Was dabei zu prüfen ist, und es ist der unangenehme Teil:**
+**Was dabei zu beachten ist — und eine Korrektur in eigener Sache.**
 
-> `hard_clamp` klammert auf die **Raumtyp**-Spanne (im Trace sichtbar als
-> `within [10,30]`), **nicht** auf die Grenzen, die im Gerät stehen (seit
-> 28.10. **15–25**, bei Bad-Zonen 18–25). Ein Sollwert von 30 passiert
-> `hard_clamp` und wird vom Gerät abgewiesen oder geklammert — unser
-> `control_command` sagt 30, das Gerät meldet 25, und der Abgleich
-> kämpft, bis er erschöpft ist.
+> **Die erste Fassung dieses Briefs behauptete hier**, ein Sollwert von
+> 30 werde vom Gerät abgewiesen und der Abgleich kämpfe dann bis zur
+> Erschöpfung. **Das ist falsch**, und zwar gegen einen Befund, den
+> dieses Haus selbst erhoben hat. Befund des Betreibers, 05.11.2026,
+> von mir an den Daten geprüft:
 
-Das ist **kein** neues Risiko aus T1 — es besteht heute. T1 vergrößert
-nur das Fenster, in dem ein `0x08` dazwischenkommen kann.
+`0x08` begrenzt **nur das Drehrad**. Funk-Sollwerte kommen durch, auch
+außerhalb der Spanne:
 
-**Umfang in diesem Sprint: erkennen und melden, nicht beheben.** Eine
-Prüfung, die beim Versand feststellt, wenn der Sollwert außerhalb der
-**bestätigten** Gerätegrenzen liegt (`sensor_reading.temp_range_min` /
-`_max`, Migration 0035), und das im Trace und als Audit-Zeile vermerkt.
-Damit wird aus einem unsichtbaren Kampf ein Befund.
+| Beleg | |
+|---|---|
+| **Gerät 26** (Zimmer 107 Schlafzimmer, Untergrenze **15**) | hat **10,00 °C** gemeldet, 28.10. — die `sollwert-probe` aus RUNBOOK §10ap |
+| **Gerät 43** (Zimmer 115 Bad, Untergrenze **18**) | meldet **15,00 °C** in **56** Meldungen — im Betrieb, nicht im Versuch |
+| über der **Obergrenze** | **0** Meldungen seit dem 28.10. |
 
-**Wer die Grenzen gewinnen soll — Raumtyp oder Gerät — ist eine eigene
-Entscheidung** und gehört nicht in diesen Sprint. Sie zu treffen, bevor
-der Befund vorliegt, wäre die falsche Reihenfolge.
+Die Entscheidungstabelle im RUNBOOK sagt zu genau diesem Ergebnis:
+*„10 °C → Hersteller-Aussage bestätigt: die Grenze gilt nur für das
+Rad."* Das Szenario „Gerät weist ab, Abgleich kämpft" **tritt also nicht
+ein**, und T5 braucht dafür keine Erkennung.
+
+**Für die obere Grenze gibt es dagegen keinen Beleg** — in keiner
+Richtung. Seit die Grenzen am 28.10. gesetzt sind, hat kein Gerät je
+einen Sollwert über seiner Obergrenze gemeldet, weil keiner gesendet
+wurde. Symmetrie anzunehmen wäre dieselbe Sorte Schluss, die diese
+Korrektur nötig gemacht hat.
+
+**Umfang in diesem Sprint: nichts.** Die Reihenfolge Konfiguration →
+Sollwert ist unbedenklich, weil die Konfiguration den Sollwert nicht
+beschneidet. Es bleibt nur die Prüfung, dass `0x07`, `0x08` und
+`0x45`/`0x46` unverzögert hinausgehen (Abnahme E).
+
+### Entscheidungsvorlage (nicht bauen): klammert die Engine auf die Radspanne?
+
+**Frage:** Soll `hard_clamp` auf **15–25** (Bad **18–25**) klammern
+statt auf die Raumtyp-Spanne `[10,30]`?
+
+**Gegen das Klammern nach unten — und das ist ein Ausschlussgrund:**
+
+* **10 °C ist der Frostschutz.** Er geht per Funk an Zimmer mit
+  Untergrenze 15 und Bäder mit 18, im Sommerbetrieb und bei der
+  Fenster-Sicherheit. Würde die Engine auf 15 klammern, machten wir den
+  Frostschutz **durch eigene Entscheidung** unmöglich — genau den
+  Ausfall, den die Probe vom 28.10. ausgeschlossen hat. Das RUNBOOK
+  beschreibt diesen Fall als den, bei dem man „stoppen und melden" muss.
+* **`default_t_vacant` liegt bei 15.** Ein Bad mit Radgrenze 18 käme
+  nie unter 18. Gerät 43 hält heute 15 in einem solchen Bad — über die
+  Nebensaison ist der Unterschied Geld.
+
+**Für das Klammern nach oben:**
+
+* Die einzigen Befehle über 25 waren **durchgereichte Drehrad-Wünsche**
+  (18 Befehle, zwei Geräte, alle 16.–18.10.), und das Rad kann seit dem
+  28.10. nicht mehr über 25. Ein Wert über 25 kann seither nur noch aus
+  einer Raumtyp-Konfiguration kommen.
+* Und oben ist der Pfad **ungeprüft**. Oben zu klammern entfernt einen
+  ungeprüften Pfad, kostet keinen Betriebsfall und widerspricht keiner
+  Anforderung.
+
+**Empfehlung: asymmetrisch.** Oben auf die bestätigte Gerätegrenze
+klammern, **unten frei lassen**. Das ist unschön, weil asymmetrisch —
+aber die beiden Seiten haben verschiedene Zwecke: unten steht der
+Frostschutz, oben steht nur Bequemlichkeit.
+
+**Die fehlende Messung, falls Sie es genauer wollen:** das Spiegelbild
+der 10-°C-Probe — **ein** Funk-Sollwert **über** der Obergrenze an **ein**
+Gerät, dann die Rücklesung. Das Werkzeug dafür steht
+(`geraetegrenzen sollwert-probe`), und erst danach wäre „oben klammern"
+eine Entscheidung aus Wissen statt aus Vorsicht.
 
 ---
 
@@ -249,7 +305,7 @@ der Befund vorliegt, wäre die falsche Reihenfolge.
 | B | `acknowledged_at` ist bei der Mehrheit der Befehle gesetzt | Quote vorher **0 von 14.020** |
 | C | Eine erschöpfte Abgleich-Lage überlebt eine Zieländerung | Test mit Gerätedoppel |
 | D | Der Trace nennt je Gerät den gesendeten Wert | Spur eines Zimmers mit Zonen-Übersteuerung; heute zeigt sie 21 bei gesendeten 30 |
-| E | Konfigurationsbefehle sind unverzögert | Test: `0x08` und ein Sollwert in derselben Auswertung |
+| E | Konfigurationsbefehle sind unverzögert, der Boost auch | Test: `0x08` und ein Sollwert in derselben Auswertung; Boost-Downlink ohne Fensterwartezeit |
 
 **Mutationsproben** sind für jede Aufgabe Pflicht und werden im PR
 benannt — nicht „Tests grün", sondern welcher Test bei welcher
@@ -262,7 +318,8 @@ Verfälschung fällt.
 * **Kein Queue-Zugriff, kein gRPC-Pfad für Gerätebefehle** (AE-48 bleibt).
 * **Kein Flush** — Begründung oben, zweifach.
 * **Kein Tor, das an `acknowledged_at` hängt.**
-* **Keine Entscheidung, wessen Grenzen gewinnen** (T5 liefert den Befund).
+* **Keine Entscheidung, wessen Grenzen gewinnen** — die
+  Entscheidungsvorlage steht in T5, die Umsetzung gehoert nicht hierher.
 * **Die Fenstererkennung** läuft getrennt weiter (Schritt 2, eigener PR).
 
 ## 6. Querverweise
