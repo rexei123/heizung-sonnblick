@@ -8047,3 +8047,123 @@ nicht als Fehler gelesen wird.
 AE-60 (Zeitzonen), §5.53 (eine Wahrheit), §5.57 (kein Knopf ohne
 sichtbaren Grund), §5.64 (Diskriminator ins Feld), §5.73 (read-time
 gehoben), `docs/status/2026-11-02-boost.md`.
+
+---
+
+# AE-84 Zweites LoRaWAN-Gateway
+
+**Datum:** 2026-11-05
+**Status:** **ENTWURF — nicht entschieden.** Entscheidungsnotiz auf
+Wunsch des Betreibers, damit die Abwägung aufgeschrieben ist, bevor sie
+unter Druck getroffen wird.
+**Bezug:** RUNBOOK §10ay, `docs/status/2026-11-05-gateway-funk-nach-stromtrennung.md`
+
+## Problem
+
+Ein einziges Gateway, und es ist in den vier Wochen vor diesem Entwurf
+zweimal zum Engpass geworden.
+
+1. **Einziger Ausfallpunkt, und er liegt im Liftschacht.** Fällt es aus,
+   steht die ganze Anlage — 107 Geräte, kein Messwert, kein Downlink.
+   Jeder Eingriff erfordert einen Gang in den Schacht.
+2. **Kein selbständiger Reconnect.** Am 04.11.2026 kam das Gateway nach
+   einem Neustart von `mosquitto` **36 Minuten** nicht zurück; acht
+   Minuten frische Bridge haben nichts geändert, nur die Stromtrennung
+   hat geholfen (§10ay). Serverseitig gibt es keinen Schalter.
+3. **Der Preis der Behebung ist messbar.** Die Stromtrennung brachte das
+   Gateway zurück, aber **4 dB schlechter im RSSI, 2,3 dB im SNR**,
+   hausweit. Ein Gerät fiel von 144 Meldungen am Tag auf 6.
+4. **Zehn Zimmer liegen dauerhaft knapp.** Schon **vor** dem Vorfall lag
+   ein Teil des Hauses bei negativem SNR — die fehlenden 4 dB haben
+   genau dort die Geräte aus dem Netz gedrückt.
+
+Mit einem zweiten Gateway wäre der Vorfall vom 04.11. ein Protokolleintrag
+geblieben und kein Ausfall.
+
+## Wo das Haus am schwächsten ist
+
+Gemessen über **29.10.–02.11.2026**, also **vor** dem Vorfall — der
+heutige Stand ist um 4 dB verschoben und als Standortgrundlage
+untauglich.
+
+| Zimmer | SNR | RSSI |
+|---|---|---|
+| **53** | **−1,4** | **−113** |
+| **109** | **−1,3** | **−113** |
+| **108** | −0,7 | −112 |
+| **110** | −0,4 | −112 |
+| **209** | +0,2 | −112 |
+| **Rezeption** | +1,1 | −111 |
+| **Bar** | +1,8 | −111 |
+| **210** | +1,8 | −110 |
+| **52** | +2,1 | −109 |
+| **54** | +3,3 | −108 |
+
+Zum Vergleich das andere Ende: **310 bei −65 dBm**, dazu 201, 214, 215
+(−76 bis −78) und 303 (−80) — alle bei SNR über 12.
+
+**Was die Zahlen hergeben.** Das schwache Gebiet ist zusammenhängend und
+liegt **unten und am 08–10-Ende**: Erdgeschoss (Rezeption, Bar), die
+52/53/54-Reihe, 108/109/110 und noch 209/210. Das starke Gebiet liegt
+**oben** und an den 01–03- und 12–15-Enden; die −65 dBm in 310 sind
+plausibel die Nachbarschaft des Gateways selbst.
+
+**Was sie nicht hergeben: den Standort.** Dafür fehlt mir der Grundriss,
+und die Geometrie der Zimmernummern ist geraten. Was dieser Entwurf
+beiträgt, ist die **Anforderung**: der zweite Standort muss die zehn
+Zimmer oben erreichen, mit Vorrang auf **53, 109, 108, 110**. Die Wahl
+des Punkts ist eine Entscheidung aus dem Plan — nicht aus dieser Tabelle.
+
+**Und sie ist nachprüfbar, bevor etwas feststeht.** ChirpStack führt zu
+jedem Uplink die empfangende Gateway-ID mit RSSI und SNR. Nach der
+Installation ist also je Zimmer sofort zu sehen, welches Gateway es
+besser hört — ein Probestandort über ein paar Stunden beantwortet die
+Frage, ohne dass vorher jemand rechnen muss.
+
+## Was in ChirpStack zu tun ist
+
+1. **Gateway anlegen** — *Gateways → Add*, mit der Gateway-EUI des
+   Geräts, **im selben Tenant**. Kein eigenes Device-Profile, keine
+   Änderung an den Geräten.
+2. **Am UG65 denselben Basic-Station-Endpunkt eintragen.** Der ist
+   **gateway-unabhängig**: `Caddyfile.test` leitet `path /router*
+   /api/gateway*` auf `chirpstack-gateway-bridge:3001`, ohne eine EUI zu
+   nennen. **Serverseitig ist damit nichts zu ändern** — das ist das
+   angenehmste Ergebnis dieser Prüfung.
+3. **Doppelempfang** ist in ChirpStack Standard: empfangen beide
+   Gateways denselben Uplink, wird er einmal verarbeitet und das Gateway
+   mit dem besseren Empfang für den Downlink gewählt.
+
+> **Der eine Wert, der vor der Installation nachzusehen ist:** unsere
+> `chirpstack.toml` setzt im `[network]`-Abschnitt **keine**
+> Deduplizierungs-Verzögerung, es gilt also die Vorgabe von ChirpStack.
+> Ob die für zwei Gateways mit unterschiedlicher Latenz reicht, steht in
+> deren Dokumentation und **nicht** hier — eine Zahl aus dem Gedächtnis
+> wäre an dieser Stelle genau die Sorte Behauptung, die §5.68 verbietet.
+
+## Risiken
+
+| Risiko | Einschätzung |
+|---|---|
+| **Doppelempfang / Deduplizierung** | Kernfunktion von ChirpStack, kein Eigenbau. Einzige offene Zahl ist das Dedup-Fenster (oben) |
+| **Zwei Gateways, zwei Ausfallbilder** | Fällt eines aus, merkt es niemand sofort — die Uplinks kommen weiter. Das ist der Preis der Redundanz, und er ist der Grund, warum **AE-84 ohne den Funk-Wächter (Sprint 25 T6) unvollständig ist**: der merkt einen hausweiten Abfall, auch wenn noch alles meldet |
+| **Mehr Sendezeit am Downlink** | Nein. ChirpStack wählt **ein** Gateway je Downlink |
+| **Montage im Haus** | PoE oder Netzteil plus Netzwerk am neuen Standort. Keine Server-Änderung |
+| **Zweites Gerät, zweite Kalibrierungsfrage** | Der Befund vom 04.11. ist ungeklärt (Kalibrierung oder Hardware). Ein zweites Gerät desselben Typs erbt dieselbe offene Frage — es verteilt das Risiko, es beseitigt es nicht |
+
+## Preis
+
+**Offen.** Hier steht bewusst keine Schätzung: ein UG65 plus Montage und
+Netzwerk ist eine Zahl, die der Betreiber beim Händler erfragt, und eine
+geratene Zahl in einem ADR wird später als Grundlage gelesen (§5.77).
+
+## Was diese Notiz nicht entscheidet
+
+Ob gekauft wird. Sie hält die Abwägung fest, nennt die Zimmer, die den
+Standort bestimmen, und stellt fest, dass **serverseitig nichts zu tun
+ist** — das war die teuerste offene Frage und sie ist beantwortet.
+
+**Die Reihenfolge, die ich empfehle:** erst §10ay Schritt 7 (geplanter
+Neustart — Kalibrierung oder Hardware?), dann die Antwort von Milesight,
+**dann** diese Entscheidung. Ein zweites Gateway, das einen
+Hardware-Fehler des ersten verdeckt, ist teuer gekaufte Ruhe.
