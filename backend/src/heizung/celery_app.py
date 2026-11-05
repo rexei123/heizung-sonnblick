@@ -45,6 +45,7 @@ app: Celery = Celery(
         "heizung.tasks.occupancy_status_tasks",
         "heizung.tasks.pin_reminder_tasks",
         "heizung.tasks.relay_tasks",
+        "heizung.tasks.funk_tasks",
     ],
 )
 
@@ -154,6 +155,20 @@ app.conf.update(
         "pin-reminder-hourly": {
             "task": "heizung.check_pin_reminder",
             "schedule": crontab(minute=40),
+            "options": {"queue": "heizung_default"},
+        },
+        # Sprint 25 T6: der Funk-Waechter. Stuendlich, weil er ueber zwei
+        # Stunden mittelt — ein schnellerer Takt liest dieselbe Zahl oefter
+        # und belastet nur die Bremse. Nichts an der Funkqualitaet bewegt
+        # sich in Minuten: der Sprung vom 04.11.2026 war ein Stufenwechsel
+        # innerhalb einer Stunde und danach 25 Stunden flach.
+        #
+        # Versetzt auf :50, damit die drei stuendlichen Waechter
+        # (Import :20, Pin :40, Funk :50) nicht dieselbe Minute belegen —
+        # kein Lastproblem, nur lesbarere Logs.
+        "funk-waechter-hourly": {
+            "task": "heizung.pruefe_funkqualitaet",
+            "schedule": crontab(minute=50),
             "options": {"queue": "heizung_default"},
         },
     },

@@ -171,6 +171,54 @@ class Settings(BaseSettings):
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
 
+    # --- Funk-Waechter (Sprint 25 T6) -------------------------------------
+    # Der Waechter vergleicht den SNR-Mittelwert der letzten
+    # ``funk_fenster_stunden`` mit dem Mittel der ``funk_grundlinie_tage``,
+    # die **24 Stunden vor jetzt enden**. Faellt er um mehr als
+    # ``funk_warn_delta_db``, geht eine Mail raus.
+    #
+    # Warum hier und nicht in ``global_config``: dieselbe Begruendung wie
+    # bei den Batterie-Stufen. Wer diese Werte verschiebt, muss wissen, wie
+    # viel dB Streuung ein Haus normal hat — sonst entsteht ein Feld,
+    # dessen Wirkung niemand vorhersagen kann. Es ist keine
+    # Hotelier-Einstellung wie die Alarm-Adresse.
+    #
+    # **Woher die 2,0 dB kommen, und was daran schwach ist.** Am 04.11.2026
+    # lagen die Stundenwerte nach dem Gateway-Neustart bei −2,0 bis −2,4 dB
+    # gegen den Vortag, die Tage davor schwankten um weniger als 0,5 dB.
+    # 2,0 trennt diese beiden Zustaende. **Kalibriert ist das an genau einem
+    # Ereignis**, nicht an einer Reihe — wer den Wert anwendet und etwas
+    # anderes sieht, korrigiert ihn (§5.68: eine Zahl aus einem Fall ist ein
+    # Anhalt, kein Gesetz).
+    #
+    # ``Decimal`` und nicht ``float``: der Vergleich laeuft genau auf der
+    # Schwelle, und 2.0 hat in IEEE-754 keine exakte Darstellung.
+    funk_warn_delta_db: Decimal = Decimal("2.0")
+    funk_grundlinie_tage: int = 7
+    funk_fenster_stunden: int = 2
+    # Mindestmenge, unter der das Urteil ``unbekannt`` lautet und **nicht**
+    # ``warnung``. Nach einem Gateway-Ausfall ist das Fenster duenn, und ein
+    # Melder, der beim Ausfall des Messwegs Alarm schlaegt, meldet seinen
+    # eigenen Ausfall (§5.79). 100 Meldungen von 40 Geraeten sind bei 107
+    # Geraeten im 10-Minuten-Takt in zwei Stunden locker erreicht — im
+    # Normalbetrieb sind es rund 1.200 von ueber 100.
+    funk_min_meldungen: int = 100
+    funk_min_geraete: int = 40
+    # Sperrzeit zwischen zwei Funk-Mails. **24 Stunden heisst: einmal am
+    # Tag, solange es anhaelt** — nicht genau einmal je Episode.
+    #
+    # Die Abweichung ist Absicht und sie ist der Vorsicht geschuldet: eine
+    # strikte Einmal-Regel braucht einen gespeicherten Episodenzustand, und
+    # faellt ein Lauf aus (Worker weg, Redis weg), bleibt der Zustand
+    # stehen und die Meldung kommt **nie**. Eine Sperrzeit kann hoechstens
+    # zu viel melden, und das ist die bessere Richtung. Vorbild
+    # ``TTL_IMPORT_STALE_S``.
+    #
+    # Wer wirklich nur eine Meldung je Vorgang will, setzt den Wert hoch —
+    # dann ist er faktisch einmalig, ohne einen Zustand einzufuehren, der
+    # stumm haengen bleiben kann.
+    funk_mail_sperre_stunden: int = 24
+
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
     # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —
