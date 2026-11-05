@@ -10539,6 +10539,77 @@ cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(
 Er zeigt nur Fenster mit **negativem SNR** — die Geräte, die tatsächlich
 an der Grenze sind, statt aller 107.
 
+### 7. Geplanter Neustart des UG65 — Schritt für Schritt
+
+Für den Fall, dass der Neustart **absichtlich** erfolgt: um zu prüfen, ob
+sich die Funkqualität davon erholt. Am 04.11. war er eine Notmaßnahme und
+hat 4 dB gekostet; dieselbe Maßnahme kann sie auch zurückbringen, wenn
+die Ursache eine Kalibrierung beim harten Neustart war.
+
+> **Vorher lesen: nie den Antennenstecker lösen, solange das Gateway
+> Strom hat** (oben). Und: der Neustart nimmt das ganze Haus für einige
+> Minuten vom Netz — **nicht** während einer Anreise, eines Montagegangs
+> oder eines Eingangstests.
+
+**Schritt 1 — den Vorher-Wert notieren.** SSH (heizung-test, root):
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT round(avg(snr_db)::numeric,1) AS snr_30min, round(avg(rssi_dbm)::numeric,0) AS rssi_30min, count(*) AS meldungen, count(DISTINCT device_id) AS geraete FROM sensor_reading WHERE time > now() - interval '30 minutes' AND snr_db IS NOT NULL;"
+```
+
+**Aufschreiben, nicht merken.** Nach dem Neustart ist der Vergleichswert
+nicht mehr abfragbar, ohne den gestörten Zeitraum mitzunehmen — und ein
+erinnerter Wert ist kein Befund (§5.68). Unter 30 Meldungen ist die Zahl
+nicht belastbar; dann noch warten.
+
+**Schritt 2 — Stecker ziehen, 30 Sekunden warten, einstecken.** Dreißig
+und nicht zehn Sekunden: bei einer vermuteten Kalibrierungsfrage soll das
+Modul sicher spannungsfrei gewesen sein.
+
+**Schritt 3 — nach 5 Minuten: kommt überhaupt etwas an?**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT count(*) AS meldungen_5min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Alternativ in ChirpStack unter *Gateways* → der UG65 → **Last seen** (muss
+unter 30 Sekunden liegen, siehe Schritt 3 oben).
+
+| Ergebnis | dann |
+|---|---|
+| Meldungen da, mehrere Geräte | weiter mit Schritt 4 |
+| **nichts** | **noch einmal** ziehen und einstecken. Das ist der Fall vom 04.11.: der erste Versuch holte es nicht zurück |
+| nach dem zweiten Versuch nichts | §10ay von vorn, Schritt 1–4 — das ist kein Funk-, sondern ein Verbindungsproblem |
+
+**Schritt 4 — nach 30 Minuten: vergleichen.** Derselbe Befehl wie in
+Schritt 1. Dreißig Minuten, weil eine belastbare Aussage einige hundert
+Meldungen braucht und die Geräte alle zehn Minuten senden.
+
+**Zielwerte: SNR ≥ 8,5 und RSSI ≥ −97.** Das ist der Stand, den das Haus
+bis zum 04.11. 06:00 hatte.
+
+**Schritt 5 — auswerten.**
+
+| Vergleich zum Vorher-Wert | Deutung | Folge |
+|---|---|---|
+| **besser**, Zielwerte erreicht | die Kalibrierung beim harten Neustart war es | behoben. Der Vorgang gehört in einen Status-Eintrag, damit beim nächsten Mal nicht wieder geraten wird |
+| **besser, aber unter den Zielwerten** | teilweise | kein zweiter Versuch am selben Tag. Erst 24 h beobachten — der Wert kann nachlaufen |
+| **gleich oder schlechter** | kein Kalibrierungsfehler | **Anfrage an Milesight** mit den Zahlen aus Schritt 1 und 4, dem Modell, der Firmware und dem Hinweis, dass Kanäle und Antenne unverändert sind |
+
+**Was die Anfrage an Milesight enthalten muss**, damit sie nicht in einer
+Rückfrage endet: der hausweite SNR/RSSI vor und nach dem Vorfall vom
+04.11., die Feststellung, dass im ChirpStack-Dashboard über 31 Tage
+**Kanäle unverändert** (868,1/3/5) und der Empfang stabil bei rund
+14.600 Meldungen am Tag lag, dass seit dem 04.11. **mehr DR2–4**
+auftreten (die Geräte weichen auf robustere Stufen aus), und dass
+**Antennensitz und -position vor Ort unverändert** sind. Damit sind
+Funk-Einstellung und Antenne als Ursache ausgeschlossen, und die Frage
+ist eine Hardware-Frage.
+
+**Die offene Hypothese dabei, und sie gehört in die Anfrage:** eine
+schlechte Kalibrierung des Funkmoduls beim harten Neustart — oder ein
+Schaden im Gerät. Beides kann dieses System nicht unterscheiden.
+
 ### Was die Zahlen beantworten, und was nicht
 
 **Beantwortet: eine frische Bridge genügt nicht.** Container, die um

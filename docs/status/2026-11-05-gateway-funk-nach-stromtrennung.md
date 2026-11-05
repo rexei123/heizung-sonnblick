@@ -71,13 +71,38 @@ Geräte waren `health_state = healthy`, weil sie ja noch melden; die
 Batterie ist in Ordnung; die Uplinks liefen weiter. Das ist §5.76
 wörtlich: der Mechanismus war grün, und die Wirkung war es nicht.
 
+## Nachtrag vom selben Tag, 10:15 — zwei Kandidaten sind weg
+
+Der Betreiber hat nachgesehen, und die beiden naheliegenden Erklärungen
+fallen damit aus:
+
+| Geprüft | Ergebnis |
+|---|---|
+| **ChirpStack-Dashboard, 31 Tage** | Kanäle **unverändert** (868,1 / 868,3 / 868,5), Empfang stabil bei rund **14.600 Meldungen am Tag**, keine Kollisionen |
+| **Datenraten** | seit dem 04.11. **mehr DR2–4** — die Geräte weichen auf robustere Stufen aus |
+| **Antenne vor Ort** | **Sitz und Position unverändert** |
+
+**Geänderte Funk-Einstellung und Antenne sind damit ausgeschlossen.**
+
+Der DR-Befund passt zum Bild und ist ein unabhängiger Beleg: ADR
+reagiert auf ein schlechteres Link-Budget, indem es auf eine robustere
+Stufe geht. Die Geräte haben also selbst gemerkt, dass weniger Reserve da
+ist — und dass die Meldungsmenge trotzdem stabil blieb, ist genau die
+Folge: sie haben es ausgeglichen, auf Kosten von Sendezeit und Batterie.
+Nur die Geräte ohne Reserve konnten es nicht ausgleichen.
+
+**Die Hypothese ist jetzt eine andere:** eine **schlechte Kalibrierung
+des Funkmoduls beim harten Neustart** — oder ein **Hardware-Schaden** im
+Gerät. Beides kann dieses System nicht unterscheiden; die Antwort kommt
+aus einem geplanten Neustart (§10ay Schritt 7) und, wenn der nichts
+bringt, von Milesight.
+
 ## Was offen ist
 
-**Warum.** Die Korrelation ist eng, der Mechanismus unbelegt. Kandidaten,
-in dieser Reihenfolge: **Antennenstecker nicht ganz fest**, Antenne
-verdreht oder verbogen, oder das Gateway kam mit anderer
-Funk-Konfiguration zurück. Wetter ist es nicht — ein 4-dB-Sprung
-innerhalb einer Stunde und danach 25 Stunden flach sieht nicht so aus.
+**Warum.** Die Korrelation ist eng, der Mechanismus unbelegt. Nach dem
+Nachtrag oben bleiben **Kalibrierung** und **Hardware-Schaden**. Wetter
+ist es nicht — ein 4-dB-Sprung innerhalb einer Stunde und danach 25
+Stunden flach sieht nicht so aus.
 
 **Was nicht geprüft werden konnte:** die Datenrate bzw. der Spreizfaktor.
 Wir speichern `rssi_dbm` und `snr_db`; der Spreizfaktor steckt in
