@@ -297,6 +297,66 @@ eine Entscheidung aus Wissen statt aus Vorsicht.
 
 ---
 
+### T6 — Funk-Wächter (**gebaut am 05.11.**, eigener PR)
+
+Nicht Teil des Befehls-Themas, aber im selben Brief, weil er dieselbe
+Wurzel hat wie T3: ein Befund, der nicht von selbst verschwinden darf.
+
+Stündlicher Melder auf den hausweiten SNR gegen das Mittel der sieben
+Tage, die 24 Stunden vor jetzt enden; mehr als 2,0 dB darunter ergibt
+Audit-Eintrag und Mail. Rein lesend. **Anlass:** am 04.11. kam das
+Gateway nach der Stromtrennung 4 dB schlechter zurück, hausweit, und es
+fiel erst einen Tag später zufällig auf — jeder Mechanismus war grün
+(§5.76). Gegenprobe gegen die gemessenen Zahlen des 04.11. ist Teil des
+PRs.
+
+### T7 — die Kachel zum Wächter (**später, nicht in Sprint 25**)
+
+Der Wächter hat heute keine Anzeige: die Spur sind der
+`business_audit`-Eintrag und die Mail — dieselbe Form wie
+`OCCUPANCY_IMPORT_STALE` und `ENGINE_ABGLEICH_ERSCHOEPFT`.
+
+**Was zu bauen ist:** der stündliche Lauf **legt sein Urteil ab**, und
+eine Dashboard-Kachel liest es. Dazu Feld im Dashboard-Schema,
+Komponente im Frontend, Handbuch-Artikel (Golden Rule 13).
+
+**Warum der Lauf es ablegt und die Kachel nicht selbst rechnet** — und
+hier gehört eine Korrektur dazu. Die erste Begründung lautete „eine
+Live-Abfrage je Seitenaufruf ist zu teuer". **Gemessen ist das falsch:**
+
+```
+EXPLAIN (ANALYZE, BUFFERS) … → actual time 49 ms
+Chunks excluded during startup: 1   (nur 9 von 190 Chunks im Zeitraum)
+Parallel Index Scan using _hyper_1_208_chunk_sensor_reading_time_idx
+```
+
+49 ms auf der echten Anlage, und AE-72 hat für die Batterie-Stufen
+**22 ms je Request akzeptiert**. Die Kachel wäre also bezahlbar. Das
+Kostenargument war zu stark formuliert.
+
+**Die tragenden Gründe sind andere, und sie sind besser:**
+
+1. **Null statt 49 ms.** Der Lauf rechnet die Zahl ohnehin jede Stunde.
+   Sie ein zweites Mal je Seitenaufruf zu rechnen ist Arbeit ohne
+   Gegenwert.
+2. **Eine Wahrheit.** Die Kachel zeigt dann **dieselbe** Zahl, die der
+   Alarm gesehen hat. Zwei Anzeigen, die dieselbe Frage mit
+   verschiedenen Zeitfenstern beantworten, sind eine zweite Wahrheit
+   (§5.53) — und die eine wird dann als Beleg gegen die andere gelesen.
+3. **Die Kachel muss den absoluten Wert zeigen, nicht nur die
+   Warnung.** Der Alarm verstummt nach sieben Tagen, weil die Störung
+   in die Grundlinie wandert (im Wächter-PR und in §10m als Grenze
+   benannt). Genau dann ist die stehende Zahl das Einzige, was den
+   schlechten Zustand noch sichtbar macht. **Die Kachel ist die Hälfte,
+   die dem Melder fehlt** — nicht Kosmetik.
+
+**Wo das Urteil liegt**, ist die offene Frage dieses T-Blocks und ein
+Pflicht-Stop: eine Spalte auf `global_config` (Migration, aber billig zu
+lesen), eine Audit-Zeile je Lauf (keine Migration, aber eine Zeile je
+Stunde für immer), oder Redis (kein Schema, verliert sich beim
+Neustart). Mein Vorschlag ist die **Spalte**, weil die Kachel sie ohne
+Aggregat lesen kann und der Wert einen Neustart überlebt.
+
 ## 4. Abnahme
 
 | | Kriterium | Wie gemessen |
