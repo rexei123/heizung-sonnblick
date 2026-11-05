@@ -80,18 +80,71 @@ Mutationsprobe.
 
 ## Warum keine Dashboard-Kachel in diesem PR
 
-Die Kachel hätte eine Aggregation über sieben Tage **je Seitenaufruf**
-gebraucht. Das ist genau der Tausch, den AE-72 für die Batterie-Stufen
-gemessen und anders entschieden hat: eine Aggregat-Abfrage je Request ist
-dort 22 ms bei 104 Geräten — über 600.000 `sensor_reading`-Zeilen und
-sieben Tage ist es das nicht.
+**Zuerst eine Korrektur an meiner eigenen Begründung.** Ich hatte
+geschrieben, die Kachel sei zu teuer, weil sie eine Aggregation über
+sieben Tage je Seitenaufruf bräuchte. **Dann habe ich es gemessen, und
+das Argument hält nicht:**
 
-Der richtige Weg ist, dass der stündliche Lauf sein Urteil ablegt und die
-Kachel es liest. **Das ist ein eigener Schritt**, und er gehört nicht in
-denselben PR wie der Melder (§5.1). Bis dahin ist die Spur der
-`business_audit`-Eintrag und die Mail — dieselbe Form wie bei
-`OCCUPANCY_IMPORT_STALE` und `ENGINE_ABGLEICH_ERSCHOEPFT`, die beide
-ebenfalls keine Kachel haben.
+```
+EXPLAIN (ANALYZE, BUFFERS) … → actual time=45.763..49.214 ms
+Chunks excluded during startup: 1
+Parallel Index Scan using _hyper_1_208_chunk_sensor_reading_time_idx
+Buffers: shared hit=12652 read=57
+```
+
+**49 ms auf der echten Anlage** (609.000 Zeilen, 103 Geräte in der
+Schnittmenge). TimescaleDB schließt die nicht betroffenen Chunks aus —
+nur **9 von 190** liegen im Zeitraum — und greift über den
+**Zeit-Index jedes Chunks**, nicht über `ix_sensor_reading_device_time`.
+Fast alles kommt aus dem Cache.
+
+AE-72 hat für die Batterie-Stufen **22 ms je Request akzeptiert**. 49 ms
+sind in derselben Größenordnung, und die Zahl wächst **nicht** mit der
+Aufbewahrungsdauer, weil das Zeitfenster fest bei acht Tagen liegt — nur
+mit der Gerätezahl und dem Meldungstakt.
+
+**Die Kachel wäre also bezahlbar.** Mein Kostenargument war zu stark
+formuliert, und es gehört korrigiert statt stehen gelassen (§5.77 in
+eigener Sache).
+
+**Was bleibt, ist der Umfang.** Eine Kachel heißt: Feld im Dashboard-
+Schema, Aggregat-Abfrage, Komponente im Frontend, Handbuch-Artikel
+(Golden Rule 13). Das ist ein zweites Thema in einem PR, der schon eines
+hat (§5.1) — und die **bessere** Form ist ohnehin nicht die
+Live-Abfrage, sondern dass der stündliche Lauf sein Urteil ablegt und die
+Kachel es liest: dann kostet sie **null** statt 49 ms, und die Zahl im
+Dashboard ist dieselbe, die der Alarm gesehen hat. Zwei Anzeigen, die
+dieselbe Frage verschieden beantworten, wären eine zweite Wahrheit.
+
+Bis dahin ist die Spur der `business_audit`-Eintrag und die Mail —
+dieselbe Form wie bei `OCCUPANCY_IMPORT_STALE` und
+`ENGINE_ABGLEICH_ERSCHOEPFT`, die beide ebenfalls keine Kachel haben.
+Die Aufgabe steht im Sprint-25-Brief.
+
+## Antworten auf die Rückfragen vor dem Merge
+
+**Startet `api` ohne einen einzigen neuen `.env`-Eintrag? Ja.** Alle
+sechs Settings haben Code-Vorgaben; nachgewiesen mit einer
+`Settings()`-Instanz in einer Umgebung, in der keine der sechs Variablen
+gesetzt ist:
+
+```
+funk_warn_delta_db           = Decimal('2.0')
+funk_grundlinie_tage         = 7
+funk_fenster_stunden         = 2
+funk_min_meldungen           = 100
+funk_min_geraete             = 40
+funk_mail_sperre_stunden     = 24
+```
+
+**Es ist also keine Zeile einzutragen.** Der Block in beiden
+`.env.example` ist Dokumentation, keine Voraussetzung.
+
+**Die Mail geht an `global_config.alert_email`** — dieselbe Adresse wie
+die beiden bestehenden Alarme, in der Oberfläche unter *Einstellungen /
+Hotel* als **E-Mail für Warnungen**. Kein neuer Empfänger, kein neues
+Feld. Ist sie leer, entsteht der Audit-Eintrag trotzdem und nur die Mail
+entfällt — mit einer Protokollzeile, die das sagt.
 
 ## Die Mail kommt einmal am Tag, nicht einmal je Episode
 
