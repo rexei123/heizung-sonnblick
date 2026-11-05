@@ -72,6 +72,25 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # **Warum eine Sperrfrist (Entscheidung des Betreibers, 05.11.2026).**
+    # ``ADD COLUMN`` braucht ``ACCESS EXCLUSIVE`` auf der Elterntabelle und
+    # auf **jedem** Chunk — in der Anlage sind das 190. Die Sperre stellt
+    # sich hinter jede offene Transaktion auf ``sensor_reading``, und alles
+    # Weitere stellt sich dahinter: der MQTT-Subscriber eingeschlossen.
+    #
+    # Ohne Frist wartet die Migration **unbegrenzt** und haelt dabei den
+    # Ingest auf, ohne dass es irgendwo auffaellt. Mit Frist scheitert sie
+    # stattdessen schnell und sichtbar; der Entrypoint versucht es fuenfmal
+    # und bei ``restart: always`` danach erneut, bis die Sperre frei ist.
+    #
+    # Das ist bewusst der **laute** Fehler statt des stillen (§5.76): ein
+    # Neustart-Zaehler in ``docker ps`` ist zu sehen, ein hoeflich wartendes
+    # ``ALTER TABLE`` nicht.
+    #
+    # ``SET LOCAL`` gilt nur in dieser Transaktion — Alembic faehrt die
+    # Migration in einer, und der Wert ist danach weg.
+    op.execute("SET LOCAL lock_timeout = '10s'")
+
     op.add_column("sensor_reading", sa.Column("ow_detection_enabled", sa.Boolean(), nullable=True))
     # Die Dauer ist ein Vielfaches von 5 Minuten und reicht bis 1275
     # (Byte * 5) — SmallInteger genuegt und ist dieselbe Wahl wie bei
