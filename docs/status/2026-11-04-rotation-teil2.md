@@ -93,20 +93,30 @@ das Gateway müsste von sich aus neu verbinden. Genau das hat es nicht
 getan. Ein reiner MQTT-Reconnect der Bridge **ohne** Neustart würde die
 WebSocket-Sitzungen dagegen nicht anfassen.
 
-**Was das unterscheidet, ist eine einzige Zahl:** die Startzeit des
-Bridge-Containers. Liegt sie beim Neustart, hat der Container neu
-gestartet und die Kette oben stimmt. Liegt sie beim letzten Deploy, lief
-die Bridge durch — dann liegt es nicht an ihr, und die Suche geht zur
-WebSocket-Strecke durch Caddy.
+**Nachtrag vom selben Tag: die Zahl ist gelesen, und die Kette hält
+nicht.** Bridge und ChirpStack liefen ab **07:39:59 frisch** — acht
+Minuten vor der Stromtrennung, und das Gateway kam trotzdem erst mit dem
+Stecker. Eine frische Gegenstelle genügt also nicht. Der erste Teil der
+Kette mag stimmen, der zweite nicht: das Gateway **müsste** neu
+verbinden, es **tut** es nicht.
+
+Ob die Bridge um 07:12 von sich aus mitgegangen ist, lässt sich nicht
+mehr feststellen — das `--force-recreate` um 07:39:59 hat die Container
+ersetzt und beide Zahlen zurückgesetzt. Dringend ist es nicht mehr, weil
+die Behebung ohnehin nicht dort liegt; §10ay liest die Zeiten jetzt
+**vor** dem ersten Neustart.
 
 **Was auf unserer Seite konfigurierbar ist — und was nicht.** Auf der
 Serverseite gibt es **keinen** Schalter, der das Gateway zurückholt:
 `ping_interval` und `read_timeout` der Bridge regeln nur, wie schnell die
 **Bridge** eine tote Sitzung bemerkt, nicht, ob das **Gateway** neu
 verbindet. Der Reconnect ist Sache der Basic-Station-Implementierung im
-UG65. Bis das geklärt ist, gilt die Regel aus §10ab: nach jedem
-Mosquitto- oder Caddy-Neustart den Gateway-Status in ChirpStack ansehen,
-Uplinks zählen, und das Gateway notfalls stromlos machen.
+UG65. Bis das geklärt ist, gilt die Regel aus **§10ay**: nach jedem
+Mosquitto-, Caddy- oder Bridge-Neustart den Gateway-Status in ChirpStack
+ansehen und die Uplinks zählen — und das Gateway **stromlos machen**, denn
+das ist bis auf Weiteres die Behebung und nicht die letzte Ausfahrt. Wer
+diese drei Dienste neu startet, muss damit rechnen, am Gerät stehen zu
+müssen.
 
 ## Befund 3 — `docker compose` frisst eingefügte Folgezeilen
 
@@ -187,7 +197,7 @@ Dieselbe Ursache wie Befund 1, deshalb derselbe PR.
 |---|---|
 | **C6** | Server-Neustart, verschoben — neuer Termin offen |
 | **Befund 4** | UG65-Oberfläche: trägt das Gerät das Packet-Forwarder-Profil aus §10a.2 noch? Dann entscheiden |
-| **Befund 2** | Startzeit des Bridge-Containers lesen, dann weitersuchen |
+| **Befund 2** | UG65-Oberfläche: ist der Basic-Station-Reconnect einstellbar? Die Bridge ist es nicht gewesen |
 | **danach** | Relais 109 Taster-Test und Panel, Relais 108, T2-Fenstertest, Paket 3 |
 
 **Eine Lücke, die dieser Termin nicht geschlossen hat.** Zwei von sieben
