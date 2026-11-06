@@ -8070,15 +8070,51 @@ zweimal zum Engpass geworden.
    einem Neustart von `mosquitto` **36 Minuten** nicht zurück; acht
    Minuten frische Bridge haben nichts geändert, nur die Stromtrennung
    hat geholfen (§10ay). Serverseitig gibt es keinen Schalter.
-3. **Der Preis der Behebung ist messbar.** Die Stromtrennung brachte das
-   Gateway zurück, aber **4 dB schlechter im RSSI, 2,3 dB im SNR**,
-   hausweit. Ein Gerät fiel von 144 Meldungen am Tag auf 6.
-4. **Zehn Zimmer liegen dauerhaft knapp.** Schon **vor** dem Vorfall lag
-   ein Teil des Hauses bei negativem SNR — die fehlenden 4 dB haben
-   genau dort die Geräte aus dem Netz gedrückt.
+3. ~~**Der Preis der Behebung ist messbar.**~~ **Erledigt am 06.11.2026**
+   — siehe Nachtrag unten.
+4. **Zehn Zimmer liegen knapp**, und zwar unabhängig vom Vorfall. Schon
+   **vor** dem 04.11. lag ein Teil des Hauses bei negativem SNR. Dieser
+   Punkt **trägt nach dem 06.11. nur noch eingeschränkt** — Nachtrag
+   unten.
 
 Mit einem zweiten Gateway wäre der Vorfall vom 04.11. ein Protokolleintrag
-geblieben und kein Ausfall.
+geblieben und kein Ausfall. **Das gilt weiterhin**, und es ist nach dem
+06.11. der tragende Grund.
+
+## Nachtrag 06.11.2026 — zwei der vier Gründe haben sich verschoben
+
+**Der Funkverlust ist behoben.** Ein geplanter Neustart mit 30 Sekunden
+stromlos hat ihn vollständig zurückgenommen: SNR von 6,1 auf **9,1**,
+RSSI von −100 auf **−95** — also auf den Stand vor dem Vorfall. Die drei
+ausgefallenen Geräte senden wieder im Takt (Gerät 021 von 6 Meldungen am
+Tag zurück auf 144). Einzelheiten in §10ay und
+`docs/status/2026-11-05-gateway-funk-nach-stromtrennung.md`.
+
+**Was das für diesen Entwurf heißt, Punkt für Punkt:**
+
+| Grund | Stand nach dem 06.11. |
+|---|---|
+| **1. Einziger Ausfallpunkt im Liftschacht** | **unverändert.** Fällt das Gateway aus, steht die Anlage |
+| **2. Kein selbständiger Reconnect** | **unverändert, und die offene Frage an Milesight.** 36 Minuten am 04.11., obwohl Bridge und ChirpStack frisch liefen |
+| **3. Preis der Behebung** | **entfallen.** Der Verlust war rücknehmbar |
+| **4. Schwache Zimmer** | **nur noch eingeschränkt.** Die zehn Zimmer liegen weiter knapp — aber sie liegen dort **auch mit einem gesunden Gateway**, und sie haben vier Wochen so funktioniert. Es ist ein Komfort- und Reserve-Argument, kein Ausfall-Argument |
+
+**Die Begründung schrumpft damit auf 1 und 2** — und die sind
+Verfügbarkeit, nicht Funkreichweite. Das ist eine andere Entscheidung als
+die, die dieser Entwurf am 05.11. vorbereitet hat: es geht nicht mehr um
+Abdeckung, sondern darum, dass die ganze Anlage an einem Gerät hängt, das
+sich nach einem Serverneustart nicht von selbst zurückmeldet.
+
+**Zwei Folgen für die Standortfrage.** Erstens ist sie weniger dringend:
+ein zweites Gateway, dessen Zweck Redundanz ist, darf auch dort stehen,
+wo die Montage einfach ist. Zweitens bleibt die Tabelle unten trotzdem
+richtig — wenn man schon eines aufhängt, dann besser dort, wo es
+zusätzlich etwas bringt.
+
+**Und ein Risiko ist schwächer geworden:** „ein zweites Gerät erbt die
+offene Kalibrierungsfrage des ersten" (unten) wiegt weniger, seit
+bekannt ist, dass der Zustand mit dreißig Sekunden stromlos
+zurücknehmbar war.
 
 ## Wo das Haus am schwächsten ist
 
@@ -8163,7 +8199,18 @@ Ob gekauft wird. Sie hält die Abwägung fest, nennt die Zimmer, die den
 Standort bestimmen, und stellt fest, dass **serverseitig nichts zu tun
 ist** — das war die teuerste offene Frage und sie ist beantwortet.
 
-**Die Reihenfolge, die ich empfehle:** erst §10ay Schritt 7 (geplanter
-Neustart — Kalibrierung oder Hardware?), dann die Antwort von Milesight,
-**dann** diese Entscheidung. Ein zweites Gateway, das einen
-Hardware-Fehler des ersten verdeckt, ist teuer gekaufte Ruhe.
+**Die Reihenfolge, die ich empfehle** — angepasst am 06.11., nachdem
+Schritt 7 gelaufen ist: **erst die Antwort von Milesight zum
+Reconnect-Verhalten**, dann diese Entscheidung.
+
+Der Grund für diese Reihenfolge hat sich dabei umgedreht. Am 05.11. war
+es die Sorge, ein zweites Gateway könnte einen Hardware-Fehler des ersten
+verdecken. Die ist weg — der Zustand war rücknehmbar. Jetzt ist es
+umgekehrt: **wenn Milesight sagt, der Reconnect ist einstellbar, verliert
+Grund 2 sein Gewicht**, und dann bleibt von der ganzen Begründung nur
+noch der Ausfallpunkt übrig. Das wäre ein deutlich schwächerer Fall für
+ein zweites Gerät — und eine Konfigurationsänderung ist billiger als
+Hardware.
+
+Umgekehrt: sagt Milesight, das Gerät verbindet sich konstruktiv nicht von
+selbst neu, ist Grund 2 hart, und dann ist dieser Entwurf zu entscheiden.
