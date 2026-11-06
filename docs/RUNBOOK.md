@@ -10610,9 +10610,32 @@ unter 30 Sekunden liegen, siehe Schritt 3 oben).
 | **nichts** | **noch einmal** ziehen und einstecken. Das ist der Fall vom 04.11.: der erste Versuch holte es nicht zurück |
 | nach dem zweiten Versuch nichts | §10ay von vorn, Schritt 1–4 — das ist kein Funk-, sondern ein Verbindungsproblem |
 
-**Schritt 4 — nach 30 Minuten: vergleichen.** Derselbe Befehl wie in
-Schritt 1. Dreißig Minuten, weil eine belastbare Aussage einige hundert
-Meldungen braucht und die Geräte alle zehn Minuten senden.
+**Schritt 4 — vergleichen, aber mit dem richtigen Fenster.**
+
+> **Das Fenster muss vollständig *nach* der Rückkehr liegen** — nicht
+> nach dem Steckerzug. Dreißig Minuten genügen; sie beginnen aber erst,
+> wenn wieder Meldungen kommen (Schritt 3), und nicht vorher.
+>
+> **Warum das der ganze Punkt ist** (Befund 06.11.2026, siehe unten). Ein
+> gleitendes „letzte 30 Minuten" straddelt nach dem Neustart den
+> Übergang: um 08:13 lag darin die Zeit von 07:43 bis 08:13, also
+> überwiegend der **alte**, schlechte Zustand. Der Mittelwert stieg
+> danach von Stichprobe zu Stichprobe — **nicht weil sich das Gateway
+> langsam erholte, sondern weil das Fenster sich langsam leerte.** Wer
+> das als Erholungskurve liest, wartet Stunden auf eine Antwort, die nach
+> zwanzig Minuten vorliegt.
+
+**SSH (heizung-test, root)** — Fenster mit **festem Beginn**, hier
+Rückkehr um 08:00; die Uhrzeit anpassen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(time_bucket('10 minutes', time) AT TIME ZONE 'Europe/Vienna','HH24:MI') AS fenster, count(*) AS uplinks, count(DISTINCT device_id) AS geraete, round(avg(snr_db)::numeric,1) AS snr, round(avg(rssi_dbm)::numeric,0) AS rssi FROM sensor_reading WHERE time >= date_trunc('day', now()) + interval '7 hours' AND snr_db IS NOT NULL GROUP BY time_bucket('10 minutes', time) ORDER BY 1;"
+```
+
+**Zehn-Minuten-Fenster statt eines Mittelwerts**, und zwar aus demselben
+Grund: so ist der **Sprung** sichtbar, und man sieht sofort, welche
+Fenster noch den alten Zustand enthalten. Rund 100 Meldungen je Fenster
+sind belastbar.
 
 **Zielwerte: SNR ≥ 8,5 und RSSI ≥ −97.** Das ist der Stand, den das Haus
 bis zum 04.11. 06:00 hatte.
@@ -10621,23 +10644,63 @@ bis zum 04.11. 06:00 hatte.
 
 | Vergleich zum Vorher-Wert | Deutung | Folge |
 |---|---|---|
-| **besser**, Zielwerte erreicht | die Kalibrierung beim harten Neustart war es | behoben. Der Vorgang gehört in einen Status-Eintrag, damit beim nächsten Mal nicht wieder geraten wird |
-| **besser, aber unter den Zielwerten** | teilweise | kein zweiter Versuch am selben Tag. Erst 24 h beobachten — der Wert kann nachlaufen |
-| **gleich oder schlechter** | kein Kalibrierungsfehler | **Anfrage an Milesight** mit den Zahlen aus Schritt 1 und 4, dem Modell, der Firmware und dem Hinweis, dass Kanäle und Antenne unverändert sind |
+| **besser**, Zielwerte erreicht | behoben. Was es war, bleibt offen — siehe unten | Status-Eintrag, damit beim nächsten Mal nicht wieder geraten wird |
+| **besser, aber unter den Zielwerten** | teilweise | kein zweiter Versuch am selben Tag. Erst 24 h beobachten |
+| **gleich oder schlechter**, über mehrere aufeinanderfolgende Fenster | der Neustart war es nicht | nicht wiederholen. Der Funkteil ist dann eine Hardware-Frage |
 
-**Was die Anfrage an Milesight enthalten muss**, damit sie nicht in einer
-Rückfrage endet: der hausweite SNR/RSSI vor und nach dem Vorfall vom
-04.11., die Feststellung, dass im ChirpStack-Dashboard über 31 Tage
-**Kanäle unverändert** (868,1/3/5) und der Empfang stabil bei rund
-14.600 Meldungen am Tag lag, dass seit dem 04.11. **mehr DR2–4**
-auftreten (die Geräte weichen auf robustere Stufen aus), und dass
-**Antennensitz und -position vor Ort unverändert** sind. Damit sind
-Funk-Einstellung und Antenne als Ursache ausgeschlossen, und die Frage
-ist eine Hardware-Frage.
+### Was am 06.11.2026 geschehen ist — der Fall ist gelaufen
 
-**Die offene Hypothese dabei, und sie gehört in die Anfrage:** eine
-schlechte Kalibrierung des Funkmoduls beim harten Neustart — oder ein
-Schaden im Gerät. Beides kann dieses System nicht unterscheiden.
+**Ein geplanter Neustart mit 30 Sekunden stromlos hat den Funkverlust
+vom 04.11. behoben.** Gemessen in Zehn-Minuten-Fenstern:
+
+| Fenster (Ortszeit) | SNR | RSSI |
+|---|---|---|
+| 07:00–07:59 | 6,0–6,7 | −100 / −101 |
+| **08:00** | **8,7** | **−96** |
+| 08:10–08:50 | 9,4 · 9,1 · 9,2 · 9,2 · 8,9 | **−95** |
+| 09:00–13:00 (Stundenmittel) | 9,0–9,2 | −95 |
+
+Der Stand vor dem Vorfall war 8,6–9,0 bei −96. **Vollständig erholt**,
+und die drei ausgefallenen Geräte senden wieder im Takt: 021 (Zimmer 107
+Kinderzimmer) hatte 6 Meldungen am Tag, jetzt wieder 18 in drei Stunden
+— also 144 am Tag wie vorher.
+
+**Es war ein Sprung, keine Kurve.** Die Erholung ist zwischen 07:50 und
+08:10 vollständig eingetreten; die Stundenmittel von 09:00 bis 13:00
+liegen flach bei 9,1. Eine scheinbar langsame Erholung über Stunden war
+eine **Eigenschaft der Messung**, nicht des Geräts (Kasten in Schritt 4).
+
+> **Der Mechanismus bleibt ungeklärt, und er wird hier nicht erfunden.**
+> Dass dreißig Sekunden stromlos den Verlust behoben haben, den eine
+> Stromtrennung zwei Tage vorher verursacht hat, ist **beobachtet** und
+> nicht erklärt. „Kalibrierung des Funkmoduls" ist eine plausible
+> Geschichte und kein Befund — sie steht deshalb als Vermutung und nicht
+> als Ursache. Wer sie belegen will, braucht Milesight oder einen
+> zweiten Fall.
+
+**Was daraus für den nächsten Vorfall folgt:** nach einem harten
+Stromverlust am Gateway die Funkqualität prüfen (Schritt 6), und bei
+einem Befund **einen geplanten Neustart versuchen, bevor man das Gerät
+für defekt hält.** Beim ersten Mal hat es geholfen.
+
+### Die Frage, die für Milesight bleibt
+
+Der **Funkteil hat sich erledigt** — Stand 06.11.2026. Offen ist eine
+andere, und sie ist die ältere: **warum verbindet sich das UG65 nach
+einem Neustart des LNS nicht von selbst wieder?**
+
+Am 04.11. kam es 36 Minuten nicht zurück, obwohl Bridge und ChirpStack
+ab 07:39:59 frisch liefen (siehe oben). Serverseitig gibt es keinen
+Schalter: `ping_interval` und `read_timeout` der Bridge regeln, wie
+schnell die **Bridge** eine tote Sitzung aufräumt; ob das **Gateway** neu
+verbindet, entscheidet dessen eigene Implementierung.
+
+**Was in die Anfrage gehört:** Modell und Firmware, der Betriebsmodus
+(Basic Station gegen ChirpStack), der Ablauf vom 04.11. mit Zeiten, und
+die konkrete Frage — ob der Basic-Station-Reconnect ein Intervall oder
+einen Grenzwert hat, der einstellbar ist, und was das Gerät tut, wenn der
+WebSocket vom Server geschlossen wird. **Nicht** fragen, was es „sein
+könnte": die Frage ist beantwortbar, wenn man sie eng stellt.
 
 ### Was die Zahlen beantworten, und was nicht
 

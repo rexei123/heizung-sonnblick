@@ -97,12 +97,74 @@ Gerät. Beides kann dieses System nicht unterscheiden; die Antwort kommt
 aus einem geplanten Neustart (§10ay Schritt 7) und, wenn der nichts
 bringt, von Milesight.
 
-## Was offen ist
+## Nachtrag 06.11.2026 — behoben, und eine Lehre über das Messen
 
-**Warum.** Die Korrelation ist eng, der Mechanismus unbelegt. Nach dem
-Nachtrag oben bleiben **Kalibrierung** und **Hardware-Schaden**. Wetter
-ist es nicht — ein 4-dB-Sprung innerhalb einer Stunde und danach 25
-Stunden flach sieht nicht so aus.
+**Ein geplanter Neustart mit 30 Sekunden stromlos hat es behoben.**
+Gemessen in Zehn-Minuten-Fenstern:
+
+| Fenster (Ortszeit) | SNR | RSSI |
+|---|---|---|
+| 07:00–07:59 | 6,0–6,7 | −100 / −101 |
+| **08:00** | **8,7** | **−96** |
+| 08:10–08:50 | 9,4 · 9,1 · 9,2 · 9,2 · 8,9 | **−95** |
+| 09:00–13:00 (Stundenmittel) | 9,0–9,2 | −95 |
+
+Der Stand vor dem Vorfall war 8,6–9,0 bei −96 — **vollständig erholt**.
+Und die drei ausgefallenen Geräte senden wieder im Takt: **021** (Zimmer
+107 Kinderzimmer) hatte **6 Meldungen am Tag**, jetzt wieder 18 in drei
+Stunden, also 144 am Tag wie vorher. Auch 026 und 028 sind zurück, beide
+sogar leicht über ihrem Stand von Ende Oktober.
+
+### Es war ein Sprung, keine Kurve — und das ist eine Korrektur
+
+Die ersten Stichproben nach dem Neustart sahen nach einer **langsamen**
+Erholung aus: 6,2 → 6,7 → 6,9 → 7,1 (08:13) → 9,1 (13:46). Daraus wäre
+die Regel „Bewertung erst nach vier bis sechs Stunden" gefolgt.
+
+**Die Zehn-Minuten-Fenster zeigen etwas anderes:** zwischen 07:50 und
+08:10 ist der volle Wert da, und von 09:00 bis 13:00 liegen die
+Stundenmittel **flach** bei 9,1. Es gab keine Erholung über Stunden.
+
+Die scheinbare Kurve war ein **gleitendes Fenster, das sich leerte**. Um
+08:13 deckte „letzte 30 Minuten" den Zeitraum 07:43–08:13 ab — also
+überwiegend den alten, schlechten Zustand. Mit jeder Stichprobe rutschte
+mehr davon heraus, und der Mittelwert stieg. **Nicht das Gateway hat sich
+langsam erholt, sondern die Messung hat sich langsam gereinigt.**
+
+**Das ist dieselbe Falle zum zweiten Mal in diesem Vorgang.** Am 05.11.
+hat mein eigenes 24-Stunden-Fenster den gesunden mit dem gestörten
+Zeitraum gemischt und drei Geräte wie dauerhaft schwache Standorte
+aussehen lassen. Jetzt hat ein 30-Minuten-Fenster die Erholung wie eine
+Kurve aussehen lassen. **Ein Mittelwert über ein Fenster, in dem sich die
+Sache ändert, verbirgt die Änderung** — und zwar in beide Richtungen.
+
+Die Regel, die daraus in §10ay Schritt 4 steht, ist deshalb nicht „länger
+warten", sondern: **das Fenster muss vollständig nach der Rückkehr
+liegen.** Dreißig Minuten genügen; sie beginnen erst, wenn wieder
+Meldungen kommen.
+
+### Der Mechanismus bleibt ungeklärt
+
+Dass dreißig Sekunden stromlos den Verlust behoben haben, den eine
+Stromtrennung zwei Tage vorher **verursacht** hat, ist **beobachtet und
+nicht erklärt**. „Kalibrierung des Funkmoduls" ist eine plausible
+Geschichte und kein Befund; sie steht in §10ay als Vermutung und nicht
+als Ursache. Wer sie belegen will, braucht Milesight oder einen zweiten
+Fall.
+
+**Was für den nächsten Vorfall gilt:** nach einem harten Stromverlust die
+Funkqualität prüfen, und bei einem Befund **einen geplanten Neustart
+versuchen, bevor man das Gerät für defekt hält.** Beim ersten Mal hat es
+geholfen.
+
+## Was offen bleibt
+
+**Nicht mehr der Funk.** Offen ist die ältere Frage, und sie ist die
+teurere: **warum verbindet sich das UG65 nach einem Neustart des LNS
+nicht von selbst wieder?** Am 04.11. kam es 36 Minuten nicht zurück,
+obwohl Bridge und ChirpStack ab 07:39:59 frisch liefen. Das ist die eine
+Frage, die an Milesight geht — eng gestellt, nicht als „was könnte es
+sein".
 
 **Was nicht geprüft werden konnte:** die Datenrate bzw. der Spreizfaktor.
 Wir speichern `rssi_dbm` und `snr_db`; der Spreizfaktor steckt in
