@@ -187,6 +187,12 @@ class CommandReason(enum.StrEnum):
     # Drehring wird silent geskippt. Off-pipeline Audit via
     # ``EventLogLayer.MANUAL_OVERRIDE_BLOCKED``.
     DEVICE_BLOCKED_ROOM_BLOCKED = "device_blocked_room_blocked"
+    # Sprint 25 (Vorfall 07.11.2026): eine Abweichung fiel in das
+    # Ack-Fenster und wurde als Antwort auf den eigenen Downlink gewertet.
+    # Bis dahin war dieser Fall ein stilles ``return None`` ohne Spur —
+    # eine Drehung am Rad konnte so verschwinden, ohne dass es jemand
+    # sehen konnte. 25 Zeichen, passt in VARCHAR(30).
+    DEVICE_BLOCKED_ACK_WINDOW = "device_blocked_ack_window"
     # Sprint 15c (AE-63): Vicki-Reboot via fcnt-Reset erkannt -> Auto-
     # Detect-Adopt uebersprungen, Re-Sync auf Engine-Soll im naechsten
     # Engine-Tick erzwungen. Off-pipeline Audit via
