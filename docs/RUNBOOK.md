@@ -874,7 +874,7 @@ Response (200): `heating_zone_id` ist `null`.
 ### 10d.5 Verifikation via DB
 
 ```bash
-docker exec -it deploy-db-1 psql -U heizung -d heizung -c \
+docker exec deploy-db-1 psql -U heizung -d heizung -c \
   "SELECT id, dev_eui, label, heating_zone_id FROM device ORDER BY id;"
 ```
 
@@ -1014,11 +1014,11 @@ celery -A heizung.celery_app inspect scheduled
 
 ```bash
 # SSH auf heizung-test
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "from heizung.tasks.health_tasks import compute_health_state; print(compute_health_state.delay())"
 # Async-Result-ID wird ausgegeben; Status via celery inspect oder
 # direkten Aufruf des Pure-Function-Helpers fuer sync-Debug:
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "import asyncio; from heizung.tasks.health_tasks import _compute_health_state_async; print(asyncio.run(_compute_health_state_async()))"
 ```
 
@@ -1046,7 +1046,12 @@ WARNING ... heizung.services.health_alerts ... health_alert
   [level=3, device_id=17, dev_eui="58a0cb..", reason="implausible_readings_24h"]
 ```
 
-**Implausible-Counter im Redis pruefen:**
+**Implausible-Counter im Redis pruefen.** Dieser Aufruf ist **absichtlich
+interaktiv** — `redis-cli` ohne Argument öffnet eine Sitzung, und die `>`-Zeilen
+darunter werden **in dieser Sitzung** getippt, nicht in der Shell. Deshalb
+behält er sein `-it`, und deshalb ist er die **letzte Zeile einer Einfügung**:
+alles, was man dahinter mit einfügt, landet in `redis-cli` statt in der Shell
+und ist für die Shell verloren — ohne Fehlermeldung. Beenden mit `exit`.
 
 ```bash
 docker exec -it heizung-redis redis-cli
@@ -8066,6 +8071,40 @@ Bulk-Skript die Fühler mit.
 **Ein Tippfehler im Namen bricht ab**, statt stillschweigend nichts zu
 tun. Ein leerer Lauf sieht sonst wie „alles ausgenommen" aus.
 
+### Was `status` hinterlässt — und wo man es liest
+
+Die Antwort auf `0x46` landet **seit dem 05.11.2026 in der Datenbank**
+(Migration 0038), nicht mehr nur in einer Protokollzeile. Das ist der
+Unterschied zwischen „ich habe gefragt" und „ich kann nachsehen": das
+Container-Protokoll reichte am Tag des Befunds **18 Stunden** zurück,
+und damit war „ist die Erkennung aktiv?" nur durch erneutes Funken
+beantwortbar.
+
+**SSH (heizung-test, root)** — der Stand je Gerät, jüngste Antwort:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT DISTINCT ON (s.device_id) d.label, r.number AS zimmer, z.name AS zone, s.ow_detection_enabled AS an, s.ow_detection_delta_c AS delta_c, s.ow_detection_duration_min AS dauer_min, s.time AS bestaetigt_um FROM sensor_reading s JOIN device d ON d.id = s.device_id LEFT JOIN heating_zone z ON z.id = d.heating_zone_id LEFT JOIN room r ON r.id = z.room_id WHERE s.ow_detection_enabled IS NOT NULL ORDER BY s.device_id, s.time DESC;"
+```
+
+**Wie das zu lesen ist.** `DISTINCT ON` nimmt je Gerät die **jüngste
+Zeile, die das Feld führt** — ein Keepalive ohne `0x46`-Antwort trägt es
+nicht und überschreibt deshalb nichts. Ein Gerät, das **gar nicht**
+erscheint, hat **nie geantwortet**; das ist nicht dasselbe wie „aus".
+
+> **`ow_detection_enabled` ist nicht `open_window`.** Die erste Spalte
+> sagt, ob die Erkennung im Gerät **eingeschaltet** ist, die zweite, ob
+> **jetzt** ein Fenster offen ist. Ein Gerät mit ausgeschalteter
+> Erkennung meldet `open_window = false` **immer**, ohne je gemessen zu
+> haben. Wer die beiden verwechselt, liest aus lauter `false` den Befund
+> „es wurde nie gelüftet" statt „die Erkennung war aus" — genau die
+> Verwechslung, die am 05.11.2026 offenstand (604.694 Zeilen `false`,
+> **null** Zeilen `true`, hausweit).
+
+**Was dort noch nicht steht:** die Antwort auf `0x46` kommt bei Class A
+erst mit dem nächsten Uplink des Geräts, also bis zu **zehn Minuten**
+nach dem Absenden. Eine leere Ausgabe unmittelbar nach `status` heißt
+„noch nicht geantwortet", nicht „antwortet nicht".
+
 ### Das Protokoll der Testwoche — fünf Schritte
 
 **Schritt 1 — Probelauf, drei Geräte.**
@@ -10588,6 +10627,261 @@ Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
 **Das ist am 04.11. das Einzige gewesen, was geholfen hat** — kein
 serverseitiger Handgriff hat das Gateway zurückgeholt.
 
+> **Nie den Antennenstecker lösen, solange das Gateway Strom hat.** Ein
+> Sender, der in einen offenen Stecker sendet, bekommt seine Leistung
+> reflektiert zurück, und das kann die Endstufe beschädigen. Das Gateway
+> sendet Downlinks, sobald ein Gerät ein Empfangsfenster öffnet — der
+> Moment lässt sich nicht abwarten und nicht vorhersehen. Also: **erst
+> stromlos, dann am Stecker.**
+
+### 6. Nach der Stromtrennung: die Funkqualität prüfen (ab 05.11.2026)
+
+**Die Stromtrennung ist die Behebung — aber sie hat einen Preis, den am
+04.11. niemand gemessen hat.** Das Gateway kam zurück, und zwar
+**schlechter**:
+
+| Zeitraum (Ortszeit) | SNR | RSSI | Uplinks/h | Geräte |
+|---|---|---|---|---|
+| bis 04.11. **06:00** | 8,6–9,0 | **−96** | ~605 | 103–104 |
+| 04.11. **07:00** (Ausfallstunde) | 7,8 | −97 | 227 | 103 |
+| ab 04.11. **08:00** | **6,0–6,9** | **−99/−100** | ~580 | 99–103 |
+
+Rund **4 dB schlechter im RSSI, 2,3 dB im SNR**, hausweit, und es hielt
+an. **38 von 103 Geräten** verloren über 3 dB, verteilt über alle
+Etagen — das sind nicht hundert Geräte gleichzeitig, das ist der
+Empfänger.
+
+Die Geräte mit der geringsten Reserve fielen dabei aus dem Netz. Gerät
+**021 (Zimmer 107 Kinderzimmer)** war vorher gesund (SNR +6,3, 144
+Uplinks am Tag) und meldete danach **6 Uplinks am Tag** bei SNR −9,7;
+sein RSSI fiel von −105 auf **−114**, also auf den Rauschboden.
+
+**Der Befund ist erst am 05.11. aufgefallen, und zwar zufällig** — bei
+der Suche nach einem vermuteten Funkloch in den Zimmern 107/109/110. Es
+war keines: die Zimmernachbarn derselben Räume waren in Ordnung. Genau
+deshalb gibt es diese Prüfung.
+
+**Die Prüfung — SSH (heizung-test, root).** Dieselbe Stunde heute gegen
+gestern, hausweit. Der Vergleich mit dem **Vortag** ist bewusst gewählt
+und nicht ein gleitendes Mehrtagesmittel: ein Mittel, das die Störung
+schon enthält, verdünnt sich selbst und schweigt nach zwei Tagen.
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(h.std,'HH24:00') AS stunde, round(h.snr::numeric,1) AS snr_heute, round(g.snr::numeric,1) AS snr_gestern, round((h.snr-g.snr)::numeric,1) AS delta_snr, round(h.rssi::numeric,0) AS rssi_heute, round(g.rssi::numeric,0) AS rssi_gestern, h.up AS up_heute, g.up AS up_gestern FROM (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) h LEFT JOIN (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') + interval '1 day' AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '36 hours' AND time < now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) g USING (std) ORDER BY h.std;"
+```
+
+**Der Schwellwert:**
+
+| `delta_snr` | heißt |
+|---|---|
+| **−2,0 dB oder schlechter**, über mehrere Stunden | **Befund.** Am 04.11. waren es −2,0 bis −2,4 dB in jeder Stunde |
+| −1,0 bis −2,0 dB | beobachten, am nächsten Tag erneut |
+| besser als −1,0 dB | im Rahmen |
+
+**Eine einzelne Stunde zählt nicht.** Die Ausfallstunde selbst und die
+Stunden danach sind aus anderen Gründen verzerrt (weniger Uplinks,
+andere Geräte). Erst drei aufeinanderfolgende Stunden unter −2 dB sind
+ein Befund.
+
+**Und was dann?** Der Verdacht geht zuerst an die **Antenne**, nicht an
+die Geräte: Stecker nicht ganz fest, Antenne verdreht oder verbogen. Ein
+Gerätetausch in einem schwachen Zimmer bringt nichts, wenn der Empfänger
+4 dB verloren hat. **Erst stromlos machen, dann am Stecker** (siehe
+oben).
+
+**Die Einzelgeräte dazu**, wenn der hausweite Wert einen Befund zeigt —
+drei Stunden je Fenster, weil ein schwaches Gerät pro Stunde zu wenige
+Meldungen hat:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT d.label, r.number||' '||z.name AS ort, to_char(time_bucket('3 hours', s.time) AT TIME ZONE 'Europe/Vienna','DD.MM. HH24:00') AS fenster, count(*) AS uplinks, round(avg(s.snr_db)::numeric,1) AS snr, round(avg(s.rssi_dbm)::numeric,0) AS rssi FROM sensor_reading s JOIN device d ON d.id=s.device_id JOIN heating_zone z ON z.id=d.heating_zone_id JOIN room r ON r.id=z.room_id WHERE s.time > now() - interval '27 hours' AND s.snr_db IS NOT NULL GROUP BY 1,2,time_bucket('3 hours', s.time) HAVING avg(s.snr_db) < 0 ORDER BY 1, time_bucket('3 hours', s.time);"
+```
+
+Er zeigt nur Fenster mit **negativem SNR** — die Geräte, die tatsächlich
+an der Grenze sind, statt aller 107.
+
+### 7. Geplanter Neustart des UG65 — Schritt für Schritt
+
+Für den Fall, dass der Neustart **absichtlich** erfolgt: um zu prüfen, ob
+sich die Funkqualität davon erholt. Am 04.11. war er eine Notmaßnahme und
+hat 4 dB gekostet; dieselbe Maßnahme kann sie auch zurückbringen, wenn
+die Ursache eine Kalibrierung beim harten Neustart war.
+
+> **Vorher lesen: nie den Antennenstecker lösen, solange das Gateway
+> Strom hat** (oben). Und: der Neustart nimmt das ganze Haus für einige
+> Minuten vom Netz — **nicht** während einer Anreise, eines Montagegangs
+> oder eines Eingangstests.
+
+> ### Die Bedingung an das Messfenster: kein Deploy darin
+>
+> **Von Schritt 1 bis Schritt 4 darf kein Merge nach `develop` laufen**,
+> und auch kein Deploy von Hand. Jeder Merge startet `api`, `web`,
+> `celery_worker` und `celery_beat` neu (§0.3), und **der
+> MQTT-Subscriber läuft im `api`-Container** — ein Deploy hinterlässt
+> also eine Lücke im Meldungsstrom.
+>
+> **Warum das die Messung zerstört und nicht nur stört:** Schritt 1 und
+> Schritt 4 vergleichen Mittelwerte über 30 Minuten. Fällt eine
+> Ingest-Lücke in eines der beiden Fenster, fehlen dort Meldungen —
+> und zwar nicht gleichmäßig, sondern bevorzugt von den Geräten, die
+> gerade gesendet hätten. Der Vergleich beantwortet dann nicht mehr
+> „hat der Neustart geholfen", sondern „welches Fenster hatte die
+> Lücke". Eine Zahl, die zwei Fragen gleichzeitig beantwortet,
+> beantwortet keine.
+>
+> **Es gibt bewusst keine Uhrzeit dazu.** Der Merge-Fenster-Regel aus
+> §0.3 ist damit nichts hinzugefügt und nichts weggenommen: die
+> Bedingung ist **„kein Deploy im Messfenster"**, nicht „morgens" oder
+> „nach den Merges". Wer die Prüfung vor die Merges legt, hat dasselbe
+> erreicht wie jemand, der danach lange genug wartet — und eine
+> Uhrzeit im RUNBOOK wäre in vier Wochen falsch (§5.77).
+>
+> **Praktisch heißt das:** entweder die Prüfung **vor** dem
+> Merge-Fenster, oder nach dem letzten Deploy so lange warten, bis der
+> Meldungsstrom nachweislich wieder normal läuft (der Befehl aus
+> Schritt 3) — und **dann** den Vorher-Wert nehmen, nicht davor.
+
+**Schritt 1 — den Vorher-Wert notieren.** SSH (heizung-test, root):
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT round(avg(snr_db)::numeric,1) AS snr_30min, round(avg(rssi_dbm)::numeric,0) AS rssi_30min, count(*) AS meldungen, count(DISTINCT device_id) AS geraete FROM sensor_reading WHERE time > now() - interval '30 minutes' AND snr_db IS NOT NULL;"
+```
+
+**Aufschreiben, nicht merken.** Nach dem Neustart ist der Vergleichswert
+nicht mehr abfragbar, ohne den gestörten Zeitraum mitzunehmen — und ein
+erinnerter Wert ist kein Befund (§5.68). Unter 30 Meldungen ist die Zahl
+nicht belastbar; dann noch warten.
+
+**Schritt 2 — Stecker ziehen, 30 Sekunden warten, einstecken.** Dreißig
+und nicht zehn Sekunden: bei einer vermuteten Kalibrierungsfrage soll das
+Modul sicher spannungsfrei gewesen sein.
+
+**Schritt 3 — nach 5 Minuten: kommt überhaupt etwas an?**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT count(*) AS meldungen_5min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Alternativ in ChirpStack unter *Gateways* → der UG65 → **Last seen** (muss
+unter 30 Sekunden liegen, siehe Schritt 3 oben).
+
+| Ergebnis | dann |
+|---|---|
+| Meldungen da, mehrere Geräte | weiter mit Schritt 4 |
+| **nichts** | **noch einmal** ziehen und einstecken. Das ist der Fall vom 04.11.: der erste Versuch holte es nicht zurück |
+| nach dem zweiten Versuch nichts | §10ay von vorn, Schritt 1–4 — das ist kein Funk-, sondern ein Verbindungsproblem |
+
+**Schritt 4 — vergleichen, aber mit dem richtigen Fenster.**
+
+> **Das Fenster muss vollständig *nach* der Rückkehr liegen** — nicht
+> nach dem Steckerzug. Dreißig Minuten genügen; sie beginnen aber erst,
+> wenn wieder Meldungen kommen (Schritt 3), und nicht vorher.
+>
+> **Warum das der ganze Punkt ist** (Befund 06.11.2026, siehe unten). Ein
+> gleitendes „letzte 30 Minuten" straddelt nach dem Neustart den
+> Übergang: um 08:13 lag darin die Zeit von 07:43 bis 08:13, also
+> überwiegend der **alte**, schlechte Zustand. Der Mittelwert stieg
+> danach von Stichprobe zu Stichprobe — **nicht weil sich das Gateway
+> langsam erholte, sondern weil das Fenster sich langsam leerte.** Wer
+> das als Erholungskurve liest, wartet Stunden auf eine Antwort, die nach
+> zwanzig Minuten vorliegt.
+
+**SSH (heizung-test, root)** — Fenster mit **festem Beginn**, hier
+Rückkehr um 08:00; die Uhrzeit anpassen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(time_bucket('10 minutes', time) AT TIME ZONE 'Europe/Vienna','HH24:MI') AS fenster, count(*) AS uplinks, count(DISTINCT device_id) AS geraete, round(avg(snr_db)::numeric,1) AS snr, round(avg(rssi_dbm)::numeric,0) AS rssi FROM sensor_reading WHERE time >= date_trunc('day', now()) + interval '7 hours' AND snr_db IS NOT NULL GROUP BY time_bucket('10 minutes', time) ORDER BY 1;"
+```
+
+**Zehn-Minuten-Fenster statt eines Mittelwerts**, und zwar aus demselben
+Grund: so ist der **Sprung** sichtbar, und man sieht sofort, welche
+Fenster noch den alten Zustand enthalten. Rund 100 Meldungen je Fenster
+sind belastbar.
+
+**Zielwerte: SNR ≥ 8,5 und RSSI ≥ −97.** Das ist der Stand, den das Haus
+bis zum 04.11. 06:00 hatte.
+
+**Schritt 5 — auswerten.**
+
+| Vergleich zum Vorher-Wert | Deutung | Folge |
+|---|---|---|
+| **besser**, Zielwerte erreicht | behoben. Was es war, bleibt offen — siehe unten | Status-Eintrag, damit beim nächsten Mal nicht wieder geraten wird |
+| **besser, aber unter den Zielwerten** | teilweise | kein zweiter Versuch am selben Tag. Erst 24 h beobachten |
+| **gleich oder schlechter**, über mehrere aufeinanderfolgende Fenster | der Neustart war es nicht | nicht wiederholen. Der Funkteil ist dann eine Hardware-Frage |
+
+### Was am 06.11.2026 geschehen ist — der Fall ist gelaufen
+
+**Ein geplanter Neustart mit 30 Sekunden stromlos hat den Funkverlust
+vom 04.11. behoben.** Gemessen in Zehn-Minuten-Fenstern:
+
+| Fenster (Ortszeit) | SNR | RSSI |
+|---|---|---|
+| 07:00–07:59 | 6,0–6,7 | −100 / −101 |
+| **08:00** | **8,7** | **−96** |
+| 08:10–08:50 | 9,4 · 9,1 · 9,2 · 9,2 · 8,9 | **−95** |
+| 09:00–13:00 (Stundenmittel) | 9,0–9,2 | −95 |
+
+Der Stand vor dem Vorfall war 8,6–9,0 bei −96. **Vollständig erholt**,
+und die drei ausgefallenen Geräte senden wieder im Takt: 021 (Zimmer 107
+Kinderzimmer) hatte 6 Meldungen am Tag, jetzt wieder 18 in drei Stunden
+— also 144 am Tag wie vorher.
+
+**Es war ein Sprung, keine Kurve.** Die Erholung ist zwischen 07:50 und
+08:10 vollständig eingetreten; die Stundenmittel von 09:00 bis 13:00
+liegen flach bei 9,1. Eine scheinbar langsame Erholung über Stunden war
+eine **Eigenschaft der Messung**, nicht des Geräts (Kasten in Schritt 4).
+
+> **Der Mechanismus bleibt ungeklärt, und er wird hier nicht erfunden.**
+> Dass dreißig Sekunden stromlos den Verlust behoben haben, den eine
+> Stromtrennung zwei Tage vorher verursacht hat, ist **beobachtet** und
+> nicht erklärt. „Kalibrierung des Funkmoduls" ist eine plausible
+> Geschichte und kein Befund — sie steht deshalb als Vermutung und nicht
+> als Ursache. Wer sie belegen will, braucht Milesight oder einen
+> zweiten Fall.
+
+**Was daraus für den nächsten Vorfall folgt:** nach einem harten
+Stromverlust am Gateway die Funkqualität prüfen (Schritt 6), und bei
+einem Befund **einen geplanten Neustart versuchen, bevor man das Gerät
+für defekt hält.** Beim ersten Mal hat es geholfen.
+
+### Die Frage, die für Milesight bleibt
+
+Der **Funkteil hat sich erledigt** — Stand 06.11.2026. Offen ist eine
+andere, und sie ist die ältere: **warum verbindet sich das UG65 nach
+einem Neustart des LNS nicht von selbst wieder?**
+
+Am 04.11. kam es 36 Minuten nicht zurück, obwohl Bridge und ChirpStack
+ab 07:39:59 frisch liefen (siehe oben). Serverseitig gibt es keinen
+Schalter: `ping_interval` und `read_timeout` der Bridge regeln, wie
+schnell die **Bridge** eine tote Sitzung aufräumt; ob das **Gateway** neu
+verbindet, entscheidet dessen eigene Implementierung.
+
+> **Korrektur vom 07.11.2026 — der Betriebsmodus ist ein anderer.** Hier
+> stand „Basic Station gegen ChirpStack". Falsch: das UG65 läuft im
+> **ChirpStack-v4-Modus mit direktem MQTT-Push auf Port 1883**,
+> angemeldet als `gateway-ug65`. Basic Station ist eingerichtet und
+> **unbenutzt** — die Bridge hat seit dem 04.11. keine Sitzung, Caddy
+> zählt 2 `router`-Treffer in 39.607 Zeilen. Belegt durch den Ausfall vom
+> 07.11.: Port 1883 gesperrt → **0** Uplinks
+> (`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+>
+> **Damit wird der Vorfall vom 04.11. erst schlüssig:** ein Neustart von
+> `mosquitto` trennt die **MQTT-Sitzung** des Gateways, und die frische
+> Bridge konnte nicht helfen, weil sie am Datenpfad nicht beteiligt ist.
+
+**Was in die Anfrage gehört:** Modell und Firmware, der Betriebsmodus
+(**ChirpStack-v4 mit direktem MQTT-Push**, nicht Basic Station), der
+Ablauf vom 04.11. mit Zeiten, und die konkrete Frage — **ob das Gerät
+nach einem Verbindungsabbruch zum MQTT-Broker von selbst neu verbindet,
+in welchem Intervall, und ob das einstellbar ist.** Dazu, was es tut,
+wenn der Broker die Verbindung schließt (Neustart) gegenüber dem Fall,
+dass Pakete verworfen werden (Firewall) — am 07.11. hat es sich nach
+Freigabe **von selbst** zurückgemeldet, am 04.11. nach einem
+Broker-Neustart **nicht**. Das ist der Unterschied, auf den es ankommt.
+
+**Nicht** fragen, was es „sein könnte": die Frage ist beantwortbar, wenn
+man sie eng stellt.
+
 ### Was die Zahlen beantworten, und was nicht
 
 **Beantwortet: eine frische Bridge genügt nicht.** Container, die um
@@ -10603,7 +10897,9 @@ erzeugt und damit `gestartet` und `Neustarts` zurückgesetzt. Die Frage
 bleibt offen und ist beim nächsten Vorfall mit Schritt 1 zu beantworten —
 sie ist nicht mehr dringend, weil die Behebung ohnehin nicht dort liegt.
 
-**Offen und beim Gerät:** ob der Basic-Station-Reconnect am UG65
+**Offen und beim Gerät** (und seit 07.11.2026 betrifft es den
+**MQTT**-Reconnect, nicht Basic Station — siehe Korrektur oben): ob der
+Reconnect am UG65
 einstellbar ist. `ping_interval` und `read_timeout` der Bridge regeln,
 wie schnell die **Bridge** eine tote Sitzung bemerkt und aufräumt; ob das
 **Gateway** neu verbindet, entscheidet dessen eigene Implementierung.
