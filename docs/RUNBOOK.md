@@ -3085,8 +3085,8 @@ Log.
 ## 10m. Alarm-Mails einrichten und prüfen (Sprint 18)
 
 Bis Sprint 18 hat dieses System **nie** eine Mail verschickt. Alarme
-standen im Container-Log, wo sie niemand liest. Ab jetzt gehen zwei
-Alarme an die Adresse, die in der Oberfläche unter *Einstellungen /
+standen im Container-Log, wo sie niemand liest. Ab jetzt gehen Alarme
+an die Adresse, die in der Oberfläche unter *Einstellungen /
 Hotel* als **E-Mail für Warnungen** eingetragen ist.
 
 > **Abschlussbedingung Sprint 18 — verbindlich, keine Empfehlung.**
@@ -3240,8 +3240,9 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 |---|---|---|
 | **Thermostat meldet sich nicht** | Ein Gerät ist über 24 h stumm. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
+| **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
 
-Beide gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
+Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
 erstes die Prüfreihenfolge Gateway / Strom / Geschoss. Denn ab dieser Menge
 ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
@@ -3251,6 +3252,63 @@ sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
 Oberfläche sichtbar, aber nicht als Mail — die Batterie-Schwelle unter
 *Einstellungen / Hotel* färbt Anzeige und Kachel, verschickt aber nichts
 (B-15b-1).
+
+### Der Funk-Alarm — was er sagt und was zu tun ist
+
+**Der Anlass, 04./05.11.2026.** Nach der Stromtrennung am UG65 kam das
+Gateway **4 dB schlechter** zurück, hausweit, und es fiel erst einen Tag
+später auf — zufällig, bei der Prüfung einer anderen Vermutung. Jeder
+Mechanismus war grün: die Geräte waren `healthy`, weil sie ja noch
+sendeten, die Batterien in Ordnung, und die Meldungsmenge fiel hausweit
+nur von 605 auf 580 je Stunde. Ausgefallen sind dabei die Geräte mit dem
+längsten Weg — eines ging von 144 Meldungen am Tag auf **6**.
+
+**Was der Alarm meint.** Er rechnet über das **ganze Haus**, nicht über
+ein Gerät. Ein einzelnes schwaches Gerät löst ihn nicht aus. Kommt er,
+ist der Verdacht **zuerst beim Gateway** — die Schritte stehen in §10ay
+Schritt 6.
+
+**Was er bewusst nicht tut:**
+
+* **Keine Alarme je Gerät.** 107 einzelne Melder wären Lärm.
+* **Kein Alarm bei zu wenigen Daten.** Sind im Messfenster weniger als
+  100 Meldungen von 40 Geräten, lautet das Urteil **„unbekannt"** und
+  nicht „Warnung". Ein Melder, der beim Ausfall des Messwegs anschlägt,
+  meldet seinen eigenen Ausfall und verliert Gewicht (§5.79).
+* **Er greift nicht in die Steuerung ein.** Rein lesend.
+
+**Die Grenze, die man kennen muss.** Die Vergleichsgröße sind die sieben
+Tage, die **24 Stunden vor jetzt enden**. Hält eine Störung länger als
+sieben Tage an, wandert sie in diese Vergleichsgröße und der Alarm
+**verstummt** — nicht weil es behoben ist, sondern weil der schlechte
+Zustand zur Normalität geworden ist. Deshalb ist der Alarm die Meldung
+über eine **Änderung**, und die Frage „wo stehen wir" beantwortet der
+Befehl aus §10ay Schritt 6.
+
+Der Alarm kommt **einmal in 24 Stunden**, solange es anhält — nicht genau
+einmal. Das ist Absicht: eine strikte Einmal-Regel bräuchte einen
+gespeicherten Zustand, und fällt ein Lauf aus, bliebe der stehen und die
+Meldung käme nie. Eine Sperrzeit kann höchstens zu viel melden, und das
+ist die bessere Richtung.
+
+**Die Werte sind in der `.env` verstellbar**, nicht in der Oberfläche —
+wer sie verschiebt, muss wissen, wie viel dB Streuung ein Haus normal
+hat:
+
+```
+FUNK_WARN_DELTA_DB=2.0
+FUNK_GRUNDLINIE_TAGE=7
+FUNK_FENSTER_STUNDEN=2
+FUNK_MIN_MELDUNGEN=100
+FUNK_MIN_GERAETE=40
+FUNK_MAIL_SPERRE_STUNDEN=24
+```
+
+**Woher die 2,0 dB kommen, und was daran schwach ist:** am 04.11. lagen
+die Stundenwerte bei −2,0 bis −2,4 dB gegen den Vortag, die Tage davor
+schwankten um weniger als 0,5 dB. 2,0 trennt diese beiden Zustände.
+**Kalibriert ist das an genau einem Ereignis** — wer den Wert anwendet
+und etwas anderes sieht, korrigiert ihn hier.
 
 Die Ausfälle von Engine, Deploy und Backup laufen **nicht** über diesen
 Weg, sondern über die Dead-Man-Checks in §10l. Das ist Absicht: ein Alarm,
