@@ -8142,3 +8142,198 @@ nicht als Fehler gelesen wird.
 AE-60 (Zeitzonen), §5.53 (eine Wahrheit), §5.57 (kein Knopf ohne
 sichtbaren Grund), §5.64 (Diskriminator ins Feld), §5.73 (read-time
 gehoben), `docs/status/2026-11-02-boost.md`.
+
+---
+
+# AE-84 Zweites LoRaWAN-Gateway
+
+**Datum:** 2026-11-05
+**Status:** **ENTWURF — nicht entschieden.** Entscheidungsnotiz auf
+Wunsch des Betreibers, damit die Abwägung aufgeschrieben ist, bevor sie
+unter Druck getroffen wird.
+**Bezug:** RUNBOOK §10ay, `docs/status/2026-11-05-gateway-funk-nach-stromtrennung.md`
+
+## Problem
+
+Ein einziges Gateway, und es ist in den vier Wochen vor diesem Entwurf
+zweimal zum Engpass geworden.
+
+1. **Einziger Ausfallpunkt, und er liegt im Liftschacht.** Fällt es aus,
+   steht die ganze Anlage — 107 Geräte, kein Messwert, kein Downlink.
+   Jeder Eingriff erfordert einen Gang in den Schacht.
+2. **Kein selbständiger Reconnect.** Am 04.11.2026 kam das Gateway nach
+   einem Neustart von `mosquitto` **36 Minuten** nicht zurück; acht
+   Minuten frische Bridge haben nichts geändert, nur die Stromtrennung
+   hat geholfen (§10ay). Serverseitig gibt es keinen Schalter.
+3. ~~**Der Preis der Behebung ist messbar.**~~ **Erledigt am 06.11.2026**
+   — siehe Nachtrag unten.
+4. **Zehn Zimmer liegen knapp**, und zwar unabhängig vom Vorfall. Schon
+   **vor** dem 04.11. lag ein Teil des Hauses bei negativem SNR. Dieser
+   Punkt **trägt nach dem 06.11. nur noch eingeschränkt** — Nachtrag
+   unten.
+
+Mit einem zweiten Gateway wäre der Vorfall vom 04.11. ein Protokolleintrag
+geblieben und kein Ausfall. **Das gilt weiterhin**, und es ist nach dem
+06.11. der tragende Grund.
+
+## Nachtrag 06.11.2026 — zwei der vier Gründe haben sich verschoben
+
+**Der Funkverlust ist behoben.** Ein geplanter Neustart mit 30 Sekunden
+stromlos hat ihn vollständig zurückgenommen: SNR von 6,1 auf **9,1**,
+RSSI von −100 auf **−95** — also auf den Stand vor dem Vorfall. Die drei
+ausgefallenen Geräte senden wieder im Takt (Gerät 021 von 6 Meldungen am
+Tag zurück auf 144). Einzelheiten in §10ay und
+`docs/status/2026-11-05-gateway-funk-nach-stromtrennung.md`.
+
+**Was das für diesen Entwurf heißt, Punkt für Punkt:**
+
+| Grund | Stand nach dem 06.11. |
+|---|---|
+| **1. Einziger Ausfallpunkt im Liftschacht** | **unverändert.** Fällt das Gateway aus, steht die Anlage |
+| **2. Kein selbständiger Reconnect** | **unverändert, und die offene Frage an Milesight.** 36 Minuten am 04.11., obwohl Bridge und ChirpStack frisch liefen |
+| **3. Preis der Behebung** | **entfallen.** Der Verlust war rücknehmbar |
+| **4. Schwache Zimmer** | **nur noch eingeschränkt.** Die zehn Zimmer liegen weiter knapp — aber sie liegen dort **auch mit einem gesunden Gateway**, und sie haben vier Wochen so funktioniert. Es ist ein Komfort- und Reserve-Argument, kein Ausfall-Argument |
+
+### Nachtrag 2 vom 07.11.2026 — ein fünfter Grund, und er ist neu
+
+Der Datenpfad ist geklärt, und er verändert die Lage: **das UG65
+publiziert seine Uplinks per MQTT auf Port 1883**, angemeldet als
+`gateway-ug65`. Basic Station ist eingerichtet und unbenutzt. Belegt
+durch einen Ausfall von **31 Minuten** am 07.11., ausgelöst von einer
+Firewall-Regel auf genau diesem Port
+(`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+
+**Daraus folgt ein Grund, den dieser Entwurf noch nicht kannte:**
+
+| **5. Der Datenpfad liegt auf einem Port, den wir schließen wollen** |
+|---|
+| Das Ziel „1883 von außen zu" steht weiter. Solange **ein** Gateway im MQTT-Modus daran hängt, ist jede Änderung an diesem Port ein Eingriff in den einzigen Datenpfad — und das war der Ausfall vom 07.11. Ein zweites Gateway **auf Basic Station** würde den Pfad verdoppeln und die Umstellung des ersten entschärfen: man könnte das eine umstellen, während das andere trägt |
+
+**Das ist der erste Grund in dieser Notiz, der nicht nur Redundanz
+kauft, sondern eine Arbeit ermöglicht**, die heute nicht sicher
+durchführbar ist.
+
+**Und Grund 2 ist präziser geworden:** der fehlende selbständige
+Reconnect betrifft die **MQTT**-Sitzung, nicht Basic Station. Dazu ein
+Unterschied, der am 07.11. sichtbar wurde — nach der Freigabe der
+Firewall hat sich das Gerät **von selbst** zurückgemeldet, nach dem
+Broker-Neustart am 04.11. **nicht**. Verworfene Pakete und eine
+geschlossene Verbindung sind für das Gerät offenbar nicht dasselbe. Das
+ist die Frage an Milesight (§10ay).
+
+**Die Begründung steht damit auf 1, 2 und 5** — Verfügbarkeit,
+Reconnect-Verhalten und die Umstellbarkeit des Datenpfads. Nicht
+Funkreichweite. Das ist eine andere Entscheidung als
+die, die dieser Entwurf am 05.11. vorbereitet hat: es geht nicht mehr um
+Abdeckung, sondern darum, dass die ganze Anlage an einem Gerät hängt, das
+sich nach einem Serverneustart nicht von selbst zurückmeldet.
+
+**Zwei Folgen für die Standortfrage.** Erstens ist sie weniger dringend:
+ein zweites Gateway, dessen Zweck Redundanz ist, darf auch dort stehen,
+wo die Montage einfach ist. Zweitens bleibt die Tabelle unten trotzdem
+richtig — wenn man schon eines aufhängt, dann besser dort, wo es
+zusätzlich etwas bringt.
+
+**Und ein Risiko ist schwächer geworden:** „ein zweites Gerät erbt die
+offene Kalibrierungsfrage des ersten" (unten) wiegt weniger, seit
+bekannt ist, dass der Zustand mit dreißig Sekunden stromlos
+zurücknehmbar war.
+
+## Wo das Haus am schwächsten ist
+
+Gemessen über **29.10.–02.11.2026**, also **vor** dem Vorfall — der
+heutige Stand ist um 4 dB verschoben und als Standortgrundlage
+untauglich.
+
+| Zimmer | SNR | RSSI |
+|---|---|---|
+| **53** | **−1,4** | **−113** |
+| **109** | **−1,3** | **−113** |
+| **108** | −0,7 | −112 |
+| **110** | −0,4 | −112 |
+| **209** | +0,2 | −112 |
+| **Rezeption** | +1,1 | −111 |
+| **Bar** | +1,8 | −111 |
+| **210** | +1,8 | −110 |
+| **52** | +2,1 | −109 |
+| **54** | +3,3 | −108 |
+
+Zum Vergleich das andere Ende: **310 bei −65 dBm**, dazu 201, 214, 215
+(−76 bis −78) und 303 (−80) — alle bei SNR über 12.
+
+**Was die Zahlen hergeben.** Das schwache Gebiet ist zusammenhängend und
+liegt **unten und am 08–10-Ende**: Erdgeschoss (Rezeption, Bar), die
+52/53/54-Reihe, 108/109/110 und noch 209/210. Das starke Gebiet liegt
+**oben** und an den 01–03- und 12–15-Enden; die −65 dBm in 310 sind
+plausibel die Nachbarschaft des Gateways selbst.
+
+**Was sie nicht hergeben: den Standort.** Dafür fehlt mir der Grundriss,
+und die Geometrie der Zimmernummern ist geraten. Was dieser Entwurf
+beiträgt, ist die **Anforderung**: der zweite Standort muss die zehn
+Zimmer oben erreichen, mit Vorrang auf **53, 109, 108, 110**. Die Wahl
+des Punkts ist eine Entscheidung aus dem Plan — nicht aus dieser Tabelle.
+
+**Und sie ist nachprüfbar, bevor etwas feststeht.** ChirpStack führt zu
+jedem Uplink die empfangende Gateway-ID mit RSSI und SNR. Nach der
+Installation ist also je Zimmer sofort zu sehen, welches Gateway es
+besser hört — ein Probestandort über ein paar Stunden beantwortet die
+Frage, ohne dass vorher jemand rechnen muss.
+
+## Was in ChirpStack zu tun ist
+
+1. **Gateway anlegen** — *Gateways → Add*, mit der Gateway-EUI des
+   Geräts, **im selben Tenant**. Kein eigenes Device-Profile, keine
+   Änderung an den Geräten.
+2. **Am UG65 denselben Basic-Station-Endpunkt eintragen.** Der ist
+   **gateway-unabhängig**: `Caddyfile.test` leitet `path /router*
+   /api/gateway*` auf `chirpstack-gateway-bridge:3001`, ohne eine EUI zu
+   nennen. **Serverseitig ist damit nichts zu ändern** — das ist das
+   angenehmste Ergebnis dieser Prüfung.
+3. **Doppelempfang** ist in ChirpStack Standard: empfangen beide
+   Gateways denselben Uplink, wird er einmal verarbeitet und das Gateway
+   mit dem besseren Empfang für den Downlink gewählt.
+
+> **Der eine Wert, der vor der Installation nachzusehen ist:** unsere
+> `chirpstack.toml` setzt im `[network]`-Abschnitt **keine**
+> Deduplizierungs-Verzögerung, es gilt also die Vorgabe von ChirpStack.
+> Ob die für zwei Gateways mit unterschiedlicher Latenz reicht, steht in
+> deren Dokumentation und **nicht** hier — eine Zahl aus dem Gedächtnis
+> wäre an dieser Stelle genau die Sorte Behauptung, die §5.68 verbietet.
+
+## Risiken
+
+| Risiko | Einschätzung |
+|---|---|
+| **Doppelempfang / Deduplizierung** | Kernfunktion von ChirpStack, kein Eigenbau. Einzige offene Zahl ist das Dedup-Fenster (oben) |
+| **Zwei Gateways, zwei Ausfallbilder** | Fällt eines aus, merkt es niemand sofort — die Uplinks kommen weiter. Das ist der Preis der Redundanz, und er ist der Grund, warum **AE-84 ohne den Funk-Wächter (Sprint 25 T6) unvollständig ist**: der merkt einen hausweiten Abfall, auch wenn noch alles meldet |
+| **Mehr Sendezeit am Downlink** | Nein. ChirpStack wählt **ein** Gateway je Downlink |
+| **Montage im Haus** | PoE oder Netzteil plus Netzwerk am neuen Standort. Keine Server-Änderung |
+| **Zweites Gerät, zweite Kalibrierungsfrage** | Der Befund vom 04.11. ist ungeklärt (Kalibrierung oder Hardware). Ein zweites Gerät desselben Typs erbt dieselbe offene Frage — es verteilt das Risiko, es beseitigt es nicht |
+
+## Preis
+
+**Offen.** Hier steht bewusst keine Schätzung: ein UG65 plus Montage und
+Netzwerk ist eine Zahl, die der Betreiber beim Händler erfragt, und eine
+geratene Zahl in einem ADR wird später als Grundlage gelesen (§5.77).
+
+## Was diese Notiz nicht entscheidet
+
+Ob gekauft wird. Sie hält die Abwägung fest, nennt die Zimmer, die den
+Standort bestimmen, und stellt fest, dass **serverseitig nichts zu tun
+ist** — das war die teuerste offene Frage und sie ist beantwortet.
+
+**Die Reihenfolge, die ich empfehle** — angepasst am 06.11., nachdem
+Schritt 7 gelaufen ist: **erst die Antwort von Milesight zum
+Reconnect-Verhalten**, dann diese Entscheidung.
+
+Der Grund für diese Reihenfolge hat sich dabei umgedreht. Am 05.11. war
+es die Sorge, ein zweites Gateway könnte einen Hardware-Fehler des ersten
+verdecken. Die ist weg — der Zustand war rücknehmbar. Jetzt ist es
+umgekehrt: **wenn Milesight sagt, der Reconnect ist einstellbar, verliert
+Grund 2 sein Gewicht**, und dann bleibt von der ganzen Begründung nur
+noch der Ausfallpunkt übrig. Das wäre ein deutlich schwächerer Fall für
+ein zweites Gerät — und eine Konfigurationsänderung ist billiger als
+Hardware.
+
+Umgekehrt: sagt Milesight, das Gerät verbindet sich konstruktiv nicht von
+selbst neu, ist Grund 2 hart, und dann ist dieser Entwurf zu entscheiden.
