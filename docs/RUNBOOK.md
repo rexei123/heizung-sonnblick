@@ -800,7 +800,7 @@ Response (200): `heating_zone_id` ist `null`.
 ### 10d.5 Verifikation via DB
 
 ```bash
-docker exec -it deploy-db-1 psql -U heizung -d heizung -c \
+docker exec deploy-db-1 psql -U heizung -d heizung -c \
   "SELECT id, dev_eui, label, heating_zone_id FROM device ORDER BY id;"
 ```
 
@@ -940,11 +940,11 @@ celery -A heizung.celery_app inspect scheduled
 
 ```bash
 # SSH auf heizung-test
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "from heizung.tasks.health_tasks import compute_health_state; print(compute_health_state.delay())"
 # Async-Result-ID wird ausgegeben; Status via celery inspect oder
 # direkten Aufruf des Pure-Function-Helpers fuer sync-Debug:
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "import asyncio; from heizung.tasks.health_tasks import _compute_health_state_async; print(asyncio.run(_compute_health_state_async()))"
 ```
 
@@ -972,7 +972,12 @@ WARNING ... heizung.services.health_alerts ... health_alert
   [level=3, device_id=17, dev_eui="58a0cb..", reason="implausible_readings_24h"]
 ```
 
-**Implausible-Counter im Redis pruefen:**
+**Implausible-Counter im Redis pruefen.** Dieser Aufruf ist **absichtlich
+interaktiv** — `redis-cli` ohne Argument öffnet eine Sitzung, und die `>`-Zeilen
+darunter werden **in dieser Sitzung** getippt, nicht in der Shell. Deshalb
+behält er sein `-it`, und deshalb ist er die **letzte Zeile einer Einfügung**:
+alles, was man dahinter mit einfügt, landet in `redis-cli` statt in der Shell
+und ist für die Shell verloren — ohne Fehlermeldung. Beenden mit `exit`.
 
 ```bash
 docker exec -it heizung-redis redis-cli

@@ -862,6 +862,99 @@ Im Sommer / bei Außentemp >= 15 °C ist der Vicki-Hardware-Algorithmus physikal
 2. **Hardware-Kältepack-Test:** Vicki im Tiefkühlfach 5 Min, dokumentiert im RUNBOOK §10e. Manuelles Akzeptanz-Verfahren, kein Sprint-Task.
 3. Codec-Spoofing in ChirpStack: **verworfen** wegen Drift-Risiko (§5.21/§5.22).
 
+## Nachtrag 05.11.2026 — ein Grundsatz und zwei Korrekturen
+
+Anlass: Befund des Betreibers zu Zimmer 306 (ein Gast lüftet sichtbar
+oft, Einbrüche um 3–4 °C, in 30 Tagen **0×** `open_window = true`) und
+die Analyse dazu.
+
+### Der Grundsatz (Entscheidung des Betreibers, 05.11.2026)
+
+> **Die Vicki-Erkennung und die Server-Erkennung sind nie gleichzeitig
+> scharf auf demselben Gerät.**
+
+Das ist keine Vorsichtsmaßnahme, sondern folgt aus der Sichtbarkeit: die
+Vicki schließt bei eigenem Befund ihr Ventil **selbst**, für die
+konfigurierte Dauer, und teilt das nur über `open_window` im nächsten
+Uplink mit — bei Class A also bis zu zehn Minuten später. Wäre Layer 4
+gleichzeitig aktiv, griffen zwei Hände an dasselbe Ventil, und eine
+davon wäre im Trace nicht zu sehen. Jede Diagnose danach müsste raten,
+welche von beiden gewirkt hat.
+
+Die Entscheidung oben („zwei aktive Trigger, einer passiv") bleibt davon
+unberührt: `openWindow` und `attached_backplate` sind **beides
+Hardware**-Fakten vom selben Gerät und widersprechen sich nicht. Der
+Grundsatz betrifft ausschließlich das Verhältnis **Gerät gegen Server**,
+also Trigger 1 gegen Trigger 3.
+
+### Korrektur 1: „In Sprint 9.11x via Downlink aktiviert" ist unbelegt
+
+Oben steht unter Trigger 1 als Tatsache: *„In Sprint 9.11x via Downlink
+`0x4501020F` aktiviert (FW >= 4.2)"*. **Dafür gibt es keinen Beleg, und
+alles spricht dagegen:**
+
+| | Befund 05.11.2026 |
+|---|---|
+| Hausweit `open_window = true` | **0** Zeilen von 604.694, über 107 Geräte, seit Inbetriebnahme |
+| Je eine `0x46`-Antwort eingegangen | **nein** — 0 Zeilen, 0 Protokolltreffer |
+| Pairing schickt `0x45` | **nicht mehr**, seit Sprint 17 (E3/C3) entfernt |
+| Alle 105 `DEVICE_PAIRED` | **28.09.–03.11.2026**, also **nach** der Entfernung |
+| Werksvorgabe | DISABLED |
+
+Jedes Gerät im Haus wurde gepairt, **nachdem** der Downlink aus dem
+Pairing entfernt war. Wenn niemand `activate_open_window_detection` von
+Hand gestartet hat, hat **kein Gerät je ein `0x45` bekommen** — und die
+49 belegten Temperatureinbrüche in Zimmer 306 allein wären ohne eine
+einzige Meldung geblieben, was zu einer aktiven Erkennung schlecht passt.
+
+**Das ist §5.77 in einem ADR**: eine Zusicherung über den Zustand der
+Anlage, die wie ein Befund gelesen wird und nie geprüft wurde. Sie hat
+genau den Schaden angerichtet, den §5.77 beschreibt — die Frage „ist es
+aktiv?" galt als erledigt. Der Satz oben ist ab jetzt als **Absicht**
+zu lesen, nicht als Zustand.
+
+Die Antwort ist seit Migration 0038 ablegbar: die `0x46`-Antwort landet
+in `sensor_reading.ow_detection_enabled`, und das RUNBOOK trägt die
+Abfrage. Vorher war sie es nicht, und das war der eigentliche Mangel.
+
+### Korrektur 2: Der passive Trigger ist um vier Sekunden blind
+
+Trigger 3 ist mit *„Δ >= 0.5 °C in 10 Min"* beschrieben. Die
+Schwelle ist nicht das Problem — das **Fenster** ist es:
+
+| | |
+|---|---|
+| Lookback des Melders | **genau 10 Minuten** |
+| Uplink-Abstand der Vicki | **Median 10,04 Minuten** |
+| Gerät 85 (306 Schlafzimmer), 30 Tage: Abfälle ≥ 0,5 °C | **88** |
+| davon mit Lücke **unter** 10 min | **12** |
+
+Bedingung 2 verlangt **zwei** frische Messwerte im Lookback. Die Vicki
+liefert den zweiten rund vier Sekunden zu spät, also sieht der Melder
+**12 von 88 Abfällen — 14 %** — bei 32.051 Auswertungen für dieses
+Zimmer. Hausweit sind in drei Wochen **44** Beobachtungen entstanden,
+und der größte Einbruch (4,06 K) war nicht darunter.
+
+Ein Melder mit dieser Trefferquote darf **nicht** scharf geschaltet
+werden, und die naheliegende Reaktion — die Schwelle senken — würde
+nichts ändern, weil sie nicht der Grund ist. Die Korrektur gehört in
+den Schritt-2-PR (Lookback, Sollwert-Bedingung, Ventilstellung als
+Unterscheider) und wird dort **gegen die 49 bekannten Ereignisse in
+Zimmer 306 gemessen**, passiv.
+
+### Der Unterscheider, den beide Melder nicht lesen
+
+Von den 49 Einbrüchen ab 1,5 °C in Zimmer 306 hatten **37** ein
+**öffnendes** Ventil (das Gerät heizt und verliert trotzdem — echter
+Wärmeverlust) und **8** ein geschlossenes (der Heizkörper kühlt aus,
+nachdem **wir** abgesenkt haben; als Fensterbeleg unbrauchbar). Die
+Ventilstellung steht in jeder Meldung und trennt die Fälle.
+
+Die Vicki **kann** sie nicht nutzen, sie kennt nur Temperatur. Der
+Server kann es. Das ist das stärkste Argument dafür, dass Trigger 3 die
+tragende Rolle übernimmt und Trigger 1 die Ausnahme bleibt — und es ist
+der Grund, warum der Grundsatz oben nicht nur Hygiene ist.
+
 ## Referenzen
 
 - `docs/vendor/mclimate-vicki/01-open-window-detection.md`
@@ -869,6 +962,8 @@ Im Sommer / bei Außentemp >= 15 °C ist der Vicki-Hardware-Algorithmus physikal
 - `docs/vendor/mclimate-vicki/04-commands-cheat-sheet.md`
 - CLAUDE.md §5.27 (neue Lesson aus diesem Befund)
 - Sprint 9.11x, 9.11y in SPRINT-PLAN.md
+- `docs/status/2026-11-05-fenstererkennung-stand-lesbar.md` (Migration 0038)
+- CLAUDE.md §5.77 (der Mechanismus hinter Korrektur 1)
 
 ---
 
