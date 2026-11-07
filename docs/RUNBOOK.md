@@ -7949,6 +7949,40 @@ Bulk-Skript die Fühler mit.
 **Ein Tippfehler im Namen bricht ab**, statt stillschweigend nichts zu
 tun. Ein leerer Lauf sieht sonst wie „alles ausgenommen" aus.
 
+### Was `status` hinterlässt — und wo man es liest
+
+Die Antwort auf `0x46` landet **seit dem 05.11.2026 in der Datenbank**
+(Migration 0038), nicht mehr nur in einer Protokollzeile. Das ist der
+Unterschied zwischen „ich habe gefragt" und „ich kann nachsehen": das
+Container-Protokoll reichte am Tag des Befunds **18 Stunden** zurück,
+und damit war „ist die Erkennung aktiv?" nur durch erneutes Funken
+beantwortbar.
+
+**SSH (heizung-test, root)** — der Stand je Gerät, jüngste Antwort:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT DISTINCT ON (s.device_id) d.label, r.number AS zimmer, z.name AS zone, s.ow_detection_enabled AS an, s.ow_detection_delta_c AS delta_c, s.ow_detection_duration_min AS dauer_min, s.time AS bestaetigt_um FROM sensor_reading s JOIN device d ON d.id = s.device_id LEFT JOIN heating_zone z ON z.id = d.heating_zone_id LEFT JOIN room r ON r.id = z.room_id WHERE s.ow_detection_enabled IS NOT NULL ORDER BY s.device_id, s.time DESC;"
+```
+
+**Wie das zu lesen ist.** `DISTINCT ON` nimmt je Gerät die **jüngste
+Zeile, die das Feld führt** — ein Keepalive ohne `0x46`-Antwort trägt es
+nicht und überschreibt deshalb nichts. Ein Gerät, das **gar nicht**
+erscheint, hat **nie geantwortet**; das ist nicht dasselbe wie „aus".
+
+> **`ow_detection_enabled` ist nicht `open_window`.** Die erste Spalte
+> sagt, ob die Erkennung im Gerät **eingeschaltet** ist, die zweite, ob
+> **jetzt** ein Fenster offen ist. Ein Gerät mit ausgeschalteter
+> Erkennung meldet `open_window = false` **immer**, ohne je gemessen zu
+> haben. Wer die beiden verwechselt, liest aus lauter `false` den Befund
+> „es wurde nie gelüftet" statt „die Erkennung war aus" — genau die
+> Verwechslung, die am 05.11.2026 offenstand (604.694 Zeilen `false`,
+> **null** Zeilen `true`, hausweit).
+
+**Was dort noch nicht steht:** die Antwort auf `0x46` kommt bei Class A
+erst mit dem nächsten Uplink des Geräts, also bis zu **zehn Minuten**
+nach dem Absenden. Eine leere Ausgabe unmittelbar nach `status` heißt
+„noch nicht geantwortet", nicht „antwortet nicht".
+
 ### Das Protokoll der Testwoche — fünf Schritte
 
 **Schritt 1 — Probelauf, drei Geräte.**
