@@ -148,6 +148,28 @@ class SensorReading(Base):
     temp_range_min: Mapped[int | None] = mapped_column(SmallInteger)
     temp_range_max: Mapped[int | None] = mapped_column(SmallInteger)
 
+    # Der Stand der **Fenstererkennung im Geraet** — aus der Antwort auf
+    # ``0x46`` (Migration 0038).
+    #
+    # **Nicht zu verwechseln mit ``open_window`` oben.** Die beiden
+    # beantworten verschiedene Fragen:
+    #
+    #   open_window          -> „ist jetzt ein Fenster offen?" (Zustand)
+    #   ow_detection_enabled -> „ist die Erkennung eingeschaltet?" (Konfig)
+    #
+    # Ein Geraet mit ausgeschalteter Erkennung meldet ``open_window =
+    # False`` **immer**, ohne je gemessen zu haben. Wer die Spalten
+    # verwechselt, liest aus lauter ``False`` den Befund „es wurde nie
+    # gelueftet" statt „die Erkennung war aus" — die Verwechslung, die am
+    # 05.11.2026 offenstand.
+    #
+    # NULL = diese Zeile fuehrt das Feld nicht. Gelesen wird die juengste
+    # Zeile, **die es fuehrt**; deren ``time`` ist der
+    # Bestaetigungszeitpunkt. Dieselbe Drei-Zustands-Regel wie oben.
+    ow_detection_enabled: Mapped[bool | None] = mapped_column(Boolean)
+    ow_detection_duration_min: Mapped[int | None] = mapped_column(SmallInteger)
+    ow_detection_delta_c: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
+
     # Raw-Payload nur für Debugging/Audit. Große Volumina — ggf. später
     # in ein separates "cold" Schema auslagern.
     raw_payload: Mapped[str | None] = mapped_column(String)
