@@ -156,6 +156,80 @@ relativ schreiben. Ganz weglassen darf man es nie.
 > Tippfehler hat den zweiten Stack verhindert, nicht die Vorsicht. Siehe
 > CLAUDE.md §5.78.
 
+### 5.0a Firewall, Port oder Bindung ändern: vorher belegen, nachher messen
+
+**Gilt für jede Änderung an einer Firewall-Regel, einem veröffentlichten
+Port oder einer Dienst-Bindung** — `iptables`, `ufw`, Hetzner Cloud
+Firewall, `ports:` in der Compose-Datei.
+
+> **Anlass, 07.11.2026.** Eine Regel
+> `-i eth0 -p tcp --dport 1883 -j DROP` in `DOCKER-USER` hat die Anlage
+> **31 Minuten** ohne Messwerte stehen lassen. Die Begründung dafür stand
+> auf der Annahme, auf Port 1883 käme von außen nichts Legitimes — und
+> das Gateway publiziert seine Uplinks genau dort, angemeldet als
+> `gateway-ug65`. Einzelheiten:
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`.
+
+#### Schritt 1 — vorher belegen, wer den Port benutzt
+
+**Nicht ableiten. Nicht aus der `.env` schließen. Lesen.** Eine fehlende
+Umgebungsvariable sagt **nichts** darüber, wer sich anmelden kann: die
+Benutzerdatenbank des Brokers ist eine gemountete Datei und überlebt das
+Entfernen der Variablen.
+
+**SSH (heizung-test, root)** — welche Benutzer der Broker kennt:
+
+```bash
+docker exec deploy-mosquitto-1 sh -c 'cut -d: -f1 /mosquitto/config/passwd'
+```
+
+Welche **externen** Clients tatsächlich verbunden sind oder waren:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto | grep -E 'New client connected' | grep -vE '127\.0\.0\.1|172\.1[0-9]\.' | tail -20
+```
+
+Und was gerade offen ist:
+
+```bash
+ss -tn state established '( sport = :1883 )' | grep -v 127.0.0.1
+```
+
+> **Die Falle, in die ich gelaufen bin:** eine **stehende** Sitzung
+> erzeugt **keine** Logzeilen. Wer Verbindungs*versuche* zählt, zählt
+> Störungen — nicht Benutzer. Ein Client, der seit Tagen verbunden ist,
+> ist im Protokoll **unsichtbar** und in `ss` sichtbar. Beides lesen.
+
+Für HTTP-Ports dasselbe im Caddy-Zugriffsprotokoll:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -200 /var/log/caddy/cs-test.access.log'
+```
+
+#### Schritt 2 — nachher innerhalb von zwei Minuten messen
+
+**SSH (heizung-test, root)**, direkt nach der Änderung:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -tAc "SELECT count(*) AS meldungen_2min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '2 minutes';"
+```
+
+**Erwartung: rund 20 Meldungen von 20 Geräten.** Bleiben sie aus:
+**sofort zurück**, ohne weitere Diagnose. Die Ursache sucht man mit
+laufender Anlage, nicht mit stehender.
+
+**Warum zwei Minuten und nicht fünf.** Die Geräte senden im
+10-Minuten-Takt, aber über hundert Geräte verteilt — in zwei Minuten
+kommen normal rund zwanzig Meldungen, das ist eindeutig genug. Und zwei
+Minuten sind kurz genug, dass der **Gerätepuffer** die Lücke noch deckt:
+das UG65 hat am 07.11. rund zwölf Minuten gepuffert und nachgeliefert.
+Diese Reserve ist aus **einem** Fall geschätzt und kein Versprechen —
+aber zwei Minuten liegen sicher darin.
+
+> **Der Rückweg gehört vor die Änderung, nicht danach.** Wer eine Regel
+> einfügt, hat den `-D`-Befehl mit identischer Regelangabe **vorher**
+> bereitliegen. Nach dem Einfügen ist keine Zeit, ihn zu formulieren.
+
 
 ### 5.1 Deploy-Timer-Status
 
@@ -5074,7 +5148,7 @@ steht, ist der **gemessene** Stand, nicht der vermutete:
 
 | Befund | Folge für diese Anleitung |
 |---|---|
-| `MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` **nicht**. Das Gateway läuft über Basic Station gegen `chirpstack-gateway-bridge`, nicht mit eigenen MQTT-Zugangsdaten. | **Schritt B3 entfällt vollständig.** |
+| ~~`MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` **nicht**. Das Gateway läuft über Basic Station …~~ **Falsch, Korrektur 07.11.2026:** die fehlende Variable sagt nichts über die Benutzerdatenbank des Brokers. Das Gateway meldet sich als `gateway-ug65` per MQTT auf 1883 an. | ~~Schritt B3 entfällt~~ **B3 bleibt offen** und braucht einen Termin an der UG65-Oberfläche. |
 | Die Bridge meldet sich bei Mosquitto als User **`chirpstack`** an (`MQTT_GATEWAY_BRIDGE_USER=chirpstack`), und `MQTT_GATEWAY_BRIDGE_PASSWORD` ist **derselbe Wert** wie `MQTT_CHIRPSTACK_PASSWORD`. | **B2 setzt beide Zeilen gemeinsam** und erzeugt die Bridge mit ihrem Init-Sidecar neu. Sonst stoppen **alle** Uplinks. |
 | `CHIRPSTACK_API_KEY` existiert in der Server-`.env` **nicht**. | **A4 Teil 2 schreibt nichts in die `.env`.** Der Key wird nur beim Provisionieren gebraucht und dort in der Umgebung mitgegeben. |
 
@@ -5639,9 +5713,13 @@ alten Key in der Umgebung.
 
 **Hier hängt die Regelung dran.** Es sind **zwei** Schritte für **zwei**
 Mosquitto-User: `heizung-api` (B1) und `chirpstack` (B2). Der dritte
-Schritt der alten Fassung — das UG65 mit eigenen Zugangsdaten — **entfällt**
-(Befund 20.10., siehe oben): das Gateway spricht Basic Station gegen
-`chirpstack-gateway-bridge`, und die Bridge meldet sich als `chirpstack` an.
+Schritt der alten Fassung — das UG65 mit eigenen Zugangsdaten — wurde
+~~als entfallen geführt~~ **und das war falsch** (Korrektur 07.11.2026):
+das Gateway publiziert per **MQTT auf 1883** als `gateway-ug65`, es
+spricht **nicht** Basic Station. **Das UG65 ist damit ein dritter
+Rotations-Teilnehmer** — sein Passwort mitzudrehen erfordert einen Zugang
+zur UG65-Oberfläche und gehört in einen Termin am Gerät. Bis dahin bleibt
+der User unverändert; ihn zu entfernen ist ein Totalausfall (§10ab C4).
 
 Jeder Wert lebt an **zwei**
 Stellen: in der `.env` (für den Dienst, der sich anmeldet) und als
@@ -5847,10 +5925,14 @@ Unterbrechung unvermeidbar. Sie ist es nicht — es gibt keinen
 Gateway-Reboot in dieser Rotation. Was in B2 kurz unterbrochen wird,
 ist die Bridge, und die kommt mit ihrem Neustart von selbst zurück.
 
-**Der Mosquitto-User `gateway-ug65` ist verwaist** (kein Dienst meldet
-sich damit an). Er wird hier **nicht** angefasst — ihn zu entfernen ist
-eine eigene Aufräum-Aufgabe mit eigenem Rückweg, nicht Teil einer
-Rotation unter Zeitdruck. Backlog **B-22-3**.
+> **Korrektur vom 07.11.2026: `gateway-ug65` ist NICHT verwaist.** Es ist
+> der Benutzer, mit dem das UG65 seine Uplinks publiziert — belegt an den
+> Anmeldezeilen des Brokers. Ihn zu entfernen ist ein **Totalausfall**,
+> keine Aufräum-Aufgabe. Siehe §10ab C4 (**nie ausführen**) und
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`.
+
+Der Mosquitto-User `gateway-ug65` wird hier **nicht** angefasst. ~~Backlog
+B-22-3~~ — **entfallen**, der User bleibt.
 
 ---
 
@@ -6779,10 +6861,36 @@ Backup zu zweifeln. Ein Rückweg ohne eigene Prüfung ist kein Rückweg.
 
 ---
 
-### C4 — den verwaisten Mosquitto-User `gateway-ug65` entfernen (B-22-3)
+### C4 — ~~den verwaisten Mosquitto-User `gateway-ug65` entfernen~~ **NIE AUSFÜHREN**
 
-> **Am 04.11.2026 ausgeführt und wieder zurückgenommen. Diesen Block
-> nicht erneut laufen lassen, bevor zwei Dinge gelesen sind.** Nach dem
+> # ⛔ NIE AUSFÜHREN — der User ist der Datenpfad
+>
+> **`gateway-ug65` ist nicht verwaist. Es ist der Benutzer, mit dem das
+> UG65 seine Uplinks publiziert.** Diesen User zu entfernen heißt:
+> **Totalausfall der Anlage**, kein Messwert, kein Downlink, und ein
+> Gateway, das sich nicht von selbst zurückmeldet.
+>
+> **Belegt am 07.11.2026**, nachdem eine Firewall-Regel auf Port 1883
+> die Anlage 31 Minuten stillgelegt hat:
+>
+> ```
+> New client connected from 213.153.54.49:21331 as auto-0FC0BE47-…
+>     (p4, c1, k30, u'gateway-ug65')
+> ```
+>
+> Und die ACL-Datei sagt es selbst:
+> `#   - gateway-ug65  : Milesight UG65 (direkter MQTT-Push im ChirpStack-v4-Modus)`
+>
+> **Der Block bleibt hier stehen und wird nicht gelöscht**, weil sein
+> Prüfbefehl weiter unten richtig war und nur nie ausgeführt wurde:
+> `grep -ci "u'gateway-ug65'"` hätte die Anmeldungen gezeigt. Wer die
+> Anleitung liest, soll sehen, **wo** die Kette gerissen ist — ein
+> gelöschter Abschnitt lehrt nichts.
+>
+> Einzelheiten: `docs/status/2026-11-07-vorfall-1883-sperre.md`, §5.0a.
+
+> **Historisch, Stand 04.11.2026 — die Begründung von damals, als falsch
+> erkannt am 07.11.:** am 04.11. ausgeführt und wieder zurückgenommen. Nach dem
 > Mosquitto-Neustart kam **kein Uplink** mehr; die MQTT-Clients verbanden
 > sich neu, das Gateway UG65 stand aber ab 07:11:45 offline und kam erst
 > nach Stromtrennung um 07:48 zurück. Der Zusammenhang zum entfernten
@@ -6811,10 +6919,23 @@ Backup zu zweifeln. Ein Rückweg ohne eigene Prüfung ist kein Rückweg.
 > davor. Protokoll: `docs/status/2026-11-04-rotation-teil2.md`,
 > Befunde 2, 4 und 5.
 
-**Befund vom 20.10.:** der User steht in
-`infra/mosquitto/config/passwd`, aber **kein Dienst meldet sich damit
+> **Korrektur vom 07.11.2026.** Der Absatz darunter ist **falsch** und
+> steht nur noch als Beleg dafür, wie der Fehler entstanden ist. Das UG65
+> spricht **nicht** Basic Station: die `chirpstack-gateway-bridge` hat
+> seit dem 04.11. **keine** Sitzung, und Caddy zählt **2** `router`-Treffer
+> in **39.607** Zeilen. Die Uplinks laufen per **MQTT auf 1883** mit dem
+> User `gateway-ug65`.
+
+**~~Befund vom 20.10.~~ (falsch):** der User steht in
+`infra/mosquitto/config/passwd`, aber ~~**kein Dienst meldet sich damit
 an**. Das UG65 spricht Basic Station gegen `chirpstack-gateway-bridge`,
-und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).
+und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).~~
+
+**Wo der Befund vom 20.10. gerissen ist:** aus dem Fehlen von
+`MQTT_GATEWAY_UG65_PASSWORD` in der Server-`.env` wurde geschlossen, das
+Gerät könne sich nicht anmelden. Die `.env` und die Benutzerdatenbank des
+Brokers sind aber zwei verschiedene Dinge — `/mosquitto/config/passwd`
+ist gemountet und überlebt das Entfernen der Variablen.
 
 **Erst belegen, dann entfernen.** Ein User, den niemand braucht, ist
 schnell gesagt und schwer zurückgeholt.
@@ -7208,7 +7329,8 @@ hoch, kommen sie mit.
 **Querverweise:** §10ab (Teil 1, die sieben Werte und die Env-Falle),
 §10l (Dead-Man-Checks und Alarme), §10p (Deploy-Sperre), §10u (Rückfall
 auf einen Stand), §10ai (die drei Belegungslisten — Fenster für C2),
-§10a.1 (legt `gateway-ug65` an; Lücke zu C4).
+§10a.1 (legt `gateway-ug65` an — **richtig so**, der User ist der
+Datenpfad; die „Lücke zu C4" war keine, Korrektur 07.11.2026).
 
 ---
 
@@ -10143,7 +10265,7 @@ jede Aussage von §10ab Teil 2, die auf Code oder Konfiguration zeigt:
 | `HOTEL_BASIC_AUTH_HASH`, `STAGE` | unverändert, Compose-Zeilen 333 und 338 |
 | **C1-Prüfung** | **war falsch** — korrigiert, siehe unten |
 | Zeilennummern in Compose | leicht verschoben (330/333/338 statt 338/339/340), in §10ab nachgezogen |
-| `gateway-ug65` (C4) | weiter in `mosquitto/config/acl` und `passwd.example` — der Block bleibt nötig |
+| `gateway-ug65` (C4) | bleibt — **es ist der Datenpfad** (Korrektur 07.11.2026, §10ab C4: nie entfernen) |
 | `CHIRPSTACK_BASIC_AUTH_HASH` | **weiter in Compose (`:330`) und `.env.example` (`:52`)**, und der irreführende Kommentar in `Caddyfile.test:5` steht auch noch. B-22-4 ist **nicht** erledigt — unverändert **kein** Teil dieser Rotation |
 | genau **eine** `basicauth`-Regel in `Caddyfile.test` (`:47`) | bestätigt: der ChirpStack-Host hat keine, C5 ist der einzige Schutz davor |
 
