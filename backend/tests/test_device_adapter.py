@@ -910,7 +910,19 @@ async def test_abweichung_im_ack_fenster_wird_verworfen_und_protokolliert(
     assert zeile.setpoint_out is None
     # Beide Werte und beide Zeiten gehoeren hinein, sonst ist die Zeile
     # fuer die naechste Fehlersuche wertlos.
-    assert zeile.details["uplink_setpoint"] == "25.0"
-    assert zeile.details["gesendeter_sollwert"] == "21.0"
+    # **Verglichen wird als Zahl, nicht als Zeichenkette** — die beiden
+    # Werte haben verschiedene Skalen, und das ist kein Fehler:
+    # ``uplink_setpoint`` kommt als ``Decimal`` vom Aufrufer durch
+    # (``"25.0"``), ``gesendeter_sollwert`` aus ``control_command``, und
+    # die Spalte ist ``NUMERIC(4, 2)`` — die Datenbank gibt ``21.00``
+    # zurueck. Die erste Fassung dieses Tests verglich ``== "21.0"`` und
+    # war in der CI rot; lokal lief sie nicht, weil Docker auf diesem
+    # Rechner nicht laeuft (Paragraph 5.50 — genau der Fall, gegen den
+    # die Regel geschrieben ist).
+    #
+    # Die Skalen anzugleichen waere der falsche Fix: die Zeile soll
+    # zeigen, was in der Datenbank steht.
+    assert Decimal(zeile.details["uplink_setpoint"]) == Decimal("25.0")
+    assert Decimal(zeile.details["gesendeter_sollwert"]) == Decimal("21.0")
     assert zeile.details["abstand_s"] == pytest.approx(10.0, abs=0.5)
     assert zeile.details["gesendet_um"] == gesendet.isoformat()
