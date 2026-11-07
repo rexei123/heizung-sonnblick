@@ -52,10 +52,27 @@ services:
       - ../mosquitto/config:/mosquitto/config:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
-    # Sprint 6 Pairing: Port 1883 oeffentlich, damit UG65 (ChirpStack-v4-Modus)
-    # direkt MQTT publishen kann. Auth via passwd+ACL aktiv (Sprint 6.6.4).
+    # Bind nur an 127.0.0.1 (ab 04.11.2026). Alle Verbraucher sprechen
+    # "mosquitto:1883" im Docker-Netz, dafuer genuegt `expose`; die
+    # Veroeffentlichung nach aussen braucht niemand.
+    #
+    # Hier stand: "Port 1883 oeffentlich, damit UG65 (ChirpStack-v4-Modus)
+    # direkt MQTT publishen kann." Das war am 20.10.2026 ueberholt und der
+    # Kommentar hat es nicht mitbekommen: das Gateway spricht Basic Station
+    # gegen chirpstack-gateway-bridge, und MQTT_GATEWAY_UG65_PASSWORD
+    # existiert in der Server-.env nicht mehr (RUNBOOK §10ab, "B3
+    # entfaellt"). Ein Gateway, dessen Passwort es serverseitig nicht gibt,
+    # kann sich nicht erfolgreich anmelden - die Uplinks kommen also nicht
+    # auf diesem Weg.
+    #
+    # Was der offene Port tatsaechlich bewirkt hat: ein Geraet aus dem Netz
+    # des Hauses klopft alle paar Sekunden ohne gueltige Anmeldung
+    # (04.11.2026, Befund 4). Die Entwicklungsfassung in
+    # ../../docker-compose.yml bindet seit Sprint 6 auf 127.0.0.1 und
+    # begruendet es mit "kein LAN-Exposure" - der Betrieb war der
+    # Ausreisser, nicht die Regel.
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     expose:
       - "1883"
     healthcheck:
