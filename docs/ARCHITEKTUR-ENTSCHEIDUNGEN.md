@@ -8099,8 +8099,36 @@ Tag zurück auf 144). Einzelheiten in §10ay und
 | **3. Preis der Behebung** | **entfallen.** Der Verlust war rücknehmbar |
 | **4. Schwache Zimmer** | **nur noch eingeschränkt.** Die zehn Zimmer liegen weiter knapp — aber sie liegen dort **auch mit einem gesunden Gateway**, und sie haben vier Wochen so funktioniert. Es ist ein Komfort- und Reserve-Argument, kein Ausfall-Argument |
 
-**Die Begründung schrumpft damit auf 1 und 2** — und die sind
-Verfügbarkeit, nicht Funkreichweite. Das ist eine andere Entscheidung als
+### Nachtrag 2 vom 07.11.2026 — ein fünfter Grund, und er ist neu
+
+Der Datenpfad ist geklärt, und er verändert die Lage: **das UG65
+publiziert seine Uplinks per MQTT auf Port 1883**, angemeldet als
+`gateway-ug65`. Basic Station ist eingerichtet und unbenutzt. Belegt
+durch einen Ausfall von **31 Minuten** am 07.11., ausgelöst von einer
+Firewall-Regel auf genau diesem Port
+(`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+
+**Daraus folgt ein Grund, den dieser Entwurf noch nicht kannte:**
+
+| **5. Der Datenpfad liegt auf einem Port, den wir schließen wollen** |
+|---|
+| Das Ziel „1883 von außen zu" steht weiter. Solange **ein** Gateway im MQTT-Modus daran hängt, ist jede Änderung an diesem Port ein Eingriff in den einzigen Datenpfad — und das war der Ausfall vom 07.11. Ein zweites Gateway **auf Basic Station** würde den Pfad verdoppeln und die Umstellung des ersten entschärfen: man könnte das eine umstellen, während das andere trägt |
+
+**Das ist der erste Grund in dieser Notiz, der nicht nur Redundanz
+kauft, sondern eine Arbeit ermöglicht**, die heute nicht sicher
+durchführbar ist.
+
+**Und Grund 2 ist präziser geworden:** der fehlende selbständige
+Reconnect betrifft die **MQTT**-Sitzung, nicht Basic Station. Dazu ein
+Unterschied, der am 07.11. sichtbar wurde — nach der Freigabe der
+Firewall hat sich das Gerät **von selbst** zurückgemeldet, nach dem
+Broker-Neustart am 04.11. **nicht**. Verworfene Pakete und eine
+geschlossene Verbindung sind für das Gerät offenbar nicht dasselbe. Das
+ist die Frage an Milesight (§10ay).
+
+**Die Begründung steht damit auf 1, 2 und 5** — Verfügbarkeit,
+Reconnect-Verhalten und die Umstellbarkeit des Datenpfads. Nicht
+Funkreichweite. Das ist eine andere Entscheidung als
 die, die dieser Entwurf am 05.11. vorbereitet hat: es geht nicht mehr um
 Abdeckung, sondern darum, dass die ganze Anlage an einem Gerät hängt, das
 sich nach einem Serverneustart nicht von selbst zurückmeldet.
