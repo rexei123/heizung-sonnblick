@@ -10695,12 +10695,31 @@ Schalter: `ping_interval` und `read_timeout` der Bridge regeln, wie
 schnell die **Bridge** eine tote Sitzung aufräumt; ob das **Gateway** neu
 verbindet, entscheidet dessen eigene Implementierung.
 
+> **Korrektur vom 07.11.2026 — der Betriebsmodus ist ein anderer.** Hier
+> stand „Basic Station gegen ChirpStack". Falsch: das UG65 läuft im
+> **ChirpStack-v4-Modus mit direktem MQTT-Push auf Port 1883**,
+> angemeldet als `gateway-ug65`. Basic Station ist eingerichtet und
+> **unbenutzt** — die Bridge hat seit dem 04.11. keine Sitzung, Caddy
+> zählt 2 `router`-Treffer in 39.607 Zeilen. Belegt durch den Ausfall vom
+> 07.11.: Port 1883 gesperrt → **0** Uplinks
+> (`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+>
+> **Damit wird der Vorfall vom 04.11. erst schlüssig:** ein Neustart von
+> `mosquitto` trennt die **MQTT-Sitzung** des Gateways, und die frische
+> Bridge konnte nicht helfen, weil sie am Datenpfad nicht beteiligt ist.
+
 **Was in die Anfrage gehört:** Modell und Firmware, der Betriebsmodus
-(Basic Station gegen ChirpStack), der Ablauf vom 04.11. mit Zeiten, und
-die konkrete Frage — ob der Basic-Station-Reconnect ein Intervall oder
-einen Grenzwert hat, der einstellbar ist, und was das Gerät tut, wenn der
-WebSocket vom Server geschlossen wird. **Nicht** fragen, was es „sein
-könnte": die Frage ist beantwortbar, wenn man sie eng stellt.
+(**ChirpStack-v4 mit direktem MQTT-Push**, nicht Basic Station), der
+Ablauf vom 04.11. mit Zeiten, und die konkrete Frage — **ob das Gerät
+nach einem Verbindungsabbruch zum MQTT-Broker von selbst neu verbindet,
+in welchem Intervall, und ob das einstellbar ist.** Dazu, was es tut,
+wenn der Broker die Verbindung schließt (Neustart) gegenüber dem Fall,
+dass Pakete verworfen werden (Firewall) — am 07.11. hat es sich nach
+Freigabe **von selbst** zurückgemeldet, am 04.11. nach einem
+Broker-Neustart **nicht**. Das ist der Unterschied, auf den es ankommt.
+
+**Nicht** fragen, was es „sein könnte": die Frage ist beantwortbar, wenn
+man sie eng stellt.
 
 ### Was die Zahlen beantworten, und was nicht
 
@@ -10717,7 +10736,9 @@ erzeugt und damit `gestartet` und `Neustarts` zurückgesetzt. Die Frage
 bleibt offen und ist beim nächsten Vorfall mit Schritt 1 zu beantworten —
 sie ist nicht mehr dringend, weil die Behebung ohnehin nicht dort liegt.
 
-**Offen und beim Gerät:** ob der Basic-Station-Reconnect am UG65
+**Offen und beim Gerät** (und seit 07.11.2026 betrifft es den
+**MQTT**-Reconnect, nicht Basic Station — siehe Korrektur oben): ob der
+Reconnect am UG65
 einstellbar ist. `ping_interval` und `read_timeout` der Bridge regeln,
 wie schnell die **Bridge** eine tote Sitzung bemerkt und aufräumt; ob das
 **Gateway** neu verbindet, entscheidet dessen eigene Implementierung.
