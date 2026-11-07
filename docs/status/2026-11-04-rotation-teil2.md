@@ -15,7 +15,7 @@ hat. Das ist der Teil, der hier mehr Platz bekommt als das Ergebnis.
 | **C1** — SMTP | **ausgelassen.** Das Gmail-App-Passwort „Hotel Heizung" wurde am **20.09.** angelegt, der Screenshot, der den Anlass gab, ist vom **19.09.** — das Passwort im Betrieb ist **jünger als der Anlass** und wurde nie gezeigt. Entscheidung des Betreibers |
 | **C2** — `OCCUPANCY_IMPORT_TOKEN` | erledigt, Liste 08:30 übernommen |
 | **C3** — `HOTEL_BASIC_AUTH_HASH` | erledigt — **mit der Störung aus Befund 1** |
-| **C4** — `gateway-ug65` entfernen | **entfernt und zurückgenommen** — mit der Störung aus Befund 2 |
+| **C4** — `gateway-ug65` entfernen | **entfernt und zurückgenommen** — mit der Störung aus Befund 2. **Ab 07.11.: nie wieder ausführen**, der User ist der Datenpfad (§10ab C4) |
 | **C5** — ChirpStack-Admin | erledigt. `admin/admin` war **nicht** aktiv |
 | **C6** — Server-Neustart | **verschoben** |
 | **C7** — alte Backups | erledigt: 20.10., 15.05. und ältere geschreddert; das vom 04.11. bleibt bis 11.11. |
@@ -171,6 +171,26 @@ gebundener Port ist richtig — aber wenn die Compose-Begründung stimmt und
 nicht der Befund vom 20.10., dann schneidet er das Gateway ab und die
 Heizung steht. Die Freigabe des Betreibers liegt vor, die Prüfung davor
 ist noch offen.
+
+> ## Aufgelöst am 07.11.2026 — die Compose-Begründung stimmte
+>
+> **Das UG65 publiziert per MQTT auf 1883 als `gateway-ug65`.** Der
+> Befund vom 20.10. war falsch; der Kommentar in der Compose-Datei war
+> richtig. Basic Station ist eingerichtet und unbenutzt: die Bridge hat
+> seit dem 04.11. keine Sitzung, Caddy zählt 2 `router`-Treffer in
+> 39.607 Zeilen.
+>
+> **Und die Prüfung, die dieser Absatz verlangt hat, ist nicht gemacht
+> worden.** Am 06.11. habe ich eine Firewall-Regel auf 1883 empfohlen,
+> ohne sie durchzuführen — die Anlage stand **31 Minuten**. Befund 5
+> unten nennt den richtigen Befehl und die richtige Begründung, drei Tage
+> vor dem Ausfall, in diesem Dokument.
+>
+> Das ist der teuerste Teil daran: das Wissen war da, aufgeschrieben, von
+> mir. Eine Lehre, die man notiert und beim nächsten Vorschlag nicht
+> anwendet, hat denselben Wert wie keine. Einzelheiten:
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`, Regel in RUNBOOK
+> §5.0a.
 
 ## Befund 5 — „sieben Tage keine Anmeldung" beweist bei Dauerverbindungen nichts
 

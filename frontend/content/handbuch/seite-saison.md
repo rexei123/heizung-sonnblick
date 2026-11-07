@@ -3,9 +3,15 @@ titel: Saison
 kategorie: Die Seiten
 stichworte: Saison, Sommer, Winter, Heizperiode, Umschaltung, in Vorbereitung
 rollen: admin
-stand: 2026-10-25
+stand: 2026-11-07
 route: /einstellungen/saison
 ---
+
+> **Nicht mehr im Menü (ab 07.11.2026).** Diese Seite steht nicht mehr in
+> der Seitenleiste, weil sie nichts anzeigt — ein Menüpunkt, der zu „In
+> Vorbereitung" führt, kostet bei jedem Blick eine Enttäuschung. Über
+> einen Lesezeichen-Link ist sie weiter erreichbar und sagt dann, was sie
+> ist. Sie kommt zurück, wenn es etwas zu bedienen gibt.
 
 > **Diese Seite ist noch in Vorbereitung.** Sie soll Saisonzeiten
 > aufnehmen — also die Umschaltung zwischen Sommer und Winter nach

@@ -88,7 +88,6 @@ const GLOBAL_CONFIG = {
   summer_mode_starts_on: null,
   summer_mode_ends_on: null,
   alert_email: "chef@hotel.example.com",
-  alert_device_offline_minutes: 60,
   occupancy_import_expected_by_local: "11:00:00",
   created_at: NOW,
   updated_at: NOW,

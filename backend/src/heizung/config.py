@@ -171,6 +171,89 @@ class Settings(BaseSettings):
     battery_ok_min_v: Decimal = Decimal("2.9")
     battery_critical_max_v: Decimal = Decimal("2.6")
 
+    # --- Funk-Waechter (Sprint 25 T6) -------------------------------------
+    # Der Waechter vergleicht den SNR-Mittelwert der letzten
+    # ``funk_fenster_stunden`` mit dem Mittel der ``funk_grundlinie_tage``,
+    # die **24 Stunden vor jetzt enden**. Faellt er um mehr als
+    # ``funk_warn_delta_db``, geht eine Mail raus.
+    #
+    # Warum hier und nicht in ``global_config``: dieselbe Begruendung wie
+    # bei den Batterie-Stufen. Wer diese Werte verschiebt, muss wissen, wie
+    # viel dB Streuung ein Haus normal hat — sonst entsteht ein Feld,
+    # dessen Wirkung niemand vorhersagen kann. Es ist keine
+    # Hotelier-Einstellung wie die Alarm-Adresse.
+    #
+    # **Woher die 2,0 dB kommen, und was daran schwach ist.** Am 04.11.2026
+    # lagen die Stundenwerte nach dem Gateway-Neustart bei −2,0 bis −2,4 dB
+    # gegen den Vortag, die Tage davor schwankten um weniger als 0,5 dB.
+    # 2,0 trennt diese beiden Zustaende. **Kalibriert ist das an genau einem
+    # Ereignis**, nicht an einer Reihe — wer den Wert anwendet und etwas
+    # anderes sieht, korrigiert ihn (§5.68: eine Zahl aus einem Fall ist ein
+    # Anhalt, kein Gesetz).
+    #
+    # ``Decimal`` und nicht ``float``: der Vergleich laeuft genau auf der
+    # Schwelle, und 2.0 hat in IEEE-754 keine exakte Darstellung.
+    funk_warn_delta_db: Decimal = Decimal("2.0")
+    funk_grundlinie_tage: int = 7
+    funk_fenster_stunden: int = 2
+    # Mindestmenge, unter der das Urteil ``unbekannt`` lautet und **nicht**
+    # ``warnung``. Nach einem Gateway-Ausfall ist das Fenster duenn, und ein
+    # Melder, der beim Ausfall des Messwegs Alarm schlaegt, meldet seinen
+    # eigenen Ausfall (§5.79). 100 Meldungen von 40 Geraeten sind bei 107
+    # Geraeten im 10-Minuten-Takt in zwei Stunden locker erreicht — im
+    # Normalbetrieb sind es rund 1.200 von ueber 100.
+    funk_min_meldungen: int = 100
+    funk_min_geraete: int = 40
+    # Sperrzeit zwischen zwei Funk-Mails. **24 Stunden heisst: einmal am
+    # Tag, solange es anhaelt** — nicht genau einmal je Episode.
+    #
+    # Die Abweichung ist Absicht und sie ist der Vorsicht geschuldet: eine
+    # strikte Einmal-Regel braucht einen gespeicherten Episodenzustand, und
+    # faellt ein Lauf aus (Worker weg, Redis weg), bleibt der Zustand
+    # stehen und die Meldung kommt **nie**. Eine Sperrzeit kann hoechstens
+    # zu viel melden, und das ist die bessere Richtung. Vorbild
+    # ``TTL_IMPORT_STALE_S``.
+    #
+    # Wer wirklich nur eine Meldung je Vorgang will, setzt den Wert hoch —
+    # dann ist er faktisch einmalig, ohne einen Zustand einzufuehren, der
+    # stumm haengen bleiben kann.
+    funk_mail_sperre_stunden: int = 24
+
+    # --- Funk-Empfang: Kachel und Totalausfall-Alarm (Sprint 25 T8) -------
+    # Die Kachel „Funk-Empfang" im Dashboard und der Totalausfall-Alarm
+    # lesen **dieselben** zwei Zahlen: wann kam die letzte Meldung, und wie
+    # viele kamen in den letzten zehn Minuten.
+    #
+    # **Warum nicht der ChirpStack-Gateway-Status** (Vorgabe des Betreibers,
+    # 07.11.2026): der prueft das Gateway, nicht die Kette. Am 07.11. war
+    # das Gateway in Ordnung, Port 1883 gesperrt und die Zahl der Meldungen
+    # **null** — ein Gateway-Status haette gruen gezeigt. Die Kachel liest
+    # deshalb das Ende der Kette: ``sensor_reading``.
+    #
+    # Die Schwellen stehen hier und nicht in ``global_config``: wer sie
+    # verschiebt, muss den Melde-Takt der Geraete kennen (10 Minuten je
+    # Geraet, ueber 100 Geraete). Dieselbe Begruendung wie bei den
+    # Batterie-Grenzen (AE-73).
+    #
+    # **Woher die Zahlen kommen.** Bei 10-Minuten-Takt und ueber hundert
+    # Geraeten kommen normal rund 20 Meldungen in zwei Minuten. Fuenf
+    # Minuten ohne jede Meldung sind damit bereits ungewoehnlich, 15 sind
+    # ein Befund — die Luecke am 07.11. war **31 Minuten**.
+    funkempfang_gruen_max_min: int = 5
+    funkempfang_gelb_max_min: int = 15
+
+    # --- Totalausfall-Alarm (Sprint 25 T8) -------------------------------
+    # Ab wann eine Mail hinausgeht, und wie oft sie sich wiederholt.
+    #
+    # **Warum es diesen Alarm braucht, obwohl es zwei andere gibt.** Die
+    # Health-Stufe ``silent`` greift erst nach ``health_degraded_max_age_h``
+    # (Vorgabe **3 h**), und der Funk-Waechter (T6) urteilt bei zu wenigen
+    # Daten ``unbekannt`` — genau das, was ein Totalausfall erzeugt. Der
+    # Ausfall vom 07.11. dauerte **31 Minuten** und hat **keinen** der
+    # beiden ausgeloest. Diese Luecke schliesst der Alarm hier.
+    totalausfall_min: int = 15
+    totalausfall_wiederholung_h: int = 2
+
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
     # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —
@@ -677,6 +760,33 @@ class Settings(BaseSettings):
                 f"{self.health_degraded_max_age_h} <= {self.health_healthy_max_age_h}). "
                 "Sonst gibt es keine Stufe 'degraded', und der Funkstille-Alarm "
                 "feuert bereits an der healthy-Grenze."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _funkempfang_schwellen_sind_geordnet(self) -> "Settings":
+        """Gelb hinter Gruen, und die Mail nicht vor der roten Kachel.
+
+        Start-Fehler und keine Warnung: eine Kachel, die nach einem
+        Tippfehler in der ``.env`` stumm eine Stufe ueberspringt, ist
+        schlimmer bedient als eine API, die nicht startet — dieselbe
+        Haltung wie bei den Health- und Batterie-Grenzen.
+        """
+        if self.funkempfang_gelb_max_min <= self.funkempfang_gruen_max_min:
+            raise ValueError(
+                "FUNKEMPFANG_GELB_MAX_MIN muss groesser als "
+                "FUNKEMPFANG_GRUEN_MAX_MIN sein (ist: "
+                f"{self.funkempfang_gelb_max_min} <= "
+                f"{self.funkempfang_gruen_max_min}). "
+                "Sonst gibt es keine Stufe 'verzoegert'."
+            )
+        if self.totalausfall_min < self.funkempfang_gelb_max_min:
+            raise ValueError(
+                "TOTALAUSFALL_MIN darf nicht kleiner sein als "
+                "FUNKEMPFANG_GELB_MAX_MIN (ist: "
+                f"{self.totalausfall_min} < {self.funkempfang_gelb_max_min}). "
+                "Sonst mailt der Alarm, bevor die Kachel rot ist — und wer "
+                "nachsieht, findet eine gelbe Kachel zu einer roten Mail."
             )
         return self
 
