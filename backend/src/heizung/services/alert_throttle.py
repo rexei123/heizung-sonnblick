@@ -70,6 +70,11 @@ KIND_IMPORT_STALE = "import_stale"
 #: verschiedene Aussagen, und beide duerfen einmal am Tag hinausgehen.
 KIND_IMPORT_GAP = "import_gap"
 KIND_PIN_ACTIVE = "pin_active"
+#: Sprint 25 T6. Gegenstand ist das **Haus**, nicht ein Geraet: der
+#: Waechter rechnet ueber das Hausmittel, und 107 einzelne Sperren waeren
+#: 107 Melder (siehe ``services/funk_waechter``).
+KIND_FUNK_SCHWACH = "funk_schwach"
+SUBJECT_FUNK_HAUS = "haus"
 
 # Gegenstand der Pin-Erinnerung ist der Zustand, nicht der SHA. Mit dem SHA
 # als Schluessel koennte ein Pin-Wechsel sofort eine zweite Mail ausloesen —
