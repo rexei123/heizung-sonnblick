@@ -31,6 +31,13 @@ const KPI = {
   battery_low_count: 0,
   valve_check_count: 0,
   room_too_warm_count: 0,
+  // Sprint 25 T8: Zod verlangt diese fuenf. Werte = Normalfall (Empfang
+  // in Ordnung, Fenstererkennung auf keinem Geraet bestaetigt).
+  funkempfang_stufe: "online" as const,
+  funkempfang_letzte_meldung: new Date(Date.now() - 60_000).toISOString(),
+  funkempfang_alter_min: 1,
+  funkempfang_meldungen_10min: 104,
+  fenstererkennung_aktiv: false,
 };
 
 /**
@@ -48,7 +55,6 @@ const GLOBAL_CONFIG = {
   summer_mode_starts_on: null,
   summer_mode_ends_on: null,
   alert_email: "chef@hotel.example.com",
-  alert_device_offline_minutes: 60,
   occupancy_import_expected_by_local: "12:00:00",
   created_at: "2026-10-21T06:00:00Z",
   updated_at: "2026-10-21T06:00:00Z",

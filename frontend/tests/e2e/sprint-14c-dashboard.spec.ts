@@ -24,6 +24,12 @@ interface Kpi {
   // Sprint 20e (T7/T10): Zod verlangt diese beiden ebenfalls.
   valve_check_count: number;
   room_too_warm_count: number;
+  // Sprint 25 T8: Zod verlangt diese fuenf ebenfalls.
+  funkempfang_stufe: "online" | "verzoegert" | "keine_meldungen" | "unbekannt";
+  funkempfang_letzte_meldung: string | null;
+  funkempfang_alter_min: number | null;
+  funkempfang_meldungen_10min: number;
+  fenstererkennung_aktiv: boolean;
 }
 
 const BASE_KPI: Kpi = {
@@ -39,6 +45,13 @@ const BASE_KPI: Kpi = {
   battery_low_count: 0,
   valve_check_count: 0,
   room_too_warm_count: 0,
+  // Sprint 25 T8: Zod verlangt diese fuenf. Werte = Normalfall (Empfang
+  // in Ordnung, Fenstererkennung auf keinem Geraet bestaetigt).
+  funkempfang_stufe: "online" as const,
+  funkempfang_letzte_meldung: new Date(Date.now() - 60_000).toISOString(),
+  funkempfang_alter_min: 1,
+  funkempfang_meldungen_10min: 104,
+  fenstererkennung_aktiv: false,
 };
 
 async function mockKpi(
@@ -77,7 +90,7 @@ test.describe("Sprint 14c Dashboard", () => {
     });
   });
 
-  test("rendert 10 KPI-Kacheln", async ({ page }) => {
+  test("rendert 11 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
@@ -87,7 +100,11 @@ test.describe("Sprint 14c Dashboard", () => {
     // Dass dieser Test bei jeder neuen Kachel fällt, ist sein Zweck: das
     // Dashboard ist die Seite, die der Hotelier täglich liest, und eine
     // Kachel mehr ist eine Entscheidung, keine Nebenwirkung.
-    await expect(page.getByTestId("kpi-card")).toHaveCount(10);
+    // **11, nicht 10** — „Funk-Empfang" ist am 07.11.2026 dazugekommen
+    // (Sprint 25 T8). Sie zeigt, ob ueberhaupt noch Messwerte ankommen,
+    // und ist die einzige Kachel, die der Ausfall an diesem Morgen rot
+    // gefaerbt haette.
+    await expect(page.getByTestId("kpi-card")).toHaveCount(11);
   });
 
   test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({ page }) => {
@@ -143,7 +160,7 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    await expect(cards).toHaveCount(10);
+    await expect(cards).toHaveCount(11);
     // Einspaltig: alle Karten teilen dieselbe linke Kante (gleiche x).
     const box0 = await cards.nth(0).boundingBox();
     const box1 = await cards.nth(1).boundingBox();

@@ -219,6 +219,41 @@ class Settings(BaseSettings):
     # stumm haengen bleiben kann.
     funk_mail_sperre_stunden: int = 24
 
+    # --- Funk-Empfang: Kachel und Totalausfall-Alarm (Sprint 25 T8) -------
+    # Die Kachel „Funk-Empfang" im Dashboard und der Totalausfall-Alarm
+    # lesen **dieselben** zwei Zahlen: wann kam die letzte Meldung, und wie
+    # viele kamen in den letzten zehn Minuten.
+    #
+    # **Warum nicht der ChirpStack-Gateway-Status** (Vorgabe des Betreibers,
+    # 07.11.2026): der prueft das Gateway, nicht die Kette. Am 07.11. war
+    # das Gateway in Ordnung, Port 1883 gesperrt und die Zahl der Meldungen
+    # **null** — ein Gateway-Status haette gruen gezeigt. Die Kachel liest
+    # deshalb das Ende der Kette: ``sensor_reading``.
+    #
+    # Die Schwellen stehen hier und nicht in ``global_config``: wer sie
+    # verschiebt, muss den Melde-Takt der Geraete kennen (10 Minuten je
+    # Geraet, ueber 100 Geraete). Dieselbe Begruendung wie bei den
+    # Batterie-Grenzen (AE-73).
+    #
+    # **Woher die Zahlen kommen.** Bei 10-Minuten-Takt und ueber hundert
+    # Geraeten kommen normal rund 20 Meldungen in zwei Minuten. Fuenf
+    # Minuten ohne jede Meldung sind damit bereits ungewoehnlich, 15 sind
+    # ein Befund — die Luecke am 07.11. war **31 Minuten**.
+    funkempfang_gruen_max_min: int = 5
+    funkempfang_gelb_max_min: int = 15
+
+    # --- Totalausfall-Alarm (Sprint 25 T8) -------------------------------
+    # Ab wann eine Mail hinausgeht, und wie oft sie sich wiederholt.
+    #
+    # **Warum es diesen Alarm braucht, obwohl es zwei andere gibt.** Die
+    # Health-Stufe ``silent`` greift erst nach ``health_degraded_max_age_h``
+    # (Vorgabe **3 h**), und der Funk-Waechter (T6) urteilt bei zu wenigen
+    # Daten ``unbekannt`` — genau das, was ein Totalausfall erzeugt. Der
+    # Ausfall vom 07.11. dauerte **31 Minuten** und hat **keinen** der
+    # beiden ausgeloest. Diese Luecke schliesst der Alarm hier.
+    totalausfall_min: int = 15
+    totalausfall_wiederholung_h: int = 2
+
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
     # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —
@@ -725,6 +760,33 @@ class Settings(BaseSettings):
                 f"{self.health_degraded_max_age_h} <= {self.health_healthy_max_age_h}). "
                 "Sonst gibt es keine Stufe 'degraded', und der Funkstille-Alarm "
                 "feuert bereits an der healthy-Grenze."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _funkempfang_schwellen_sind_geordnet(self) -> "Settings":
+        """Gelb hinter Gruen, und die Mail nicht vor der roten Kachel.
+
+        Start-Fehler und keine Warnung: eine Kachel, die nach einem
+        Tippfehler in der ``.env`` stumm eine Stufe ueberspringt, ist
+        schlimmer bedient als eine API, die nicht startet — dieselbe
+        Haltung wie bei den Health- und Batterie-Grenzen.
+        """
+        if self.funkempfang_gelb_max_min <= self.funkempfang_gruen_max_min:
+            raise ValueError(
+                "FUNKEMPFANG_GELB_MAX_MIN muss groesser als "
+                "FUNKEMPFANG_GRUEN_MAX_MIN sein (ist: "
+                f"{self.funkempfang_gelb_max_min} <= "
+                f"{self.funkempfang_gruen_max_min}). "
+                "Sonst gibt es keine Stufe 'verzoegert'."
+            )
+        if self.totalausfall_min < self.funkempfang_gelb_max_min:
+            raise ValueError(
+                "TOTALAUSFALL_MIN darf nicht kleiner sein als "
+                "FUNKEMPFANG_GELB_MAX_MIN (ist: "
+                f"{self.totalausfall_min} < {self.funkempfang_gelb_max_min}). "
+                "Sonst mailt der Alarm, bevor die Kachel rot ist — und wer "
+                "nachsieht, findet eine gelbe Kachel zu einer roten Mail."
             )
         return self
 

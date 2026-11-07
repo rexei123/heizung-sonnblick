@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-07
 route: /
 ---
 
@@ -37,11 +37,37 @@ abgefallener Kopf — ein Ventil ohne Kopf steht offen.
 die seit Tagen läuft, ist der häufigste Grund für „das Zimmer reagiert
 nicht auf die Automatik".
 
-**Fenster offen** steht heute dauerhaft auf **0**, und das ist keine
-Aussage über die Fenster im Haus: die Thermostate liefern ihre
-Fenstererkennung ab Werk ausgeschaltet, und eingeschaltet wurde sie nie.
-Die Kachel wird erst nach der Erprobung (Sprint 23 T2) etwas melden
-können. Bis dahin ist eine 0 dort kein Befund.
+**Fenster offen** zeigt **„Erkennung inaktiv"** statt einer Zahl,
+solange kein Thermostat zurückgemeldet hat, dass seine Fenstererkennung
+eingeschaltet ist. Die Geräte liefern sie ab Werk ausgeschaltet.
+
+Bis zum 07.11.2026 stand dort eine **0**, und das war die gefährlichere
+Anzeige: eine 0 liest sich als „es ist kein Fenster offen", richtig war
+„niemand hat gemessen". Hausweit gab es zu diesem Zeitpunkt keine
+einzige Meldung über ein offenes Fenster — bei 49 belegten
+Temperatureinbrüchen allein in einem Zimmer.
+
+**Funk-Empfang** ist die Kachel, die einen Ausfall zeigt, während alle
+anderen Zahlen noch harmlos aussehen.
+
+| Anzeige | Bedeutung |
+|---|---|
+| **online** | die letzte Meldung ist höchstens fünf Minuten alt |
+| **verzögert** | fünf bis fünfzehn Minuten — einmal nachsehen |
+| **keine Meldungen** | über fünfzehn Minuten. **Es kommen keine Messwerte mehr an**, und ab dieser Stufe geht auch eine Mail hinaus |
+
+Darunter stehen zwei Zeilen: wann die letzte Meldung kam, und wie viele
+in den letzten zehn Minuten eintrafen. Die zweite Zahl beantwortet eine
+andere Frage als die erste — bricht die Menge ein, während die jüngste
+Meldung frisch ist, ist etwas im Gange, das die erste Zahl nicht sieht.
+Normal sind rund hundert.
+
+**Warum diese Kachel nicht den Gateway-Status zeigt.** Am 07.11.2026 war
+das Gateway in Ordnung und meldete sich als verbunden — und es kam
+**31 Minuten** lang kein einziger Messwert an, weil eine Firewall-Regel
+den Weg dahinter blockierte. Ein Gateway-Status hätte grün gezeigt. Diese
+Kachel liest deshalb das **Ende** der Kette: was nicht ankommt, ist weg,
+ganz gleich welches Glied es verloren hat.
 
 ## Letzter Algorithmen-Lauf
 

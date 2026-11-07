@@ -3,7 +3,7 @@ titel: Ein Thermostat meldet sich nicht
 kategorie: Abläufe an der Rezeption
 stichworte: Funkstille, offline, Batterie, tauschen, Ventil prüfen, Gateway
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-07
 ---
 
 Auf dem Dashboard steht „Geräte online" niedriger als sonst, oder ein
@@ -12,11 +12,18 @@ sondern **wie viele**.
 
 ## 1. Einer oder alle?
 
-**Dashboard → Geräte online.** Fehlen eines oder zwei, ist es ein
-Gerätefehler. Fehlen viele, ist es der Funk: das Gateway im Haus gibt
-die Meldungen weiter, und fällt es aus, sind alle Geräte auf einmal
-still. Dann ist nichts am einzelnen Zimmer zu machen — das ist
-Server- und Technikarbeit.
+**Dashboard → Funk-Empfang.** Diese Kachel beantwortet die Frage in
+einem Blick. Steht sie auf **keine Meldungen**, kommt im ganzen Haus
+nichts mehr an — dann ist nichts am einzelnen Zimmer zu machen, das ist
+Server- und Technikarbeit, und eine Mail ist dazu schon unterwegs.
+
+**Steht sie auf online, dann liegt es am Gerät.** Weiter mit Schritt 2.
+
+Zweiter Blick: **Geräte online**. Fehlen eines oder zwei, ist es ein
+Gerätefehler. Fehlen viele, während „Funk-Empfang" grün ist, melden sich
+die Geräte einzeln ab — dann ist es nicht der Weg ins Haus, sondern der
+Funk im Haus (ein Stockwerk, eine Ecke), und das ist ebenfalls
+Technikarbeit.
 
 ## 2. Welches Gerät
 

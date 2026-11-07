@@ -63,6 +63,17 @@ _EXPECTED_KEYS = {
     # eine Entscheidung sein, keine Entdeckung.
     "valve_check_count",
     "room_too_warm_count",
+    # Sprint 25 T8: Zustand der Empfangskette fuer die Kachel
+    # „Funk-Empfang". Und er hat seinen Zweck erfuellt — diese fuenf
+    # Zeilen stehen hier, weil der Test in der CI rot war.
+    "funkempfang_stufe",
+    "funkempfang_letzte_meldung",
+    "funkempfang_alter_min",
+    "funkempfang_meldungen_10min",
+    # Ob ueberhaupt ein Geraet seine Fenstererkennung bestaetigt hat.
+    # Steuert, ob „Fenster offen" eine Zahl oder „Erkennung inaktiv"
+    # zeigt.
+    "fenstererkennung_aktiv",
 }
 
 
@@ -189,8 +200,19 @@ async def test_dashboard_kpi_admin_200_schema(
         "active_overrides",
         "zones_window_open",
         "battery_low_count",
+        # Sprint 25 T8: die Zahl der Meldungen im Zaehlfenster. Nicht
+        # dabei: ``funkempfang_alter_min`` — es ist ``int | None``, und
+        # ohne eine einzige Meldung ist ``None`` die richtige Antwort.
+        "funkempfang_meldungen_10min",
     ):
         assert isinstance(body[key], int), f"{key} muss int sein, war {body[key]!r}"
+    assert body["funkempfang_stufe"] in {
+        "online",
+        "verzoegert",
+        "keine_meldungen",
+        "unbekannt",
+    }, body["funkempfang_stufe"]
+    assert isinstance(body["fenstererkennung_aktiv"], bool)
     assert body["avg_temperature_celsius"] is None or isinstance(
         body["avg_temperature_celsius"], (int, float)
     )

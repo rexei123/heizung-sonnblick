@@ -158,19 +158,60 @@ async def detect_user_override(
     Logik:
 
     1. Letzter ControlCommand fuer ``device_id`` mit
-       ``sent_to_gateway_at IS NOT NULL``, sortiert ``DESC``.
+       ``sent_to_gateway_at IS NOT NULL`` **und ``sent_to_gateway_at <=
+       received_at``** — also der Befehl, der **vor** diesem Uplink
+       hinausgegangen ist.
     2. Kein Treffer -> kein Engine-Intent bekannt -> ``None``.
-    3. Ack-Window: ``received_at - sent_to_gateway_at <= 60 s`` ->
-       erwarteter Reply -> ``None``.
-    4. Toleranz nach ``fport`` (0.6 fuer 1, 0.1 fuer 2).
-    5. ``|uplink - last_engine| <= tolerance`` -> Rundungsdifferenz
-       -> ``None``.
+    3. Toleranz nach ``fport`` (0.6 fuer 1, 0.1 fuer 2).
+    4. ``|uplink - last_engine| <= tolerance`` -> Rundungsdifferenz
+       -> ``None``. Stiller Fall, es gibt nichts zu melden.
+    5. Ack-Window: ``received_at - sent_to_gateway_at <= 60 s`` ->
+       erwarteter Reply -> ``None``, **aber mit ``event_log``-Zeile**,
+       weil hier eine **Abweichung** verworfen wird.
     6. Sonst -> ``uplink_target_temp`` (= User-Setpoint).
+
+    **Warum die Zeitgrenze in der Abfrage steht (Vorfall 07.11.2026).**
+    Vorher nahm diese Funktion den **global letzten** Befehl. Die
+    Ack-Fenster-Bedingung hat **keine untere Grenze**: eine *negative*
+    Differenz erfuellt ``<= 60 s`` auch. Ein Uplink, dessen Zeitstempel
+    **vor** dem letzten gesendeten Befehl liegt, galt damit immer als
+    „erwartete Antwort" und wurde verworfen.
+
+    Nach einem Ausfall ist das der Normalfall und nicht die Ausnahme:
+    ``received_at`` kommt aus ``uplink.time``, also vom Gateway, und
+    ``_persist_uplink`` stellt die Engine-Auswertung in die Warteschlange
+    (``evaluate_room.delay``), **bevor** diese Funktion laeuft. Der Worker
+    kann den Befehl also dazwischen erzeugen.
+
+    ``received_at`` ist die **Gateway-Zeit** (``uplink.time``, gesetzt in
+    ``mqtt_subscriber._handle_override_detection``), ``sent_to_gateway_at``
+    die **Serverzeit** des Versands. Die beiden koennen sich ueberkreuzen,
+    und dann war die Differenz negativ.
+
+    **Abgrenzung, damit niemand den falschen Schluss erbt:** der Vorfall
+    in Zimmer 209 am 07.11.2026 hatte eine **andere** Ursache. Dort kam
+    die Drehung nur in ``0x81``-Periodenberichten an, und
+    ``_handle_override_detection`` steigt fuer alles aus, was kein
+    ``0x28``-Frame ist — diese Funktion wurde also nie gerufen. Der
+    ``0x28``-Frame lag in der 31-minuetigen Luecke. Der Fehler hier ist
+    davon unabhaengig und trifft ``0x28``-Frames, die kurz nach einem
+    Downlink ankommen.
+
+    Die Grenze in der ``WHERE``-Bedingung nimmt dem Rennen die Wirkung:
+    verglichen wird gegen den Befehl, der **zum Zeitpunkt des Uplinks**
+    der letzte war. Die Differenz ist damit nie negativ, und die
+    Ack-Fenster-Pruefung bedeutet wieder, was sie sagt.
+
+    **Was sie nicht behebt:** die Reihenfolge selbst. Dass die Auswertung
+    vor der Erkennung eingestellt wird, bleibt — ein Eingriff in den
+    Steuerpfad mit eigener Freigabe (Sprint 25).
     """
     stmt = (
         select(ControlCommand.target_setpoint, ControlCommand.sent_to_gateway_at)
         .where(ControlCommand.device_id == device_id)
         .where(ControlCommand.sent_to_gateway_at.is_not(None))
+        # Die Zeitgrenze ist der Fix vom 07.11.2026 — Begruendung oben.
+        .where(ControlCommand.sent_to_gateway_at <= received_at)
         .order_by(ControlCommand.sent_to_gateway_at.desc())
         .limit(1)
     )
@@ -182,14 +223,82 @@ async def detect_user_override(
     if sent_at is None:
         return None
 
-    if received_at - sent_at <= timedelta(seconds=ACK_WINDOW_SECONDS):
-        return None
-
+    # Toleranz VOR dem Ack-Fenster: nur eine echte Abweichung ist
+    # berichtenswert. Meldet das Geraet denselben Wert zurueck, den wir
+    # gesendet haben, ist das der Normalfall und erzeugt keine Zeile.
     tolerance = TOLERANCE_FPORT2 if fport == 2 else TOLERANCE_FPORT1
     if abs(uplink_target_temp - last_setpoint) <= tolerance:
         return None
 
+    if received_at - sent_at <= timedelta(seconds=ACK_WINDOW_SECONDS):
+        # Eine Abweichung im Ack-Fenster. Sie wird weiter verworfen — der
+        # Wert kann die Quittung eines fast gleichzeitigen Downlinks sein
+        # —, aber **nicht mehr stumm**. Ohne diese Zeile ist der Fall aus
+        # Zimmer 209 beim naechsten Mal wieder unsichtbar (Paragraph 5.52).
+        await _write_ack_window_event_log(
+            session,
+            device_id=device_id,
+            received_at=received_at,
+            uplink_setpoint=uplink_target_temp,
+            sent_setpoint=last_setpoint,
+            sent_at=sent_at,
+        )
+        return None
+
     return uplink_target_temp
+
+
+async def _write_ack_window_event_log(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    received_at: datetime,
+    uplink_setpoint: Decimal,
+    sent_setpoint: Decimal,
+    sent_at: datetime,
+) -> None:
+    """Haelt fest, dass eine Abweichung im Ack-Fenster verworfen wurde.
+
+    Dasselbe Off-Pipeline-Muster wie ``_write_blocked_event_log``
+    (Paragraph 5.52): synthetische ``evaluation_id``,
+    ``setpoint_in``/``setpoint_out`` bleiben ``None``, weil keine
+    Steuer-Entscheidung entstand.
+
+    **Wirft nicht.** Das Protokollieren ist die Beobachtung, nicht die
+    Aufgabe — ein Fehler hier darf die Uplink-Verarbeitung nicht
+    abbrechen. Ohne Raum-Zuordnung gibt es keine Zeile (``room_id`` ist
+    Teil des Primaerschluessels), dann bleibt nur der Logeintrag.
+    """
+    try:
+        room_id = await _device_room_id(session, device_id)
+        if room_id is None:
+            logger.info(
+                "ack-fenster: Abweichung verworfen, aber kein Raum-Mapping "
+                "(device_id=%s uplink=%s gesendet=%s)",
+                device_id,
+                uplink_setpoint,
+                sent_setpoint,
+            )
+            return
+        await _write_blocked_event_log(
+            session,
+            room_id=room_id,
+            device_id=device_id,
+            received_at=received_at,
+            reason=CommandReason.DEVICE_BLOCKED_ACK_WINDOW,
+            uplink_setpoint=uplink_setpoint,
+            zusatz={
+                "gesendeter_sollwert": str(sent_setpoint),
+                "gesendet_um": sent_at.isoformat(),
+                "uplink_um": received_at.isoformat(),
+                "abstand_s": round((received_at - sent_at).total_seconds(), 3),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "ack-fenster-event_log nicht geschrieben device_id=%s",
+            device_id,
+        )
 
 
 async def _device_room_id(session: AsyncSession, device_id: int) -> int | None:

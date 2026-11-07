@@ -3,7 +3,7 @@ titel: Hotel-Stammdaten
 kategorie: Die Seiten
 stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline
 rollen: admin
-stand: 2026-10-25
+stand: 2026-11-07
 route: /einstellungen/hotel
 ---
 
@@ -35,10 +35,16 @@ die fehlende Belegungsliste und die Engine-Alarme. Steht hier keine
 Adresse, laufen die Melder weiter und schreiben ins Protokoll, aber
 niemand erfährt davon.
 
-**Gerät offline nach (Min)** legt fest, ab welcher Funkstille ein Gerät
-auf der Geräteseite als nicht online gilt. Die Betriebsregel für den
-Batterietausch — drei Stunden Funkstille — ist davon unabhängig; dieser
-Wert steuert nur die Anzeige.
+> **Das Feld „Gerät offline nach (Min)" ist am 07.11.2026 entfernt
+> worden, weil es nichts getan hat.** Hier stand, es steuere die Anzeige
+> auf der Geräteseite — auch das war falsch: eine Suche über Backend und
+> Frontend fand den Wert im Schema und in diesem Formular, und **keine
+> Stelle, die ihn liest**.
+>
+> Was tatsächlich gilt, ist die Betriebsregel, die hier schon richtig
+> stand: **ab drei Stunden Funkstille** gilt ein Gerät als still. Diese
+> Grenze ist nicht in der Oberfläche verstellbar, und zwar mit Absicht —
+> an ihr hängt der Funkstille-Alarm.
 
 ## Speichern
 

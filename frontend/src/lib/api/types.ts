@@ -851,7 +851,6 @@ export interface GlobalConfig {
   summer_mode_starts_on: string | null;
   summer_mode_ends_on: string | null;
   alert_email: string | null;
-  alert_device_offline_minutes: number;
   // Ortszeit "HH:MM:SS" (§5.65). Schwelle des Belegungs-Import-Watchdogs.
   occupancy_import_expected_by_local: string;
   // Laufzeit-Felder zum Mailversand (Sprint 18, T4). Read-only — sie stehen
@@ -984,7 +983,6 @@ export interface GlobalConfigUpdate {
   summer_mode_starts_on?: string | null;
   summer_mode_ends_on?: string | null;
   alert_email?: string | null;
-  alert_device_offline_minutes?: number;
   occupancy_import_expected_by_local?: string;
 }
 
@@ -1195,6 +1193,25 @@ export interface DashboardKpi {
   last_engine_tick: string | null;
   // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch).
   battery_low_count: number;
+  /**
+   * Sprint 25 T8: Zustand der Empfangskette, gelesen am **Ende** der
+   * Kette (`sensor_reading`) und bewusst nicht am ChirpStack-
+   * Gateway-Status — am 07.11.2026 war das Gateway in Ordnung, Port 1883
+   * gesperrt und die Zahl der Meldungen null.
+   *
+   * Die Stufe bildet das Backend, weil die Schwellen in den Settings
+   * stehen (`FUNKEMPFANG_GRUEN_MAX_MIN` / `_GELB_MAX_MIN`).
+   */
+  funkempfang_stufe: "online" | "verzoegert" | "keine_meldungen" | "unbekannt";
+  funkempfang_letzte_meldung: string | null;
+  funkempfang_alter_min: number | null;
+  funkempfang_meldungen_10min: number;
+  /**
+   * Ob überhaupt ein Gerät die Fenstererkennung als eingeschaltet
+   * gemeldet hat (letzte 7 Tage). Steuert, ob „Fenster offen" eine Zahl
+   * oder „Erkennung inaktiv" zeigt.
+   */
+  fenstererkennung_aktiv: boolean;
   // Sprint 20e (T7/T10): die beiden Ventil-Hinweise, getrennt gezählt.
   // Getrennt, weil sie verschiedene Handgriffe bedeuten — eine gemeinsame
   // Zahl hätte den Hausmeister losgeschickt, ohne ihm zu sagen, was er
