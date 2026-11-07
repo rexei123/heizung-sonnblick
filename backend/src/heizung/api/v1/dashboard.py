@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.auth.dependencies import require_user
+from heizung.config import get_settings
 from heizung.db import get_session
 from heizung.models.user import User
 from heizung.schemas.dashboard import DashboardKpiRead
 from heizung.services import dashboard_aggregates as agg
+from heizung.services import funkempfang
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -30,6 +32,12 @@ async def get_dashboard_kpi(
     _user: User = Depends(require_user),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> DashboardKpiRead:
+    settings = get_settings()
+    funk = await funkempfang.lies_funkempfang(
+        session,
+        gruen_max_min=settings.funkempfang_gruen_max_min,
+        gelb_max_min=settings.funkempfang_gelb_max_min,
+    )
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
     devices_online, devices_assigned = await agg.count_devices_online(session)
     valve_check, room_too_warm = await agg.count_valve_alerts(session)
@@ -44,6 +52,11 @@ async def get_dashboard_kpi(
         zones_window_open=await agg.count_zones_window_open(session),
         last_engine_tick=await agg.last_engine_tick(session),
         battery_low_count=await agg.count_battery_low(session),
+        funkempfang_stufe=funk.stufe,
+        funkempfang_letzte_meldung=funk.letzte_meldung,
+        funkempfang_alter_min=funk.alter_min,
+        funkempfang_meldungen_10min=funk.meldungen_zaehlfenster,
+        fenstererkennung_aktiv=await agg.fenstererkennung_bestaetigt(session),
         valve_check_count=valve_check,
         room_too_warm_count=room_too_warm,
     )

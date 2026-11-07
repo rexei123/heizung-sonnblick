@@ -23,7 +23,6 @@ class GlobalConfigUpdate(BaseModel):
     summer_mode_starts_on: date | None = None
     summer_mode_ends_on: date | None = None
     alert_email: EmailStr | None = None
-    alert_device_offline_minutes: int | None = Field(default=None, ge=1, le=1440)
     # Ortszeit (§5.65). Der Watchdog vergleicht die in Ortszeit gewandelte
     # Jetzt-Zeit dagegen — hier steht Wanduhr, nicht UTC.
     occupancy_import_expected_by_local: time | None = None
@@ -66,7 +65,6 @@ class GlobalConfigRead(BaseModel):
     summer_mode_starts_on: date | None
     summer_mode_ends_on: date | None
     alert_email: str | None
-    alert_device_offline_minutes: int
     occupancy_import_expected_by_local: time
 
     # Laufzeit-Felder zum Mailversand (Sprint 18, T4). Bewusst nur hier und

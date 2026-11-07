@@ -3,7 +3,7 @@ titel: Szenarien
 kategorie: Die Seiten
 stichworte: Sommermodus, Frostschutz, Szenario, Saison, umschalten
 rollen: admin
-stand: 2026-10-25
+stand: 2026-11-07
 route: /szenarien
 ---
 
@@ -32,5 +32,7 @@ Nacht nicht zu heizen.
 Wenn der Kessel aus ist und bis zum Herbst aus bleibt. Für eine einzelne
 warme Woche ist er das falsche Werkzeug — dafür gibt es die Sollwerte.
 
-Die Seite „Saison" wird den Schalter später um Saisonzeiten ergänzen; bis
-dahin ist dieser hier der Ort dafür.
+Eine eigene Seite „Saison" war geplant und steht seit dem 07.11.2026
+nicht mehr im Menü — sie hat nie etwas angezeigt. **Dieser Schalter hier
+ist der Ort für die Saison**, und solange das so bleibt, nennt das
+Handbuch keine zweite Stelle.

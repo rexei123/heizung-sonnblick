@@ -26,16 +26,40 @@ import { formatDateTime, formatRelative, formatTemperature } from "@/lib/format"
 /** Engine-Tick gilt als „alt", wenn aelter als 10 Minuten (T0-Erwartung < 10 min). */
 const TICK_STALE_MS = 10 * 60 * 1000;
 
+/**
+ * Das Lade-Skelett. **Die Reihenfolge und die Zahl muessen zu
+ * ``buildCards`` passen**, sonst springt die Seite in dem Moment, in dem
+ * die Daten eintreffen.
+ *
+ * Diese Liste stand bis zum 07.11.2026 auf **acht** Eintraegen, waehrend
+ * ``buildCards`` **zehn** Karten baute: „Ventil pruefen" und „Zimmer zu
+ * warm" sind mit Sprint 20e dazugekommen und hier nie eingetragen
+ * worden. Der Kommentar daneben behauptete dabei ausdruecklich, beide
+ * Listen seien synchron (CLAUDE.md Paragraph 5.77 — ein Vermerk, der
+ * das Gegenteil des Codes sagt).
+ *
+ * **Eine Ausnahme bleibt, und sie ist beabsichtigt:** die Kachel
+ * „Belegungsliste" entsteht nur, wenn der Import eingerichtet ist. Sie
+ * gehoert nicht hierher — ein Skelett fuer eine Karte, die es in diesem
+ * Haus nie geben wird, waere ein Platzhalter fuer nichts.
+ *
+ * Wer eine Karte in ``buildCards`` ergaenzt, ergaenzt sie hier an
+ * derselben Stelle.
+ */
 const CARD_META: { label: string; icon: string }[] = [
   { label: "Belegte Zimmer", icon: "bed" },
   { label: "Ø Raumtemperatur", icon: "thermostat" },
   { label: "Geräte online", icon: "device_thermostat" },
   { label: "Aktive Übersteuerungen", icon: "tune" },
   { label: "Fenster offen", icon: "sensor_window" },
+  // Sprint 25 T8
+  { label: "Funk-Empfang", icon: "settings_input_antenna" },
   { label: "Letzter Algorithmen-Lauf", icon: "history" },
-  // Sprint 15d (AE-65): 7. Kachel — Skeleton-Array muss synchron sein, sonst
-  // zeigt das Lade-Skelett 6 und geladen 7.
+  // Sprint 15d (AE-65)
   { label: "Schwache Batterie", icon: "battery_alert" },
+  // Sprint 20e (T7/T10) — nachgetragen am 07.11.2026, siehe oben.
+  { label: "Ventil prüfen", icon: "build" },
+  { label: "Zimmer zu warm", icon: "local_fire_department" },
 ];
 
 // Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
@@ -84,6 +108,30 @@ interface CardConfig {
   href?: string;
 }
 
+/**
+ * Beschriftung und Farbe der Kachel „Funk-Empfang" (Sprint 25 T8).
+ *
+ * Die **Stufe** entscheidet das Backend (die Schwellen stehen in den
+ * Settings), hier steht nur, wie sie heißt und welchen Ton sie bekommt.
+ *
+ * `unbekannt` ist bewusst **neutral** und nicht rot: es heißt „noch keine
+ * einzige Meldung", also ein frisch aufgesetztes Haus. Rot zu zeigen wäre
+ * eine Behauptung über eine Anlage, die es noch nicht gibt.
+ */
+const FUNK_TEXT: Record<DashboardKpi["funkempfang_stufe"], string> = {
+  online: "online",
+  verzoegert: "verzögert",
+  keine_meldungen: "keine Meldungen",
+  unbekannt: "—",
+};
+
+const FUNK_TON: Record<DashboardKpi["funkempfang_stufe"], KpiTone> = {
+  online: "neutral",
+  verzoegert: "warning-soft",
+  keine_meldungen: "danger-soft",
+  unbekannt: "neutral",
+};
+
 function buildCards(data: DashboardKpi): CardConfig[] {
   const tick = data.last_engine_tick;
   const tickStale = tick === null || Date.now() - new Date(tick).getTime() > TICK_STALE_MS;
@@ -128,10 +176,42 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       tone: "neutral",
     },
     {
+      // Sprint 25 T8: solange **kein** Gerät bestätigt hat, dass die
+      // Fenstererkennung bei ihm eingeschaltet ist, steht hier
+      // „Erkennung inaktiv" und **keine Zahl**.
+      //
+      // Eine 0 an dieser Stelle liest sich als „es ist kein Fenster
+      // offen". Richtig ist „niemand hat gemessen": am 07.11.2026 stand
+      // hausweit keine einzige Zeile mit `open_window = true` — bei
+      // 604.694 Zeilen `false` und 49 belegten Temperatureinbrüchen
+      // allein in Zimmer 306. Die 0 ist hier die gefährlichere Zahl,
+      // weil sie wie ein Befund aussieht (§5.77).
       label: "Fenster offen",
-      value: data.zones_window_open,
+      value: data.fenstererkennung_aktiv ? data.zones_window_open : "Erkennung inaktiv",
+      subValue: data.fenstererkennung_aktiv ? undefined : "keine Rückmeldung vom Gerät",
       icon: "sensor_window",
-      tone: data.zones_window_open > 0 ? "warning-soft" : "neutral",
+      tone:
+        data.fenstererkennung_aktiv && data.zones_window_open > 0 ? "warning-soft" : "neutral",
+    },
+    {
+      // Sprint 25 T8: die Kachel, die den Ausfall vom 07.11.2026 gezeigt
+      // hätte. Sie liest das **Ende** der Kette (`sensor_reading`) und
+      // bewusst nicht den ChirpStack-Gateway-Status: an diesem Tag war
+      // das Gateway in Ordnung, Port 1883 gesperrt und die Zahl der
+      // Meldungen null. Ein Gateway-Status hätte grün gezeigt.
+      //
+      // Die **Stufe** kommt aus dem Backend, weil die Schwellen in den
+      // Settings stehen. Sie hier zu rechnen hieße, sie zu wiederholen —
+      // eine zweite Wahrheit (§5.53).
+      label: "Funk-Empfang",
+      value: FUNK_TEXT[data.funkempfang_stufe],
+      subValue:
+        data.funkempfang_alter_min !== null
+          ? `letzte Meldung vor ${data.funkempfang_alter_min} min`
+          : undefined,
+      note: `${data.funkempfang_meldungen_10min} Meldungen in 10 min`,
+      icon: "settings_input_antenna",
+      tone: FUNK_TON[data.funkempfang_stufe],
     },
     {
       label: "Letzter Algorithmen-Lauf",

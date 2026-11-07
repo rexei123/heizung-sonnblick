@@ -171,6 +171,21 @@ app.conf.update(
             "schedule": crontab(minute=50),
             "options": {"queue": "heizung_default"},
         },
+        # Sprint 25 T8: der Totalausfall-Alarm. Alle fuenf Minuten, und
+        # anders als beim Waechter darueber ist der schnelle Takt hier der
+        # Zweck: der Ausfall vom 07.11.2026 dauerte 31 Minuten und hat
+        # keinen vorhandenen Melder erreicht. Die Health-Stufe silent
+        # greift erst nach drei Stunden, und der Funk-Waechter urteilt bei
+        # zu wenigen Daten "unbekannt" — genau das, was ein Totalausfall
+        # erzeugt.
+        #
+        # Fuenf Minuten bei einer Schwelle von 15 heisst: die Mail kommt
+        # spaetestens 20 Minuten nach der letzten Meldung.
+        "totalausfall-every-5min": {
+            "task": "heizung.pruefe_totalausfall",
+            "schedule": 300.0,
+            "options": {"queue": "heizung_default"},
+        },
     },
 )
 

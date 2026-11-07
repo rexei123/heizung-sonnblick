@@ -1032,12 +1032,20 @@ journalctl -u heizung-worker -f | grep health_alert
 journalctl -u heizung-worker -n 1000 | grep health_alert | tail -100
 ```
 
-**Erwarteter Output bei Stufe-2-Alarm (offline > 24h):**
+**Erwarteter Output bei Stufe-2-Alarm (Gerät ist `silent` geworden):**
 
 ```
 WARNING ... heizung.services.health_alerts ... health_alert
   [level=2, device_id=42, dev_eui="58a0cb..", reason="offline_24h"]
 ```
+
+> **Die `24h` im Grund ist ein Name, keine Schwelle** — hier stand bis zum
+> 07.11.2026 „offline > 24h", und das war falsch. Der Alarm hängt am
+> Übergang nach `silent`, also an `HEALTH_DEGRADED_MAX_AGE_H` (**Vorgabe
+> 3 h**). Die Zeichenkette `offline_24h` stammt aus Sprint 11, als die
+> Grenze wirklich bei 24 h lag; Sprint 20e hat die Grenze bewegt, den
+> Namen nicht. Wer danach sucht, sucht also nach `offline_24h` und meint
+> drei Stunden (§5.77).
 
 **Erwarteter Output bei Stufe-3-Alarm (implausible Readings >= 10):**
 
@@ -3238,9 +3246,10 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 
 | Alarm | Auslöser | Frühestens wieder |
 |---|---|---|
-| **Thermostat meldet sich nicht** | Ein Gerät ist über 24 h stumm. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
+| **Thermostat meldet sich nicht** | Ein Gerät ist über `HEALTH_DEGRADED_MAX_AGE_H` stumm — **Vorgabe 3 h**, nicht 24. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 | **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
+| **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
