@@ -27,7 +27,6 @@ export default function HotelSettingsPage() {
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [alertEmail, setAlertEmail] = useState("");
-  const [offlineMin, setOfflineMin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -39,7 +38,6 @@ export default function HotelSettingsPage() {
     setCheckIn(cfg.data.default_checkin_time.slice(0, 5));
     setCheckOut(cfg.data.default_checkout_time.slice(0, 5));
     setAlertEmail(cfg.data.alert_email ?? "");
-    setOfflineMin(String(cfg.data.alert_device_offline_minutes));
   }, [cfg.data]);
 
   const handle = async (e: FormEvent) => {
@@ -60,9 +58,6 @@ export default function HotelSettingsPage() {
     }
     if ((cfg.data.alert_email ?? "") !== alertEmail) {
       payload.alert_email = alertEmail.trim() || null;
-    }
-    if (parseInt(offlineMin, 10) !== cfg.data.alert_device_offline_minutes) {
-      payload.alert_device_offline_minutes = parseInt(offlineMin, 10);
     }
 
     if (Object.keys(payload).length === 0) {
@@ -139,14 +134,26 @@ export default function HotelSettingsPage() {
               (AE-66), der aus gutem Grund in der Oberfläche steht.
               Handgriff zum Ändern: RUNBOOK §10q.
             */}
-            <NumField
-              id="cfg-off"
-              label="Gerät offline nach (Min)"
-              value={offlineMin}
-              onChange={setOfflineMin}
-              min={1}
-              max={1440}
-            />
+            {/*
+              Hier stand „Gerät offline nach (Min)" mit Vorgabe 120.
+              **Entfernt am 07.11.2026 — das Feld hatte keinen
+              Konsumenten.** Ein `grep` über Backend und Frontend fand
+              die Spalte, das Schema, dieses Feld und `types.ts` — und
+              keine Stelle, die den Wert liest, um etwas zu entscheiden.
+
+              Was tatsächlich wirkt, sind `HEALTH_HEALTHY_MAX_AGE_H`
+              (2 h) und `HEALTH_DEGRADED_MAX_AGE_H` (3 h) in den
+              Settings. Die stehen dort und nicht hier, weil am
+              zweiten Wert der Funkstille-Alarm hängt — dieselbe
+              Begründung wie bei den Batterie-Grenzen darüber.
+
+              Ein Schalter ohne Wirkung ist schlimmer als kein
+              Schalter, und ein Hinweis „wirkt nicht" wäre ein
+              Schalter mit einer Erklärung, warum er nutzlos ist
+              (§5.77). Die **Spalte** bleibt in der Datenbank —
+              additiv und rückfall-sicher, wie bei
+              `alert_battery_warn_percent`.
+            */}
           </Card>
 
           {error ? (

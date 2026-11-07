@@ -53,6 +53,22 @@ interface NavGroup {
   items: NavItem[];
 }
 
+// **Drei Einträge sind am 07.11.2026 aus der Seitenleiste genommen worden**
+// (Entscheidung des Betreibers): „Profile", „Saison" und „Gateway". Alle
+// drei Seiten zeigen nur einen Platzhalter — ein Menüpunkt, der zu „In
+// Vorbereitung" führt, kostet bei jedem Blick eine Enttäuschung und sagt
+// nichts, was man nicht auch nicht wissen könnte.
+//
+// **Die Routen bleiben erreichbar und leiten NICHT um.** Zwei Gründe. Ein
+// Lesezeichen auf `/profile` landet weiter auf der Seite, die „In
+// Vorbereitung" sagt — das ist wahr; eine Umleitung aufs Dashboard wäre
+// eine stumme Lüge („ich habe Profile geklickt und bekomme das
+// Dashboard"). Und der Handbuch-Spiegel (`test_handbuch_spiegel.py`)
+// prüft, dass jede Route in den Kopfdaten eines Artikels in
+// `ROUTE_ZU_ARTIKEL` steht; Artikel und Zuordnung bleiben deshalb
+// unangetastet. Entfernt ist **nur** die Sichtbarkeit.
+//
+// „Szenarien" bleibt: die Seite funktioniert.
 const NAV: NavGroup[] = [
   {
     label: "Übersicht",
@@ -77,7 +93,6 @@ const NAV: NavGroup[] = [
         icon: "schedule",
       },
       { href: "/raumtypen", label: "Raumtypen", icon: "category" },
-      { href: "/profile", label: "Profile", icon: "assignment_ind" },
       { href: "/szenarien", label: "Szenarien", icon: "movie" },
     ],
   },
@@ -85,7 +100,6 @@ const NAV: NavGroup[] = [
     label: "Geräte",
     items: [
       { href: "/devices", label: "Thermostate", icon: "thermostat" },
-      { href: "/einstellungen/gateway", label: "Gateway", icon: "router" },
     ],
   },
   {
@@ -102,7 +116,6 @@ const NAV: NavGroup[] = [
     label: "Einstellungen",
     items: [
       { href: "/einstellungen/hotel", label: "Hotel", icon: "apartment" },
-      { href: "/einstellungen/saison", label: "Saison", icon: "wb_sunny" },
       { href: "/einstellungen/benutzer", label: "Benutzer", icon: "group", nurAdmin: true },
       { href: "/einstellungen/api", label: "API & Webhooks", icon: "api" },
     ],

@@ -30,6 +30,14 @@ const dashboardKpiSchema = z.object({
   // hier und nicht ein ``as DashboardKpi``.
   valve_check_count: z.number(),
   room_too_warm_count: z.number(),
+  // Sprint 25 T8: dieselbe Falle zum dritten Mal, und diesmal hat der
+  // Typecheck sie sofort gemeldet. Ohne diese Keys strippt Zod sie, und
+  // die Kachel zeigte stumm "undefined" (Paragraph 5.64).
+  funkempfang_stufe: z.enum(["online", "verzoegert", "keine_meldungen", "unbekannt"]),
+  funkempfang_letzte_meldung: z.string().nullable(),
+  funkempfang_alter_min: z.number().nullable(),
+  funkempfang_meldungen_10min: z.number(),
+  fenstererkennung_aktiv: z.boolean(),
 });
 
 export const dashboardApi = {

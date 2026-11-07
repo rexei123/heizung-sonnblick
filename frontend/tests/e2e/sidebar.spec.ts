@@ -1,8 +1,15 @@
 import { STANDARD_ADMIN, test, expect, type Page } from "./fixtures";
 
 /**
- * Sprint 9.13b — Sidebar-Migration auf 14 Eintraege in 5 Gruppen +
- * Mobile-Sheet via shadcn. Stub-Pages (8) mit EmptyState-Komponente.
+ * Sprint 9.13b — Sidebar-Migration auf 5 Gruppen + Mobile-Sheet via
+ * shadcn. Stub-Pages mit EmptyState-Komponente.
+ *
+ * **Die Zahl der Eintraege steht nicht mehr hier, sondern nur in den
+ * Pruefungen** (Stand 07.11.2026: 12 fuer Admin, 11 fuer Mitarbeiter).
+ * Sie hat sich dreimal geaendert — 14, dann 15, jetzt 12 — und eine
+ * Zahl in der Dateiueberschrift wird beim Nachziehen regelmaessig
+ * vergessen. Jede Pruefung nennt ihre Zahl mit Grund an der Stelle, an
+ * der sie zaehlt (CLAUDE.md Paragraph 5.77).
  *
  * Backend-Mock: nur fuer / (Dashboard-Empty-State). Sidebar-Tests sind
  * Layout-getrieben, brauchen keinen API-State.
@@ -45,11 +52,11 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
    * **Am 26.10. korrigiert:** er stand zuerst in einer eigenen Gruppe
    * „Hilfe" am Ende (also 6 Gruppen) und sitzt seither in „Uebersicht",
    * direkt unter „Belegungen" — Entscheidung des Betreibers. Damit sind
-   * es wieder **5** Gruppen bei 15 Eintraegen. Beide Aenderungen stehen
+   * es wieder **5** Gruppen. Beide Aenderungen stehen
    * hier mit Grund, damit niemand sie spaeter fuer stillschweigend
    * nachgezogene Zahlen haelt.
    */
-  test("Desktop-Sidebar zeigt Admin 15 Eintraege in 5 Gruppen", async ({ page }) => {
+  test("Desktop-Sidebar zeigt Admin 12 Eintraege in 5 Gruppen", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mitRolle(page, "admin");
 
@@ -70,12 +77,16 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     // einzigen Eintrag war Rahmen ohne Inhalt.
     await expect(nav.getByRole("heading", { level: 3, name: "Hilfe" })).toHaveCount(0);
 
-    // 15 Nav-Links
+    // **12, nicht 15** — am 07.11.2026 sind „Profile", „Saison" und
+    // „Gateway" aus der Leiste genommen worden (Sprint 25 T8). Alle drei
+    // Seiten zeigten nur „In Vorbereitung". Die Routen bleiben
+    // erreichbar, sie stehen nur nicht mehr im Menue; der Stub-Test
+    // weiter unten prueft genau das.
     const links = nav.getByRole("link");
-    await expect(links).toHaveCount(15);
+    await expect(links).toHaveCount(12);
   });
 
-  test("Desktop-Sidebar zeigt Mitarbeiter 14 Eintraege ohne Benutzer", async ({ page }) => {
+  test("Desktop-Sidebar zeigt Mitarbeiter 11 Eintraege ohne Benutzer", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await mitRolle(page, "mitarbeiter");
 
@@ -85,7 +96,9 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     await expect(nav).toBeVisible();
 
     // Die Gruppe „Einstellungen" bleibt — sie verliert nur einen von
-    // sechs Einträgen. Eine Gruppe fällt erst weg, wenn sie leer würde.
+    // drei Einträgen (es waren sechs, bis „Profile", „Saison" und
+    // „Gateway" am 07.11.2026 aus der Leiste gingen). Eine Gruppe fällt
+    // erst weg, wenn sie leer würde.
     await expect(
       nav.getByRole("heading", { level: 3, name: "Einstellungen" }),
     ).toBeVisible();
@@ -94,7 +107,8 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
     // Das Handbuch ist fuer alle Rollen lesbar — es ist der einzige
     // Eintrag, bei dem das ausdruecklich gefordert war.
     await expect(nav.getByRole("link", { name: "Handbuch" })).toBeVisible();
-    await expect(nav.getByRole("link")).toHaveCount(14);
+    // 11 = die 12 des Admin minus „Benutzer" (Sprint 25 T8, siehe oben).
+    await expect(nav.getByRole("link")).toHaveCount(11);
   });
 
   test("Mobile-Sheet oeffnet sich via Hamburger und schliesst nach Navigation", async ({
@@ -132,6 +146,11 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
 
     // Sprint 9.17 (T10): Sprint-Nummer-Badges sind raus, Stubs zeigen
     // einheitlich „In Vorbereitung".
+    // Sprint 25 T8 (07.11.2026): diese beiden Seiten stehen nicht mehr in
+    // der Seitenleiste — aber ihre Routen bleiben erreichbar und leiten
+    // NICHT um. Genau das prueft dieser Test weiterhin: wer einen alten
+    // Lesezeichen-Link oeffnet, landet auf einer Seite, die sagt, was sie
+    // ist. Eine Umleitung aufs Dashboard waere eine stumme Luege.
     const stubs: { path: string; title: string }[] = [
       { path: "/profile", title: "Profile" },
       { path: "/einstellungen/saison", title: "Saison" },
@@ -166,13 +185,18 @@ test.describe("Sprint 9.13b Sidebar-Migration", () => {
       r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
 
-    await page.goto("/einstellungen/saison");
+    // Geprueft wird an „API & Webhooks", seit der Saison-Eintrag am
+    // 07.11.2026 aus der Leiste genommen wurde (Sprint 25 T8). Die Frage
+    // ist dieselbe und sie ist der Grund fuer diesen Test: ein
+    // startsWith("/einstellungen") wuerde jeden Untermenue-Eintrag
+    // gleichzeitig markieren.
+    await page.goto("/einstellungen/api");
 
-    // Saison-Link hat aria-current=page
-    const saisonLink = page
+    // Der aufgerufene Eintrag hat aria-current=page
+    const apiLink = page
       .getByRole("navigation", { name: "Hauptnavigation" })
-      .getByRole("link", { name: /Saison/i });
-    await expect(saisonLink).toHaveAttribute("aria-current", "page");
+      .getByRole("link", { name: /API & Webhooks/i });
+    await expect(apiLink).toHaveAttribute("aria-current", "page");
 
     // Hotel-Link in derselben Gruppe ist NICHT aktiv (sonst hätte
     // startsWith /einstellungen alle Untermenues markiert)

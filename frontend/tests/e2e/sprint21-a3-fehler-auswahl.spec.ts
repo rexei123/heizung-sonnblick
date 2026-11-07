@@ -114,6 +114,13 @@ const KPI = {
   battery_low_count: 2,
   valve_check_count: 2,
   room_too_warm_count: 1,
+  // Sprint 25 T8: Zod verlangt diese fuenf. Werte = Normalfall (Empfang
+  // in Ordnung, Fenstererkennung auf keinem Geraet bestaetigt).
+  funkempfang_stufe: "online" as const,
+  funkempfang_letzte_meldung: new Date(Date.now() - 60_000).toISOString(),
+  funkempfang_alter_min: 1,
+  funkempfang_meldungen_10min: 104,
+  fenstererkennung_aktiv: false,
 };
 
 async function mockApi(page: Page): Promise<void> {

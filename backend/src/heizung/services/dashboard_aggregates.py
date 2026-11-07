@@ -20,7 +20,7 @@ Konventionen:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import cast
 
@@ -283,3 +283,41 @@ async def count_battery_low(session: AsyncSession) -> int:
     )
     verdicts = await battery_verdicts(session, device_ids)
     return sum(1 for v in verdicts.values() if v.stage in ("warn", "kritisch"))
+
+
+async def fenstererkennung_bestaetigt(session: AsyncSession, *, tage: int = 7) -> bool:
+    """Hat in den letzten ``tage`` Tagen ein Geraet die Fenstererkennung
+    als **eingeschaltet** gemeldet?
+
+    Quelle ist ``sensor_reading.ow_detection_enabled`` — die Antwort auf
+    ``0x46`` (Migration 0038). ``True`` heisst: mindestens ein Geraet hat
+    bestaetigt, dass die Erkennung bei ihm laeuft.
+
+    **Warum die Kachel das braucht.** Ohne diese Angabe zeigt „Fenster
+    offen" eine **0**, und eine 0 liest sich als „es ist kein Fenster
+    offen". Richtig ist aber „niemand hat gemessen": am 07.11.2026 stand
+    hausweit **keine einzige** Zeile mit ``open_window = true`` — bei
+    604.694 Zeilen ``false`` und 49 belegten Temperatureinbruechen allein
+    in Zimmer 306. Eine 0 an dieser Stelle ist die gefaehrlichere Zahl,
+    weil sie wie ein Befund aussieht (Paragraph 5.77).
+
+    **Warum sieben Tage und nicht „jemals".** Zwei Gruende, und der
+    zweite ist der wichtigere.
+
+    Billig: ``ow_detection_enabled`` hat keinen Index, und die Spalte ist
+    in fast allen Zeilen ``NULL``. „Jemals" waere ein Scan ueber alle 190
+    Chunks, um eine Abwesenheit zu beweisen — je Seitenaufruf. Mit der
+    Zeitgrenze schliesst TimescaleDB alle Chunks bis auf rund acht aus.
+
+    Und inhaltlich richtig: eine Bestaetigung vom Juni ist keine Aussage
+    ueber heute. Das Geraet kann getauscht, zurueckgesetzt oder neu
+    gepairt worden sein. Wer wissen will, ob die Erkennung **jetzt**
+    laeuft, fragt die Rueckmeldung der letzten Woche.
+    """
+    stmt = (
+        select(SensorReading.device_id)
+        .where(SensorReading.ow_detection_enabled.is_(True))
+        .where(SensorReading.time > datetime.now(tz=UTC) - timedelta(days=tage))
+        .limit(1)
+    )
+    return (await session.scalar(stmt)) is not None

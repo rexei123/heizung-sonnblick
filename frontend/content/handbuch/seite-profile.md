@@ -3,9 +3,15 @@ titel: Profile
 kategorie: Die Seiten
 stichworte: Profile, Heizprofil, Tagprofil, Nachtprofil, Wochenende, in Vorbereitung
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-07
 route: /profile
 ---
+
+> **Nicht mehr im Menü (ab 07.11.2026).** Diese Seite steht nicht mehr in
+> der Seitenleiste, weil sie nichts anzeigt — ein Menüpunkt, der zu „In
+> Vorbereitung" führt, kostet bei jedem Blick eine Enttäuschung. Über
+> einen Lesezeichen-Link ist sie weiter erreichbar und sagt dann, was sie
+> ist. Sie kommt zurück, wenn es etwas zu bedienen gibt.
 
 > **Diese Seite ist leer.** Sie ist für Tag-, Nacht- und
 > Wochenend-Heizprofile vorgesehen und zeigt bis dahin nur ihren Namen.

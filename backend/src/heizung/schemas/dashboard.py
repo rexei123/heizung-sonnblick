@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_serializer
 
@@ -52,6 +53,25 @@ class DashboardKpiRead(BaseModel):
     # haette nach der Erweiterung etwas Falsches behauptet (§5.77).
     valve_check_count: int = 0
     room_too_warm_count: int = 0
+
+    # --- Sprint 25 T8: Kachel „Funk-Empfang" ------------------------------
+    # Liest das **Ende** der Kette (``sensor_reading``) und bewusst nicht
+    # den ChirpStack-Gateway-Status: am 07.11.2026 war das Gateway in
+    # Ordnung, Port 1883 gesperrt und die Zahl der Meldungen null. Ein
+    # Gateway-Status haette gruen gezeigt.
+    #
+    # Die Stufe wird **serverseitig** gebildet, weil die Schwellen in den
+    # Settings stehen. Sie im Frontend zu rechnen hiesse, die Schwellen
+    # dort zu wiederholen — eine zweite Wahrheit (Paragraph 5.53).
+    funkempfang_stufe: Literal["online", "verzoegert", "keine_meldungen", "unbekannt"]
+    funkempfang_letzte_meldung: datetime | None
+    funkempfang_alter_min: int | None
+    funkempfang_meldungen_10min: int
+    # Sprint 25 T8: ob ueberhaupt ein Geraet die Fenstererkennung als
+    # eingeschaltet gemeldet hat (letzte 7 Tage). Steuert, ob die Kachel
+    # „Fenster offen" eine Zahl oder „Erkennung inaktiv" zeigt. Siehe
+    # ``dashboard_aggregates.fenstererkennung_bestaetigt``.
+    fenstererkennung_aktiv: bool = False
 
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:
