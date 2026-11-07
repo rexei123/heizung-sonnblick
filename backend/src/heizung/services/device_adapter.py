@@ -183,12 +183,19 @@ async def detect_user_override(
     (``evaluate_room.delay``), **bevor** diese Funktion laeuft. Der Worker
     kann den Befehl also dazwischen erzeugen.
 
-    Belegt in Zimmer 209 am 07.11.2026: nach einem 31-minuetigen Ausfall
-    meldete das Geraet ``25,0`` mit ``uplink.time = 07:00:16.774``, und
-    der Engine-Befehl ``21,0`` ging um ``07:00:21.810`` hinaus — **fuenf
-    Sekunden spaeter**. Die Drehung des Gastes wurde als Antwort auf einen
-    Befehl gewertet, den es zu diesem Zeitpunkt noch nicht gab, und
-    verschwand ohne jede Spur.
+    ``received_at`` ist die **Gateway-Zeit** (``uplink.time``, gesetzt in
+    ``mqtt_subscriber._handle_override_detection``), ``sent_to_gateway_at``
+    die **Serverzeit** des Versands. Die beiden koennen sich ueberkreuzen,
+    und dann war die Differenz negativ.
+
+    **Abgrenzung, damit niemand den falschen Schluss erbt:** der Vorfall
+    in Zimmer 209 am 07.11.2026 hatte eine **andere** Ursache. Dort kam
+    die Drehung nur in ``0x81``-Periodenberichten an, und
+    ``_handle_override_detection`` steigt fuer alles aus, was kein
+    ``0x28``-Frame ist — diese Funktion wurde also nie gerufen. Der
+    ``0x28``-Frame lag in der 31-minuetigen Luecke. Der Fehler hier ist
+    davon unabhaengig und trifft ``0x28``-Frames, die kurz nach einem
+    Downlink ankommen.
 
     Die Grenze in der ``WHERE``-Bedingung nimmt dem Rennen die Wirkung:
     verglichen wird gegen den Befehl, der **zum Zeitpunkt des Uplinks**

@@ -784,19 +784,33 @@ async def _ack_fenster_zeilen(session: AsyncSession, room_id: int) -> list[objec
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def test_fall_209_uplink_vor_dem_befehl_wird_override(session: AsyncSession) -> None:
-    """**Der Vorfall vom 07.11.2026, nachgebaut.**
+async def test_uplink_vor_dem_befehl_wird_override(session: AsyncSession) -> None:
+    """Ein Uplink, der **aelter** ist als der letzte Befehl, darf nicht als
+    dessen Antwort gelten.
 
-    Das Geraet meldete ``25,0`` mit ``uplink.time = 07:00:16.774``. Der
-    Engine-Befehl ``21,0`` ging **fuenf Sekunden spaeter** hinaus
-    (``07:00:21.810``), weil ``_persist_uplink`` die Auswertung in die
-    Warteschlange stellt, bevor die Erkennung laeuft.
+    ``received_at`` ist ``uplink.time``, also die **Gateway-Zeit**
+    (``mqtt_subscriber._handle_override_detection``). Der Engine-Befehl
+    traegt die **Serverzeit** seines Versands. Beide koennen sich
+    ueberkreuzen, weil ``_persist_uplink`` die Auswertung in die
+    Warteschlange stellt (``evaluate_room.delay``), **bevor** die
+    Erkennung laeuft: der Worker erzeugt den Befehl dazwischen.
 
-    Vorher nahm die Funktion den **global letzten** Befehl, rechnete
-    ``received_at - sent_at = -5 s``, fand das ``<= 60 s`` und verwarf die
-    Drehung des Gastes stillschweigend. Jetzt zaehlt der Befehl, der
-    **vor** dem Uplink hinausging — und das ist der von zwei Stunden
-    vorher.
+    Vorher nahm die Funktion den **global letzten** Befehl und rechnete
+    eine **negative** Differenz, die ``<= 60 s`` erfuellt — eine Drehung
+    wurde damit stillschweigend als Quittung gewertet. Jetzt zaehlt der
+    Befehl, der **vor** dem Uplink hinausging.
+
+    > **Was dieser Test NICHT ist: der Fall Zimmer 209 vom 07.11.2026.**
+    > Die erste Fassung hat ihn so genannt, und das war falsch.
+    > ``_handle_override_detection`` steigt fuer alles aus, was **kein**
+    > ``0x28``-Frame ist (``report_type != manual_target_change``) —
+    > Geraet 60 hat an diesem Tag **52 Frames gesendet, alle ``0x81``**,
+    > und ``detect_user_override`` wurde dort **nie gerufen**. Die
+    > Drehung ging verloren, weil ihr ``0x28``-Frame in der
+    > 31-minuetigen Luecke lag, nicht wegen des Ack-Fensters.
+    >
+    > Der Fehler hier ist trotzdem echt: er trifft ``0x28``-Frames, die
+    > kurz nach einem Downlink ankommen. Nur hat er 209 nicht verursacht.
     """
     room, device = await _raum_mit_geraet(session)
     uplink_zeit = datetime(2026, 11, 7, 7, 0, 16, 774000, tzinfo=UTC)
