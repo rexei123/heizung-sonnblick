@@ -156,6 +156,80 @@ relativ schreiben. Ganz weglassen darf man es nie.
 > Tippfehler hat den zweiten Stack verhindert, nicht die Vorsicht. Siehe
 > CLAUDE.md §5.78.
 
+### 5.0a Firewall, Port oder Bindung ändern: vorher belegen, nachher messen
+
+**Gilt für jede Änderung an einer Firewall-Regel, einem veröffentlichten
+Port oder einer Dienst-Bindung** — `iptables`, `ufw`, Hetzner Cloud
+Firewall, `ports:` in der Compose-Datei.
+
+> **Anlass, 07.11.2026.** Eine Regel
+> `-i eth0 -p tcp --dport 1883 -j DROP` in `DOCKER-USER` hat die Anlage
+> **31 Minuten** ohne Messwerte stehen lassen. Die Begründung dafür stand
+> auf der Annahme, auf Port 1883 käme von außen nichts Legitimes — und
+> das Gateway publiziert seine Uplinks genau dort, angemeldet als
+> `gateway-ug65`. Einzelheiten:
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`.
+
+#### Schritt 1 — vorher belegen, wer den Port benutzt
+
+**Nicht ableiten. Nicht aus der `.env` schließen. Lesen.** Eine fehlende
+Umgebungsvariable sagt **nichts** darüber, wer sich anmelden kann: die
+Benutzerdatenbank des Brokers ist eine gemountete Datei und überlebt das
+Entfernen der Variablen.
+
+**SSH (heizung-test, root)** — welche Benutzer der Broker kennt:
+
+```bash
+docker exec deploy-mosquitto-1 sh -c 'cut -d: -f1 /mosquitto/config/passwd'
+```
+
+Welche **externen** Clients tatsächlich verbunden sind oder waren:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto | grep -E 'New client connected' | grep -vE '127\.0\.0\.1|172\.1[0-9]\.' | tail -20
+```
+
+Und was gerade offen ist:
+
+```bash
+ss -tn state established '( sport = :1883 )' | grep -v 127.0.0.1
+```
+
+> **Die Falle, in die ich gelaufen bin:** eine **stehende** Sitzung
+> erzeugt **keine** Logzeilen. Wer Verbindungs*versuche* zählt, zählt
+> Störungen — nicht Benutzer. Ein Client, der seit Tagen verbunden ist,
+> ist im Protokoll **unsichtbar** und in `ss` sichtbar. Beides lesen.
+
+Für HTTP-Ports dasselbe im Caddy-Zugriffsprotokoll:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -200 /var/log/caddy/cs-test.access.log'
+```
+
+#### Schritt 2 — nachher innerhalb von zwei Minuten messen
+
+**SSH (heizung-test, root)**, direkt nach der Änderung:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -tAc "SELECT count(*) AS meldungen_2min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '2 minutes';"
+```
+
+**Erwartung: rund 20 Meldungen von 20 Geräten.** Bleiben sie aus:
+**sofort zurück**, ohne weitere Diagnose. Die Ursache sucht man mit
+laufender Anlage, nicht mit stehender.
+
+**Warum zwei Minuten und nicht fünf.** Die Geräte senden im
+10-Minuten-Takt, aber über hundert Geräte verteilt — in zwei Minuten
+kommen normal rund zwanzig Meldungen, das ist eindeutig genug. Und zwei
+Minuten sind kurz genug, dass der **Gerätepuffer** die Lücke noch deckt:
+das UG65 hat am 07.11. rund zwölf Minuten gepuffert und nachgeliefert.
+Diese Reserve ist aus **einem** Fall geschätzt und kein Versprechen —
+aber zwei Minuten liegen sicher darin.
+
+> **Der Rückweg gehört vor die Änderung, nicht danach.** Wer eine Regel
+> einfügt, hat den `-D`-Befehl mit identischer Regelangabe **vorher**
+> bereitliegen. Nach dem Einfügen ist keine Zeit, ihn zu formulieren.
+
 
 ### 5.1 Deploy-Timer-Status
 
