@@ -221,3 +221,47 @@ def test_jeder_befehl_den_wir_senden_hat_ein_zuhause() -> None:
         "Reply-Codes ohne Eintrag in REPLY_COMMANDS — ihre Antwort landet "
         f"in decodePeriodicReport und ist verloren: {fehlend}"
     )
+
+
+#: Die Bytes einer ``0x46``-Antwort mit angehaengtem Keepalive, in der
+#: Form des Live-Frames vom 26.10.2026 (drei bzw. hier vier Reply-Bytes,
+#: dann neun Keepalive-Bytes).
+#:
+#: **Konstruiert, nicht gemessen.** Es ist in diesem Haus noch nie eine
+#: ``0x46``-Antwort eingegangen (Befund 05.11.2026: 0 Zeilen, 0
+#: Protokolltreffer) — genau deshalb wurde der Speicher dafuer gebaut.
+#: Die Bytes folgen der Hersteller-Doku §04: ``0x46 {enabled} {duration/5}
+#: {delta*10}``, hier ``01 02 0F`` = an, 10 Minuten, 1,5 °C.
+OW_STATUS_FRAME = bytes(
+    [0x46, 0x01, 0x02, 0x0F, 0x81, 0x12, 0x9B, 0x7C, 0xD9, 0xD9, 0x11, 0xF0, 0x30]
+)
+
+
+def test_ow_status_reply_wird_mit_keepalive_dekodiert() -> None:
+    """Reply **und** Keep-alive aus demselben Frame — wie bei 0x15.
+
+    Der Punkt ist derselbe wie beim Grenzen-Test: ein Reply-Code, der
+    nicht in ``REPLY_COMMANDS`` steht, landet in
+    ``decodePeriodicReport``, und dann kommt im ``object``-Block nur
+    ``{command: 70}`` an. Die Antwort auf „ist die Fenstererkennung an"
+    waere damit verloren, **bevor** der Subscriber sie sehen kann.
+
+    Die Erwartungswerte fuer die Parameter stehen in der Hersteller-Doku
+    (``duration = byte * 5``, ``delta = byte / 10``), nicht in meiner
+    Vorstellung: 0x02 -> 10 Minuten, 0x0F -> 1,5 °C.
+    """
+    daten = _decode(OW_STATUS_FRAME)["data"]
+
+    assert daten.get("report_type") == "open_window_status_reply", (
+        f"0x46 nicht an den Reply-Zweig geroutet: {daten!r}"
+    )
+    assert daten["open_window_detection_enabled"] is True
+    assert daten["open_window_detection_duration_min"] == 10
+    assert daten["open_window_detection_delta_c"] == 1.5
+
+    # Der Keepalive darf nicht verloren gehen — das war der 0x15-Fehler.
+    assert daten["temperature"] == 22.35
+    assert daten["battery_voltage"] == 3.5
+    # Und er traegt den **Zustand**, der nicht mit dem **Stand**
+    # verwechselt werden darf: Erkennung an, Fenster zu.
+    assert daten["openWindow"] is False

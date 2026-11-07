@@ -641,30 +641,129 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
 
 
 async def _handle_open_window_status_report(uplink: ChirpStackUplink) -> None:
-    """Sprint 9.11x.b T5: loggt OW-Status aus Codec-Output (S6: Logger,
-    kein DB-Insert, kein Schema-Drift).
+    """Schreibt die Antwort auf ``0x46`` nach ``sensor_reading``.
 
-    Codec emittiert nach Antwort auf 0x46-Downlink (Vendor-Doku §04):
+    Codec emittiert nach Antwort auf den 0x46-Downlink (Vendor-Doku §04):
         - ``open_window_detection_enabled``: bool
         - ``open_window_detection_duration_min``: int (= byte * 5)
         - ``open_window_detection_delta_c``: float (= byte / 10)
 
-    Audit-Trail via journalctl (event_type-Marker im Log-String macht
-    den Eintrag grep-bar). Bewusste S6-Entscheidung statt event_log-DB-
-    Insert: Maintenance-Reports sind seltene Events (~1x pro Bulk-
-    Aktivierung), DB-Audit waere Overkill.
+    **Warum eine Zeile und nicht nur ein Protokolleintrag — der Anlass,
+    05.11.2026.** Bis hierher war das eine reine Logger-Zeile, als
+    bewusste S6-Entscheidung aus Sprint 9.11x.b („seltene Events,
+    DB-Audit waere Overkill"). Die Begruendung hat nicht gehalten: auf die
+    Frage „ist die Fenstererkennung ueberhaupt aktiv?" gab es im ganzen
+    System keine Antwort. ``control_command`` fuehrt nur Sollwerte,
+    ``business_audit`` keine passende Aktion, und ``sensor_reading``
+    bekam keine Zeile, weil ``open_window_status_reply`` in
+    ``REPLY_REPORT_TYPES`` steht. Das Container-Protokoll reichte
+    **18 Stunden** zurueck.
+
+    Die Haeufigkeit war also das falsche Mass. Entscheidend ist nicht, wie
+    oft die Antwort kommt, sondern **wie oft die Frage gestellt wird** —
+    und sie wird bei jeder Aenderung an der Fenstererkennung erneut
+    gestellt. Ein Speicher, der vor der naechsten Frage verfaellt, macht
+    jede Antwort zu einer Vermutung (§5.68).
+
+    Gleiche Form wie ``_handle_temp_range_report`` (0x15, Sprint 23 T1):
+    eine Zeile, die **nur** diese Felder traegt. Das ist Absicht — eine
+    Befehlsantwort hat weder Temperatur noch Ventilstellung, und die
+    Leser nehmen die juengste Zeile, **die das Feld fuehrt**. Dem
+    Zonen-Aggregat taeuscht sie nichts vor, weil es auf ``temperature IS
+    NOT NULL`` filtert.
+
+    **Der angehaengte Keepalive geht dabei verloren**, so wie bei 0x15:
+    der Reply-Zweig verwirft ihn, weil ``REPLY_REPORT_TYPES`` den
+    regulaeren Reading-Insert ueberspringt. Das ist Bestandsverhalten und
+    hier nicht geaendert — es gehoert zusammen mit der 0x15-Seite
+    angesehen, nicht einseitig.
+
+    Die Protokollzeile bleibt zusaetzlich bestehen: sie ist grep-bar und
+    sagt auch dann etwas, wenn das Schreiben scheitert.
     """
     obj = uplink.object or {}
     if "open_window_detection_enabled" not in obj:
         return
+
+    roh_enabled = obj.get("open_window_detection_enabled")
+    roh_dauer = obj.get("open_window_detection_duration_min")
+    roh_delta = obj.get("open_window_detection_delta_c")
+
+    # Der Codec liefert einen echten Wahrheitswert (``bytes[1] === 0x01``).
+    # Alles andere ist eine Antwort, die wir nicht deuten — lieber „keine
+    # Zeile" als ein ``False``, das wie ein Befund aussieht.
+    if not isinstance(roh_enabled, bool):
+        logger.warning(
+            "ow-status-Antwort mit untauglichem enabled dev_eui=%s enabled=%r",
+            uplink.deviceInfo.devEui,
+            roh_enabled,
+        )
+        return
+
+    dauer_min = _als_ganze_zahl(roh_dauer)
+    delta_c = _to_decimal(roh_delta)
+    if dauer_min is None or delta_c is None:
+        logger.warning(
+            "ow-status-Antwort ohne brauchbare Parameter dev_eui=%s dauer=%r delta=%r",
+            uplink.deviceInfo.devEui,
+            roh_dauer,
+            roh_delta,
+        )
+        return
+
+    # Die Spannen kommen aus dem Downlink-Adapter, nicht als Zahlen hier
+    # — eine zweite Wahrheit darueber, was das Geraet annimmt, liefe beim
+    # ersten Nachjustieren auseinander. Dieselbe Regel wie bei 0x15.
+    if (
+        dauer_min < downlink_adapter.OW_DURATION_MIN_MIN
+        or dauer_min > downlink_adapter.OW_DURATION_MIN_MAX
+        or dauer_min % downlink_adapter.OW_DURATION_STEP_MIN != 0
+        or delta_c < downlink_adapter.OW_DELTA_MIN_C
+        or delta_c > downlink_adapter.OW_DELTA_MAX_C
+    ):
+        # Lieber „nicht bestaetigt" als ein Parameter, den es nicht gibt:
+        # die Anzeige sagt dann, dass noch keine Antwort kam, und das ist
+        # wahr.
+        logger.warning(
+            "ow-status-Antwort ausserhalb der Spanne dev_eui=%s dauer=%s delta=%s",
+            uplink.deviceInfo.devEui,
+            dauer_min,
+            delta_c,
+        )
+        return
+
     dev_eui = uplink.deviceInfo.devEui.lower()
+    try:
+        async with SessionLocal() as session:
+            device_id = await session.scalar(select(Device.id).where(Device.dev_eui == dev_eui))
+            if device_id is None:
+                logger.warning("ow-status-Antwort unbekannter DevEUI %s verworfen", dev_eui)
+                return
+            session.add(
+                SensorReading(
+                    device_id=device_id,
+                    time=datetime.now(tz=UTC),
+                    fcnt=uplink.fCnt,
+                    ow_detection_enabled=roh_enabled,
+                    ow_detection_duration_min=dauer_min,
+                    ow_detection_delta_c=delta_c,
+                )
+            )
+            await session.commit()
+    except Exception:
+        # Fehler sind nicht toedlich: wir protokollieren und halten die
+        # Subscriber-Schleife nicht an (dieselbe Haltung wie bei 0x15 und
+        # beim FW-Bericht).
+        logger.exception("ow-status-Antwort nicht gespeichert dev_eui=%s", dev_eui)
+        return
+
     logger.info(
         "event_type=MAINTENANCE_VICKI_CONFIG_REPORT dev_eui=%s "
         "enabled=%s duration_min=%s delta_c=%s",
         dev_eui,
-        obj.get("open_window_detection_enabled"),
-        obj.get("open_window_detection_duration_min"),
-        obj.get("open_window_detection_delta_c"),
+        roh_enabled,
+        dauer_min,
+        delta_c,
     )
 
 

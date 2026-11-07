@@ -156,6 +156,80 @@ relativ schreiben. Ganz weglassen darf man es nie.
 > Tippfehler hat den zweiten Stack verhindert, nicht die Vorsicht. Siehe
 > CLAUDE.md §5.78.
 
+### 5.0a Firewall, Port oder Bindung ändern: vorher belegen, nachher messen
+
+**Gilt für jede Änderung an einer Firewall-Regel, einem veröffentlichten
+Port oder einer Dienst-Bindung** — `iptables`, `ufw`, Hetzner Cloud
+Firewall, `ports:` in der Compose-Datei.
+
+> **Anlass, 07.11.2026.** Eine Regel
+> `-i eth0 -p tcp --dport 1883 -j DROP` in `DOCKER-USER` hat die Anlage
+> **31 Minuten** ohne Messwerte stehen lassen. Die Begründung dafür stand
+> auf der Annahme, auf Port 1883 käme von außen nichts Legitimes — und
+> das Gateway publiziert seine Uplinks genau dort, angemeldet als
+> `gateway-ug65`. Einzelheiten:
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`.
+
+#### Schritt 1 — vorher belegen, wer den Port benutzt
+
+**Nicht ableiten. Nicht aus der `.env` schließen. Lesen.** Eine fehlende
+Umgebungsvariable sagt **nichts** darüber, wer sich anmelden kann: die
+Benutzerdatenbank des Brokers ist eine gemountete Datei und überlebt das
+Entfernen der Variablen.
+
+**SSH (heizung-test, root)** — welche Benutzer der Broker kennt:
+
+```bash
+docker exec deploy-mosquitto-1 sh -c 'cut -d: -f1 /mosquitto/config/passwd'
+```
+
+Welche **externen** Clients tatsächlich verbunden sind oder waren:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs mosquitto | grep -E 'New client connected' | grep -vE '127\.0\.0\.1|172\.1[0-9]\.' | tail -20
+```
+
+Und was gerade offen ist:
+
+```bash
+ss -tn state established '( sport = :1883 )' | grep -v 127.0.0.1
+```
+
+> **Die Falle, in die ich gelaufen bin:** eine **stehende** Sitzung
+> erzeugt **keine** Logzeilen. Wer Verbindungs*versuche* zählt, zählt
+> Störungen — nicht Benutzer. Ein Client, der seit Tagen verbunden ist,
+> ist im Protokoll **unsichtbar** und in `ss` sichtbar. Beides lesen.
+
+Für HTTP-Ports dasselbe im Caddy-Zugriffsprotokoll:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -200 /var/log/caddy/cs-test.access.log'
+```
+
+#### Schritt 2 — nachher innerhalb von zwei Minuten messen
+
+**SSH (heizung-test, root)**, direkt nach der Änderung:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -tAc "SELECT count(*) AS meldungen_2min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '2 minutes';"
+```
+
+**Erwartung: rund 20 Meldungen von 20 Geräten.** Bleiben sie aus:
+**sofort zurück**, ohne weitere Diagnose. Die Ursache sucht man mit
+laufender Anlage, nicht mit stehender.
+
+**Warum zwei Minuten und nicht fünf.** Die Geräte senden im
+10-Minuten-Takt, aber über hundert Geräte verteilt — in zwei Minuten
+kommen normal rund zwanzig Meldungen, das ist eindeutig genug. Und zwei
+Minuten sind kurz genug, dass der **Gerätepuffer** die Lücke noch deckt:
+das UG65 hat am 07.11. rund zwölf Minuten gepuffert und nachgeliefert.
+Diese Reserve ist aus **einem** Fall geschätzt und kein Versprechen —
+aber zwei Minuten liegen sicher darin.
+
+> **Der Rückweg gehört vor die Änderung, nicht danach.** Wer eine Regel
+> einfügt, hat den `-D`-Befehl mit identischer Regelangabe **vorher**
+> bereitliegen. Nach dem Einfügen ist keine Zeit, ihn zu formulieren.
+
 
 ### 5.1 Deploy-Timer-Status
 
@@ -800,7 +874,7 @@ Response (200): `heating_zone_id` ist `null`.
 ### 10d.5 Verifikation via DB
 
 ```bash
-docker exec -it deploy-db-1 psql -U heizung -d heizung -c \
+docker exec deploy-db-1 psql -U heizung -d heizung -c \
   "SELECT id, dev_eui, label, heating_zone_id FROM device ORDER BY id;"
 ```
 
@@ -940,11 +1014,11 @@ celery -A heizung.celery_app inspect scheduled
 
 ```bash
 # SSH auf heizung-test
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "from heizung.tasks.health_tasks import compute_health_state; print(compute_health_state.delay())"
 # Async-Result-ID wird ausgegeben; Status via celery inspect oder
 # direkten Aufruf des Pure-Function-Helpers fuer sync-Debug:
-docker exec -it heizung-worker python -c \
+docker exec heizung-worker python -c \
   "import asyncio; from heizung.tasks.health_tasks import _compute_health_state_async; print(asyncio.run(_compute_health_state_async()))"
 ```
 
@@ -972,7 +1046,12 @@ WARNING ... heizung.services.health_alerts ... health_alert
   [level=3, device_id=17, dev_eui="58a0cb..", reason="implausible_readings_24h"]
 ```
 
-**Implausible-Counter im Redis pruefen:**
+**Implausible-Counter im Redis pruefen.** Dieser Aufruf ist **absichtlich
+interaktiv** — `redis-cli` ohne Argument öffnet eine Sitzung, und die `>`-Zeilen
+darunter werden **in dieser Sitzung** getippt, nicht in der Shell. Deshalb
+behält er sein `-it`, und deshalb ist er die **letzte Zeile einer Einfügung**:
+alles, was man dahinter mit einfügt, landet in `redis-cli` statt in der Shell
+und ist für die Shell verloren — ohne Fehlermeldung. Beenden mit `exit`.
 
 ```bash
 docker exec -it heizung-redis redis-cli
@@ -5127,7 +5206,7 @@ steht, ist der **gemessene** Stand, nicht der vermutete:
 
 | Befund | Folge für diese Anleitung |
 |---|---|
-| `MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` **nicht**. Das Gateway läuft über Basic Station gegen `chirpstack-gateway-bridge`, nicht mit eigenen MQTT-Zugangsdaten. | **Schritt B3 entfällt vollständig.** |
+| ~~`MQTT_GATEWAY_UG65_PASSWORD` existiert in der Server-`.env` **nicht**. Das Gateway läuft über Basic Station …~~ **Falsch, Korrektur 07.11.2026:** die fehlende Variable sagt nichts über die Benutzerdatenbank des Brokers. Das Gateway meldet sich als `gateway-ug65` per MQTT auf 1883 an. | ~~Schritt B3 entfällt~~ **B3 bleibt offen** und braucht einen Termin an der UG65-Oberfläche. |
 | Die Bridge meldet sich bei Mosquitto als User **`chirpstack`** an (`MQTT_GATEWAY_BRIDGE_USER=chirpstack`), und `MQTT_GATEWAY_BRIDGE_PASSWORD` ist **derselbe Wert** wie `MQTT_CHIRPSTACK_PASSWORD`. | **B2 setzt beide Zeilen gemeinsam** und erzeugt die Bridge mit ihrem Init-Sidecar neu. Sonst stoppen **alle** Uplinks. |
 | `CHIRPSTACK_API_KEY` existiert in der Server-`.env` **nicht**. | **A4 Teil 2 schreibt nichts in die `.env`.** Der Key wird nur beim Provisionieren gebraucht und dort in der Umgebung mitgegeben. |
 
@@ -5692,9 +5771,13 @@ alten Key in der Umgebung.
 
 **Hier hängt die Regelung dran.** Es sind **zwei** Schritte für **zwei**
 Mosquitto-User: `heizung-api` (B1) und `chirpstack` (B2). Der dritte
-Schritt der alten Fassung — das UG65 mit eigenen Zugangsdaten — **entfällt**
-(Befund 20.10., siehe oben): das Gateway spricht Basic Station gegen
-`chirpstack-gateway-bridge`, und die Bridge meldet sich als `chirpstack` an.
+Schritt der alten Fassung — das UG65 mit eigenen Zugangsdaten — wurde
+~~als entfallen geführt~~ **und das war falsch** (Korrektur 07.11.2026):
+das Gateway publiziert per **MQTT auf 1883** als `gateway-ug65`, es
+spricht **nicht** Basic Station. **Das UG65 ist damit ein dritter
+Rotations-Teilnehmer** — sein Passwort mitzudrehen erfordert einen Zugang
+zur UG65-Oberfläche und gehört in einen Termin am Gerät. Bis dahin bleibt
+der User unverändert; ihn zu entfernen ist ein Totalausfall (§10ab C4).
 
 Jeder Wert lebt an **zwei**
 Stellen: in der `.env` (für den Dienst, der sich anmeldet) und als
@@ -5900,10 +5983,14 @@ Unterbrechung unvermeidbar. Sie ist es nicht — es gibt keinen
 Gateway-Reboot in dieser Rotation. Was in B2 kurz unterbrochen wird,
 ist die Bridge, und die kommt mit ihrem Neustart von selbst zurück.
 
-**Der Mosquitto-User `gateway-ug65` ist verwaist** (kein Dienst meldet
-sich damit an). Er wird hier **nicht** angefasst — ihn zu entfernen ist
-eine eigene Aufräum-Aufgabe mit eigenem Rückweg, nicht Teil einer
-Rotation unter Zeitdruck. Backlog **B-22-3**.
+> **Korrektur vom 07.11.2026: `gateway-ug65` ist NICHT verwaist.** Es ist
+> der Benutzer, mit dem das UG65 seine Uplinks publiziert — belegt an den
+> Anmeldezeilen des Brokers. Ihn zu entfernen ist ein **Totalausfall**,
+> keine Aufräum-Aufgabe. Siehe §10ab C4 (**nie ausführen**) und
+> `docs/status/2026-11-07-vorfall-1883-sperre.md`.
+
+Der Mosquitto-User `gateway-ug65` wird hier **nicht** angefasst. ~~Backlog
+B-22-3~~ — **entfallen**, der User bleibt.
 
 ---
 
@@ -6832,10 +6919,36 @@ Backup zu zweifeln. Ein Rückweg ohne eigene Prüfung ist kein Rückweg.
 
 ---
 
-### C4 — den verwaisten Mosquitto-User `gateway-ug65` entfernen (B-22-3)
+### C4 — ~~den verwaisten Mosquitto-User `gateway-ug65` entfernen~~ **NIE AUSFÜHREN**
 
-> **Am 04.11.2026 ausgeführt und wieder zurückgenommen. Diesen Block
-> nicht erneut laufen lassen, bevor zwei Dinge gelesen sind.** Nach dem
+> # ⛔ NIE AUSFÜHREN — der User ist der Datenpfad
+>
+> **`gateway-ug65` ist nicht verwaist. Es ist der Benutzer, mit dem das
+> UG65 seine Uplinks publiziert.** Diesen User zu entfernen heißt:
+> **Totalausfall der Anlage**, kein Messwert, kein Downlink, und ein
+> Gateway, das sich nicht von selbst zurückmeldet.
+>
+> **Belegt am 07.11.2026**, nachdem eine Firewall-Regel auf Port 1883
+> die Anlage 31 Minuten stillgelegt hat:
+>
+> ```
+> New client connected from 213.153.54.49:21331 as auto-0FC0BE47-…
+>     (p4, c1, k30, u'gateway-ug65')
+> ```
+>
+> Und die ACL-Datei sagt es selbst:
+> `#   - gateway-ug65  : Milesight UG65 (direkter MQTT-Push im ChirpStack-v4-Modus)`
+>
+> **Der Block bleibt hier stehen und wird nicht gelöscht**, weil sein
+> Prüfbefehl weiter unten richtig war und nur nie ausgeführt wurde:
+> `grep -ci "u'gateway-ug65'"` hätte die Anmeldungen gezeigt. Wer die
+> Anleitung liest, soll sehen, **wo** die Kette gerissen ist — ein
+> gelöschter Abschnitt lehrt nichts.
+>
+> Einzelheiten: `docs/status/2026-11-07-vorfall-1883-sperre.md`, §5.0a.
+
+> **Historisch, Stand 04.11.2026 — die Begründung von damals, als falsch
+> erkannt am 07.11.:** am 04.11. ausgeführt und wieder zurückgenommen. Nach dem
 > Mosquitto-Neustart kam **kein Uplink** mehr; die MQTT-Clients verbanden
 > sich neu, das Gateway UG65 stand aber ab 07:11:45 offline und kam erst
 > nach Stromtrennung um 07:48 zurück. Der Zusammenhang zum entfernten
@@ -6864,10 +6977,23 @@ Backup zu zweifeln. Ein Rückweg ohne eigene Prüfung ist kein Rückweg.
 > davor. Protokoll: `docs/status/2026-11-04-rotation-teil2.md`,
 > Befunde 2, 4 und 5.
 
-**Befund vom 20.10.:** der User steht in
-`infra/mosquitto/config/passwd`, aber **kein Dienst meldet sich damit
+> **Korrektur vom 07.11.2026.** Der Absatz darunter ist **falsch** und
+> steht nur noch als Beleg dafür, wie der Fehler entstanden ist. Das UG65
+> spricht **nicht** Basic Station: die `chirpstack-gateway-bridge` hat
+> seit dem 04.11. **keine** Sitzung, und Caddy zählt **2** `router`-Treffer
+> in **39.607** Zeilen. Die Uplinks laufen per **MQTT auf 1883** mit dem
+> User `gateway-ug65`.
+
+**~~Befund vom 20.10.~~ (falsch):** der User steht in
+`infra/mosquitto/config/passwd`, aber ~~**kein Dienst meldet sich damit
 an**. Das UG65 spricht Basic Station gegen `chirpstack-gateway-bridge`,
-und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).
+und die Bridge nutzt den User `chirpstack` (§10ab, „B3 entfällt“).~~
+
+**Wo der Befund vom 20.10. gerissen ist:** aus dem Fehlen von
+`MQTT_GATEWAY_UG65_PASSWORD` in der Server-`.env` wurde geschlossen, das
+Gerät könne sich nicht anmelden. Die `.env` und die Benutzerdatenbank des
+Brokers sind aber zwei verschiedene Dinge — `/mosquitto/config/passwd`
+ist gemountet und überlebt das Entfernen der Variablen.
 
 **Erst belegen, dann entfernen.** Ein User, den niemand braucht, ist
 schnell gesagt und schwer zurückgeholt.
@@ -7261,7 +7387,8 @@ hoch, kommen sie mit.
 **Querverweise:** §10ab (Teil 1, die sieben Werte und die Env-Falle),
 §10l (Dead-Man-Checks und Alarme), §10p (Deploy-Sperre), §10u (Rückfall
 auf einen Stand), §10ai (die drei Belegungslisten — Fenster für C2),
-§10a.1 (legt `gateway-ug65` an; Lücke zu C4).
+§10a.1 (legt `gateway-ug65` an — **richtig so**, der User ist der
+Datenpfad; die „Lücke zu C4" war keine, Korrektur 07.11.2026).
 
 ---
 
@@ -8001,6 +8128,40 @@ Bulk-Skript die Fühler mit.
 
 **Ein Tippfehler im Namen bricht ab**, statt stillschweigend nichts zu
 tun. Ein leerer Lauf sieht sonst wie „alles ausgenommen" aus.
+
+### Was `status` hinterlässt — und wo man es liest
+
+Die Antwort auf `0x46` landet **seit dem 05.11.2026 in der Datenbank**
+(Migration 0038), nicht mehr nur in einer Protokollzeile. Das ist der
+Unterschied zwischen „ich habe gefragt" und „ich kann nachsehen": das
+Container-Protokoll reichte am Tag des Befunds **18 Stunden** zurück,
+und damit war „ist die Erkennung aktiv?" nur durch erneutes Funken
+beantwortbar.
+
+**SSH (heizung-test, root)** — der Stand je Gerät, jüngste Antwort:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT DISTINCT ON (s.device_id) d.label, r.number AS zimmer, z.name AS zone, s.ow_detection_enabled AS an, s.ow_detection_delta_c AS delta_c, s.ow_detection_duration_min AS dauer_min, s.time AS bestaetigt_um FROM sensor_reading s JOIN device d ON d.id = s.device_id LEFT JOIN heating_zone z ON z.id = d.heating_zone_id LEFT JOIN room r ON r.id = z.room_id WHERE s.ow_detection_enabled IS NOT NULL ORDER BY s.device_id, s.time DESC;"
+```
+
+**Wie das zu lesen ist.** `DISTINCT ON` nimmt je Gerät die **jüngste
+Zeile, die das Feld führt** — ein Keepalive ohne `0x46`-Antwort trägt es
+nicht und überschreibt deshalb nichts. Ein Gerät, das **gar nicht**
+erscheint, hat **nie geantwortet**; das ist nicht dasselbe wie „aus".
+
+> **`ow_detection_enabled` ist nicht `open_window`.** Die erste Spalte
+> sagt, ob die Erkennung im Gerät **eingeschaltet** ist, die zweite, ob
+> **jetzt** ein Fenster offen ist. Ein Gerät mit ausgeschalteter
+> Erkennung meldet `open_window = false` **immer**, ohne je gemessen zu
+> haben. Wer die beiden verwechselt, liest aus lauter `false` den Befund
+> „es wurde nie gelüftet" statt „die Erkennung war aus" — genau die
+> Verwechslung, die am 05.11.2026 offenstand (604.694 Zeilen `false`,
+> **null** Zeilen `true`, hausweit).
+
+**Was dort noch nicht steht:** die Antwort auf `0x46` kommt bei Class A
+erst mit dem nächsten Uplink des Geräts, also bis zu **zehn Minuten**
+nach dem Absenden. Eine leere Ausgabe unmittelbar nach `status` heißt
+„noch nicht geantwortet", nicht „antwortet nicht".
 
 ### Das Protokoll der Testwoche — fünf Schritte
 
@@ -10162,7 +10323,7 @@ jede Aussage von §10ab Teil 2, die auf Code oder Konfiguration zeigt:
 | `HOTEL_BASIC_AUTH_HASH`, `STAGE` | unverändert, Compose-Zeilen 333 und 338 |
 | **C1-Prüfung** | **war falsch** — korrigiert, siehe unten |
 | Zeilennummern in Compose | leicht verschoben (330/333/338 statt 338/339/340), in §10ab nachgezogen |
-| `gateway-ug65` (C4) | weiter in `mosquitto/config/acl` und `passwd.example` — der Block bleibt nötig |
+| `gateway-ug65` (C4) | bleibt — **es ist der Datenpfad** (Korrektur 07.11.2026, §10ab C4: nie entfernen) |
 | `CHIRPSTACK_BASIC_AUTH_HASH` | **weiter in Compose (`:330`) und `.env.example` (`:52`)**, und der irreführende Kommentar in `Caddyfile.test:5` steht auch noch. B-22-4 ist **nicht** erledigt — unverändert **kein** Teil dieser Rotation |
 | genau **eine** `basicauth`-Regel in `Caddyfile.test` (`:47`) | bestätigt: der ChirpStack-Host hat keine, C5 ist der einzige Schutz davor |
 
@@ -10524,6 +10685,261 @@ Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
 **Das ist am 04.11. das Einzige gewesen, was geholfen hat** — kein
 serverseitiger Handgriff hat das Gateway zurückgeholt.
 
+> **Nie den Antennenstecker lösen, solange das Gateway Strom hat.** Ein
+> Sender, der in einen offenen Stecker sendet, bekommt seine Leistung
+> reflektiert zurück, und das kann die Endstufe beschädigen. Das Gateway
+> sendet Downlinks, sobald ein Gerät ein Empfangsfenster öffnet — der
+> Moment lässt sich nicht abwarten und nicht vorhersehen. Also: **erst
+> stromlos, dann am Stecker.**
+
+### 6. Nach der Stromtrennung: die Funkqualität prüfen (ab 05.11.2026)
+
+**Die Stromtrennung ist die Behebung — aber sie hat einen Preis, den am
+04.11. niemand gemessen hat.** Das Gateway kam zurück, und zwar
+**schlechter**:
+
+| Zeitraum (Ortszeit) | SNR | RSSI | Uplinks/h | Geräte |
+|---|---|---|---|---|
+| bis 04.11. **06:00** | 8,6–9,0 | **−96** | ~605 | 103–104 |
+| 04.11. **07:00** (Ausfallstunde) | 7,8 | −97 | 227 | 103 |
+| ab 04.11. **08:00** | **6,0–6,9** | **−99/−100** | ~580 | 99–103 |
+
+Rund **4 dB schlechter im RSSI, 2,3 dB im SNR**, hausweit, und es hielt
+an. **38 von 103 Geräten** verloren über 3 dB, verteilt über alle
+Etagen — das sind nicht hundert Geräte gleichzeitig, das ist der
+Empfänger.
+
+Die Geräte mit der geringsten Reserve fielen dabei aus dem Netz. Gerät
+**021 (Zimmer 107 Kinderzimmer)** war vorher gesund (SNR +6,3, 144
+Uplinks am Tag) und meldete danach **6 Uplinks am Tag** bei SNR −9,7;
+sein RSSI fiel von −105 auf **−114**, also auf den Rauschboden.
+
+**Der Befund ist erst am 05.11. aufgefallen, und zwar zufällig** — bei
+der Suche nach einem vermuteten Funkloch in den Zimmern 107/109/110. Es
+war keines: die Zimmernachbarn derselben Räume waren in Ordnung. Genau
+deshalb gibt es diese Prüfung.
+
+**Die Prüfung — SSH (heizung-test, root).** Dieselbe Stunde heute gegen
+gestern, hausweit. Der Vergleich mit dem **Vortag** ist bewusst gewählt
+und nicht ein gleitendes Mehrtagesmittel: ein Mittel, das die Störung
+schon enthält, verdünnt sich selbst und schweigt nach zwei Tagen.
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(h.std,'HH24:00') AS stunde, round(h.snr::numeric,1) AS snr_heute, round(g.snr::numeric,1) AS snr_gestern, round((h.snr-g.snr)::numeric,1) AS delta_snr, round(h.rssi::numeric,0) AS rssi_heute, round(g.rssi::numeric,0) AS rssi_gestern, h.up AS up_heute, g.up AS up_gestern FROM (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) h LEFT JOIN (SELECT date_trunc('hour', time AT TIME ZONE 'Europe/Vienna') + interval '1 day' AS std, avg(snr_db) AS snr, avg(rssi_dbm) AS rssi, count(*) AS up FROM sensor_reading WHERE time > now() - interval '36 hours' AND time < now() - interval '12 hours' AND snr_db IS NOT NULL GROUP BY 1) g USING (std) ORDER BY h.std;"
+```
+
+**Der Schwellwert:**
+
+| `delta_snr` | heißt |
+|---|---|
+| **−2,0 dB oder schlechter**, über mehrere Stunden | **Befund.** Am 04.11. waren es −2,0 bis −2,4 dB in jeder Stunde |
+| −1,0 bis −2,0 dB | beobachten, am nächsten Tag erneut |
+| besser als −1,0 dB | im Rahmen |
+
+**Eine einzelne Stunde zählt nicht.** Die Ausfallstunde selbst und die
+Stunden danach sind aus anderen Gründen verzerrt (weniger Uplinks,
+andere Geräte). Erst drei aufeinanderfolgende Stunden unter −2 dB sind
+ein Befund.
+
+**Und was dann?** Der Verdacht geht zuerst an die **Antenne**, nicht an
+die Geräte: Stecker nicht ganz fest, Antenne verdreht oder verbogen. Ein
+Gerätetausch in einem schwachen Zimmer bringt nichts, wenn der Empfänger
+4 dB verloren hat. **Erst stromlos machen, dann am Stecker** (siehe
+oben).
+
+**Die Einzelgeräte dazu**, wenn der hausweite Wert einen Befund zeigt —
+drei Stunden je Fenster, weil ein schwaches Gerät pro Stunde zu wenige
+Meldungen hat:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT d.label, r.number||' '||z.name AS ort, to_char(time_bucket('3 hours', s.time) AT TIME ZONE 'Europe/Vienna','DD.MM. HH24:00') AS fenster, count(*) AS uplinks, round(avg(s.snr_db)::numeric,1) AS snr, round(avg(s.rssi_dbm)::numeric,0) AS rssi FROM sensor_reading s JOIN device d ON d.id=s.device_id JOIN heating_zone z ON z.id=d.heating_zone_id JOIN room r ON r.id=z.room_id WHERE s.time > now() - interval '27 hours' AND s.snr_db IS NOT NULL GROUP BY 1,2,time_bucket('3 hours', s.time) HAVING avg(s.snr_db) < 0 ORDER BY 1, time_bucket('3 hours', s.time);"
+```
+
+Er zeigt nur Fenster mit **negativem SNR** — die Geräte, die tatsächlich
+an der Grenze sind, statt aller 107.
+
+### 7. Geplanter Neustart des UG65 — Schritt für Schritt
+
+Für den Fall, dass der Neustart **absichtlich** erfolgt: um zu prüfen, ob
+sich die Funkqualität davon erholt. Am 04.11. war er eine Notmaßnahme und
+hat 4 dB gekostet; dieselbe Maßnahme kann sie auch zurückbringen, wenn
+die Ursache eine Kalibrierung beim harten Neustart war.
+
+> **Vorher lesen: nie den Antennenstecker lösen, solange das Gateway
+> Strom hat** (oben). Und: der Neustart nimmt das ganze Haus für einige
+> Minuten vom Netz — **nicht** während einer Anreise, eines Montagegangs
+> oder eines Eingangstests.
+
+> ### Die Bedingung an das Messfenster: kein Deploy darin
+>
+> **Von Schritt 1 bis Schritt 4 darf kein Merge nach `develop` laufen**,
+> und auch kein Deploy von Hand. Jeder Merge startet `api`, `web`,
+> `celery_worker` und `celery_beat` neu (§0.3), und **der
+> MQTT-Subscriber läuft im `api`-Container** — ein Deploy hinterlässt
+> also eine Lücke im Meldungsstrom.
+>
+> **Warum das die Messung zerstört und nicht nur stört:** Schritt 1 und
+> Schritt 4 vergleichen Mittelwerte über 30 Minuten. Fällt eine
+> Ingest-Lücke in eines der beiden Fenster, fehlen dort Meldungen —
+> und zwar nicht gleichmäßig, sondern bevorzugt von den Geräten, die
+> gerade gesendet hätten. Der Vergleich beantwortet dann nicht mehr
+> „hat der Neustart geholfen", sondern „welches Fenster hatte die
+> Lücke". Eine Zahl, die zwei Fragen gleichzeitig beantwortet,
+> beantwortet keine.
+>
+> **Es gibt bewusst keine Uhrzeit dazu.** Der Merge-Fenster-Regel aus
+> §0.3 ist damit nichts hinzugefügt und nichts weggenommen: die
+> Bedingung ist **„kein Deploy im Messfenster"**, nicht „morgens" oder
+> „nach den Merges". Wer die Prüfung vor die Merges legt, hat dasselbe
+> erreicht wie jemand, der danach lange genug wartet — und eine
+> Uhrzeit im RUNBOOK wäre in vier Wochen falsch (§5.77).
+>
+> **Praktisch heißt das:** entweder die Prüfung **vor** dem
+> Merge-Fenster, oder nach dem letzten Deploy so lange warten, bis der
+> Meldungsstrom nachweislich wieder normal läuft (der Befehl aus
+> Schritt 3) — und **dann** den Vorher-Wert nehmen, nicht davor.
+
+**Schritt 1 — den Vorher-Wert notieren.** SSH (heizung-test, root):
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT round(avg(snr_db)::numeric,1) AS snr_30min, round(avg(rssi_dbm)::numeric,0) AS rssi_30min, count(*) AS meldungen, count(DISTINCT device_id) AS geraete FROM sensor_reading WHERE time > now() - interval '30 minutes' AND snr_db IS NOT NULL;"
+```
+
+**Aufschreiben, nicht merken.** Nach dem Neustart ist der Vergleichswert
+nicht mehr abfragbar, ohne den gestörten Zeitraum mitzunehmen — und ein
+erinnerter Wert ist kein Befund (§5.68). Unter 30 Meldungen ist die Zahl
+nicht belastbar; dann noch warten.
+
+**Schritt 2 — Stecker ziehen, 30 Sekunden warten, einstecken.** Dreißig
+und nicht zehn Sekunden: bei einer vermuteten Kalibrierungsfrage soll das
+Modul sicher spannungsfrei gewesen sein.
+
+**Schritt 3 — nach 5 Minuten: kommt überhaupt etwas an?**
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT count(*) AS meldungen_5min, count(DISTINCT device_id) AS geraete, max(time) AS letzte FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Alternativ in ChirpStack unter *Gateways* → der UG65 → **Last seen** (muss
+unter 30 Sekunden liegen, siehe Schritt 3 oben).
+
+| Ergebnis | dann |
+|---|---|
+| Meldungen da, mehrere Geräte | weiter mit Schritt 4 |
+| **nichts** | **noch einmal** ziehen und einstecken. Das ist der Fall vom 04.11.: der erste Versuch holte es nicht zurück |
+| nach dem zweiten Versuch nichts | §10ay von vorn, Schritt 1–4 — das ist kein Funk-, sondern ein Verbindungsproblem |
+
+**Schritt 4 — vergleichen, aber mit dem richtigen Fenster.**
+
+> **Das Fenster muss vollständig *nach* der Rückkehr liegen** — nicht
+> nach dem Steckerzug. Dreißig Minuten genügen; sie beginnen aber erst,
+> wenn wieder Meldungen kommen (Schritt 3), und nicht vorher.
+>
+> **Warum das der ganze Punkt ist** (Befund 06.11.2026, siehe unten). Ein
+> gleitendes „letzte 30 Minuten" straddelt nach dem Neustart den
+> Übergang: um 08:13 lag darin die Zeit von 07:43 bis 08:13, also
+> überwiegend der **alte**, schlechte Zustand. Der Mittelwert stieg
+> danach von Stichprobe zu Stichprobe — **nicht weil sich das Gateway
+> langsam erholte, sondern weil das Fenster sich langsam leerte.** Wer
+> das als Erholungskurve liest, wartet Stunden auf eine Antwort, die nach
+> zwanzig Minuten vorliegt.
+
+**SSH (heizung-test, root)** — Fenster mit **festem Beginn**, hier
+Rückkehr um 08:00; die Uhrzeit anpassen:
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker exec -i deploy-db-1 psql -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" -P pager=off -c "SELECT to_char(time_bucket('10 minutes', time) AT TIME ZONE 'Europe/Vienna','HH24:MI') AS fenster, count(*) AS uplinks, count(DISTINCT device_id) AS geraete, round(avg(snr_db)::numeric,1) AS snr, round(avg(rssi_dbm)::numeric,0) AS rssi FROM sensor_reading WHERE time >= date_trunc('day', now()) + interval '7 hours' AND snr_db IS NOT NULL GROUP BY time_bucket('10 minutes', time) ORDER BY 1;"
+```
+
+**Zehn-Minuten-Fenster statt eines Mittelwerts**, und zwar aus demselben
+Grund: so ist der **Sprung** sichtbar, und man sieht sofort, welche
+Fenster noch den alten Zustand enthalten. Rund 100 Meldungen je Fenster
+sind belastbar.
+
+**Zielwerte: SNR ≥ 8,5 und RSSI ≥ −97.** Das ist der Stand, den das Haus
+bis zum 04.11. 06:00 hatte.
+
+**Schritt 5 — auswerten.**
+
+| Vergleich zum Vorher-Wert | Deutung | Folge |
+|---|---|---|
+| **besser**, Zielwerte erreicht | behoben. Was es war, bleibt offen — siehe unten | Status-Eintrag, damit beim nächsten Mal nicht wieder geraten wird |
+| **besser, aber unter den Zielwerten** | teilweise | kein zweiter Versuch am selben Tag. Erst 24 h beobachten |
+| **gleich oder schlechter**, über mehrere aufeinanderfolgende Fenster | der Neustart war es nicht | nicht wiederholen. Der Funkteil ist dann eine Hardware-Frage |
+
+### Was am 06.11.2026 geschehen ist — der Fall ist gelaufen
+
+**Ein geplanter Neustart mit 30 Sekunden stromlos hat den Funkverlust
+vom 04.11. behoben.** Gemessen in Zehn-Minuten-Fenstern:
+
+| Fenster (Ortszeit) | SNR | RSSI |
+|---|---|---|
+| 07:00–07:59 | 6,0–6,7 | −100 / −101 |
+| **08:00** | **8,7** | **−96** |
+| 08:10–08:50 | 9,4 · 9,1 · 9,2 · 9,2 · 8,9 | **−95** |
+| 09:00–13:00 (Stundenmittel) | 9,0–9,2 | −95 |
+
+Der Stand vor dem Vorfall war 8,6–9,0 bei −96. **Vollständig erholt**,
+und die drei ausgefallenen Geräte senden wieder im Takt: 021 (Zimmer 107
+Kinderzimmer) hatte 6 Meldungen am Tag, jetzt wieder 18 in drei Stunden
+— also 144 am Tag wie vorher.
+
+**Es war ein Sprung, keine Kurve.** Die Erholung ist zwischen 07:50 und
+08:10 vollständig eingetreten; die Stundenmittel von 09:00 bis 13:00
+liegen flach bei 9,1. Eine scheinbar langsame Erholung über Stunden war
+eine **Eigenschaft der Messung**, nicht des Geräts (Kasten in Schritt 4).
+
+> **Der Mechanismus bleibt ungeklärt, und er wird hier nicht erfunden.**
+> Dass dreißig Sekunden stromlos den Verlust behoben haben, den eine
+> Stromtrennung zwei Tage vorher verursacht hat, ist **beobachtet** und
+> nicht erklärt. „Kalibrierung des Funkmoduls" ist eine plausible
+> Geschichte und kein Befund — sie steht deshalb als Vermutung und nicht
+> als Ursache. Wer sie belegen will, braucht Milesight oder einen
+> zweiten Fall.
+
+**Was daraus für den nächsten Vorfall folgt:** nach einem harten
+Stromverlust am Gateway die Funkqualität prüfen (Schritt 6), und bei
+einem Befund **einen geplanten Neustart versuchen, bevor man das Gerät
+für defekt hält.** Beim ersten Mal hat es geholfen.
+
+### Die Frage, die für Milesight bleibt
+
+Der **Funkteil hat sich erledigt** — Stand 06.11.2026. Offen ist eine
+andere, und sie ist die ältere: **warum verbindet sich das UG65 nach
+einem Neustart des LNS nicht von selbst wieder?**
+
+Am 04.11. kam es 36 Minuten nicht zurück, obwohl Bridge und ChirpStack
+ab 07:39:59 frisch liefen (siehe oben). Serverseitig gibt es keinen
+Schalter: `ping_interval` und `read_timeout` der Bridge regeln, wie
+schnell die **Bridge** eine tote Sitzung aufräumt; ob das **Gateway** neu
+verbindet, entscheidet dessen eigene Implementierung.
+
+> **Korrektur vom 07.11.2026 — der Betriebsmodus ist ein anderer.** Hier
+> stand „Basic Station gegen ChirpStack". Falsch: das UG65 läuft im
+> **ChirpStack-v4-Modus mit direktem MQTT-Push auf Port 1883**,
+> angemeldet als `gateway-ug65`. Basic Station ist eingerichtet und
+> **unbenutzt** — die Bridge hat seit dem 04.11. keine Sitzung, Caddy
+> zählt 2 `router`-Treffer in 39.607 Zeilen. Belegt durch den Ausfall vom
+> 07.11.: Port 1883 gesperrt → **0** Uplinks
+> (`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+>
+> **Damit wird der Vorfall vom 04.11. erst schlüssig:** ein Neustart von
+> `mosquitto` trennt die **MQTT-Sitzung** des Gateways, und die frische
+> Bridge konnte nicht helfen, weil sie am Datenpfad nicht beteiligt ist.
+
+**Was in die Anfrage gehört:** Modell und Firmware, der Betriebsmodus
+(**ChirpStack-v4 mit direktem MQTT-Push**, nicht Basic Station), der
+Ablauf vom 04.11. mit Zeiten, und die konkrete Frage — **ob das Gerät
+nach einem Verbindungsabbruch zum MQTT-Broker von selbst neu verbindet,
+in welchem Intervall, und ob das einstellbar ist.** Dazu, was es tut,
+wenn der Broker die Verbindung schließt (Neustart) gegenüber dem Fall,
+dass Pakete verworfen werden (Firewall) — am 07.11. hat es sich nach
+Freigabe **von selbst** zurückgemeldet, am 04.11. nach einem
+Broker-Neustart **nicht**. Das ist der Unterschied, auf den es ankommt.
+
+**Nicht** fragen, was es „sein könnte": die Frage ist beantwortbar, wenn
+man sie eng stellt.
+
 ### Was die Zahlen beantworten, und was nicht
 
 **Beantwortet: eine frische Bridge genügt nicht.** Container, die um
@@ -10539,7 +10955,9 @@ erzeugt und damit `gestartet` und `Neustarts` zurückgesetzt. Die Frage
 bleibt offen und ist beim nächsten Vorfall mit Schritt 1 zu beantworten —
 sie ist nicht mehr dringend, weil die Behebung ohnehin nicht dort liegt.
 
-**Offen und beim Gerät:** ob der Basic-Station-Reconnect am UG65
+**Offen und beim Gerät** (und seit 07.11.2026 betrifft es den
+**MQTT**-Reconnect, nicht Basic Station — siehe Korrektur oben): ob der
+Reconnect am UG65
 einstellbar ist. `ping_interval` und `read_timeout` der Bridge regeln,
 wie schnell die **Bridge** eine tote Sitzung bemerkt und aufräumt; ob das
 **Gateway** neu verbindet, entscheidet dessen eigene Implementierung.
