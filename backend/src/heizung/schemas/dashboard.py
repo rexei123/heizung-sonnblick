@@ -73,6 +73,17 @@ class DashboardKpiRead(BaseModel):
     # ``dashboard_aggregates.fenstererkennung_bestaetigt``.
     fenstererkennung_aktiv: bool = False
 
+    # --- Sprint 25 T3: „Geraete nehmen Befehle nicht an" ------------------
+    # Aktive Geraete mit gesetztem ``abgleich_erschoepft_seit``: der
+    # Abgleich hat nach drei Versuchen aufgegeben, und das Geraet hat
+    # seither keinen gesendeten Sollwert bestaetigt.
+    #
+    # **Eigene Achse, kein Teil von „Geraete online".** Ein solches Geraet
+    # funkt — es meldet nur einen anderen Wert als den gesendeten. Es ist
+    # auf der Offline-Achse ``healthy`` und gehoert deshalb nicht in deren
+    # Zahl (derselbe Grund wie bei der Batterie, Paragraph 5.73).
+    befehle_nicht_angenommen: int = 0
+
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None

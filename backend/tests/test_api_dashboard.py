@@ -74,6 +74,9 @@ _EXPECTED_KEYS = {
     # Steuert, ob „Fenster offen" eine Zahl oder „Erkennung inaktiv"
     # zeigt.
     "fenstererkennung_aktiv",
+    # Sprint 25 (T3): Geraete, bei denen der Abgleich aufgegeben hat und
+    # die seither keinen gesendeten Sollwert bestaetigt haben.
+    "befehle_nicht_angenommen",
 }
 
 
@@ -204,6 +207,7 @@ async def test_dashboard_kpi_admin_200_schema(
         # dabei: ``funkempfang_alter_min`` — es ist ``int | None``, und
         # ohne eine einzige Meldung ist ``None`` die richtige Antwort.
         "funkempfang_meldungen_10min",
+        "befehle_nicht_angenommen",
     ):
         assert isinstance(body[key], int), f"{key} muss int sein, war {body[key]!r}"
     assert body["funkempfang_stufe"] in {

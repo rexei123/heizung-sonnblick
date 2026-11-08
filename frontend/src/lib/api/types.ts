@@ -215,6 +215,18 @@ export interface Device {
   rad_gesperrt_gewollt: boolean;
   valve_state: ValveState;
   valve_delta_k: number | null;
+  /**
+   * Sprint 25 T3: seit wann nimmt dieses Gerät den gesendeten Sollwert
+   * nicht an? UTC ISO-8601, `null` heißt „nimmt an, soweit bekannt".
+   *
+   * `null` ist ausdrücklich **nicht** „geprüft und in Ordnung": ein Gerät,
+   * das noch nie einen Downlink bekommen hat, steht ebenfalls auf `null`.
+   *
+   * Echtes Feld der Tabelle (Migration 0039) und kein abgeleiteter Wert —
+   * die Zahl der Versuche lebt in Redis mit vier Stunden Frist, und genau
+   * ihr Verfallen war der Befund, den T3 behebt.
+   */
+  abgleich_erschoepft_seit: string | null;
   // Sprint 20e-b: gegen was Regel 3b verglichen hat — Referenzmenge, deren
   // Median in °C und der knappste Abstand dazu in Kelvin. Der Hinweistext
   // nennt beide Abstände, damit „zu warm" nicht nach Wetter aussieht.
@@ -1212,6 +1224,15 @@ export interface DashboardKpi {
    * oder „Erkennung inaktiv" zeigt.
    */
   fenstererkennung_aktiv: boolean;
+  /**
+   * Sprint 25 T3: aktive Geräte, bei denen der Abgleich nach drei
+   * Versuchen aufgegeben hat und die seither **keinen** gesendeten
+   * Sollwert bestätigt haben (`device.abgleich_erschoepft_seit`).
+   *
+   * Eigene Achse, kein Teil von „Geräte online": so ein Gerät **funkt**,
+   * es meldet nur einen anderen Wert als den gesendeten.
+   */
+  befehle_nicht_angenommen: number;
   // Sprint 20e (T7/T10): die beiden Ventil-Hinweise, getrennt gezählt.
   // Getrennt, weil sie verschiedene Handgriffe bedeuten — eine gemeinsame
   // Zahl hätte den Hausmeister losgeschickt, ohne ihm zu sagen, was er

@@ -377,3 +377,45 @@ def test_bei_dauerhafter_abweichung_hoert_der_abgleich_auf(
     engine_abgleich.erfolg_gemeldet(dev)
     fake_redis.delete(engine_abgleich._drossel_key(dev))
     assert engine_abgleich.darf_senden(dev) is True
+
+
+# ---------------------------------------------------------------------------
+# Sprint 25 (T3): der Meldungstext
+#
+# Er steht hier und nicht bei den DB-Tests der Erschoepfung, weil er keine
+# Datenbank braucht — und damit auch ohne Postgres laeuft (B-18-5).
+# ---------------------------------------------------------------------------
+
+
+def test_mailtext_nennt_den_wunsch_nur_wenn_er_abweicht() -> None:
+    """Zwei gleiche Zahlen untereinander lassen den Leser den Unterschied suchen."""
+    from datetime import UTC, datetime
+
+    from heizung.services import abgleich_meldung
+
+    gemeinsam: dict[str, Any] = {
+        "dev_eui": "ae7fcafe00000001",
+        "hardware_nummer": "007",
+        "zimmer": "209",
+        "zone": "Schlafzimmer",
+        "gemeldet_c": 20,
+        "gesendet_c": 18,
+        "versuche": 3,
+        "seit": datetime(2026, 11, 8, 9, 0, tzinfo=UTC),
+    }
+    ohne = abgleich_meldung.nachricht(
+        abgleich_meldung.Befund(**gemeinsam, engine_soll_c=18), zeitzone="Europe/Vienna"
+    )
+    mit = abgleich_meldung.nachricht(
+        abgleich_meldung.Befund(**gemeinsam, engine_soll_c=21), zeitzone="Europe/Vienna"
+    )
+    assert "Wunsch der Engine jetzt" not in ohne
+    assert "Wunsch der Engine jetzt: 21 C" in mit
+    # Der gesendete Wert muss im Text stehen. Ohne ihn liest sich die Mail
+    # als "Geraet weicht vom Wunsch ab" — und genau diese Lesart liess den
+    # Befund an Geraet 7 verschwinden.
+    assert "Zuletzt gesendet:        18 C" in ohne
+    # Die Handlung steht vor den Zahlen: wer nachts liest, will zuerst
+    # wissen, ob er aufstehen muss.
+    assert ohne.index("WAS ZU TUN IST") < ohne.index("DIE ZAHLEN")
+    assert "007" in abgleich_meldung.betreff(abgleich_meldung.Befund(**gemeinsam, engine_soll_c=18))

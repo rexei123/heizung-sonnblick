@@ -53,7 +53,14 @@ type SortMode = "status" | "label";
  * | `ventil` | „Ventil prüfen" | `ventil_klemmt_zu` **oder** `ventil_schliesst_nicht` |
  * | `lager` | (die Zeile an der Kachel) | keine Heizzone |
  */
-type Zeige = "alle" | "nicht-online" | "batterie" | "zu-warm" | "ventil" | "lager";
+type Zeige =
+  | "alle"
+  | "nicht-online"
+  | "batterie"
+  | "zu-warm"
+  | "ventil"
+  | "befehle-abgelehnt"
+  | "lager";
 
 interface FilterEintrag {
   wert: Zeige;
@@ -96,6 +103,14 @@ const FILTER: FilterEintrag[] = [
     label: "Ventil prüfen",
     passt: (d) =>
       d.valve_state === "ventil_klemmt_zu" || d.valve_state === "ventil_schliesst_nicht",
+  },
+  {
+    // Sprint 25 T3: die Kachel „Befehle nicht angenommen" verweist hierher.
+    // Eine Zahl ohne Weg zu den Geräten wäre eine Zahl, mit der niemand
+    // etwas anfangen kann.
+    wert: "befehle-abgelehnt",
+    label: "Befehle nicht angenommen",
+    passt: (d) => d.abgleich_erschoepft_seit !== null,
   },
   { wert: "lager", label: "Im Lager", passt: (d) => d.heating_zone_id === null },
 ];
