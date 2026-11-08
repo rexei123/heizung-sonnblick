@@ -8260,12 +8260,63 @@ produktive Hardware an (S4).
 
 ### Was heute gilt
 
-**Die Erkennung ist aus.** Die Vickis liefern sie ab Werk ausgeschaltet
-(§5.27), und eingeschaltet wurde sie nie. Folge: `openWindow` meldet
-immer `false`, die Dashboard-Kachel „Fenster offen" steht dauerhaft auf
-0, und **Schicht 4 der Heizlogik reagiert heute allein auf den
-abgenommenen Kopf**. Wer lüftet, kühlt das Zimmer, ohne dass die
-Steuerung es merkt.
+**Die Erkennung ist aus — seit dem 07.11.2026 gemessen, nicht
+erschlossen.** Die Vickis liefern sie ab Werk ausgeschaltet (§5.27), und
+eingeschaltet wurde sie nie. Belegt mit `0x46` an drei Geräte: zwei
+Antworten, beide `enabled = false` mit den Werksvorgaben 1,0 °C / 10 min
+(`docs/status/2026-11-07-0x46-abfrage-ergebnis.md`).
+
+Folge: `openWindow` meldet immer `false`, und **Schicht 4 der Heizlogik
+reagiert heute allein auf den abgenommenen Kopf**. Wer lüftet, kühlt das
+Zimmer, ohne dass die Steuerung es merkt.
+
+Die Dashboard-Kachel „Fenster offen" zeigt seit #394 **„Erkennung
+inaktiv"** statt einer 0. Hier stand „steht dauerhaft auf 0" — und genau
+das war die gefährlichere Anzeige: eine 0 liest sich als „es ist kein
+Fenster offen", richtig ist „niemand hat gemessen".
+
+> ### ⚠ Die Testgeräte sind seit dem 07.11.2026 **86 und 24**
+>
+> Entscheidung des Betreibers. In diesem Abschnitt stand
+> `--nur "105" --nur "110" --nur "306 Schlafzimmer"` — **alle drei Angaben
+> sind überholt**, und jede aus einem eigenen Grund:
+>
+> | alt | warum weg |
+> |---|---|
+> | `"110"` | **schlechter Funk.** Entscheidung vom 05.11.2026 |
+> | `"306 Schlafzimmer"` (Gerät 85) | **10,9 % Paketverlust** über 24 h bei -110 dBm und 1,1 dB SNR; die Nachbarn im selben Zimmer liegen bei 2,7 %. Belegt am 07.11., als genau dieses Gerät die `0x46`-Antwort verlor |
+> | `"105"` | **die Zimmernummer trifft beide Geräte des Zimmers** — also auch **25** (105 Bad). Ein Bad ist wegen der Dusche der schlechteste Ort für diesen Test, und niemand hat das gewollt |
+>
+> **Zur dritten Zeile, der Genauigkeit zuliebe:** dass `--nur` nach
+> Nummer **oder** Zone **oder** Etikett **oder** DevEUI wählt, steht seit
+> dem 01.11.2026 weiter unten in diesem Abschnitt („Befund: mit den
+> Nummern 105–109 …"), und dass eine Zimmernummer **alle** Thermostate
+> ihres Zimmers trifft, ist dort ausdrücklich **gewollt** und deshalb
+> kein Abbruchgrund. Neu ist hier nicht die Mechanik, sondern ihre Folge
+> für **diesen** Test: Zimmer 105 hat zwei Geräte, und eines davon ist
+> ein Bad. Das stand nirgends — der Testplan nannte eine Nummer und
+> meinte ein Gerät.
+>
+> **Neu, und beide namentlich statt über die Zimmernummer:**
+>
+> ```
+> --nur "306 Kinderzimmer" --nur "105 Schlafzimmer"
+> ```
+>
+> Das sind die Geräte **86** und **24**, beide mit 2,7 % Verlust. Bäder
+> sind damit ausgeschlossen, und zwar durch die Auswahl selbst und nicht
+> durch eine Fußnote.
+>
+> **Warum nicht trotzdem 85, es ist ja das Zimmer mit dem Befund?** Weil
+> ein Test dort zwei Aussagen mischt, die sich nicht mehr trennen lassen:
+> *die Erkennung hat nicht ausgelöst* und *die Meldung ist verloren
+> gegangen*. Bei jedem zehnten Frame ist das kein Randfall.
+>
+> **Die 49 Ereignisse aus Gerät 85 bleiben trotzdem der Prüfsatz** — aber
+> für die **Server**-Erkennung (Schritt 2, passiv). Dort spielt der Funk
+> keine Rolle: die Messwerte liegen in der Datenbank, der Verlust von
+> 10,9 % hat sie bereits passiert. Einzelheiten:
+> `docs/status/2026-11-07-0x46-abfrage-ergebnis.md`.
 
 ### Das Werkzeug
 
@@ -8329,11 +8380,11 @@ nach dem Absenden. Eine leere Ausgabe unmittelbar nach `status` heißt
 
 ### Das Protokoll der Testwoche — fünf Schritte
 
-**Schritt 1 — Probelauf, drei Geräte.**
+**Schritt 1 — Probelauf, beide Geräte.**
 
 ```
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer"
 ```
 
 Lesen: stehen genau drei Ziele da? Welche Firmware? `0x45` greift erst ab
@@ -8343,7 +8394,7 @@ Lesen: stehen genau drei Ziele da? Welche Firmware? `0x45` greift erst ab
 
 ```
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+    --nur "306 Kinderzimmer" --delta 0.2 --ausfuehren
 ```
 
 Delta 0,2 ist der **empfindlichste** Wert und ein **Messwert, kein
@@ -8355,11 +8406,11 @@ stehen.
 Mindestens ein voller Tag Abstand zur nächsten Absenkung, sonst ist nicht
 zu unterscheiden, was ausgelöst hat.
 
-**Schritt 3 — der Betriebswert auf alle drei.**
+**Schritt 3 — der Betriebswert auf beide.**
 
 ```
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer" --ausfuehren
 ```
 
 1,0 °C und 10 Minuten. Das ist bewusst **nicht** der empfindlichste Wert:
@@ -8394,7 +8445,7 @@ liefert Rückgabewert 3. Dann:
 
 ```
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer" --ausfuehren
 ```
 
 **Warum nicht nachjustieren.** Die naheliegende Reaktion wäre, das Delta
@@ -8554,12 +8605,12 @@ VACANT wie bei einer Abreise und folgenlos.
 
 ---
 
-**Schritt 1 — Probelauf, drei Geräte, nichts wird gesendet.** *SSH
+**Schritt 1 — Probelauf, beide Geräte, nichts wird gesendet.** *SSH
 (heizung-test, root).*
 
 ```bash
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer"
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer"
 ```
 
 *Erwartet:* genau **drei Ziele**, jedes mit Firmware **4.2 oder höher**,
@@ -8574,7 +8625,7 @@ ausführen** — `0x45` greift dort nicht — sondern melden.
 
 ```bash
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "306 Schlafzimmer" --delta 0.2 --ausfuehren
+    --nur "306 Kinderzimmer" --delta 0.2 --ausfuehren
 ```
 
 *Erwartet:* ein Downlink, Rücklesung mit `delta = 0.2`. **Und
@@ -8587,15 +8638,15 @@ nicht zu unterscheiden, was ausgelöst hat. Im geschlossenen Haus heißt
 das: **am Vormittag setzen, nicht am Abend**.
 
 *Rückweg:* Schritt 3 überschreibt den Wert ohnehin; sofort zurück geht es
-mit `aus --nur "306 Schlafzimmer" --ausfuehren`.
+mit `aus --nur "306 Kinderzimmer" --ausfuehren`.
 
 ---
 
-**Schritt 3 — der Betriebswert auf alle drei.** *SSH.*
+**Schritt 3 — der Betriebswert auf beide.** *SSH.*
 
 ```bash
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung setzen \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer" --ausfuehren
 ```
 
 *Erwartet:* drei Downlinks, Rücklesung je Gerät mit **1,0 °C und 10
@@ -8654,7 +8705,7 @@ dokumentieren, **in derselben Woche nicht nachjustieren**.
 
 ```bash
 docker exec deploy-api-1 python -m heizung.scripts.fenstererkennung aus \
-    --nur "105" --nur "110" --nur "306 Schlafzimmer" --ausfuehren
+    --nur "306 Kinderzimmer" --nur "105 Schlafzimmer" --ausfuehren
 ```
 
 Danach `status` zum Rücklesen, und die drei Test-Belegungen löschen. Der

@@ -10,8 +10,9 @@ Stellen:
    Brief verlangt 1,0 °C — und für die Messung T2.5 **0,2 °C auf genau
    einem Gerät**.
 2. **Es gab keinen Weg, ein einzelnes Gerät zu adressieren.** Der
-   Testplan nennt drei (105, 110, 306 Schlafzimmer), die Messung genau
-   eines.
+   Testplan nannte damals drei (105, 110, 306 Schlafzimmer), die Messung
+   genau eines. Es sind seit dem 07.11.2026 **zwei** — 306 Kinderzimmer
+   und 105 Schlafzimmer, siehe ``TESTPLAN_GERAETE`` und RUNBOOK §10ao.
 3. **Es gab keinen Weg, die Erkennung wieder auszuschalten.** Das
    Abbruchkriterium des Betreibers lautet: löst sie *einmal* durch unsere
    eigene Absenkung aus, wird sie auf **allen** Testgeräten abgeschaltet.
@@ -66,10 +67,19 @@ OW_DAUER_MIN_BETRIEB: int = 10
 #: vergleicht; die Hersteller-Doku lässt das offen (Stand 22.10.2026).
 OW_DELTA_MESSUNG: Decimal = Decimal("0.2")
 
-#: Die drei Geräte des Testplans, als Bezeichnung. Absichtlich **keine**
+#: Die Geräte des Testplans, als **Zonen**-Bezeichnung. Absichtlich keine
 #: DevEUIs im Code: die hängen an der Montage und ändern sich beim Tausch,
 #: und eine DevEUI im Repo wäre eine Zusicherung über die Anlage (§5.68).
-TESTPLAN_GERAETE: tuple[str, ...] = ("105", "110", "306 Schlafzimmer")
+#:
+#: Dokumentation des Testplans §10ao, **derzeit ohne Konsument** — der Wert
+#: wird nirgends gelesen, er hält den Stand der Entscheidung am Code fest.
+#: Wer ihn als Auswahl verwendet, prüft zuerst §10ao, nicht diese Zeile.
+#:
+#: Zonen und nicht Zimmernummern, weil ``--nur`` in
+#: ``scripts/fenstererkennung.py`` auch auf die **Zimmernummer** matcht: ein
+#: bloßes ``"105"`` trifft jedes Gerät in Zimmer 105, also auch das Bad.
+#: Entscheidung vom 07.11.2026, Begründung je Gerät in RUNBOOK §10ao.
+TESTPLAN_GERAETE: tuple[str, ...] = ("306 Kinderzimmer", "105 Schlafzimmer")
 
 
 # ---------------------------------------------------------------------------
