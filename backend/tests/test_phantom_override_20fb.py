@@ -35,6 +35,7 @@ keine Datenbank — deshalb laufen die Tests auch lokal (B-18-5).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -264,3 +265,84 @@ async def test_handverstellung_ohne_sollwert_kommt_nicht_durch(
     )
 
     assert m_leer(mitschrift)
+
+
+# ---------------------------------------------------------------------------
+# 4. Welche Uhr steht in ``received_at``? — die Merge-Bedingung zu #393
+# ---------------------------------------------------------------------------
+
+
+async def test_received_at_ist_die_gateway_zeit_aus_dem_uplink(
+    mitschrift: Mitschrift,
+) -> None:
+    """``received_at`` ist ``uplink.time``, **nicht** die Serverzeit.
+
+    **Warum dieser Test existiert.** Der Fix in ``device_adapter`` grenzt
+    das Ack-Fenster auf Befehle ein, die **vor** dem Uplink an das Gateway
+    gingen (``sent_to_gateway_at <= received_at``). Welche Uhr in
+    ``received_at`` steht, entscheidet damit, was der Fix tut — und die
+    Rechnung zum Fall Zimmer 209 ist mit ``uplink.time`` gemacht
+    (07:00:16.774). Waere es die Verarbeitungszeit des Servers, laege sie
+    vermutlich **nach** 07:00:21.810, und die Rechnung waere falsch.
+
+    Geprueft wird deshalb der **Aufrufpfad**, nicht die Funktion:
+    ``mqtt_subscriber._handle_override_detection`` -> das, was bei
+    ``handle_uplink_for_override`` als ``received_at`` ankommt. Die Zeile
+    dazwischen ist ``received_at = uplink.time or datetime.now(tz=UTC)``.
+
+    Die Zusicherung ist doppelt formuliert, und das ist Absicht: der
+    Vergleich gegen ``uplink.time`` haelt auch, wenn jemand den
+    Zeitstempel im Aufbau oben aendert, der gegen den festen Wert zeigt,
+    **welche** Zeit gemeint ist.
+    """
+    uplink = _uplink(
+        {
+            "report_type": MANUAL_TARGET_REPORT_TYPE,
+            "target_temperature": 25.0,
+        }
+    )
+
+    await _handle_override_detection(uplink)
+
+    assert len(mitschrift.versuche) == 1, "der 0x28-Frame muss durchkommen"
+    received_at = mitschrift.versuche[0]["received_at"]
+    assert received_at == uplink.time
+    assert received_at == datetime(2026, 10, 5, 20, 3, 25, tzinfo=UTC)
+
+
+async def test_ohne_zeit_im_uplink_wird_die_serverzeit_genommen(
+    mitschrift: Mitschrift,
+) -> None:
+    """Der Rueckfall — und die einzige Stelle, an der die Serverzeit steht.
+
+    ``ChirpStackUplink.time`` ist optional. Fehlt es, nimmt der Pfad
+    ``datetime.now(tz=UTC)``. Das ist richtig so (ohne Zeitstempel ist die
+    eigene Uhr die beste vorhandene Antwort), aber es ist eine **andere**
+    Uhr als im Normalfall, und das soll im Repo stehen und nicht nur im
+    PR-Text.
+
+    Gemessen wird gegen eine Spanne, nicht gegen einen Punkt: zwischen dem
+    Aufruf und der Zuweisung liegt echte Laufzeit.
+    """
+    ohne_zeit = ChirpStackUplink.model_validate(
+        {
+            "deviceInfo": {"devEui": DEV_EUI},
+            "fCnt": 100,
+            "fPort": 2,
+            "object": {
+                "report_type": MANUAL_TARGET_REPORT_TYPE,
+                "target_temperature": 25.0,
+            },
+            "rxInfo": [{"rssi": -90, "snr": 9.0}],
+        }
+    )
+    assert ohne_zeit.time is None, "der Aufbau soll genau diesen Fall treffen"
+
+    vorher = datetime.now(tz=UTC)
+    await _handle_override_detection(ohne_zeit)
+    nachher = datetime.now(tz=UTC)
+
+    assert len(mitschrift.versuche) == 1
+    received_at = mitschrift.versuche[0]["received_at"]
+    assert isinstance(received_at, datetime)
+    assert vorher <= received_at <= nachher

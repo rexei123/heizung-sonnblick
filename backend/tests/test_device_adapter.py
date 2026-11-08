@@ -32,6 +32,7 @@ from heizung.models.enums import (
     CommandReason,
     DeviceKind,
     DeviceVendor,
+    EventLogLayer,
     HeatingZoneKind,
     OverrideSource,
 )
@@ -401,7 +402,6 @@ async def test_drehring_in_vacant_silent_skip(session: AsyncSession) -> None:
     """
     from sqlalchemy import select as sa_select
 
-    from heizung.models.enums import EventLogLayer
     from heizung.models.event_log import EventLog
 
     short = _unique_short()
@@ -746,3 +746,183 @@ async def test_handle_uplink_block_takes_precedence_over_window(
     )
     assert len(rows) == 1
     assert rows[0].reason == CommandReason.DEVICE_BLOCKED_ROOM_BLOCKED
+
+
+# ---------------------------------------------------------------------------
+# Ack-Fenster: der Fix vom 07.11.2026 (Vorfall Zimmer 209)
+# ---------------------------------------------------------------------------
+
+
+async def _raum_mit_geraet(session: AsyncSession) -> tuple[Room, Device]:
+    """Room + HeatingZone + Device. ``room_id`` braucht die event_log-Zeile."""
+    short = _unique_short()
+    rt = RoomType(name=f"ack-{short}")
+    session.add(rt)
+    await session.flush()
+    room = Room(number=f"ack-{short}", room_type_id=rt.id)
+    session.add(room)
+    await session.flush()
+    hz = HeatingZone(room_id=room.id, kind=HeatingZoneKind.BEDROOM, name="zone-ack")
+    session.add(hz)
+    await session.flush()
+    device = await _create_device(session, heating_zone_id=hz.id)
+    return room, device
+
+
+async def _ack_fenster_zeilen(session: AsyncSession, room_id: int) -> list[object]:
+    # Lokaler Import wie an den beiden anderen event_log-Stellen dieser
+    # Datei — nicht schoener, aber einheitlich.
+    from sqlalchemy import select as sa_select
+
+    from heizung.models.event_log import EventLog
+
+    stmt = (
+        sa_select(EventLog)
+        .where(EventLog.room_id == room_id)
+        .where(EventLog.reason == CommandReason.DEVICE_BLOCKED_ACK_WINDOW)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def test_uplink_vor_dem_befehl_wird_override(session: AsyncSession) -> None:
+    """Ein Uplink, der **aelter** ist als der letzte Befehl, darf nicht als
+    dessen Antwort gelten.
+
+    ``received_at`` ist ``uplink.time``, also die **Gateway-Zeit**
+    (``mqtt_subscriber._handle_override_detection``). Der Engine-Befehl
+    traegt die **Serverzeit** seines Versands. Beide koennen sich
+    ueberkreuzen, weil ``_persist_uplink`` die Auswertung in die
+    Warteschlange stellt (``evaluate_room.delay``), **bevor** die
+    Erkennung laeuft: der Worker erzeugt den Befehl dazwischen.
+
+    Vorher nahm die Funktion den **global letzten** Befehl und rechnete
+    eine **negative** Differenz, die ``<= 60 s`` erfuellt — eine Drehung
+    wurde damit stillschweigend als Quittung gewertet. Jetzt zaehlt der
+    Befehl, der **vor** dem Uplink hinausging.
+
+    > **Was dieser Test NICHT ist: der Fall Zimmer 209 vom 07.11.2026.**
+    > Die erste Fassung hat ihn so genannt, und das war falsch.
+    > ``_handle_override_detection`` steigt fuer alles aus, was **kein**
+    > ``0x28``-Frame ist (``report_type != manual_target_change``) —
+    > Geraet 60 hat an diesem Tag **52 Frames gesendet, alle ``0x81``**,
+    > und ``detect_user_override`` wurde dort **nie gerufen**. Die
+    > Drehung ging verloren, weil ihr ``0x28``-Frame in der
+    > 31-minuetigen Luecke lag, nicht wegen des Ack-Fensters.
+    >
+    > Der Fehler hier ist trotzdem echt: er trifft ``0x28``-Frames, die
+    > kurz nach einem Downlink ankommen. Nur hat er 209 nicht verursacht.
+    """
+    room, device = await _raum_mit_geraet(session)
+    uplink_zeit = datetime(2026, 11, 7, 7, 0, 16, 774000, tzinfo=UTC)
+
+    # Der Befehl, der zum Zeitpunkt des Uplinks der letzte war.
+    await _create_control_command(
+        session,
+        device_id=device.id,
+        setpoint=Decimal("21.0"),
+        sent_at=uplink_zeit - timedelta(hours=2),
+    )
+    # Der Befehl, der FUENF SEKUNDEN NACH dem Uplink hinausging.
+    await _create_control_command(
+        session,
+        device_id=device.id,
+        setpoint=Decimal("21.0"),
+        sent_at=datetime(2026, 11, 7, 7, 0, 21, 810000, tzinfo=UTC),
+    )
+
+    result = await device_adapter.detect_user_override(
+        session,
+        device_id=device.id,
+        uplink_target_temp=Decimal("25.0"),
+        fport=1,
+        received_at=uplink_zeit,
+    )
+
+    assert result == Decimal("25.0"), (
+        "die Drehung des Gastes wurde wieder verworfen — der Befehl von danach darf nicht zaehlen"
+    )
+    # Verworfen wurde nichts, also gibt es auch keine Ack-Fenster-Zeile.
+    assert await _ack_fenster_zeilen(session, room.id) == []
+
+
+async def test_regulaerer_ack_gleicher_wert_schreibt_keine_zeile(session: AsyncSession) -> None:
+    """Der Normalfall bleibt still.
+
+    Das Geraet quittiert zehn Sekunden nach dem Downlink **denselben**
+    Wert. Das ist keine Abweichung, also kein Override **und keine
+    Protokollzeile** — sonst stuende in jedem Zimmer mehrmals am Tag eine
+    Zeile ueber nichts (Paragraph 5.79: ein Melder, der immer meldet,
+    meldet nichts).
+    """
+    room, device = await _raum_mit_geraet(session)
+    now = datetime.now(tz=UTC)
+    await _create_control_command(
+        session, device_id=device.id, setpoint=Decimal("21.0"), sent_at=now - timedelta(seconds=10)
+    )
+
+    result = await device_adapter.detect_user_override(
+        session,
+        device_id=device.id,
+        uplink_target_temp=Decimal("21.0"),
+        fport=1,
+        received_at=now,
+    )
+
+    assert result is None
+    assert await _ack_fenster_zeilen(session, room.id) == []
+
+
+async def test_abweichung_im_ack_fenster_wird_verworfen_und_protokolliert(
+    session: AsyncSession,
+) -> None:
+    """Eine **Abweichung** im Ack-Fenster wird weiter verworfen — aber nicht stumm.
+
+    Zehn Sekunden nach einem ``21,0``-Downlink meldet das Geraet ``25,0``.
+    Der Wert kann die Quittung eines fast gleichzeitigen zweiten Downlinks
+    sein, deshalb bleibt das Verwerfen. Ohne die Zeile ist der Fall aus
+    Zimmer 209 beim naechsten Mal wieder unsichtbar — und genau das hat
+    ihn teuer gemacht.
+    """
+    room, device = await _raum_mit_geraet(session)
+    now = datetime.now(tz=UTC)
+    gesendet = now - timedelta(seconds=10)
+    await _create_control_command(
+        session, device_id=device.id, setpoint=Decimal("21.0"), sent_at=gesendet
+    )
+
+    result = await device_adapter.detect_user_override(
+        session,
+        device_id=device.id,
+        uplink_target_temp=Decimal("25.0"),
+        fport=1,
+        received_at=now,
+    )
+
+    assert result is None, "im Ack-Fenster wird weiter verworfen"
+
+    zeilen = await _ack_fenster_zeilen(session, room.id)
+    assert len(zeilen) == 1, "die verworfene Abweichung hat keine Spur hinterlassen"
+    zeile = zeilen[0]
+    assert zeile.layer == EventLogLayer.MANUAL_OVERRIDE_BLOCKED
+    assert zeile.device_id == device.id
+    # Keine Steuer-Entscheidung -> keine Sollwerte (Off-Pipeline, 5.52).
+    assert zeile.setpoint_in is None
+    assert zeile.setpoint_out is None
+    # Beide Werte und beide Zeiten gehoeren hinein, sonst ist die Zeile
+    # fuer die naechste Fehlersuche wertlos.
+    # **Verglichen wird als Zahl, nicht als Zeichenkette** — die beiden
+    # Werte haben verschiedene Skalen, und das ist kein Fehler:
+    # ``uplink_setpoint`` kommt als ``Decimal`` vom Aufrufer durch
+    # (``"25.0"``), ``gesendeter_sollwert`` aus ``control_command``, und
+    # die Spalte ist ``NUMERIC(4, 2)`` — die Datenbank gibt ``21.00``
+    # zurueck. Die erste Fassung dieses Tests verglich ``== "21.0"`` und
+    # war in der CI rot; lokal lief sie nicht, weil Docker auf diesem
+    # Rechner nicht laeuft (Paragraph 5.50 — genau der Fall, gegen den
+    # die Regel geschrieben ist).
+    #
+    # Die Skalen anzugleichen waere der falsche Fix: die Zeile soll
+    # zeigen, was in der Datenbank steht.
+    assert Decimal(zeile.details["uplink_setpoint"]) == Decimal("25.0")
+    assert Decimal(zeile.details["gesendeter_sollwert"]) == Decimal("21.0")
+    assert zeile.details["abstand_s"] == pytest.approx(10.0, abs=0.5)
+    assert zeile.details["gesendet_um"] == gesendet.isoformat()
