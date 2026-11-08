@@ -6665,7 +6665,8 @@ genauso Pflicht:
 
 > **Gelaufen am 04.11.2026.** C2, C3, C5 und C7 sind erledigt, **C1 ist
 > ausgelassen** (Anlass entfallen, siehe dort), **C6 verschoben**, **C4
-> ausgeführt und zurückgenommen** (siehe dort). C5 hat die Annahme
+> ausgeführt und zurückgenommen** (siehe dort). **C8 ist am 07.11.
+> dazugekommen** und steht mit C6 auf dem Wartungstag **11.11.2026**. C5 hat die Annahme
 > widerlegt, auf die der Block gebaut war: `admin/admin` war **nicht**
 > aktiv. Zwei Störungen am laufenden Betrieb, beide hier eingearbeitet —
 > Protokoll und sechs Befunde in
@@ -7268,8 +7269,9 @@ keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
 
 ### C6 — Server-Neustart (apt-Updates)
 
-> **Am 04.11.2026 verschoben, Termin offen.** Der Block ist damit die
-> einzige Aufgabe aus Teil 2, die unverändert offen steht. Die Begründung
+> **Am 04.11.2026 verschoben, Termin seit 07.11. der 11.11.2026.** Der
+> Block war damit die einzige Aufgabe aus Teil 2, die unverändert offen
+> stand; seit dem 07.11. steht **C8** daneben auf demselben Tag. Die Begründung
 > unten gilt weiter, mit einem Zusatz aus dem 04.11.: ein Kaltstart prüft
 > auch, ob das Gateway nach einer serverseitigen Unterbrechung von selbst
 > zurückkommt — am 04.11. tat es das **nicht** (Befund 2). Wer C6
@@ -7420,6 +7422,108 @@ und das gehört notiert.
 
 **Rückweg:** keiner. Das ist der Punkt des Blocks, und deshalb steht er
 zuletzt.
+
+### C8 — die UFW-Regel für `tailscale0` entfernen (Termin 11.11.2026)
+
+> **Aufgenommen am 07.11.2026**, nach der Entscheidung, Tailscale **nicht**
+> wiederzubeleben (`docs/status/2026-11-07-zugang-oeffentliche-ip.md`).
+> Bewusst **nicht** am selben Tag ausgeführt: an diesem Morgen hat eine
+> Firewall-Änderung die Anlage 31 Minuten stillgelegt, und zwei
+> Firewall-Eingriffe an einem Tag sind einer zu viel.
+
+**Was weg soll.** `ufw status verbose` führt
+
+```
+Anywhere on tailscale0     ALLOW IN    Anywhere
+```
+
+Die Regel lässt alles auf dem Tailscale-Interface herein. `tailscaled` ist
+auf dem Server seit dem **17.10.2026** `inactive`, der Node-Key abgelaufen
+— das Interface existiert nicht mehr, die Regel trifft also auf nichts zu.
+
+**Warum sie trotzdem weg soll, obwohl sie nichts tut.** Genau deshalb. Eine
+Regel, die nichts tut, wird beim nächsten Lesen für einen Zugangsweg
+gehalten — und dann baut jemand darauf. Am 04.11. war es ein Mosquitto-User,
+den eine Liste als „verwaist" führte und der der Datenpfad war (C4); am
+07.11. ein Port, von dem ich annahm, von außen käme dort nichts. **Beide
+Male war der Fehler nicht die Handlung, sondern der Eintrag, auf den sie
+sich berief.** Ein Rest in einer Firewall-Tabelle ist genau so ein Eintrag.
+
+**Was die Regel nicht ist:** ein Risiko. Ohne Interface gibt es keinen
+Verkehr, der sie treffen könnte. Sie ist Aufräumen, kein Hotfix — deshalb
+Wartungstag und nicht heute.
+
+#### Schritt 1 — vorher belegen (§5.0a)
+
+**SSH (heizung-test, root)** — existiert das Interface überhaupt noch?
+
+```bash
+ip -brief link show tailscale0 2>&1; systemctl is-active tailscaled
+```
+
+Erwartet: `Device "tailscale0" does not exist.` und `inactive`. **Steht dort
+etwas anderes, abbrechen** — dann läuft Tailscale wieder, und die Regel ist
+ein Zugangsweg.
+
+Die Regel mit ihrer Nummer, denn gelöscht wird über die Nummer:
+
+```bash
+ufw status numbered | grep -i tailscale
+```
+
+Den Ausgangsstand abschreiben:
+
+```bash
+ufw status verbose; date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+Und den Stand der Messwerte **vor** dem Eingriff — die Zahl, gegen die
+Schritt 3 vergleicht:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT max(time), count(*) FROM sensor_reading WHERE time > now() - interval '10 minutes';"
+```
+
+#### Schritt 2 — entfernen
+
+```bash
+ufw delete <NUMMER>
+```
+
+`<NUMMER>` ist die Zahl aus Schritt 1. **Keine zweite Regel im selben
+Durchgang** — bei mehreren Änderungen sagt die Messung danach nicht mehr,
+welche es war.
+
+#### Schritt 3 — nachher innerhalb von zwei Minuten messen
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT max(time), count(*) FROM sensor_reading WHERE time > now() - interval '10 minutes';"
+```
+
+**`max(time)` muss jünger sein als in Schritt 1**, und die Zahl in der
+Größenordnung von hundert. Dazu die eigene Sitzung, die ja über dieselbe
+Firewall läuft:
+
+```bash
+ufw status verbose | head -20
+```
+
+**Bleibt `max(time)` stehen oder bricht die SSH-Sitzung ab: sofort zurück.**
+
+```bash
+ufw allow in on tailscale0
+```
+
+Seit dem 07.11. gibt es dafür auch die Kachel **„Funk-Empfang"** auf dem
+Dashboard und eine Mail nach 15 Minuten Stille. Sie ersetzen die Messung
+nicht — eine Kachel sieht man nur, wenn man hinsieht —, aber sie sind das
+Netz darunter.
+
+#### Was danach in der Doku nachzuziehen ist
+
+CLAUDE.md §4 nennt die Regel als Rest. Ist sie weg, gehört der Halbsatz
+weg — im selben PR, sonst steht in der Doku ein Rest, der selbst ein Rest
+ist (§5.77).
 
 ### Rückweg, wenn SSH nicht wiederkommt
 
@@ -10409,6 +10513,7 @@ genau diesen Handgriff schon gab.
 | **C5** | ChirpStack-Admin (C5.1 **zuerst**, dann C5.2) | jederzeit | 10 min |
 | **C6** | apt-Updates und Neustart, danach die Prüfliste | **zuletzt** | 20 min |
 | **C7** | alte Backups löschen | **nach** grüner Prüfliste | 5 min |
+| **C8** | UFW-Regel `tailscale0` entfernen (**11.11.2026**) | **einzeln**, mit Messung vorher und nachher | 10 min |
 
 **Das einzige echte Zeitfenster ist C2** (§10ai: drei Listen um 08:30,
 15:30, 19:30). Vormittags ist es bequem offen. Alles andere hat keinen
