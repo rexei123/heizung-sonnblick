@@ -1,5 +1,46 @@
 # RUNBOOK — Heizungssteuerung Hotel Sonnblick
 
+> ### Zugang zum Server — **die öffentliche IP**, seit 07.11.2026
+>
+> ```
+> ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150
+> ```
+>
+> **Nicht** `root@heizung-test`. Tailscale ist auf dem Server seit dem
+> 17.10.2026 `inactive` (Node-Key abgelaufen) und wird nach Entscheidung des
+> Betreibers **nicht wiederbelebt**. Der MagicDNS-Name läuft deshalb in einen
+> Zeitüberlauf, und ein Zeitüberlauf sagt nicht, warum — man sucht dann den
+> Fehler am Server, obwohl er im Namen steckt.
+>
+> Die Maschine heißt weiter `heizung-test`; der Text unten nennt sie so, und
+> das bleibt richtig. Was sich geändert hat, ist allein der Weg dorthin.
+>
+> **Eine URL:** `https://heizung.hoteltec.at`. Der Zweitname
+> `heizung-test.hoteltec.at` wird seit dem Promote am 09.06.2026 nicht
+> bedient — Caddy hält dafür kein Zertifikat, der TLS-Aufbau bricht ohne
+> Zertifikat ab. Bis zum 07.11.2026 standen in diesem Dokument rund zwanzig
+> `curl`-Zeilen auf diesen Namen; sie wären alle ins Leere gelaufen. Zwei
+> Stellen hatten den Befund notiert (§10g-Hinweis, §4.4-Tabelle) — **notiert,
+> nicht nachgezogen**, und damit war er wertlos (§5.77).
+>
+> **SSH-Härtung, gemessen am 07.11.2026** mit `sshd -T`:
+>
+> | Einstellung | Wert |
+> |---|---|
+> | `PasswordAuthentication` | **no** |
+> | `KbdInteractiveAuthentication` | **no** — damit gibt es keinen Passwort-Pfad |
+> | `PermitRootLogin` | **without-password** (= nur Schlüssel) |
+> | `PermitEmptyPasswords` | no |
+> | `MaxAuthTries` | 6 |
+> | `fail2ban` | **active**, ein Jail `sshd`, 6432 Fehlversuche, 466 Sperren |
+>
+> Eine Feinheit, falls jemand die Datei liest: `/etc/ssh/sshd_config` sagt in
+> Zeile 42 `PermitRootLogin no`, und das gilt **nicht**. Das `Include
+> /etc/ssh/sshd_config.d/*.conf` steht in Zeile 12, und in sshd gewinnt der
+> **erste** gefundene Wert — also `prohibit-password` aus
+> `00-root-login.conf`. Wer die Hauptdatei allein liest, bekommt die falsche
+> Antwort; `sshd -T` gibt die richtige.
+
 Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-28.
 
 **Regel Nr. 1:** Bei Rescue-Einsatz IMMER den kompletten Fix-Block aus §3 in einem Shot ausführen. Niemals inkrementell fixen.
@@ -8,7 +49,13 @@ Operations-Handbuch für Test- und Main-Server. Stand: 2026-04-28.
 
 ## 1. Server-Übersicht
 
-| Rolle | Hetzner | Public-IP / Hostname | Tailscale | GHCR-Tag | Branch |
+**Die Tailscale-Spalte ist Geschichte, kein Zugangsweg** (07.11.2026):
+`tailscaled` ist auf dem Prod-Server `inactive`, der Node-Key ist am
+17.10.2026 abgelaufen, und er wird nicht wiederbelebt. Zugang ist die
+Public-IP. Die Spalte bleibt stehen, weil die Adressen in älteren
+Einträgen dieses Dokuments vorkommen.
+
+| Rolle | Hetzner | Public-IP / Hostname | Tailscale (**außer Betrieb**) | GHCR-Tag | Branch |
 |---|---|---|---|---|---|
 | Test (= **Prod** seit 2026-06-09) | CPX22 | `157.90.17.150` / **`heizung.hoteltec.at`** (Prod, develop-Stand; `heizung-test.hoteltec.at` nicht mehr bedient) | `heizung-test` = `100.82.226.57` | `develop` | `develop` |
 | Main (**alter Live-Prod-Server**) | CPX32 | `157.90.30.116` / — (bediente `heizung.hoteltec.at` bis zum Promote; jetzt Rollback-Reserve, Stilllegung C1 offen) | `heizung-main` = `100.82.254.20` | `main` | `main` |
@@ -31,7 +78,7 @@ Stop) ist C1 und noch offen.
 **Standard (via Tailscale MagicDNS):**
 
 ```powershell
-ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test
+ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150
 ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-main
 ```
 
@@ -59,7 +106,7 @@ ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.30.116
 ### 3.2 SSH in den Rescue
 
 ```powershell
-ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test   # oder heizung-main
+ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150   # oder heizung-main
 # Fingerprint akzeptieren falls anders (Rescue hat eigenen Host-Key)
 ```
 
@@ -715,7 +762,7 @@ Zurueck-Schalten ohne Skript-Lauf: einmalig manuell. Nicht committen — der nae
 
 ## 10b. Basic-Auth fuer Heizung-API (Sprint 8a, K-1)
 
-Seit Sprint 8a sind `/api/*`, `/openapi.json`, `/docs` und `/redoc` auf `heizung.hoteltec.at` und `heizung-test.hoteltec.at` per HTTP-Basic-Auth geschuetzt. **Ein** Hotel-User: `hotel`. `/health` (Backend-Liveness) und `/healthz` (Frontend) bleiben public fuer Uptime-Monitoring.
+Seit Sprint 8a sind `/api/*`, `/openapi.json`, `/docs` und `/redoc` auf `heizung.hoteltec.at` und `heizung.hoteltec.at` per HTTP-Basic-Auth geschuetzt. **Ein** Hotel-User: `hotel`. `/health` (Backend-Liveness) und `/healthz` (Frontend) bleiben public fuer Uptime-Monitoring.
 
 Browser cached Credentials nach erstem Login. TanStack-Query-Calls vom Frontend funktionieren ohne Code-Aenderung weil der Browser den `Authorization`-Header automatisch dranhaengt.
 
@@ -743,14 +790,14 @@ sudo docker compose -f infra/deploy/docker-compose.prod.yml logs caddy --tail 10
 
 ```bash
 # Ohne Auth: 401
-curl -I https://heizung-test.hoteltec.at/api/v1/devices
+curl -I https://heizung.hoteltec.at/api/v1/devices
 # HTTP/2 401
 
 # Mit Auth: 200
-curl -u hotel:<starkes-passwort> https://heizung-test.hoteltec.at/api/v1/devices
+curl -u hotel:<starkes-passwort> https://heizung.hoteltec.at/api/v1/devices
 
 # /health bleibt public
-curl https://heizung-test.hoteltec.at/health
+curl https://heizung.hoteltec.at/health
 # {"status":"ok",...}
 ```
 
@@ -841,7 +888,7 @@ curl -X PUT \
   -u "<user>:<pass>" \
   -H "Content-Type: application/json" \
   -d '{"heating_zone_id": 42}' \
-  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+  https://heizung.hoteltec.at/api/v1/devices/2/heating-zone
 ```
 
 Erwartete Response (200):
@@ -866,7 +913,7 @@ neue Wert überschreibt den alten ohne 409-Konflikt.
 ```bash
 curl -X DELETE \
   -u "<user>:<pass>" \
-  https://heizung-test.hoteltec.at/api/v1/devices/2/heating-zone
+  https://heizung.hoteltec.at/api/v1/devices/2/heating-zone
 ```
 
 Response (200): `heating_zone_id` ist `null`.
@@ -897,7 +944,7 @@ Erwartet nach Sprint 9.11a Live-Setup: alle 4 Vickis mit
 ```bash
 curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
   -d '{"setpoint": "23", "source": "frontend_4h", "reason": "Test"}' \
-  https://heizung-test.hoteltec.at/api/v1/rooms/{room_id}/overrides
+  https://heizung.hoteltec.at/api/v1/rooms/{room_id}/overrides
 ```
 
 Erlaubte `source`-Werte:
@@ -929,7 +976,7 @@ Kein DB-Insert in `manual_override`, kein `business_audit`-Eintrag, kein Engine-
 
 ```bash
 curl -u "<user>:<pass>" -X DELETE \
-  https://heizung-test.hoteltec.at/api/v1/overrides/{override_id}
+  https://heizung.hoteltec.at/api/v1/overrides/{override_id}
 ```
 
 #### Belegung anlegen
@@ -937,7 +984,7 @@ curl -u "<user>:<pass>" -X DELETE \
 ```bash
 curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
   -d '{"room_id": 2, "check_in": "2026-05-09T06:00:00Z", "check_out": "2026-05-11T11:00:00Z", "source": "manual"}' \
-  https://heizung-test.hoteltec.at/api/v1/occupancies
+  https://heizung.hoteltec.at/api/v1/occupancies
 ```
 
 #### Belegung stornieren
@@ -947,7 +994,7 @@ DELETE ist nicht erlaubt. Stornierung via PATCH:
 ```bash
 curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
   -d '{"cancel": true}' \
-  https://heizung-test.hoteltec.at/api/v1/occupancies/{id}
+  https://heizung.hoteltec.at/api/v1/occupancies/{id}
 ```
 
 Begründung: Belegungen sind audit- und PMS-Sync-relevant, dürfen nicht gelöscht werden.
@@ -963,7 +1010,7 @@ Sprint 12a hat das Override-Modell konsolidiert (AE-58): Override existiert nur 
    ```bash
    curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
      -d '{"room_id": 42, "check_in": "2026-10-15T07:00:00Z", "check_out": "2026-10-18T16:00:00Z", "source": "manual"}' \
-     https://heizung-test.hoteltec.at/api/v1/occupancies
+     https://heizung.hoteltec.at/api/v1/occupancies
    ```
 
    `source="manual"` markiert die Belegung als manuell angelegt (nicht PMS-synchronisiert). `check_in`/`check_out`-Zeitfenster deckt die Wartungs-Phase ab.
@@ -973,7 +1020,7 @@ Sprint 12a hat das Override-Modell konsolidiert (AE-58): Override existiert nur 
    ```bash
    curl -u "<user>:<pass>" -X POST -H "Content-Type: application/json" \
      -d '{"setpoint": "12", "source": "frontend_checkout", "reason": "Renovierung"}' \
-     https://heizung-test.hoteltec.at/api/v1/rooms/42/overrides
+     https://heizung.hoteltec.at/api/v1/rooms/42/overrides
    ```
 
    Override bekommt `expires_at = check_out` der fiktiven Belegung (Hard-Cap 7 Tage greift defensiv). `reason` ist Audit-Klartext.
@@ -985,7 +1032,7 @@ Sprint 12a hat das Override-Modell konsolidiert (AE-58): Override existiert nur 
    ```bash
    curl -u "<user>:<pass>" -X PATCH -H "Content-Type: application/json" \
      -d '{"cancel": true}' \
-     https://heizung-test.hoteltec.at/api/v1/occupancies/<id>
+     https://heizung.hoteltec.at/api/v1/occupancies/<id>
    ```
 
    `sync_room_status` wechselt automatisch `OCCUPIED → VACANT`, und `auto_revoke_on_checkout` (`revoke_all_active_overrides`) widerruft den Wartungs-Override — Audit-Spur bleibt, Raum laeuft anschliessend auf globalen Einstellungen.
@@ -1148,7 +1195,7 @@ Body (mailparser „Nested - array of objects", „One request per email"):
 
 ```bash
 # SSH (heizung-test) — Smoke-Test gegen das webhook.site-Beispiel
-curl -sS -X POST https://heizung-test.hoteltec.at/api/v1/integrations/occupancy-import \
+curl -sS -X POST https://heizung.hoteltec.at/api/v1/integrations/occupancy-import \
   -H "X-Webhook-Token: $OCCUPANCY_IMPORT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"id":"smoke-1","received_at":"2026-06-06 07:14:15","liste":[{"Zimmer":"103","Anreise":"04.06.","Abreise":"06.06.2026","Aufenthaltstyp":"Abreise"}]}'
@@ -1464,13 +1511,13 @@ Strategie-Chat-Freigabe einholen mit:
 # PowerShell (Windows lokal), aus Repo-Root
 scp -i $HOME\.ssh\id_ed25519_heizung `
     infra/deploy/rotate-secrets.sh `
-    root@heizung-test:/tmp/rotate-secrets.sh
+    root@157.90.17.150:/tmp/rotate-secrets.sh
 
-ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test `
+ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150 `
     "cat -n /tmp/rotate-secrets.sh"
 # Sichtpruefung aller Zeilen, dann:
 
-ssh -i $HOME\.ssh\id_ed25519_heizung root@heizung-test `
+ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150 `
     "bash /tmp/rotate-secrets.sh"
 ```
 
@@ -1486,7 +1533,7 @@ Erwarteter Output (Schritte [1/8] bis [8/8]):
 # Bash (Git Bash auf Windows oder Linux-Shell). Passwort versteckt.
 read -rsp "kaprun@hotel-sonnblick.at PW: " P; echo
 curl -s -o /tmp/lv.body -D /tmp/lv.headers -w "status=%{http_code}\n" \
-  -X POST https://heizung-test.hoteltec.at/api/v1/auth/login \
+  -X POST https://heizung.hoteltec.at/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"kaprun@hotel-sonnblick.at\",\"password\":\"$P\"}"
 unset P
@@ -1744,7 +1791,7 @@ kein Vicki.
 export CHIRPSTACK_API_KEY='<token>'
 
 # 2. Import-CSV (MIT app_key) auf den Server kopieren - vom Office-Laptop:
-#    scp pairings.csv root@heizung-test:/tmp/pairings.csv
+#    scp pairings.csv root@157.90.17.150:/tmp/pairings.csv
 
 # 3. Compose-Netz ermitteln (der Einmal-Container muss hinein)
 docker network ls | grep deploy
@@ -2290,7 +2337,7 @@ Lücke, in der ein montiertes Gerät auf 10 °C hängt.
 ```bash
 # SSH (Prod-Server, root)
 # Montage-CSV (OHNE Spalte app_key) vom Office-Laptop kopieren:
-#   scp montage.csv root@heizung-test:/tmp/montage.csv
+#   scp montage.csv root@157.90.17.150:/tmp/montage.csv
 
 # Dann in den Container — Server-/tmp ist nicht Container-/tmp (§10h.3):
 docker cp /tmp/montage.csv <api-container>:/tmp/montage.csv
@@ -2789,7 +2836,7 @@ gegen einen Reserve-Pool-Vicki. Drei API-Endpoints unter
 ### 10j.1 Pool-Liste anzeigen
 
 ```bash
-curl -s -b "${COOKIE}" https://heizung-test.hoteltec.at/api/v1/devices/pool
+curl -s -b "${COOKIE}" https://heizung.hoteltec.at/api/v1/devices/pool
 ```
 
 Liefert die aktiven Reserve-Vickis sortiert ``created_at DESC``
@@ -2803,7 +2850,7 @@ curl -s -X POST \
   -H 'Content-Type: application/json' \
   -b "${COOKIE}" \
   -d '{"new_pool_device_id": ${POOL_ID}}' \
-  https://heizung-test.hoteltec.at/api/v1/devices/${OLD_ID}/replace/from-pool
+  https://heizung.hoteltec.at/api/v1/devices/${OLD_ID}/replace/from-pool
 ```
 
 Atomarer Pool-Reassign-Tausch:
@@ -2838,7 +2885,7 @@ curl -s -X POST \
   -H 'Content-Type: application/json' \
   -b "${COOKIE}" \
   -d '{"reason": "battery_dead"}' \
-  https://heizung-test.hoteltec.at/api/v1/devices/${OLD_ID}/retire
+  https://heizung.hoteltec.at/api/v1/devices/${OLD_ID}/retire
 ```
 
 Setzt ``retired_at`` + ``retired_reason``. ``heating_zone_id``
@@ -4563,7 +4610,7 @@ arbeiten:**
 curl -sS -o /dev/null -w '%{http_code}\n' https://heizung.hoteltec.at/
 ```
 
-Auf dem Test-Server stattdessen `https://heizung-test.hoteltec.at/`.
+Auf dem Test-Server stattdessen `https://heizung.hoteltec.at/`.
 
 `200`. Und zum Schluss die Sicht, um die es Ihnen ging — die Geräteliste oder
 das Zimmer, das nicht mehr ging.
@@ -5563,9 +5610,13 @@ genau das, was geprüft werden soll:
    allen Kacheln, ist nicht der `SECRET_KEY` das Problem, sondern der
    `api`-Container — dann §10l.
 
-**Achtung:** §10g nennt hier noch `heizung-test.hoteltec.at` — diese
-Adresse wird seit dem Promote am 09.06.2026 nicht mehr bedient (AE-67).
-Richtig ist `heizung.hoteltec.at`.
+**Erledigt am 07.11.2026.** Hier stand ein Hinweis, §10g nenne noch
+`heizung-test.hoteltec.at`. Das war am 09.06.2026 richtig notiert und ist
+**fünf Monate als Hinweis stehen geblieben, statt behoben zu werden** —
+rund zwanzig `curl`-Zeilen in diesem Dokument standen weiter auf dem
+toten Namen. Sie sind jetzt umgestellt. Ein Hinweis auf einen Fehler
+ersetzt die Korrektur nicht; er verlängert nur die Zeit, in der jemand
+den Fehler trotzdem kopiert (§5.77).
 
 **Rückweg:**
 
@@ -6614,7 +6665,8 @@ genauso Pflicht:
 
 > **Gelaufen am 04.11.2026.** C2, C3, C5 und C7 sind erledigt, **C1 ist
 > ausgelassen** (Anlass entfallen, siehe dort), **C6 verschoben**, **C4
-> ausgeführt und zurückgenommen** (siehe dort). C5 hat die Annahme
+> ausgeführt und zurückgenommen** (siehe dort). **C8 ist am 07.11.
+> dazugekommen** und steht mit C6 auf dem Wartungstag **11.11.2026**. C5 hat die Annahme
 > widerlegt, auf die der Block gebaut war: `admin/admin` war **nicht**
 > aktiv. Zwei Störungen am laufenden Betrieb, beide hier eingearbeitet —
 > Protokoll und sechs Befunde in
@@ -7217,8 +7269,9 @@ keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
 
 ### C6 — Server-Neustart (apt-Updates)
 
-> **Am 04.11.2026 verschoben, Termin offen.** Der Block ist damit die
-> einzige Aufgabe aus Teil 2, die unverändert offen steht. Die Begründung
+> **Am 04.11.2026 verschoben, Termin seit 07.11. der 11.11.2026.** Der
+> Block war damit die einzige Aufgabe aus Teil 2, die unverändert offen
+> stand; seit dem 07.11. steht **C8** daneben auf demselben Tag. Die Begründung
 > unten gilt weiter, mit einem Zusatz aus dem 04.11.: ein Kaltstart prüft
 > auch, ob das Gateway nach einer serverseitigen Unterbrechung von selbst
 > zurückkommt — am 04.11. tat es das **nicht** (Befund 2). Wer C6
@@ -7369,6 +7422,108 @@ und das gehört notiert.
 
 **Rückweg:** keiner. Das ist der Punkt des Blocks, und deshalb steht er
 zuletzt.
+
+### C8 — die UFW-Regel für `tailscale0` entfernen (Termin 11.11.2026)
+
+> **Aufgenommen am 07.11.2026**, nach der Entscheidung, Tailscale **nicht**
+> wiederzubeleben (`docs/status/2026-11-07-zugang-oeffentliche-ip.md`).
+> Bewusst **nicht** am selben Tag ausgeführt: an diesem Morgen hat eine
+> Firewall-Änderung die Anlage 31 Minuten stillgelegt, und zwei
+> Firewall-Eingriffe an einem Tag sind einer zu viel.
+
+**Was weg soll.** `ufw status verbose` führt
+
+```
+Anywhere on tailscale0     ALLOW IN    Anywhere
+```
+
+Die Regel lässt alles auf dem Tailscale-Interface herein. `tailscaled` ist
+auf dem Server seit dem **17.10.2026** `inactive`, der Node-Key abgelaufen
+— das Interface existiert nicht mehr, die Regel trifft also auf nichts zu.
+
+**Warum sie trotzdem weg soll, obwohl sie nichts tut.** Genau deshalb. Eine
+Regel, die nichts tut, wird beim nächsten Lesen für einen Zugangsweg
+gehalten — und dann baut jemand darauf. Am 04.11. war es ein Mosquitto-User,
+den eine Liste als „verwaist" führte und der der Datenpfad war (C4); am
+07.11. ein Port, von dem ich annahm, von außen käme dort nichts. **Beide
+Male war der Fehler nicht die Handlung, sondern der Eintrag, auf den sie
+sich berief.** Ein Rest in einer Firewall-Tabelle ist genau so ein Eintrag.
+
+**Was die Regel nicht ist:** ein Risiko. Ohne Interface gibt es keinen
+Verkehr, der sie treffen könnte. Sie ist Aufräumen, kein Hotfix — deshalb
+Wartungstag und nicht heute.
+
+#### Schritt 1 — vorher belegen (§5.0a)
+
+**SSH (heizung-test, root)** — existiert das Interface überhaupt noch?
+
+```bash
+ip -brief link show tailscale0 2>&1; systemctl is-active tailscaled
+```
+
+Erwartet: `Device "tailscale0" does not exist.` und `inactive`. **Steht dort
+etwas anderes, abbrechen** — dann läuft Tailscale wieder, und die Regel ist
+ein Zugangsweg.
+
+Die Regel mit ihrer Nummer, denn gelöscht wird über die Nummer:
+
+```bash
+ufw status numbered | grep -i tailscale
+```
+
+Den Ausgangsstand abschreiben:
+
+```bash
+ufw status verbose; date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+Und den Stand der Messwerte **vor** dem Eingriff — die Zahl, gegen die
+Schritt 3 vergleicht:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT max(time), count(*) FROM sensor_reading WHERE time > now() - interval '10 minutes';"
+```
+
+#### Schritt 2 — entfernen
+
+```bash
+ufw delete <NUMMER>
+```
+
+`<NUMMER>` ist die Zahl aus Schritt 1. **Keine zweite Regel im selben
+Durchgang** — bei mehreren Änderungen sagt die Messung danach nicht mehr,
+welche es war.
+
+#### Schritt 3 — nachher innerhalb von zwei Minuten messen
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT max(time), count(*) FROM sensor_reading WHERE time > now() - interval '10 minutes';"
+```
+
+**`max(time)` muss jünger sein als in Schritt 1**, und die Zahl in der
+Größenordnung von hundert. Dazu die eigene Sitzung, die ja über dieselbe
+Firewall läuft:
+
+```bash
+ufw status verbose | head -20
+```
+
+**Bleibt `max(time)` stehen oder bricht die SSH-Sitzung ab: sofort zurück.**
+
+```bash
+ufw allow in on tailscale0
+```
+
+Seit dem 07.11. gibt es dafür auch die Kachel **„Funk-Empfang"** auf dem
+Dashboard und eine Mail nach 15 Minuten Stille. Sie ersetzen die Messung
+nicht — eine Kachel sieht man nur, wenn man hinsieht —, aber sie sind das
+Netz darunter.
+
+#### Was danach in der Doku nachzuziehen ist
+
+CLAUDE.md §4 nennt die Regel als Rest. Ist sie weg, gehört der Halbsatz
+weg — im selben PR, sonst steht in der Doku ein Rest, der selbst ein Rest
+ist (§5.77).
 
 ### Rückweg, wenn SSH nicht wiederkommt
 
@@ -10399,6 +10554,7 @@ genau diesen Handgriff schon gab.
 | **C5** | ChirpStack-Admin (C5.1 **zuerst**, dann C5.2) | jederzeit | 10 min |
 | **C6** | apt-Updates und Neustart, danach die Prüfliste | **zuletzt** | 20 min |
 | **C7** | alte Backups löschen | **nach** grüner Prüfliste | 5 min |
+| **C8** | UFW-Regel `tailscale0` entfernen (**11.11.2026**) | **einzeln**, mit Messung vorher und nachher | 10 min |
 
 **Das einzige echte Zeitfenster ist C2** (§10ai: drei Listen um 08:30,
 15:30, 19:30). Vormittags ist es bequem offen. Alles andere hat keinen

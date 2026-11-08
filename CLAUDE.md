@@ -280,7 +280,12 @@ Claude-Code-Rolle abarbeiten.
 - **Lokales Working Copy:** `C:\Users\User\dev\heizung-sonnblick`
 - **Aktueller Sprint:** **Sprint 9.10c abgeschlossen** (Vicki-Codec-Decoder-Fix: Cmd-Byte-Routing statt fPort-Routing). Sprint 9.11 Live-Test #2 in Vorbereitung.
 - **Letzter Tag:** `v0.1.9-rc3-window-detection` (Sprint 9.10). Sprint 9.10c-Tag-Frage offen (Strategie-Chat).
-- **Produktivumgebungen:** `https://heizung.hoteltec.at` (Main), `https://heizung-test.hoteltec.at` (Test)
+- **Produktivumgebung:** `https://heizung.hoteltec.at` — **eine**, und sie
+  ist der `develop`-Stand. Der Zweitname `heizung-test.hoteltec.at` wird seit
+  dem Promote am 09.06.2026 **nicht bedient**: Caddy hält kein Zertifikat
+  dafür, der TLS-Aufbau bricht ohne Zertifikat ab. Am 07.11.2026 aus der
+  Liste genommen, nachdem er hier fünf Monate als zweite Umgebung stand
+  (§5.77).
 
 ## 2. Pflicht-Lektüre vor Sprint-Arbeit
 
@@ -418,11 +423,31 @@ heizung-main ohne Live-Schaden, kostete aber 25 Min Aufräum-Zeit
 ## 4. Operations-Highlights
 
 - **SSH-Key:** `$HOME\.ssh\id_ed25519_heizung` (zwingend `-i ...`-Flag, Default-Key passt nicht)
-- **Server-Hostnames:** `heizung-test`, `heizung-main` (Tailscale MagicDNS)
+- **Zugang zum Server:** `ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150`
+  — die **öffentliche IP**, Entscheidung des Betreibers vom 07.11.2026.
+  Die Maschine heißt weiter `heizung-test` (ihr `hostname` sagt das), aber
+  **über diesen Namen kommt man nicht mehr hin**: Tailscale ist auf dem
+  Server seit dem 17.10.2026 `inactive`, der Node-Key ist abgelaufen, und
+  er wird nicht wiederbelebt. Wer `root@heizung-test` tippt, läuft in einen
+  Zeitüberlauf — **nicht** in eine Fehlermeldung, die den Grund nennt.
+- **Zweiter Server `heizung-main`** (`157.90.30.116`, CPX32): der **alte**
+  Prod-Server, seit dem Promote am 09.06.2026 Rückfall-Reserve; die
+  Stilllegung steht als C1 offen. In Tailscale seit etwa dem 18.10.2026
+  `offline`. Befehle im RUNBOOK, die `root@heizung-main` nennen, sind damit
+  **ohne geprüftes Ziel** — ob er über seine Public-IP erreichbar ist, habe
+  ich nicht probiert, weil niemand danach gefragt hat. Wer ihn braucht,
+  prüft es vorher (§5.68).
 - **Container-Stack:** api, web, db (timescaledb), redis, caddy, mosquitto, chirpstack, chirpstack-postgres, chirpstack-gateway-bridge, celery_worker, celery_beat (plus Init-Sidecars `chirpstack-init`, `chirpstack-gateway-bridge-init`) — Compose-File: `infra/deploy/docker-compose.prod.yml` (zwingend `-f`)
 - **Deploy:** GHCR Pull über systemd-Timer (5 Min), KEIN Push-Deploy
 - **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` — NICHT Hetzner Cloud DNS
-- **UFW:** aktiv auf beiden Servern, Port 22/80/443 + tailscale0 erlaubt
+- **UFW:** aktiv, Port 22/80/443 offen, dazu **1883** (MQTT, der Datenweg des
+  UG65 — siehe `docs/status/2026-11-07-vorfall-1883-sperre.md`, Sperren
+  schaltet die Anlage ab) und eine Regel für `tailscale0`, die ohne
+  laufendes Tailscale nichts mehr tut.
+- **SSH-Härtung** (gemessen 07.11.2026, `sshd -T`): `PasswordAuthentication
+  no`, `KbdInteractiveAuthentication no`, `PermitRootLogin without-password`
+  (also nur Schlüssel), `PermitEmptyPasswords no`, `MaxAuthTries 6`.
+  `fail2ban` läuft, ein Jail `sshd`, 466 Sperren bisher.
 - **PAT-Type:** Classic PAT (Fine-grained unterstützt GHCR nicht)
 
 ## 5. Lessons Learned (Pflicht-Lektuere, NICHT ueberspringen)
@@ -3803,8 +3828,10 @@ npm run build
 **e2e lokal (Playwright), ab 25.10.2026 mit Schranke.** Ein Lauf bricht ab,
 wenn `API_PROXY_TARGET` nicht auf localhost zeigt. Grund: ungemockte
 API-Anfragen gehen über den Rewrite aus `next.config.mjs` an dieses Ziel,
-und in `frontend/.env.local` steht lokal `https://heizung-test.hoteltec.at`
-— develop, also **die Produktion dieses Hauses**. Die Begründung samt
+und in `frontend/.env.local` steht lokal ein Produktions-Ziel — also **die
+Produktion dieses Hauses**. (Stand 07.11.2026 steht dort noch
+`heizung-test.hoteltec.at`, ein Name, der nicht mehr bedient wird; die
+Schranke greift unabhängig davon, weil sie nur auf „nicht localhost" sieht.) Die Begründung samt
 Anlass steht im Docstring von `frontend/tests/proxy-ziel.ts`.
 
 Die Datei des Betreibers bleibt unverändert; der Wert aus der Shell
