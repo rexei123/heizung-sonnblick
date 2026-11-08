@@ -86,7 +86,8 @@ als Unterscheider). Noch nicht gebaut.
   Betreibers vom 07.11.: dort spielt der Funk **keine Rolle** — die Daten
   liegen in der Datenbank, der Verlust von 10,9 % hat sie bereits
   passiert.
-* `TESTPLAN_GERAETE` wird in diesem PR **auf Zonen** gesetzt.
+* `TESTPLAN_GERAETE` steht **auf Zonen** — Einzeiler in diesem PR (#397),
+  nicht erst im Schritt-2-PR. Siehe den Kasten unten.
 
 **Schritt 3 — Vicki-Erkennung aktivieren.** Testgeräte **86** (306
 Kinderzimmer) und **24** (105 Schlafzimmer). **Nicht 85**, Begründung:
@@ -95,15 +96,22 @@ mischt „hat nicht ausgelöst" mit „die Meldung ist verloren". **Nicht
 Zimmer 110**, Entscheidung vom 05.11., ebenfalls schlechter Funk. Das Bad
 (87) bleibt wegen der Dusche außen vor.
 
-> **Befund zu `TESTPLAN_GERAETE`, aufgenommen am 07.11.:** die Konstante
-> steht in `services/fenstererkennung.py:72` auf
+> **Befund zu `TESTPLAN_GERAETE`, aufgenommen und behoben am 07.11.:** die
+> Konstante stand in `services/fenstererkennung.py` auf
 > `("105", "110", "306 Schlafzimmer")` und hat **keinen einzigen
-> Konsumenten** — `grep` findet nur die Definition. Sie ist damit
+> Konsumenten** — `grep` findet nur die Definition. Sie war damit
 > zweifach überholt (110 seit 05.11., „306 Schlafzimmer" seit heute) und
-> dokumentiert einen Plan, den sie nicht ausführt. Wer sie liest und die
-> Namen in `--nur` tippt, zielt auf die **falschen** Geräte. Korrektur
-> nach Vorgabe im Schritt-2-PR; ein Einzeiler jetzt wäre billiger als
-> eine bekannt falsche Konstante über das Wochenende (§5.20, §5.77).
+> dokumentierte einen Plan, den sie nicht ausführt. Wer sie liest und die
+> Namen in `--nur` tippt, zielt auf die **falschen** Geräte — und `"105"`
+> trifft dabei auch das Bad.
+>
+> **Entscheidung des Betreibers:** Einzeiler jetzt, in diesem PR, statt
+> im Schritt-2-PR — eine bekannt falsche Konstante über das Wochenende
+> ist teurer als die Korrektur (§5.20, §5.77). Neuer Wert
+> `("306 Kinderzimmer", "105 Schlafzimmer")`, mit dem Vermerk „derzeit
+> ohne Konsument" am Code. **Dass sie keinen Konsumenten hat, bleibt
+> offen** — der Vermerk hält es fest, statt es zu verbergen; wer die
+> Auswahl programmatisch braucht, baut den Leser im Schritt-2-PR.
 
 ### Port 1883
 
