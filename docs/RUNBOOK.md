@@ -8287,6 +8287,16 @@ Fenster offen", richtig ist „niemand hat gemessen".
 > | `"306 Schlafzimmer"` (Gerät 85) | **10,9 % Paketverlust** über 24 h bei -110 dBm und 1,1 dB SNR; die Nachbarn im selben Zimmer liegen bei 2,7 %. Belegt am 07.11., als genau dieses Gerät die `0x46`-Antwort verlor |
 > | `"105"` | **die Zimmernummer trifft beide Geräte des Zimmers** — also auch **25** (105 Bad). Ein Bad ist wegen der Dusche der schlechteste Ort für diesen Test, und niemand hat das gewollt |
 >
+> **Zur dritten Zeile, der Genauigkeit zuliebe:** dass `--nur` nach
+> Nummer **oder** Zone **oder** Etikett **oder** DevEUI wählt, steht seit
+> dem 01.11.2026 weiter unten in diesem Abschnitt („Befund: mit den
+> Nummern 105–109 …"), und dass eine Zimmernummer **alle** Thermostate
+> ihres Zimmers trifft, ist dort ausdrücklich **gewollt** und deshalb
+> kein Abbruchgrund. Neu ist hier nicht die Mechanik, sondern ihre Folge
+> für **diesen** Test: Zimmer 105 hat zwei Geräte, und eines davon ist
+> ein Bad. Das stand nirgends — der Testplan nannte eine Nummer und
+> meinte ein Gerät.
+>
 > **Neu, und beide namentlich statt über die Zimmernummer:**
 >
 > ```
