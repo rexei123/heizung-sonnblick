@@ -71,8 +71,8 @@ _EXPECTED_KEYS = {
     "funkempfang_alter_min",
     "funkempfang_meldungen_10min",
     # Ob ueberhaupt ein Geraet seine Fenstererkennung bestaetigt hat.
-    # Steuert, ob „Fenster offen" eine Zahl oder „Erkennung inaktiv"
-    # zeigt.
+    # Steuert, ob „Fenster offen" eine Zahl oder „inaktiv" (mit dem
+    # Grund in der Zusatzzeile) zeigt — Wortlaut ab 10.11.2026.
     "fenstererkennung_aktiv",
     # Sprint 25 (T3): Geraete, bei denen der Abgleich aufgegeben hat und
     # die seither keinen gesendeten Sollwert bestaetigt haben.

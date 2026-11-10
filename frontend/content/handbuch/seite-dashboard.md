@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste
 rollen: alle
-stand: 2026-11-08
+stand: 2026-11-10
 route: /
 ---
 
@@ -37,7 +37,8 @@ abgefallener Kopf — ein Ventil ohne Kopf steht offen.
 die seit Tagen läuft, ist der häufigste Grund für „das Zimmer reagiert
 nicht auf die Automatik".
 
-**Fenster offen** zeigt **„Erkennung inaktiv"** statt einer Zahl,
+**Fenster offen** zeigt **„inaktiv"** statt einer Zahl, mit dem Grund
+in der Zeile darunter („Erkennung im Gerät ausgeschaltet"),
 solange kein Thermostat zurückgemeldet hat, dass seine Fenstererkennung
 eingeschaltet ist. Die Geräte liefern sie ab Werk ausgeschaltet.
 

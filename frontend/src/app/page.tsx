@@ -21,7 +21,11 @@ import { useAuth } from "@/contexts/auth-context";
 import { useDashboardKpi } from "@/lib/api/hooks-dashboard";
 import { useOccupancyImportLog } from "@/lib/api/hooks-occupancy-import";
 import type { DashboardKpi, OccupancyImportStatus } from "@/lib/api/types";
-import { formatDateTime, formatRelative, formatTemperature } from "@/lib/format";
+import {
+  formatDateTime,
+  formatRelative,
+  formatTemperature,
+} from "@/lib/format";
 
 /** Engine-Tick gilt als „alt", wenn aelter als 10 Minuten (T0-Erwartung < 10 min). */
 const TICK_STALE_MS = 10 * 60 * 1000;
@@ -136,7 +140,8 @@ const FUNK_TON: Record<DashboardKpi["funkempfang_stufe"], KpiTone> = {
 
 function buildCards(data: DashboardKpi): CardConfig[] {
   const tick = data.last_engine_tick;
-  const tickStale = tick === null || Date.now() - new Date(tick).getTime() > TICK_STALE_MS;
+  const tickStale =
+    tick === null || Date.now() - new Date(tick).getTime() > TICK_STALE_MS;
   return [
     {
       label: "Belegte Zimmer",
@@ -166,7 +171,10 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       subValue: `von ${data.devices_assigned}`,
       note: data.devices_pool > 0 ? `${data.devices_pool} im Lager` : undefined,
       icon: "device_thermostat",
-      tone: data.devices_online < data.devices_assigned ? "warning-soft" : "neutral",
+      tone:
+        data.devices_online < data.devices_assigned
+          ? "warning-soft"
+          : "neutral",
       // Das Gegenteil dessen, was diese Kachel zaehlt: zugeordnet und
       // nicht healthy/degraded. Die Auswahl dort heisst entsprechend.
       href: "/devices?zeige=nicht-online",
@@ -188,12 +196,23 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       // 604.694 Zeilen `false` und 49 belegten Temperatureinbrüchen
       // allein in Zimmer 306. Die 0 ist hier die gefährlichere Zahl,
       // weil sie wie ein Befund aussieht (§5.77).
+      // Vorgabe des Betreibers (10.11.2026): der **Wert** ist kurz, der
+      // Grund steht in der Zusatzzeile. „Erkennung inaktiv" stand bis
+      // dahin als Wert und war mit 17 Zeichen die längste Zeichenkette
+      // im Raster — sie hat die Karte umbrechen lassen und damit, seit
+      // alle Zeilen gleich hoch sind, das ganze Raster höher gemacht.
+      //
+      // Ist die Erkennung aktiv, steht hier wieder die **Zahl**.
       label: "Fenster offen",
-      value: data.fenstererkennung_aktiv ? data.zones_window_open : "Erkennung inaktiv",
-      subValue: data.fenstererkennung_aktiv ? undefined : "keine Rückmeldung vom Gerät",
+      value: data.fenstererkennung_aktiv ? data.zones_window_open : "inaktiv",
+      subValue: data.fenstererkennung_aktiv
+        ? undefined
+        : "Erkennung im Gerät ausgeschaltet",
       icon: "sensor_window",
       tone:
-        data.fenstererkennung_aktiv && data.zones_window_open > 0 ? "warning-soft" : "neutral",
+        data.fenstererkennung_aktiv && data.zones_window_open > 0
+          ? "warning-soft"
+          : "neutral",
     },
     {
       // Sprint 25 T8: die Kachel, die den Ausfall vom 07.11.2026 gezeigt
@@ -289,14 +308,42 @@ export default function Home() {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* `auto-rows-fr` macht **alle** Zeilen gleich hoch, nicht nur die
+          Karten innerhalb einer Zeile: `1fr` verteilt die Höhe gleich,
+          also richtet sich jede Zeile nach der höchsten Karte des
+          **ganzen** Rasters. Maßstab ist damit die Kachel mit Wert und
+          zwei Zusatzzeilen — heute „Geräte online" und „Funk-Empfang".
+          Dazu `h-full` **an der Karte** (`KpiCard`), sonst dehnt sich nur
+          die Rasterzelle und die Karte bleibt klein.
+
+          An den Hüllen dazwischen steht bewusst **kein** `h-full`: ein
+          Rasterkind wird ohnehin auf die Zeilenhöhe gedehnt
+          (`align-items: stretch` ist die Vorgabe), und damit hat die
+          Hülle eine feste Höhe, gegen die das `h-full` der Karte rechnet.
+          Eine Mutationsprobe am 10.11.2026 hat das belegt: `h-full` an
+          der Hülle entfernt → alle sieben Layout-Tests blieben grün. Eine
+          Klasse, die nichts tut, ist keine Absicherung, sondern eine
+          Behauptung (§0 S6). */}
+      <div className="grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {kpiQ.isLoading
           ? CARD_META.map((m) => (
-              <KpiCard key={m.label} loading label={m.label} value="" icon={m.icon} />
+              <KpiCard
+                key={m.label}
+                loading
+                label={m.label}
+                value=""
+                icon={m.icon}
+              />
             ))
           : kpiQ.isError || !kpiQ.data
             ? CARD_META.map((m) => (
-                <KpiCard key={m.label} error label={m.label} value="" icon={m.icon} />
+                <KpiCard
+                  key={m.label}
+                  error
+                  label={m.label}
+                  value=""
+                  icon={m.icon}
+                />
               ))
             : buildCards(kpiQ.data).map((c) => {
                 const karte = (
@@ -331,9 +378,19 @@ export default function Home() {
             (GET .../occupancy-import/log), klickbar zur Detailseite. */}
         <Link href="/einstellungen/api" className="block">
           {importQ.isLoading ? (
-            <KpiCard loading label="Belegungsliste" value="" icon="event_available" />
+            <KpiCard
+              loading
+              label="Belegungsliste"
+              value=""
+              icon="event_available"
+            />
           ) : importQ.isError || !importQ.data ? (
-            <KpiCard error label="Belegungsliste" value="" icon="event_available" />
+            <KpiCard
+              error
+              label="Belegungsliste"
+              value=""
+              icon="event_available"
+            />
           ) : (
             <KpiCard
               label="Belegungsliste"
