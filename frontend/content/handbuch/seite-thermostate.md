@@ -3,7 +3,7 @@ titel: Thermostate
 kategorie: Die Seiten
 stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk, montiert, Fühler
 rollen: alle
-stand: 2026-11-02
+stand: 2026-11-08
 route: /devices
 ---
 
@@ -34,6 +34,17 @@ offenen Ventil.
 Eine **Information**, kein Auftrag — siehe oben, der Auftrag heißt
 Funkstille. Daneben steht die Spannung in Volt; bei „unbekannt" steht
 bewusst keine Zahl, weil unter drei Messwerten keine Aussage möglich ist.
+
+**Befehle nicht angenommen.** Das Gerät übernimmt den gesendeten
+Sollwert nicht. Dreimal nachgesendet, dann ist Schluss — jeder
+Funkbefehl ist eine Motorbewegung. Das Gerät **funkt dabei weiter**; es
+ist nicht offline, es gehorcht nur nicht. Deshalb ist das eine eigene
+Auswahl und nicht Teil von „Nicht online".
+
+Die Lage bleibt stehen, bis das Gerät einen gesendeten Wert
+**bestätigt** — nicht schon dann, wenn die Steuerung ihr Ziel zufällig
+auf den Wert verschiebt, den das Gerät ohnehin hält. Was zu tun ist,
+steht auf der Übersichtsseite bei der gleichnamigen Kachel.
 
 **Im Lager.** Keiner Zone zugeordnet. Reserve für einen Tausch.
 

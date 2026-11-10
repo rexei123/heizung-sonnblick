@@ -81,6 +81,8 @@ function makeDevice(
     grenzen_ist_min_c: null,
     grenzen_ist_max_c: null,
     grenzen_bestaetigt_um: null,
+    // Sprint 25 T3: nimmt Befehle an, soweit bekannt.
+    abgleich_erschoepft_seit: null,
     ...zusatz,
   };
 }

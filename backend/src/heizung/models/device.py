@@ -227,6 +227,22 @@ class Device(Base):
     # nicht pruefbar.
     switch_cycles: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
+    # Sprint 25 (T3, Migration 0039): seit wann nimmt dieses Geraet den
+    # Engine-Sollwert nicht an?
+    #
+    # Gesetzt, wenn der Abgleich nach drei erfolglosen Nachsendungen
+    # aufgibt. Geloescht **nur** durch eine Bestaetigung: das Geraet meldet
+    # den Wert, der ihm zuletzt gesendet wurde. Dass die Engine inzwischen
+    # etwas anderes will, loescht ihn **nicht** — genau daran verschwand
+    # der Befund an Geraet 7 zwischen dem 01. und 04.11.2026, ohne dass das
+    # Geraet je einen Befehl angenommen hatte.
+    #
+    # Ist- und Soll-Wert stehen bewusst nicht daneben: sie sind in
+    # ``sensor_reading.setpoint`` und ``control_command.target_setpoint``
+    # vorhanden, und eine Kopie waere eine zweite Wahrheit (§5.53). Hier
+    # steht nur, was sonst nirgends steht — **seit wann**.
+    abgleich_erschoepft_seit: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
