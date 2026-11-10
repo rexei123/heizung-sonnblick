@@ -23,6 +23,46 @@
 > Stellen hatten den Befund notiert (§10g-Hinweis, §4.4-Tabelle) — **notiert,
 > nicht nachgezogen**, und damit war er wertlos (§5.77).
 >
+> ### Notzugang: die Hetzner-Konsole
+>
+> **Wenn SSH nicht mehr geht** — Firewall zugedreht, `sshd` kaputt,
+> Netzwerk weg, Schlüssel verloren —, bleibt die **Web-Konsole bei
+> Hetzner**. Sie hängt am Hypervisor und nicht am Netzwerk-Stack des
+> Servers: UFW, `sshd_config` und `fail2ban` sind dort **ohne Wirkung**.
+> Genau deshalb ist sie der Notweg und nicht ein zweiter Komfortweg.
+>
+> **Wo.** `https://console.hetzner.cloud` → Projekt → Server
+> `heizung-test` (`157.90.17.150`) → **Console** (Symbol `>_` oben
+> rechts). Es öffnet sich ein Terminal im Browser.
+>
+> **Wie anmelden.** Am Anmeldefeld `root` und das **Root-Passwort** —
+> **nicht** der SSH-Schlüssel. Das ist der Grund, warum dieser Weg
+> überhaupt trägt: `PasswordAuthentication no` gilt nur für **SSH**, die
+> lokale Konsole nimmt das Passwort.
+>
+> | Geprüft am 10.11.2026 | Befund |
+> |---|---|
+> | Root-Passwort gesetzt? | **ja** — `passwd -S root` → `P`, zuletzt geändert **20.04.2026** |
+> | Anmeldefeld vorhanden? | **ja** — `getty@tty1.service` ist `enabled` |
+> | Plattform | Hetzner **Cloud** (`sys_vendor` = Hetzner, `product_name` = vServer) |
+>
+> **Die eine Voraussetzung, die nicht technisch ist:** das Passwort muss
+> **auffindbar** sein. Ein gesetztes Passwort, das niemand kennt, macht
+> die Konsole im Notfall wertlos. Wenn es nicht im Passwortspeicher
+> liegt, gehört es dort hinein — **jetzt**, nicht im Notfall.
+>
+> **Wenn das Passwort fehlt:** Hetzner-Konsole → Server → **Rescue** →
+> *Reset root password*. Hetzner zeigt ein neues Passwort an und **startet
+> die Maschine dafür neu** — im Notfall vertretbar, im Betrieb nicht. Die
+> Alternative ist dasselbe Menü → *Enable rescue & power cycle*, also ein
+> Rettungssystem per Netzboot; damit kommt man an die Platte, aber die
+> Dienste laufen nicht.
+>
+> **Was die Konsole nicht kann:** Kopieren und Einfügen ist je nach
+> Browser eingeschränkt, und lange Befehle tippt man dort von Hand. Sie
+> ist zum **Aufschließen** gedacht — Firewall öffnen, `sshd` starten —,
+> nicht zum Arbeiten.
+>
 > **SSH-Härtung, gemessen am 07.11.2026** mit `sshd -T`:
 >
 > | Einstellung | Wert |
@@ -7271,7 +7311,9 @@ keinen Rückweg**, nur ein weiteres neues Passwort. Deshalb steht
 
 > **Am 04.11.2026 verschoben, Termin seit 07.11. der 11.11.2026.** Der
 > Block war damit die einzige Aufgabe aus Teil 2, die unverändert offen
-> stand; seit dem 07.11. steht **C8** daneben auf demselben Tag. Die Begründung
+> stand. **C8 stand vom 07.11. bis zum 10.11. daneben auf demselben Tag und
+> ist zurückgestellt** (siehe dort) — der 11.11. trägt damit nur Block 1
+> (Sicherungen löschen) und C6. Die Begründung
 > unten gilt weiter, mit einem Zusatz aus dem 04.11.: ein Kaltstart prüft
 > auch, ob das Gateway nach einer serverseitigen Unterbrechung von selbst
 > zurückkommt — am 04.11. tat es das **nicht** (Befund 2). Wer C6
@@ -7423,13 +7465,55 @@ und das gehört notiert.
 **Rückweg:** keiner. Das ist der Punkt des Blocks, und deshalb steht er
 zuletzt.
 
-### C8 — die UFW-Regel für `tailscale0` entfernen (Termin 11.11.2026)
+### C8 — die UFW-Regel für `tailscale0` entfernen (**zurückgestellt**)
 
 > **Aufgenommen am 07.11.2026**, nach der Entscheidung, Tailscale **nicht**
 > wiederzubeleben (`docs/status/2026-11-07-zugang-oeffentliche-ip.md`).
 > Bewusst **nicht** am selben Tag ausgeführt: an diesem Morgen hat eine
 > Firewall-Änderung die Anlage 31 Minuten stillgelegt, und zwei
 > Firewall-Eingriffe an einem Tag sind einer zu viel.
+>
+> ### ⚠ Am 10.11.2026 zurückgestellt — die Prämisse war falsch gemessen
+>
+> **Der Termin 11.11. entfällt.** Die Vorprüfung für den Wartungstag hat
+> ergeben: `tailscaled` **läuft**, das Interface **existiert** und trägt
+> eine Adresse. Damit ist die Abbruchbedingung aus Schritt 1 eingetreten,
+> und zwar bevor jemand sie ausgeführt hat.
+>
+> ```
+> snap services tailscale  →  tailscale.tailscaled  enabled  active
+> tailscale0               →  UNKNOWN  100.82.226.57/32  fd7a:115c:a1e0::3434:e239/128
+> tailscale status         →  Logged out.
+> ```
+>
+> **Was am 07.11. schiefgegangen ist:** geprüft wurde
+> `systemctl is-active tailscaled`. Diese Unit **gibt es auf diesem Server
+> nicht** — Tailscale ist als **Snap** installiert
+> (`/snap/bin/tailscale`), der Dienst heißt
+> `snap.tailscale.tailscaled.service`. Die Antwort `inactive` hieß also
+> „diese Unit kenne ich nicht", nicht „der Dienst läuft nicht". Ein
+> Befehl, dessen Ausgabe man falsch liest, liefert keinen Befund (§5.68)
+> — und hier hat er eine ganze Begründung getragen.
+>
+> **Der Knoten ist abgemeldet, nicht abgelaufen.** „Logged out" ist ein
+> anderer Zustand als ein verfallener Node-Key: ein `tailscale login`
+> stellt den Weg in einer Minute wieder her. Genau deshalb ist die Regel
+> **nicht** der tote Rest, als den dieser Block sie beschrieb, sondern
+> der Rückfallpfad, wenn die öffentliche IP einmal nicht erreichbar ist.
+>
+> **Die Entscheidung ist am 10.11.2026 gefallen: stilllegen** — aber als
+> **eigener Punkt im nächsten Wartungsfenster**, nicht am 11.11. Erst
+> `snap stop --disable tailscale`, **dann** die zwei UFW-Regeln (IPv4 und
+> IPv6), einzeln und mit Vorher/Nachher nach §5.0a. **Vorbedingung:** der
+> Notzugang über die Hetzner-Konsole ist geprüft und das Root-Passwort
+> auffindbar — Tailscale war der zweite Weg auf diese Maschine, und wer
+> ihn zumacht, braucht den dritten vorher in der Hand. Ablauf in §10aw,
+> Block 2.
+>
+> **Die Schritte unten bleiben stehen**, weil sie nach der Entscheidung
+> gebraucht werden. Was **nicht** mehr stimmt, ist der Absatz „Was die
+> Regel nicht ist: ein Risiko" — ohne Verkehr trifft sie nichts, das
+> gilt; „ohne Interface" gilt nicht.
 
 **Was weg soll.** `ufw status verbose` führt
 
@@ -7437,9 +7521,10 @@ zuletzt.
 Anywhere on tailscale0     ALLOW IN    Anywhere
 ```
 
-Die Regel lässt alles auf dem Tailscale-Interface herein. `tailscaled` ist
-auf dem Server seit dem **17.10.2026** `inactive`, der Node-Key abgelaufen
-— das Interface existiert nicht mehr, die Regel trifft also auf nichts zu.
+Die Regel lässt alles auf dem Tailscale-Interface herein. Sie stand hier
+mit der Begründung, `tailscaled` sei seit dem 17.10.2026 `inactive` und
+das Interface existiere nicht mehr — **beides ist am 10.11.2026 widerlegt
+worden**, siehe den Kasten oben.
 
 **Warum sie trotzdem weg soll, obwohl sie nichts tut.** Genau deshalb. Eine
 Regel, die nichts tut, wird beim nächsten Lesen für einen Zugangsweg
@@ -7458,12 +7543,21 @@ Wartungstag und nicht heute.
 **SSH (heizung-test, root)** — existiert das Interface überhaupt noch?
 
 ```bash
-ip -brief link show tailscale0 2>&1; systemctl is-active tailscaled
+ip -brief link show tailscale0 2>&1
+snap services tailscale 2>&1
+systemctl is-active snap.tailscale.tailscaled.service 2>&1
+timeout 10 tailscale status 2>&1 | head -3
 ```
 
-Erwartet: `Device "tailscale0" does not exist.` und `inactive`. **Steht dort
-etwas anderes, abbrechen** — dann läuft Tailscale wieder, und die Regel ist
-ein Zugangsweg.
+**Die Unit heißt `snap.tailscale.tailscaled.service`, nicht `tailscaled`.**
+Hier stand bis zum 10.11.2026 `systemctl is-active tailscaled`, und das
+war der Fehler: diese Unit existiert nicht, die Antwort lautet deshalb
+immer `inactive` — unabhängig davon, ob Tailscale läuft.
+
+Erwartet, **damit weitergemacht werden darf**:
+`Device "tailscale0" does not exist.` und ein Dienst, der **nicht** läuft.
+**Steht dort etwas anderes, abbrechen** — dann läuft Tailscale, und die
+Regel ist ein Zugangsweg. Am 10.11.2026 war genau das der Fall.
 
 Die Regel mit ihrer Nummer, denn gelöscht wird über die Nummer:
 
@@ -10502,7 +10596,227 @@ Profil, nicht am Gerät.
 ohne Last), AE-78 §14, `docs/status/2026-11-02-adr-plugin.md`.
 
 
-## 10aw. Rotation Teil 2: die Laufliste für den 04.11.2026
+## 10aw. Wartungstage: die Lauflisten (04.11. und 11.11.2026)
+
+Zwei Tage, zwei Listen. Der **11.11.** steht zuerst, weil er noch
+ansteht; der **04.11.** darunter, weil sein Ergebnis die Vorgeschichte
+des 11.11. ist — insbesondere der Mosquitto-Neustart, der das Gateway
+hat hängen lassen.
+
+### Wartungstag 11.11.2026 — die Laufliste
+
+**Drei Blöcke, in dieser Reihenfolge, mit einer Prüfung nach jedem.** Die
+Befehle selbst stehen in §10ab (C6, C7) und bei C8 unten; hier steht die
+**Reihenfolge**, die Zeiten und die Abbruchregeln.
+
+> **Ein Befund vom 10.11.2026, 06:40, und er streicht einen Block:**
+> **C8 entfällt.** `tailscaled` läuft — als **Snap**, nicht als
+> apt-Dienst, und deshalb hat die Prüfung vom 07.11. ihn nicht gesehen.
+> Einzelheiten unten bei C8.
+
+#### Vorprüfungen, gelaufen am 10.11.2026 um 06:40 (nur lesend)
+
+| Frage | Befund |
+|---|---|
+| Kommen alle Container nach dem Reboot von selbst hoch? | **Ja, die elf Dienste.** Alle tragen `restart: always`. Die **zwei Init-Behälter** (`chirpstack-init`, `chirpstack-gateway-bridge-init`) tragen `restart: "no"` und bleiben liegen — **so gewollt**, sie sind Einmal-Läufer, und ihr Ergebnis liegt in den Named Volumes `chirpstack_config_rendered` / `gateway_bridge_config_rendered`. `depends_on` wird beim Hochfahren durch den Docker-Dienst **nicht** ausgewertet, ChirpStack und Bridge starten also trotzdem |
+| Startet Docker selbst? | `systemctl is-enabled docker` → **enabled** |
+| Kommen die Timer zurück? | `heizung-deploy-pull.timer` **enabled**, `heizung-backup.timer` **enabled**. Der Pull-Timer ruft ohnehin alle fünf Minuten `docker compose up -d` — spätestens damit sind auch die Init-Behälter wieder gelaufen |
+| Muss Tailscale ausgelassen werden? | **Nichts zu tun, und nichts auszulassen.** Der Snap-Dienst ist `enabled` und kommt zurück, der Knoten ist aber **abgemeldet** (`tailscale status` → „Logged out"). Er baut von sich aus keine Verbindung auf |
+| Steht ein Reboot überhaupt an? | **Ja.** `/var/run/reboot-required` existiert, genannt sind `linux-image-6.8.0-147-generic` und `linux-base`. **58 Pakete** zu aktualisieren, 2 neu |
+| Grundlast für das Messfenster | **102 Meldungen von 102 Geräten in zehn Minuten** (10.11., 06:41). Also **eine Meldung je Gerät je zehn Minuten** — das ist der Maßstab für „kommt wieder was an" |
+
+#### Block 1 — die Sicherungen vom 04.11. löschen
+
+**Ein Pfad in der Vorgabe war leicht daneben**, deshalb hier die
+geprüften:
+
+```bash
+ls -la /opt/heizung-sonnblick/infra/deploy/.env.bak-pre-rotation-20261104T054309Z \
+       /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-20261104T054309Z
+```
+
+Die `passwd`-Sicherung liegt in `infra/mosquitto/**config**/`, nicht in
+`infra/mosquitto/`. Beide Dateien sind vorhanden.
+
+**Erst ansehen, dann löschen.** Die `.env`-Sicherung trägt als
+Änderungsdatum den **20.10.**, nicht den 04.11. — das ist kein Fehler,
+sondern eine Kopie mit erhaltener Zeit (`cp -p`): der Inhalt ist die
+`.env`, wie sie **vor** der Rotation vom 04.11. galt.
+
+```bash
+rm /opt/heizung-sonnblick/infra/deploy/.env.bak-pre-rotation-20261104T054309Z
+rm /opt/heizung-sonnblick/infra/mosquitto/config/passwd.bak-20261104T054309Z
+```
+
+**Prüfung danach:** beide `ls` melden „No such file or directory", und —
+wichtiger — der Betrieb läuft unverändert:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+Das `-f` ist nicht optional (§5.78). Mosquitto muss `healthy` sein; die
+gelöschte `passwd.bak` ist eine Kopie, die laufende Datei heißt `passwd`
+und bleibt.
+
+**Abbruchregel:** Melden `ls` die Dateien nicht, ist **nichts** zu
+löschen — dann hat sie jemand schon entfernt, und ein `rm` auf einen
+geratenen Pfad ist der Anfang eines anderen Vorfalls.
+
+#### Block 2 — C8 (UFW-Regel `tailscale0`): **nicht ausführen**
+
+**Die Abbruchbedingung, die am 07.11. in C8 geschrieben wurde, ist
+eingetreten:** „abbrechen, wenn die Schnittstelle existiert". Sie
+existiert.
+
+```
+tailscale0       UNKNOWN        100.82.226.57/32 fd7a:115c:a1e0::3434:e239/128
+snap services tailscale  →  tailscale.tailscaled  enabled  active
+tailscale status         →  Logged out.
+```
+
+**Was am 07.11. falsch gemessen wurde.** Geprüft wurde
+`systemctl is-active tailscaled` — und diese Unit **gibt es nicht**, weil
+Tailscale hier als Snap installiert ist (`/snap/bin/tailscale`). Die
+Antwort `inactive` bedeutete also „diese Unit kenne ich nicht", nicht
+„der Dienst läuft nicht". Der Dienst heißt
+`snap.tailscale.tailscaled.service` und ist **enabled und active**.
+Damit ist auch der Eintrag in CLAUDE.md §4 („seit 17.10. `inactive`,
+Node-Key abgelaufen") in zwei Punkten falsch: der Dienst läuft, und der
+Knoten ist **abgemeldet** — was etwas anderes ist als ein abgelaufener
+Schlüssel (§5.68: eine Ausgabe, die man falsch liest, ist kein Befund).
+
+**Warum die Regel damit bleibt.** Sie ist heute wirkungslos, weil kein
+Partner verbunden ist — aber sie ist nicht *tot*: ein
+`tailscale login` auf diesem Server stellt den Weg in einer Minute
+wieder her, und das ist der Rückfallpfad, wenn die öffentliche IP einmal
+nicht erreichbar ist. Eine Regel zu entfernen, deren Weg man im Notfall
+noch braucht, spart nichts und kostet im schlechtesten Moment.
+
+**Die Entscheidung ist am 10.11.2026 gefallen: stilllegen.** Beides war
+vertretbar, der heutige Zustand ist das Schlechteste von beidem — ein
+laufender Dienst ohne Sitzung und eine Firewall-Regel, deren Grund
+niemand mehr kennt.
+
+**Aber nicht morgen.** Es ist ein eigener Punkt für das **nächste**
+Wartungsfenster, als **einzelne** Änderung mit Vorher/Nachher-Messung
+nach §5.0a — und zwar in dieser Reihenfolge:
+
+```bash
+# 1. Dienst aus, und zwar so, dass er nach einem Reboot nicht zurückkommt
+snap stop --disable tailscale
+
+# 2. erst danach die Regel, denn ohne Dienst gibt es die Schnittstelle nicht mehr
+ufw status numbered | grep -i tailscale     # Nummern lesen
+ufw delete <NUMMER>                         # IPv4 und IPv6 sind zwei Regeln
+```
+
+**Die Reihenfolge ist nicht beliebig.** Erst der Dienst, dann die Regel:
+eine Regel auf eine Schnittstelle, die es noch gibt, ist der
+Zugangsweg — und den entfernt man nicht, solange er offen ist. Umgekehrt
+wäre zwischen den beiden Schritten ein Zeitfenster, in dem Tailscale
+läuft und die Firewall ihn nicht mehr durchlässt; das ist kein Schaden,
+aber eine unnötige Zwischenlage.
+
+**Vorbedingung, und sie ist der eigentliche Punkt:** der Notzugang muss
+vorher **geprüft** sein — die Hetzner-Konsole, Kasten unter der H1, mit
+dem Root-Passwort im Passwortspeicher. Tailscale war bisher der zweite
+Weg auf diese Maschine. Wer ihn zumacht, muss den dritten in der Hand
+haben, **bevor** er zumacht (§0 S5: letzter bekannter guter Stand schlägt
+jede Annahme).
+
+#### Block 3 — C6: apt-Updates und Reboot, mit dem Gateway in Reichweite
+
+**Warum das der einzige Block mit Zeitplan ist.** Ein Reboot startet
+**Mosquitto** neu. Am 04.11. hat genau das das Gateway hängen lassen: ab
+dem Mosquitto-Neustart in C4 kam **kein Uplink** mehr, bis um 07:48
+jemand das UG65 stromlos gemacht hat. Das ist deshalb **kein Störfall,
+den man einplant — es ist ein Schritt, den man vorbereitet.**
+
+**Betreiber steht beim Gateway.** Das Dashboard auf dem Telefon, Kachel
+**Funk-Empfang**: sie nennt „*n* Meldungen in 10 min". Normal sind
+**rund 100**.
+
+**Startzeit: Mittwoch 11.11.2026, ca. 10:00.** Nicht zwischen 08:15 und
+08:45 — in dieses Fenster fällt der Belegungs-Import, und ein Neustart
+mitten darin erzeugt einen Befund, der nichts mit dem Reboot zu tun hat.
+10:00 liegt außerdem im Merge-Fenster, es ist also jemand am Rechner.
+
+| Zeit | Handgriff | Prüfung, bevor es weitergeht |
+|---|---|---|
+| **T−10** (ca. 09:50) | **Erster Schritt, vor allem anderen:** Grundwert ablesen **und Screenshot der Kachel Funk-Empfang machen**. Die Zahl aufschreiben | Zahl ist ~100 und Stufe **online**. Ist sie das jetzt schon nicht, wird **nicht** neu gestartet — dann liegt etwas anderes vor. **Ohne Screenshot kein Reboot:** danach ist der Vorher-Wert nicht mehr zu beschaffen, und ein Vergleich ohne Ausgangswert ist keiner (§5.0a) |
+| **T−5** | Zum Gateway gehen. Steckdose erreichbar? | Betreiber ist am UG65 |
+| **T0** | `apt-get update && apt-get dist-upgrade -y` — **ohne** Reboot | Läuft durch, 58 Pakete, Erfahrungswert 3–6 min. Bei Rückfragen zu Konfigurationsdateien: **„keep the local version"** |
+| **T+6** | `docker compose -f …/docker-compose.prod.yml ps` | Alle elf Dienste noch `Up`. Der Reboot kommt erst, wenn das stimmt |
+| **T+7** | `reboot` | SSH bricht ab. Das ist das erwartete Verhalten |
+| **T+8…T+10** | Warten. Neustart dauert 1–2 min | SSH geht wieder: `ssh -i … root@157.90.17.150 uptime` |
+| **T+10** | `docker compose -f … ps` | Elf Dienste `Up`, `api` / `web` / `celery_*` / `db` / `redis` / `mosquitto` **healthy**. Die zwei Init-Behälter stehen auf `Exited (0)` — **richtig so** |
+| **T+11** | `curl -sf -o /dev/null -w "%{http_code}" https://heizung.hoteltec.at/` | `200` |
+| **T+11 … T+21** | **Zehn Minuten warten und die Kachel ansehen.** Nicht früher urteilen | Das ist der Kern: jedes Gerät meldet **einmal je zehn Minuten**. Nach zehn Minuten muss die Zahl wieder bei ~100 stehen |
+
+**Die erste Entscheidung fällt schon bei T+10** (Festlegung des
+Betreibers, 10.11.) — und sie unterscheidet zwei Lagen, die sich sehr
+verschieden anfühlen:
+
+* **Null Meldungen** (die Kachel zählt `0`, und auch die jüngste Meldung
+  bleibt die von vor dem Reboot) → **sofort** 30 s stromlos am UG65,
+  **nicht** bis T+21 warten. Null ist eindeutig: bei 102 Geräten und
+  einer Meldung je Gerät je zehn Minuten müsste nach zehn Minuten
+  **irgendetwas** angekommen sein. Nichts heißt: das Gateway hängt, genau
+  wie am 04.11. Weitere elf Minuten Warten fügen dem keine Erkenntnis
+  hinzu, kosten aber elf Minuten ohne Regelung.
+* **Einzelne Meldungen, aber unter 20** → **bis T+21 warten**, dann gilt
+  die Entscheidung unten. Hier ist das Gateway nachweislich am Netz; was
+  fehlt, kann schlicht der Nachlauf sein, weil die Geräte ihre
+  Zehn-Minuten-Fenster nicht synchron haben.
+
+**Die Entscheidung bei T+21** (nur nötig, wenn T+10 „einzelne, aber unter
+20" ergab):
+
+* Zahl **≥ 80** → das Gateway hat den Neustart überlebt. **Fertig, kein
+  Stromlos.** Messfenster ist schon gelaufen.
+* Zahl **unter 20** → der Fall vom 04.11. Weiter mit dem Stromlos unten.
+* Zahl **dazwischen** → nicht raten. Noch **zehn Minuten** warten und
+  erneut ablesen; steigt sie nicht über 80, wie „unter 20" behandeln.
+
+**Stromlos am UG65 — bei null Meldungen ab T+10, sonst ab T+21:**
+
+1. Stecker ziehen, **30 Sekunden** warten, wieder einstecken.
+2. Hochlauf des UG65: **2–3 Minuten**, bis es sich am Netz meldet.
+3. **Messfenster beginnt erst mit der Rückkehr**, nicht mit dem
+   Einstecken: ab der **ersten** eingetroffenen Meldung zehn Minuten
+   zählen, dann muss die Kachel wieder ~100 zeigen.
+
+**Warum überhaupt abwarten statt gleich stromlos.** Weil sonst niemand
+weiß, ob das Gateway den Neustart von selbst überstanden hätte — und
+genau diese Frage ist nach dem 04.11. offen. Ein Stromlos ohne jedes
+Abwarten macht aus einem Befund eine Gewohnheit.
+
+**Warum die zehn Minuten bei null trotzdem reichen.** Die Frage ist mit
+null Meldungen schon beantwortet: das Gateway hat den Neustart **nicht**
+von selbst überstanden. Länger zu warten prüft nichts mehr, es verlängert
+nur die Zeit ohne Regelung.
+
+**Wenn auch nach dem Stromlos nichts kommt**, ist es nicht das Gateway:
+dann Port 1883 prüfen (§5.0a — die Sperre schaltet die Anlage ab) und
+die abgewiesenen Anmeldungen im Mosquitto-Protokoll lesen:
+
+```bash
+docker logs deploy-mosquitto-1 --tail 50 | grep -iE "denied|refused|gateway-ug65"
+```
+
+#### Was nach dem Wartungstag offen bleibt
+
+* **C7-Rest:** erledigt, sobald Block 1 gelaufen ist.
+* **C8 → neuer Punkt C9, nächstes Wartungsfenster:** Tailscale
+  stilllegen (`snap stop --disable tailscale`), **danach** die zwei
+  UFW-Regeln entfernen. Einzelne Änderung, §5.0a, und **erst nachdem**
+  der Notzugang über die Hetzner-Konsole geprüft ist (Passwort im
+  Passwortspeicher). Entscheidung des Betreibers vom 10.11.2026.
+* **C1** (Stilllegung `heizung-main`): unverändert offen, nicht Teil
+  dieses Tages.
+
+### Rotation Teil 2 — die Laufliste für den 04.11.2026
 
 **Was das hier ist.** Die Blöcke stehen in §10ab Teil 2 mit allen
 Befehlen und Begründungen; sie werden hier **nicht wiederholt** — zwei
@@ -10564,7 +10878,7 @@ genau diesen Handgriff schon gab.
 | **C5** | ChirpStack-Admin (C5.1 **zuerst**, dann C5.2) | jederzeit | 10 min |
 | **C6** | apt-Updates und Neustart, danach die Prüfliste | **zuletzt** | 20 min |
 | **C7** | alte Backups löschen | **nach** grüner Prüfliste | 5 min |
-| **C8** | UFW-Regel `tailscale0` entfernen (**11.11.2026**) | **einzeln**, mit Messung vorher und nachher | 10 min |
+| ~~**C8**~~ → **C9** | Tailscale stilllegen **und** die UFW-Regeln entfernen — **nicht** am 11.11., sondern im **nächsten** Wartungsfenster. Zurückgestellt am 10.11.2026: `tailscaled` läuft (Snap), die Abbruchbedingung war eingetreten | **einzeln**, §5.0a, und erst nach geprüftem Notzugang | 15 min |
 
 **Das einzige echte Zeitfenster ist C2** (§10ai: drei Listen um 08:30,
 15:30, 19:30). Vormittags ist es bequem offen. Alles andere hat keinen

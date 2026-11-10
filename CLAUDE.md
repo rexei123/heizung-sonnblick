@@ -426,10 +426,33 @@ heizung-main ohne Live-Schaden, kostete aber 25 Min Aufräum-Zeit
 - **Zugang zum Server:** `ssh -i $HOME\.ssh\id_ed25519_heizung root@157.90.17.150`
   — die **öffentliche IP**, Entscheidung des Betreibers vom 07.11.2026.
   Die Maschine heißt weiter `heizung-test` (ihr `hostname` sagt das), aber
-  **über diesen Namen kommt man nicht mehr hin**: Tailscale ist auf dem
-  Server seit dem 17.10.2026 `inactive`, der Node-Key ist abgelaufen, und
-  er wird nicht wiederbelebt. Wer `root@heizung-test` tippt, läuft in einen
-  Zeitüberlauf — **nicht** in eine Fehlermeldung, die den Grund nennt.
+  **über diesen Namen kommt man nicht mehr hin**: der Tailscale-Knoten ist
+  **abgemeldet** („Logged out"), MagicDNS löst damit nichts auf. Wer
+  `root@heizung-test` tippt, läuft in einen Zeitüberlauf — **nicht** in
+  eine Fehlermeldung, die den Grund nennt.
+
+  **Korrektur vom 10.11.2026.** Hier stand, Tailscale sei „seit dem
+  17.10.2026 `inactive`, der Node-Key abgelaufen". Beides ist falsch:
+  `tailscaled` **läuft** (als **Snap**, Dienst
+  `snap.tailscale.tailscaled.service`, `enabled` und `active`), das
+  Interface `tailscale0` existiert mit Adresse `100.82.226.57`, und der
+  Knoten ist **abgemeldet** statt abgelaufen — ein `tailscale login`
+  stellt den Weg wieder her. Die falsche Aussage entstand aus
+  `systemctl is-active tailscaled`: diese Unit gibt es nicht, die Antwort
+  `inactive` hieß „Unit unbekannt" (§5.68). Folge: der geplante Block C8
+  (UFW-Regel entfernen) ist zurückgestellt — RUNBOOK §10aw Block 2.
+- **Notzugang, wenn SSH nicht mehr geht:** die **Web-Konsole bei Hetzner**
+  (`https://console.hetzner.cloud` → Projekt → Server `heizung-test` →
+  **Console**). Sie hängt am Hypervisor, nicht am Netzwerk-Stack des
+  Servers — UFW, `sshd_config` und `fail2ban` sind dort **ohne Wirkung**.
+  Anmeldung mit `root` und dem **Root-Passwort** (nicht dem Schlüssel;
+  `PasswordAuthentication no` gilt nur für SSH). Geprüft am 10.11.2026:
+  Passwort ist gesetzt (`passwd -S root` → `P`, 20.04.2026),
+  `getty@tty1` ist `enabled`. **Die Voraussetzung ist nicht technisch:**
+  das Passwort muss im Passwortspeicher liegen, sonst ist die Konsole im
+  Notfall wertlos. Fehlt es, hilft nur Hetzner → Rescue → *Reset root
+  password*, und das **startet die Maschine neu**. Einzelheiten und die
+  Grenzen der Konsole: RUNBOOK, Kasten unter der H1.
 - **Zweiter Server `heizung-main`** (`157.90.30.116`, CPX32): der **alte**
   Prod-Server, seit dem Promote am 09.06.2026 Rückfall-Reserve; die
   Stilllegung steht als C1 offen. In Tailscale seit etwa dem 18.10.2026
@@ -442,8 +465,10 @@ heizung-main ohne Live-Schaden, kostete aber 25 Min Aufräum-Zeit
 - **DNS:** Hetzner Online (konsoleH), NS `ns1.your-server.de`/`ns.second-ns.com`/`ns3.second-ns.de` — NICHT Hetzner Cloud DNS
 - **UFW:** aktiv, Port 22/80/443 offen, dazu **1883** (MQTT, der Datenweg des
   UG65 — siehe `docs/status/2026-11-07-vorfall-1883-sperre.md`, Sperren
-  schaltet die Anlage ab) und eine Regel für `tailscale0`, die ohne
-  laufendes Tailscale nichts mehr tut.
+  schaltet die Anlage ab) und eine Regel für `tailscale0`. Die wirkt
+  heute nicht, weil der Tailscale-Knoten abgemeldet ist — der **Dienst
+  läuft aber**, und ein `tailscale login` macht sie in einer Minute
+  wieder wirksam (Korrektur vom 10.11.2026, siehe oben).
 - **SSH-Härtung** (gemessen 07.11.2026, `sshd -T`): `PasswordAuthentication
   no`, `KbdInteractiveAuthentication no`, `PermitRootLogin without-password`
   (also nur Schlüssel), `PermitEmptyPasswords no`, `MaxAuthTries 6`.
