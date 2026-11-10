@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste
 rollen: alle
-stand: 2026-11-07
+stand: 2026-11-08
 route: /
 ---
 
@@ -68,6 +68,32 @@ das Gateway in Ordnung und meldete sich als verbunden — und es kam
 den Weg dahinter blockierte. Ein Gateway-Status hätte grün gezeigt. Diese
 Kachel liest deshalb das **Ende** der Kette: was nicht ankommt, ist weg,
 ganz gleich welches Glied es verloren hat.
+
+**Befehle nicht angenommen** zählt die Geräte, die einen gesendeten
+Sollwert nicht übernehmen. Die Steuerung hat dreimal nachgesendet, das
+Gerät meldet weiter seinen eigenen Wert, und danach wird **nicht weiter
+gesendet** — jeder Funkbefehl ist eine Motorbewegung und kostet Batterie.
+
+Ein Klick auf die Kachel zeigt die betroffenen Geräte. Zusätzlich geht
+eine Mail hinaus, einmal je Vorfall.
+
+**Was zu tun ist.** Am Gerät nachsehen: sitzt der Kopf fest auf dem
+Ventil, ist die Batterie frisch. Danach den Funk prüfen. Von Hand muss
+nichts gesetzt werden — sobald das Gerät wieder annimmt, zieht die
+Steuerung den Wert selbst nach.
+
+**Das Zimmer ist dabei nicht kalt.** Das Gerät heizt, nur nach seinem
+eigenen Wert. Liegt der höher als der gewünschte, ist das Zimmer zu warm
+statt zu kalt. Deshalb ist die Kachel gelb und nicht rot.
+
+**Warum die Zahl stehen bleibt, bis das Gerät antwortet.** Sie
+verschwindet ausdrücklich **nicht** dadurch, dass die Steuerung
+inzwischen etwas anderes will. Bis zum 08.11.2026 war genau das der Fall:
+verschob die Steuerung ihr Ziel auf den Wert, den das Gerät ohnehin
+hielt, sah die Lage behoben aus — und das Gerät hatte nie einen Befehl
+angenommen. Der Befund kam beim nächsten Zielwechsel wieder, jedes Mal
+mit drei weiteren Funkbefehlen, und war jedes Mal wieder weg, bevor ihn
+jemand sah.
 
 ## Letzter Algorithmen-Lauf
 

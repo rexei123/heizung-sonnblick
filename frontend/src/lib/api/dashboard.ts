@@ -38,6 +38,9 @@ const dashboardKpiSchema = z.object({
   funkempfang_alter_min: z.number().nullable(),
   funkempfang_meldungen_10min: z.number(),
   fenstererkennung_aktiv: z.boolean(),
+  // Sprint 25 T3: Geräte, bei denen der Abgleich aufgegeben hat und die
+  // seither keinen gesendeten Sollwert bestätigt haben.
+  befehle_nicht_angenommen: z.number(),
 });
 
 export const dashboardApi = {

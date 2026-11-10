@@ -60,6 +60,8 @@ const CARD_META: { label: string; icon: string }[] = [
   // Sprint 20e (T7/T10) — nachgetragen am 07.11.2026, siehe oben.
   { label: "Ventil prüfen", icon: "build" },
   { label: "Zimmer zu warm", icon: "local_fire_department" },
+  // Sprint 25 T3
+  { label: "Befehle nicht angenommen", icon: "sync_problem" },
 ];
 
 // Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
@@ -247,6 +249,25 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       icon: "local_fire_department",
       tone: data.room_too_warm_count > 0 ? "danger-soft" : "neutral",
       href: "/devices?zeige=zu-warm",
+    },
+    {
+      // Sprint 25 T3: Geräte, bei denen der Abgleich aufgegeben hat.
+      //
+      // **Eigene Kachel und nicht Teil von „Geräte online".** So ein Gerät
+      // funkt — es meldet nur einen anderen Wert als den gesendeten und ist
+      // auf der Offline-Achse `healthy`. Beides nebeneinander ist gewollt,
+      // derselbe Grund wie bei der Batterie (§5.73): zwei Fragen, zwei
+      // Achsen.
+      //
+      // **Gelb, nicht rot.** Das Zimmer heizt — nach dem eigenen Wert des
+      // Geräts, nicht nach dem der Steuerung. Liegt dieser Wert höher, ist
+      // es zu warm statt zu kalt, und das ist kein Notfall. Rot steht hier
+      // daneben für „Zimmer zu warm", wo der Kopf vom Ventil ist.
+      label: "Befehle nicht angenommen",
+      value: data.befehle_nicht_angenommen,
+      icon: "sync_problem",
+      tone: data.befehle_nicht_angenommen > 0 ? "warning-soft" : "neutral",
+      href: "/devices?zeige=befehle-abgelehnt",
     },
   ];
 }

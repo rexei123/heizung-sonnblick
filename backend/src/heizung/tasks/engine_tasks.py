@@ -34,8 +34,11 @@ from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
 from heizung.models.enums import CommandReason, EventLogLayer, HeatingZoneKind
 from heizung.models.event_log import EventLog
+from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.room import Room
 from heizung.models.sensor_reading import SensorReading
+from heizung.rules.constants import DEFAULT_HOTEL_TIMEZONE
 from heizung.rules.engine import (
     MAX_SETPOINT_C,
     MIN_SETPOINT_C,
@@ -48,9 +51,12 @@ from heizung.rules.engine import (
     evaluate_room as _engine_evaluate_room,
 )
 from heizung.services import (
+    abgleich_meldung,
     alert_throttle,
     engine_abgleich,
     engine_lock,
+    mail_status,
+    mailer,
     override_service,
     resync_flag,
 )
@@ -437,56 +443,84 @@ async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]
 AUDIT_ABGLEICH_ERSCHOEPFT = "ENGINE_ABGLEICH_ERSCHOEPFT"
 
 
-async def _melde_abgleich_erschoepft(
+async def _melde_abgleich_erschoepft(  # noqa: PLR0913 — jedes Argument steht im Audit
     session: AsyncSession,
     *,
     dev: Device,
-    zone_id: int,
+    zone: HeatingZone,
     room_id: int,
     ist_wert: int,
     soll_wert: int,
+    gesendet_c: int | None,
     versuche: int,
+    jetzt: datetime,
 ) -> None:
-    """Schreibt **einmal** einen Audit-Eintrag, wenn der Abgleich aufgibt.
+    """Haelt die erschoepfte Lage fest: Merker, Audit-Eintrag, Mail.
 
-    Sprint 20f (T3). Nach ``MAX_VERSUCHE`` erfolglosen Nachsendungen wird
-    nicht weiter gesendet — ein Geraet an der Funkgrenze wuerde sonst bei
-    jedem Tick angefunkt, und jeder Downlink ist eine Motorbewegung (§0 S4).
+    Sprint 20f (T3) hat hier den Audit-Eintrag eingefuehrt. Nach
+    ``MAX_VERSUCHE`` erfolglosen Nachsendungen wird nicht weiter gesendet —
+    ein Geraet an der Funkgrenze wuerde sonst bei jedem Tick angefunkt, und
+    jeder Downlink ist eine Motorbewegung (Paragraph 0 S4).
 
     **Das Aufgeben darf nicht stillschweigend passieren.** Ein Geraet, das
     dauerhaft einen anderen Wert haelt als die Engine will, heizt ein Zimmer
     falsch — und niemand sieht es, weil die Oberflaeche den Engine-Soll
-    anzeigt und nicht den Geraete-Wert. Genau diese Sorte stiller Ausfall ist
-    §5.76: wer nur die Mechanik ueberwacht ("wurde gesendet"), findet ihn
-    nicht.
+    anzeigt und nicht den Geraete-Wert. Genau diese Sorte stiller Ausfall
+    ist Paragraph 5.76: wer nur die Mechanik ueberwacht ("wurde gesendet"),
+    findet ihn nicht.
 
-    **Einmal, nicht bei jedem Tick.** Die Drosselung haengt am Zaehler-Stand:
-    ``alert_throttle`` sperrt je ``dev_eui`` fuer 24 h. Sonst entstuende bei
-    einem Geraet an der Funkgrenze im Minutentakt ein Audit-Eintrag, und der
-    Melder waere nach einem Tag einer, dem niemand mehr zusieht (§5.79).
+    **Sprint 25 (T3) — der Merker ist neu, und er ist der Kern.** Bis dahin
+    bestand der Zustand aus einem Redis-Zaehler mit vier Stunden TTL und
+    einer Audit-Zeile. Beides ist als Speicher untauglich: der Zaehler
+    verfaellt von selbst, und eine Audit-Zeile hat kein Ende.
+    ``device.abgleich_erschoepft_seit`` traegt die Lage jetzt, bis das
+    Geraet **bestaetigt** — Begruendung in Migration 0039 und am Modellfeld.
 
-    Kein Mail-Versand: der Brief zu 20f sieht fuer T3 eine Warnung und einen
-    Audit-Eintrag vor, keine Benachrichtigung. Die Mail-Entscheidung gehoert
-    zum Hinweis-Pfad aus 20e und wird dort gemeinsam getroffen.
+    **Einmal je Episode, nicht bei jedem Tick.** Die Episode selbst ist die
+    Drosselung: der Merker steht, solange die Lage besteht, und ein zweiter
+    Eintrag entsteht erst nach einer Bestaetigung. Das ist strenger als eine
+    Uhr — ein Befund, der zweimal gemeldet wird, ist zweimal passiert.
+
+    Die 24-Stunden-Sperre aus ``alert_throttle`` bleibt **fuer die Mail**
+    daneben stehen, als Boden. Eine Episode braucht mindestens drei
+    Versuche im 30-Minuten-Abstand, also 90 Minuten; ein Geraet, das
+    zwischen Bestaetigen und Verweigern pendelt, koennte sonst mehrmals
+    taeglich schreiben. Eine Mail je Tag und Geraet ist bei einem solchen
+    Pendeln die richtige Menge (Paragraph 5.79).
+
+    **Die Mail blockiert den Tick nicht.** ``mailer.send_mail`` ist
+    synchron und kann auf das SMTP-Fenster warten; sie laeuft deshalb in
+    ``asyncio.to_thread``. Sie wirft nicht, sie meldet — ein Mailproblem
+    darf die Steuerung nicht anhalten (Paragraph 0 S5).
     """
-    if not await asyncio.to_thread(
-        alert_throttle.should_send,
-        "engine_abgleich_erschoepft",
-        dev.dev_eui,
-        ttl_s=86400,
-    ):
-        return
+    # Zuerst der Merker, und zwar vor jeder Drosselung. Er ist der Zustand,
+    # nicht die Meldung: ob eine Mail rausgeht, darf nicht entscheiden, ob
+    # die Lage festgehalten wird.
+    neue_episode = dev.abgleich_erschoepft_seit is None
+    if neue_episode:
+        dev.abgleich_erschoepft_seit = jetzt
+        await session.flush()
 
     logger.warning(
         "engine_abgleich erschoepft dev_eui=%s device_id=%s zone_id=%s "
-        "ist=%s soll=%s versuche=%s — es wird nicht weiter gesendet",
+        "ist=%s soll=%s gesendet=%s versuche=%s neue_episode=%s — "
+        "es wird nicht weiter gesendet",
         dev.dev_eui,
         dev.id,
-        zone_id,
+        zone.id,
         ist_wert,
         soll_wert,
+        gesendet_c,
         versuche,
+        neue_episode,
     )
+
+    if not neue_episode:
+        # Die Lage ist bekannt und steht in der Datenbank. Ein zweiter
+        # Audit-Eintrag fuer denselben Befund waere eine zweite Zeile ohne
+        # zweite Information.
+        return
+
     await record_business_action(
         session,
         user_id=None,
@@ -498,10 +532,17 @@ async def _melde_abgleich_erschoepft(
             "dev_eui": dev.dev_eui,
             "hardware_nummer": dev.label,
             "room_id": room_id,
-            "zone_id": zone_id,
+            "zone_id": zone.id,
             "gemeldeter_sollwert": ist_wert,
             "engine_sollwert": soll_wert,
+            # Sprint 25 (T3): der **gesendete** Wert gehoert dazu und ist
+            # nicht derselbe wie ``engine_sollwert``. Genau ihr
+            # Auseinanderfallen war der Fall Geraet 7: die Engine wollte
+            # etwas Neues, gesendet war noch das Alte, und der Vergleich
+            # gegen den neuen Wunsch liess den Befund verschwinden.
+            "gesendeter_sollwert": gesendet_c,
             "versuche": versuche,
+            "erschoepft_seit": jetzt.isoformat(),
             "hinweis": (
                 "Das Geraet uebernimmt den Engine-Sollwert nicht. Funk, "
                 "Batterie oder Hardware pruefen; nach der Behebung regelt "
@@ -510,6 +551,104 @@ async def _melde_abgleich_erschoepft(
         },
         request_ip=None,
     )
+
+    if not await asyncio.to_thread(
+        alert_throttle.should_send,
+        alert_throttle.KIND_ABGLEICH_ERSCHOEPFT,
+        dev.dev_eui,
+        ttl_s=86400,
+    ):
+        logger.info("abgleich_erschoepft_mail_gebremst dev_eui=%s", dev.dev_eui)
+        return
+
+    gc = await session.get(GlobalConfig, 1)
+    empfaenger = gc.alert_email if gc else None
+    if not empfaenger:
+        logger.info("abgleich_erschoepft_keine_alarmadresse dev_eui=%s", dev.dev_eui)
+        return
+
+    room = await session.get(Room, room_id)
+    befund = abgleich_meldung.Befund(
+        dev_eui=dev.dev_eui,
+        hardware_nummer=dev.label,
+        zimmer=room.number if room else None,
+        zone=zone.name,
+        gemeldet_c=ist_wert,
+        # Ohne gesendeten Befehl gibt es nichts zu bestaetigen; dann ist der
+        # Wunsch der beste Wert, den der Text nennen kann.
+        gesendet_c=gesendet_c if gesendet_c is not None else soll_wert,
+        engine_soll_c=soll_wert,
+        versuche=versuche,
+        seit=dev.abgleich_erschoepft_seit or jetzt,
+    )
+    zeitzone = (gc.timezone if gc and gc.timezone else None) or DEFAULT_HOTEL_TIMEZONE
+    result = await asyncio.to_thread(
+        mailer.send_mail,
+        recipient=empfaenger,
+        subject=abgleich_meldung.betreff(befund),
+        body=abgleich_meldung.nachricht(befund, zeitzone=zeitzone),
+    )
+    # Pflicht fuer jeden Alarmweg (``services/mail_status``): wer versendet,
+    # haelt das Ergebnis fest. Sonst sieht der Naechste, der nachsieht,
+    # warum keine Mail kam, den Zustand eines **anderen** Alarms.
+    await mail_status.record_attempt(session, result)
+    if not result.sent:
+        logger.warning(
+            "abgleich_erschoepft_mail_nicht_zugestellt dev_eui=%s grund=%s detail=%s",
+            dev.dev_eui,
+            result.reason,
+            result.detail,
+        )
+
+
+async def _hat_wirklich_uebernommen(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    gesendet_c: int,
+    gesendet_um: datetime,
+) -> bool:
+    """Ist die Uebereinstimmung eine **Uebernahme** — oder hielt das Geraet
+    den Wert schon vorher?
+
+    Sprint 25 (T3). Die zweite Haelfte des Falls Geraet 7, und sie ist
+    weniger offensichtlich als die erste.
+
+    Nachdem der Merker den reinen Wunschwechsel ueberlebt, bleibt ein Pfad:
+    verschiebt die Engine ihren Wunsch auf den Wert, den das Geraet haelt,
+    dann **sendet die Hysterese** diesen Wert — sie vergleicht gegen den
+    zuletzt gesendeten, nicht gegen den gemeldeten. Im naechsten Tick ist
+    der zuletzt gesendete Wert gleich dem gemeldeten, und die
+    Bestaetigungs-Bedingung griffe, obwohl das Geraet nichts getan hat. Der
+    Befund waere einen Tick nach dem Wunschwechsel doch verschwunden.
+
+    Die Frage ist also nicht "stimmen die Werte ueberein", sondern "hat
+    sich am Geraet etwas **geaendert**". Ein Befehl, der einem Geraet den
+    Wert schickt, den es ohnehin meldet, kann nichts belegen.
+
+    **Nur fuer Geraete mit gesetztem Merker aufgerufen.** Es ist eine Query
+    je Geraet; im Normalfall — 104 Geraete im Minutentakt, kein Befund —
+    waere sie Last ohne Aussage.
+
+    **Im Zweifel ``True``**, also "als Uebernahme zaehlen". Fehlt die
+    Vorgeschichte, laesst sich nicht entscheiden, und ein Befund, den
+    niemand abstellen kann, ist schlimmer als einer, der neunzig Minuten
+    spaeter wiederkommt: eine Warnung, die immer leuchtet, warnt nicht
+    (Paragraph 5.79). Die Lage entsteht ohnehin neu, sobald der Abgleich
+    wieder dreimal erfolglos gesendet hat.
+    """
+    stmt = (
+        select(SensorReading.setpoint)
+        .where(SensorReading.device_id == device_id)
+        .where(SensorReading.time <= gesendet_um)
+        .where(SensorReading.setpoint.is_not(None))
+        .order_by(SensorReading.time.desc())
+        .limit(1)
+    )
+    vorher = (await session.execute(stmt)).scalar_one_or_none()
+    if vorher is None:
+        return True
+    return int(vorher) != gesendet_c
 
 
 async def _gemeldete_sollwerte(session: AsyncSession, device_ids: Sequence[int]) -> dict[int, int]:
@@ -890,16 +1029,74 @@ async def _dispatch_downlinks_per_zone(
                         await _melde_abgleich_erschoepft(
                             session,
                             dev=dev,
-                            zone_id=zone.id,
+                            zone=zone,
                             room_id=room_id,
                             ist_wert=ist_wert,
                             soll_wert=zone_target_setpoint_c,
+                            gesendet_c=prev_sp,
                             versuche=stand,
+                            jetzt=jetzt,
                         )
-            elif ist_wert is not None and ist_wert == zone_target_setpoint_c:
-                # Geraet steht auf dem Soll — Zaehler zuruecksetzen, damit ein
-                # spaeterer Fall wieder drei Versuche hat.
-                await asyncio.to_thread(engine_abgleich.erfolg_gemeldet, dev.dev_eui)
+            elif ist_wert is not None and prev_sp is not None and ist_wert == prev_sp:
+                # **Bestaetigung** — und genau hier lag der Fall Geraet 7.
+                #
+                # Bis zum 08.11.2026 stand hier ``ist_wert ==
+                # zone_target_setpoint_c``, also "Geraet stimmt mit dem
+                # **aktuellen Wunsch** ueberein". Das ist eine Aussage ueber
+                # den Wunsch, nicht ueber das Geraet: verschiebt die Engine
+                # ihren Wunsch auf den Wert, den das Geraet ohnehin haelt —
+                # Nachtabsenkung, Belegungswechsel —, dann griff die
+                # Bedingung, der Zaehler fiel, und der Befund war weg. Das
+                # Geraet hatte nie einen Befehl angenommen. Beim naechsten
+                # Wunschwechsel begann es von vorn, mit drei frischen
+                # Versuchen und drei weiteren Motorbewegungen.
+                #
+                # Richtig ist der Vergleich gegen den **zuletzt gesendeten**
+                # Wert: nur er beantwortet "hat das Geraet uebernommen".
+                # ``prev_sp`` kommt aus ``_last_command_for_device`` und
+                # filtert auf ``sent_to_gateway_at IS NOT NULL`` — ein nie
+                # abgeschickter Befehl gilt nicht als bestaetigt.
+                #
+                # ``prev_sp is None`` heisst "noch nie gesendet". Dann gibt
+                # es nichts zu bestaetigen, und es kann auch keine
+                # erschoepfte Lage geben (sie entsteht nur durch Versuche).
+                #
+                # Steht der Merker, wird zusaetzlich gefragt, ob das Geraet
+                # den Wert **uebernommen** hat oder ihn schon hielt, als der
+                # Befehl rausging. Begruendung an
+                # ``_hat_wirklich_uebernommen`` — ohne diese Frage waere der
+                # Befund einen Tick nach dem Wunschwechsel doch weg.
+                uebernommen = True
+                if dev.abgleich_erschoepft_seit is not None and prev_at is not None:
+                    uebernommen = await _hat_wirklich_uebernommen(
+                        session,
+                        device_id=dev.id,
+                        gesendet_c=prev_sp,
+                        gesendet_um=prev_at,
+                    )
+
+                if not uebernommen:
+                    logger.info(
+                        "abgleich_erschoepft_haelt dev_eui=%s device_id=%s wert=%s — "
+                        "das Geraet hielt den gesendeten Wert schon vorher, "
+                        "das ist keine Uebernahme",
+                        dev.dev_eui,
+                        dev.id,
+                        ist_wert,
+                    )
+                else:
+                    await asyncio.to_thread(engine_abgleich.erfolg_gemeldet, dev.dev_eui)
+                    if dev.abgleich_erschoepft_seit is not None:
+                        logger.info(
+                            "abgleich_erschoepft_beendet dev_eui=%s device_id=%s "
+                            "bestaetigt=%s seit=%s",
+                            dev.dev_eui,
+                            dev.id,
+                            ist_wert,
+                            dev.abgleich_erschoepft_seit.isoformat(),
+                        )
+                        dev.abgleich_erschoepft_seit = None
+                        await session.flush()
 
             if not dev_decision.should_send:
                 skipped_count += 1

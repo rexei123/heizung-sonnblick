@@ -57,6 +57,7 @@ async def get_dashboard_kpi(
         funkempfang_alter_min=funk.alter_min,
         funkempfang_meldungen_10min=funk.meldungen_zaehlfenster,
         fenstererkennung_aktiv=await agg.fenstererkennung_bestaetigt(session),
+        befehle_nicht_angenommen=await agg.count_befehle_nicht_angenommen(session),
         valve_check_count=valve_check,
         room_too_warm_count=room_too_warm,
     )

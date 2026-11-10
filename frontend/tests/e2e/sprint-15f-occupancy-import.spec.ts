@@ -38,6 +38,7 @@ const KPI = {
   funkempfang_alter_min: 1,
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
+  befehle_nicht_angenommen: 0,
 };
 
 /**

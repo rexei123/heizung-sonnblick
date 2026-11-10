@@ -75,6 +75,16 @@ KIND_PIN_ACTIVE = "pin_active"
 #: 107 Melder (siehe ``services/funk_waechter``).
 KIND_FUNK_SCHWACH = "funk_schwach"
 SUBJECT_FUNK_HAUS = "haus"
+#: Sprint 25 T3. Gegenstand ist das **Geraet** (``dev_eui``), denn der
+#: Befund ist geraete-eigen.
+#:
+#: Diese Sperre ist hier nur der **Boden**, nicht die eigentliche
+#: Drosselung: die ist der Merker ``device.abgleich_erschoepft_seit``, und
+#: der haelt bis zur Bestaetigung durch das Geraet. Die Kennung hiess bis
+#: zum 08.11.2026 als Literal ``"engine_abgleich_erschoepft"`` im Task und
+#: drosselte dort die **Audit-Zeile**; seit der Merker den Zustand traegt,
+#: braucht die Audit-Zeile keine Uhr mehr und die Sperre gilt der Mail.
+KIND_ABGLEICH_ERSCHOEPFT = "abgleich_erschoepft"
 
 # Gegenstand der Pin-Erinnerung ist der Zustand, nicht der SHA. Mit dem SHA
 # als Schluessel koennte ein Pin-Wechsel sofort eine zweite Mail ausloesen —

@@ -285,6 +285,34 @@ async def count_battery_low(session: AsyncSession) -> int:
     return sum(1 for v in verdicts.values() if v.stage in ("warn", "kritisch"))
 
 
+async def count_befehle_nicht_angenommen(session: AsyncSession) -> int:
+    """Aktive Geraete, bei denen der Abgleich aufgegeben hat (Sprint 25, T3).
+
+    Quelle ist ``device.abgleich_erschoepft_seit`` (Migration 0039). Gesetzt
+    heisst: drei Nachsendungen erfolglos, es wird nicht weiter gesendet, und
+    das Geraet hat seither **keinen** gesendeten Sollwert bestaetigt.
+
+    **Eine Spalte und kein Rechenweg.** Die uebrigen Zaehler dieser Datei
+    leiten ihr Urteil zur Laufzeit ab (§5.73) — hier geht das nicht: die
+    Zahl der Versuche lebt in Redis mit einer TTL von vier Stunden, und
+    genau ihr Verfallen war der Befund, den T3 behebt. Ein Zustand, der
+    bestehen soll, bis ein Geraet etwas tut, ist kein Rechenergebnis.
+
+    **Warum die Zahl nicht „Geraete offline" doppelt.** Ein erschoepftes
+    Geraet **funkt** — es meldet nur einen anderen Wert als den gesendeten.
+    Auf der Offline-Achse ist es ``healthy``. Beides nebeneinander ist
+    gewollt und derselbe Grund wie bei der Batterie (§5.73): zwei Fragen,
+    zwei Achsen.
+
+    Lifecycle-Filter ``retired_at IS NULL`` (§5.58).
+    """
+    stmt = select(func.count()).where(
+        Device.retired_at.is_(None),
+        Device.abgleich_erschoepft_seit.is_not(None),
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
 async def fenstererkennung_bestaetigt(session: AsyncSession, *, tage: int = 7) -> bool:
     """Hat in den letzten ``tage`` Tagen ein Geraet die Fenstererkennung
     als **eingeschaltet** gemeldet?
