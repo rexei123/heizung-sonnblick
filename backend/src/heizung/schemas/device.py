@@ -350,6 +350,16 @@ class DeviceRead(BaseModel):
     battery_last_voltage: Decimal | None = None
     battery_last_at: datetime | None = None
 
+    # Sprint 25 (T3, Migration 0039): seit wann nimmt das Geraet den
+    # gesendeten Sollwert nicht an? ``None`` heisst „nimmt an, soweit
+    # bekannt" — und ausdruecklich nicht „geprueft und in Ordnung": ein
+    # Geraet ohne jeden Downlink steht ebenfalls auf ``None``.
+    #
+    # Echtes ORM-Feld, kein abgeleiteter Wert — ``model_validate(device)``
+    # liest es direkt. Begruendung, warum es eine Spalte ist und kein
+    # Rechenweg, in Migration 0039.
+    abgleich_erschoepft_seit: datetime | None = None
+
     # Sprint 14a (D1/D2): additive Cross-Sicht-Felder. Defaults None, damit
     # ``model_validate(device)`` (from_attributes) bei fehlenden ORM-
     # Attributen (active_override, latest_reading) den Default nimmt; der
