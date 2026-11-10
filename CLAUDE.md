@@ -441,6 +441,18 @@ heizung-main ohne Live-Schaden, kostete aber 25 Min Aufräum-Zeit
   `systemctl is-active tailscaled`: diese Unit gibt es nicht, die Antwort
   `inactive` hieß „Unit unbekannt" (§5.68). Folge: der geplante Block C8
   (UFW-Regel entfernen) ist zurückgestellt — RUNBOOK §10aw Block 2.
+- **Notzugang, wenn SSH nicht mehr geht:** die **Web-Konsole bei Hetzner**
+  (`https://console.hetzner.cloud` → Projekt → Server `heizung-test` →
+  **Console**). Sie hängt am Hypervisor, nicht am Netzwerk-Stack des
+  Servers — UFW, `sshd_config` und `fail2ban` sind dort **ohne Wirkung**.
+  Anmeldung mit `root` und dem **Root-Passwort** (nicht dem Schlüssel;
+  `PasswordAuthentication no` gilt nur für SSH). Geprüft am 10.11.2026:
+  Passwort ist gesetzt (`passwd -S root` → `P`, 20.04.2026),
+  `getty@tty1` ist `enabled`. **Die Voraussetzung ist nicht technisch:**
+  das Passwort muss im Passwortspeicher liegen, sonst ist die Konsole im
+  Notfall wertlos. Fehlt es, hilft nur Hetzner → Rescue → *Reset root
+  password*, und das **startet die Maschine neu**. Einzelheiten und die
+  Grenzen der Konsole: RUNBOOK, Kasten unter der H1.
 - **Zweiter Server `heizung-main`** (`157.90.30.116`, CPX32): der **alte**
   Prod-Server, seit dem Promote am 09.06.2026 Rückfall-Reserve; die
   Stilllegung steht als C1 offen. In Tailscale seit etwa dem 18.10.2026
