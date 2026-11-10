@@ -76,23 +76,30 @@ test.describe("Sprint 14c Dashboard", () => {
   // (GET .../occupancy-import/log). Ohne Mock liefe sie in den Error-State,
   // zählte aber weiter als kpi-card -> hier deterministisch grün mocken.
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/v1/integrations/occupancy-import/log", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          status: "green",
-          last_success_at: new Date(Date.now() - 3_600_000).toISOString(),
-          expected_by_local: "12:00",
-          expected_by_local_label: "12:00 MESZ",
-          today_received: true,
-          imports: [],
-        }),
-      });
-    });
+    await page.route(
+      "**/api/v1/integrations/occupancy-import/log",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "green",
+            last_success_at: new Date(Date.now() - 3_600_000).toISOString(),
+            expected_by_local: "12:00",
+            expected_by_local_label: "12:00 MESZ",
+            today_received: true,
+            imports: [],
+          }),
+        });
+      },
+    );
   });
 
-  test("rendert 11 KPI-Kacheln", async ({ page }) => {
+  // Der Name stand bis zum 10.11.2026 auf „11 Kacheln", waehrend die
+  // Pruefung darunter schon 12 verlangte — ein Testname ist das, was in
+  // der CI-Ausgabe steht, und ein gruener Lauf mit falscher Zahl ist ein
+  // Beleg, der etwas anderes behauptet als er prueft.
+  test("rendert 12 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
@@ -109,30 +116,42 @@ test.describe("Sprint 14c Dashboard", () => {
     await expect(page.getByTestId("kpi-card")).toHaveCount(12);
   });
 
-  test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({ page }) => {
+  test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({
+    page,
+  }) => {
     await mockKpi(page, { battery_low_count: 3 });
     await page.goto("/");
-    const card = page.getByTestId("kpi-card").filter({ hasText: "Schwache Batterie" });
+    const card = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Schwache Batterie" });
     await expect(card).toBeVisible();
     await expect(card).toContainText("3");
   });
 
-  test("Sprint 20e: Ventil-prüfen-Kachel zählt valve_check_count (beide Ventil-Befunde)", async ({ page }) => {
+  test("Sprint 20e: Ventil-prüfen-Kachel zählt valve_check_count (beide Ventil-Befunde)", async ({
+    page,
+  }) => {
     await mockKpi(page, { valve_check_count: 2 });
     await page.goto("/");
-    const card = page.getByTestId("kpi-card").filter({ hasText: "Ventil prüfen" });
+    const card = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Ventil prüfen" });
     await expect(card).toBeVisible();
     await expect(card).toContainText("2");
   });
 
-  test("Sprint 20e: Zimmer-zu-warm-Kachel zählt room_too_warm_count", async ({ page }) => {
+  test("Sprint 20e: Zimmer-zu-warm-Kachel zählt room_too_warm_count", async ({
+    page,
+  }) => {
     // Das ist der Ersatz-Melder für Engine-Layer 4 Detached, den 20e T4
     // stillgelegt hat — ein Ventil ohne Kopf steht offen, das Zimmer wird
     // heiß. Die Kachel ist die einzige Stelle, an der das auffällt, solange
     // niemand die Geräteliste durchsieht.
     await mockKpi(page, { room_too_warm_count: 1 });
     await page.goto("/");
-    const card = page.getByTestId("kpi-card").filter({ hasText: "Zimmer zu warm" });
+    const card = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Zimmer zu warm" });
     await expect(card).toBeVisible();
     await expect(card).toContainText("1");
   });
@@ -141,7 +160,10 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { level: 1, name: /Guten (Morgen|Tag|Abend)|Hallo/ }),
+      page.getByRole("heading", {
+        level: 1,
+        name: /Guten (Morgen|Tag|Abend)|Hallo/,
+      }),
     ).toBeVisible();
   });
 
@@ -163,6 +185,18 @@ test.describe("Sprint 14c Dashboard", () => {
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
     await expect(cards).toHaveCount(12);
+    // **Erst messen, wenn die Schriften geladen sind.** Dieser Test ist
+    // am 08. und am 10.11.2026 im Gesamtlauf gefallen (`boundingBox` war
+    // `null`) und allein jedes Mal gruen.
+    //
+    // Die Ursache ist **nicht** die Schrift, auch wenn es zuerst so
+    // aussah: zwischen zwei `boundingBox()`-Aufrufen zeichnet React neu,
+    // sobald die Belegungsliste eintrifft, und der Locator zeigt dann auf
+    // ein abgeloestes Element. Wer mehrere Kacheln vergleicht, misst
+    // deshalb in **einem** Durchgang (siehe `kacheln-gleiche-hoehe.spec`,
+    // `evaluateAll`). Hier werden nur zwei Kanten geprueft; das Warten auf
+    // die Schriften genuegt, weil es den Neuaufbau ohnehin abwartet.
+    await page.evaluate(() => document.fonts.ready);
     // Einspaltig: alle Karten teilen dieselbe linke Kante (gleiche x).
     const box0 = await cards.nth(0).boundingBox();
     const box1 = await cards.nth(1).boundingBox();
@@ -173,10 +207,14 @@ test.describe("Sprint 14c Dashboard", () => {
     expect(box1?.y ?? 0).toBeGreaterThan((box0?.y ?? 0) + 10);
   });
 
-  test("Empty-State: avg null -> Karte zeigt Strich statt NaN", async ({ page }) => {
+  test("Empty-State: avg null -> Karte zeigt Strich statt NaN", async ({
+    page,
+  }) => {
     await mockKpi(page, { avg_temperature_celsius: null });
     await page.goto("/");
-    const tempCard = page.getByTestId("kpi-card").filter({ hasText: "Ø Raumtemperatur" });
+    const tempCard = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Ø Raumtemperatur" });
     await expect(tempCard).toBeVisible();
     await expect(tempCard).not.toContainText("NaN");
     await expect(tempCard).toContainText("–");
@@ -187,7 +225,9 @@ test.describe("Sprint 14c Dashboard", () => {
   }) => {
     await mockKpi(page, { devices_online: 3, devices_assigned: 4 });
     await page.goto("/");
-    const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
+    const deviceCard = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Geräte online" });
     await expect(deviceCard).toBeVisible();
     await expect(deviceCard).toContainText("3");
     // Warning-Tone: Icon-Slot traegt text-warning.
@@ -202,10 +242,18 @@ test.describe("Sprint 14c Dashboard", () => {
    * online" ist, stand die Kachel **dauerhaft** auf Gelb. Eine Warnung, die
    * immer leuchtet, warnt nicht (§5.79).
    */
-  test("lager_steht_in_eigener_zeile_und_faerbt_die_kachel_nicht", async ({ page }) => {
-    await mockKpi(page, { devices_online: 101, devices_assigned: 101, devices_pool: 3 });
+  test("lager_steht_in_eigener_zeile_und_faerbt_die_kachel_nicht", async ({
+    page,
+  }) => {
+    await mockKpi(page, {
+      devices_online: 101,
+      devices_assigned: 101,
+      devices_pool: 3,
+    });
     await page.goto("/");
-    const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
+    const deviceCard = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Geräte online" });
 
     await expect(deviceCard).toContainText("von 101");
     await expect(deviceCard).toContainText("3 im Lager");
@@ -215,9 +263,15 @@ test.describe("Sprint 14c Dashboard", () => {
 
   test("ohne_lagerbestand_bleibt_die_zweite_zeile_weg", async ({ page }) => {
     // Eine Zeile "0 im Lager" waere Platz ohne Inhalt.
-    await mockKpi(page, { devices_online: 101, devices_assigned: 101, devices_pool: 0 });
+    await mockKpi(page, {
+      devices_online: 101,
+      devices_assigned: 101,
+      devices_pool: 0,
+    });
     await page.goto("/");
-    const deviceCard = page.getByTestId("kpi-card").filter({ hasText: "Geräte online" });
+    const deviceCard = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Geräte online" });
 
     await expect(deviceCard).toContainText("von 101");
     await expect(deviceCard).not.toContainText("im Lager");
