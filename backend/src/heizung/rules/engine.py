@@ -1519,6 +1519,47 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
     # Nachtabsenkung, wuerde sonst durchrutschen und das Bad auf 22
     # stellen, obwohl der Gast 19 fuer das ganze Zimmer gewaehlt hat.
     manual_extras = manual.extras or {}
+
+    # Sprint 25 (T4): "no active override" ist richtig und trotzdem
+    # irrefuehrend, sobald eine **Zone** des Zimmers uebersteuert ist.
+    #
+    # Die Zeile stammt aus dem Room-Scope-Aufruf, und der findet eine
+    # zonenweite Uebersteuerung bestimmungsgemaess nicht. Wer die Zeile im
+    # ``event_log`` liest, liest aber "fuer dieses Zimmer gilt keine
+    # Uebersteuerung" — und das ist falsch, wenn das Bad auf 23 steht.
+    #
+    # **Die Oberflaeche ist davon nicht betroffen**: das Trace-Panel zeigt
+    # seit Sprint 12b T4 "kein zimmerweiter Override — siehe
+    # Pro-Zone-Setpoints", sobald ``zone_overrides_trace`` gefuellt ist.
+    # Falsch war allein die **gespeicherte** Zeile, also das, was jemand
+    # sieht, der die Datenbank liest oder spaeter einen zweiten Konsumenten
+    # baut (Paragraph 5.77).
+    #
+    # **Hier und nicht im Zone-Loop oben**, weil ``zone_overrides`` erst an
+    # dieser Stelle endgueltig ist: Layer 4 kann den Dict bei offenem
+    # Fenster vollstaendig verwerfen, und Layer 5 kappt die Werte. Eine
+    # Zeile, die eine verworfene Uebersteuerung nennt, waere die naechste
+    # Falschaussage.
+    #
+    # ``extras["source"]`` bleibt ``None`` — daran haengt
+    # ``raumweit_eingegriffen`` unten, und zimmerweit ist hier gerade
+    # **nicht** eingegriffen worden.
+    if manual_extras.get("source") is None and zone_overrides:
+        zonen_text = ", ".join(f"{zid}={sp}" for zid, sp in sorted(zone_overrides.items()))
+        manual = LayerStep(
+            layer=manual.layer,
+            setpoint_c=manual.setpoint_c,
+            reason=manual.reason,
+            detail=f"keine zimmerweite Uebersteuerung, aber Zonen: {zonen_text}",
+            extras={
+                **manual_extras,
+                "zonen_uebersteuerungen": [
+                    {"zone_id": zid, "setpoint_c": sp} for zid, sp in sorted(zone_overrides.items())
+                ],
+            },
+        )
+        manual_extras = manual.extras or {}
+
     raumweit_eingegriffen = (
         manual_extras.get("source") is not None
         or window.reason == CommandReason.WINDOW_OPEN
