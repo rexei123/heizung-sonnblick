@@ -1112,6 +1112,11 @@ async def _dispatch_downlinks_per_zone(
                         "dev_eui": dev.dev_eui,
                         "status": "skipped_hysteresis",
                         "setpoint_c": zone_target_setpoint_c,
+                        # Sprint 25 (T4): was **hinausgegangen** ist, getrennt
+                        # von der Absicht. Hier nichts — und genau deshalb
+                        # ``None`` und nicht der Zielwert: eine Zahl an dieser
+                        # Stelle liest sich als gesendet.
+                        "gesendet_c": None,
                         "hysteresis_reason": dev_decision.reason,
                         "error": None,
                     }
@@ -1166,7 +1171,16 @@ async def _dispatch_downlinks_per_zone(
         # Parallele Downlink-Submission via asyncio.gather. ``return_exceptions=
         # True`` macht aus jeder Exception einen Wert in ``outcomes`` — KEINE
         # asyncio.gather()-Cascade-Cancellation, kein Rollback (A2).
-        coros = [send_setpoint(dev.dev_eui, zone_target_setpoint_c) for dev, _, _ in send_payloads]
+        # Sprint 25 (T4): der Wert kommt aus dem **Befehl**, nicht ein
+        # zweites Mal aus der Zonen-Variablen. Bis heute stand
+        # ``zone_target_setpoint_c`` an zwei Stellen — einmal im
+        # ``ControlCommand``, einmal hier — und zwei Ableitungen desselben
+        # Wertes koennen auseinanderlaufen (Paragraph 5.53). Nach dem
+        # Entprellen (T1) ist genau das der Fall: dort entscheidet nicht
+        # mehr der Tick allein, was hinausgeht.
+        coros = [
+            send_setpoint(dev.dev_eui, int(cc.target_setpoint)) for dev, cc, _ in send_payloads
+        ]
         outcomes = await asyncio.gather(*coros, return_exceptions=True)
 
         count_sent = 0
@@ -1190,6 +1204,9 @@ async def _dispatch_downlinks_per_zone(
                         "dev_eui": dev.dev_eui,
                         "status": "failed",
                         "setpoint_c": zone_target_setpoint_c,
+                        # Der Publish hat geworfen: es ist nichts beim Gateway
+                        # angekommen. ``None`` ist hier die Wahrheit.
+                        "gesendet_c": None,
                         "hysteresis_reason": hyst_reason,
                         "error": f"{type(outcome).__name__}: {outcome}",
                     }
@@ -1212,6 +1229,13 @@ async def _dispatch_downlinks_per_zone(
                         "dev_eui": dev.dev_eui,
                         "status": "sent",
                         "setpoint_c": zone_target_setpoint_c,
+                        # Derselbe Wert, den der Downlink getragen hat — aus
+                        # dem Befehl gelesen, nicht aus der Zonen-Variablen
+                        # nachgebaut. Heute ist er gleich ``setpoint_c``;
+                        # nach dem Entprellen (T1) kann er abweichen, und ab
+                        # dann ist er die einzige Zeile, an der sich
+                        # "entprellt" von "verloren" unterscheiden laesst.
+                        "gesendet_c": int(cc.target_setpoint),
                         "hysteresis_reason": hyst_reason,
                         "error": None,
                     }

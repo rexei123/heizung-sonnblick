@@ -29,6 +29,7 @@ import redis
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.config import get_settings
@@ -37,7 +38,12 @@ from heizung.models.device import Device
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.constants import PLAUSI_TEMP_MAX_C, PLAUSI_TEMP_MIN_C
-from heizung.services import downlink_adapter, redis_client, relay_uplink
+from heizung.services import (
+    befehl_quittung,
+    downlink_adapter,
+    redis_client,
+    relay_uplink,
+)
 from heizung.services.device_adapter import handle_uplink_for_override
 from heizung.services.health_alerts import emit_relay_protection_alert
 from heizung.tasks.engine_tasks import evaluate_room
@@ -602,6 +608,31 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
         # Sprint 20e (T3): Montage-Nachweis auf demselben Frame.
         await _maybe_confirm_mounted(session, device_id, values, seen_at)
 
+        # Sprint 25 (T2): Quittung, reine Buchfuehrung.
+        #
+        # **Der Fang ist hier Pflicht, nicht Vorsicht.** Die Vorgabe lautet
+        # "kein Tor, keine Logik haengt daran" — dann darf die Quittung
+        # auch den Messwert nicht aufhalten, der gerade geschrieben wird.
+        # Ein verlorener Eintrag in einer Diagnose-Spalte kostet eine
+        # Zeile im Protokoll; ein verlorener Messwert kostet die Regelung.
+        #
+        # Protokolliert wird trotzdem als Warnung: ein ``except``, das
+        # schweigt, verbirgt die Mechanik (Nachtrag zu Paragraph 5.14).
+        if values["setpoint"] is not None:
+            try:
+                await befehl_quittung.quittiere(
+                    session,
+                    device_id=device_id,
+                    gemeldet_c=values["setpoint"],
+                    gemeldet_um=seen_at,
+                )
+            except SQLAlchemyError:
+                logger.warning(
+                    "quittung_fehlgeschlagen dev_eui=%s — Messwert bleibt unberuehrt",
+                    dev_eui,
+                    exc_info=True,
+                )
+
         await session.commit()
 
         logger.info(
@@ -638,6 +669,49 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
                 "device_id=%s ohne heating_zone -> kein Re-Eval geschedult",
                 device_id,
             )
+
+
+async def _handle_setpoint_reply_quittung(uplink: ChirpStackUplink) -> None:
+    """Quittiert den gesendeten Befehl aus der ``0x52``-Antwort (Sprint 25, T2).
+
+    Der Reply-Zweig ueberspringt den regulaeren Reading-Insert, also kommt
+    die Quittung hier nicht von selbst mit. Und genau dieser Frame ist die
+    **ausdrueckliche** Bestaetigung: der Kommentar im Reply-Zweig sagt seit
+    Sprint 20f-b, dass ``0x52`` nur noch „die Bestaetigung des eigenen
+    Downlinks" ist. Bisher hat sie niemand aufgeschrieben.
+
+    Eigene Session wie die anderen Reply-Handler. Fehler bleiben hier —
+    eine Quittung darf keinen Uplink aufhalten (Paragraph 0 S5).
+    """
+    obj = uplink.object or {}
+    gemeldet = _to_decimal(obj.get("target_temperature"))
+    if gemeldet is None:
+        return
+
+    # Dieselbe Zeitquelle wie im uebrigen Pfad: Gateway-Zeit, Rueckfall auf
+    # die Serverzeit (belegt in ``test_phantom_override_20fb``).
+    gemeldet_um = uplink.time or datetime.now(tz=UTC)
+    dev_eui = uplink.deviceInfo.devEui.lower()
+    try:
+        async with SessionLocal() as session:
+            device_id = await session.scalar(select(Device.id).where(Device.dev_eui == dev_eui))
+            if device_id is None:
+                logger.warning("setpoint-reply unbekannter DevEUI %s — keine Quittung", dev_eui)
+                return
+            befehl_id = await befehl_quittung.quittiere(
+                session,
+                device_id=device_id,
+                gemeldet_c=gemeldet,
+                gemeldet_um=gemeldet_um,
+            )
+            if befehl_id is not None:
+                await session.commit()
+    except SQLAlchemyError:
+        logger.warning(
+            "quittung_aus_reply_fehlgeschlagen dev_eui=%s",
+            dev_eui,
+            exc_info=True,
+        )
 
 
 async def _handle_open_window_status_report(uplink: ChirpStackUplink) -> None:
@@ -1103,6 +1177,10 @@ async def _consume_loop() -> None:
                         #
                         # FW + OW-Status bleiben, sie haben mit Overrides
                         # nichts zu tun.
+                        # Sprint 25 (T2): die Quittung zum eigenen Downlink.
+                        # Sie steht vor den anderen, weil sie die Aussage
+                        # dieses Frames ist und nicht ein Nebenbefund.
+                        await _handle_setpoint_reply_quittung(uplink)
                         await _handle_firmware_version_report(uplink)
                         await _handle_open_window_status_report(uplink)
                         # Sprint 23 T1: die ``0x15``-Antwort schreibt ihre
