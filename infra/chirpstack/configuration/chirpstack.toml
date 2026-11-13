@@ -21,15 +21,17 @@
   net_id = "000000"
   enabled_regions = ["eu868"]
 
-  # ADR-Plugins (16.11.2026). Zugewiesen werden sie **je Geraeteprofil**
-  # ueber adr_algorithm_id; hier stehen sie nur zur Verfuegung. Ein Profil,
-  # das keines nennt, bleibt beim Standard-Algorithmus.
+  # ADR-Plugin fuer das Relais-Profil (16.11.2026). Zugewiesen wird es
+  # **je Geraeteprofil** ueber adr_algorithm_id; hier steht es nur zur
+  # Verfuegung. Ein Profil, das es nicht nennt, bleibt beim
+  # Standard-Algorithmus.
   #
-  # Die Begruendung steht im Kopf der jeweiligen Datei:
-  #   relais-feste-datenrate.js  DR1, nbTrans 2, volle Leistung
-  #                              (108 verlor am 12.11. 16 % bei DR3)
-  #   vicki-feste-leistung.js    volle Leistung, Datenrate adaptiv
-  #                              (056 war 14 h stumm bei ca. 2 dBm)
+  # **Nur fuer die Relais, und das ist eine Entscheidung.** Fuer die
+  # Vickis loest ``installation_margin = 20`` in region_eu868.toml
+  # dasselbe Problem mit einer Zahl statt mit einem zweiten Mechanismus:
+  # der Standard-Algorithmus nimmt die Sendeleistung dann nicht mehr
+  # weg. Er senkt aber **nie** die Datenrate, und genau das braucht 108
+  # (von DR3 auf DR1) -- deshalb bleibt dieses Plugin.
   #
   # **Der Pfad muss zum Init-Sidecar passen.** Er kopiert das Verzeichnis
   # nach /output, und ChirpStack sieht /output als /etc/chirpstack. Ohne
@@ -38,7 +40,6 @@
   # Aussagekraeftiges.
   adr_plugins = [
     "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
-    "/etc/chirpstack/adr-plugins/vicki-feste-leistung.js",
   ]
 
 [api]

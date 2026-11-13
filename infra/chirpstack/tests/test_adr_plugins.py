@@ -1,18 +1,16 @@
-"""Die ADR-Plugins, ausgefuehrt mit node.
+"""Das ADR-Plugin fuer das Relais-Profil, ausgefuehrt mit node.
 
-Zwei Dateien, zwei Zwecke, und der Unterschied ist der Kern:
+**Es gibt genau ein Plugin, und das ist eine Entscheidung.** Ein zweites
+fuer die Vickis war am 13.11.2026 gebaut (feste Sendeleistung, Datenrate
+adaptiv) und ist wieder entfallen: fuer sie loest
+``installation_margin = 20`` in ``region_eu868.toml`` dasselbe Problem
+mit **einer Zahl** statt mit einem zweiten Mechanismus, hausweit, ohne
+Sonderprofil und ohne Abweichungs-Liste (Paragraph 0 S6).
 
-================================= ================= ====================
-Datei                             Datenrate         Leistung / nbTrans
-================================= ================= ====================
-``relais-feste-datenrate.js``     fest **DR1**      0 / **2**
-``vicki-feste-leistung.js``       **adaptiv**       0 / 1
-================================= ================= ====================
-
-Beim Relais ist der Spreizfaktor der Hebel und Sendezeit kostet nichts
-(Netzspannung). Bei einem Batteriegeraet ist die **Leistung** der Hebel,
-und jede zusaetzliche Sendezeit kostet Energie -- 056 verlor mit voller
-Leistung 3,6 Prozent und mit ca. 2 dBm vierzehn Stunden lang alles.
+Was die Zahl **nicht** loest, ist die Datenrate: der
+Standard-Algorithmus senkt sie nie. Relais 108 bleibt damit auf DR3
+eingeklemmt, wo es am 12.11. 16 Prozent seiner Meldungen verlor -- und
+genau dafuer ist dieses Plugin da.
 
 **Warum dieser Test existiert, und zwar vor dem Ausrollen.** ChirpStack
 laedt die Plugin-Dateien beim Start. Eine Datei mit einem Syntaxfehler
@@ -56,7 +54,6 @@ import pytest
 #: am Mittwoch aufgefallen, nicht hier.
 PLUGIN_VERZEICHNIS = pathlib.Path(__file__).resolve().parents[1] / "configuration" / "adr-plugins"
 PLUGIN_RELAIS = PLUGIN_VERZEICHNIS / "relais-feste-datenrate.js"
-PLUGIN_VICKI = PLUGIN_VERZEICHNIS / "vicki-feste-leistung.js"
 
 NODE = shutil.which("node")
 
@@ -161,6 +158,24 @@ def test_die_datenrate_wird_auf_dr1_gesetzt() -> None:
     assert antwort["txPowerIndex"] == 0
 
 
+def test_die_leistung_wird_auf_voll_gesetzt_auch_wenn_sie_schon_gesenkt_war() -> None:
+    """**Eine Mutationsprobe hat gezeigt, dass dafuer kein Test existierte.**
+
+    Die Probe ersetzte ``txPowerIndex: 0`` durch ``req.txPowerIndex`` --
+    also „durchreichen statt festnageln" -- und blieb gruen: die
+    Standard-Anfrage oben traegt selbst schon Index 0, und
+    Durchreichen liefert dann dieselbe Null.
+
+    Der Fall aus dem Betrieb ist ein anderer: ADR hatte **109** am
+    13.11.2026 auf ``tx_power_index=6`` gesenkt (ca. 4 dBm). Genau dort
+    muss das Plugin die Leistung zurueckholen.
+    """
+    gesenkt = dict(ANFRAGE, txPowerIndex=6, maxTxPowerIndex=7)
+    assert _ruf("handle", gesenkt)["txPowerIndex"] == 0, (
+        "eine gesenkte Leistung muss das Plugin auf voll zuruecksetzen"
+    )
+
+
 def test_die_region_grenzen_werden_eingehalten() -> None:
     """Ein DR ausserhalb von min_dr/max_dr waere ein abgelehnter Befehl.
 
@@ -193,99 +208,8 @@ def test_die_antwort_hat_genau_die_drei_erwarteten_felder() -> None:
     assert set(_ruf("handle", ANFRAGE)) == {"dr", "txPowerIndex", "nbTrans"}
 
 
-# ---------------------------------------------------------------------------
-# vicki-feste-leistung.js — Leistung fest, Datenrate adaptiv
-# ---------------------------------------------------------------------------
-#
-# **Der Anlass, 12./13.11.2026.** Fuehler 056 war vierzehn Stunden stumm,
-# 83 verlorene Frames, am selben Platz. Ursache war die Sendeleistung:
-# ChirpStacks Standard-Algorithmus hatte sie auf tx_power_index 7 (ca. 2
-# dBm) heruntergenommen. Nach der Korrektur auf Index 1 verbesserte sich
-# RSSI von -113 auf -104 dBm und SNR von -0,2 auf +8,2 dB -- neun dB,
-# allein aus der Leistung.
-#
-# Und der Algorithmus holt sie sich wieder: am 13.11. zwischen 06:44 und
-# 07:54 fuenf Stufen, Index 1 bis 5, auf dem Weg zurueck zu 7.
-
-#: Die Anfrage, wie sie fuer 056 aussieht: DR5, Leistung schon
-#: heruntergenommen, Reserve knapp.
-ANFRAGE_VICKI: dict[str, Any] = dict(
-    ANFRAGE,
-    devEui="70b3d52dd3033273",
-    dr=5,
-    txPowerIndex=5,
-    maxTxPowerIndex=7,
-    uplinkHistory=[
-        {"fCnt": 2988, "maxSnr": -1.2, "maxRssi": -113, "txPowerIndex": 5, "gatewayCount": 1},
-        {"fCnt": 2997, "maxSnr": -0.2, "maxRssi": -112, "txPowerIndex": 5, "gatewayCount": 1},
-    ],
-)
-
-
-def test_vicki_datei_laeuft_als_skript_und_hat_die_drei_funktionen() -> None:
-    """Dieselbe Pflicht wie beim Relais-Plugin: die Datei muss laden.
-
-    Beide Dateien stehen in derselben ``adr_plugins``-Liste. Eine
-    fehlerhafte bringt ChirpStack dazu, **alle** nicht anzubieten -- und
-    daran haengen rund hundert Vickis.
-    """
-    assert _ruf("id", plugin=PLUGIN_VICKI) == "vicki_feste_leistung"
-    assert "Sendeleistung" in _ruf("name", plugin=PLUGIN_VICKI)
-
-
-def test_vicki_die_leistung_wird_auf_null_gesetzt() -> None:
-    """Index 0 ist die **hoechste** Leistung, nicht die niedrigste."""
-    antwort = _ruf("handle", ANFRAGE_VICKI, plugin=PLUGIN_VICKI)
-    assert antwort["txPowerIndex"] == 0
-
-
-def test_vicki_die_datenrate_bleibt_unberuehrt() -> None:
-    """**Der Test, der die beiden Plugins unterscheidet.**
-
-    Haette hier eine Zahl gestanden, waere es ein zweites Relais-Plugin
-    mit anderem Namen. Bei 056 war der Verlust mit voller Leistung 3,6
-    Prozent -- die Leistung ist der Hebel, nicht der Spreizfaktor. Eine
-    feste niedrige Datenrate waere zusaetzliche Sendezeit ohne belegten
-    Nutzen, und Sendezeit kostet bei einem Batteriegeraet Energie.
-    """
-    for dr in (0, 3, 5):
-        antwort = _ruf("handle", dict(ANFRAGE_VICKI, dr=dr), plugin=PLUGIN_VICKI)
-        assert antwort["dr"] == dr, (
-            f"die Datenrate muss durchgereicht werden, kam {antwort['dr']} bei {dr}"
-        )
-
-
-def test_vicki_eine_wiederholung_nicht_zwei() -> None:
-    """Jede Wiederholung verdoppelt die Sendeenergie eines Batteriegeraets."""
-    assert _ruf("handle", ANFRAGE_VICKI, plugin=PLUGIN_VICKI)["nbTrans"] == 1
-
-
-def test_vicki_ohne_adr_bleibt_alles_wie_es_war() -> None:
-    ohne = dict(ANFRAGE_VICKI, adr=False, dr=5, txPowerIndex=5, nbTrans=1)
-    assert _ruf("handle", ohne, plugin=PLUGIN_VICKI) == {
-        "dr": 5,
-        "txPowerIndex": 5,
-        "nbTrans": 1,
-    }
-
-
-def test_vicki_die_antwort_hat_genau_die_drei_erwarteten_felder() -> None:
-    antwort = _ruf("handle", ANFRAGE_VICKI, plugin=PLUGIN_VICKI)
-    assert set(antwort) == {"dr", "txPowerIndex", "nbTrans"}
-
-
-def test_die_beiden_kennungen_sind_verschieden() -> None:
-    """Zwei Plugins mit derselben Kennung waeren eines.
-
-    ``adr_algorithm_id`` ist der Schluessel, unter dem ein Geraeteprofil
-    waehlt. Bei einer Dopplung entscheidet die Ladereihenfolge, und ein
-    Profil bekaeme stillschweigend das andere Verhalten.
-    """
-    assert _ruf("id", plugin=PLUGIN_RELAIS) != _ruf("id", plugin=PLUGIN_VICKI)
-
-
-def test_die_dateien_stehen_in_der_plugin_liste() -> None:
-    """Beide Dateien muessen in ``chirpstack.toml`` **aufgelistet** sein.
+def test_die_datei_steht_in_der_plugin_liste() -> None:
+    """Die Datei muss in ``chirpstack.toml`` **aufgelistet** sein.
 
     Ein Plugin, das im Repo liegt und nicht in der Liste steht, ist kein
     Plugin -- und das faellt sonst erst am Server auf, wo das
@@ -301,9 +225,27 @@ def test_die_dateien_stehen_in_der_plugin_liste() -> None:
     toml = (PLUGIN_VERZEICHNIS.parent / "chirpstack.toml").read_text(encoding="utf-8")
     assert "adr_plugins = [" in toml, "die Plugin-Liste fehlt ganz"
     liste = toml.split("adr_plugins = [", 1)[1].split("]", 1)[0]
-    for datei in (PLUGIN_RELAIS, PLUGIN_VICKI):
-        eintrag = f'"/etc/chirpstack/adr-plugins/{datei.name}"'
-        assert eintrag in liste, f"{eintrag} fehlt in der adr_plugins-Liste"
+    eintrag = f'"/etc/chirpstack/adr-plugins/{PLUGIN_RELAIS.name}"'
+    assert eintrag in liste, f"{eintrag} fehlt in der adr_plugins-Liste"
+
+
+def test_die_installationsreserve_steht_auf_zwanzig() -> None:
+    """**Der Wachposten fuer die Entscheidung vom 16.11.2026.**
+
+    ``installation_margin`` ist die SNR-Reserve, auf die ADR
+    hinoptimiert. Mit der Vorgabe **10** stand das Ziel bei DR5 auf +2,5
+    dB, und 90 von 109 Geraeten landeten auf ``tx_power_index 7`` (ca. 2
+    dBm) -- bei Fuehler 056 riss der Link, vierzehn Stunden.
+
+    Ein Rueckfall auf 10 waere ohne diesen Test nicht zu bemerken: nichts
+    bricht, nichts meldet, und die Leistung sickert ueber Tage wieder
+    weg.
+    """
+    region = (PLUGIN_VERZEICHNIS.parent / "region_eu868.toml").read_text(encoding="utf-8")
+    zeilen = [z.strip() for z in region.splitlines() if z.strip().startswith("installation_margin")]
+    assert zeilen == ["installation_margin = 20.0"], (
+        f"erwartet genau eine Zeile 'installation_margin = 20.0', gefunden: {zeilen}"
+    )
 
 
 def test_der_init_sidecar_kopiert_das_verzeichnis() -> None:

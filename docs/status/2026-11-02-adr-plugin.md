@@ -4,9 +4,10 @@
 > bleibt als solcher stehen. Zwei Dinge gelten nicht mehr: die
 > Zieldatenrate ist **DR1**, nicht DR3 — ChirpStacks ADR hat Relais 108 am
 > 12.11. selbst auf DR3 gezogen, und dort verlor es 16 % seiner Meldungen
-> —, und das Plugin ist **ausgerollt**. Dazu ist ein zweites dazugekommen
-> (feste Sendeleistung für Fühler in Randlage). Der geltende Stand:
-> `docs/status/2026-11-13-adr-plugins-dr1-und-leistung.md` und RUNBOOK
+> —, und das Plugin ist **ausgerollt**. Für die Fühler löst dagegen eine
+> Zahl das Problem: `installation_margin = 20` in `region_eu868.toml`.
+> Der geltende Stand:
+> `docs/status/2026-11-13-adr-reserve-und-relais-dr1.md` und RUNBOOK
 > §10av.
 
 **Keine Migration.** Eine JavaScript-Datei, ihr Test, RUNBOOK §10av.

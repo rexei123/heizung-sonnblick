@@ -9,7 +9,37 @@
   user_info = "EU868 Frequenzplan, vorbereitet fuer Hotel Sonnblick"
 
   [regions.network]
-    installation_margin = 10.0
+    # **Die SNR-Reserve, auf die ADR hinoptimiert — am 16.11.2026 von 10
+    # auf 20 dB erhoeht.**
+    #
+    # Der Standard-Algorithmus rechnet (chirpstack/src/adr/default.rs):
+    #
+    #     snr_margin = snr_max - required_snr_for_dr - installation_margin
+    #     n_step     = (snr_margin / 3.0) as isize
+    #
+    # n_step > 0 erhoeht die Datenrate, und wenn die schon am Anschlag
+    # ist, **senkt es die Sendeleistung**. Im Gleichgewicht gilt also
+    # ``snr_max ~ required_snr_for_dr + installation_margin``: bei DR5
+    # (SF7, required -7,5) waren das mit 10 dB ein Ziel-SNR von **+2,5
+    # dB**. Das ist die Reserve, mit der 90 von 109 Geraeten auf
+    # tx_power_index 7 (ca. 2 dBm) standen.
+    #
+    # **Der Anlass:** Fuehler 056 war am 12./13.11.2026 von 14:41 bis
+    # 04:44 stumm -- vierzehn Stunden, 83 verlorene Frames, am selben
+    # Platz. Nach der Korrektur auf Index 1 verbesserte sich RSSI von
+    # -113 auf -104 dBm und SNR von -0,2 auf +8,2 dB. Neun dB, allein aus
+    # der Leistung.
+    #
+    # Mit 20 dB liegt das Ziel bei **+12,5 dB**. Gerechnet auf die
+    # Messwerte vom 13.11. (hoechster SNR der letzten 20 Meldungen je
+    # Geraet): **kein** Geraet hat dann noch Spielraum nach unten, 70
+    # bleiben wie sie sind, 33 bekommen Leistung zurueck. Keines verliert
+    # etwas.
+    #
+    # **Was es nicht behebt:** die Datenrate. Der Algorithmus senkt sie
+    # nie (nur eine Klammer bei ``dr > max_dr``). Relais 108 bleibt
+    # deshalb auf DR3 eingeklemmt, und dafuer gibt es das ADR-Plugin.
+    installation_margin = 20.0
     rx_window = 0
     rx1_delay = 1
     rx1_dr_offset = 0
