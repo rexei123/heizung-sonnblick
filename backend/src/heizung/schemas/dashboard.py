@@ -84,6 +84,32 @@ class DashboardKpiRead(BaseModel):
     # Zahl (derselbe Grund wie bei der Batterie, Paragraph 5.73).
     befehle_nicht_angenommen: int = 0
 
+    # --- 13.11.2026: Kachel „Fuehler Relais-Zone" -------------------------
+    # Zonen, in denen ein Relais **in Betrieb** ist und kein aktueller
+    # Fuehlerwert mehr ankommt. Ohne Zonenwert schaltet der
+    # Zweipunktregler bewusst ab (Zwangs-AUS, S5) — die Zone heizt dann
+    # nicht mehr, und anders als bei einem Vicki gibt es kein Geraet, das
+    # nach seinem eigenen internen Fuehler weiterregelt.
+    #
+    # **Eigene Achse, kein Teil von „Geraete online".** Der Fuehler 056
+    # war am 12./13.11. vierzehn Stunden stumm und dabei
+    # ``health_state = degraded`` — auf der Offline-Achse also kein
+    # Alarm, weil die Stufe ``silent`` mehr als 24 Stunden verlangt. Die
+    # Kachel „Geraete online" stand auf 102 von 103, und niemand liest
+    # daraus, dass die Rezeption blind ist (dieselbe Begruendung wie bei
+    # der Batterie, Paragraph 5.73: zwei Fragen, zwei Achsen).
+    #
+    # Die Stufe wird **serverseitig** gebildet, weil die Grenze in den
+    # Settings steht (``relais_fuehler_stumm_min``). Sie im Frontend zu
+    # rechnen hiesse, die Grenze dort zu wiederholen (Paragraph 5.53).
+    relais_fuehler_stumme_zonen: int = 0
+    #: Alter der juengsten Meldung in der am laengsten stummen Zone, in
+    #: Minuten. ``None``, wenn keine Zone stumm ist **oder** wenn die
+    #: stumme Zone gar keinen Fuehler hat — dort gibt es kein Alter, und
+    #: eine 0 waere dann eine Behauptung ueber eine Meldung, die es nicht
+    #: gibt.
+    relais_fuehler_stumm_min: int | None = None
+
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None

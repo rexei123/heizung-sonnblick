@@ -66,6 +66,8 @@ const CARD_META: { label: string; icon: string }[] = [
   { label: "Zimmer zu warm", icon: "local_fire_department" },
   // Sprint 25 T3
   { label: "Befehle nicht angenommen", icon: "sync_problem" },
+  // 13.11.2026
+  { label: "Fühler Relais-Zone", icon: "sensors_off" },
 ];
 
 // Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
@@ -287,6 +289,41 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       icon: "sync_problem",
       tone: data.befehle_nicht_angenommen > 0 ? "warning-soft" : "neutral",
       href: "/devices?zeige=befehle-abgelehnt",
+    },
+    {
+      // 13.11.2026: Zonen mit einem Relais in Betrieb, die keinen
+      // aktuellen Fühlerwert mehr haben.
+      //
+      // **Rot, nicht gelb** — anders als „Befehle nicht angenommen"
+      // daneben. Dort heizt das Zimmer weiter, nur nach dem eigenen Wert
+      // des Geräts. Hier heizt die Zone **gar nicht**: ein Relais hat
+      // keinen eigenen Fühler, und ohne Zonenwert schaltet der Regler
+      // bewusst ab. Im Winter ist das kalt und nicht ungenau.
+      //
+      // **Die Zahl steht nicht in „Geräte online".** Fühler 056 war am
+      // 12./13.11. vierzehn Stunden stumm und dabei `degraded` — die
+      // Kachel daneben zeigte 102 von 103, und niemand liest daraus,
+      // dass die Rezeption blind ist (§5.73: zwei Fragen, zwei Achsen).
+      label: "Fühler Relais-Zone",
+      value: data.relais_fuehler_stumme_zonen,
+      icon: "sensors_off",
+      tone: data.relais_fuehler_stumme_zonen > 0 ? "danger-soft" : "neutral",
+      // Die Zusatzzeile nennt die **längste** Stille, nicht die
+      // Gesamtzahl der Minuten: bei mehreren Zonen ist die schlimmste die
+      // handlungsrelevante. `null` heißt hier „kein Alter vorhanden" —
+      // entweder ist keine Zone stumm, oder der stummen Zone ist gar kein
+      // Fühler zugeordnet. Beides wäre mit einer 0 falsch beschrieben.
+      subValue:
+        data.relais_fuehler_stumme_zonen > 0 && data.relais_fuehler_stumm_min !== null
+          ? `längste Stille ${data.relais_fuehler_stumm_min} min`
+          : data.relais_fuehler_stumme_zonen > 0
+            ? "kein Fühler zugeordnet"
+            : undefined,
+      // **Kein `href`**, und das ist die Regel dieser Datei und keine
+      // Lücke: ein Ziel bekommt nur eine Kachel, auf deren Seite sich die
+      // Zahl auflöst. Eine Liste aller Zimmer tut das nicht — welche Zone
+      // blind ist, stünde dort nirgends. Sobald es eine Ansicht der
+      // Relais-Zonen gibt, gehört sie hierher.
     },
   ];
 }

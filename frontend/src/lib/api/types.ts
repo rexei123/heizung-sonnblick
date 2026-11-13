@@ -1239,6 +1239,23 @@ export interface DashboardKpi {
   // mitnehmen soll.
   valve_check_count: number;
   room_too_warm_count: number;
+  /**
+   * 13.11.2026: Zonen, in denen ein Relais **in Betrieb** ist und kein
+   * aktueller Fühlerwert mehr ankommt.
+   *
+   * Eigene Achse, kein Teil von „Geräte online". Ein Relais hat keinen
+   * eigenen Fühler: fehlt der Zonenwert, schaltet der Regler bewusst ab
+   * (Zwangs-AUS) und die Zone heizt **nicht mehr**. Fühler 056 war am
+   * 12./13.11. vierzehn Stunden stumm und dabei `health_state =
+   * degraded` — auf der Offline-Achse also unauffällig.
+   */
+  relais_fuehler_stumme_zonen: number;
+  /**
+   * Alter der jüngsten Meldung in der am längsten stummen Zone, in
+   * Minuten. `null`, wenn keine Zone stumm ist **oder** wenn der Zone
+   * gar kein Fühler zugeordnet ist — dort gibt es kein Alter.
+   */
+  relais_fuehler_stumm_min: number | null;
 }
 
 // ---------------------------------------------------------------------------

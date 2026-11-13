@@ -41,6 +41,11 @@ const dashboardKpiSchema = z.object({
   // Sprint 25 T3: Geräte, bei denen der Abgleich aufgegeben hat und die
   // seither keinen gesendeten Sollwert bestätigt haben.
   befehle_nicht_angenommen: z.number(),
+  // 13.11.2026: Zonen mit einem Relais in Betrieb, in denen kein
+  // aktueller Fühlerwert mehr ankommt. Ohne Zonenwert schaltet der Regler
+  // bewusst ab — die Zone heizt dann nicht mehr.
+  relais_fuehler_stumme_zonen: z.number(),
+  relais_fuehler_stumm_min: z.number().nullable(),
 });
 
 export const dashboardApi = {

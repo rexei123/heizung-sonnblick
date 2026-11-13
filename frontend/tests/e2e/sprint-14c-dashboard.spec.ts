@@ -31,6 +31,8 @@ interface Kpi {
   funkempfang_meldungen_10min: number;
   fenstererkennung_aktiv: boolean;
   befehle_nicht_angenommen: number;
+  relais_fuehler_stumme_zonen: number;
+  relais_fuehler_stumm_min: number | null;
 }
 
 const BASE_KPI: Kpi = {
@@ -54,6 +56,8 @@ const BASE_KPI: Kpi = {
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
   befehle_nicht_angenommen: 0,
+  relais_fuehler_stumme_zonen: 0,
+  relais_fuehler_stumm_min: null,
 };
 
 async function mockKpi(
@@ -99,7 +103,7 @@ test.describe("Sprint 14c Dashboard", () => {
   // Pruefung darunter schon 12 verlangte — ein Testname ist das, was in
   // der CI-Ausgabe steht, und ein gruener Lauf mit falscher Zahl ist ein
   // Beleg, der etwas anderes behauptet als er prueft.
-  test("rendert 12 KPI-Kacheln", async ({ page }) => {
+  test("rendert 13 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
@@ -109,11 +113,13 @@ test.describe("Sprint 14c Dashboard", () => {
     // Dass dieser Test bei jeder neuen Kachel fällt, ist sein Zweck: das
     // Dashboard ist die Seite, die der Hotelier täglich liest, und eine
     // Kachel mehr ist eine Entscheidung, keine Nebenwirkung.
-    // **12, nicht 11** — „Befehle nicht angenommen" ist am 08.11.2026
-    // dazugekommen (Sprint 25 T3). Sie zeigt die Geraete, bei denen der
-    // Abgleich aufgegeben hat; vorher war diese Lage nur in einer
-    // Audit-Zeile zu finden, die niemand freiwillig liest.
-    await expect(page.getByTestId("kpi-card")).toHaveCount(12);
+    // **13, nicht 12** — „Fuehler Relais-Zone" ist am 13.11.2026
+    // dazugekommen. Sie zeigt die Zonen, in denen ein Relais in Betrieb
+    // ist und kein aktueller Fuehlerwert mehr ankommt; genau diese Lage
+    // hat am 12./13.11. vierzehn Stunden bestanden, ohne irgendwo zu
+    // stehen. Davor kam am 08.11. „Befehle nicht angenommen" dazu
+    // (Sprint 25 T3).
+    await expect(page.getByTestId("kpi-card")).toHaveCount(13);
   });
 
   test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({
@@ -184,7 +190,10 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    await expect(cards).toHaveCount(12);
+    // 13, seit „Fuehler Relais-Zone" am 13.11.2026 dazugekommen ist.
+    // **Die zweite Stelle mit dieser Zahl**, und sie ist beim ersten Lauf
+    // rot geworden — eine Kachel mehr aendert zwei Tests, nicht einen.
+    await expect(cards).toHaveCount(13);
     // **Erst messen, wenn die Schriften geladen sind.** Dieser Test ist
     // am 08. und am 10.11.2026 im Gesamtlauf gefallen (`boundingBox` war
     // `null`) und allein jedes Mal gruen.
@@ -275,5 +284,72 @@ test.describe("Sprint 14c Dashboard", () => {
 
     await expect(deviceCard).toContainText("von 101");
     await expect(deviceCard).not.toContainText("im Lager");
+  });
+
+  /**
+   * 13.11.2026 — die Kachel „Fühler Relais-Zone".
+   *
+   * **Der Anlass.** Fühler 056 (Zone Eingang, Rezeption) schwieg am
+   * 12./13.11. von 14:41 bis 04:44 — vierzehn Stunden. Die Zone führt ein
+   * Relais in Betrieb und wurde deshalb nicht geheizt; der Zwangs-AUS des
+   * Reglers hat richtig gegriffen. Sichtbar war genau eine Zahl: „Geräte
+   * online" stand auf 102 von 103, und daraus liest niemand heraus, dass
+   * ein Bereich blind ist.
+   *
+   * Geprüft wird, was die Kachel **unterscheidet**: Stille mit Zahl,
+   * fehlende Zuordnung ohne Zahl, und der Normalfall ohne Zusatzzeile.
+   */
+  test("stumme_relais_zone_ist_rot_und_nennt_die_laengste_stille", async ({
+    page,
+  }) => {
+    await mockKpi(page, {
+      relais_fuehler_stumme_zonen: 1,
+      relais_fuehler_stumm_min: 438,
+    });
+    await page.goto("/");
+    const karte = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Fühler Relais-Zone" });
+
+    await expect(karte).toContainText("1");
+    await expect(karte).toContainText("längste Stille 438 min");
+    // **Rot, nicht gelb.** Die Zone heizt gar nicht — anders als bei
+    // „Befehle nicht angenommen", wo das Zimmer nach dem eigenen Wert des
+    // Geräts weiterheizt. Die Farbe folgt dem Schaden.
+    await expect(karte.locator(".text-danger")).not.toHaveCount(0);
+  });
+
+  test("zone_ohne_fuehler_nennt_keine_minuten", async ({ page }) => {
+    // Eine Minutenzahl wäre hier eine Aussage über eine Meldung, die es
+    // nie gab — und sie schickt den Leser auf Funksuche, obwohl nichts zu
+    // suchen ist.
+    await mockKpi(page, {
+      relais_fuehler_stumme_zonen: 1,
+      relais_fuehler_stumm_min: null,
+    });
+    await page.goto("/");
+    const karte = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Fühler Relais-Zone" });
+
+    await expect(karte).toContainText("kein Fühler zugeordnet");
+    await expect(karte).not.toContainText("min");
+  });
+
+  test("ohne_stumme_zone_bleibt_die_kachel_ruhig", async ({ page }) => {
+    await mockKpi(page, {
+      relais_fuehler_stumme_zonen: 0,
+      relais_fuehler_stumm_min: null,
+    });
+    await page.goto("/");
+    const karte = page
+      .getByTestId("kpi-card")
+      .filter({ hasText: "Fühler Relais-Zone" });
+
+    await expect(karte).toContainText("0");
+    await expect(karte).not.toContainText("Stille");
+    await expect(karte).not.toContainText("kein Fühler");
+    // Eine Kachel, die im Normalfall rot ist, warnt nicht (§5.79).
+    await expect(karte.locator(".text-danger")).toHaveCount(0);
   });
 });

@@ -77,6 +77,11 @@ _EXPECTED_KEYS = {
     # Sprint 25 (T3): Geraete, bei denen der Abgleich aufgegeben hat und
     # die seither keinen gesendeten Sollwert bestaetigt haben.
     "befehle_nicht_angenommen",
+    # 13.11.2026: Zonen, in denen ein Relais **in Betrieb** ist und kein
+    # aktueller Fuehlerwert mehr ankommt. Und auch diese zwei Zeilen
+    # stehen hier, weil der Test rot war — genau dafuer ist er da.
+    "relais_fuehler_stumme_zonen",
+    "relais_fuehler_stumm_min",
 }
 
 
