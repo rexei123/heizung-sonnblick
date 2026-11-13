@@ -254,6 +254,26 @@ class Settings(BaseSettings):
     totalausfall_min: int = 15
     totalausfall_wiederholung_h: int = 2
 
+    # --- Fuehler einer Relais-Zone schweigt (13.11.2026) ------------------
+    # Ab wann gemeldet wird, dass eine Zone mit einem Relais **in
+    # Betrieb** keinen aktuellen Fuehlerwert mehr hat, und wie oft sich
+    # die Mail wiederholt.
+    #
+    # **Warum 30 Minuten.** Bei Zehn-Minuten-Takt sind das drei
+    # verpasste Meldungen — ein einzelner verlorener Uplink soll keine
+    # Mail erzeugen, drei in Folge schon. Der Anlass ist der 12./13.11.:
+    # Fuehler 056 schwieg **vierzehn Stunden**, die Zone Eingang wurde in
+    # dieser Zeit nicht geheizt, und kein vorhandener Melder hat
+    # angeschlagen (die Health-Stufe ``silent`` verlangt mehr als 24 h).
+    #
+    # Diese Grenze entscheidet **nichts** an der Steuerung. Der
+    # Zwangs-AUS des Zweipunktreglers haengt unveraendert am
+    # Frischefenster des Zonen-Aggregats; siehe
+    # ``services/relais_fuehler`` fuer die Begruendung, warum es zwei
+    # Grenzen sind und welche vor welcher liegen muss.
+    relais_fuehler_stumm_min: int = 30
+    relais_fuehler_wiederholung_h: int = 6
+
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
     # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —
@@ -787,6 +807,40 @@ class Settings(BaseSettings):
                 f"{self.totalausfall_min} < {self.funkempfang_gelb_max_min}). "
                 "Sonst mailt der Alarm, bevor die Kachel rot ist — und wer "
                 "nachsieht, findet eine gelbe Kachel zu einer roten Mail."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _relais_fuehler_grenze_liegt_vor_dem_abschalten(self) -> "Settings":
+        """Die Warnung muss **vor** dem Zwangs-AUS kommen, nicht danach.
+
+        Der Zweipunktregler schaltet ab, sobald das Zonen-Aggregat keinen
+        frischen Messwert mehr findet; sein Fenster ist ein Vielfaches
+        von ``health_healthy_max_age_h``. Eine Warn-Grenze oberhalb davon
+        waere eine Meldung ueber etwas, das schon passiert ist — der
+        Vorlauf, der den ganzen Zweck ausmacht, waere weg.
+
+        Verglichen wird gegen das **einfache** Keepalive-Fenster und
+        nicht gegen das Vielfache: der Faktor steht in
+        ``tasks/relay_tasks.VERALTUNGS_FAKTOR``, und ihn hier zu
+        wiederholen waere eine zweite Wahrheit (Paragraph 5.53). Die
+        strengere Grenze kostet nichts — sie laesst jede sinnvolle
+        Einstellung zu und schliesst nur die aus, die den Vorlauf
+        aufgibt.
+        """
+        keepalive_min = self.health_healthy_max_age_h * 60
+        if self.relais_fuehler_stumm_min >= keepalive_min:
+            raise ValueError(
+                "RELAIS_FUEHLER_STUMM_MIN muss kleiner sein als "
+                "HEALTH_HEALTHY_MAX_AGE_H in Minuten (ist: "
+                f"{self.relais_fuehler_stumm_min} >= {keepalive_min}). "
+                "Sonst warnt die Meldung erst, wenn der Regler die Zone "
+                "schon abgeschaltet hat."
+            )
+        if self.relais_fuehler_stumm_min < 1:
+            raise ValueError(
+                "RELAIS_FUEHLER_STUMM_MIN muss mindestens 1 sein (ist: "
+                f"{self.relais_fuehler_stumm_min})."
             )
         return self
 

@@ -2,7 +2,11 @@
 
     GET /api/v1/dashboard/kpi  -> DashboardKpiRead
 
-Liefert die 6 Uebersichts-Kacheln der Startseite ``/`` in einem Request.
+Liefert die Uebersichts-Kacheln der Startseite ``/`` in einem Request.
+**Ohne Zahl im Satz**: hier stand „die 6 Kacheln", seit Sprint 14c, und
+es sind inzwischen dreizehn. Eine Zahl an dieser Stelle ist eine Aussage
+ueber den heutigen Stand und verfaellt bei der naechsten Kachel
+(Paragraph 5.77).
 Read-only, ``require_user`` (Admin + Mitarbeiter). Die Aggregate leben in
 ``services.dashboard_aggregates`` (eine Funktion pro KPI).
 """
@@ -18,7 +22,7 @@ from heizung.db import get_session
 from heizung.models.user import User
 from heizung.schemas.dashboard import DashboardKpiRead
 from heizung.services import dashboard_aggregates as agg
-from heizung.services import funkempfang
+from heizung.services import funkempfang, relais_fuehler
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -26,7 +30,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get(
     "/kpi",
     response_model=DashboardKpiRead,
-    summary="Hotel-KPIs fuer das Dashboard (6 Kacheln)",
+    summary="Hotel-KPIs fuer die Kacheln des Dashboards",
 )
 async def get_dashboard_kpi(
     _user: User = Depends(require_user),  # noqa: B008
@@ -38,6 +42,18 @@ async def get_dashboard_kpi(
         gruen_max_min=settings.funkempfang_gruen_max_min,
         gelb_max_min=settings.funkempfang_gelb_max_min,
     )
+    # 13.11.2026: dieselbe Quelle wie der Alarm-Task
+    # (``tasks/funk_tasks.pruefe_relais_fuehler``). Kachel und Mail aus
+    # einer Funktion — zwei Ableitungen derselben Aussage koennten
+    # auseinanderlaufen, und dann findet jemand eine stille Kachel zu
+    # einer Mail (Paragraph 5.53, dieselbe Haltung wie bei
+    # ``funkempfang``).
+    relais_zonen = await relais_fuehler.lies_relais_zonen(
+        session, grenze_min=settings.relais_fuehler_stumm_min
+    )
+    stumme = [z for z in relais_zonen if z.stumm]
+    alter_werte = [z.alter_min for z in stumme if z.alter_min is not None]
+
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
     devices_online, devices_assigned = await agg.count_devices_online(session)
     valve_check, room_too_warm = await agg.count_valve_alerts(session)
@@ -60,4 +76,6 @@ async def get_dashboard_kpi(
         befehle_nicht_angenommen=await agg.count_befehle_nicht_angenommen(session),
         valve_check_count=valve_check,
         room_too_warm_count=room_too_warm,
+        relais_fuehler_stumme_zonen=len(stumme),
+        relais_fuehler_stumm_min=max(alter_werte) if alter_werte else None,
     )

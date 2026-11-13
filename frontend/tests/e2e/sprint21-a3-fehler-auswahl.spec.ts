@@ -122,6 +122,8 @@ const KPI = {
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
   befehle_nicht_angenommen: 0,
+  relais_fuehler_stumme_zonen: 0,
+  relais_fuehler_stumm_min: null,
 };
 
 async function mockApi(page: Page): Promise<void> {

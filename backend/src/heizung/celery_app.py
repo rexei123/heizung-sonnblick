@@ -186,6 +186,26 @@ app.conf.update(
             "schedule": 300.0,
             "options": {"queue": "heizung_default"},
         },
+        # 13.11.2026: der Fuehler einer Relais-Zone schweigt.
+        #
+        # Derselbe Takt wie der Totalausfall, und derselbe Grund: bei
+        # einer Schwelle von 30 Minuten kommt die Mail spaetestens 35
+        # Minuten nach der letzten Meldung. Haeufiger waere sinnlos (die
+        # Geraete melden im Zehn-Minuten-Takt), seltener wuerde den
+        # Vorlauf verschenken, auf dem die ganze Meldung beruht.
+        #
+        # **Kein Versatz gegen den Totalausfall-Waechter**, und das ist
+        # keine Nachlaessigkeit: ein Intervall-Zeitplan laeuft ab dem
+        # Start von Beat, ein Versatz liesse sich nur mit einem
+        # ``crontab``-Ausdruck erzwingen. Die beiden lesen dieselbe
+        # Tabelle lesend und treten sich nicht auf die Fuesse; und dieser
+        # Waechter prueft als erstes, ob ein Totalausfall laeuft, und
+        # schweigt dann.
+        "relais-fuehler-every-5min": {
+            "task": "heizung.pruefe_relais_fuehler",
+            "schedule": 300.0,
+            "options": {"queue": "heizung_default"},
+        },
     },
 )
 

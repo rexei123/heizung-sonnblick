@@ -41,6 +41,8 @@ interface Kpi {
   funkempfang_meldungen_10min: number;
   fenstererkennung_aktiv: boolean;
   befehle_nicht_angenommen: number;
+  relais_fuehler_stumme_zonen: number;
+  relais_fuehler_stumm_min: number | null;
 }
 
 const BASE_KPI: Kpi = {
@@ -62,6 +64,8 @@ const BASE_KPI: Kpi = {
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
   befehle_nicht_angenommen: 0,
+  relais_fuehler_stumme_zonen: 0,
+  relais_fuehler_stumm_min: null,
 };
 
 async function mockDashboard(
@@ -256,11 +260,14 @@ test.describe("Dashboard-Kacheln: gleiche Höhe", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
-    const skelett = page
-      .locator('[data-testid="kpi-card"][aria-busy="true"]')
-      .first();
-    await expect(skelett).toBeVisible();
-    const skelettBox = await skelett.boundingBox();
+    const skelette = page.locator(
+      '[data-testid="kpi-card"][aria-busy="true"]',
+    );
+    await expect(skelette.first()).toBeVisible();
+    // Alle Karten, nicht nur die beschäftigten: siehe die Begründung
+    // unten am Vergleich.
+    const anzahlWaehrendLaden = await page.getByTestId("kpi-card").count();
+    const skelettBox = await skelette.first().boundingBox();
     expect(skelettBox).not.toBeNull();
 
     freigeben();
@@ -274,6 +281,31 @@ test.describe("Dashboard-Kacheln: gleiche Höhe", () => {
       `Skelett ${skelettBox!.height} px, fertige Kachel ${fertig} px — ` +
         `die Seite springt beim Laden`,
     ).toBeLessThanOrEqual(2);
+
+    // **Und die Anzahl, nicht nur die Höhe.** Gleich hohe Platzhalter in
+    // der falschen Zahl lassen die Seite genauso springen — wer eine
+    // Kachel in `buildCards` ergänzt und in `CARD_META` vergisst, baut
+    // genau das. Eine Mutationsprobe am 13.11.2026 hat gezeigt, dass
+    // dafür kein Test existierte: Eintrag aus `CARD_META` entfernt, 23
+    // von 23 grün.
+    //
+    // **Geprüft wird die Eigenschaft, nicht die Zahl:** die Zahl der
+    // Karten darf sich beim Eintreffen der Daten nicht ändern. Eine Zahl
+    // im Test wäre eine zweite Stelle, die bei jeder neuen Kachel
+    // nachzuziehen ist — und die man dann nachzieht, ohne zu prüfen.
+    //
+    // Gezählt werden **alle** Karten, nicht nur die beschäftigten. Die
+    // Kachel „Belegungsliste" steht in `buildCards` und bewusst nicht in
+    // `CARD_META` (Begründung dort), bringt aber ihren eigenen
+    // Platzhalter mit, solange ihre eigene Abfrage lädt. In der Summe
+    // stimmen beide Phasen deshalb überein — und genau diese Summe ist
+    // das, was der Betrachter sieht.
+    const fertigeKarten = await page.getByTestId("kpi-card").count();
+    expect(
+      anzahlWaehrendLaden,
+      `${anzahlWaehrendLaden} Karten beim Laden, danach ${fertigeKarten} — ` +
+        `die Seite springt beim Laden`,
+    ).toBe(fertigeKarten);
   });
 
   test('Fenster offen: Wert „inaktiv", Grund in der Zusatzzeile', async ({

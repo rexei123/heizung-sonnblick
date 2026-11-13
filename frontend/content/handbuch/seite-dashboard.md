@@ -1,9 +1,9 @@
 ---
 titel: Dashboard
 kategorie: Die Seiten
-stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste
+stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais
 rollen: alle
-stand: 2026-11-10
+stand: 2026-11-13
 route: /
 ---
 
@@ -95,6 +95,32 @@ hielt, sah die Lage behoben aus — und das Gerät hatte nie einen Befehl
 angenommen. Der Befund kam beim nächsten Zielwechsel wieder, jedes Mal
 mit drei weiteren Funkbefehlen, und war jedes Mal wieder weg, bevor ihn
 jemand sah.
+
+**Fühler Relais-Zone** ist der ernsteste Melder dieser Seite, und
+deshalb ist er rot und nicht gelb. Er zählt die Bereiche, die über ein
+**Relais** geheizt werden — heute die Rezeption und die Bar — und deren
+Thermostat nicht mehr meldet.
+
+**Warum das schwerer ist als ein stummes Thermostat im Zimmer.** Ein
+Thermostat am Heizkörper regelt bei Funkstille nach seinem eigenen
+Fühler weiter; das Zimmer wird ungenau, aber nicht kalt. Ein Relais hat
+keinen eigenen Fühler. Fehlt der Wert des Bereichs, schaltet die
+Steuerung **bewusst ab** — das ist der sichere Zustand, und solange er
+gilt, wird dort nicht geheizt.
+
+Die Zusatzzeile nennt die längste Stille. Steht dort „kein Fühler
+zugeordnet", ist es keine Funkstörung, sondern eine fehlende Zuordnung:
+dem Bereich ist kein Thermostat zugewiesen, und dann heizt er nie.
+
+Nach einer halben Stunde ohne Meldung geht eine Mail hinaus, einmal je
+Vorfall, und eine zweite, wenn der Wert wieder da ist.
+
+**Warum es diesen Melder gibt.** Am 12.11.2026 schwieg der Fühler der
+Rezeption von 14:41 bis 04:44 — **vierzehn Stunden**, und die Rezeption
+wurde in dieser Zeit nicht geheizt. Die Steuerung hat richtig gehandelt;
+nur stand es nirgends. „Geräte online" zeigte 102 von 103, und daraus
+liest niemand heraus, dass ein Bereich blind ist. Was zu tun ist, steht
+unter [Thermostat meldet nicht](/handbuch/ablauf-thermostat-still).
 
 ## Letzter Algorithmen-Lauf
 
