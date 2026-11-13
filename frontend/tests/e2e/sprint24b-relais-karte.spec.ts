@@ -243,15 +243,27 @@ test.describe("Relais-Karte", () => {
   });
 
   test("der Zaehler sagt, was er zaehlt", async ({ page }) => {
-    // **Der Befund vom 01.11.2026.** Die Geraeteseite zeigte
-    // „Schaltzyklen 0", obwohl 109 im T3.0-Lauf mehrfach geschaltet
-    // hatte. Der Zaehler war richtig -- gezaehlt wird nur, was der
-    // Orchestrator gesendet und das Geraet bestaetigt hat, und T3.0 lief
-    // von Hand daran vorbei. Das Etikett versprach mehr.
+    // **Zwei Befunde, zwei Etiketten.**
+    //
+    // 01.11.2026: Die Geraeteseite zeigte „Schaltzyklen 0", obwohl 109
+    // im T3.0-Lauf mehrfach geschaltet hatte. Der Zaehler war richtig --
+    // gezaehlt wurde nur, was der Orchestrator gesendet und das Geraet
+    // bestaetigt hat, und T3.0 lief von Hand daran vorbei. Daraufhin
+    // hiess die Zeile „Schaltzyklen der Steuerung".
+    //
+    // 12.11.2026: Dieselbe Buchfuehrung hat auch einen Zyklus der
+    // Steuerung verloren -- der Wunsch kippte, bevor die Bestaetigung
+    // ankam. Seit dem 13.11. zaehlt die **gemeldete** Zustandsaenderung,
+    // und das Etikett sagt das: „Einschaltungen (gemeldet)".
     await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
     await page.goto("/devices/77");
 
     await expect(page.getByTestId("relay-card")).toContainText(
+      "Einschaltungen (gemeldet)",
+    );
+    // Und das alte Etikett ist weg, nicht nur ergaenzt: „der Steuerung"
+    // waere jetzt die Falschaussage, die es vorher nicht war.
+    await expect(page.getByTestId("relay-card")).not.toContainText(
       "Schaltzyklen der Steuerung",
     );
   });

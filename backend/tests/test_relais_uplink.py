@@ -652,3 +652,194 @@ async def test_ein_frame_ohne_ruecklesung_ruehrt_die_vermerke_nicht_an(
     assert ergebnis == {}
     assert dev.power_return_verified_at == vorher
     assert dev.overheating_recovery_verified_at == vorher
+
+
+# ---------------------------------------------------------------------------
+# Einschaltungen zaehlen (13.11.2026)
+# ---------------------------------------------------------------------------
+#
+# **Der Befund des Betreibers, 12.11.2026.** Das Panel an der Rezeption hat
+# an diesem Vormittag zweimal eingeschaltet, und die Geraeteseite zeigte
+# **eine**. Der Grund war Buchfuehrung, nicht Funk: gezaehlt wurde im
+# Waechter, wenn ein von ihm abgesetzter Befehl bestaetigt wurde.
+#
+# Die Spur, Ortszeit:
+#
+#   09:38  EIN gesendet (0x57, 1800 s)
+#   09:40  Ist 20,9 > Soll 19,0 -> Wunsch kippt auf AUS, offener Stand
+#          verworfen (richtig: sonst bremst sein Backoff ein EIN, das
+#          niemand mehr will)
+#   09:47  Geraet meldet EIN -- und findet keinen offenen Stand mehr
+#
+# Gezaehlt wird seither die **gemeldete Zustandsaenderung**. Diese Tests
+# halten fest, was dabei zaehlt und was nicht.
+
+#: Derselbe Keepalive wie oben, nur aus. Als eigene Konstante und nicht
+#: als ``dict(KEEPALIVE) | {...}`` an jeder Aufrufstelle: der Zustand ist
+#: das, worum es in diesen Tests geht, und er soll in der Konstante
+#: stehen, nicht in einer Rechnung daneben.
+KEEPALIVE_AUS = {
+    "report_type": "keepalive",
+    "internalTemperature": 26,
+    "energy_raw": 1234567,
+    "energy_kWh": 1234.567,
+    "power_W": 0,
+    "acVoltage_V": 230,
+    "acCurrent_mA": 0,
+    "relayState": "OFF",
+}
+
+
+async def _meldet(
+    session: AsyncSession, dev: Device, *, ein: bool, vor_minuten: int, fcnt: int
+) -> dict[str, object]:
+    return await relay_uplink.verarbeite_relais_uplink(
+        session,
+        device_id=dev.id,
+        obj=dict(KEEPALIVE if ein else KEEPALIVE_AUS),
+        zeit=datetime.now(tz=UTC) - timedelta(minutes=vor_minuten),
+        fcnt=fcnt,
+    )
+
+
+@pytest.mark.asyncio
+async def test_der_wechsel_von_aus_auf_ein_wird_gezaehlt(db_session: AsyncSession) -> None:
+    dev = await _relais(db_session, marker="z1")
+    await _meldet(db_session, dev, ein=False, vor_minuten=20, fcnt=1)
+    assert dev.switch_cycles == 0
+
+    protokoll = await _meldet(db_session, dev, ein=True, vor_minuten=10, fcnt=2)
+
+    assert dev.switch_cycles == 1
+    assert protokoll["einschaltung_gezaehlt"] is True
+
+
+@pytest.mark.asyncio
+async def test_die_erste_meldung_ueberhaupt_zaehlt_nicht(db_session: AsyncSession) -> None:
+    """**Noch nie etwas gehoert ist kein beobachteter Wechsel.**
+
+    Dass die erste Meldung „ein" sagt, heisst nicht, dass das Geraet
+    gerade angelaufen ist — es kann seit Tagen laufen. Genau so war es am
+    12.11. um 08:40 bei Relais 108: der erste Frame nach dem Neustart
+    (``fcnt 1``) meldete EIN bei 1630 W, und das Panel heizte zu diesem
+    Zeitpunkt schon. Eine Einschaltung zu zaehlen, die niemand gesehen
+    hat, waere eine Behauptung.
+    """
+    dev = await _relais(db_session, marker="z2")
+
+    protokoll = await _meldet(db_session, dev, ein=True, vor_minuten=5, fcnt=1)
+
+    assert dev.switch_cycles == 0
+    assert protokoll["einschaltung_gezaehlt"] is False
+
+
+@pytest.mark.asyncio
+async def test_derselbe_frame_zweimal_zaehlt_einmal(db_session: AsyncSession) -> None:
+    """MQTT stellt mindestens einmal zu — zwei Zustellungen sind ein Wechsel.
+
+    Die Wiederholungsfestigkeit kommt nicht aus einer eigenen Pruefung,
+    sondern aus der **Reihenfolge**: gezaehlt wird vor dem Einfuegen, und
+    der zweite Durchlauf sieht die Zeile des ersten als Vorzustand. Diese
+    Probe ist der Grund, warum der Aufruf dort steht und nicht danach.
+    """
+    dev = await _relais(db_session, marker="z3")
+    await _meldet(db_session, dev, ein=False, vor_minuten=20, fcnt=1)
+    zeit = datetime.now(tz=UTC) - timedelta(minutes=10)
+    for _ in range(2):
+        await relay_uplink.verarbeite_relais_uplink(
+            db_session, device_id=dev.id, obj=dict(KEEPALIVE), zeit=zeit, fcnt=2
+        )
+
+    assert dev.switch_cycles == 1
+
+
+@pytest.mark.asyncio
+async def test_zwei_meldungen_ein_in_folge_zaehlen_einmal(db_session: AsyncSession) -> None:
+    """Der Keepalive alle zehn Minuten ist kein Schaltvorgang."""
+    dev = await _relais(db_session, marker="z4")
+    await _meldet(db_session, dev, ein=False, vor_minuten=30, fcnt=1)
+    await _meldet(db_session, dev, ein=True, vor_minuten=20, fcnt=2)
+    await _meldet(db_session, dev, ein=True, vor_minuten=10, fcnt=3)
+
+    assert dev.switch_cycles == 1
+
+
+@pytest.mark.asyncio
+async def test_ein_aus_zaehlt_nicht(db_session: AsyncSession) -> None:
+    dev = await _relais(db_session, marker="z5")
+    await _meldet(db_session, dev, ein=False, vor_minuten=30, fcnt=1)
+    await _meldet(db_session, dev, ein=True, vor_minuten=20, fcnt=2)
+    await _meldet(db_session, dev, ein=False, vor_minuten=10, fcnt=3)
+
+    assert dev.switch_cycles == 1, "ein AUS ist keine Einschaltung"
+
+
+@pytest.mark.asyncio
+async def test_frame_ohne_zustand_zaehlt_nicht_und_setzt_nichts_zurueck(
+    db_session: AsyncSession,
+) -> None:
+    """Eine Befehlsantwort ohne Keepalive-Schwanz sagt nichts ueber den Zustand.
+
+    Sie darf weder einen Wechsel vortaeuschen noch den naechsten echten
+    Wechsel verdecken — dieselbe Regel, nach der ``relay_state``
+    ``NULL``-Zeilen ueberspringt.
+    """
+    dev = await _relais(db_session, marker="z6")
+    await _meldet(db_session, dev, ein=False, vor_minuten=30, fcnt=1)
+
+    protokoll = await relay_uplink.verarbeite_relais_uplink(
+        db_session,
+        device_id=dev.id,
+        obj={"report_type": "command_reply", "internalTemperature": 26},
+        zeit=datetime.now(tz=UTC) - timedelta(minutes=20),
+        fcnt=2,
+    )
+    assert protokoll["einschaltung_gezaehlt"] is False
+    assert dev.switch_cycles == 0
+
+    # Der echte Wechsel danach zaehlt trotzdem.
+    await _meldet(db_session, dev, ein=True, vor_minuten=10, fcnt=3)
+    assert dev.switch_cycles == 1
+
+
+@pytest.mark.asyncio
+async def test_gegenprobe_12_11_zwei_einschaltungen_zaehlen_zwei(
+    db_session: AsyncSession,
+) -> None:
+    """**Die Gegenprobe zum Befund: der Vormittag des 12.11. in Meldungen.**
+
+    09:27 AUS, 09:47 EIN, 10:07 AUS, 10:37 EIN — so hat Relais 108 es
+    gemeldet. Die alte Zaehlung kam auf **1**, weil der offene Stand des
+    ersten EIN um 09:40 verworfen worden war. Diese Reihe muss **2**
+    ergeben.
+    """
+    dev = await _relais(db_session, marker="z7")
+    await _meldet(db_session, dev, ein=False, vor_minuten=100, fcnt=9)
+    await _meldet(db_session, dev, ein=True, vor_minuten=80, fcnt=11)
+    await _meldet(db_session, dev, ein=False, vor_minuten=60, fcnt=13)
+    await _meldet(db_session, dev, ein=True, vor_minuten=30, fcnt=16)
+
+    assert dev.switch_cycles == 2, (
+        "zwei gemeldete Einschaltungen muessen zwei ergeben — das war der Befund"
+    )
+
+
+@pytest.mark.asyncio
+async def test_zwei_meldungen_aus_in_folge_zaehlen_nicht(db_session: AsyncSession) -> None:
+    """**Die Probe, die eine Luecke gefunden hat.**
+
+    Eine Mutation, die statt „nur EIN zaehlt" nur noch „kein NULL"
+    pruefte, blieb gruen: die Reihe AUS, EIN, AUS faellt dabei nicht auf,
+    weil der Vorzustand jedes Mal passt. Eine Reihe aus **zwei AUS**
+    faellt auf — und genau die ist der Normalfall.
+
+    In der Nacht vom 12. auf den 13.11.2026 hat Relais 108 **107
+    Meldungen** geschickt, alle mit ``relay_on = false``, ohne einen
+    einzigen Zustandswechsel. Unter dieser Mutation haette der Zaehler in
+    einer Nacht auf ueber hundert gestanden.
+    """
+    dev = await _relais(db_session, marker="z8")
+    for i, minuten in enumerate((40, 30, 20, 10), start=1):
+        await _meldet(db_session, dev, ein=False, vor_minuten=minuten, fcnt=i)
+
+    assert dev.switch_cycles == 0, "Keepalives im Zustand AUS sind keine Einschaltung"
