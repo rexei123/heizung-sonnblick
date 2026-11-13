@@ -21,6 +21,26 @@
   net_id = "000000"
   enabled_regions = ["eu868"]
 
+  # ADR-Plugins (16.11.2026). Zugewiesen werden sie **je Geraeteprofil**
+  # ueber adr_algorithm_id; hier stehen sie nur zur Verfuegung. Ein Profil,
+  # das keines nennt, bleibt beim Standard-Algorithmus.
+  #
+  # Die Begruendung steht im Kopf der jeweiligen Datei:
+  #   relais-feste-datenrate.js  DR1, nbTrans 2, volle Leistung
+  #                              (108 verlor am 12.11. 16 % bei DR3)
+  #   vicki-feste-leistung.js    volle Leistung, Datenrate adaptiv
+  #                              (056 war 14 h stumm bei ca. 2 dBm)
+  #
+  # **Der Pfad muss zum Init-Sidecar passen.** Er kopiert das Verzeichnis
+  # nach /output, und ChirpStack sieht /output als /etc/chirpstack. Ohne
+  # die Kopierzeile in docker-compose.prod.yml steht der Pfad hier und die
+  # Datei ist im Container nicht da -- und ChirpStack sagt dazu nichts
+  # Aussagekraeftiges.
+  adr_plugins = [
+    "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
+    "/etc/chirpstack/adr-plugins/vicki-feste-leistung.js",
+  ]
+
 [api]
   bind = "0.0.0.0:8080"
   secret = "${CHIRPSTACK_API_SECRET}"
