@@ -110,6 +110,23 @@ class DashboardKpiRead(BaseModel):
     #: gibt.
     relais_fuehler_stumm_min: int | None = None
 
+    # --- Platte laeuft voll (14.11.2026) ---
+    #
+    # **Warum das auf diese Seite gehoert.** Am 13.11. war die Platte zu
+    # 94 % belegt, und gefunden wurde es beim Nachsehen nach etwas
+    # anderem. Bei 100 % nimmt Postgres keine Schreibvorgaenge mehr an —
+    # keine Messwerte, keine Engine-Auswertung, keine Relais-
+    # Bestaetigungen. Das ist der einzige Wert auf dieser Seite, der die
+    # **ganze** Anlage auf einmal stillegt.
+    #
+    # Die Zahl ist die Belegung in Prozent, gerechnet wie ``df`` (siehe
+    # ``services/plattenplatz``). ``warnt`` wird **serverseitig**
+    # gebildet, weil die Grenze in den Settings steht — sie im Frontend
+    # zu wiederholen waere eine zweite Wahrheit (Paragraph 5.53).
+    platte_prozent: int = 0
+    platte_frei_gb: float = 0.0
+    platte_warnt: bool = False
+
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None

@@ -82,6 +82,10 @@ _EXPECTED_KEYS = {
     # stehen hier, weil der Test rot war — genau dafuer ist er da.
     "relais_fuehler_stumme_zonen",
     "relais_fuehler_stumm_min",
+    # 14.11.2026 — Kachel Plattenplatz
+    "platte_prozent",
+    "platte_frei_gb",
+    "platte_warnt",
 }
 
 
@@ -189,6 +193,56 @@ async def test_dashboard_kpi_without_cookie_returns_401(http_client: httpx.Async
     http_client.cookies.clear()
     resp = await http_client.get("/api/v1/dashboard/kpi")
     assert resp.status_code == 401
+
+
+async def test_platte_warnt_kommt_aus_der_einstellung(
+    http_client: httpx.AsyncClient, users: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**Die Luecke, die Mutationsprobe M9 gefunden hat.**
+
+    ``platte_warnt`` entscheidet die Farbe der Kachel, und die Grenze
+    steht in den Einstellungen. Rechnet der Endpunkt sie selbst, verstellt
+    die Einstellung nichts — und zwei plausible Zahlen stehen nebeneinander
+    (Paragraph 5.53, derselbe Fehler, den die Batterie-Kacheln einmal
+    hatten).
+
+    Geprueft wird mit einer Grenze von 0 Prozent: dann muss **jede**
+    Platte warnen. Eine echte Belegung herzustellen ginge nicht — der Test
+    liefe auf fremden Rechnern anders.
+    """
+    monkeypatch.setenv("PLATTE_WARN_PROZENT", "1")
+    get_settings.cache_clear()
+    try:
+        await _login(http_client, users["admin"], users["password"])
+        resp = await http_client.get("/api/v1/dashboard/kpi")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["platte_warnt"] is True, (
+            f"bei einer Grenze von 1 % muss gewarnt werden (prozent={body['platte_prozent']})"
+        )
+    finally:
+        monkeypatch.delenv("PLATTE_WARN_PROZENT", raising=False)
+        get_settings.cache_clear()
+
+
+async def test_platte_warnt_nicht_bei_hoher_grenze(
+    http_client: httpx.AsyncClient, users: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Gegenprobe: mit 99 Prozent warnt nichts.
+
+    Ohne sie waere der Test darueber auch mit einem festen ``True``
+    zufrieden.
+    """
+    monkeypatch.setenv("PLATTE_WARN_PROZENT", "99")
+    get_settings.cache_clear()
+    try:
+        await _login(http_client, users["admin"], users["password"])
+        resp = await http_client.get("/api/v1/dashboard/kpi")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["platte_warnt"] is False
+    finally:
+        monkeypatch.delenv("PLATTE_WARN_PROZENT", raising=False)
+        get_settings.cache_clear()
 
 
 async def test_dashboard_kpi_admin_200_schema(

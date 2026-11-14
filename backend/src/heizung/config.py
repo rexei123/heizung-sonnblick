@@ -575,6 +575,47 @@ class Settings(BaseSettings):
     health_healthy_max_age_h: int = 2
     health_degraded_max_age_h: int = 3
 
+    # --- Platte laeuft voll (14.11.2026) ----------------------------------
+    #
+    # Am 13.11. war die Platte zu 94 % belegt, und aufgefallen ist es beim
+    # Nachsehen nach etwas anderem. Bei 100 % nimmt Postgres keine
+    # Schreibvorgaenge mehr an — keine Messwerte, keine Engine-Auswertung,
+    # keine Relais-Bestaetigungen.
+    #
+    # **85 Prozent, und zwar in der Rechenart von ``df``.** Die
+    # Begruendung fuer die Rechenart steht im Kopf von
+    # ``services/plattenplatz``; sie ist kein Detail, sondern der
+    # Unterschied zwischen einer Warnung bei 85 und einer bei 88 Prozent.
+    #
+    # Warum 85: bei 75 GB sind das rund 11 GB frei, also etwa zwei Monate
+    # ``event_log``-Wachstum oder knapp dreissig Merges. Genug Vorlauf, um
+    # das Aufraeumen zu einem Termin zu machen und nicht zu einem Notfall —
+    # und hoch genug, dass die Warnung nicht zum Dauerzustand wird.
+    platte_warn_prozent: int = 85
+    #: Abstand zwischen zwei Mails derselben Episode.
+    #:
+    #: **Vierundzwanzig Stunden und nicht sechs** wie beim Zonen-Melder:
+    #: eine volle Platte ist kein Vorgang, der sich von selbst erledigt,
+    #: und niemand raeumt nachts um drei auf. Eine Mail am Tag haelt den
+    #: Zustand wach, ohne den Posteingang zu fuellen.
+    platte_wiederholung_h: int = 24
+
+    @field_validator("platte_warn_prozent", mode="after")
+    @classmethod
+    def _platte_grenze_ist_ein_prozentsatz(cls, wert: int) -> int:
+        """Zwischen 1 und 99.
+
+        ``0`` waere eine Warnung, die immer steht, ``100`` eine, die nie
+        kommt — und beide sind schlechter als keine, weil sie aussehen wie
+        ein Melder (Paragraph 5.79).
+        """
+        if not 1 <= wert <= 99:
+            raise ValueError(
+                f"PLATTE_WARN_PROZENT muss zwischen 1 und 99 liegen (ist: {wert}). "
+                "0 warnt immer, 100 nie."
+            )
+        return wert
+
     # --- Rueckfallpunkt (Sprint 20g, H-6 T10) ---
     #
     # ``PIN_SHA`` steht in ``infra/deploy/.env`` und wird von
