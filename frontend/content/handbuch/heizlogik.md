@@ -3,7 +3,7 @@ titel: Wie das Haus heizt
 kategorie: Grundlagen
 stichworte: Sollwert, Schichten, Sommer, Absenkung, Vorheizen, Fenster, Kappung, Allgemeinbereich, nur messen, Relais
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-14
 ---
 
 Jedes Zimmer bekommt alle fünf Minuten einen Sollwert errechnet. Das
@@ -120,14 +120,33 @@ liegt im Reserve-Pool und ist keiner Zone zugeordnet.
 
 ## Relais
 
-Für die Infrarot-Heizkörper ist ein Relais-Pfad **vorbereitet, aber nicht
-in Betrieb**. Im Programm gibt es die Geräteart, die Zonenart „kein
-Stellglied" und die Unterscheidung im Versandfilter; es ist kein Relais
-montiert, und es wird keines geschaltet.
+Die Infrarot-Heizkörper in der Rezeption und in der Bar hängen an einem
+**Relais**, und die beiden sind seit November 2026 **in Betrieb**. (Bis
+zum 14.11.2026 stand hier, der Relais-Pfad sei vorbereitet und es werde
+keines geschaltet. Das war seit zwei Wochen überholt.)
 
-Was das für die Bedienung heißt: eine Zone ohne Stellglied zeigt einen
-Sollwert, aber keine Rückmeldung von einem Gerät. Die Ist-Temperatur
-kommt dort vom Sensor im Raum, nicht vom Thermostat.
+**Ein Relais ist ein Schalter, kein Thermostat.** Es kennt keinen
+Sollwert — es ist ein oder aus. Deshalb geht an ein Relais **kein
+Sollwert-Befehl**: die Heizlogik rechnet wie überall den Sollwert der
+Zone aus, und ein eigener Regler vergleicht ihn mit der gemessenen
+Temperatur und schaltet.
+
+Was dabei gilt:
+
+- Eingeschaltet wird **immer mit Zeitbegrenzung**. Fällt der Server aus,
+  geht das Panel von selbst aus — der Raum wird dann kalt, aber nichts
+  heizt unbeaufsichtigt weiter.
+- Zwischen zwei Schaltungen liegen eine Mindestlaufzeit und eine
+  Mindestpause, damit das Panel nicht taktet.
+- Fehlt die gemessene Temperatur oder ist sie zu alt, wird
+  **abgeschaltet**, nicht weitergeheizt.
+- Das Relais meldet seinen Zustand selbst. Bleibt diese Meldung aus,
+  gilt der Zustand als unbekannt, und die Steuerung **fragt nach**
+  statt zu raten.
+
+Die Ist-Temperatur dieser Räume kommt von einem Vicki, der unmontiert im
+Raum liegt und auf „nur messen" steht — das Relais selbst misst keine
+Raumtemperatur.
 
 ## Warum nicht jede Änderung ankommt
 
@@ -137,8 +156,8 @@ jeder Funkbefehl kostet Batterie und Motorbewegung:
 - Gesendet wird, wenn sich der Sollwert um mindestens 0,5 °C ändert.
 - Oder wenn seit dem letzten Befehl sechs Stunden vergangen sind.
 - Geräte auf „nur messen" bekommen nichts.
-- Ein Relais hätte einen eigenen Weg — siehe oben, es ist keines in
-  Betrieb.
+- Ein Relais bekommt gar keinen Sollwert, sondern einen Schaltbefehl —
+  siehe oben.
 
 Dazu kommt der Funk selbst: ein Thermostat meldet sich im Regelfall alle
 paar Minuten, im ungünstigen Fall dauert eine Bestätigung bis zu sechs
