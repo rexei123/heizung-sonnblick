@@ -51,7 +51,7 @@ from heizung.models.room_type import RoomType
 from heizung.tasks.engine_tasks import (
     _dispatch_downlinks_per_zone,
     _get_zone_devices,
-    _zone_hat_nur_relais,
+    _zone_hat_relais,
 )
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
@@ -105,7 +105,14 @@ async def _zimmer(session: AsyncSession, *, marker: str) -> tuple[int, int]:
     return room.id, zone.id
 
 
-async def _geraet(session: AsyncSession, zone_id: int, *, kind: DeviceKind, label: str) -> Device:
+async def _geraet(
+    session: AsyncSession,
+    zone_id: int,
+    *,
+    kind: DeviceKind,
+    label: str,
+    nur_messen: bool = False,
+) -> Device:
     jetzt = datetime.now(tz=UTC)
     ist_relais = kind == DeviceKind.RELAY
     dev = Device(
@@ -116,6 +123,7 @@ async def _geraet(session: AsyncSession, zone_id: int, *, kind: DeviceKind, labe
         label=label,
         heating_zone_id=zone_id,
         health_state="healthy",
+        measure_only=nur_messen,
         # In Betrieb genommen (S3) — ein Relais, das gar nicht schalten
         # darf, wuerde den Test auch ohne den Filter bestehen.
         power_return_verified_at=jetzt - timedelta(hours=2) if ist_relais else None,
@@ -267,7 +275,77 @@ async def test_der_grund_im_trace_nennt_das_relais(
     )
 
     status = next(z for z in pro_zone if z["zone_id"] == zone_id)
-    assert status["detail"] == "nur_relais_in_der_zone"
+    assert status["detail"] == "relais_zone_ohne_sollwertgeraet"
+
+
+async def test_der_grund_gilt_auch_mit_fuehler_in_der_zone(
+    db_session: AsyncSession, gesendet: list[tuple[str, int]]
+) -> None:
+    """**Die Bestueckung, die es im Haus wirklich gibt.**
+
+    In der Rezeption und in der Bar haengt neben dem Relais ein Vicki auf
+    „nur messen" (056 bzw. 027). Beide werden uebergangen — das Relais,
+    weil es kein Sollwert-Register hat, der Fuehler, weil er kein Ventil
+    hat.
+
+    Die erste Fassung fragte ``all(... == RELAY)`` und war damit genau
+    hier falsch: im Trace stand weiter ``no_healthy_active_devices``.
+    Aufgefallen ist es am Live-Stand nach dem Deploy, nicht im Test — der
+    kannte nur eine Zone mit ausschliesslich einem Relais (Paragraph
+    5.55).
+    """
+    room_id, zone_id = await _zimmer(db_session, marker="echt")
+    await _geraet(db_session, zone_id, kind=DeviceKind.RELAY, label="Panel")
+    fuehler = await _geraet(
+        db_session,
+        zone_id,
+        kind=DeviceKind.THERMOSTAT,
+        label="056 Eingang",
+        nur_messen=True,
+    )
+
+    assert await _get_zone_devices(db_session, zone_id) == [], "beide Geraete werden uebergangen"
+    assert await _zone_hat_relais(db_session, zone_id) is True
+
+    _, pro_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room_id,
+        target_setpoint_c=23,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    status = next(z for z in pro_zone if z["zone_id"] == zone_id)
+    assert status["detail"] == "relais_zone_ohne_sollwertgeraet"
+    assert status["setpoint_c"] == 23, "und der Sollwert steht weiter da"
+    assert gesendet == []
+    assert fuehler.measure_only is True
+
+
+async def test_zone_nur_mit_fuehler_bleibt_beim_alten_grund(
+    db_session: AsyncSession, gesendet: list[tuple[str, int]]
+) -> None:
+    """Die Gegenprobe zur Korrektur: ohne Relais kein Relais-Grund.
+
+    Eine Zone mit einem einzigen Fuehler auf „nur messen" hat ebenfalls
+    kein ansteuerbares Geraet — aber keinen Schalter, der das erklaert.
+    Dort ist der alte Text der richtige.
+    """
+    room_id, zone_id = await _zimmer(db_session, marker="nurf")
+    await _geraet(db_session, zone_id, kind=DeviceKind.THERMOSTAT, label="Fuehler", nur_messen=True)
+
+    assert await _zone_hat_relais(db_session, zone_id) is False
+
+    _, pro_zone = await _dispatch_downlinks_per_zone(
+        session=db_session,
+        room_id=room_id,
+        target_setpoint_c=21,
+        base_reason=CommandReason.VACANT_SETPOINT,
+        eval_id=uuid.uuid4(),
+    )
+
+    status = next(z for z in pro_zone if z["zone_id"] == zone_id)
+    assert status["detail"] == "no_healthy_active_devices"
 
 
 async def test_eine_leere_zone_heisst_weiter_keine_gesunden_geraete(
@@ -305,7 +383,10 @@ async def test_gemischte_zone_meldet_keinen_relais_grund(
     ventil = await _geraet(db_session, zone_id, kind=DeviceKind.THERMOSTAT, label="Ventil")
     await _geraet(db_session, zone_id, kind=DeviceKind.RELAY, label="Panel")
 
-    assert await _zone_hat_nur_relais(db_session, zone_id) is False
+    # ``_zone_hat_relais`` sagt hier **ja** — und das ist richtig, denn
+    # ein Relais haengt darin. Der Grund kommt trotzdem nicht zum Tragen:
+    # die Geraeteliste ist nicht leer, der leere Zweig wird nie erreicht.
+    assert await _zone_hat_relais(db_session, zone_id) is True
 
     _, pro_zone = await _dispatch_downlinks_per_zone(
         session=db_session,
@@ -323,13 +404,15 @@ async def test_gemischte_zone_meldet_keinen_relais_grund(
     assert [eui for eui, _ in gesendet] == [ventil.dev_eui]
 
 
-async def test_nur_relais_erkennt_die_leere_zone_nicht_als_relais_zone(
+async def test_die_leere_zone_ist_keine_relais_zone(
     db_session: AsyncSession,
 ) -> None:
-    """``all()`` auf einer leeren Liste ist ``True`` — die Falle dieser Funktion.
+    """Ohne Geraete kein Relais — und damit der alte Grund.
 
-    Ohne die ``bool(alle)``-Bedingung waere jede leere Zone eine
-    Relais-Zone, und der Grund im Trace waere schlicht falsch.
+    Mit ``all()`` war das die Falle (``all([])`` ist ``True``) und
+    brauchte eine eigene ``bool(alle)``-Bedingung; mit ``any()`` faellt
+    sie weg. Der Test bleibt, weil die Aussage dieselbe ist und die
+    naechste Umstellung wieder daran vorbeikommen koennte.
     """
     _, zone_id = await _zimmer(db_session, marker="nix")
-    assert await _zone_hat_nur_relais(db_session, zone_id) is False
+    assert await _zone_hat_relais(db_session, zone_id) is False

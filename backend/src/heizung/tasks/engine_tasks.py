@@ -458,8 +458,8 @@ async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]
     ]
 
 
-async def _zone_hat_nur_relais(session: AsyncSession, zone_id: int) -> bool:
-    """Hat diese Zone Geraete, aber kein einziges ansteuerbares?
+async def _zone_hat_relais(session: AsyncSession, zone_id: int) -> bool:
+    """Haengt in dieser Zone ein Relais?
 
     **Nur fuer die Begruendung im Trace**, und nur in dem Zweig, in dem
     ``_get_zone_devices`` leer zurueckkommt — also hoechstens einmal je
@@ -470,9 +470,32 @@ async def _zone_hat_nur_relais(session: AsyncSession, zone_id: int) -> bool:
     genommenes Relais in der Zone haengt und jede Minute geregelt wird.
     Das liest sich wie ein Ausfall und ist keiner (Paragraph 5.79: ein
     Melder, dem niemand glaubt, weil er bei gesunden Zonen rot meldet).
+
+    **Korrektur vom 14.11.2026, am Live-Stand gemessen.** Die erste
+    Fassung fragte ``all(... == RELAY)`` — „sind **alle** Geraete der
+    Zone Relais". In beiden Relais-Zonen des Hauses haengt aber auch der
+    Fuehler (056 in der Rezeption, 027 in der Bar, beide auf „nur
+    messen"). Die Antwort war damit ``False``, und im Trace stand
+    weiterhin der alte Text. Geprueft hatte das niemand: der Test kannte
+    nur eine Zone mit **ausschliesslich** einem Relais, und die gibt es
+    im Haus nicht (Paragraph 5.55 — ein gruener Lauf, der eine Lage
+    prueft, die nicht vorkommt).
+
+    ``any`` ist auch die richtige Frage. Gefragt ist nicht, woraus die
+    Zone besteht, sondern **warum** nichts angesteuert wird — und sobald
+    ein Relais darin haengt, ist das die Antwort. Dass der Fuehler
+    daneben ebenfalls uebergangen wird, ist ein zweiter, genauso normaler
+    Grund (``measure_only``) und kein Ausfall.
+
+    **Was dabei verdeckt wird, und warum das vertretbar ist:** haengt in
+    einer Relais-Zone zusaetzlich ein *krankes* Thermostat, nennt der
+    Trace die Relais-Zone und nicht das kranke Geraet. Dessen Zustand hat
+    seinen eigenen Weg — die Health-Achse, die Kachel „Geraete online"
+    und den Melder der Relais-Zone. Hier geht es um die Frage, ob das
+    leere Ergebnis erklaert ist.
     """
     alle = await get_active_devices_for_zone(session, zone_id)
-    return bool(alle) and all(d.kind == DeviceKind.RELAY for d in alle)
+    return any(d.kind == DeviceKind.RELAY for d in alle)
 
 
 # Sprint 20f (T3): Audit-Aktion, wenn der Abgleich aufgibt. Eigener Name, kein
@@ -834,8 +857,8 @@ async def _dispatch_downlinks_per_zone(
                     "count_skipped": 0,
                     "all_failed": False,
                     "detail": (
-                        "nur_relais_in_der_zone"
-                        if await _zone_hat_nur_relais(session, zone.id)
+                        "relais_zone_ohne_sollwertgeraet"
+                        if await _zone_hat_relais(session, zone.id)
                         else "no_healthy_active_devices"
                     ),
                 }
