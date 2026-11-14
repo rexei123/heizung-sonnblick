@@ -24,7 +24,7 @@ Task                                   Frage                        Takt
 ``pruefe_funkqualitaet``               wird das Haus schlechter      1 h
                                        empfangen als vorige Woche?
 ``pruefe_totalausfall``                kommt ueberhaupt noch etwas?  5 min
-``pruefe_relais_fuehler``              hat jede Zone mit einem       5 min
+``pruefe_relais_zone``              hat jede Zone mit einem       5 min
                                        Relais in Betrieb einen
                                        aktuellen Fuehlerwert?
 ====================================== ============================ =======
@@ -56,7 +56,7 @@ from heizung.services import (
     funkempfang,
     mail_status,
     mailer,
-    relais_fuehler,
+    relais_zone_melder,
 )
 from heizung.services.business_audit_service import record_business_action
 
@@ -367,8 +367,23 @@ def pruefe_totalausfall(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=Tru
 #: Die beiden Audit-Marken. Wie beim Totalausfall sind sie **gleichzeitig
 #: der Zustand** — nur je Zone statt je Haus (``target_id`` ist die
 #: Zonen-Id). Siehe ``_letzter_zonen_stand``.
-AUDIT_FUEHLER_STUMM = "RELAIS_ZONE_FUEHLER_STUMM"
-AUDIT_FUEHLER_STUMM_ENDE = "RELAIS_ZONE_FUEHLER_STUMM_ENDE"
+AUDIT_ZONE_STUMM = "RELAIS_ZONE_STUMM"
+AUDIT_ZONE_STUMM_ENDE = "RELAIS_ZONE_STUMM_ENDE"
+
+#: Die Namen bis zum 14.11.2026, als der Melder nur den Fuehler kannte.
+#:
+#: **Sie werden mitgelesen, und zwar nur gelesen.** Eine Episode, die zum
+#: Zeitpunkt des Deploys offen ist, traegt noch die alte Marke; ohne sie
+#: hier haette der erste Durchlauf danach keine laufende Episode gesehen
+#: und eine zweite Alarm-Mail fuer denselben Vorgang geschickt. Ein
+#: Melder, der beim Umbenennen seiner eigenen Marken Fehlalarm gibt, ist
+#: die Sorte, die man nach einer Woche ueberliest (Paragraph 5.79).
+#:
+#: Entfernbar, sobald keine Episode aus der Zeit vor dem 14.11.2026 mehr
+#: offen sein kann — also nach dem ersten Durchlauf, in dem alle
+#: Relais-Zonen melden. Wer das aufraeumt, prueft es mit der Abfrage in
+#: ``docs/status/2026-11-14-melder-relais-stumm.md``.
+AUDIT_ALTE_NAMEN = ("RELAIS_ZONE_FUEHLER_STUMM", "RELAIS_ZONE_FUEHLER_STUMM_ENDE")
 
 
 async def _letzter_zonen_stand(
@@ -386,7 +401,7 @@ async def _letzter_zonen_stand(
     stmt = (
         select(BusinessAudit.action, BusinessAudit.ts)
         .where(
-            BusinessAudit.action.in_([AUDIT_FUEHLER_STUMM, AUDIT_FUEHLER_STUMM_ENDE]),
+            BusinessAudit.action.in_([AUDIT_ZONE_STUMM, AUDIT_ZONE_STUMM_ENDE, *AUDIT_ALTE_NAMEN]),
             BusinessAudit.target_type == "heating_zone",
             BusinessAudit.target_id == zone_id,
         )
@@ -403,7 +418,7 @@ async def _zonen_mail_und_audit(
     session: AsyncSession,
     *,
     action: str,
-    befund: relais_fuehler.ZonenBefund,
+    befund: relais_zone_melder.ZonenBefund,
     betreff: str,
     text: str,
 ) -> bool:
@@ -423,8 +438,19 @@ async def _zonen_mail_und_audit(
                 befund.letzte_meldung.isoformat() if befund.letzte_meldung else None
             ),
             "alter_min": befund.alter_min,
+            "relais": list(befund.relais),
+            "relais_letzte_meldung": (
+                befund.relais_letzte_meldung.isoformat() if befund.relais_letzte_meldung else None
+            ),
+            "relais_alter_min": befund.relais_alter_min,
+            "relais_stumm": befund.relais_stumm,
             "relais_in_betrieb": befund.relais_in_betrieb,
             "grund": befund.grund,
+            # Dieselbe Liste, die in der Mail steht. Ohne sie waere im
+            # Audit nachtraeglich nicht zu sehen, **wer** geschwiegen hat,
+            # sondern nur, dass die Zone stumm war (Paragraph 5.68: ein
+            # Befund braucht seine Zahlen, sonst wird er zur Behauptung).
+            "schweigende_geraete": list(befund.schweigende_geraete),
         },
     )
 
@@ -432,7 +458,7 @@ async def _zonen_mail_und_audit(
     empfaenger = gc.alert_email if gc else None
     if not empfaenger:
         logger.info(
-            "relais_fuehler_keine_alarmadresse action=%s zone_id=%s",
+            "relais_zone_keine_alarmadresse action=%s zone_id=%s",
             action,
             befund.zone_id,
         )
@@ -443,7 +469,7 @@ async def _zonen_mail_und_audit(
     await mail_status.record_attempt(session, result)
     if not result.sent:
         logger.warning(
-            "relais_fuehler_mail_nicht_zugestellt action=%s zone_id=%s grund=%s",
+            "relais_zone_mail_nicht_zugestellt action=%s zone_id=%s grund=%s",
             action,
             befund.zone_id,
             result.reason,
@@ -451,7 +477,7 @@ async def _zonen_mail_und_audit(
     return bool(result.sent)
 
 
-async def _run_relais_fuehler() -> dict[str, Any]:
+async def _run_relais_zone() -> dict[str, Any]:
     """Async-Koerper des Tasks. Public fuer Tests."""
     settings = get_settings()
     async with _task_session() as session:
@@ -481,11 +507,11 @@ async def _run_relais_fuehler() -> dict[str, Any]:
         )
         if funk.ist_totalausfall:
             ergebnis["uebersprungen"] = "totalausfall"
-            logger.info("relais_fuehler_uebersprungen grund=totalausfall")
+            logger.info("relais_zone_uebersprungen grund=totalausfall")
             return ergebnis
 
-        befunde = await relais_fuehler.lies_relais_zonen(
-            session, grenze_min=settings.relais_fuehler_stumm_min
+        befunde = await relais_zone_melder.lies_relais_zonen(
+            session, grenze_min=settings.relais_zone_stumm_min
         )
         ergebnis["zonen_geprueft"] = len(befunde)
         ergebnis["zonen_stumm"] = sum(1 for b in befunde if b.stumm)
@@ -493,32 +519,34 @@ async def _run_relais_fuehler() -> dict[str, Any]:
         jetzt = datetime.now(tz=UTC)
         for befund in befunde:
             letzte_aktion, letzte_zeit = await _letzter_zonen_stand(session, zone_id=befund.zone_id)
-            episode_laeuft = letzte_aktion == AUDIT_FUEHLER_STUMM
+            # Der alte Alarm-Name zaehlt mit, der alte Entwarnungs-Name
+            # nicht: eine beendete Episode ist beendet, egal wie sie
+            # hiess.
+            episode_laeuft = letzte_aktion in (AUDIT_ZONE_STUMM, AUDIT_ALTE_NAMEN[0])
 
             if befund.stumm:
                 zu_frueh = (
                     episode_laeuft
                     and letzte_zeit is not None
-                    and jetzt - letzte_zeit
-                    < timedelta(hours=settings.relais_fuehler_wiederholung_h)
+                    and jetzt - letzte_zeit < timedelta(hours=settings.relais_zone_wiederholung_h)
                 )
                 if zu_frueh:
                     logger.info(
-                        "relais_fuehler_gebremst zone_id=%s alter_min=%s",
+                        "relais_zone_gebremst zone_id=%s grund=%s alter_min=%s relais_alter_min=%s",
                         befund.zone_id,
+                        befund.grund,
                         befund.alter_min,
+                        befund.relais_alter_min,
                     )
                     continue
                 gemailt = await _zonen_mail_und_audit(
                     session,
-                    action=AUDIT_FUEHLER_STUMM,
+                    action=AUDIT_ZONE_STUMM,
                     befund=befund,
-                    betreff=relais_fuehler.betreff_alarm(befund),
-                    text=relais_fuehler.nachricht_alarm(befund, zeitzone=zeitzone),
+                    betreff=relais_zone_melder.betreff_alarm(befund),
+                    text=relais_zone_melder.nachricht_alarm(befund, zeitzone=zeitzone),
                 )
-                ergebnis["aktionen"].append(
-                    {"zone_id": befund.zone_id, "aktion": AUDIT_FUEHLER_STUMM}
-                )
+                ergebnis["aktionen"].append({"zone_id": befund.zone_id, "aktion": AUDIT_ZONE_STUMM})
                 ergebnis["gemailt"] += int(gemailt)
                 continue
 
@@ -528,13 +556,13 @@ async def _run_relais_fuehler() -> dict[str, Any]:
             if episode_laeuft:
                 gemailt = await _zonen_mail_und_audit(
                     session,
-                    action=AUDIT_FUEHLER_STUMM_ENDE,
+                    action=AUDIT_ZONE_STUMM_ENDE,
                     befund=befund,
-                    betreff=relais_fuehler.betreff_entwarnung(befund),
-                    text=relais_fuehler.nachricht_entwarnung(befund, zeitzone=zeitzone),
+                    betreff=relais_zone_melder.betreff_entwarnung(befund),
+                    text=relais_zone_melder.nachricht_entwarnung(befund, zeitzone=zeitzone),
                 )
                 ergebnis["aktionen"].append(
-                    {"zone_id": befund.zone_id, "aktion": AUDIT_FUEHLER_STUMM_ENDE}
+                    {"zone_id": befund.zone_id, "aktion": AUDIT_ZONE_STUMM_ENDE}
                 )
                 ergebnis["gemailt"] += int(gemailt)
 
@@ -542,7 +570,7 @@ async def _run_relais_fuehler() -> dict[str, Any]:
         return ergebnis
 
 
-@app.task(name="heizung.pruefe_relais_fuehler", bind=True)
-def pruefe_relais_fuehler(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=True
+@app.task(name="heizung.pruefe_relais_zone", bind=True)
+def pruefe_relais_zone(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=True
     """Beat-Task alle 5 Minuten: hat jede Relais-Zone einen aktuellen Wert?"""
-    return asyncio.run(_run_relais_fuehler())
+    return asyncio.run(_run_relais_zone())

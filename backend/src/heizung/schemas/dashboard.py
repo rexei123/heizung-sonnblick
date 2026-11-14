@@ -100,15 +100,15 @@ class DashboardKpiRead(BaseModel):
     # der Batterie, Paragraph 5.73: zwei Fragen, zwei Achsen).
     #
     # Die Stufe wird **serverseitig** gebildet, weil die Grenze in den
-    # Settings steht (``relais_fuehler_stumm_min``). Sie im Frontend zu
+    # Settings steht (``Settings.relais_zone_stumm_min``). Sie im Frontend zu
     # rechnen hiesse, die Grenze dort zu wiederholen (Paragraph 5.53).
-    relais_fuehler_stumme_zonen: int = 0
+    relais_zonen_stumm: int = 0
     #: Alter der juengsten Meldung in der am laengsten stummen Zone, in
     #: Minuten. ``None``, wenn keine Zone stumm ist **oder** wenn die
     #: stumme Zone gar keinen Fuehler hat — dort gibt es kein Alter, und
     #: eine 0 waere dann eine Behauptung ueber eine Meldung, die es nicht
     #: gibt.
-    relais_fuehler_stumm_min: int | None = None
+    relais_zonen_stille_min: int | None = None
 
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:

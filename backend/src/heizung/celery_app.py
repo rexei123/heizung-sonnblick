@@ -201,8 +201,8 @@ app.conf.update(
         # Tabelle lesend und treten sich nicht auf die Fuesse; und dieser
         # Waechter prueft als erstes, ob ein Totalausfall laeuft, und
         # schweigt dann.
-        "relais-fuehler-every-5min": {
-            "task": "heizung.pruefe_relais_fuehler",
+        "relais-zone-every-5min": {
+            "task": "heizung.pruefe_relais_zone",
             "schedule": 300.0,
             "options": {"queue": "heizung_default"},
         },

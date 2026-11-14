@@ -269,10 +269,10 @@ class Settings(BaseSettings):
     # Diese Grenze entscheidet **nichts** an der Steuerung. Der
     # Zwangs-AUS des Zweipunktreglers haengt unveraendert am
     # Frischefenster des Zonen-Aggregats; siehe
-    # ``services/relais_fuehler`` fuer die Begruendung, warum es zwei
+    # ``services/relais_zone_melder`` fuer die Begruendung, warum es zwei
     # Grenzen sind und welche vor welcher liegen muss.
-    relais_fuehler_stumm_min: int = 30
-    relais_fuehler_wiederholung_h: int = 6
+    relais_zone_stumm_min: int = 30
+    relais_zone_wiederholung_h: int = 6
 
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
@@ -811,7 +811,7 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _relais_fuehler_grenze_liegt_vor_dem_abschalten(self) -> "Settings":
+    def _relais_zone_grenze_liegt_vor_dem_abschalten(self) -> "Settings":
         """Die Warnung muss **vor** dem Zwangs-AUS kommen, nicht danach.
 
         Der Zweipunktregler schaltet ab, sobald das Zonen-Aggregat keinen
@@ -829,18 +829,17 @@ class Settings(BaseSettings):
         aufgibt.
         """
         keepalive_min = self.health_healthy_max_age_h * 60
-        if self.relais_fuehler_stumm_min >= keepalive_min:
+        if self.relais_zone_stumm_min >= keepalive_min:
             raise ValueError(
-                "RELAIS_FUEHLER_STUMM_MIN muss kleiner sein als "
+                "RELAIS_ZONE_STUMM_MIN muss kleiner sein als "
                 "HEALTH_HEALTHY_MAX_AGE_H in Minuten (ist: "
-                f"{self.relais_fuehler_stumm_min} >= {keepalive_min}). "
+                f"{self.relais_zone_stumm_min} >= {keepalive_min}). "
                 "Sonst warnt die Meldung erst, wenn der Regler die Zone "
                 "schon abgeschaltet hat."
             )
-        if self.relais_fuehler_stumm_min < 1:
+        if self.relais_zone_stumm_min < 1:
             raise ValueError(
-                "RELAIS_FUEHLER_STUMM_MIN muss mindestens 1 sein (ist: "
-                f"{self.relais_fuehler_stumm_min})."
+                f"RELAIS_ZONE_STUMM_MIN muss mindestens 1 sein (ist: {self.relais_zone_stumm_min})."
             )
         return self
 

@@ -44,8 +44,8 @@ const dashboardKpiSchema = z.object({
   // 13.11.2026: Zonen mit einem Relais in Betrieb, in denen kein
   // aktueller Fühlerwert mehr ankommt. Ohne Zonenwert schaltet der Regler
   // bewusst ab — die Zone heizt dann nicht mehr.
-  relais_fuehler_stumme_zonen: z.number(),
-  relais_fuehler_stumm_min: z.number().nullable(),
+  relais_zonen_stumm: z.number(),
+  relais_zonen_stille_min: z.number().nullable(),
 });
 
 export const dashboardApi = {
