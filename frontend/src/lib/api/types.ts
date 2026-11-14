@@ -1249,13 +1249,13 @@ export interface DashboardKpi {
    * 12./13.11. vierzehn Stunden stumm und dabei `health_state =
    * degraded` — auf der Offline-Achse also unauffällig.
    */
-  relais_fuehler_stumme_zonen: number;
+  relais_zonen_stumm: number;
   /**
    * Alter der jüngsten Meldung in der am längsten stummen Zone, in
    * Minuten. `null`, wenn keine Zone stumm ist **oder** wenn der Zone
    * gar kein Fühler zugeordnet ist — dort gibt es kein Alter.
    */
-  relais_fuehler_stumm_min: number | null;
+  relais_zonen_stille_min: number | null;
 }
 
 // ---------------------------------------------------------------------------

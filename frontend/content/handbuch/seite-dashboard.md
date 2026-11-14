@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais
 rollen: alle
-stand: 2026-11-13
+stand: 2026-11-14
 route: /
 ---
 
@@ -96,10 +96,13 @@ angenommen. Der Befund kam beim nächsten Zielwechsel wieder, jedes Mal
 mit drei weiteren Funkbefehlen, und war jedes Mal wieder weg, bevor ihn
 jemand sah.
 
-**Fühler Relais-Zone** ist der ernsteste Melder dieser Seite, und
+**Relais-Zone stumm** ist der ernsteste Melder dieser Seite, und
 deshalb ist er rot und nicht gelb. Er zählt die Bereiche, die über ein
-**Relais** geheizt werden — heute die Rezeption und die Bar — und deren
-Thermostat nicht mehr meldet.
+**Relais** geheizt werden — heute die Rezeption und die Bar — und in
+denen das **Thermostat oder das Relais** nicht mehr meldet.
+
+(Bis zum 14.11.2026 hieß die Kachel „Fühler Relais-Zone" und sah nur
+auf das Thermostat. Ein Relais, das schwieg, blieb unbemerkt.)
 
 **Warum das schwerer ist als ein stummes Thermostat im Zimmer.** Ein
 Thermostat am Heizkörper regelt bei Funkstille nach seinem eigenen
@@ -108,12 +111,19 @@ keinen eigenen Fühler. Fehlt der Wert des Bereichs, schaltet die
 Steuerung **bewusst ab** — das ist der sichere Zustand, und solange er
 gilt, wird dort nicht geheizt.
 
+**Schweigt dagegen das Relais**, sind Soll- und Ist-Wert da und
+unbekannt ist nur, ob das Panel gerade heizt. Die Steuerung fragt den
+Zustand dann von selbst nach und schaltet bis zur Antwort nicht ein. Die
+Mail sagt, welcher der beiden Fälle vorliegt, und nennt das Gerät.
+
 Die Zusatzzeile nennt die längste Stille. Steht dort „kein Fühler
 zugeordnet", ist es keine Funkstörung, sondern eine fehlende Zuordnung:
 dem Bereich ist kein Thermostat zugewiesen, und dann heizt er nie.
 
 Nach einer halben Stunde ohne Meldung geht eine Mail hinaus, einmal je
-Vorfall, und eine zweite, wenn der Wert wieder da ist.
+Vorfall, und eine zweite, wenn wieder beide zu hören sind. **Schweigen
+beide gleichzeitig**, steht das in derselben Mail — und spricht eher für
+den Weg (Gateway, Netz, Strom) als für die Geräte.
 
 **Warum es diesen Melder gibt.** Am 12.11.2026 schwieg der Fühler der
 Rezeption von 14:41 bis 04:44 — **vierzehn Stunden**, und die Rezeption
