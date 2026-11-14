@@ -20,7 +20,7 @@ Playwright-Routen in Sprint 24b, nur eine Schicht tiefer.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,14 @@ from heizung.schemas.room_type import (
 )
 from heizung.services import raumtyp_regel
 from heizung.services.business_audit_service import record_business_action
+from heizung.services.config_audit_service import record_config_change
+
+#: Die Marken fuer ``config_audit``. ``scope_qualifier`` traegt hier
+#: die **Raumtyp-Id** und nicht ``"global"`` wie bei ``rule_config`` --
+#: eine Aenderung an einem Raumtyp gilt fuer dessen Zimmer, und wer die
+#: Spur liest, muss sehen, welcher gemeint war.
+AUDIT_TABLE = "room_type"
+AUDIT_SOURCE = "api"
 
 # Postgres int4-Range. IDs > 2^31-1 wuerden DataError werfen → 500.
 INT4_MAX = 2_147_483_647
@@ -255,8 +263,9 @@ async def get_room_type(
 )
 async def update_room_type(
     payload: RoomTypeUpdate,
+    request: Request,
     room_type_id: int = RoomTypeIdPath,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RoomType:
     rt = await _get_or_404(session, room_type_id)
@@ -291,9 +300,64 @@ async def update_room_type(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Mindestens ein Feld zur Aktualisierung erforderlich",
         )
+
+    # **Audit je Feld** (14.11.2026). Bis dahin schrieb dieser Endpunkt
+    # **keine** Spur -- und das sind die Werte, nach denen die Rezeption
+    # und die Bar tatsaechlich geregelt werden: fuer einen nicht buchbaren
+    # Raumtyp hebt ``rules.engine.bereichs_kette`` die drei Spalten auf
+    # ROOM_TYPE-Rang, womit sie die hausweite Zeile schlagen.
+    #
+    # **Der Anlass, 13.11.2026.** Der Betreiber hat den Grundsollwert der
+    # Rezeption dreimal geaendert -- 07:21 auf 22, 07:53 auf 20, 08:09 auf
+    # 21. In ``config_audit`` stand aus 36 Stunden **eine** Zeile, und die
+    # betraf die hausweite Regel. Die drei Aenderungen liessen sich nur
+    # ueber den Engine-Trace rekonstruieren, also ueber eine Tabelle, die
+    # einem anderen Zweck dient.
+    #
+    # ``rule_config`` und ``global_config`` schreiben die Spur seit Sprint
+    # 22; hier fehlte sie. Dieselbe Form wie dort: eine Zeile je
+    # **geaendertem** Feld, ``scope_qualifier`` traegt die Raumtyp-Id.
+    request_ip = request.client.host if request.client else None
     for field, value in updates.items():
+        alt_wert = getattr(rt, field, None)
+        if alt_wert == value:
+            # Idempotenz: kein Audit-Spam fuer No-Op-Updates. Dieselbe
+            # Pruefung wie in ``rule_configs`` -- die Oberflaeche schickt
+            # das ganze Formular, auch die unveraenderten Felder.
+            continue
         setattr(rt, field, value)
+        await record_config_change(
+            session,
+            source=AUDIT_SOURCE,
+            table_name=AUDIT_TABLE,
+            scope_qualifier=str(room_type_id),
+            column_name=field,
+            old_value=alt_wert,
+            new_value=value,
+            user_id=admin.id,
+            request_ip=request_ip,
+        )
+
+    # **Die Gleichziehung wird mitgeschrieben, wenn sie etwas aendert.**
+    # Bei einem Allgemeinbereich zieht das Speichern ``default_t_occupied``
+    # auf den Frei-Wert nach (Begruendung bei ``_betrieb_gleichziehen``).
+    # Das ist eine Aenderung an einer Spalte, die niemand angefasst hat --
+    # ohne eigene Zeile waere sie im Audit unsichtbar, und beim naechsten
+    # Vergleich stimmte der alte Wert nicht mehr.
+    vorher_occupied = rt.default_t_occupied
     _betrieb_gleichziehen(rt)
+    if rt.default_t_occupied != vorher_occupied and "default_t_occupied" not in updates:
+        await record_config_change(
+            session,
+            source=AUDIT_SOURCE,
+            table_name=AUDIT_TABLE,
+            scope_qualifier=str(room_type_id),
+            column_name="default_t_occupied",
+            old_value=vorher_occupied,
+            new_value=rt.default_t_occupied,
+            user_id=admin.id,
+            request_ip=request_ip,
+        )
     try:
         # Eine **vorhandene** Zeile wird nachgezogen — sie ist wirksam, und
         # ein Formular, das sie stehenlaesst, zeigte danach einen Wert und
