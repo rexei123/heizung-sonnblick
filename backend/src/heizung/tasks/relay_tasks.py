@@ -123,13 +123,38 @@ def zweipunkt_schwellen() -> ZweipunktSchwellen:
 
 
 def waechter_schwellen() -> WaechterSchwellen:
-    """Die Waechter-Parameter aus den Settings, einmal je Durchlauf."""
+    """Die Waechter-Parameter aus den Settings, einmal je Durchlauf.
+
+    **Die Bestaetigungsfrist wird gerechnet, nicht eingestellt**
+    (13.11.2026). Sie stand als eigene Einstellung auf **60 Sekunden** —
+    eine Zahl, die aus der Zustellung kam: Class C heisst, dass der
+    Downlink sofort beim Geraet ist, und eine Minute schien reichlich.
+
+    Sie war es nicht, denn die Zustellung ist nicht die Bestaetigung. Ein
+    16ASPM meldet seinen Zustand nur im eigenen Takt, gemessen alle **600
+    Sekunden**. Die Frist lag damit um den Faktor zehn unter dem
+    frühesten Zeitpunkt, an dem eine Bestaetigung ueberhaupt eintreffen
+    kann — der Waechter hat also planmaessig wiederholt und planmaessig
+    Alarm geschlagen.
+
+    Gemessen am 12.11.2026 an Relais 108: **zehn Downlinks fuer vier
+    Schaltungen**, und ein Fehlalarm um 10:06 fuer ein Relais, das
+    bereits aus war (die Meldung dazu kam 10:07:56). Ein Melder, der bei
+    jedem zweiten Vorgang Fehlalarm gibt, wird nach einer Woche
+    ueberlesen (Paragraph 5.79).
+
+    Die Frist ist deshalb das **Meldeintervall plus Zuschlag**. Beide
+    Zahlen sind Einstellungen, ihre Verknuepfung ist Code — damit kann
+    niemand die eine verstellen und die andere vergessen.
+    """
     s = get_settings()
     return WaechterSchwellen(
         timer_expire=timedelta(seconds=s.relay_timer_expire_s),
         timer_refresh=timedelta(seconds=s.relay_timer_refresh_s),
         refresh_abstand=timedelta(seconds=s.relay_refresh_intervall_s),
-        bestaetigungs_frist=timedelta(seconds=s.relay_bestaetigungs_frist_s),
+        bestaetigungs_frist=timedelta(
+            seconds=s.relay_meldeintervall_s + s.relay_bestaetigungs_zuschlag_s
+        ),
         max_versuche=s.relay_max_versuche,
         backoff_max=timedelta(seconds=s.relay_backoff_max_s),
     )
@@ -302,11 +327,20 @@ async def _steuere_eine_zone(
             now=jetzt,
         )
 
-        # Ein bestaetigter Befehl: offenen Stand loeschen und bei einem
-        # EIN einen Schaltzyklus zaehlen.
+        # Ein bestaetigter Befehl: offenen Stand loeschen.
+        #
+        # **Den Schaltzyklus zaehlt hier nichts mehr** (13.11.2026). Bis
+        # dahin stand an dieser Stelle ``switch_cycles += 1``, sobald ein
+        # bestaetigter Befehl ein EIN war — und genau so ist am 12.11. ein
+        # Zyklus verloren gegangen: Der Wunsch kippte zwei Minuten nach
+        # dem Senden auf AUS, der offene Stand wurde (richtig) verworfen,
+        # und als die Bestaetigung sieben Minuten spaeter kam, gab es
+        # nichts mehr, woran sie haengen konnte.
+        #
+        # Gezaehlt wird jetzt in ``relay_uplink`` an der **gemeldeten
+        # Zustandsaenderung**. Das ist die Quelle, die nicht davon
+        # abhaengt, ob unsere Buchfuehrung den Befehl noch kennt.
         if befehl.aktion is WaechterAktion.NICHTS and befehl.grund == "bestaetigt":
-            if offen is not None and offen.ziel_ein:
-                geraet.switch_cycles += 1
             _loesche_offen(geraet)
             continue
 

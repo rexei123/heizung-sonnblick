@@ -278,7 +278,7 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is True, "der offene Befehl ist vermerkt"
     assert geraet.pending_attempts == 1
-    assert geraet.switch_cycles == 0, "noch nicht bestaetigt, also noch kein Zyklus"
+    assert geraet.switch_cycles == 0
 
     # --- 2. Das Geraet meldet EIN. Der Befehl ist bestaetigt.
     await _relais_meldet(setup_engine, aufbau.relais_id, True)
@@ -287,7 +287,19 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
     assert len(gesendet) == 1, "keine Wiederholung nach der Bestaetigung"
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is None, "offener Befehl geloescht"
-    assert geraet.switch_cycles == 1, "ein bestaetigtes EIN ist ein Schaltzyklus"
+    # **Der Orchestrator zaehlt keine Einschaltung** (13.11.2026). Bis
+    # dahin tat er das hier, und genau so ist am 12.11. ein Zyklus
+    # verloren gegangen: der Wunsch kippte, bevor die Bestaetigung
+    # eintraf, der offene Stand war (richtig) verworfen, und die
+    # Bestaetigung fand nichts mehr, woran sie haengen konnte.
+    #
+    # ``_relais_meldet`` setzt die Zeile direkt in die Tabelle und geht
+    # am Uplink-Pfad vorbei. Dass der Zaehler hier **nicht** steigt, ist
+    # deshalb die Aussage, die dieser Test machen soll: an dieser Stelle
+    # wird nicht gezaehlt. Die Zaehlung selbst steht in
+    # ``test_relais_uplink`` an der gemeldeten Zustandsaenderung — mit
+    # der Gegenprobe zum Befund vom 12.11.
+    assert geraet.switch_cycles == 0, "der Waechter darf nicht zaehlen - sonst zaehlt es doppelt"
     zone2 = next(z for z in e2["details"] if z["zone_id"] == aufbau.zone_id)
     assert zone2["gesendet"] == 0
 
@@ -318,7 +330,7 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
 
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is None
-    assert geraet.switch_cycles == 1, "ein AUS ist kein neuer Zyklus"
+    assert geraet.switch_cycles == 0, "der Waechter zaehlt auch beim AUS nicht"
     assert len(gesendet) == 2, "genau zwei Downlinks im ganzen Zyklus"
 
 
@@ -489,9 +501,35 @@ async def test_ohne_bestaetigung_nicht_jede_minute_ein_downlink(
     fehlende Bestaetigung, sondern dass der Alarm den offenen Stand
     geloescht hat: der naechste Durchlauf begann die Zaehlung von vorn.
 
-    Hier laufen **elf** Durchlaeufe im Minutentakt, und das Geraet
-    antwortet nie. Vorher waeren das elf Downlinks gewesen. Jetzt sind es
-    drei und ein Alarm — und der Alarm genau einmal.
+    **Zweiter Teil des Befundes, 12.11.2026 an Relais 108.** Zehn
+    Downlinks fuer vier Schaltungen — diesmal nicht, weil der Alarm etwas
+    loeschte, sondern weil die Bestaetigungsfrist auf 60 Sekunden stand.
+    Ein 16ASPM meldet seinen Zustand alle 600 Sekunden; die Frist lag also
+    um den Faktor zehn unter dem fruehesten moeglichen Zeitpunkt einer
+    Bestaetigung. Seit dem 13.11. ist sie das Meldeintervall plus
+    Zuschlag.
+
+    Hier laufen deshalb **zwei** Horizonte, und beide gehoeren zusammen:
+
+    * **elf Minuten** im Minutentakt, das Geraet antwortet nie: vorher
+      elf Downlinks, nach der ersten Korrektur drei, jetzt **einer**. In
+      dieser Zeit kann keine Bestaetigung eingetroffen sein, also gibt es
+      nichts zu wiederholen.
+    * **neunzig Minuten** im Fuenf-Minuten-Takt: **vier** Versuche und
+      **ein** Alarm. Die Bremse ist keine Aufgabe.
+
+    Die Leiter, gerechnet ab dem ersten Senden (die Frist laeuft ab dem
+    letzten **Senden**, nicht ab dem ersten):
+
+    ===== ========= ==========================================
+    Tick  Frist     was passiert
+    ===== ========= ==========================================
+    0     --        Versuch 1
+    15    12 min    Versuch 2
+    40    24 min    Versuch 3
+    70    30 min    Alarm (``versuche == max_versuche``), kein Downlink
+    75    30 min    Versuch 4, gedrosselt
+    ===== ========= ==========================================
     """
     jetzt = datetime.now(tz=UTC)
     await _messwert(setup_engine, aufbau.fuehler_id, "19.0", vor_minuten=0)
@@ -501,14 +539,31 @@ async def test_ohne_bestaetigung_nicht_jede_minute_ein_downlink(
         e = await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=minute))
         alarme += e["alarme"]
 
-    assert [g[0] for g in gesendet] == ["ein", "ein", "ein"], (
-        f"drei Versuche in elf Minuten, nicht elf: {gesendet}"
+    assert [g[0] for g in gesendet] == ["ein"], (
+        f"ein Versuch in elf Minuten, nicht elf und nicht drei: {gesendet}"
+    )
+    assert alarme == 0, (
+        "nach elf Minuten ist noch kein Alarm faellig - die Bestaetigung "
+        "kann frueher gar nicht kommen"
+    )
+
+    # Weiter bis zur Erschoepfung des Budgets. Fristen: 12 min, 24 min,
+    # dann die Kappung bei 30 min — der Alarm faellt also kurz nach
+    # Minute 66.
+    for minute in range(15, 91, 5):
+        e = await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=minute))
+        alarme += e["alarme"]
+
+    assert [g[0] for g in gesendet] == ["ein"] * 4, (
+        f"vier Versuche in neunzig Minuten, nicht achtzehn: {gesendet}"
     )
     assert alarme == 1, "der Alarm kommt einmal, nicht bei jedem Durchlauf"
 
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is True, "der offene Stand bleibt stehen"
-    assert geraet.pending_attempts == 4, "hochgezaehlt, damit der Alarm nicht erneut meldet"
+    assert geraet.pending_attempts == 5, (
+        "vier Versuche plus der Zaehlschritt des Alarms, damit er nicht erneut meldet"
+    )
     assert geraet.switch_cycles == 0
 
 
