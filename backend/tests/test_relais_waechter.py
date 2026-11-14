@@ -36,6 +36,7 @@ SCHWELLEN = WaechterSchwellen(
     bestaetigungs_frist=timedelta(seconds=60),
     max_versuche=3,
     backoff_max=timedelta(minutes=30),
+    zustand_veraltet=timedelta(minutes=25),
 )
 
 EXPIRE = WatchdogStrategy.EXPIRE_AND_RESEND
@@ -46,15 +47,25 @@ def akt(
     *,
     gewuenscht_ein: bool,
     bestaetigt_ein: bool | None,
+    zustand_gemeldet: datetime | None = NOW,
     strategie: WatchdogStrategy = EXPIRE,
     offen: Offen | None = None,
     letzter_ein_befehl: datetime | None = None,
     now: datetime = NOW,
 ):
+    """``zustand_gemeldet`` ist hier **frisch** vorbelegt.
+
+    Die Vorbelegung gilt nur im Test: in der Signatur des Waechters ist
+    der Zeitpunkt Pflicht-Argument, weil ein Default dort „immer frisch"
+    heissen wuerde — also die Annahme, gegen die die Veraltungs-Pruefung
+    gebaut ist. Hier spart sie die Wiederholung in dreissig Aufrufen, die
+    von der Frische nicht handeln.
+    """
     return naechste_aktion(
         strategie=strategie,
         gewuenscht_ein=gewuenscht_ein,
         bestaetigt_ein=bestaetigt_ein,
+        zustand_gemeldet=zustand_gemeldet,
         offen=offen,
         letzter_ein_befehl=letzter_ein_befehl,
         schwellen=SCHWELLEN,
@@ -180,14 +191,22 @@ def test_unbekannter_zustand_schaltet_nicht_ein() -> None:
     Panel, das wir nicht sehen, ist das die falsche Richtung.
     """
     e = akt(gewuenscht_ein=True, bestaetigt_ein=None)
-    assert e.aktion is WaechterAktion.NICHTS
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
     assert e.grund == "zustand_unbekannt"
 
 
 def test_unbekannter_zustand_sendet_auch_kein_aus() -> None:
-    """Ein ``0xC1 00`` ins Blaue ist Sendezeit ohne Wirkung."""
+    """Ein ``0xC1 00`` ins Blaue ist Sendezeit ohne Wirkung.
+
+    **Geaendert am 14.11.2026.** Bis dahin stand hier
+    ``WaechterAktion.NICHTS`` mit dem Grund ``bereits_aus`` — eine
+    Auskunft, die der Waechter nicht hatte. Geschaltet wird weiterhin
+    nicht; statt zu schweigen wird jetzt gefragt.
+    """
     e = akt(gewuenscht_ein=False, bestaetigt_ein=None)
-    assert e.aktion is WaechterAktion.NICHTS
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
+    assert e.grund == "zustand_unbekannt"
+    assert e.sekunden is None, "eine Abfrage traegt keine Dauer"
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +523,7 @@ def test_rohe_strategie_zeichenkette_verhaelt_sich_wie_das_enum() -> None:
         strategie="expire_and_resend",  # type: ignore[arg-type]
         gewuenscht_ein=True,
         bestaetigt_ein=True,
+        zustand_gemeldet=NOW,
         offen=None,
         letzter_ein_befehl=None,
         schwellen=SCHWELLEN,
@@ -514,3 +534,161 @@ def test_rohe_strategie_zeichenkette_verhaelt_sich_wie_das_enum() -> None:
         "mit 'is' statt '==' waere hier auffrischung_ohne_vorbefehl "
         "herausgekommen — also ein 0x57 auf ein laufendes EIN (S2-Bruch)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Das Haltbarkeitsdatum des Zustands (14.11.2026)
+# ---------------------------------------------------------------------------
+
+
+VERALTET = NOW - timedelta(minutes=26)
+GERADE_NOCH = NOW - timedelta(minutes=25)
+
+
+def test_veralteter_aus_zustand_fuehrt_nicht_mehr_zu_bereits_aus() -> None:
+    """**Der Befund, der diese Aenderung ausgeloest hat.**
+
+    Ein Relais meldet AUS und schweigt danach. Geht die bestaetigende
+    Meldung eines spaeteren EIN verloren, heizt das Panel — und der
+    Waechter sah ein AUS, wollte AUS und meldete ``bereits_aus``. Dabei
+    blieb es, Durchlauf fuer Durchlauf: nichts aenderte sich mehr, weil
+    nichts mehr gefragt wurde.
+    """
+    e = akt(gewuenscht_ein=False, bestaetigt_ein=False, zustand_gemeldet=VERALTET)
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
+    assert e.grund == "zustand_veraltet"
+
+
+def test_veralteter_ein_zustand_laeuft_nicht_mehr_von_selbst_ab() -> None:
+    """Die Gegenrichtung, und sie ist genauso still.
+
+    Bei ``EXPIRE_AND_RESEND`` und bestaetigtem EIN sagt der Waechter
+    ``laeuft_ab_von_selbst`` — richtig, solange die Meldung frisch ist.
+    Ist sie zwei Stunden alt, ist der Timer langst abgelaufen und das
+    Relais in Wahrheit AUS; der Raum kuehlt aus, und niemand setzt neu.
+    """
+    e = akt(gewuenscht_ein=True, bestaetigt_ein=True, zustand_gemeldet=VERALTET)
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
+    assert e.grund == "zustand_veraltet"
+
+
+def test_genau_auf_der_schwelle_gilt_die_meldung_noch() -> None:
+    """Der Rand gehoert in die nachgiebige Richtung.
+
+    25 Minuten sind noch frisch, 25 Minuten und eine Sekunde nicht.
+    Strenger zu sein kostet Funkzeit und macht nichts sicherer.
+    """
+    e = akt(gewuenscht_ein=False, bestaetigt_ein=False, zustand_gemeldet=GERADE_NOCH)
+    assert e.aktion is WaechterAktion.NICHTS
+    assert e.grund == "bereits_aus"
+
+    knapp_darueber = akt(
+        gewuenscht_ein=False,
+        bestaetigt_ein=False,
+        zustand_gemeldet=GERADE_NOCH - timedelta(seconds=1),
+    )
+    assert knapp_darueber.aktion is WaechterAktion.FRAGE_ZUSTAND
+
+
+def test_eine_alte_meldung_bestaetigt_keinen_neuen_befehl() -> None:
+    """**Der zweite Fehler, den dieselbe Pruefung schliesst.**
+
+    Das Relais meldet EIN und schweigt. Eine halbe Stunde spaeter geht
+    ein EIN hinaus. Ohne die Veraltungs-Pruefung sah der Waechter
+    „bestaetigt" — aus einer Meldung, die vor dem Befehl liegt. Der
+    offene Stand waere geloescht und ein Schaltzyklus gezaehlt worden,
+    ohne dass je jemand geprueft hat, ob der Befehl angekommen ist.
+    """
+    offen = Offen(ziel_ein=True, seit=NOW - timedelta(minutes=2), versuche=1)
+    e = akt(
+        gewuenscht_ein=True,
+        bestaetigt_ein=True,
+        zustand_gemeldet=VERALTET,
+        offen=offen,
+    )
+    assert e.aktion is not WaechterAktion.NICHTS
+    assert e.grund != "bestaetigt"
+
+
+def test_offener_befehl_wird_trotz_veraltung_normal_wiederholt() -> None:
+    """Die Veraltung uebernimmt den Pfad nicht.
+
+    Steht ein offener Befehl, der zum Wunsch passt, gilt die Leiter aus
+    Frist, Wiederholung und Alarm — unveraendert. Nur ein Relais **ohne**
+    offenen Befehl wird gefragt; sonst wuerde eine Abfrage den
+    Schaltbefehl verdraengen, auf den es gerade wartet.
+    """
+    offen = Offen(ziel_ein=True, seit=NOW - timedelta(seconds=10), versuche=1)
+    e = akt(
+        gewuenscht_ein=True,
+        bestaetigt_ein=False,
+        zustand_gemeldet=VERALTET,
+        offen=offen,
+    )
+    assert e.aktion is WaechterAktion.WARTE
+    assert e.grund == "frist_laeuft"
+
+
+def test_fehlender_zeitpunkt_bei_vorhandenem_zustand_gilt_als_veraltet() -> None:
+    """Eine Angabe, die es nicht geben darf, wird vorsichtig gelesen.
+
+    ``relay_state`` liefert Zustand und Zeitpunkt aus derselben Zeile;
+    der Fall kann dort nicht entstehen. Kommt er trotzdem, ist Fragen die
+    Antwort, die nichts kaputt macht.
+    """
+    e = akt(gewuenscht_ein=False, bestaetigt_ein=False, zustand_gemeldet=None)
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
+    assert e.grund == "zustand_veraltet"
+
+
+def test_nie_gemeldet_heisst_unbekannt_und_nicht_veraltet() -> None:
+    """Zwei Gruende, dieselbe Handlung — und das Protokoll trennt sie.
+
+    „Noch nie gemeldet" ist ein Montagefall, „seit 25 Minuten stumm" ein
+    Funkfall. Wer im Protokoll nur „fragt" liest, weiss nicht, wen er
+    anrufen soll.
+    """
+    e = akt(gewuenscht_ein=True, bestaetigt_ein=None, zustand_gemeldet=None)
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND
+    assert e.grund == "zustand_unbekannt"
+
+
+def test_die_schwelle_kommt_aus_den_schwellen_und_nicht_aus_dem_code() -> None:
+    """Mit einem anderen Fenster verschiebt sich der Rand mit.
+
+    Haengt die Zahl im Waechter fest, verstellt die Einstellung nichts —
+    und das faellt niemandem auf, weil beide Werte plausibel aussehen.
+    """
+    eng = WaechterSchwellen(
+        timer_expire=SCHWELLEN.timer_expire,
+        timer_refresh=SCHWELLEN.timer_refresh,
+        refresh_abstand=SCHWELLEN.refresh_abstand,
+        bestaetigungs_frist=SCHWELLEN.bestaetigungs_frist,
+        max_versuche=SCHWELLEN.max_versuche,
+        backoff_max=SCHWELLEN.backoff_max,
+        zustand_veraltet=timedelta(minutes=5),
+    )
+    e = naechste_aktion(
+        strategie=EXPIRE,
+        gewuenscht_ein=False,
+        bestaetigt_ein=False,
+        zustand_gemeldet=NOW - timedelta(minutes=6),
+        offen=None,
+        letzter_ein_befehl=None,
+        schwellen=eng,
+        now=NOW,
+    )
+    assert e.aktion is WaechterAktion.FRAGE_ZUSTAND, (
+        "mit einem Fenster von 5 Minuten ist eine 6 Minuten alte Meldung alt"
+    )
+
+
+def test_das_fenster_kommt_aus_dem_meldeintervall() -> None:
+    """Zweieinhalbfaches Meldeintervall, aus derselben Zahl wie beim Fuehler.
+
+    600 Sekunden mal 2,5 sind 1500 Sekunden. Steht hier etwas anderes,
+    ist entweder der Faktor verrutscht oder jemand hat eine zweite Zahl
+    eingefuehrt.
+    """
+    assert relay_tasks.zustand_veraltungs_fenster() == timedelta(seconds=1500)
+    assert relay_tasks.waechter_schwellen().zustand_veraltet == timedelta(seconds=1500)
