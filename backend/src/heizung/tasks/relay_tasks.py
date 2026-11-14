@@ -302,11 +302,20 @@ async def _steuere_eine_zone(
             now=jetzt,
         )
 
-        # Ein bestaetigter Befehl: offenen Stand loeschen und bei einem
-        # EIN einen Schaltzyklus zaehlen.
+        # Ein bestaetigter Befehl: offenen Stand loeschen.
+        #
+        # **Den Schaltzyklus zaehlt hier nichts mehr** (13.11.2026). Bis
+        # dahin stand an dieser Stelle ``switch_cycles += 1``, sobald ein
+        # bestaetigter Befehl ein EIN war — und genau so ist am 12.11. ein
+        # Zyklus verloren gegangen: Der Wunsch kippte zwei Minuten nach
+        # dem Senden auf AUS, der offene Stand wurde (richtig) verworfen,
+        # und als die Bestaetigung sieben Minuten spaeter kam, gab es
+        # nichts mehr, woran sie haengen konnte.
+        #
+        # Gezaehlt wird jetzt in ``relay_uplink`` an der **gemeldeten
+        # Zustandsaenderung**. Das ist die Quelle, die nicht davon
+        # abhaengt, ob unsere Buchfuehrung den Befehl noch kennt.
         if befehl.aktion is WaechterAktion.NICHTS and befehl.grund == "bestaetigt":
-            if offen is not None and offen.ziel_ein:
-                geraet.switch_cycles += 1
             _loesche_offen(geraet)
             continue
 
