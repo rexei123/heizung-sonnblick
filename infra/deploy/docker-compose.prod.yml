@@ -105,8 +105,15 @@ services:
         # MQTT_CHIRPSTACK_USER/PASSWORD in [regions.gateway.backend.mqtt]
         # fuer Auth gegen Mosquitto.
         envsubst < /template/region_eu868.toml > /output/region_eu868.toml
+        # ADR-Plugins (16.11.2026): kein envsubst, nur kopieren -- in den
+        # Plugin-Dateien steht nichts Geheimes. **Diese Zeile ist der
+        # Punkt, an dem es sonst scheitert:** der Pfad steht in
+        # chirpstack.toml, und ohne die Kopie ist die Datei im Container
+        # nicht da. ChirpStack meldet das nicht aussagekraeftig.
+        cp -r /template/adr-plugins /output/
         echo "chirpstack-init: rendered configs to /output"
         ls -la /output/
+        ls -la /output/adr-plugins/
 
   # Init-Sidecar fuer chirpstack-gateway-bridge: rendert dessen TOML.
   chirpstack-gateway-bridge-init:

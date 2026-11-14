@@ -21,6 +21,27 @@
   net_id = "000000"
   enabled_regions = ["eu868"]
 
+  # ADR-Plugin fuer das Relais-Profil (16.11.2026). Zugewiesen wird es
+  # **je Geraeteprofil** ueber adr_algorithm_id; hier steht es nur zur
+  # Verfuegung. Ein Profil, das es nicht nennt, bleibt beim
+  # Standard-Algorithmus.
+  #
+  # **Nur fuer die Relais, und das ist eine Entscheidung.** Fuer die
+  # Vickis loest ``installation_margin = 20`` in region_eu868.toml
+  # dasselbe Problem mit einer Zahl statt mit einem zweiten Mechanismus:
+  # der Standard-Algorithmus nimmt die Sendeleistung dann nicht mehr
+  # weg. Er senkt aber **nie** die Datenrate, und genau das braucht 108
+  # (von DR3 auf DR1) -- deshalb bleibt dieses Plugin.
+  #
+  # **Der Pfad muss zum Init-Sidecar passen.** Er kopiert das Verzeichnis
+  # nach /output, und ChirpStack sieht /output als /etc/chirpstack. Ohne
+  # die Kopierzeile in docker-compose.prod.yml steht der Pfad hier und die
+  # Datei ist im Container nicht da -- und ChirpStack sagt dazu nichts
+  # Aussagekraeftiges.
+  adr_plugins = [
+    "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
+  ]
+
 [api]
   bind = "0.0.0.0:8080"
   secret = "${CHIRPSTACK_API_SECRET}"
