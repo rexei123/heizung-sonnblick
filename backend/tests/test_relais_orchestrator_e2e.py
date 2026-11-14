@@ -79,6 +79,39 @@ async def gesendet(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, int 
     return aufrufe
 
 
+class Drossel:
+    """Stand-in fuer ``relais_abfrage.darf_fragen`` (14.11.2026).
+
+    Die echte Drosselung haengt an Redis. Hier geht es um die Abfolge im
+    Orchestrator, nicht um die Bremse — die hat ihre eigene Datei
+    (``test_relais_abfrage_drossel``). ``erlaubt`` laesst ein Test die
+    Bremse zuziehen, ``aufrufe`` haelt fest, mit welchem Fenster gefragt
+    wurde.
+    """
+
+    def __init__(self) -> None:
+        self.erlaubt = True
+        self.aufrufe: list[tuple[int, int]] = []
+
+    def __call__(self, device_id: int, *, abstand_s: int) -> bool:
+        self.aufrufe.append((device_id, abstand_s))
+        return self.erlaubt
+
+
+@pytest.fixture(autouse=True)
+def drossel(monkeypatch: pytest.MonkeyPatch) -> Drossel:
+    """**Autouse**, weil sonst jeder Testlauf echtes Redis braeuchte.
+
+    Der Orchestrator fragt die Bremse bei jedem unbekannten Zustand. Ohne
+    diesen Stand-in waere ein Lauf ohne Redis stumm — und zwar nicht mit
+    einem Fehler, sondern mit einer ausbleibenden Abfrage, also der
+    schwer zu lesenden Sorte Fehlschlag.
+    """
+    d = Drossel()
+    monkeypatch.setattr(relay_tasks.relais_abfrage, "darf_fragen", d)
+    return d
+
+
 class Aufbau:
     """Die Ids des Testaufbaus, damit die Tests sie nicht durchreichen muessen."""
 
@@ -166,13 +199,35 @@ async def aufbau(setup_engine: Any) -> AsyncIterator[Aufbau]:
         # Ohne sie ist der Zustand **unbekannt**, und der Waechter
         # schaltet dann nicht ein, sondern fragt (``0xB1``). Dieser Pfad
         # hat seinen eigenen Test weiter unten.
-        session.add(
-            RelayReading(
-                time=jetzt - timedelta(minutes=30),
-                device_id=relais.id,
-                relay_on=False,
-                power_w=0,
-            )
+        #
+        # **Zwei Zeilen, nicht eine** (14.11.2026, §5.51). Hier stand eine
+        # einzige Zeile von vor dreissig Minuten, und das trug beide
+        # Aussagen auf einmal: „aus seit dreissig Minuten" (also
+        # Mindestpause vorbei) und „zuletzt gehoert vor dreissig Minuten".
+        # Mit dem Haltbarkeitsdatum des Zustands (Fenster 25 min) sind das
+        # zwei verschiedene Dinge — und fuenf Bestandstests wollten ein
+        # ``0x57`` und bekamen eine Abfrage.
+        #
+        # Die Antwort darauf ist der Aufbau, nicht die Regel. Ein Relais
+        # im Betrieb meldet alle zehn Minuten; ``AUS seit 40 min, zuletzt
+        # gemeldet vor 5 min`` ist der **normale** Zustand eines
+        # abgeschalteten Panels, und genau den beschreiben diese zwei
+        # Zeilen.
+        session.add_all(
+            [
+                RelayReading(
+                    time=jetzt - timedelta(minutes=40),
+                    device_id=relais.id,
+                    relay_on=False,
+                    power_w=0,
+                ),
+                RelayReading(
+                    time=jetzt - timedelta(minutes=5),
+                    device_id=relais.id,
+                    relay_on=False,
+                    power_w=0,
+                ),
+            ]
         )
         await session.commit()
         ids = Aufbau(room.id, zone.id, fuehler.id, relais.id, relais.dev_eui)
@@ -416,7 +471,13 @@ async def test_szenario_3_veralteter_fuehler_schaltet_aus(
     Zweieinhalbfache der ``healthy``-Grenze (2 h), also 5 h.
     """
     await _messwert(setup_engine, aufbau.fuehler_id, "19.0", vor_minuten=360)
-    await _relais_meldet(setup_engine, aufbau.relais_id, True, vor_minuten=20)
+    # **Zwei Minuten, nicht zwanzig** (14.11.2026). Der Aufbau meldet seit
+    # dem Haltbarkeitsdatum des Zustands auch eine frische AUS-Zeile; eine
+    # EIN-Meldung von vor zwanzig Minuten waere damit nicht mehr die
+    # jüngste, und der Zustand der Zone bliebe AUS. Nebenbei prueft der
+    # Test jetzt mehr: die Mindestlaufzeit ist bei zwei Minuten **nicht**
+    # abgelaufen, der Zwangs-AUS bricht sie also wie zugesagt.
+    await _relais_meldet(setup_engine, aufbau.relais_id, True, vor_minuten=2)
 
     e = await relay_tasks._steuere_relais_zonen_async()
 
@@ -653,3 +714,196 @@ async def test_unbekannter_zustand_fragt_statt_zu_schweigen(
     assert gefragt == [aufbau.relais_eui], "aber eine Abfrage"
     zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
     assert zone.get("gefragt") == 1
+
+
+# ---------------------------------------------------------------------------
+# Veralteter Zustand: fragen statt glauben (14.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_veralteter_aus_zustand_fuehrt_zur_abfrage_statt_zur_stille(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+    drossel: Drossel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**Der Befund, der 2c ausgeloest hat — durch den ganzen Weg.**
+
+    Das Relais hat vor 40 Minuten AUS gemeldet und schweigt seither. Der
+    Raum ist warm, der Regler will AUS. Bis zum 14.11. endete das in
+    ``bereits_aus``: der Orchestrator hielt das Relais fuer aus, weil es
+    das vor 40 Minuten einmal war.
+
+    Ist in dieser Zeit ein EIN hinausgegangen, dessen bestaetigende
+    Meldung verloren ging, heizt das Panel — und nichts im Programm
+    aendert daran noch etwas, weil nichts mehr gefragt wird.
+    """
+    gefragt: list[str] = []
+
+    async def _frage(dev_eui: str) -> str:
+        gefragt.append(dev_eui)
+        return "topic/frage"
+
+    monkeypatch.setattr(relay_tasks.relay_adapter, "frage_zustand", _frage)
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM relay_reading WHERE device_id = :d"),
+            {"d": aufbau.relais_id},
+        )
+        await session.commit()
+
+    # Warmer Raum -> der Regler will AUS. Die Meldung des Relais ist 40
+    # Minuten alt, das Fenster sind 25.
+    await _relais_meldet(setup_engine, aufbau.relais_id, False, vor_minuten=40)
+    await _messwert(setup_engine, aufbau.fuehler_id, "23.0")
+
+    e = await relay_tasks._steuere_relais_zonen_async()
+
+    zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
+    # Der **Regler** sieht eine abgeschaltete Zone und sagt „schon aus" —
+    # er liest den Zustand weiterhin ohne Haltbarkeitsdatum, und das ist
+    # Absicht: er schickt nichts. Zweifeln muss der, der sendet.
+    assert zone["regler_grund"] == "bereits_aus"
+    assert gesendet == [], "kein Schaltbefehl auf eine Vermutung"
+    assert gefragt == [aufbau.relais_eui], "sondern eine Abfrage"
+    assert zone.get("gefragt") == 1
+    assert drossel.aufrufe == [(aufbau.relais_id, 1500)], (
+        "mit dem Veraltungs-Fenster als Abstand, nicht mit einer eigenen Zahl"
+    )
+
+
+async def test_frische_meldung_fuehrt_weiter_zu_stille(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Die Gegenprobe, und sie ist die wichtigere.
+
+    Ein Relais, das vor zehn Minuten AUS gemeldet hat, wird **nicht**
+    gefragt. Sonst waere aus der Aenderung eine Abfrage je Durchlauf fuer
+    jedes ausgeschaltete Relais im Haus geworden — und das sind die
+    meisten.
+    """
+    gefragt: list[str] = []
+
+    async def _frage(dev_eui: str) -> str:
+        gefragt.append(dev_eui)
+        return "topic/frage"
+
+    monkeypatch.setattr(relay_tasks.relay_adapter, "frage_zustand", _frage)
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM relay_reading WHERE device_id = :d"),
+            {"d": aufbau.relais_id},
+        )
+        await session.commit()
+
+    await _relais_meldet(setup_engine, aufbau.relais_id, False, vor_minuten=10)
+    await _messwert(setup_engine, aufbau.fuehler_id, "23.0")
+
+    e = await relay_tasks._steuere_relais_zonen_async()
+
+    zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
+    assert gesendet == []
+    assert gefragt == [], "eine zehn Minuten alte Meldung ist eine Auskunft"
+    assert zone.get("gefragt") is None
+
+
+async def test_gedrosselte_abfrage_sendet_nichts_und_sagt_es(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+    drossel: Drossel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zieht die Bremse zu, geht nichts hinaus — und das Ergebnis sagt es.
+
+    Ohne die Zaehlung waere ein gedrosselter Durchlauf von einem
+    stillschweigenden nicht zu unterscheiden, und die Diagnose eines
+    stummen Relais begaenne mit der falschen Frage (§5.76).
+    """
+
+    async def _frage(dev_eui: str) -> str:  # noqa: ARG001 - darf nicht gerufen werden
+        raise AssertionError("bei gezogener Bremse darf nichts hinausgehen")
+
+    monkeypatch.setattr(relay_tasks.relay_adapter, "frage_zustand", _frage)
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM relay_reading WHERE device_id = :d"),
+            {"d": aufbau.relais_id},
+        )
+        await session.commit()
+
+    await _messwert(setup_engine, aufbau.fuehler_id, "19.0")
+    drossel.erlaubt = False
+
+    e = await relay_tasks._steuere_relais_zonen_async()
+
+    zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
+    assert gesendet == []
+    assert zone.get("gefragt") is None
+    assert zone.get("frage_gedrosselt") == 1
+
+
+async def test_nach_der_antwort_schaltet_der_waechter_wieder(
+    aufbau: Aufbau,
+    setup_engine: Any,
+    gesendet: list[tuple[str, str, int | None]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Die Abfrage ist ein Zwischenschritt, kein Endzustand.
+
+    Erst fragen, dann schalten: das Relais meldet auf ``0xB1``, dass es
+    **EIN** ist — und im naechsten Durchlauf geht das AUS hinaus, das
+    vorher auf einer Vermutung beruht haette. Das ist der Grund, warum
+    hier gefragt und nicht blind ``0xC1 00`` geschickt wird.
+    """
+    gefragt: list[str] = []
+
+    async def _frage(dev_eui: str) -> str:
+        gefragt.append(dev_eui)
+        return "topic/frage"
+
+    monkeypatch.setattr(relay_tasks.relay_adapter, "frage_zustand", _frage)
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM relay_reading WHERE device_id = :d"),
+            {"d": aufbau.relais_id},
+        )
+        await session.commit()
+
+    await _relais_meldet(setup_engine, aufbau.relais_id, False, vor_minuten=40)
+    await _messwert(setup_engine, aufbau.fuehler_id, "23.0")
+
+    jetzt = datetime.now(tz=UTC)
+    await relay_tasks._steuere_relais_zonen_async(now=jetzt)
+    assert gefragt == [aufbau.relais_eui]
+    assert gesendet == []
+
+    # Die Antwort auf ``0xB1``: das Panel heizt in Wahrheit.
+    await _relais_meldet(setup_engine, aufbau.relais_id, True)
+
+    # **Die Mindestlaufzeit laeuft ab der Auskunft**, nicht ab dem
+    # Einschalten — eine Zustandsabfrage sagt, *was* gilt, nicht *seit
+    # wann*. Der Raum ist nur warm (kein Zwangs-AUS), also gilt die
+    # Mindestlaufzeit, und das Panel heizt noch zehn Minuten weiter.
+    await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=1))
+    assert gesendet == [], "die Mindestlaufzeit haelt noch"
+
+    e = await relay_tasks._steuere_relais_zonen_async(now=jetzt + timedelta(minutes=11))
+    assert gesendet == [("aus", aufbau.relais_eui, None)], (
+        "jetzt liegt eine Auskunft vor, und sie verlangt ein AUS"
+    )
+    zone = next(z for z in e["details"] if z["zone_id"] == aufbau.zone_id)
+    assert zone["gesendet"] == 1
+    assert gefragt == [aufbau.relais_eui], "und es wurde genau einmal gefragt"
