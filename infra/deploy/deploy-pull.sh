@@ -483,10 +483,21 @@ fi
 # Aufraeum-Panne rot meldet, waere ein Melder, der am falschen Ort
 # anschlaegt (Paragraph 5.79). Deshalb endet jeder Pfad hier mit
 # ``return 0``, und der Aufruf traegt ``|| true``.
+#
+# **Und keine Zeile hier enthaelt das Wort FEHLER.** Das ist keine
+# Stilfrage: ``merge-paket.ps1`` liest nach jedem Merge die neuen Zeilen
+# dieses Logs und bricht den ganzen Lauf ab, sobald ``FEHLER`` darin
+# vorkommt. Ein stolpernder ``docker rmi`` wuerde damit eine Merge-Kette
+# anhalten, die mit ihm nichts zu tun hat. Dockers eigene Meldungen sind
+# englisch (``Error response from daemon``) und treffen das Muster nicht.
+#
+# **Diese Phase steht hinter der ``Fertig.``-Zeile**, und zwar bewusst:
+# ``merge-paket`` wartet auf genau diese Zeile. Haushalt soll die
+# Erfolgsmeldung eines Deploys nicht verzoegern.
 AUFRAEUM_TAGE=${DEPLOY_CLEANUP_DAYS:-7}
 
 aufraeumen() {
-    local grenze laufend kandidaten weg anzahl frei_vorher frei_nachher
+    local grenze laufend kandidaten weg anzahl jung behalten frei_vorher frei_nachher
 
     if ! [ "$AUFRAEUM_TAGE" -ge 1 ] 2>/dev/null; then
         log "Aufraeumen: DEPLOY_CLEANUP_DAYS='$AUFRAEUM_TAGE' ist keine Zahl >= 1 — uebersprungen."
@@ -529,8 +540,22 @@ $(docker images --filter=reference="ghcr.io/rexei123/$REPO" \
         sort -u || true)
 
     anzahl=$(printf '%s\n' "$weg" | grep -c . || true)
+
+    # **Was behalten wird, gehoert ins Log und nicht nur in den Code.**
+    # Eine Zeile "3 geloescht" beantwortet nicht die Frage, die man im
+    # Zweifel hat — naemlich ob das Rueckfallziel noch da ist. Deshalb
+    # stehen hier beide Seiten: die Tags, die wegen einer Regel bleiben
+    # (laufend oder Tag dieses Laufs), und die Zahl der Tags, die nur
+    # wegen ihres Alters bleiben.
+    behalten=$(printf '%s\n' "$laufend" |
+        grep -F 'ghcr.io/rexei123/heizung-' | sort -u | tr '\n' ' ' || true)
+    jung=$(printf '%s\n' "$kandidaten" |
+        awk -F'|' -v g="$grenze" 'NF == 2 && substr($2, 1, 10) >= g { print $1 }' |
+        grep -c . || true)
+    log "Aufraeumen: Grenze $grenze. Immer behalten: ${behalten:-(nichts)}"
+
     if [ "${anzahl:-0}" -eq 0 ]; then
-        log "Aufraeumen: keine Images aelter als $AUFRAEUM_TAGE Tage (Grenze $grenze)."
+        log "Aufraeumen: nichts aelter als $AUFRAEUM_TAGE Tage. ${jung:-0} Tag(s) bleiben (juenger)."
         return 0
     fi
 
@@ -542,7 +567,8 @@ $(docker images --filter=reference="ghcr.io/rexei123/$REPO" \
     # anschlagen kann — und das ist schlechter als keine (Paragraph 5.79).
 
     frei_vorher=$(df -B1 --output=avail / 2>/dev/null | tail -n1 | tr -d ' ' || echo "")
-    log "Aufraeumen: $anzahl Tag(s) aelter als $AUFRAEUM_TAGE Tage (Grenze $grenze)."
+    log "Aufraeumen: $anzahl Tag(s) werden geloescht, ${jung:-0} bleiben (juenger als $AUFRAEUM_TAGE Tage)."
+    log "Aufraeumen: weg: $(printf '%s\n' "$weg" | tr '\n' ' ')"
     printf '%s\n' "$weg" | xargs -r -n 20 docker rmi >>"$LOG" 2>&1 || true
     frei_nachher=$(df -B1 --output=avail / 2>/dev/null | tail -n1 | tr -d ' ' || echo "")
 

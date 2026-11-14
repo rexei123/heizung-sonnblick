@@ -149,10 +149,11 @@ def umgebung(tmp_path: Path) -> dict[str, object]:
     env["DEPLOY_REPO_DIR"] = repo.as_posix()
     env["DEPLOY_LOG"] = (tmp_path / "deploy.log").as_posix()
     env["DOCKER_RMI_FEHLER"] = "0"
+    log = tmp_path / "deploy.log"
     # Die Grenze bleibt die Vorgabe (sieben Tage). Die Attrappe liefert
     # Daten weit davor und weit danach, der Test haengt also nicht am
     # Kalendertag, an dem er laeuft (Paragraph 5.59).
-    return {"repo": repo, "protokoll": Path(protokoll), "env": env}
+    return {"repo": repo, "protokoll": Path(protokoll), "env": env, "log": log}
 
 
 def _lauf(umgebung: dict[str, object], **extra: str) -> subprocess.CompletedProcess[str]:
@@ -286,6 +287,71 @@ def test_ein_fehlschlag_beim_aufraeumen_laesst_den_deploy_gruen(
     protokoll = umgebung["protokoll"]
     assert isinstance(protokoll, Path)
     assert "curl" in protokoll.read_text(encoding="utf-8")
+
+
+def test_kein_fehler_im_log_wenn_das_aufraeumen_stolpert(
+    umgebung: dict[str, object],
+) -> None:
+    """**Die Pruefung, die ``merge-paket.ps1`` macht.**
+
+    Das Skript liest nach jedem Merge die neuen Zeilen von
+    ``/var/log/heizung-deploy.log`` und bricht den ganzen Lauf ab, sobald
+    darin ``FEHLER`` vorkommt (Zeile 97, Ausnahme nur fuer
+    „Image-Pull fehlgeschlagen"). Ein stolpernder ``docker rmi`` wuerde
+    damit eine Merge-Kette anhalten, die mit ihm nichts zu tun hat.
+
+    Geprueft wird deshalb nicht nur der Rueckgabewert, sondern das
+    **Log** — und zwar mit demselben Muster, das ``merge-paket`` benutzt.
+    """
+    ergebnis = _lauf(umgebung, DOCKER_RMI_FEHLER="1")
+    log = umgebung["log"]
+    assert isinstance(log, Path)
+    inhalt = log.read_text(encoding="utf-8")
+
+    assert "FEHLER" not in inhalt, "merge-paket bricht bei 'FEHLER' im Log ab:\n" + inhalt
+    assert "ABBRUCH" not in inhalt, inhalt
+    # Und die Zeile, auf die merge-paket wartet, steht trotzdem da.
+    assert "Fertig. HEAD=" in inhalt
+    assert ergebnis.returncode == 0
+
+
+def test_das_log_sagt_was_behalten_wurde(umgebung: dict[str, object]) -> None:
+    """**Frage 3 des Betreibers.**
+
+    „3 geloescht" beantwortet nicht die Frage, die man im Zweifel hat —
+    naemlich ob das Rueckfallziel noch da ist. Deshalb stehen beide
+    Seiten im Log: die Tags, die wegen einer Regel bleiben, und die Zahl
+    derer, die nur wegen ihres Alters bleiben.
+    """
+    _lauf(umgebung)
+    log = umgebung["log"]
+    assert isinstance(log, Path)
+    inhalt = log.read_text(encoding="utf-8")
+
+    assert "Immer behalten:" in inhalt
+    assert f"heizung-api:{LAUFENDER_TAG}" in inhalt, "der Tag des Laufs"
+    assert "heizung-api:develop-ccccccc" in inhalt, "das laufende alte Image"
+    assert "bleiben (juenger als 7 Tage)" in inhalt
+    assert "Aufraeumen: weg:" in inhalt
+
+
+def test_das_log_sagt_auch_dass_nichts_zu_tun_war(umgebung: dict[str, object]) -> None:
+    """Ein Lauf ohne Loeschung muss sich von einem unterbliebenen Lauf
+    unterscheiden lassen (Paragraph 5.76).
+
+    Sonst beginnt die Frage „laeuft das Aufraeumen ueberhaupt" mit dem
+    Blick in ein Log, das zu beiden Faellen schweigt. Geprueft mit einer
+    Grenze von 3650 Tagen: dann ist nichts alt genug.
+    """
+    ergebnis = _lauf(umgebung, DEPLOY_CLEANUP_DAYS="3650")
+    log = umgebung["log"]
+    assert isinstance(log, Path)
+    inhalt = log.read_text(encoding="utf-8")
+
+    assert _rmi_zeilen(umgebung) == []
+    assert "nichts aelter als 3650 Tage" in inhalt
+    assert "Immer behalten:" in inhalt
+    assert ergebnis.returncode == 0
 
 
 def test_null_tage_schaltet_das_aufraeumen_aus(umgebung: dict[str, object]) -> None:
