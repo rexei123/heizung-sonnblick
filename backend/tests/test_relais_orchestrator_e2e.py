@@ -333,7 +333,7 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is True, "der offene Befehl ist vermerkt"
     assert geraet.pending_attempts == 1
-    assert geraet.switch_cycles == 0, "noch nicht bestaetigt, also noch kein Zyklus"
+    assert geraet.switch_cycles == 0
 
     # --- 2. Das Geraet meldet EIN. Der Befehl ist bestaetigt.
     await _relais_meldet(setup_engine, aufbau.relais_id, True)
@@ -342,7 +342,19 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
     assert len(gesendet) == 1, "keine Wiederholung nach der Bestaetigung"
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is None, "offener Befehl geloescht"
-    assert geraet.switch_cycles == 1, "ein bestaetigtes EIN ist ein Schaltzyklus"
+    # **Der Orchestrator zaehlt keine Einschaltung** (13.11.2026). Bis
+    # dahin tat er das hier, und genau so ist am 12.11. ein Zyklus
+    # verloren gegangen: der Wunsch kippte, bevor die Bestaetigung
+    # eintraf, der offene Stand war (richtig) verworfen, und die
+    # Bestaetigung fand nichts mehr, woran sie haengen konnte.
+    #
+    # ``_relais_meldet`` setzt die Zeile direkt in die Tabelle und geht
+    # am Uplink-Pfad vorbei. Dass der Zaehler hier **nicht** steigt, ist
+    # deshalb die Aussage, die dieser Test machen soll: an dieser Stelle
+    # wird nicht gezaehlt. Die Zaehlung selbst steht in
+    # ``test_relais_uplink`` an der gemeldeten Zustandsaenderung — mit
+    # der Gegenprobe zum Befund vom 12.11.
+    assert geraet.switch_cycles == 0, "der Waechter darf nicht zaehlen - sonst zaehlt es doppelt"
     zone2 = next(z for z in e2["details"] if z["zone_id"] == aufbau.zone_id)
     assert zone2["gesendet"] == 0
 
@@ -373,7 +385,7 @@ async def test_szenario_1_heizzyklus_laeuft_ende_zu_ende(
 
     geraet = await _geraet(setup_engine, aufbau.relais_id)
     assert geraet.pending_target_on is None
-    assert geraet.switch_cycles == 1, "ein AUS ist kein neuer Zyklus"
+    assert geraet.switch_cycles == 0, "der Waechter zaehlt auch beim AUS nicht"
     assert len(gesendet) == 2, "genau zwei Downlinks im ganzen Zyklus"
 
 

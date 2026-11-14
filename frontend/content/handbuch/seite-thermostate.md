@@ -3,7 +3,7 @@ titel: Thermostate
 kategorie: Die Seiten
 stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk, montiert, Fühler
 rollen: alle
-stand: 2026-11-08
+stand: 2026-11-13
 route: /devices
 ---
 
@@ -173,11 +173,20 @@ nimmt die Übersteuerung im Programm, weil die ein Ende hat.
 
 ### Zwei Zeilen auf der Relais-Karte, die leicht falsch gelesen werden
 
-**„Schaltzyklen der Steuerung"** zählt, was die Steuerung geschaltet und
-das Relais bestätigt hat — nicht, wie oft das Relais insgesamt
-geschaltet hat. Ein Druck auf den Knopf am Gerät und ein Befehl von Hand
-zählen dort nicht mit. Vor dem 02.11.2026 hieß die Zeile nur
-„Schaltzyklen" und versprach damit mehr, als sie zählt.
+**„Einschaltungen (gemeldet)"** zählt, wie oft das Relais **gemeldet
+hat**, dass es angelaufen ist — jede beobachtete Einschaltung, auch über
+den Knopf am Gerät oder nach einer Stromrückkehr.
+
+Die Zeile hieß bis zum 13.11.2026 „Schaltzyklen der Steuerung" und
+zählte nur Befehle, die die Steuerung gesendet und das Gerät bestätigt
+hat. Das war genauer gemeint, als es trug: am 12.11. hat das Panel an
+der Rezeption zweimal eingeschaltet und die Zeile zeigte **eine**. Der
+Grund war Buchführung, nicht Funk — der Wunsch der Steuerung kippte,
+bevor die Bestätigung eintraf, und danach ließ sich die Bestätigung
+keinem Befehl mehr zuordnen.
+
+Was die Zahl **nicht** sagt: wie oft geschaltet wurde, während das Gerät
+nicht gefunkt hat. Gezählt wird, was ankommt.
 
 **„Unbestätigter Befehl"** steht nur da, wenn gerade ein Schaltbefehl
 offen ist: das Relais hat ihn noch nicht bestätigt. Das ist für sich
