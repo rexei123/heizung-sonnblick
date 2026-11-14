@@ -3,7 +3,7 @@ titel: Thermostate
 kategorie: Die Seiten
 stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk, montiert, Fühler
 rollen: alle
-stand: 2026-11-08
+stand: 2026-11-13
 route: /devices
 ---
 
@@ -173,11 +173,20 @@ nimmt die Übersteuerung im Programm, weil die ein Ende hat.
 
 ### Zwei Zeilen auf der Relais-Karte, die leicht falsch gelesen werden
 
-**„Schaltzyklen der Steuerung"** zählt, was die Steuerung geschaltet und
-das Relais bestätigt hat — nicht, wie oft das Relais insgesamt
-geschaltet hat. Ein Druck auf den Knopf am Gerät und ein Befehl von Hand
-zählen dort nicht mit. Vor dem 02.11.2026 hieß die Zeile nur
-„Schaltzyklen" und versprach damit mehr, als sie zählt.
+**„Einschaltungen (gemeldet)"** zählt, wie oft das Relais **gemeldet
+hat**, dass es angelaufen ist — jede beobachtete Einschaltung, auch über
+den Knopf am Gerät oder nach einer Stromrückkehr.
+
+Die Zeile hieß bis zum 13.11.2026 „Schaltzyklen der Steuerung" und
+zählte nur Befehle, die die Steuerung gesendet und das Gerät bestätigt
+hat. Das war genauer gemeint, als es trug: am 12.11. hat das Panel an
+der Rezeption zweimal eingeschaltet und die Zeile zeigte **eine**. Der
+Grund war Buchführung, nicht Funk — der Wunsch der Steuerung kippte,
+bevor die Bestätigung eintraf, und danach ließ sich die Bestätigung
+keinem Befehl mehr zuordnen.
+
+Was die Zahl **nicht** sagt: wie oft geschaltet wurde, während das Gerät
+nicht gefunkt hat. Gezählt wird, was ankommt.
 
 **„Unbestätigter Befehl"** steht nur da, wenn gerade ein Schaltbefehl
 offen ist: das Relais hat ihn noch nicht bestätigt. Das ist für sich
@@ -194,6 +203,22 @@ ist. Interessant wird die Zeile, wenn dort viele Versuche stehen:
 kostet Sendezeit, und ein Gerät, das nicht antwortet, würde sonst jede
 Minute angefunkt. Aufgegeben wird aber nicht: sobald das Relais wieder
 zu hören ist, geht es weiter.
+
+**Ein Versuch, der ein paar Minuten alt ist, ist kein Befund.** Ein
+Relais meldet seinen Zustand nur alle zehn Minuten — eine Bestätigung
+kann also frühestens dann da sein, und oft erst beim Übernächsten.
+Deshalb wartet die Steuerung seit dem 13.11.2026 ein ganzes
+Meldeintervall, bevor sie einen Schaltbefehl wiederholt.
+
+Vorher wartete sie **eine Minute**, und das war die Zahl aus dem
+falschen Vorgang: der Befehl ist sofort beim Gerät, die Antwort kommt
+viel später. Am 12.11. sind deshalb zehn Funkbefehle für vier
+Schaltungen hinausgegangen, und um 10:06 stand ein Hinweis im Protokoll
+für ein Relais, das seit einer Minute aus war.
+
+Die Kehrseite: der Hinweis „gemeldet" kommt jetzt nach rund **einer
+Stunde** statt nach sieben Minuten. Schneller lässt sich nicht
+unterscheiden, ob ein Relais schweigt oder nur noch nicht gefunkt hat.
 
 ## Bezeichnung ändern
 

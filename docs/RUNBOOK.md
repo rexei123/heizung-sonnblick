@@ -8038,6 +8038,12 @@ und Mindestpause von je 10 Minuten lassen rechnerisch höchstens drei
 Zyklen je Stunde zu. Mehr heißt, dass eine der beiden Zeiten nicht
 greift.
 
+**Seit dem 13.11.2026 zählt die Spalte jede gemeldete Einschaltung**, also
+auch eine über den Handschalter oder nach einer Stromrückkehr — vorher nur
+die vom Orchestrator bestätigten. Für dieses Kriterium heißt das: ein Wert
+über drei ist erst dann ein Befund über die Mindestzeiten, wenn am Gerät
+niemand von Hand geschaltet hat.
+
 **Der Wächter-Ausfalltest gehört in die Mitte des Feldtests, nicht an
 sein Ende.** Er ist die einzige Prüfung, die zeigt, dass die ganze
 Konstruktion ihren Zweck erfüllt — und wenn er scheitert, will man das

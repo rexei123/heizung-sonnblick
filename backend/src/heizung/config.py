@@ -396,11 +396,29 @@ class Settings(BaseSettings):
     # (AE-78).
     relay_gehaeusetemperatur_alarm: int = 40
 
-    # Wie lange der Waechter auf die Bestaetigung eines Schaltbefehls
-    # wartet, bevor er ihn wiederholt. Class C heisst, dass der Downlink
-    # sofort zugestellt wird -- 60 s sind also reichlich und lassen Raum
-    # fuer einen verlorenen Uplink.
-    relay_bestaetigungs_frist_s: int = 60
+    # Wie oft ein Relais von selbst meldet, in Sekunden.
+    #
+    # **Gemessen, nicht aus dem Geraeteprofil.** In ChirpStack steht fuer
+    # das Profil „Relais 16ASPM" ``uplink_interval = 3600``; das ist die
+    # Erwartung des Netzservers fuer seine Offline-Erkennung und **keine**
+    # Geraeteeinstellung. Gemessen an Relais 108 am 12./13.11.2026 ueber
+    # 107 lueckenlose Meldungen: 588 bis 612 Sekunden, Mittel 600.
+    #
+    # Diese Zahl ist die Eingangsgroesse fuer **zwei** Fristen, und das
+    # ist der Grund, warum sie eine eigene Einstellung ist und nicht
+    # zweimal als Konstante dasteht (Paragraph 5.53): die
+    # Bestaetigungsfrist des Waechters unten, und die Grenze, ab der ein
+    # gemeldeter Schaltzustand als veraltet gilt.
+    relay_meldeintervall_s: int = 600
+
+    # Zuschlag auf das Meldeintervall fuer die Bestaetigungsfrist.
+    #
+    # Das Intervall schwankt um Sekunden (gemessen 588 bis 612). Eine
+    # Frist von genau 600 s liefe deshalb bei etwa der Haelfte der
+    # Vorgaenge wenige Sekunden zu frueh ab und erzeugte eine
+    # Wiederholung, die nichts bewirkt. 120 s sind 20 Prozent und liegen
+    # weit ausserhalb der gemessenen Streuung.
+    relay_bestaetigungs_zuschlag_s: int = 120
 
     # Nach so vielen erfolglosen Versuchen kommt der Alarm und kein
     # weiterer Downlink. Dieselbe Begruendung wie beim Engine-Abgleich
@@ -807,6 +825,39 @@ class Settings(BaseSettings):
                 f"{self.totalausfall_min} < {self.funkempfang_gelb_max_min}). "
                 "Sonst mailt der Alarm, bevor die Kachel rot ist — und wer "
                 "nachsieht, findet eine gelbe Kachel zu einer roten Mail."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _relais_bestaetigungsfrist_passt_in_den_backoff(self) -> "Settings":
+        """Die erste Frist darf nicht von ihrer eigenen Obergrenze gekappt werden.
+
+        Die Bestaetigungsfrist ist ``relay_meldeintervall_s +
+        relay_bestaetigungs_zuschlag_s`` und verdoppelt sich je Versuch,
+        gekappt bei ``relay_backoff_max_s``. Liegt die Kappung **unter**
+        der ersten Frist, ist die Verdopplung wirkungslos und die Frist
+        selbst zu kurz — der Waechter wiederholte dann wieder, bevor eine
+        Bestaetigung ueberhaupt eintreffen kann, und genau das war der
+        Befund vom 12.11.2026.
+
+        Start-Fehler und keine Warnung, dieselbe Haltung wie bei den
+        uebrigen Grenzen: eine Einstellung, die stumm das Gegenteil
+        bewirkt, ist schlimmer bedient als eine API, die nicht startet.
+        """
+        frist = self.relay_meldeintervall_s + self.relay_bestaetigungs_zuschlag_s
+        if self.relay_backoff_max_s < frist:
+            raise ValueError(
+                "RELAY_BACKOFF_MAX_S darf nicht kleiner sein als die "
+                "Bestaetigungsfrist aus RELAY_MELDEINTERVALL_S + "
+                f"RELAY_BESTAETIGUNGS_ZUSCHLAG_S (ist: "
+                f"{self.relay_backoff_max_s} < {frist}). Sonst kappt die "
+                "Obergrenze die erste Frist, und der Waechter wiederholt, "
+                "bevor eine Bestaetigung eintreffen kann."
+            )
+        if self.relay_meldeintervall_s < 1:
+            raise ValueError(
+                "RELAY_MELDEINTERVALL_S muss mindestens 1 sein (ist: "
+                f"{self.relay_meldeintervall_s})."
             )
         return self
 
