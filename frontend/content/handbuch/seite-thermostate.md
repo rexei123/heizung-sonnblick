@@ -204,6 +204,22 @@ kostet Sendezeit, und ein Gerät, das nicht antwortet, würde sonst jede
 Minute angefunkt. Aufgegeben wird aber nicht: sobald das Relais wieder
 zu hören ist, geht es weiter.
 
+**Ein Versuch, der ein paar Minuten alt ist, ist kein Befund.** Ein
+Relais meldet seinen Zustand nur alle zehn Minuten — eine Bestätigung
+kann also frühestens dann da sein, und oft erst beim Übernächsten.
+Deshalb wartet die Steuerung seit dem 13.11.2026 ein ganzes
+Meldeintervall, bevor sie einen Schaltbefehl wiederholt.
+
+Vorher wartete sie **eine Minute**, und das war die Zahl aus dem
+falschen Vorgang: der Befehl ist sofort beim Gerät, die Antwort kommt
+viel später. Am 12.11. sind deshalb zehn Funkbefehle für vier
+Schaltungen hinausgegangen, und um 10:06 stand ein Hinweis im Protokoll
+für ein Relais, das seit einer Minute aus war.
+
+Die Kehrseite: der Hinweis „gemeldet" kommt jetzt nach rund **einer
+Stunde** statt nach sieben Minuten. Schneller lässt sich nicht
+unterscheiden, ob ein Relais schweigt oder nur noch nicht gefunkt hat.
+
 ## Bezeichnung ändern
 
 Die Bezeichnung lässt sich in der Liste direkt bearbeiten; mit Escape

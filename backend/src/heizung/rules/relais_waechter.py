@@ -250,18 +250,35 @@ def naechste_aktion(
 def _frist(versuche: int, schwellen: WaechterSchwellen) -> timedelta:
     """Wie lange nach dem ``versuche``-ten Versuch gewartet wird.
 
-    Verdopplung je Versuch, gekappt bei ``backoff_max``:
+    Verdopplung je Versuch, gekappt bei ``backoff_max``. Mit den
+    Vorgaben vom 13.11.2026 (Frist = Meldeintervall 600 s + Zuschlag
+    120 s, Kappung 1800 s):
 
-    ======== ======
+    ======== ========
     Versuche Frist
-    ======== ======
-    1        60 s
-    2        120 s
-    3        240 s
-    4        480 s
-    5        960 s
-    6+       1800 s (Kappung)
-    ======== ======
+    ======== ========
+    1        720 s
+    2        1440 s
+    3        1800 s (Kappung)
+    4+       1800 s
+    ======== ========
+
+    **Die Tabelle stand bis zum 13.11.2026 auf 60, 120, 240, 480, 960
+    Sekunden.** Die Frist kam damals aus der Zustellung — Class C heisst,
+    dass der Downlink sofort beim Geraet ist — und nicht aus der
+    **Bestaetigung**. Ein 16ASPM meldet seinen Zustand nur im eigenen
+    Takt, gemessen alle 600 s; die Frist lag also um den Faktor zehn
+    unter dem fruehesten moeglichen Zeitpunkt einer Bestaetigung.
+
+    Gemessen am 12.11.2026 an Relais 108: zehn Downlinks fuer vier
+    Schaltungen, und ein Fehlalarm um 10:06 fuer ein Relais, das bereits
+    aus war.
+
+    **Folge fuer den Alarm, und sie ist der Preis:** er kommt jetzt nach
+    720 + 1440 + 1800 Sekunden, also nach rund **einer Stunde** statt
+    nach sieben Minuten. Schneller ist nicht zu haben, ohne wieder zu
+    raten: unter zwei Meldeintervallen ist „keine Bestaetigung" keine
+    Aussage ueber das Geraet, sondern eine ueber unsere Geduld.
 
     **Der Anlass ist eine Messung des Betreibers am 01.11.2026.** Zwischen
     11:22 und 11:28 ging **jede Minute** ein Downlink an Relais 109 —
