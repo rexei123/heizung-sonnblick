@@ -32,7 +32,7 @@ from heizung.celery_app import app
 from heizung.config import get_settings
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
-from heizung.models.enums import CommandReason, EventLogLayer, HeatingZoneKind
+from heizung.models.enums import CommandReason, DeviceKind, EventLogLayer, HeatingZoneKind
 from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
@@ -430,10 +430,49 @@ async def _get_zone_devices(session: AsyncSession, zone_id: int) -> list[Device]
     Engine-Funktion — dieselbe Trennung, die der ``health_state``-Filter
     schon macht.
 
+    **14.11.2026 (2d): Relais fliegen ebenfalls heraus.** Ein 16ASPM ist
+    ein Schalter. Er hat keinen Sollwert und kein Register, in das ein
+    ``0x51`` schreiben koennte — er kennt den Befehl nicht und verwirft
+    ihn. Geschaltet wird er vom Relais-Orchestrator
+    (``tasks/relay_tasks``), und zwar aus dem **Ergebnis** dieser Engine:
+    der Sollwert der Zone steht im ``HARD_CLAMP``-Trace, der Regler
+    vergleicht ihn mit dem Istwert und schickt ``0x57`` oder ``0xC1 00``.
+
+    **Das Relais bleibt in der Zone** (Vorgabe des Betreibers). Es gehoert
+    dorthin: die Zone ist der Ort, an dem Soll, Ist und Schaltzustand
+    zusammenkommen, und ``get_active_devices_for_zone`` liefert es
+    weiterhin — fuer die Anzeige, fuer den Orchestrator und fuer den
+    Melder. Nur **angesteuert** wird es hier nicht.
+
+    Dieselbe Trennung wie bei ``measure_only``, und aus demselben Grund:
+    „welche Geraete gehoeren zur Zone" und „welche Geraete bekommen einen
+    Sollwert" sind zwei Fragen.
+
     Das ist die Stelle, die Mutationsprobe M7 angreift.
     """
     active_devices = await get_active_devices_for_zone(session, zone_id)
-    return [d for d in active_devices if d.health_state == "healthy" and not d.measure_only]
+    return [
+        d
+        for d in active_devices
+        if d.health_state == "healthy" and not d.measure_only and d.kind != DeviceKind.RELAY
+    ]
+
+
+async def _zone_hat_nur_relais(session: AsyncSession, zone_id: int) -> bool:
+    """Hat diese Zone Geraete, aber kein einziges ansteuerbares?
+
+    **Nur fuer die Begruendung im Trace**, und nur in dem Zweig, in dem
+    ``_get_zone_devices`` leer zurueckkommt — also hoechstens einmal je
+    Zone und Durchlauf, und im Haus betrifft das die zwei Relais-Zonen.
+
+    Ohne diese Unterscheidung stand im Trace der Rezeption
+    ``no_healthy_active_devices``, waehrend ein gesundes, in Betrieb
+    genommenes Relais in der Zone haengt und jede Minute geregelt wird.
+    Das liest sich wie ein Ausfall und ist keiner (Paragraph 5.79: ein
+    Melder, dem niemand glaubt, weil er bei gesunden Zonen rot meldet).
+    """
+    alle = await get_active_devices_for_zone(session, zone_id)
+    return bool(alle) and all(d.kind == DeviceKind.RELAY for d in alle)
 
 
 # Sprint 20f (T3): Audit-Aktion, wenn der Abgleich aufgibt. Eigener Name, kein
@@ -794,7 +833,11 @@ async def _dispatch_downlinks_per_zone(
                     "count_failed": 0,
                     "count_skipped": 0,
                     "all_failed": False,
-                    "detail": "no_healthy_active_devices",
+                    "detail": (
+                        "nur_relais_in_der_zone"
+                        if await _zone_hat_nur_relais(session, zone.id)
+                        else "no_healthy_active_devices"
+                    ),
                 }
             )
             continue

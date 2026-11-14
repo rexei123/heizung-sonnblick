@@ -14,7 +14,16 @@ Je Zone mit mindestens einem Relais:
    Zweieinhalbfachen des Keepalive-Intervalls.
 4. **Regler** (``zweipunkt.entscheide``) → EIN, AUS oder unveraendert.
 5. Je Relais der Zone: **Waechter** (``relais_waechter.naechste_aktion``)
-   → senden, warten oder alarmieren.
+   → senden, warten, fragen oder alarmieren.
+
+**Zwei Veraltungen, zwei Verbraucher.** Schritt 3 prueft den **Fuehler**:
+ohne frischen Messwert entscheidet der Regler einen Zwangs-AUS (S5).
+Schritt 5 prueft seit dem 14.11.2026 zusaetzlich das **Relais selbst**:
+ist dessen jüngste Zustandsmeldung aelter als das Zweieinhalbfache des
+Meldeintervalls, gilt der Schaltzustand als unbekannt, und der Waechter
+laesst fragen (``0xB1``) statt aus einer alten Meldung zu schliessen, es
+sei nichts zu tun. Dieselbe Begruendung, dieselbe Zahl
+(``VERALTUNGS_FAKTOR``), verschiedene Intervalle.
 
 **Was hier nicht entschieden wird.** Dieser Task enthaelt keine
 Fachlogik: er holt Werte, ruft die reinen Funktionen und fuehrt deren
@@ -96,7 +105,13 @@ from heizung.rules.zweipunkt import (
     einschalt_versatz,
     entscheide,
 )
-from heizung.services import provision_lauf, relay_adapter, relay_service, relay_state
+from heizung.services import (
+    provision_lauf,
+    relais_abfrage,
+    relay_adapter,
+    relay_service,
+    relay_state,
+)
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.device_service import get_active_devices_for_zone
 from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
@@ -104,11 +119,34 @@ from heizung.tasks.engine_tasks import _task_session
 
 logger = logging.getLogger(__name__)
 
-#: Faktor auf das Keepalive-Intervall des Fuehlers, ab dem ein Messwert
-#: als veraltet gilt (S5). Zweieinhalb und nicht zwei: ein einzelner
-#: verlorener Uplink soll keine Zone abschalten, zwei verlorene in Folge
-#: schon. Bei einem Vicki-Intervall von einer Stunde sind das 2,5 h.
+#: Faktor auf das Meldeintervall, ab dem eine Meldung als veraltet gilt
+#: (S5). Zweieinhalb und nicht zwei: eine einzelne verlorene Meldung soll
+#: nichts aendern, zwei verlorene in Folge schon.
+#:
+#: **Er gilt fuer zwei Meldungen, und das ist Absicht.** Beim **Fuehler**
+#: der Zone (Keepalive eine Stunde) sind das 2,5 h, ab denen der Istwert
+#: als veraltet gilt und der Regler einen Zwangs-AUS entscheidet. Beim
+#: **Relais** selbst (Meldeintervall 10 min) sind das 25 min, ab denen der
+#: Waechter dem gemeldeten Schaltzustand nicht mehr glaubt (14.11.2026).
+#: Zwei verschiedene Intervalle, dieselbe Begruendung — und deshalb eine
+#: Zahl. Zwei Zahlen mit derselben Herleitung waeren zwei Wahrheiten
+#: (§5.53).
 VERALTUNGS_FAKTOR = Decimal("2.5")
+
+
+def zustand_veraltungs_fenster() -> timedelta:
+    """So alt darf die jüngste Zustandsmeldung eines Relais sein.
+
+    ``VERALTUNGS_FAKTOR`` mal Meldeintervall, also mit den Vorgaben 25
+    Minuten. **Eine Funktion fuer zwei Verbraucher**: der Waechter
+    entscheidet daran, ob er dem Zustand glaubt, und die Drosselung der
+    Abfrage nimmt dasselbe Fenster als Abstand. Zwei Rechnungen fuer
+    dieselbe Zahl waeren zwei Wahrheiten, und sie liefen beim ersten
+    Nachjustieren auseinander — dann wuerde entweder oefter gefragt als
+    noetig oder ein veralteter Zustand bliebe eine Weile unbefragt.
+    """
+    sekunden = Decimal(get_settings().relay_meldeintervall_s) * VERALTUNGS_FAKTOR
+    return timedelta(seconds=int(sekunden))
 
 
 def zweipunkt_schwellen() -> ZweipunktSchwellen:
@@ -123,15 +161,41 @@ def zweipunkt_schwellen() -> ZweipunktSchwellen:
 
 
 def waechter_schwellen() -> WaechterSchwellen:
-    """Die Waechter-Parameter aus den Settings, einmal je Durchlauf."""
+    """Die Waechter-Parameter aus den Settings, einmal je Durchlauf.
+
+    **Die Bestaetigungsfrist wird gerechnet, nicht eingestellt**
+    (13.11.2026). Sie stand als eigene Einstellung auf **60 Sekunden** —
+    eine Zahl, die aus der Zustellung kam: Class C heisst, dass der
+    Downlink sofort beim Geraet ist, und eine Minute schien reichlich.
+
+    Sie war es nicht, denn die Zustellung ist nicht die Bestaetigung. Ein
+    16ASPM meldet seinen Zustand nur im eigenen Takt, gemessen alle **600
+    Sekunden**. Die Frist lag damit um den Faktor zehn unter dem
+    frühesten Zeitpunkt, an dem eine Bestaetigung ueberhaupt eintreffen
+    kann — der Waechter hat also planmaessig wiederholt und planmaessig
+    Alarm geschlagen.
+
+    Gemessen am 12.11.2026 an Relais 108: **zehn Downlinks fuer vier
+    Schaltungen**, und ein Fehlalarm um 10:06 fuer ein Relais, das
+    bereits aus war (die Meldung dazu kam 10:07:56). Ein Melder, der bei
+    jedem zweiten Vorgang Fehlalarm gibt, wird nach einer Woche
+    ueberlesen (Paragraph 5.79).
+
+    Die Frist ist deshalb das **Meldeintervall plus Zuschlag**. Beide
+    Zahlen sind Einstellungen, ihre Verknuepfung ist Code — damit kann
+    niemand die eine verstellen und die andere vergessen.
+    """
     s = get_settings()
     return WaechterSchwellen(
         timer_expire=timedelta(seconds=s.relay_timer_expire_s),
         timer_refresh=timedelta(seconds=s.relay_timer_refresh_s),
         refresh_abstand=timedelta(seconds=s.relay_refresh_intervall_s),
-        bestaetigungs_frist=timedelta(seconds=s.relay_bestaetigungs_frist_s),
+        bestaetigungs_frist=timedelta(
+            seconds=s.relay_meldeintervall_s + s.relay_bestaetigungs_zuschlag_s
+        ),
         max_versuche=s.relay_max_versuche,
         backoff_max=timedelta(seconds=s.relay_backoff_max_s),
+        zustand_veraltet=zustand_veraltungs_fenster(),
     )
 
 
@@ -296,17 +360,31 @@ async def _steuere_eine_zone(
             strategie=WatchdogStrategy(geraet.watchdog_strategy),
             gewuenscht_ein=gewuenscht_ein,
             bestaetigt_ein=zustand.ein,
+            # Der Zeitpunkt **dieser** Meldung, nicht der Beginn des
+            # Zustands. Ein Relais, das seit zwei Stunden EIN meldet, ist
+            # frisch; eines, dessen letzte Meldung zwei Stunden alt ist,
+            # ist stumm. ``seit`` kann beides nicht unterscheiden.
+            zustand_gemeldet=zustand.gemeldet,
             offen=offen,
             letzter_ein_befehl=geraet.pending_since,
             schwellen=wschwellen,
             now=jetzt,
         )
 
-        # Ein bestaetigter Befehl: offenen Stand loeschen und bei einem
-        # EIN einen Schaltzyklus zaehlen.
+        # Ein bestaetigter Befehl: offenen Stand loeschen.
+        #
+        # **Den Schaltzyklus zaehlt hier nichts mehr** (13.11.2026). Bis
+        # dahin stand an dieser Stelle ``switch_cycles += 1``, sobald ein
+        # bestaetigter Befehl ein EIN war — und genau so ist am 12.11. ein
+        # Zyklus verloren gegangen: Der Wunsch kippte zwei Minuten nach
+        # dem Senden auf AUS, der offene Stand wurde (richtig) verworfen,
+        # und als die Bestaetigung sieben Minuten spaeter kam, gab es
+        # nichts mehr, woran sie haengen konnte.
+        #
+        # Gezaehlt wird jetzt in ``relay_uplink`` an der **gemeldeten
+        # Zustandsaenderung**. Das ist die Quelle, die nicht davon
+        # abhaengt, ob unsere Buchfuehrung den Befehl noch kennt.
         if befehl.aktion is WaechterAktion.NICHTS and befehl.grund == "bestaetigt":
-            if offen is not None and offen.ziel_ein:
-                geraet.switch_cycles += 1
             _loesche_offen(geraet)
             continue
 
@@ -316,15 +394,20 @@ async def _steuere_eine_zone(
         # ``pending_since`` wuerde als ``letzter_ein_befehl`` weiter in die
         # REFRESH-Rechnung eingehen.
         if (
-            befehl.aktion is WaechterAktion.NICHTS
+            befehl.aktion in (WaechterAktion.NICHTS, WaechterAktion.FRAGE_ZUSTAND)
             and offen is not None
             and offen.ziel_ein != gewuenscht_ein
         ):
             _loesche_offen(geraet)
             ergebnis["verworfen"] = ergebnis.get("verworfen", 0) + 1
+            # Auch bei ``FRAGE_ZUSTAND``: der offene Stand gehoert weg,
+            # bevor gefragt wird, sonst bremst sein Backoff spaeter einen
+            # Befehl, den niemand mehr will. Gefragt wird dann im
+            # naechsten Durchlauf, also eine Minute spaeter — das ist der
+            # Preis dafuer, hier nur **eine** Sache zu tun.
             continue
 
-        # Unbekannter Zustand: **fragen**, nicht schweigen.
+        # Zustand unbekannt oder zu alt: **fragen**, nicht schweigen.
         #
         # Der Waechter schaltet bei unbekanntem Zustand bewusst nicht ein
         # (Sprint 24, AE-78 §9.3) — ein Relais, von dem wir nicht wissen,
@@ -340,10 +423,29 @@ async def _steuere_eine_zone(
         # erlaubt Lesen ausdruecklich auch an einem Relais, das nicht in
         # Betrieb genommen ist — hier kommt er ohnehin nur fuer
         # freigegebene Geraete zum Einsatz.
-        if befehl.aktion is WaechterAktion.NICHTS and befehl.grund == "zustand_unbekannt":
+        #
+        # **Seit dem 14.11.2026 gilt das auch fuer einen veralteten
+        # Zustand und fuer ein gewuenschtes AUS** — und damit auch fuer
+        # ein Relais, das dauerhaft schweigt. Deshalb die Drosselung: ohne
+        # sie waere das ein Lese-Downlink je Minute, rund 16 Minuten
+        # Sendezeit am Tag fuer ein einziges stummes Geraet.
+        if befehl.aktion is WaechterAktion.FRAGE_ZUSTAND:
+            darf = await asyncio.to_thread(
+                relais_abfrage.darf_fragen,
+                geraet.id,
+                abstand_s=int(zustand_veraltungs_fenster().total_seconds()),
+            )
+            if not darf:
+                ergebnis["frage_gedrosselt"] = ergebnis.get("frage_gedrosselt", 0) + 1
+                continue
             await relay_adapter.frage_zustand(geraet.dev_eui)
             ergebnis["gefragt"] = ergebnis.get("gefragt", 0) + 1
-            logger.info("relais-zustand unbekannt, 0xB1 gesendet device_id=%s", geraet.id)
+            logger.info(
+                "relais-zustand %s, 0xB1 gesendet device_id=%s gemeldet=%s",
+                befehl.grund,
+                geraet.id,
+                zustand.gemeldet,
+            )
             continue
 
         if befehl.aktion is WaechterAktion.ALARM:
