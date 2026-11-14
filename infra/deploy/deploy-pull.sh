@@ -13,6 +13,8 @@
 #      den Commit zeigt, auf den Phase 1 gesynct hat (H-6, AE-77).
 #   3. Container-Stand aktualisieren (alle Services, recreate nur
 #      bei Config- oder Image-Drift).
+#   4. Alte Deploy-Images aufraeumen (14.11.2026). Laeuft nach dem
+#      erfolgreichen Deploy und kann den Lauf nicht scheitern lassen.
 #
 # Annahmen:
 #   - /opt/heizung-sonnblick ist ein git-Checkout mit Remote `origin`.
@@ -36,6 +38,13 @@
 #   2026-04-30  H-6 SHA-Pinning revertiert (Tag-Mismatch CI vs git-log).
 #               Eigener Sprint, der CI-Workflow + deploy-pull synchron
 #               anpasst, ist Backlog. Bis dahin: mutierender Tag aus .env.
+#   2026-11-14  Phase 4: Aufraeumen. Am 13.11. war die Platte zu 94 %
+#               belegt — 206 Images, 48,7 GB, davon zwei in Benutzung.
+#               Jeder Merge erzeugt ein Image-Paar von rund 400 MB (zwei
+#               Tags je Image, Paragraph 5.4); bei 4,1 GB frei waren das
+#               noch rund zehn Merges. Von Hand steht der Handgriff im
+#               RUNBOOK Paragraph 10az, und genau das ist das Problem:
+#               er braucht jemanden, der nachsieht.
 #   2026-10-08  H-6 (AE-77): Pinning kommt wieder, diesmal ohne die
 #               Heuristik von damals. Der Tag wird aus `NEW_SHA`
 #               gebildet — also aus dem Commit, auf den Phase 1 ohnehin
@@ -441,6 +450,137 @@ if [ -n "$PIN_SHA_VAL" ]; then
 else
     log "Fertig. HEAD=$NEW_SHA IMAGE_TAG=$IMAGE_TAG api=${API_DIGEST:-?} web=${WEB_DIGEST:-?}"
 fi
+
+# ---------------------------------------------------------------------
+# Phase 4: alte Deploy-Images aufraeumen (14.11.2026)
+# ---------------------------------------------------------------------
+#
+# **Warum hier und nicht als eigener Timer.** Images entstehen beim
+# Deploy, also ist der Deploy der Moment, in dem man sie wegraeumt. Ein
+# zweiter Timer waere ein zweiter Mechanismus mit eigener Ueberwachung —
+# und einer, der genau dann nichts tut, wenn gar nicht deployt wird, also
+# wenn auch nichts entsteht.
+#
+# **Was immer bleibt**, in dieser Reihenfolge der Sicherungen:
+#   1. Alles, was ein Container gerade benutzt (``docker ps``). Ist diese
+#      Liste nicht zu bekommen, wird **nicht** geloescht — die
+#      Sicherheitsprobe aus RUNBOOK Paragraph 10az, in Code.
+#   2. Der Tag dieses Laufs. Bei gesetztem ``PIN_SHA`` ist das der
+#      Pin-Tag, also das Rueckfallziel.
+#   3. Alles, was juenger ist als ``AUFRAEUM_TAGE`` (Vorgabe sieben).
+#      Sieben Tage sind der Preis fuer den Rueckfallweg: die Images
+#      liegen zwar weiter im GHCR, aber ein Rueckfall ist genau der
+#      Moment, in dem das Netz vielleicht das Problem ist.
+#
+# **Kein ``prune``, kein ``-f``.** ``docker image prune -a`` raeumt alles
+# ab, was kein Container benutzt — auch ``caddy``, ``redis``,
+# ``timescaledb`` und die ChirpStack-Bilder, und die wiederzuholen
+# braucht Netz zu einem Zeitpunkt, den niemand waehlt. Und ohne ``-f``
+# verweigert ``docker rmi`` jedes Image, das ein Container benutzt, auch
+# ein gestoppter: das ist die Sicherung hinter der Sicherung.
+#
+# **Der Lauf darf daran nicht scheitern.** Ein Deploy, der wegen einer
+# Aufraeum-Panne rot meldet, waere ein Melder, der am falschen Ort
+# anschlaegt (Paragraph 5.79). Deshalb endet jeder Pfad hier mit
+# ``return 0``, und der Aufruf traegt ``|| true``.
+#
+# **Und keine Zeile hier enthaelt das Wort FEHLER.** Das ist keine
+# Stilfrage: ``merge-paket.ps1`` liest nach jedem Merge die neuen Zeilen
+# dieses Logs und bricht den ganzen Lauf ab, sobald ``FEHLER`` darin
+# vorkommt. Ein stolpernder ``docker rmi`` wuerde damit eine Merge-Kette
+# anhalten, die mit ihm nichts zu tun hat. Dockers eigene Meldungen sind
+# englisch (``Error response from daemon``) und treffen das Muster nicht.
+#
+# **Diese Phase steht hinter der ``Fertig.``-Zeile**, und zwar bewusst:
+# ``merge-paket`` wartet auf genau diese Zeile. Haushalt soll die
+# Erfolgsmeldung eines Deploys nicht verzoegern.
+AUFRAEUM_TAGE=${DEPLOY_CLEANUP_DAYS:-7}
+
+aufraeumen() {
+    local grenze laufend kandidaten weg anzahl jung behalten frei_vorher frei_nachher
+
+    if ! [ "$AUFRAEUM_TAGE" -ge 1 ] 2>/dev/null; then
+        log "Aufraeumen: DEPLOY_CLEANUP_DAYS='$AUFRAEUM_TAGE' ist keine Zahl >= 1 — uebersprungen."
+        return 0
+    fi
+
+    if ! grenze=$(date -d "$AUFRAEUM_TAGE days ago" +%F 2>/dev/null); then
+        log "Aufraeumen: Datumsgrenze nicht berechenbar — uebersprungen."
+        return 0
+    fi
+
+    # Sicherung 1: was laeuft, bleibt. Ohne diese Liste wird nichts
+    # geloescht — lieber eine volle Platte als ein geloeschtes Image
+    # unter einem laufenden Container.
+    if ! laufend=$(docker ps --format '{{.Image}}' 2>/dev/null); then
+        log "Aufraeumen: 'docker ps' nicht abfragbar — es wird nichts geloescht."
+        return 0
+    fi
+
+    # Sicherung 2: der Tag dieses Laufs. Bei gesetztem Pin ist das das
+    # Rueckfallziel, und das muss die sieben Tage ueberleben.
+    laufend="$laufend
+ghcr.io/rexei123/heizung-api:$IMAGE_TAG
+ghcr.io/rexei123/heizung-web:$IMAGE_TAG"
+
+    # Zwei getrennte Abfragen statt eines ``heizung-*``-Musters: der Glob
+    # wuerde ein drittes Image mitnehmen, das eines Tages dazukommt und
+    # andere Regeln haette.
+    kandidaten=""
+    for REPO in heizung-api heizung-web; do
+        kandidaten="$kandidaten
+$(docker images --filter=reference="ghcr.io/rexei123/$REPO" \
+            --format '{{.Repository}}:{{.Tag}}|{{.CreatedAt}}' 2>/dev/null || true)"
+    done
+
+    weg=$(printf '%s\n' "$kandidaten" |
+        awk -F'|' -v g="$grenze" 'NF == 2 && substr($2, 1, 10) < g { print $1 }' |
+        grep -v '<none>' |
+        grep -v -x -F "$laufend" |
+        sort -u || true)
+
+    anzahl=$(printf '%s\n' "$weg" | grep -c . || true)
+
+    # **Was behalten wird, gehoert ins Log und nicht nur in den Code.**
+    # Eine Zeile "3 geloescht" beantwortet nicht die Frage, die man im
+    # Zweifel hat — naemlich ob das Rueckfallziel noch da ist. Deshalb
+    # stehen hier beide Seiten: die Tags, die wegen einer Regel bleiben
+    # (laufend oder Tag dieses Laufs), und die Zahl der Tags, die nur
+    # wegen ihres Alters bleiben.
+    behalten=$(printf '%s\n' "$laufend" |
+        grep -F 'ghcr.io/rexei123/heizung-' | sort -u | tr '\n' ' ' || true)
+    jung=$(printf '%s\n' "$kandidaten" |
+        awk -F'|' -v g="$grenze" 'NF == 2 && substr($2, 1, 10) >= g { print $1 }' |
+        grep -c . || true)
+    log "Aufraeumen: Grenze $grenze. Immer behalten: ${behalten:-(nichts)}"
+
+    if [ "${anzahl:-0}" -eq 0 ]; then
+        log "Aufraeumen: nichts aelter als $AUFRAEUM_TAGE Tage. ${jung:-0} Tag(s) bleiben (juenger)."
+        return 0
+    fi
+
+    # **Die Sicherheitsprobe aus Paragraph 10az steckt oben im
+    # ``grep -v -x -F``**, nicht in einer zweiten Pruefung danach. Von
+    # Hand ist sie ein Vergleich, den man liest und dann entscheidet;
+    # hier ist sie ein Filter, und ein Filter kann nicht uebersehen
+    # werden. Eine Pruefung hinter dem Filter waere eine, die nie
+    # anschlagen kann — und das ist schlechter als keine (Paragraph 5.79).
+
+    frei_vorher=$(df -B1 --output=avail / 2>/dev/null | tail -n1 | tr -d ' ' || echo "")
+    log "Aufraeumen: $anzahl Tag(s) werden geloescht, ${jung:-0} bleiben (juenger als $AUFRAEUM_TAGE Tage)."
+    log "Aufraeumen: weg: $(printf '%s\n' "$weg" | tr '\n' ' ')"
+    printf '%s\n' "$weg" | xargs -r -n 20 docker rmi >>"$LOG" 2>&1 || true
+    frei_nachher=$(df -B1 --output=avail / 2>/dev/null | tail -n1 | tr -d ' ' || echo "")
+
+    if [ -n "$frei_vorher" ] && [ -n "$frei_nachher" ]; then
+        log "Aufraeumen fertig. Frei: $((frei_vorher / 1000000000)) GB -> $((frei_nachher / 1000000000)) GB."
+    else
+        log "Aufraeumen fertig."
+    fi
+    return 0
+}
+
+aufraeumen || true
 
 # ---------------------------------------------------------------------
 # Dead-Man-Ping (Sprint 18)

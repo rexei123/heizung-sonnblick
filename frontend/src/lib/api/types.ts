@@ -1256,6 +1256,9 @@ export interface DashboardKpi {
    * gar kein Fühler zugeordnet ist — dort gibt es kein Alter.
    */
   relais_fuehler_stumm_min: number | null;
+  platte_prozent: number;
+  platte_frei_gb: number;
+  platte_warnt: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ from heizung.db import get_session
 from heizung.models.user import User
 from heizung.schemas.dashboard import DashboardKpiRead
 from heizung.services import dashboard_aggregates as agg
-from heizung.services import funkempfang, relais_fuehler
+from heizung.services import funkempfang, plattenplatz, relais_fuehler
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -54,6 +54,12 @@ async def get_dashboard_kpi(
     stumme = [z for z in relais_zonen if z.stumm]
     alter_werte = [z.alter_min for z in stumme if z.alter_min is not None]
 
+    # Ein Syscall, keine Abfrage — und derselbe Helfer, den der
+    # stuendliche Waechter benutzt. Zwei Rechnungen fuer dieselbe Zahl
+    # waeren zwei Wahrheiten, und dann steht auf der Kachel etwas anderes
+    # als in der Mail (Paragraph 5.53).
+    platte = plattenplatz.lies_plattenstand(grenze_prozent=settings.platte_warn_prozent)
+
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
     devices_online, devices_assigned = await agg.count_devices_online(session)
     valve_check, room_too_warm = await agg.count_valve_alerts(session)
@@ -78,4 +84,7 @@ async def get_dashboard_kpi(
         room_too_warm_count=room_too_warm,
         relais_fuehler_stumme_zonen=len(stumme),
         relais_fuehler_stumm_min=max(alter_werte) if alter_werte else None,
+        platte_prozent=platte.prozent,
+        platte_frei_gb=platte.frei_gb,
+        platte_warnt=platte.warnt,
     )

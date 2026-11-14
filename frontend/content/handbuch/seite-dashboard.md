@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais
 rollen: alle
-stand: 2026-11-13
+stand: 2026-11-14
 route: /
 ---
 
@@ -121,6 +121,36 @@ wurde in dieser Zeit nicht geheizt. Die Steuerung hat richtig gehandelt;
 nur stand es nirgends. „Geräte online" zeigte 102 von 103, und daraus
 liest niemand heraus, dass ein Bereich blind ist. Was zu tun ist, steht
 unter [Thermostat meldet nicht](/handbuch/ablauf-thermostat-still).
+
+## Plattenplatz
+
+Zeigt, wie voll die Festplatte des Servers ist — dieselbe Zahl, die
+`df -h /` auf dem Server nennt.
+
+**Warum eine Festplatte auf diese Seite gehört.** Läuft sie voll, nimmt
+die Datenbank keine Schreibvorgänge mehr an. Dann gibt es keine
+Messwerte, keine Berechnung und keine Rückmeldung von den Relais — die
+Steuerung steht, und zwar nicht teilweise. Es ist der einzige Wert
+dieser Seite, der die ganze Anlage auf einmal stilllegt.
+
+Die zweite Zeile nennt die freien Gigabyte. Prozent allein sagt nicht,
+wie dringend es ist: derselbe Prozentsatz bedeutet auf einer kleinen
+Platte wenige Gigabyte und auf einer großen viele.
+
+**Rot heißt: über der Grenze, und dann geht eine Mail hinaus** — einmal
+je Vorfall, nicht stündlich, und eine zweite, wenn wieder Platz da ist.
+Die Grenze ist einstellbar und steht nicht in diesem Text, weil sie sich
+ändern kann.
+
+**Aufgeräumt wird von selbst.** Nach jedem Deploy löscht der Server die
+alten Programmabbilder, die älter als eine Woche sind; der laufende Stand
+und ein gesetzter Rückfallpunkt bleiben immer. Kommt die Mail trotzdem,
+sind es nicht die Abbilder — dann hilft die Checkliste im Betriebshandbuch.
+
+**Warum es diese Kachel gibt.** Am 13.11.2026 war die Platte zu 94 %
+belegt, und gefunden wurde das beim Nachsehen nach etwas anderem. Es
+waren noch 4,1 GB frei, also etwa zehn Programm-Aktualisierungen.
+Gewarnt hat nichts.
 
 ## Letzter Algorithmen-Lauf
 

@@ -68,6 +68,8 @@ const CARD_META: { label: string; icon: string }[] = [
   { label: "Befehle nicht angenommen", icon: "sync_problem" },
   // 13.11.2026
   { label: "Fühler Relais-Zone", icon: "sensors_off" },
+  // 14.11.2026
+  { label: "Plattenplatz", icon: "storage" },
 ];
 
 // Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
@@ -324,6 +326,33 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       // Zahl auflöst. Eine Liste aller Zimmer tut das nicht — welche Zone
       // blind ist, stünde dort nirgends. Sobald es eine Ansicht der
       // Relais-Zonen gibt, gehört sie hierher.
+    },
+    {
+      // 14.11.2026: wie voll die Platte des Servers ist.
+      //
+      // **Warum das auf diese Seite gehört, obwohl es keine Heizung ist.**
+      // Am 13.11. war die Platte zu 94 % belegt, und gefunden wurde es
+      // beim Nachsehen nach etwas anderem. Bei 100 % nimmt Postgres keine
+      // Schreibvorgänge mehr an — keine Messwerte, keine
+      // Engine-Auswertung, keine Relais-Bestätigungen. Das ist der
+      // einzige Wert auf dieser Seite, der die **ganze** Anlage auf
+      // einmal stilllegt.
+      //
+      // **`tone` kommt aus dem Backend** (`platte_warnt`), nicht aus
+      // einem Vergleich hier. Die Grenze steht in den Einstellungen; sie
+      // im Frontend zu wiederholen wäre eine zweite Schwelle, die beim
+      // ersten Nachjustieren driftet (§5.53) — derselbe Fehler, den die
+      // Batterie-Kacheln einmal hatten (§5.73).
+      label: "Plattenplatz",
+      value: `${data.platte_prozent} %`,
+      icon: "storage",
+      tone: data.platte_warnt ? "danger-soft" : "neutral",
+      // Prozent allein sagt nicht, wie dringend es ist: 85 % von 75 GB
+      // sind 11 GB frei, 85 % von 500 GB wären 75 GB. Die Zusatzzeile
+      // nennt deshalb immer die Gigabyte.
+      subValue: `${data.platte_frei_gb} GB frei`,
+      // **Kein `href`** — es gibt keine Seite, auf der sich diese Zahl
+      // auflöst. Der Handgriff steht im RUNBOOK §10az und in der Mail.
     },
   ];
 }

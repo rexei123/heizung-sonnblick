@@ -46,6 +46,7 @@ app: Celery = Celery(
         "heizung.tasks.pin_reminder_tasks",
         "heizung.tasks.relay_tasks",
         "heizung.tasks.funk_tasks",
+        "heizung.tasks.platten_tasks",
     ],
 )
 
@@ -204,6 +205,19 @@ app.conf.update(
         "relais-fuehler-every-5min": {
             "task": "heizung.pruefe_relais_fuehler",
             "schedule": 300.0,
+            "options": {"queue": "heizung_default"},
+        },
+        # 14.11.2026: der Platten-Waechter. Stuendlich, weil sich eine
+        # Platte in Tagen fuellt und nicht in Minuten; die Messung ist ein
+        # Syscall und kostet nichts, ein schnellerer Takt wuerde die Mail
+        # nicht frueher schicken, sondern nur das Protokoll fuellen.
+        #
+        # Versetzt auf :10 — die anderen stuendlichen Waechter liegen auf
+        # :20 (Import), :40 (Pin) und :50 (Funk). Kein Lastproblem, nur
+        # lesbarere Logs.
+        "platte-hourly": {
+            "task": "heizung.pruefe_plattenplatz",
+            "schedule": crontab(minute=10),
             "options": {"queue": "heizung_default"},
         },
     },

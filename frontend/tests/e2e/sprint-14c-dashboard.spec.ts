@@ -33,6 +33,9 @@ interface Kpi {
   befehle_nicht_angenommen: number;
   relais_fuehler_stumme_zonen: number;
   relais_fuehler_stumm_min: number | null;
+  platte_prozent: number;
+  platte_frei_gb: number;
+  platte_warnt: boolean;
 }
 
 const BASE_KPI: Kpi = {
@@ -58,6 +61,9 @@ const BASE_KPI: Kpi = {
   befehle_nicht_angenommen: 0,
   relais_fuehler_stumme_zonen: 0,
   relais_fuehler_stumm_min: null,
+  platte_prozent: 64,
+  platte_frei_gb: 27.0,
+  platte_warnt: false,
 };
 
 async function mockKpi(
@@ -103,7 +109,7 @@ test.describe("Sprint 14c Dashboard", () => {
   // Pruefung darunter schon 12 verlangte — ein Testname ist das, was in
   // der CI-Ausgabe steht, und ein gruener Lauf mit falscher Zahl ist ein
   // Beleg, der etwas anderes behauptet als er prueft.
-  test("rendert 13 KPI-Kacheln", async ({ page }) => {
+  test("rendert 14 KPI-Kacheln", async ({ page }) => {
     await mockKpi(page, {});
     await page.goto("/");
     await expect(page.getByText("Belegte Zimmer")).toBeVisible();
@@ -113,13 +119,14 @@ test.describe("Sprint 14c Dashboard", () => {
     // Dass dieser Test bei jeder neuen Kachel fällt, ist sein Zweck: das
     // Dashboard ist die Seite, die der Hotelier täglich liest, und eine
     // Kachel mehr ist eine Entscheidung, keine Nebenwirkung.
+    // **14, nicht 13** — „Plattenplatz" ist am 14.11.2026 dazugekommen.
     // **13, nicht 12** — „Fuehler Relais-Zone" ist am 13.11.2026
     // dazugekommen. Sie zeigt die Zonen, in denen ein Relais in Betrieb
     // ist und kein aktueller Fuehlerwert mehr ankommt; genau diese Lage
     // hat am 12./13.11. vierzehn Stunden bestanden, ohne irgendwo zu
     // stehen. Davor kam am 08.11. „Befehle nicht angenommen" dazu
     // (Sprint 25 T3).
-    await expect(page.getByTestId("kpi-card")).toHaveCount(13);
+    await expect(page.getByTestId("kpi-card")).toHaveCount(14);
   });
 
   test("Schwache-Batterie-Kachel: battery_low_count, warning-soft wenn > 0", async ({
@@ -190,10 +197,10 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {});
     await page.goto("/");
     const cards = page.getByTestId("kpi-card");
-    // 13, seit „Fuehler Relais-Zone" am 13.11.2026 dazugekommen ist.
+    // 14, seit „Plattenplatz" am 14.11.2026 dazugekommen ist.
     // **Die zweite Stelle mit dieser Zahl**, und sie ist beim ersten Lauf
     // rot geworden — eine Kachel mehr aendert zwei Tests, nicht einen.
-    await expect(cards).toHaveCount(13);
+    await expect(cards).toHaveCount(14);
     // **Erst messen, wenn die Schriften geladen sind.** Dieser Test ist
     // am 08. und am 10.11.2026 im Gesamtlauf gefallen (`boundingBox` war
     // `null`) und allein jedes Mal gruen.
@@ -326,6 +333,9 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {
       relais_fuehler_stumme_zonen: 1,
       relais_fuehler_stumm_min: null,
+  platte_prozent: 64,
+  platte_frei_gb: 27.0,
+  platte_warnt: false,
     });
     await page.goto("/");
     const karte = page
@@ -340,6 +350,9 @@ test.describe("Sprint 14c Dashboard", () => {
     await mockKpi(page, {
       relais_fuehler_stumme_zonen: 0,
       relais_fuehler_stumm_min: null,
+  platte_prozent: 64,
+  platte_frei_gb: 27.0,
+  platte_warnt: false,
     });
     await page.goto("/");
     const karte = page
