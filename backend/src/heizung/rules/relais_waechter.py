@@ -47,6 +47,21 @@ der Funkgrenze verliert irgendwann drei Bestaetigungen in Folge, und der
 Waechter haette es damit dauerhaft stillgelegt — ohne dass am Geraet
 etwas kaputt ist. Einzelheiten in ``_frist``.
 
+**Ein Zustand hat ein Haltbarkeitsdatum** (14.11.2026). Das Relais
+meldet von selbst, standardmaessig alle zehn Minuten. Hoert diese Meldung
+auf, altert der zuletzt gemeldete Zustand — und ab einem gewissen Alter
+ist er keine Auskunft mehr, sondern eine Erinnerung. Der Waechter
+behandelt ihn dann wie einen **unbekannten** Zustand und laesst fragen
+(``0xB1``), statt aus einem alten AUS zu schliessen, es sei nichts zu
+tun.
+
+Das schliesst eine Luecke, die in beide Richtungen offen stand: ein
+Relais, dessen letzte Meldung AUS lautet und das seither schweigt, konnte
+in Wahrheit **heizen** — die bestaetigende Meldung des EIN war verloren
+gegangen. Der Waechter sah ein AUS, wollte AUS und meldete ``bereits_aus``.
+Ein Panel, das unbemerkt heizt, ist genau der Fall, gegen den dieser
+Waechter gebaut ist, und er entstand hier aus seinem eigenen Urteil.
+
 Diese Datei entscheidet nur. Senden, Speichern und Alarmieren macht der
 Aufrufer — so bleiben S1 und S2 ohne Datenbank pruefbar.
 """
@@ -69,6 +84,10 @@ class WaechterAktion(enum.StrEnum):
     SENDE_AUS = "sende_aus"
     #: Es laeuft ein Befehl, auf dessen Bestaetigung noch gewartet wird.
     WARTE = "warte"
+    #: ``0xB1`` senden — der Zustand ist unbekannt oder zu alt. Ein
+    #: **Lese**-Befehl: er schaltet nichts. Der Aufrufer drosselt ihn,
+    #: weil ein stummes Relais sonst jede Minute gefragt wuerde.
+    FRAGE_ZUSTAND = "frage_zustand"
     #: Nach ``max_versuche`` ohne Bestaetigung: **einmal** melden. Danach
     #: wird weiter versucht, aber nur noch im Abstand ``backoff_max``.
     ALARM = "alarm"
@@ -106,6 +125,9 @@ class WaechterSchwellen:
     max_versuche: int
     #: Obergrenze der Verdopplung. Mehr dazu in ``_frist``.
     backoff_max: timedelta
+    #: So alt darf die jüngste Zustandsmeldung sein. Darueber gilt der
+    #: Zustand als unbekannt. Mehr dazu in ``_zustand_veraltet``.
+    zustand_veraltet: timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +144,7 @@ def naechste_aktion(
     strategie: WatchdogStrategy,
     gewuenscht_ein: bool,
     bestaetigt_ein: bool | None,
+    zustand_gemeldet: datetime | None,
     offen: Offen | None,
     letzter_ein_befehl: datetime | None,
     schwellen: WaechterSchwellen,
@@ -136,8 +159,17 @@ def naechste_aktion(
     Vereinfachung: der erste Befehl wuerde dann ein Relais einschalten,
     von dem wir nicht wissen, ob es schon heizt.
 
+    ``zustand_gemeldet`` ist der Zeitpunkt **dieser Meldung** — nicht der
+    Beginn des Zustands. Ist sie zu alt, gilt der Zustand als unbekannt,
+    und zwar vor allen anderen Regeln (siehe ``_zustand_veraltet``).
+    Pflicht-Argument: ein Default waere hier „immer frisch", also die
+    Annahme, die diese Pruefung gerade abschaffen soll.
+
     Reihenfolge, verbindlich:
 
+    0. **Alter des Zustands** — eine zu alte Meldung gilt als
+       unbekannt. Das steht vor Schritt 1, weil eine alte Meldung keinen
+       neuen Befehl bestaetigen kann.
     1. **Bestaetigung** — ein offener Befehl, den das Geraet gemeldet
        hat, ist erledigt.
     2. **Ein offener Befehl, der dem jetzigen Wunsch widerspricht, wird
@@ -146,13 +178,29 @@ def naechste_aktion(
        ersetzt oder loescht den offenen Stand.
     3. **Offener Befehl**, der zum Wunsch passt: Frist mit Backoff,
        Alarm, Wiederholung.
-    4. **AUS gewuenscht** — Sicherheit vor Komfort, und AUS braucht
+    4. **Zustand unbekannt oder zu alt** — fragen (``0xB1``), und zwar
+       unabhaengig davon, was gewuenscht ist.
+    5. **AUS gewuenscht** — Sicherheit vor Komfort, und AUS braucht
        keine Bedingung.
-    5. **Zustand unbekannt** — kein EIN.
     6. **EIN gewuenscht** nach Strategie.
+
+    **Schritt 4 stand bis zum 14.11.2026 hinter Schritt 5**, und damit
+    endete ein unbekannter Zustand bei gewuenschtem AUS in
+    ``bereits_aus`` — einer Auskunft, die der Waechter nicht hatte.
     """
+    # 0. Eine zu alte Meldung ist keine Auskunft.
+    veraltet = _zustand_veraltet(bestaetigt_ein, zustand_gemeldet, schwellen=schwellen, now=now)
+    zustand: bool | None = None if veraltet else bestaetigt_ein
+
     # 1. Ein abgesetzter Befehl wartet auf seine Bestaetigung.
-    if offen is not None and bestaetigt_ein is offen.ziel_ein:
+    #
+    # **Mit ``zustand``, nicht mit ``bestaetigt_ein``.** Eine Meldung von
+    # vor zwei Stunden kann einen Befehl von vor zwei Minuten nicht
+    # bestaetigen. Ohne diese Unterscheidung galt ein EIN als bestaetigt,
+    # weil das Relais schon vorher EIN gemeldet hatte — der Zaehler stieg,
+    # der offene Stand verschwand, und niemand hat je geprueft, ob der
+    # Befehl angekommen ist.
+    if offen is not None and zustand is offen.ziel_ein:
         # Bestaetigt. Der Aufrufer loescht ``offen`` und zaehlt bei einem
         # EIN einen Schaltzyklus. Wir sagen hier nur, dass nichts mehr zu
         # senden ist.
@@ -201,22 +249,40 @@ def naechste_aktion(
             f"wiederholung{gedrosselt}_{offen.versuche + 1}",
         )
 
-    # 4. AUS gewuenscht.
+    # 4. Der Zustand ist unbekannt oder zu alt: **fragen**.
+    #
+    # Fuer beide Wuensche, und das ist die Aenderung vom 14.11.2026. Bis
+    # dahin fuehrte ein gewuenschtes AUS bei unbekanntem Zustand zu
+    # ``bereits_aus`` — der Waechter behauptete, das Relais sei schon aus,
+    # und hatte dafuer keine Grundlage. War die bestaetigende Meldung
+    # eines EIN verloren gegangen, heizte das Panel weiter, und zwar
+    # dauerhaft: es gab keinen Durchlauf mehr, der daran etwas aendert.
+    #
+    # ``0xB1`` ist ein **Lese**-Befehl, er schaltet nichts. Die
+    # naheliegende Gegenvariante — bei unbekanntem Zustand sofort
+    # ``0xC1 00`` schicken — waere in der Wirkung schneller (ein Downlink
+    # statt zwei, und AUS ist die sichere Richtung). Sie schreibt aber
+    # einen Schaltbefehl auf eine Vermutung, und sie nimmt dem naechsten
+    # Durchlauf die Grundlage: nach einem AUS ins Blaue ist der Zustand
+    # genauso unbekannt wie vorher, nur dass jetzt ein unbestaetigter
+    # Befehl offen steht. Erst fragen, dann schalten.
+    if zustand is None:
+        return Waechterbefehl(
+            WaechterAktion.FRAGE_ZUSTAND,
+            "zustand_veraltet" if veraltet else "zustand_unbekannt",
+        )
+
+    # 5. AUS gewuenscht.
     if not gewuenscht_ein:
-        if bestaetigt_ein is True:
+        if zustand:
             return Waechterbefehl(WaechterAktion.SENDE_AUS, "aus_gewuenscht")
-        # Auch bei unbekanntem Zustand nichts senden: ein ``0xC1 00`` auf
-        # ein Relais, das ohnehin aus ist, waere Sendezeit ohne Wirkung
-        # (§0 S4). Wer sicher ausschalten will, tut das ueber den
-        # Zwangs-AUS des Reglers, der einen bekannten Zustand sieht.
+        # Der Zustand ist **frisch** AUS: ein ``0xC1 00`` darauf waere
+        # Sendezeit ohne Wirkung (§0 S4). Diese Zeile gilt seit dem
+        # 14.11.2026 nur noch fuer eine Meldung, der wir glauben.
         return Waechterbefehl(WaechterAktion.NICHTS, "bereits_aus")
 
-    # 5. EIN gewuenscht, aber der Zustand ist unbekannt.
-    if bestaetigt_ein is None:
-        return Waechterbefehl(WaechterAktion.NICHTS, "zustand_unbekannt")
-
     # 6. EIN gewuenscht.
-    if not bestaetigt_ein:
+    if not zustand:
         return Waechterbefehl(
             WaechterAktion.SENDE_EIN,
             "ein_gewuenscht",
@@ -245,6 +311,47 @@ def naechste_aktion(
             sekunden=int(schwellen.timer_refresh.total_seconds()),
         )
     return Waechterbefehl(WaechterAktion.NICHTS, "auffrischung_noch_nicht_faellig")
+
+
+def _zustand_veraltet(
+    bestaetigt_ein: bool | None,
+    zustand_gemeldet: datetime | None,
+    *,
+    schwellen: WaechterSchwellen,
+    now: datetime,
+) -> bool:
+    """Ist die jüngste Zustandsmeldung zu alt, um ihr zu glauben?
+
+    **Die Schwelle ist das Zweieinhalbfache des Meldeintervalls** (Vorgabe
+    10 min, also 25 min). Dieselbe Rechnung wie beim Fuehler einer
+    Relais-Zone (``tasks/relay_tasks.VERALTUNGS_FAKTOR``) und aus
+    demselben Grund: **eine** verlorene Meldung soll nichts aendern, zwei
+    in Folge schon. Bei genau zwei verlorenen Meldungen liegt die dritte
+    erwartete Meldung bei 30 Minuten — die Schwelle von 25 greift also,
+    bevor sie faellig wird, und nicht erst danach.
+
+    ``<=`` und nicht ``<``: eine Meldung, die genau auf der Schwelle
+    liegt, gilt noch. Der Rand gehoert in die nachgiebige Richtung, weil
+    die strenge hier Funkzeit kostet und nichts sicherer macht.
+
+    **Kein Zustand ist nicht veraltet, sondern unbekannt.** Ist
+    ``bestaetigt_ein`` schon ``None``, gibt es nichts zu altern; die
+    Funktion sagt ``False``, und der Waechter nennt den Grund
+    ``zustand_unbekannt`` statt ``zustand_veraltet``. Die Unterscheidung
+    aendert die Handlung nicht (beide fragen), aber sie steht im Protokoll
+    — „noch nie gemeldet" ist ein Montagefall, „seit 25 min stumm" ein
+    Funkfall.
+
+    Fehlt der Zeitpunkt, obwohl ein Zustand vorliegt, gilt der Zustand als
+    veraltet. Dieser Fall kann aus ``relay_state`` nicht entstehen (beide
+    Angaben kommen aus derselben Zeile); er ist hier die vorsichtige
+    Antwort auf eine Angabe, die es nicht geben darf.
+    """
+    if bestaetigt_ein is None:
+        return False
+    if zustand_gemeldet is None:
+        return True
+    return now - zustand_gemeldet > schwellen.zustand_veraltet
 
 
 def _frist(versuche: int, schwellen: WaechterSchwellen) -> timedelta:

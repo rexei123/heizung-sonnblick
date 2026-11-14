@@ -114,6 +114,11 @@ def _offener_befehl_nach(sekunden: int, *, versuche: int = 1) -> WaechterAktion:
         strategie=WatchdogStrategy.EXPIRE_AND_RESEND,
         gewuenscht_ein=True,
         bestaetigt_ein=False,
+        # Die Meldung ist frisch: hier geht es um die Frist des offenen
+        # Befehls, nicht um das Haltbarkeitsdatum des Zustands
+        # (14.11.2026). Veraltet er, greift die Leiter unveraendert — das
+        # prueft ``test_relais_waechter``.
+        zustand_gemeldet=NOW,
         offen=Offen(ziel_ein=True, seit=NOW - timedelta(seconds=sekunden), versuche=versuche),
         letzter_ein_befehl=None,
         schwellen=waechter_schwellen(),
