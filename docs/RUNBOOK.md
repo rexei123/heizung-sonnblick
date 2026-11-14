@@ -11514,3 +11514,162 @@ das Protokoll des Vorfalls), §10ab C4 (der Block, in dessen Rahmen es
 passiert ist), §10ab C3 (der Caddy-Crashloop desselben Morgens),
 §10a.2 (die UG65-Oberfläche), §5.76 in `CLAUDE.md` (Wirkung überwachen
 statt Mechanik — Schritt 4 zählt Uplinks, nicht Verbindungen).
+
+
+## 10az. Platte voll: alte Images aufräumen (durchgeführt 14.11.2026)
+
+**Der Befund, 13.11.2026.** Bei der Vorarbeit zum Relais-Verlauf war die
+Platte zu **94 %** voll — 4,5 GB frei von 75 GB, am nächsten Morgen 4,1
+GB. Nicht aufgefallen ist es jemandem; gefunden wurde es beim Nachsehen
+nach etwas anderem.
+
+**Die Ursache sind die Deploy-Images, nicht die Messdaten:**
+
+| | 13.11. vorher |
+|---|---|
+| Images gesamt | **206 Stück, 48,74 GB** |
+| davon `heizung-api` | **121** |
+| davon `heizung-web` | **121** |
+| in Benutzung | **2** |
+| Volumes (die Datenbanken) | 12,3 GB, darin `event_log` 11 GB |
+| frei | **4,1 GB** |
+
+Jeder Merge erzeugt ein Image-Paar — H-6 gibt jedem Commit seinen eigenen
+Tag, und `build-images.yml` vergibt je Image **zwei** Tags (Quell- und
+Merge-SHA, §5.4). Bei rund 200 MB marginal je Image kostet ein Merge
+etwa **400 MB**. Mit 4,1 GB frei waren das noch **rund zehn Merges**.
+
+**Was bei 100 % passiert:** Postgres nimmt keine Schreibvorgänge mehr an.
+Dann gibt es keine Messwerte, keine Engine-Auswertung und keine
+Relais-Bestätigungen — mitten in der Heizperiode.
+
+### Das Ergebnis vom 14.11.2026, 07:30
+
+| | vorher | nachher |
+|---|---|---|
+| Platte | 95 %, **4,1 GB** frei | **64 %, 27 GB** frei |
+| Images | 206, 48,74 GB | **98, 24,83 GB** |
+| `heizung-*`-Tags | 242 | **29** (auf 14 Image-IDs) |
+| Container | alle Up | alle Up auf `develop-dd6408f` |
+| Messwerte in 5 min | — | 50 von 50 Geräten |
+
+**Gelöscht wurden 213 Tags**, die Sicherheitsprobe war leer, kein
+Container hat etwas gemerkt.
+
+**Die Erwartung lag zu hoch.** Vorhergesagt waren 35 bis 45 GB, geworden
+sind es **27 GB**. Der Grund sind geteilte Schichten: `docker system df`
+nennt die „reclaimable"-Größe, indem es gemeinsame Schichten mehrfach
+zählt. Wer die Zahl als Vorhersage nimmt, rechnet zu gut — **die
+einzige verlässliche Zahl ist `df` danach.**
+
+### Die Befehle, in dieser Reihenfolge
+
+**1. Vorher festhalten.**
+
+```bash
+df -h /
+```
+
+```bash
+docker system df
+```
+
+**2. Probelauf: die Liste erzeugen und zählen.**
+
+```bash
+docker images --filter=reference='ghcr.io/rexei123/heizung-*' --format '{{.Repository}}:{{.Tag}}|{{.CreatedAt}}' | awk -F'|' -v g="$(date -d '7 days ago' +%F)" 'substr($2,1,10) < g {print $1}' | sort > /root/images-weg.txt; wc -l < /root/images-weg.txt
+```
+
+**3. Die Sicherheitsprobe — sie ist nicht optional.**
+
+```bash
+docker ps --format '{{.Image}}' | sort -u > /root/images-laufend.txt; grep -F -x -f /root/images-laufend.txt /root/images-weg.txt; echo "(leere Ausgabe = kein laufendes Image in der Liste)"
+```
+
+*Erwartet: leer.* Steht dort etwas, **nicht weitermachen** — dann ist die
+Datumsgrenze falsch gerechnet oder ein Container läuft auf einem alten
+Image.
+
+**4. Was behalten wird, zum Ansehen.**
+
+```bash
+docker images --filter=reference='ghcr.io/rexei123/heizung-*' --format '{{.Repository}}:{{.Tag}}  {{.CreatedAt}}' | awk -v g="$(date -d '7 days ago' +%F)" '$2 >= g' | sort
+```
+
+**5. Löschen — genau diese Liste.**
+
+```bash
+xargs -r -n 20 -a /root/images-weg.txt docker rmi
+```
+
+**6. Nachher prüfen.**
+
+```bash
+df -h /
+```
+
+```bash
+docker system df
+```
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
+```
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte_5min, count(DISTINCT device_id) AS geraete FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+Der letzte Befehl ist die eigentliche Prüfung (§5.76): `ps` sagt, dass
+Container laufen, dieser sagt, dass **Daten ankommen**. Erwartet sind
+rund 50 Messwerte von rund 50 Geräten.
+
+### Warum kein `prune`
+
+`docker image prune -a` räumt **alles** ab, was kein Container benutzt —
+auch `caddy`, `redis`, `timescaledb`, die ChirpStack-Bilder. Die kommen
+aus fremden Registries, und sie wiederzuholen braucht Netz zu einem
+Zeitpunkt, den niemand wählt.
+
+Und **kein `-f`**: ohne `-f` verweigert `docker rmi` jedes Image, das ein
+Container benutzt, auch ein gestoppter. Diese Verweigerung ist die
+zweite Sicherung hinter der Probe aus Schritt 3.
+
+### Was den Rückfallweg betrifft
+
+§10u rollt über `PIN_SHA` auf einen alten Image-Tag zurück. **Wer alte
+Images löscht, löscht Rückfallziele.** Am 14.11. war `PIN_SHA` in der
+`.env` **leer**, es war also keines angepinnt.
+
+**Vor dem nächsten Aufräumen zu prüfen:**
+
+```bash
+grep '^PIN_SHA=' /opt/heizung-sonnblick/infra/deploy/.env
+```
+
+Steht dort ein Commit, muss dessen Image-Paar **aus der Liste heraus** —
+auch wenn es älter als sieben Tage ist.
+
+**Entschärft, aber nicht aufgehoben:** die Images liegen weiter im GHCR,
+ein Rückfall zieht sie per `docker pull`. Das setzt Netz voraus, und ein
+Rückfall ist genau der Moment, in dem das Netz vielleicht das Problem
+ist. Deshalb sieben Tage lokal behalten und nicht nur den laufenden Tag.
+
+### Was danach noch offen ist
+
+**Es bleiben 23,88 GB „reclaimable" (96 % der Images).** Die 29
+verbliebenen `heizung-*`-Tags liegen auf 14 Image-IDs, von denen **zwei**
+laufen — eine engere Grenze als sieben Tage würde also noch einmal
+ähnlich viel freigeben. Sieben Tage sind der Preis für den Rückfallweg;
+dass dieselbe Menge in einer Woche wieder dasteht, ist genau der Grund
+für die Automatisierung.
+
+**`event_log` wächst mit rund 4,8 GB im Monat** (300 000 Zeilen am Tag
+seit dem 02.10., als mit §5.23 alle Schichten anfingen, immer zu
+schreiben). Die 27 GB sind damit in etwa fünf Monaten aufgebraucht, auch
+ohne einen einzigen Merge. Eine Timescale-Verdichtung ist verfügbar
+(`timescaledb.license = timescale`, 2.26.3) und steht als Vorschlag.
+
+**Querverweise:** §10u (Rückfall über `PIN_SHA`), §5.4 (zwei Tags je
+Image), §5.78 (`docker compose` ohne `-f`), §5.76 (Wirkung statt
+Mechanik), `docs/status/2026-11-14-platte-images.md`.
