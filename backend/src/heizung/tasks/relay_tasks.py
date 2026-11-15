@@ -382,7 +382,17 @@ async def _steuere_eine_zone(
             # ist stumm. ``seit`` kann beides nicht unterscheiden.
             zustand_gemeldet=zustand.gemeldet,
             offen=offen,
-            letzter_ein_befehl=geraet.pending_since,
+            # **Nicht ``pending_since``** (Korrektur vom 15.11.2026).
+            # Der wird geloescht, sobald das Geraet den Zustand meldet
+            # — danach saehe der Waechter „kein Vorbefehl" und setzte
+            # sofort nach. Gemessen an einem Lauf gegen die Datenbank:
+            # **drei** ``0x57`` in fuenf Minuten, also eines alle zwei
+            # Minuten statt alle fuenf.
+            #
+            # Aufgefallen ist das nicht in den Tests: ``REFRESH`` war nur
+            # als reine Funktion geprueft, und dort kommt dieser
+            # Zeitpunkt als Argument herein (Paragraph 5.55).
+            letzter_ein_befehl=geraet.relais_ein_gesendet_at,
             schwellen=wschwellen,
             now=jetzt,
         )
@@ -500,6 +510,12 @@ async def _steuere_eine_zone(
                     ergebnis["uebersprungen"] += 1
                     continue
             await relay_adapter.relais_ein_fuer(geraet.dev_eui, befehl.sekunden or 0)
+            # **Der Zeitpunkt bleibt**, auch wenn der offene Stand spaeter
+            # mit der Bestaetigung verschwindet. Daran rechnet der Abstand
+            # des Nachsetzens (``REFRESH``). Nur beim **Ein**-Befehl: ein
+            # ``0xC1 00`` darf ihn nicht ueberschreiben, sonst traegt die
+            # Spalte zwei Bedeutungen (Paragraph 5.51).
+            geraet.relais_ein_gesendet_at = jetzt
             _setze_offen(geraet, ziel_ein=True, jetzt=jetzt, offen=offen)
             ergebnis["gesendet"] += 1
             continue

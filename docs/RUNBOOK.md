@@ -11893,3 +11893,106 @@ ohne einen einzigen Merge. Eine Timescale-Verdichtung ist verfügbar
 **Querverweise:** §10u (Rückfall über `PIN_SHA`), §5.4 (zwei Tags je
 Image), §5.78 (`docker compose` ohne `-f`), §5.76 (Wirkung statt
 Mechanik), `docs/status/2026-11-14-platte-images.md`.
+
+
+## 10bc. Relais-Timer nachsetzen statt ablaufen lassen (Strategie `refresh`)
+
+**Wofür.** Ein Relais wird nie dauerhaft EIN gesetzt — EIN geht
+ausschließlich über den Timer `0x57`, und der läuft von selbst ab (S1).
+Mit der Vorgabe `expire_and_resend` läuft er **30 Minuten**, danach geht
+das Panel aus, meldet den Wechsel und wird neu gesetzt.
+
+**Was das kostet, gemessen am 14./15.11.2026 an 108 und 109:** jede
+EIN-Phase war 30 Minuten lang, keine einzige länger — in 41 Phasen. Die
+Pause danach dauerte 10 bis 20 Minuten, und keine davon hat der Regler
+gewollt: an der Rezeption war der Raum die ganze Zeit 2 bis 3 K zu kalt
+und der Regler meldete jede Minute `regler: ein`. Der Einschaltanteil lag
+damit bei **60 bis 67 Prozent**, und ein 1,5-kW-Panel liefert dann
+effektiv 0,9 kW.
+
+Mit `refresh` wird der Timer nachgesetzt, solange geheizt werden soll:
+Laufzeit **900 s**, nachgesetzt alle **300 s**. Das Panel geht nicht mehr
+zwischendurch aus.
+
+**Die Freigabe hängt an einer Messung, nicht an einer Meinung.** T3.0 vom
+01.11.2026 hat am Gerät ergeben, dass ein zweites `0x57` während eines
+laufenden Timers den Timer **ersetzt** und „previous state" dabei AUS
+bleibt (Bedeutung **(b)**, §10aw Schritt 4, AE-78 §4). Wäre es anders
+ausgegangen, bliebe `refresh` gesperrt.
+
+### Umschalten
+
+**SSH (heizung-test, root)** — für 108:
+
+```bash
+docker exec deploy-api-1 curl -sS -X PATCH http://localhost:8000/api/v1/devices/109/relay/watchdog-strategy -H 'Content-Type: application/json' -d '{"strategie":"refresh"}'
+```
+
+*Erwartet:* `"strategie":"refresh"`, `"timer_sekunden":900`.
+
+Für 109 Panel dasselbe mit `devices/110`. **Die Geräte-Ids sind 109 (=
+Etikett „108") und 110 (= Etikett „109 Panel")** — die Etiketten tragen
+die Hausnummern, die Ids nicht.
+
+Der Aufruf braucht eine Admin-Anmeldung; ohne Cookie antwortet er 401.
+Der Weg über die Oberfläche ist der kürzere, sobald die Geräteseite einen
+Schalter dafür hat — heute hat sie keinen.
+
+**Kein Downlink in diesem Aufruf.** Die Umschaltung wirkt beim nächsten
+Durchlauf des Orchestrators, also innerhalb einer Minute.
+
+### Wirkung prüfen, nicht Mechanik
+
+Nach zwanzig Minuten, **SSH (Server)**:
+
+```bash
+docker logs deploy-celery_worker-1 --since 20m 2>&1 | grep -c "relais ein dev_eui=70b3d52ddd001f23"
+```
+
+*Erwartet:* **4**, also eines alle fünf Minuten — nicht 20 und nicht 0.
+Bei 0 heizt die Zone gerade nicht (dann ist nichts nachzusetzen); bei
+deutlich mehr als 4 greift der Abstand nicht, und das gehört gemeldet.
+
+Und der eigentliche Nachweis, nach zwei Stunden:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "WITH rr AS (SELECT rr.device_id, d.label, rr.time, rr.relay_on, lead(rr.time) OVER (PARTITION BY rr.device_id ORDER BY rr.time) AS bis FROM relay_reading rr JOIN device d ON d.id = rr.device_id WHERE rr.time > now() - interval '2 hours' AND rr.relay_on IS NOT NULL) SELECT label, round(100.0 * sum(CASE WHEN relay_on THEN EXTRACT(EPOCH FROM (bis-time)) ELSE 0 END) / nullif(sum(EXTRACT(EPOCH FROM (bis-time))),0)) AS ein_proz FROM rr WHERE bis IS NOT NULL GROUP BY label ORDER BY label;"
+```
+
+*Erwartet:* der Einschaltanteil steigt über die 67 Prozent, die
+`expire_and_resend` als Obergrenze hatte — bei durchgehendem Heizwunsch
+Richtung 100.
+
+### Funklast
+
+Ein `0x57` sind 4 Byte Nutzlast, mit LoRaWAN-Rahmen 17 Byte auf Luft. Bei
+RX2 (DR0, SF12, 125 kHz) kostet das **1,32 s**. Zwölf je Stunde sind
+**15,8 s** je Relais, bei zwei Relais **31,7 s**. Das Band um
+869,525 MHz ist dasjenige mit der höheren Erlaubnis; die Zahl ist in
+jedem Fall unter einem Prozent. Ein Test nagelt die zwölf fest
+(`test_die_funklast_je_stunde_bleibt_bei_zwoelf`) — ändert sich die Zahl,
+ist das eine Entscheidung und keine Nebenwirkung.
+
+### Verlorene Nachsetzung
+
+Ein `0x57` wird unbestätigt gesendet, und das Gerät meldet keinen
+Zustandswechsel — es war ja schon EIN. Der Wächter erfährt also **nicht**,
+ob die Nachsetzung angekommen ist, und er muss es auch nicht: bei 900 s
+Laufzeit und 300 s Abstand gehen **drei** Nachsetzungen hinaus, bevor der
+Timer ablaufen könnte. Zwei dürfen verloren gehen. Gehen drei in Folge
+verloren, geht das Panel aus, meldet es, und der normale Weg setzt es neu
+— also derselbe Rückfall wie bei `expire_and_resend`, nur selten.
+
+### Rückweg
+
+```bash
+docker exec deploy-api-1 curl -sS -X PATCH http://localhost:8000/api/v1/devices/109/relay/watchdog-strategy -H 'Content-Type: application/json' -d '{"strategie":"expire_and_resend"}'
+```
+
+Wirkt beim nächsten Durchlauf. Der laufende Timer läuft noch bis zu 15
+Minuten weiter und wird dann nicht mehr nachgesetzt — es gibt also keinen
+Moment ohne Schutz.
+
+**Querverweise:** §10aw Schritt 4 (T3.0, die Messung, an der die Freigabe
+hängt), AE-78 §4, §5.76 (Wirkung statt Mechanik), §0 S1 (nie dauerhaft
+EIN), `docs/status/2026-11-15-relais-timer-nachsetzen.md`.
