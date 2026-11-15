@@ -80,8 +80,8 @@ _EXPECTED_KEYS = {
     # 13.11.2026: Zonen, in denen ein Relais **in Betrieb** ist und kein
     # aktueller Fuehlerwert mehr ankommt. Und auch diese zwei Zeilen
     # stehen hier, weil der Test rot war — genau dafuer ist er da.
-    "relais_fuehler_stumme_zonen",
-    "relais_fuehler_stumm_min",
+    "relais_zonen_stumm",
+    "relais_zonen_stille_min",
 }
 
 

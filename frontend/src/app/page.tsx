@@ -66,8 +66,8 @@ const CARD_META: { label: string; icon: string }[] = [
   { label: "Zimmer zu warm", icon: "local_fire_department" },
   // Sprint 25 T3
   { label: "Befehle nicht angenommen", icon: "sync_problem" },
-  // 13.11.2026
-  { label: "Fühler Relais-Zone", icon: "sensors_off" },
+  // 13.11.2026, auf beide Geräte erweitert am 14.11.2026
+  { label: "Relais-Zone stumm", icon: "sensors_off" },
 ];
 
 // Sprint 15f (AE-66): Ampel-Status -> KpiCard-Tone. tone kommt AUSSCHLIESSLICH
@@ -304,19 +304,26 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       // 12./13.11. vierzehn Stunden stumm und dabei `degraded` — die
       // Kachel daneben zeigte 102 von 103, und niemand liest daraus,
       // dass die Rezeption blind ist (§5.73: zwei Fragen, zwei Achsen).
-      label: "Fühler Relais-Zone",
-      value: data.relais_fuehler_stumme_zonen,
+      //
+      // **Der Name nennt seit 14.11.2026 die Zone, nicht den Fühler.**
+      // Gezählt wird, wenn der Fühler **oder** das Relais seit mehr als
+      // einer halben Stunde nichts gemeldet hat. Eine Kachel „Fühler
+      // Relais-Zone", die auch bei einem stummen Relais hochgeht, wäre
+      // genau die Sorte Beschriftung, die man später für einen Befund
+      // liest (§5.77).
+      label: "Relais-Zone stumm",
+      value: data.relais_zonen_stumm,
       icon: "sensors_off",
-      tone: data.relais_fuehler_stumme_zonen > 0 ? "danger-soft" : "neutral",
+      tone: data.relais_zonen_stumm > 0 ? "danger-soft" : "neutral",
       // Die Zusatzzeile nennt die **längste** Stille, nicht die
       // Gesamtzahl der Minuten: bei mehreren Zonen ist die schlimmste die
       // handlungsrelevante. `null` heißt hier „kein Alter vorhanden" —
       // entweder ist keine Zone stumm, oder der stummen Zone ist gar kein
       // Fühler zugeordnet. Beides wäre mit einer 0 falsch beschrieben.
       subValue:
-        data.relais_fuehler_stumme_zonen > 0 && data.relais_fuehler_stumm_min !== null
-          ? `längste Stille ${data.relais_fuehler_stumm_min} min`
-          : data.relais_fuehler_stumme_zonen > 0
+        data.relais_zonen_stumm > 0 && data.relais_zonen_stille_min !== null
+          ? `längste Stille ${data.relais_zonen_stille_min} min`
+          : data.relais_zonen_stumm > 0
             ? "kein Fühler zugeordnet"
             : undefined,
       // **Kein `href`**, und das ist die Regel dieser Datei und keine

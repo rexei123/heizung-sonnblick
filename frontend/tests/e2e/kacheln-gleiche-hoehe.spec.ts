@@ -41,8 +41,8 @@ interface Kpi {
   funkempfang_meldungen_10min: number;
   fenstererkennung_aktiv: boolean;
   befehle_nicht_angenommen: number;
-  relais_fuehler_stumme_zonen: number;
-  relais_fuehler_stumm_min: number | null;
+  relais_zonen_stumm: number;
+  relais_zonen_stille_min: number | null;
 }
 
 const BASE_KPI: Kpi = {
@@ -64,8 +64,8 @@ const BASE_KPI: Kpi = {
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
   befehle_nicht_angenommen: 0,
-  relais_fuehler_stumme_zonen: 0,
-  relais_fuehler_stumm_min: null,
+  relais_zonen_stumm: 0,
+  relais_zonen_stille_min: null,
 };
 
 async function mockDashboard(

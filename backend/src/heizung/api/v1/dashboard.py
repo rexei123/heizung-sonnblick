@@ -22,7 +22,7 @@ from heizung.db import get_session
 from heizung.models.user import User
 from heizung.schemas.dashboard import DashboardKpiRead
 from heizung.services import dashboard_aggregates as agg
-from heizung.services import funkempfang, relais_fuehler
+from heizung.services import funkempfang, relais_zone_melder
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -43,13 +43,13 @@ async def get_dashboard_kpi(
         gelb_max_min=settings.funkempfang_gelb_max_min,
     )
     # 13.11.2026: dieselbe Quelle wie der Alarm-Task
-    # (``tasks/funk_tasks.pruefe_relais_fuehler``). Kachel und Mail aus
+    # (``tasks/funk_tasks.pruefe_relais_zone``). Kachel und Mail aus
     # einer Funktion — zwei Ableitungen derselben Aussage koennten
     # auseinanderlaufen, und dann findet jemand eine stille Kachel zu
     # einer Mail (Paragraph 5.53, dieselbe Haltung wie bei
     # ``funkempfang``).
-    relais_zonen = await relais_fuehler.lies_relais_zonen(
-        session, grenze_min=settings.relais_fuehler_stumm_min
+    relais_zonen = await relais_zone_melder.lies_relais_zonen(
+        session, grenze_min=settings.relais_zone_stumm_min
     )
     stumme = [z for z in relais_zonen if z.stumm]
     alter_werte = [z.alter_min for z in stumme if z.alter_min is not None]
@@ -76,6 +76,6 @@ async def get_dashboard_kpi(
         befehle_nicht_angenommen=await agg.count_befehle_nicht_angenommen(session),
         valve_check_count=valve_check,
         room_too_warm_count=room_too_warm,
-        relais_fuehler_stumme_zonen=len(stumme),
-        relais_fuehler_stumm_min=max(alter_werte) if alter_werte else None,
+        relais_zonen_stumm=len(stumme),
+        relais_zonen_stille_min=max(alter_werte) if alter_werte else None,
     )

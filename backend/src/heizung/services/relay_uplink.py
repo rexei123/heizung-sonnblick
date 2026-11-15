@@ -43,7 +43,7 @@ from heizung.models.enums import DeviceKind
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.relay_reading import RelayReading
 from heizung.models.room import Room
-from heizung.services import relay_service
+from heizung.services import relay_service, relay_state
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,57 @@ async def _vermerke_ruecklesungen(
     }
 
 
+async def _zaehle_einschaltung(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    neu: bool | None,
+) -> bool:
+    """Zaehlt eine beobachtete Einschaltung. Gibt zurueck, ob gezaehlt wurde.
+
+    Gezaehlt wird **ein Wechsel von aus auf ein**, und nur der. Die drei
+    Faelle, die nicht zaehlen, haben jeder einen Grund:
+
+    ``neu is None``
+        Eine Zeile ohne ``relay_on`` sagt nichts ueber den Zustand (etwa
+        eine reine Befehlsantwort ohne Keepalive-Schwanz). Sie darf
+        keinen Wechsel vortaeuschen — dieselbe Regel wie in
+        ``relay_state``.
+
+    ``vorher is None``
+        **Noch nie etwas gehoert.** Dass die erste Meldung „ein" sagt,
+        heisst nicht, dass das Geraet gerade angelaufen ist — es kann
+        seit Tagen laufen. Eine Einschaltung zu zaehlen, die niemand
+        gesehen hat, waere eine Behauptung; der Zaehler soll
+        Beobachtungen zaehlen.
+
+    ``vorher is True``
+        Kein Wechsel. Das ist zugleich die **Wiederholungsfestigkeit**:
+        wird dieselbe Meldung zweimal verarbeitet, hat der erste Durchlauf
+        die Zeile eingefuegt, der zweite sieht sie als Vorzustand und
+        zaehlt nicht erneut. Deshalb steht der Aufruf **vor** dem
+        Einfuegen und nicht danach.
+    """
+    if neu is not True:
+        return False
+
+    vorher = await relay_state.bestaetigter_zustand(session, device_id)
+    if vorher.ein is not False:
+        return False
+
+    geraet = await session.get(Device, device_id)
+    if geraet is None:
+        return False
+
+    geraet.switch_cycles += 1
+    logger.info(
+        "einschaltung gezaehlt device_id=%s stand=%s",
+        device_id,
+        geraet.switch_cycles,
+    )
+    return True
+
+
 async def verarbeite_relais_uplink(
     session: AsyncSession,
     *,
@@ -177,6 +228,33 @@ async def verarbeite_relais_uplink(
     Returns ein kleines Protokoll fuer den Aufrufer-Log.
     """
     werte = werte_aus_codec(obj, device_id=device_id, zeit=zeit, fcnt=fcnt)
+
+    # **Der Schaltzyklus wird hier gezaehlt, vor dem Einfuegen** (Befund
+    # des Betreibers, 12.11.2026). Vorher zaehlte ihn der Waechter, wenn
+    # ein von ihm abgesetzter Befehl bestaetigt wurde — und verlor ihn
+    # genau im Fall, fuer den der Zaehler gebaut ist.
+    #
+    # Gemessen am 12.11.: um 09:38 ging ein EIN hinaus, um 09:40 kippte
+    # der Wunsch auf AUS (der Fuehler war wieder im Haus und ueber dem
+    # Soll), und der Waechter verwarf den offenen Stand — richtig so,
+    # sonst bremst sein Backoff einen Befehl, den niemand mehr will. Als
+    # die Bestaetigung um 09:47 kam, gab es keinen offenen Stand mehr, an
+    # dem sie haengen konnte. Das Relais hat geschaltet und der Zaehler
+    # stand auf 1 statt auf 2.
+    #
+    # Dieselbe Spur sagt, warum **die Meldung** die richtige Stelle ist:
+    # der Zustand, den das Geraet meldet, ist die einzige belastbare
+    # Quelle (dieselbe Haltung wie in ``relay_state``). Was wir gesendet
+    # haben, steht in ``device.pending_*`` und ist eine Absicht.
+    #
+    # **Was der Zaehler damit sagt, hat sich geaendert**, und das Etikett
+    # in der Oberflaeche ist im selben Schritt nachgezogen: gezaehlt wird
+    # jede **beobachtete** Einschaltung, auch eine ueber den Handschalter
+    # oder nach einer Stromrueckkehr. Das ist mehr als „was der
+    # Orchestrator bestaetigt bekam" und genau das, was der Betreiber
+    # wissen will — wie oft das Panel wirklich angelaufen ist.
+    gezaehlt = await _zaehle_einschaltung(session, device_id=device_id, neu=werte["relay_on"])
+
     await session.execute(
         pg_insert(RelayReading)
         .values(**werte)
@@ -187,6 +265,7 @@ async def verarbeite_relais_uplink(
         "relay_on": werte["relay_on"],
         "power_w": werte["power_w"],
         "sperre_gesetzt": False,
+        "einschaltung_gezaehlt": gezaehlt,
     }
 
     protokoll["ruecklesungen"] = await _vermerke_ruecklesungen(

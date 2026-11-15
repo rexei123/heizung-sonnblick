@@ -6,7 +6,7 @@ waere schneller zu lesen und beim ersten verpassten Uplink falsch
 (§5.53). Bei einem Schaltzustand ist die falsche Haelfte der Kopie genau
 die, auf die sich der Waechter verlassen wuerde.
 
-Abgeleitet werden **zwei** Angaben, und die zweite ist die schwierigere:
+Abgeleitet werden **drei** Angaben, und die zweite ist die schwierigere:
 
 - **was** gilt: der ``relay_on`` der jüngsten Zeile, die ihn fuehrt.
 - **seit wann** es gilt: der Zeitpunkt der Zeile, mit der dieser Zustand
@@ -15,6 +15,18 @@ Abgeleitet werden **zwei** Angaben, und die zweite ist die schwierigere:
   Mindestlaufzeit daran, und wer den jüngsten Zeitpunkt nimmt, bekommt
   eine Mindestlaufzeit, die bei jedem Keepalive neu beginnt und damit
   nie ablaeuft.
+- **wann es zuletzt gemeldet wurde**: der Zeitpunkt der jüngsten Zeile.
+  Das ist die Angabe, an der der Waechter entscheidet, ob er dem Zustand
+  noch glaubt (``gemeldet``, 14.11.2026).
+
+**``seit`` und ``gemeldet`` sind zwei verschiedene Zeiten, und die
+Verwechslung ist teuer.** Ein Relais, das seit zwei Stunden EIN meldet,
+hat ``seit`` vor zwei Stunden und ``gemeldet`` vor zehn Minuten — es ist
+frisch. Ein Relais, das vor zwei Stunden das letzte Mal EIN gemeldet hat
+und seither schweigt, hat **dieselbe** ``seit`` und ein ``gemeldet`` vor
+zwei Stunden — es ist stumm, und was dort gerade gilt, weiss niemand.
+Wer die Frische an ``seit`` misst, haelt ein laufendes Panel fuer stumm
+und ein stummes fuer laufend.
 
 ``NULL``-Zeilen zaehlen nicht mit: eine Zeile ohne ``relay_on`` (etwa
 eine reine Befehlsantwort ohne Keepalive-Schwanz) sagt nichts ueber den
@@ -40,10 +52,16 @@ class RelaisZustand:
     Zustand fuehrt. Das ist nicht dasselbe wie AUS, und der Waechter
     behandelt es getrennt: bei unbekanntem Zustand wird nicht
     eingeschaltet.
+
+    ``gemeldet`` ist der Zeitpunkt der jüngsten Zeile, die den Zustand
+    fuehrt — nicht der Beginn des Zustands (``seit``). Ist ``ein`` nicht
+    ``None``, dann ist auch ``gemeldet`` gesetzt; beide kommen aus
+    derselben Zeile.
     """
 
     ein: bool | None
     seit: datetime | None
+    gemeldet: datetime | None
 
 
 async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZustand:
@@ -66,7 +84,7 @@ async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZ
     ).first()
 
     if jüngste is None:
-        return RelaisZustand(ein=None, seit=None)
+        return RelaisZustand(ein=None, seit=None, gemeldet=None)
 
     zeit, ein = jüngste
 
@@ -96,7 +114,7 @@ async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZ
                 .limit(1)
             )
         ).scalar()
-        return RelaisZustand(ein=ein, seit=erste)
+        return RelaisZustand(ein=ein, seit=erste, gemeldet=zeit)
 
     # Die erste Zeile **nach** dem Wechsel ist der Beginn.
     beginn = (
@@ -110,4 +128,4 @@ async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZ
         )
     ).scalar()
 
-    return RelaisZustand(ein=ein, seit=beginn or zeit)
+    return RelaisZustand(ein=ein, seit=beginn or zeit, gemeldet=zeit)
