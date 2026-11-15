@@ -14,7 +14,6 @@ CRUD:
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
@@ -36,8 +35,8 @@ from heizung.schemas.heating_zone import (
 from heizung.services import override_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
-    latest_hard_clamp_setpoint_per_room,
-    latest_hard_clamp_zone_setpoints,
+    SollStand,
+    lies_soll_stand,
 )
 from heizung.services.geraetegrenzen import soll_grenzen_je_zone
 from heizung.services.zone_aggregates import (
@@ -53,8 +52,7 @@ async def _build_zone_read(
     zone: HeatingZone,
     *,
     mean_temps: dict[int, ZonenIst] | None = None,
-    engine_setpoints: dict[int, Decimal | None] | None = None,
-    zonen_setpoints: dict[int, dict[int, int]] | None = None,
+    soll_stand: SollStand | None = None,
     luecken: dict[int, GeraeteLuecke | None] | None = None,
 ) -> HeatingZoneRead:
     """Sprint 14d FU-5 + 14e FU-1/FU-2: HeatingZoneRead + Anreicherungen.
@@ -115,14 +113,14 @@ async def _build_zone_read(
     # Befund: eine **Zonen**-Uebersteuerung (die Karte zeigte 21 neben
     # ihrer eigenen aktiven Uebersteuerung auf 23) und eine Zone, deren
     # Geraete alle ausgefallen sind.
-    if engine_setpoints is None:
-        engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
-    if zonen_setpoints is None:
-        zonen_setpoints = await latest_hard_clamp_zone_setpoints(session, [zone.room_id])
-    zonen_wert = zonen_setpoints.get(zone.room_id, {}).get(zone.id)
-    update["engine_setpoint_c"] = (
-        Decimal(zonen_wert) if zonen_wert is not None else engine_setpoints.get(zone.room_id)
-    )
+    #
+    # **Seit dem 15.11.2026 ueber ``SollStand.fuer``**, denselben Helfer,
+    # den der Relais-Regler benutzt. Der Rueckfall auf den Zimmerwert ist
+    # unveraendert; er stand hier nur als eigene Zeile, und genau diese
+    # Zeile fehlte im Regler (Paragraph 5.53).
+    if soll_stand is None:
+        soll_stand = await lies_soll_stand(session, [zone.room_id])
+    update["engine_setpoint_c"] = soll_stand.fuer(zone.room_id, zone.id)
 
     return read.model_copy(update=update)
 
@@ -191,16 +189,14 @@ async def list_heating_zones(
     mean_temps = await latest_mean_temp_per_zone(session, [z.id for z in zones])
     # Eine Abfrage fuer alle Zonen des Zimmers, nicht eine je Karte.
     luecken = await geraete_luecke_per_zone(session, [z.id for z in zones])
-    engine_setpoints = await latest_hard_clamp_setpoint_per_room(session, [room_id])
-    zonen_setpoints = await latest_hard_clamp_zone_setpoints(session, [room_id])
+    soll_stand = await lies_soll_stand(session, [room_id])
     return [
         await _build_zone_read(
             session,
             zone,
             mean_temps=mean_temps,
             luecken=luecken,
-            engine_setpoints=engine_setpoints,
-            zonen_setpoints=zonen_setpoints,
+            soll_stand=soll_stand,
         )
         for zone in zones
     ]
