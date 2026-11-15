@@ -10466,6 +10466,42 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 
 ## 10av. Funk am Rand in Ordnung bringen: Reserve auf 20 dB, Relais auf DR1 (Rollout Mo 16.11.2026 nachmittags)
 
+> **Der Plugin-Teil ist zurückgezogen. Stand 15.11.2026, 09:00.**
+>
+> Beim Rollout am 15.11. hat ChirpStack 4.17 die Plugin-Datei beim Start
+> geladen und abgebrochen:
+>
+> ```
+> Setting up ADR plugin file_path=/etc/chirpstack/adr-plugins/relais-feste-datenrate.js
+> Error: Get id function: JS error: Error converting from js 'undefined' into type 'function'
+> ```
+>
+> Der Dienst lief daraufhin in Schleife. **Von 08:53 bis 09:00 hat die
+> Anlage nichts verarbeitet** — keine Uplinks, keine Downlinks. Die
+> Notreparatur steht in §10bb; der `adr_plugins`-Eintrag ist seither aus
+> `chirpstack.toml` heraus.
+>
+> **Was von dieser Liste gilt:** alles zur **Reserve**
+> (`installation_margin = 20.0`) — Schritt 0, 1, 2, 4, 4a, 4b, 5b, 6.
+> Sie ist eine Zahl in der Regionsdatei, lädt keinen Code und war an dem
+> Ausfall nicht beteiligt.
+>
+> **Was nicht gilt:** Schritt 3 (Profil zuweisen), 5a und 5c — alles, was
+> das Plugin betrifft. **Schritt 3 nicht ausführen.** Ein Geräteprofil,
+> das auf ein nicht geladenes Plugin zeigt, läuft bei jedem Uplink des
+> Relais in einen Fehler.
+>
+> **Folge, die bleibt:** 108 hängt auf DR3, und der Standard-Algorithmus
+> senkt die Datenrate **nie** von selbst. Die 16 Prozent Verlust an 108
+> bleiben bis zum zweiten Versuch. Das ist die bewusste Wahl — 16 Prozent
+> Verlust an einem Relais gegen einen Dienst, der nicht startet.
+>
+> **Vor dem zweiten Versuch** ist zu klären, in welcher Form ChirpStack
+> 4.17 `id()` erwartet, und zwar **am Quelltext von ChirpStack**, nicht
+> an der Doku. Dazu gehört ein Test, der die Datei so lädt wie ChirpStack
+> — die 54 bestehenden Tests laden sie unter **Node** und waren grün,
+> während der Dienst nicht startete (§5.55).
+
 > **Das Kriterium aus §10au ist erfüllt.** Es lautete „Verlust über 5 % am
 > Relais **und** deutlich niedriger bei den Vickis". Gemessen am
 > 12.11.2026:
