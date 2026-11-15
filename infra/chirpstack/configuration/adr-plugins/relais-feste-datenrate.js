@@ -1,9 +1,17 @@
 /**
  * Feste Datenrate fuer das Geraeteprofil "Relais 16ASPM".
  *
- * VORBEREITET, NICHT AUSGEROLLT (Stand 02.11.2026). Die Entscheidung
- * haengt an der Messung am Endplatz, RUNBOOK Paragraph 10au. Eingebaut
- * wird im Rotationsfenster am Mittwoch, nicht zwischendurch.
+ * AUSGEROLLT AM 16.11.2026. Die Entscheidung hing an der Messung am
+ * Endplatz (RUNBOOK Paragraph 10au), und das Kriterium ist seit dem
+ * 12.11.2026 erfuellt: Relais 108 verlor an diesem Vormittag **16 Prozent**
+ * seiner Meldungen (4 von 25), der Fuehler 056 im selben Raum **3,6
+ * Prozent**, der Fuehler 027 an der Bar **0**.
+ *
+ * Die Datei stand bis dahin auf DR3 -- gebaut gegen das Problem von 109,
+ * das auf DR5 festhing. Fuer 108 waere das wirkungslos gewesen: ChirpStacks
+ * Standard-Algorithmus hatte es am 12.11. um 09:04 auf DR2 und um 09:27 auf
+ * **DR3** hochgezogen, und dort trug der Link nicht mehr. Ziel ist deshalb
+ * **DR1**.
  *
  * ## Warum ein Plugin und kein Geraetebefehl
  *
@@ -15,18 +23,32 @@
  * Anwendungs-Nutzlasten -- LinkADRReq ist ein MAC-Befehl, den der Server
  * selbst schickt.
  *
- * ## Warum 109 auf SF7 festhaengt
+ * ## Warum die Geraete dort landen, wo sie landen
  *
- * ADR laeuft nur, wenn das **Geraet** das ADR-Bit setzt, und
- * ChirpStacks Standard-Algorithmus **senkt die Datenrate nie** -- er
- * erhoeht sie nur. 109 ist einmal auf DR5 hochgezogen worden und bleibt
- * dort, auch bei RSSI -113 dBm. Das ist keine Fehlfunktion, das ist der
- * Algorithmus.
+ * ADR laeuft nur, wenn das **Geraet** das ADR-Bit setzt -- und beide
+ * Relais setzen es, am 12.11. zweimal mit ``LinkADRReq acknowledged``
+ * belegt. Der Standard-Algorithmus **senkt die Datenrate nie**, er erhoeht
+ * sie nur, und er **senkt die Sendeleistung**, sobald die Reserve gut
+ * aussieht. 109 ist einmal auf DR5 hochgezogen worden und bleibt dort,
+ * auch bei RSSI -113 dBm; 108 ist auf DR3 gezogen worden und hat dort 16
+ * Prozent verloren.
+ *
+ * **Die strukturelle Schwaeche:** der Algorithmus rechnet auf den
+ * Meldungen, die **ankommen**. Die ausgefallenen sieht er nicht. Er kann
+ * sich also in eine Einstellung hineinoptimieren, aus der er nicht
+ * zurueckfindet -- und bei Funkstille hat er gar keine Datenpunkte mehr.
+ * Das ist keine Fehlfunktion, das ist der Algorithmus.
  *
  * ## Was dieses Plugin tut
  *
- * DR3 (SF9) festnageln und jeden Uplink zweimal senden lassen
- * (nbTrans 2), bei voller Sendeleistung (txPowerIndex 0).
+ * DR1 (SF11) festnageln, jeden Uplink zweimal senden lassen (nbTrans 2),
+ * bei voller Sendeleistung (txPowerIndex 0).
+ *
+ * **Warum DR1 und nicht DR0.** DR1 gibt 5 dB gegen DR3, DR0 gaebe 7,5 --
+ * aber DR0 verbraucht bei nbTrans 2 die halbe Duty-Cycle-Grenze (0,49
+ * Prozent) und laesst fuer Antworten und Wiederholungen keinen Platz. DR1
+ * liegt bei 0,25 Prozent. DR0 bleibt der Rueckfall, falls DR1 noch
+ * verliert.
  *
  * **Nur fuer das Relais-Profil.** Zugewiesen wird es je Geraeteprofil
  * ueber adr_algorithm_id; die rund hundert Vickis bleiben beim
@@ -36,10 +58,15 @@
  *
  * ## Sendezeit, gerechnet
  *
- * Bei 26 Byte Nutzlast und BW 125 kostet ein Uplink bei SF7 82 ms und
- * bei SF9 267 ms. Mit Keepalive alle zehn Minuten und nbTrans 2 sind das
- * 3,2 s/h, also 0,09 % -- die 1-%-Grenze ist nicht in Sicht. Sendezeit
- * ist hier kein Argument gegen irgendetwas.
+ * Bei 26 Byte Nutzlast und BW 125 kostet ein Uplink bei SF7 82 ms, bei
+ * SF9 267 ms und bei **SF11 (DR1) 740 ms**. Mit Keepalive alle zehn
+ * Minuten und nbTrans 2 sind das 1,48 s je Vorgang, also 8,9 s/h und
+ * **0,25 %** -- ein Viertel der 1-%-Grenze.
+ *
+ * Zum Vergleich DR0 (SF12, 1483 ms): 0,49 %, also die Haelfte der Grenze.
+ * Das ist der Grund fuer DR1, und Sendezeit ist damit das einzige
+ * Argument, das hier ueberhaupt eines ist -- das Relais haengt an der
+ * Netzspannung, Batterie spart hier niemand.
  *
  * Teurer wird dagegen ein Downlink in RX1: er nimmt die Datenrate des
  * Uplinks, also 165 ms statt 51 ms. Das bleibt weit unter den 1319 ms,
@@ -66,7 +93,7 @@
 
 /** Anzeigename im Geraeteprofil. */
 function name() {
-  return "Relais 16ASPM: feste Datenrate DR3, zwei Wiederholungen";
+  return "Relais 16ASPM: feste Datenrate DR1, zwei Wiederholungen";
 }
 
 /**
@@ -76,11 +103,11 @@ function name() {
  * stillschweigend.
  */
 function id() {
-  return "relais_fest_dr3";
+  return "relais_fest_dr1";
 }
 
-/** Zieldatenrate: DR3 ist SF9 in EU868. */
-var ZIEL_DR = 3;
+/** Zieldatenrate: DR1 ist SF11 in EU868. */
+var ZIEL_DR = 1;
 
 /** Jeden Uplink zweimal. Gegen Einzelverluste, nicht gegen schlechten Link. */
 var WIEDERHOLUNGEN = 2;
