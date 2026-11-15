@@ -10308,7 +10308,13 @@ Typs.
 **Wofür.** 109 steht seit **Montag, 02.11.2026, etwa 07:05** am Endplatz
 in der Dose am Eingang — nur Zuleitung, kein Panel, zurückgenommen. Nach
 12 bis 24 Stunden entscheidet die Messung, ob das Relais-Profil ein
-eigenes ADR-Plugin bekommt (DR3, `nbTrans` 2).
+eigenes ADR-Plugin bekommt.
+
+> **Nachtrag 13.11.2026.** Die Entscheidung ist gefallen, und das Ziel ist
+> **DR1**, nicht DR3 wie hier ursprünglich geplant: ChirpStacks
+> Standard-Algorithmus hat 108 am 12.11. selbst auf DR3 gezogen, und dort
+> verlor es 16 % seiner Meldungen. Die Tabelle in Schritt 3 unten ist
+> entsprechend nachgezogen. Ausrollen: §10av.
 
 **Warum erst jetzt.** Die Messung vom 01.11. (rund 30 % Verlust, RSSI
 −106 bis −113 dBm) entstand, als das Relais noch nicht in der Dose saß.
@@ -10393,9 +10399,16 @@ folgenlos.
 | Befund | Weg |
 |---|---|
 | Verlust **unter 5 %** | nichts tun. Die Dose ist gut genug — **unabhängig vom Pegel** |
-| Verlust **5 bis 15 %** | ADR-Plugin im Rotationsfenster (Mittwoch), DR3 ohne `nbTrans` |
-| Verlust **über 15 %** | ADR-Plugin mit DR3 **und** `nbTrans 2`; zusätzlich prüfen, ob die Dose anders liegen kann |
+| Verlust **5 bis 15 %** | ADR-Plugin im Wartungsfenster, **DR2** ohne `nbTrans` |
+| Verlust **über 15 %** | ADR-Plugin mit **DR1** **und** `nbTrans 2`; zusätzlich prüfen, ob die Dose anders liegen kann |
 | Vickis haben denselben Verlust | kein Relais-Problem. Gateway und Standort prüfen, nicht das Profil |
+
+**Die Datenraten in dieser Tabelle sind am 13.11.2026 um eine Stufe
+gesenkt worden.** Sie standen auf DR3 für beide Zeilen, und DR3 ist genau
+die Rate, auf der 108 am 12.11. 16 % verloren hat — eine Vorgabe, die den
+gemessenen Schaden als Abhilfe empfiehlt. Der Grund für den Fehler ist
+derselbe wie beim Algorithmus: die Zahlen stammten von 109 **ohne Panel**
+in der Dose, nicht von einem Relais unter Last.
 
 **Der Verlust entscheidet, der Pegel erklärt — korrigiert am 03.11.2026.**
 Hier stand in Zeile 1 zusätzlich „und RSSI besser als −105 dBm", als
@@ -10451,74 +10464,147 @@ selbst schickt; er lässt sich dort nicht eintippen.
 **Querverweise:** §10at (109 ohne Last in Gang bringen), AE-78 §14 (der
 Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`.
 
-## 10av. ADR-Plugin für das Relais-Profil einbauen (vorbereitet und nicht ausgerollt, Stand 03.11.2026)
+## 10av. Funk am Rand in Ordnung bringen: Reserve auf 20 dB, Relais auf DR1 (Rollout Mo 16.11.2026 nachmittags)
 
-> **Nicht ausgerollt — Entscheidung des Betreibers vom 03.11.2026.** Die
-> Messung aus §10au hat es nicht verlangt: **2,1 % Verlust** an 109 am
-> Endplatz, Vickis 0 bis 1,4 %. Das Plugin behebt nichts, was gemessen
-> wurde, und kostet einen Neustart von ChirpStack.
+> **Das Kriterium aus §10au ist erfüllt.** Es lautete „Verlust über 5 % am
+> Relais **und** deutlich niedriger bei den Vickis". Gemessen am
+> 12.11.2026:
 >
-> **Die Anleitung bleibt deshalb unverändert stehen, nicht als Altlast.**
-> Sie gilt, sobald 109 mit Panel an seinen endgültigen Platz kommt, ein
-> zweites Relais weiter weg sitzt, oder der Verlust bei unveränderten
-> Vickis über 5 % steigt. Begründung: AE-78 §15.
+> | Gerät | Ort | DR | Verlust |
+> |---|---|---|---|
+> | **108** | Rezeption, Panel | 3 | **16,0 %** (4 von 25) |
+> | 056 Eingang | Rezeption, derselbe Raum | 5 | 3,6 % |
+> | 027 Bar | Bar | 5 | 0,0 % |
 
-**Nur ausführen, wenn die Messung aus §10au es verlangt** (Verlust über
-5 % am Relais **und** deutlich niedriger bei den Vickis). Der Einbau
-gehört in das Rotationsfenster am Mittwoch, nicht in einen laufenden
-Betriebstag: ChirpStack muss dafür neu starten, und daran hängen rund
-hundert Vickis.
+**Zwei Maßnahmen, zwei Ursachen.** ChirpStacks Standard-Algorithmus hat
+an verschiedenen Geräten verschieden geschadet, und jede Hälfte braucht
+ihr eigenes Mittel:
 
-**Was die Datei tut.** `DR3` (SF9) festnageln, jeden Uplink zweimal
-senden (`nbTrans 2`), volle Sendeleistung — **nur** für Geräte mit dem
-Profil „Relais 16ASPM". Die Begründung steht im Kopf der Datei
-`infra/chirpstack/configuration/adr-plugins/relais-feste-datenrate.js`.
+| Ursache | Gerät | Mittel |
+|---|---|---|
+| Sendeleistung weggenommen | **die Vickis**, 90 von 109 auf ca. 2 dBm | `installation_margin = 20.0` in `region_eu868.toml` — **eine Zahl, hausweit** |
+| Datenrate hochgezogen | **108** auf DR3 | ADR-Plugin `relais-feste-datenrate.js` am Profil „Relais 16ASPM" |
 
-**Warum überhaupt ein Plugin.** Es gibt im 16ASPM-Befehlssatz **keinen**
-Befehl für ADR, Datenrate, Spreizfaktor oder Sendeleistung, und
-ChirpStacks Warteschlange nimmt Anwendungs-Nutzlasten — `LinkADRReq` ist
-ein MAC-Befehl, den der Server selbst schickt. Dazu: ADR läuft nur, wenn
-das Gerät das ADR-Bit setzt, und der Standard-Algorithmus **senkt die
-Datenrate nie**. Das ist der strukturelle Grund, warum 109 auf DR5
-festhängt.
+**Warum für die Vickis kein Plugin.** Es war eines gebaut (feste
+Leistung, Datenrate adaptiv) und ist wieder entfallen. Die Reserve löst
+dasselbe mit einer Zahl: kein Sonderprofil, kein Umhängen, keine
+Abweichungs-Liste, keine Codec-Falle (§5.22). Ein Mechanismus weniger
+(§0 S6).
 
-**Warum nicht `region_eu868.toml`.** `min_dr`/`max_dr` dort gelten
-**regionsweit**, also für alle hundert Vickis. Das Plugin wird dagegen je
-**Geräteprofil** zugewiesen.
+**Warum für das Relais keine Zahl.** Der Algorithmus **senkt die
+Datenrate nie** — nur eine Klammer greift, wenn `dr > max_dr`. 108 ist
+auf DR3 eingeklemmt und kommt von selbst nicht zurück, egal wie die
+Reserve steht.
 
-### Schritt 1 — zwei Zeilen im Repo, ein PR
+### Was die Reserve ist, und was 20 dB bedeuten
 
-Die Plugin-Datei liegt schon im Repo und ist durch CI geprüft
-(`infra/chirpstack/tests/test_adr_plugin_relais.py`). Fehlen nur die zwei
-Zeilen, die sie **aktiv** machen — und die bewusst noch nicht da sind:
+Aus `chirpstack/src/adr/default.rs`:
 
-**a)** `infra/chirpstack/configuration/chirpstack.toml`, im Abschnitt
+```rust
+let snr_max = self.get_max_snr(req);
+let snr_margin = snr_max - req.required_snr_for_dr - req.installation_margin;
+let n_step = (snr_margin / 3.0) as isize;
+```
+
+`n_step > 0` erhöht die Datenrate, und wenn die am Anschlag ist, **senkt
+es die Sendeleistung**. Im Gleichgewicht gilt deshalb
+
+> `snr_max ≈ required_snr_for_dr + installation_margin`
+
+Bei DR5 (SF7, `required_snr_for_dr = −7,5`) heißt das:
+
+| Reserve | Ziel-SNR | Folge für unsere 103 Vickis |
+|---|---|---|
+| **10 dB** (bis 16.11.) | +2,5 dB | 86 Geräte hätten noch Spielraum nach unten, 0 bekämen Leistung zurück |
+| 15 dB | +7,5 dB | 66 noch Spielraum, 15 zurück — **für 056 zu knapp** (es liegt bei +8,2) |
+| **20 dB** | **+12,5 dB** | **0** Spielraum, 70 bleiben, **33 bekommen zurück**. Keines verliert etwas |
+
+### Die Rückkehr der Leistung ist langsam — und das hat einen Grund im Code
+
+```rust
+if n_step < 0 && self.get_history_count(req) != self.required_history_count() {
+    return Ok(resp);
+}
+```
+
+`required_history_count()` ist **20**, und `get_history_count` zählt nur
+Einträge mit **demselben** `tx_power_index` (so steht es als Kommentar im
+Code). Eine Erhöhung der Leistung ist also erst möglich, wenn **20
+Meldungen mit unveränderter Stufe** vorliegen — bei Zehn-Minuten-Takt
+alle **3 h 20 min**.
+
+**Nach unten gibt es diese Bremse nicht.** Positive Schritte laufen ohne
+Sperre, einer je Entscheidung — gemessen an 056 am 13.11.: Index 1, 2, 3,
+4, 5 in 70 Minuten.
+
+**Nach oben kommt dafür alles auf einmal.** Die Anpassung ist rekursiv
+und wendet **alle** Schritte in **einer** Entscheidung an. Gerechnet auf
+die Messwerte vom 13.11.:
+
+| Einstellzeit | Geräte |
+|---|---|
+| 0 (bewegt sich nicht) | **70** |
+| 3 h 20 min (eine Entscheidung) | 18 |
+| 6 h 40 min | 14 |
+| 10 h 00 min | 1 (Gerät 021, Index 6 → 1) |
+
+**Das Haus ist also nach rund zehn Stunden eingestellt**, nicht nach
+Tagen — und 70 Geräte rühren sich gar nicht, weil ihr Link auch mit 2 dBm
+genug Reserve hat.
+
+**Für 056 heißt das: eine Entscheidung, 3 h 20 min.** Wie viele Stufen
+dabei zurückkommen, hängt davon ab, welche SNR-Werte in seiner History
+stehen — heute sind es Frames von Index 1 bis 5 durcheinander, und
+gerechnet ergibt das **eine** Stufe. Mit einer eingeschwungenen History
+auf Index 5 wären es **fünf Stufen auf einmal**, also sofort Index 0.
+Beides ist dieselbe eine Entscheidung; nur die Schrittzahl steht nicht
+fest.
+
+**Deshalb steht Schritt 4 in dieser Liste.** Der Batteriewechsel macht
+aus „irgendwann heute Abend" ein „jetzt".
+
+### Schritt 1 — der PR
+
+Drei Dinge, ein PR:
+
+**a)** `infra/chirpstack/configuration/region_eu868.toml`:
+
+```toml
+installation_margin = 20.0
+```
+
+**b)** `infra/chirpstack/configuration/chirpstack.toml`, Abschnitt
 `[network]`:
 
 ```toml
-adr_plugins=[
+adr_plugins = [
   "/etc/chirpstack/adr-plugins/relais-feste-datenrate.js",
 ]
 ```
 
-**b)** `infra/deploy/docker-compose.prod.yml`, im Init-Sidecar
-`chirpstack-init`, hinter die beiden `envsubst`-Zeilen:
+**c)** `infra/deploy/docker-compose.prod.yml`, im Init-Sidecar
+`chirpstack-init`, hinter die `envsubst`-Zeilen:
 
 ```sh
 cp -r /template/adr-plugins /output/
 ```
 
-**Diese zweite Zeile ist der Punkt, an dem es sonst scheitert.** Der
-Sidecar rendert nur `chirpstack.toml` und `region_eu868.toml` in das
-Volume, das ChirpStack als `/etc/chirpstack` sieht. Ohne das `cp` steht
-der Pfad in der Konfiguration und die Datei ist im Container nicht da —
-und ChirpStack sagt dazu **nichts Aussagekräftiges**.
+**Diese dritte Zeile ist der Punkt, an dem es sonst scheitert.** Der
+Sidecar rendert nur die beiden TOML-Dateien in das Volume, das ChirpStack
+als `/etc/chirpstack` sieht. Ohne das `cp` steht der Pfad in der
+Konfiguration und die Datei ist im Container nicht da — und ChirpStack
+sagt dazu **nichts Aussagekräftiges**. Zwei Tests halten das fest, ein
+dritter nagelt die Reserve auf 20 fest.
 
 *Erwartet:* CI grün, PR gemergt, Deploy auf heizung-test gelaufen.
 
-### Schritt 2 — nachsehen, ob ChirpStack läuft
+### Schritt 2 — ChirpStack neu starten und nachsehen, dass er läuft
 
 **SSH (heizung-test, root):**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d chirpstack-init chirpstack
+```
 
 ```bash
 docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps chirpstack
@@ -10526,80 +10612,178 @@ docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
 
 Das `-f` ist nicht optional (§5.0, §5.78).
 
-*Erwartet:* `running`. Steht dort `restarting`, ist das Plugin oder der
+*Erwartet:* `running`. Steht dort `restarting`, ist das Plugin oder ein
 Pfad falsch — **Rückweg sofort**, siehe unten.
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml \
-    logs --tail 50 chirpstack
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec chirpstack ls -la /etc/chirpstack/adr-plugins/
 ```
-
-### Schritt 3 — das Plugin dem Profil zuweisen
-
-*Oberfläche ChirpStack:* **Device profiles → „Relais 16ASPM" → ADR
-algorithm**. Dort muss jetzt
-**„Relais 16ASPM: feste Datenrate DR3, zwei Wiederholungen"** in der
-Auswahl stehen.
-
-**Steht es nicht in der Liste, hat ChirpStack die Datei nicht geladen.**
-Das ist der einzige verlässliche Hinweis darauf; eine Fehlermeldung gibt
-es nicht. Dann zurück zu Schritt 1b.
-
-Auswählen, speichern. **Die Vickis bleiben unberührt** — ihr Profil
-behält „Default ADR algorithm".
-
-### Schritt 4 — Wirkung prüfen, nicht Mechanik
-
-Die Zuweisung allein beweist nichts (§5.76). Geprüft wird an den
-**nächsten Uplinks**:
-
-*Oberfläche ChirpStack:* **Devices → 109 → Metriken → DR.**
-
-*Erwartet:* innerhalb von zwei bis drei Keepalive-Zyklen (also rund 30
-Minuten) steht dort `3` statt `5`. Der Server schickt den `LinkADRReq`
-mit dem nächsten Downlink-Fenster; bei Class C ist das schnell.
-
-Danach §10au Schritt 1 erneut laufen lassen und den Verlust vergleichen:
 
 ```bash
-docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet \
-    --geraet 109 --stunden 2
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec chirpstack grep installation_margin /etc/chirpstack/region_eu868.toml
 ```
 
-*Erwartet:* der Verlust fällt deutlich. Fällt er **nicht**, ist der Link
-nicht das Problem — dann liegt es an der Dose, am Gateway oder am Haus,
-und das Plugin gehört zurückgenommen, weil es dann nur Sendezeit kostet.
+*Erwartet:* die Plugin-Datei liegt da, und die Reserve steht auf 20.0.
+
+**Mosquitto wird dabei nicht angefasst.** `up -d chirpstack-init
+chirpstack` nennt zwei Dienste; Compose startet nur diese und ihre
+`depends_on`-Kette, und Mosquitto steht nicht darin. Das Gateway hängt am
+Mosquitto und bleibt unberührt — anders als beim Server-Neustart am
+04.11., bei dem genau das das Problem war. **Zu prüfen bleibt es
+trotzdem**, Schritt 6.
+
+### Schritt 3 — Relais-Profil zuweisen
+
+*Oberfläche ChirpStack:* **Device profiles → „Relais 16ASPM" → ADR
+algorithm.** Dort muss jetzt **„Relais 16ASPM: feste Datenrate DR1, zwei
+Wiederholungen"** in der Auswahl stehen.
+
+**Steht es nicht in der Liste, hat ChirpStack die Datei nicht geladen.**
+Das ist der einzige verlässliche Hinweis; eine Fehlermeldung gibt es
+nicht. Dann zurück zu Schritt 1c.
+
+Auswählen, speichern. Das Profil gilt für **108 und 109** zugleich — das
+Plugin hängt am Profil, nicht am Gerät. **Die Vickis bleiben auf „Default
+ADR algorithm"**; für sie wirkt die Reserve aus Schritt 1a.
+
+### Schritt 4 — Batterie an 056 kurz heraus
+
+**Zweck: die Wartezeit abkürzen.** Ohne diesen Handgriff kommt die
+Leistung erst mit der nächsten Entscheidung, also nach 3 h 20 min. Ein
+Neu-Beitritt setzt sie **sofort** auf Index 0.
+
+**Zellen heraus, fünf Sekunden warten, wieder hinein.**
+
+*Gefahrlos, weil 056 und 027 `measure_only` und **nicht montiert** sind* —
+kein Ventil, keine Referenzfahrt, nur ein Fühler, der neu startet. **An
+einem montierten Vicki ist ein Batteriewechsel etwas anderes.**
+
+Dann prüfen, dass der Beitritt stattgefunden hat und die Leistung
+**nicht wieder nach unten** geht:
+
+```bash
+docker logs deploy-chirpstack-1 --since 20m 2>&1 | grep -iE "join_request|join_accept" | grep d3033273
+```
+
+```bash
+docker logs deploy-chirpstack-1 --since 40m 2>&1 | grep "LinkADRReq acknowledged" | grep d3033273
+```
+
+*Erwartet:* ein Beitritt, und danach **kein** `LinkADRReq` mit
+`tx_power_index` größer als 0. Kommt doch einer mit 1 oder mehr, wirkt
+die Reserve nicht — dann steht sie nicht auf 20 (Schritt 2 wiederholen)
+oder ChirpStack hat die Regionsdatei nicht neu gelesen.
+
+**Beleg, dass ein Beitritt mit voller Leistung startet** — dreimal im
+Protokoll, jeweils `tx_power_index=0` nach dem Join:
+
+```
+01.11. 09:42  dd001e69  tx_power_index=0  dr=3   (vorher Index 3)
+01.11. 10:52  dd001e69  tx_power_index=0  dr=3   (vorher Index 3)
+11.11. 07:06  d30333fb  tx_power_index=0  dr=3   (Join um 07:01)
+```
+
+**Und ein Nebeneffekt, der gewollt ist: das Gerät bleibt auf DR3.** Ein
+Beitritt beginnt bei DR3, und mit der Reserve von 20 dB erhöht ADR die
+Datenrate nicht mehr (`n_step ≤ 0` für alle unsere Geräte). Ein Vicki
+nach einem Batteriewechsel sendet also auf SF9 statt SF7: 267 ms statt 82
+ms je Uplink, bei 144 Uplinks am Tag 38 s Sendezeit, also 0,044 %
+Auslastung. **Das ist Absicht** — robuster und ohne Belang für die
+Grenze. Wer die Datenrate zurück will, hebt sie von Hand im Gerät oder
+senkt die Reserve.
+
+### Schritt 5 — Wirkung prüfen, nicht Mechanik (§5.76)
+
+**Relais, innerhalb von etwa 30 Minuten:**
+
+```bash
+docker logs deploy-chirpstack-1 --since 40m 2>&1 | grep -E "LinkADRReq acknowledged.*dd001(f23|e69)"
+```
+
+*Erwartet:* `dr=1 nb_trans=2 tx_power_index=0` für **beide** Relais.
+
+**Das Gateway, weil es am 04.11. das Problem war:**
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT date_trunc('hour', time) AT TIME ZONE 'Europe/Vienna' AS stunde, count(*) AS messwerte, count(DISTINCT device_id) AS geraete FROM sensor_reading WHERE time > now() - interval '3 hours' GROUP BY 1 ORDER BY 1;"
+```
+
+*Erwartet:* unverändert rund 600 Messwerte je Stunde von rund 102
+Geräten. Bricht die Zahl ein, ist das Gateway betroffen — dann §10ay
+(Stromtrennung am UG65).
+
+**Nach zwei Stunden der Verlustvergleich am Relais:**
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -f /tmp/testtage-108.sql
+```
+
+*Erwartet:* der Verlust von 108 fällt deutlich unter 16 %. Fällt er
+**nicht**, ist der Link nicht das Problem — dann liegt es an der Dose, am
+Panel oder am Haus, und das Plugin gehört zurückgenommen, weil es dann
+nur Sendezeit kostet.
+
+### Schritt 6 — Wirkungskontrolle nach 48 Stunden
+
+Zwei Zahlen, und beide brauchen den Vorher-Wert. **Vor dem Rollout
+notieren**, danach vergleichen.
+
+**a) Verteilung der Leistungsstufen über alle Geräte.** `tx_power_index`
+steht nicht in unserer Datenbank — er lebt in ChirpStacks
+Geräte-Sitzung. Lesbar ist er über den jeweils letzten `LinkADRReq`:
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^.*dev_eui=//' | awk '{last[$1]=$2} END {for (e in last) print last[e]}' | sort | uniq -c | sort -k2
+```
+
+*Erwartet vorher:* rund 90 Geräte auf `tx_power_index=7`.
+*Erwartet nach 48 h:* kein Gerät mehr mit einer Stufe, die ADR weiter
+senken würde; rund ein Drittel auf einer kleineren Stufe als vorher.
+
+**b) Paketverlust hausweit, vorher gegen nachher.**
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "WITH f AS (SELECT sr.device_id, sr.fcnt, sr.time, lag(sr.fcnt) OVER (PARTITION BY sr.device_id ORDER BY sr.time) AS vorher FROM sensor_reading sr WHERE sr.time > now() - interval '48 hours') SELECT count(DISTINCT device_id) AS geraete, count(*) AS angekommen, coalesce(sum(CASE WHEN vorher IS NOT NULL AND fcnt > vorher THEN fcnt - vorher - 1 ELSE 0 END), 0) AS fehlend, round(100.0 * coalesce(sum(CASE WHEN vorher IS NOT NULL AND fcnt > vorher THEN fcnt - vorher - 1 ELSE 0 END), 0) / nullif(count(*), 0), 2) AS verlust_proz FROM f;"
+```
+
+Und die Geräte mit dem größten Verlust, um die Randlagen zu sehen:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "WITH f AS (SELECT sr.device_id, sr.fcnt, sr.time, lag(sr.fcnt) OVER (PARTITION BY sr.device_id ORDER BY sr.time) AS vorher FROM sensor_reading sr WHERE sr.time > now() - interval '48 hours') SELECT d.label, count(*) AS angekommen, sum(CASE WHEN f.vorher IS NOT NULL AND f.fcnt > f.vorher THEN f.fcnt - f.vorher - 1 ELSE 0 END) AS fehlend, round(100.0 * sum(CASE WHEN f.vorher IS NOT NULL AND f.fcnt > f.vorher THEN f.fcnt - f.vorher - 1 ELSE 0 END) / count(*), 1) AS verlust_proz FROM f JOIN device d ON d.id = f.device_id GROUP BY d.label HAVING sum(CASE WHEN f.vorher IS NOT NULL AND f.fcnt > f.vorher THEN f.fcnt - f.vorher - 1 ELSE 0 END) > 0 ORDER BY 4 DESC LIMIT 15;"
+```
+
+**PowerShell-Varianten** (lokal, `srv`-Funktion siehe §4): denselben
+Befehl in einfache Anführungszeichen setzen, `srv '…'`.
+
+**Was die Zahlen nicht sagen.** Der hausweite Verlust lag in der Nacht
+vom 12. auf den 13.11. bei rund 1 %, und darin steckten 93 % von 056. Ein
+Mittelwert über hundert Geräte verdeckt den Rand — deshalb die zweite
+Abfrage, und deshalb bleibt der Blick auf 056, 085, 041, 069 und 005.
 
 ### Rückweg
 
-**Der schnelle:** im Geräteprofil den ADR-Algorithmus zurück auf
-**„Default ADR algorithm"**. Wirkt sofort für das Profil, braucht keinen
-Neustart. Die Datenrate zieht der Standard-Algorithmus wieder hoch,
-sobald der Link es erlaubt.
+**Für das Relais, ohne Neustart:** im Geräteprofil den ADR-Algorithmus
+zurück auf **„Default ADR algorithm"**. Die Datenrate zieht der
+Standard-Algorithmus dann wieder hoch.
 
-**Der vollständige:** die beiden Zeilen aus Schritt 1 zurücknehmen (ein
-Revert des PR), Deploy abwarten, ChirpStack läuft dann wieder ohne
-Plugin.
+**Für die Reserve:** `installation_margin` zurück auf `10.0`, Deploy,
+ChirpStack neu starten. **Das wirkt nicht sofort** — ADR nimmt die
+Leistung dann über Stunden wieder weg, eine Stufe je Entscheidung, und
+der alte Zustand ist nach etwa einem Tag zurück.
+
+**Der vollständige:** Revert des PR, Deploy abwarten, Neustart.
 
 **Wenn ChirpStack nach dem Deploy nicht startet**, ist der schnelle Weg
 nicht verfügbar — dann zählt nur der Revert. Deshalb steht Schritt 2 vor
 Schritt 3 und nicht danach.
 
-### Was dabei zu wissen ist
+### Querverweise
 
-**`nbTrans 2` verdoppelt die Sendezeit des Geräts.** Bei DR3 und
-Keepalive alle zehn Minuten sind das 3,2 s/h, also 0,09 % — die
-1-%-Grenze ist nicht in Sicht. Sendezeit ist hier kein Argument.
-
-**Ein Downlink in RX1 nimmt die Datenrate des Uplinks**, wird also von
-51 ms auf 165 ms langsamer. Das bleibt weit unter den 1319 ms, die ein
-Class-C-Downlink über RX2 bei DR0/SF12 ohnehin kostet.
-
-**Für 108 gilt dasselbe ohne weiteres Zutun**: das Plugin hängt am
-Profil, nicht am Gerät.
-
-**Querverweise:** §10au (die Messung, von der das abhängt), §10at (109
-ohne Last), AE-78 §14, `docs/status/2026-11-02-adr-plugin.md`.
+§10au (die Messung, von der das abhängt), §10at (Relais ohne Last),
+§10ay (Gateway stromlos), §5.22 (Codec-Deploy ist nicht automatisch),
+§5.76 (Wirkung statt Mechanik), §5.78 (`docker compose` ohne `-f`),
+AE-78 §14/§15, `docs/status/2026-11-02-adr-plugin.md`,
+`docs/status/2026-11-13-adr-reserve-und-relais-dr1.md`.
 
 
 ## 10aw. Wartungstage: die Lauflisten (04.11. und 11.11.2026)
