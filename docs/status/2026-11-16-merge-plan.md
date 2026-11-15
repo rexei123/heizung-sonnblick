@@ -19,16 +19,24 @@ dabei in der Bestätigungs-Kette hängt, bekommt die Downlinks beim Resume
 ## Die Reihenfolge, eine `merge-paket`-Zeile
 
 ```
-419 -> 418 -> 412 -> 417 -> 416
+420 -> 421 -> 419 -> 418 -> 412 -> 417 -> 416
 ```
 
 | PR | Thema | Steuerpfad? | Wirkt sofort? |
 |---|---|---|---|
+| [#420](https://github.com/rexei123/heizung-sonnblick/pull/420) | Notreparatur als §10bb, zwei Lessons, Hygiene | nein | nein (Doku + Testhygiene) |
+| [#421](https://github.com/rexei123/heizung-sonnblick/pull/421) | Drei Vorprüfungen (Plugin-Format, Verdichtung, Tagesplan) | nein | nein (nur Doku) |
 | [#419](https://github.com/rexei123/heizung-sonnblick/pull/419) | Eingangstest ohne Relais | nein | nein (Montage-Werkzeug) |
 | [#418](https://github.com/rexei123/heizung-sonnblick/pull/418) | Auswertungswerkzeug | nein | nein (eigener Aufruf) |
 | [#412](https://github.com/rexei123/heizung-sonnblick/pull/412) | Platten-Warnung + Aufräumen | nein | ja (Kachel, Deploy-Aufräumen) |
 | [#417](https://github.com/rexei123/heizung-sonnblick/pull/417) | Mindestpause nach langem Lauf | **ja** | **ja** |
 | [#416](https://github.com/rexei123/heizung-sonnblick/pull/416) | Timer nachsetzen (`refresh`) | **ja** | **nein** — siehe unten |
+
+**Ein Konflikt ist absehbar und harmlos:** #420 hängt §10bb und §10bd an
+das Ende von `docs/RUNBOOK.md`, #416 hängt dort §10bc an. Wer zuletzt
+kommt, braucht ein `develop`-Einmergen. `merge-paket` stellt die Basis
+selbst um; bleibt es stehen, bitte melden — kein Rebase, kein
+Force-Push.
 
 **Warum diese Reihenfolge.** Die drei harmlosen zuerst: wenn im Fenster
 etwas klemmt, ist der Steuerpfad noch nicht angefasst. #417 vor #416,
@@ -67,6 +75,13 @@ docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwe
 
 *Erwartet:* 40–55 Messwerte von ebenso vielen Geräten, jüngste unter zwei
 Minuten alt.
+
+### #420 und #421 — Doku
+
+Kein Prüfschritt am Server. #420 enthält zwei Code-Änderungen, die sich
+**nicht** sehen lassen: die Übergangslesung alter Audit-Namen ist weg
+(nachweislich toter Code, am Server geprüft) und eine Test-Fixture räumt
+ihr Gerät auf. Der Melder verhält sich unverändert.
 
 ### #419 — Eingangstest ohne Relais
 
