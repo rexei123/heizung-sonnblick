@@ -208,25 +208,40 @@ def test_die_antwort_hat_genau_die_drei_erwarteten_felder() -> None:
     assert set(_ruf("handle", ANFRAGE)) == {"dr", "txPowerIndex", "nbTrans"}
 
 
-def test_die_datei_steht_in_der_plugin_liste() -> None:
-    """Die Datei muss in ``chirpstack.toml`` **aufgelistet** sein.
+def test_die_datei_ist_nicht_verdrahtet() -> None:
+    """**Umgedreht am 15.11.2026, nach einem Ausfall von sieben Minuten.**
 
-    Ein Plugin, das im Repo liegt und nicht in der Liste steht, ist kein
-    Plugin -- und das faellt sonst erst am Server auf, wo das
-    Geraeteprofil den Algorithmus nicht anbietet und stillschweigend auf
-    den Standard zurueckfaellt.
+    Hier stand das Gegenteil: die Datei **muesse** in ``chirpstack.toml``
+    aufgelistet sein. Der Eintrag hat ChirpStack 4.17 beim Start
+    abbrechen lassen (``Get id function: JS error``), der Dienst lief in
+    Schleife, und von 08:53 bis 09:00 hat die Anlage nichts verarbeitet.
 
-    **Geprueft wird die Liste, nicht die Datei.** Die erste Fassung suchte
-    den Dateinamen im ganzen TOML -- und blieb gruen, als eine
-    Mutationsprobe die Zeile aus der Liste entfernte: der Name steht auch
-    im Kommentar darueber. Ein Test, der den Kommentar liest, prueft die
-    Absicht statt der Wirkung (Paragraph 5.55).
+    Solange nicht geprueft ist, in welcher Form ChirpStack ``id()``
+    erwartet, darf dieser Pfad **nicht** in der Konfiguration stehen. Der
+    Test ist damit ein Wachposten gegen ein versehentliches
+    Wiedereinschalten -- und zwar an der Stelle, an der es wehtut: ein
+    Eintrag hier legt die **ganze** Anlage still, nicht nur die Relais.
+
+    **Was er nicht leistet:** er sagt nichts darueber, ob die Datei
+    richtig ist. Das koennen die Tests darueber auch nicht -- sie laden
+    sie unter **Node**, und ChirpStack benutzt eine andere Engine. Genau
+    das ist der Grund, warum 54 gruene Tests den Ausfall nicht verhindert
+    haben (Paragraph 5.55). Wer den Eintrag zurueckbringt, bringt
+    zusammen mit ihm einen Test, der die Datei so laedt wie ChirpStack.
     """
     toml = (PLUGIN_VERZEICHNIS.parent / "chirpstack.toml").read_text(encoding="utf-8")
-    assert "adr_plugins = [" in toml, "die Plugin-Liste fehlt ganz"
-    liste = toml.split("adr_plugins = [", 1)[1].split("]", 1)[0]
-    eintrag = f'"/etc/chirpstack/adr-plugins/{PLUGIN_RELAIS.name}"'
-    assert eintrag in liste, f"{eintrag} fehlt in der adr_plugins-Liste"
+    # Kommentarzeilen zaehlen nicht: der Abschnitt darueber **erklaert**,
+    # warum der Eintrag fehlt, und nennt ihn dabei. Ein Test, der den
+    # Kommentar mitliest, waere rot, obwohl die Konfiguration stimmt --
+    # derselbe Fehler wie in der ersten Fassung dieses Tests, nur
+    # andersherum.
+    nutzzeilen = [z for z in toml.splitlines() if not z.strip().startswith("#")]
+    assert not any("adr_plugins" in z for z in nutzzeilen), (
+        "adr_plugins ist zurueckgezogen -- ein Eintrag hier laesst "
+        "ChirpStack 4.17 beim Start abbrechen"
+    )
+    # Die Datei selbst bleibt im Repo: der zweite Versuch braucht sie.
+    assert PLUGIN_RELAIS.exists(), "die Plugin-Datei soll liegenbleiben"
 
 
 def test_die_installationsreserve_steht_auf_zwanzig() -> None:
