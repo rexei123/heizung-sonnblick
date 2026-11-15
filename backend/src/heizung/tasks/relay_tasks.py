@@ -114,7 +114,7 @@ from heizung.services import (
 )
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.device_service import get_active_devices_for_zone
-from heizung.services.event_log import latest_hard_clamp_setpoint_per_room
+from heizung.services.event_log import lies_soll_stand
 from heizung.tasks.engine_tasks import _task_session
 
 logger = logging.getLogger(__name__)
@@ -301,9 +301,25 @@ async def _steuere_eine_zone(
     fuehler = [d for d in geraete if d.kind != DeviceKind.RELAY]
     ergebnis["relais"] = len(relais)
 
-    # --- Soll: was die Engine fuer das Zimmer dieser Zone entschieden hat.
-    soll_je_raum = await latest_hard_clamp_setpoint_per_room(session, [zone.room_id])
-    soll_roh = soll_je_raum.get(zone.room_id)
+    # --- Soll: was die Engine fuer **diese Zone** entschieden hat.
+    #
+    # **Korrektur vom 15.11.2026, am Live-Stand belegt.** Hier stand der
+    # Zimmerwert (``latest_hard_clamp_setpoint_per_room``), und damit war
+    # eine **Zonen**-Uebersteuerung fuer ein Relais wirkungslos. Belegt
+    # an der Bar am 14.11.: der Betreiber hat den Barbereich dreimal auf
+    # 23 Grad gestellt (``frontend_bereich``, zuletzt 17:10), die
+    # hard_clamp-Zeile trug ``setpoint_out = 22.0`` **und**
+    # ``downlink_zone_status[0].setpoint_c = 23`` — zwei Zahlen in einer
+    # Zeile. Verlauf und Zonenkarte lasen die 23 (sie tun das seit dem
+    # 31.10.2026), der Regler die 22, und das Panel regelte das Totband
+    # um 22 aus. Der Wunsch des Mitarbeiters kam nie am Gerät an.
+    #
+    # ``lies_soll_stand`` ist seither die **einzige** Quelle fuer beide,
+    # samt dem Rueckfall auf den Zimmerwert. Ein eigener Zugriff auf
+    # ``latest_hard_clamp_setpoint_per_room`` von hier aus waere wieder
+    # die zweite Wahrheit (Paragraph 5.53).
+    stand = await lies_soll_stand(session, [zone.room_id])
+    soll_roh = stand.fuer(zone.room_id, zone.id)
     if soll_roh is None:
         # Noch keine Engine-Auswertung fuer dieses Zimmer. Nicht schalten —
         # und das ist kein Fehler, sondern der Zustand vor dem ersten Tick.

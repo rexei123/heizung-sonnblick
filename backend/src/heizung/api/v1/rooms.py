@@ -10,7 +10,6 @@ CRUD:
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -45,8 +44,7 @@ from heizung.services import betriebszeit, child_lock, override_service, raumtyp
 from heizung.services import boost as boost_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
-    latest_hard_clamp_setpoint_per_room,
-    latest_hard_clamp_zone_setpoints,
+    lies_soll_stand,
 )
 from heizung.services.referenzzone import referenzzonen_pro_zimmer
 from heizung.services.room_history import lade_verlauf
@@ -205,10 +203,9 @@ async def list_rooms(
     room_ids = [room.id for room in rooms]
     referenzzonen = await referenzzonen_pro_zimmer(session, room_ids)
     ist_pro_zone = await latest_mean_temp_per_zone(session, referenzzonen.values())
-    soll_pro_zimmer = await latest_hard_clamp_setpoint_per_room(session, room_ids)
     # Befund des Betreibers, 31.10.2026: der Soll der **Referenzzone**, nicht
     # der des Zimmers. Begruendung in ``_mit_ist_und_soll``.
-    soll_pro_zone = await latest_hard_clamp_zone_setpoints(session, room_ids)
+    soll_stand = await lies_soll_stand(session, room_ids)
 
     def _mit_ist_und_soll(room: Room) -> RoomRead:
         zone_id = referenzzonen.get(room.id)
@@ -229,11 +226,11 @@ async def list_rooms(
         # Zimmer ohne Referenzzone (dann gibt es keinen Zonenwert, der
         # gemeint sein koennte) und die erste Minute nach einem Deploy,
         # bevor der Engine-Lauf den Zonenwert geschrieben hat.
-        soll = soll_pro_zimmer.get(room.id)
-        if zone_id is not None:
-            zonen_soll = soll_pro_zone.get(room.id, {}).get(zone_id)
-            if zonen_soll is not None:
-                soll = Decimal(zonen_soll)
+        #
+        # **Seit dem 15.11.2026 ueber ``SollStand.fuer``** — derselbe
+        # Helfer, den der Relais-Regler benutzt. Der Rueckfall ist
+        # unveraendert, er steht jetzt an einer Stelle statt an drei.
+        soll = soll_stand.fuer(room.id, zone_id)
         return RoomRead.model_validate(room).model_copy(
             update={
                 "has_active_override": (

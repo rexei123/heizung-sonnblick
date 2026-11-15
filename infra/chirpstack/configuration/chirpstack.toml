@@ -21,6 +21,42 @@
   net_id = "000000"
   enabled_regions = ["eu868"]
 
+  # **KEIN adr_plugins-Eintrag. Zurueckgezogen am 15.11.2026, nach einem
+  # Ausfall von sieben Minuten.**
+  #
+  # Der Eintrag stand hier ab #406 und zeigte auf
+  # adr-plugins/relais-feste-datenrate.js. ChirpStack 4.17 hat die Datei
+  # beim Start geladen und abgebrochen:
+  #
+  #   Setting up ADR plugin file_path=/etc/chirpstack/adr-plugins/relais-feste-datenrate.js
+  #   Error: Get id function: JS error: Error converting from js 'undefined' into type 'function'
+  #
+  # Danach startete der Dienst in Schleife. Von 08:53 bis 09:00 hat die
+  # Anlage **nichts verarbeitet** -- keine Uplinks, keine Downlinks. Die
+  # Datei exportiert ``id()`` nicht in der Form, die ChirpStack erwartet;
+  # welche das ist, steht noch nicht fest (Befund kommt eigens).
+  #
+  # **Was bleibt und warum.** ``installation_margin = 20.0`` in
+  # region_eu868.toml ist unberuehrt -- sie ist eine Zahl in der
+  # Regionsdatei, laedt keinen Code und war an dem Ausfall nicht
+  # beteiligt. Sie loest ohnehin die Haelfte des Problems, die die
+  # **Vickis** betrifft (056 war vierzehn Stunden stumm, weil ADR ihm die
+  # Sendeleistung genommen hatte).
+  #
+  # Die Plugin-Datei bleibt im Repo, und die Kopierzeile im Init-Sidecar
+  # bleibt auch. Beide sind ohne diesen Eintrag wirkungslos: die Datei
+  # liegt dann im Container, und niemand laedt sie. Der zweite Versuch
+  # braucht sie, und der Weg dorthin ist ein Test, der die Datei in der
+  # **Engine von ChirpStack** laedt statt unter Node (Paragraph 5.55 --
+  # die 54 bestehenden Tests sind gruen und haben die falsche Umgebung
+  # geprueft).
+  #
+  # **Was offen bleibt, wenn dieser Eintrag fehlt:** 108 haengt auf DR3,
+  # und der Standard-Algorithmus senkt die Datenrate **nie** von selbst.
+  # Der Verlust von 16 Prozent an 108 bleibt also bis zum zweiten
+  # Versuch. Das ist die bewusste Wahl -- 16 Prozent Verlust an einem
+  # Relais gegen einen Dienst, der nicht startet.
+
 [api]
   bind = "0.0.0.0:8080"
   secret = "${CHIRPSTACK_API_SECRET}"

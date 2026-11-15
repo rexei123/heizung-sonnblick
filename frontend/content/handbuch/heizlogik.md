@@ -3,7 +3,7 @@ titel: Wie das Haus heizt
 kategorie: Grundlagen
 stichworte: Sollwert, Schichten, Sommer, Absenkung, Vorheizen, Fenster, Kappung, Allgemeinbereich, nur messen, Relais
 rollen: alle
-stand: 2026-11-14
+stand: 2026-11-15
 ---
 
 Jedes Zimmer bekommt alle fünf Minuten einen Sollwert errechnet. Das
@@ -130,6 +130,13 @@ Sollwert — es ist ein oder aus. Deshalb geht an ein Relais **kein
 Sollwert-Befehl**: die Heizlogik rechnet wie überall den Sollwert der
 Zone aus, und ein eigener Regler vergleicht ihn mit der gemessenen
 Temperatur und schaltet.
+
+**Eine Übersteuerung des Bereichs wirkt damit auch auf das Relais**, und
+zwar auf demselben Weg wie bei einem Thermostat: Übersteuerung vor
+Zimmer vor Raumtyp vor hausweiter Vorgabe. (Bis zum 15.11.2026 war das
+hier zugesichert und stimmte nicht: der Regler nahm den Sollwert des
+**Zimmers** und übersah eine Übersteuerung, die nur für den Bereich
+galt. Die Bar stand dreimal auf 23 Grad und heizte auf 22.)
 
 Was dabei gilt:
 

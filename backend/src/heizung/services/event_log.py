@@ -23,6 +23,7 @@ zuletzt von der Engine als HARD_CLAMP geschriebenen Setpoints
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -163,6 +164,66 @@ async def latest_hard_clamp_zone_setpoints(
         if je_zone:
             ergebnis[int(room_id)] = je_zone
     return ergebnis
+
+
+@dataclass(frozen=True)
+class SollStand:
+    """Der Engine-Sollwert je Zimmer **und** je Zone, aus einem Lauf gelesen.
+
+    **Warum das ein eigener Typ ist** (Befund des Betreibers, 15.11.2026).
+    Es gab zwei Lesefunktionen und **vier** Aufrufer, von denen drei den
+    Rueckfall vom Zonen- auf den Zimmerwert jeweils selbst buchstabierten
+    — und der vierte, der **Relais-Regler**, gar nicht nach dem Zonenwert
+    fragte. Folge: eine Zonen-Uebersteuerung der Bar auf 23 Grad stand im
+    Verlauf und in der Zonenkarte, und das Panel regelte weiter auf die
+    22 Grad des Raumtyps. Vier Zeilen Steuerlogik an vier Stellen sind
+    vier Wahrheiten (Paragraph 5.53); eine Funktion ist eine.
+
+    Der Rueckfall ist derselbe, den die Anzeige seit dem 31.10.2026 hat:
+    steht in der Zeile ein Wert fuer **diese** Zone, gilt er; sonst der
+    Zimmerwert. Zwei Faelle brauchen ihn — eine Zeile aus der Zeit vor
+    dem 31.10. (kein ``setpoint_c``) und die erste Minute nach einem
+    Deploy, bevor der erste Engine-Lauf durch ist.
+    """
+
+    #: Der Zimmerwert, ``Decimal`` wie persistiert.
+    je_zimmer: dict[int, Decimal | None]
+    #: ``{room_id: {zone_id: setpoint_c}}``, ganze Grad wie im Trace.
+    je_zone: dict[int, dict[int, int]]
+
+    def fuer(self, room_id: int, zone_id: int | None) -> Decimal | None:
+        """Der Sollwert, der fuer **diese** Zone gilt.
+
+        ``zone_id is None`` heisst „es gibt keine Zone, die gemeint sein
+        koennte" (ein Zimmer ohne Referenzzone) — dann bleibt der
+        Zimmerwert. Das ist kein Sonderfall, sondern die Lage in der
+        Zimmerliste.
+        """
+        if zone_id is not None:
+            wert = self.je_zone.get(room_id, {}).get(zone_id)
+            if wert is not None:
+                return Decimal(wert)
+        return self.je_zimmer.get(room_id)
+
+
+async def lies_soll_stand(session: AsyncSession, room_ids: Iterable[int]) -> SollStand:
+    """Beide Sollwert-Sichten in zwei Abfragen, fuer alle genannten Zimmer.
+
+    **Der einzige Weg zum Engine-Soll**, fuer die Anzeige wie fuer den
+    Relais-Regler. Wer hier vorbeigeht und nur
+    :func:`latest_hard_clamp_setpoint_per_room` liest, bekommt den
+    Zimmerwert und uebersieht jede Zonen-Uebersteuerung.
+
+    Zwei Abfragen und nicht eine: beide lesen zwar **dieselbe** Zeile,
+    aber die eine nimmt eine Spalte und die andere ein JSON-Feld daraus.
+    Sie zusammenzulegen waere eine Abfrage weniger und ein Auspacken
+    mehr; die Trennung haelt die beiden Lesefunktionen einzeln pruefbar.
+    """
+    ids = list(room_ids)
+    return SollStand(
+        je_zimmer=await latest_hard_clamp_setpoint_per_room(session, ids),
+        je_zone=await latest_hard_clamp_zone_setpoints(session, ids),
+    )
 
 
 async def log_inferred_window_event(
