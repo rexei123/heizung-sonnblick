@@ -50,6 +50,7 @@ from heizung.schemas.device import (
 from heizung.schemas.sensor_reading import SensorReadingRead
 from heizung.services import override_service, paketverlust
 from heizung.services.battery_health import BatteryVerdict, battery_verdicts
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.child_lock import (
     Sperrmeldung,
     child_lock_state,
@@ -686,7 +687,7 @@ async def assign_device_to_zone(
 )
 async def detach_device_from_zone(
     device_id: int = DeviceIdPath,
-    _admin: User = Depends(require_admin),  # noqa: B008
+    admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Device:
     device = await session.get(Device, device_id)
@@ -700,6 +701,7 @@ async def detach_device_from_zone(
         return device
 
     prev = device.heating_zone_id
+    vorher_montiert = device.mounted_confirmed_at
     device.heating_zone_id = None
 
     # Sprint 20e (T12): der Montage-Nachweis gehoert zur Zuordnung.
@@ -712,6 +714,44 @@ async def detach_device_from_zone(
     # Layer 4 nimmt es nach dem naechsten Einbau sofort aus der
     # Detached-Pruefung, ohne dass je ein Frame die Montage belegt hat.
     device.mounted_confirmed_at = None
+
+    # **Die Spur fuer das Trennen** (14.11.2026). Bis dahin hinterliess
+    # dieser Endpunkt **nur** die Logzeile unten -- und damit nichts, was
+    # ueber die Aufbewahrung des Container-Logs hinaus Bestand hat.
+    #
+    # **Der Anlass, 12.11.2026.** Beim Tausch der vertauschten Relais
+    # stehen in ``business_audit`` zwei ``DEVICE_ZONE_ASSIGNED``-Zeilen,
+    # beide mit ``vorher: {"heating_zone_id": null}``. Dass Relais 109
+    # vorher in der Zone Eingang hing, steht **nirgends** -- im Audit
+    # sieht es aus, als waere es aus dem Nichts an die Bar gekommen. Ein
+    # Audit, das nur Zuordnungen kennt und keine Trennungen, erzaehlt die
+    # halbe Geschichte, und die fehlende Haelfte ist genau die, die man
+    # bei einer Verwechslung braucht.
+    #
+    # Dieselbe Form wie ``device_service.assign_zone``: ``old_value``
+    # traegt die Zone, aus der getrennt wurde, ``new_value`` das
+    # ``null``. Der Montage-Nachweis kommt mit in die Spur, weil er hier
+    # ebenfalls zuruecksetzt -- sonst steht spaeter ein Nachweis auf
+    # ``null``, dessen Verschwinden keine Zeile erklaert.
+    await record_business_action(
+        session,
+        user_id=admin.id,
+        action="DEVICE_ZONE_DETACHED",
+        target_type="device",
+        target_id=device.id,
+        old_value={
+            "heating_zone_id": prev,
+            "mounted_confirmed_at": (
+                vorher_montiert.isoformat() if vorher_montiert is not None else None
+            ),
+        },
+        new_value={
+            "heating_zone_id": None,
+            "mounted_confirmed_at": None,
+            "dev_eui": device.dev_eui,
+            "source": "api",
+        },
+    )
 
     await session.commit()
     await session.refresh(device)

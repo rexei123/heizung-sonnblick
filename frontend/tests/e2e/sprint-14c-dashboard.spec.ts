@@ -31,8 +31,8 @@ interface Kpi {
   funkempfang_meldungen_10min: number;
   fenstererkennung_aktiv: boolean;
   befehle_nicht_angenommen: number;
-  relais_fuehler_stumme_zonen: number;
-  relais_fuehler_stumm_min: number | null;
+  relais_zonen_stumm: number;
+  relais_zonen_stille_min: number | null;
   platte_prozent: number;
   platte_frei_gb: number;
   platte_warnt: boolean;
@@ -59,8 +59,8 @@ const BASE_KPI: Kpi = {
   funkempfang_meldungen_10min: 104,
   fenstererkennung_aktiv: false,
   befehle_nicht_angenommen: 0,
-  relais_fuehler_stumme_zonen: 0,
-  relais_fuehler_stumm_min: null,
+  relais_zonen_stumm: 0,
+  relais_zonen_stille_min: null,
   platte_prozent: 64,
   platte_frei_gb: 27.0,
   platte_warnt: false,
@@ -120,11 +120,10 @@ test.describe("Sprint 14c Dashboard", () => {
     // Dashboard ist die Seite, die der Hotelier täglich liest, und eine
     // Kachel mehr ist eine Entscheidung, keine Nebenwirkung.
     // **14, nicht 13** — „Plattenplatz" ist am 14.11.2026 dazugekommen.
-    // **13, nicht 12** — „Fuehler Relais-Zone" ist am 13.11.2026
-    // dazugekommen. Sie zeigt die Zonen, in denen ein Relais in Betrieb
-    // ist und kein aktueller Fuehlerwert mehr ankommt; genau diese Lage
-    // hat am 12./13.11. vierzehn Stunden bestanden, ohne irgendwo zu
-    // stehen. Davor kam am 08.11. „Befehle nicht angenommen" dazu
+    // Davor am 13.11. „Relais-Zone stumm": die Zonen, in denen ein Relais
+    // in Betrieb ist und keine aktuelle Meldung mehr ankommt — genau die
+    // Lage, die am 12./13.11. vierzehn Stunden bestanden hat, ohne
+    // irgendwo zu stehen. Und am 08.11. „Befehle nicht angenommen"
     // (Sprint 25 T3).
     await expect(page.getByTestId("kpi-card")).toHaveCount(14);
   });
@@ -294,7 +293,7 @@ test.describe("Sprint 14c Dashboard", () => {
   });
 
   /**
-   * 13.11.2026 — die Kachel „Fühler Relais-Zone".
+   * 13.11.2026 — die Kachel „Relais-Zone stumm".
    *
    * **Der Anlass.** Fühler 056 (Zone Eingang, Rezeption) schwieg am
    * 12./13.11. von 14:41 bis 04:44 — vierzehn Stunden. Die Zone führt ein
@@ -310,13 +309,13 @@ test.describe("Sprint 14c Dashboard", () => {
     page,
   }) => {
     await mockKpi(page, {
-      relais_fuehler_stumme_zonen: 1,
-      relais_fuehler_stumm_min: 438,
+      relais_zonen_stumm: 1,
+      relais_zonen_stille_min: 438,
     });
     await page.goto("/");
     const karte = page
       .getByTestId("kpi-card")
-      .filter({ hasText: "Fühler Relais-Zone" });
+      .filter({ hasText: "Relais-Zone stumm" });
 
     await expect(karte).toContainText("1");
     await expect(karte).toContainText("längste Stille 438 min");
@@ -331,16 +330,13 @@ test.describe("Sprint 14c Dashboard", () => {
     // nie gab — und sie schickt den Leser auf Funksuche, obwohl nichts zu
     // suchen ist.
     await mockKpi(page, {
-      relais_fuehler_stumme_zonen: 1,
-      relais_fuehler_stumm_min: null,
-  platte_prozent: 64,
-  platte_frei_gb: 27.0,
-  platte_warnt: false,
+      relais_zonen_stumm: 1,
+      relais_zonen_stille_min: null,
     });
     await page.goto("/");
     const karte = page
       .getByTestId("kpi-card")
-      .filter({ hasText: "Fühler Relais-Zone" });
+      .filter({ hasText: "Relais-Zone stumm" });
 
     await expect(karte).toContainText("kein Fühler zugeordnet");
     await expect(karte).not.toContainText("min");
@@ -348,16 +344,13 @@ test.describe("Sprint 14c Dashboard", () => {
 
   test("ohne_stumme_zone_bleibt_die_kachel_ruhig", async ({ page }) => {
     await mockKpi(page, {
-      relais_fuehler_stumme_zonen: 0,
-      relais_fuehler_stumm_min: null,
-  platte_prozent: 64,
-  platte_frei_gb: 27.0,
-  platte_warnt: false,
+      relais_zonen_stumm: 0,
+      relais_zonen_stille_min: null,
     });
     await page.goto("/");
     const karte = page
       .getByTestId("kpi-card")
-      .filter({ hasText: "Fühler Relais-Zone" });
+      .filter({ hasText: "Relais-Zone stumm" });
 
     await expect(karte).toContainText("0");
     await expect(karte).not.toContainText("Stille");

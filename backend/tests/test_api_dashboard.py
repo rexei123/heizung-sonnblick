@@ -37,6 +37,7 @@ from heizung.main import app
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind, DeviceVendor, UserRole
 from heizung.models.user import User
+from heizung.services import plattenplatz
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_URL_PRESENT = bool(DATABASE_URL)
@@ -80,8 +81,8 @@ _EXPECTED_KEYS = {
     # 13.11.2026: Zonen, in denen ein Relais **in Betrieb** ist und kein
     # aktueller Fuehlerwert mehr ankommt. Und auch diese zwei Zeilen
     # stehen hier, weil der Test rot war — genau dafuer ist er da.
-    "relais_fuehler_stumme_zonen",
-    "relais_fuehler_stumm_min",
+    "relais_zonen_stumm",
+    "relais_zonen_stille_min",
     # 14.11.2026 — Kachel Plattenplatz
     "platte_prozent",
     "platte_frei_gb",
@@ -223,6 +224,41 @@ async def test_platte_warnt_kommt_aus_der_einstellung(
     finally:
         monkeypatch.delenv("PLATTE_WARN_PROZENT", raising=False)
         get_settings.cache_clear()
+
+
+async def test_platte_zahlen_kommen_aus_der_messung(
+    http_client: httpx.AsyncClient, users: dict[str, str]
+) -> None:
+    """**Die Luecke, die die Konflikt-Aufloesung am 15.11.2026 gefunden hat.**
+
+    ``platte_warnt`` war in beide Richtungen geprueft, ``platte_prozent``
+    und ``platte_frei_gb`` **gar nicht**. Beide haben im Schema einen
+    Vorgabewert (``0`` und ``0.0``), eine abgerissene Verdrahtung faellt
+    also nicht auf: der Endpunkt antwortet weiter mit 200, und auf der
+    Kachel steht „0 %" und „0.0 GB frei" — eine plausible Zahl, die nichts
+    gemessen hat (Paragraph 5.55).
+
+    Gefunden mit einer Mutationsprobe am Merge: ``platte_prozent`` aus dem
+    Endpunkt entfernt, und die sechs Tests der Datei blieben gruen.
+
+    Geprueft wird gegen **denselben Helfer**, den der Endpunkt benutzt —
+    nicht gegen eine festgeschriebene Zahl, die auf einem anderen Rechner
+    anders waere. ``prozent`` ist ganzzahlig und damit stabil; bei
+    ``frei_gb`` lasse ich ein GB Spiel, weil zwischen den beiden Messungen
+    geschrieben werden darf.
+    """
+    await _login(http_client, users["admin"], users["password"])
+    resp = await http_client.get("/api/v1/dashboard/kpi")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    gemessen = plattenplatz.lies_plattenstand(grenze_prozent=get_settings().platte_warn_prozent)
+    assert body["platte_prozent"] == gemessen.prozent, (
+        "die Kachel zeigt etwas anderes als der Helfer misst"
+    )
+    assert body["platte_prozent"] > 0, "0 % waere der Vorgabewert, keine Messung"
+    assert abs(body["platte_frei_gb"] - gemessen.frei_gb) <= 1.0
+    assert body["platte_frei_gb"] > 0, "0.0 GB waere der Vorgabewert"
 
 
 async def test_platte_warnt_nicht_bei_hoher_grenze(

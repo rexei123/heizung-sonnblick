@@ -277,14 +277,24 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
               : `${data.internal_temperature_raw}${data.gehaeusetemperatur_alarm ? " — über der Warnschwelle" : ""}`
           }
         />
-        {/* **„Schaltzyklen der Steuerung", nicht „Schaltzyklen."** Gezählt
-            wird nur, wenn ein Befehl bestätigt wird, den der
-            Orchestrator gesendet hat. Der T3.0-Lauf am 01.11.2026 ging
-            von Hand über ``python -c`` am Wächter vorbei — dort stand
-            danach „0", obwohl das Relais mehrfach geschaltet hatte. Der
-            Zähler war richtig, das Etikett versprach mehr. */}
+        {/* **„Einschaltungen (gemeldet)", seit dem 13.11.2026.** Hier
+            stand „Schaltzyklen der Steuerung", weil nur zählte, was der
+            Orchestrator an Bestätigungen zugeordnet bekam.
+
+            Das Etikett war damit richtig und die Zahl zu klein: am
+            12.11. ging um 09:38 ein EIN hinaus, der Wunsch kippte um
+            09:40 auf AUS, der offene Stand wurde verworfen — und die
+            Bestätigung um 09:47 fand nichts mehr, woran sie hängen
+            konnte. Das Relais hatte geschaltet, der Zähler stand auf 1
+            statt 2.
+
+            Gezählt wird jetzt die **gemeldete** Zustandsänderung, also
+            jede beobachtete Einschaltung. Das schließt den Handschalter
+            und eine Stromrückkehr ein, und deshalb heißt die Zeile nicht
+            mehr „der Steuerung": sie sagt, wie oft das Panel wirklich
+            angelaufen ist. */}
         <Zeile
-          bezeichnung="Schaltzyklen der Steuerung"
+          bezeichnung="Einschaltungen (gemeldet)"
           wert={String(data.switch_cycles)}
         />
         <Zeile bezeichnung="Wächter" wert={data.watchdog_strategy} />
