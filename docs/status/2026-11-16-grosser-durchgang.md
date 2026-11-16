@@ -54,9 +54,15 @@ neu, Phase 2d) und #425 (Plugin — Phase 3). Alles andere geht in **einer**
 
 *wo:* PowerShell (lokal)
 
+```powershell
+.\merge-paket.ps1 427,426,428,429
 ```
-merge-paket 427 426 428 429
-```
+
+> **Komma, nicht Leerzeichen.** Das Skript nimmt `[int[]]$Prs` und
+> danach `[int]$DeployTimeoutMin`. Mit Leerzeichen bindet PowerShell die
+> zweite Zahl als Zeitgrenze und bricht bei der dritten ab. Hier stand bis
+> zum 16.11. die Leerzeichen-Form — mein Fehler, vom Betreiber beim
+> Aufruf richtig gemacht.
 
 | PR | Thema | besonders |
 |---|---|---|
@@ -92,8 +98,17 @@ Wartungsblock.
 weiter mergen, Ausgabe an mich — ich löse den Konflikt (kein Rebase, kein
 Force-Push).
 
-*Wartezeit:* der Deploy-Timer zieht alle **5 Minuten**. Nach dem letzten
-Merge **6 Minuten warten**, bevor geprüft wird.
+*Wartezeit:* das Skript wartet je PR selbst auf die CI und auf den
+Deploy — bis zu 30 Minuten je PR (`-DeployTimeoutMin`). Es merged
+**nichts parallel** und hält beim ersten Fehler an.
+
+> **Sperrzeit im Skript: 14:30 bis 15:45.** In diesem Fenster merged es
+> nicht (DST-Prüfung Bar). Wer dort landet, wartet oder verschiebt.
+
+**Was das Skript selbst erledigt:** einen Zweig im Zustand `BEHIND` holt
+es mit `gh pr update-branch` auf Stand. Bei `DIRTY` **hält es an** und
+sagt, dass ich develop einmergen muss — genau der Fall, der zwischen #428
+und #429 zu erwarten ist.
 
 ### 1.2 Läuft der Stack?
 
