@@ -98,6 +98,10 @@ class Zonenzustand:
     ein: bool
     seit: datetime | None
 
+    #: Wie lange die vorige Phase gedauert hat (15.11.2026). ``None``
+    #: heisst „es gab keine" — dann greift die Mindestpause wie bisher.
+    vorige_dauer: timedelta | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class Entscheidung:
@@ -153,10 +157,34 @@ def entscheide(
                 f"min_lauf_{int(schwellen.min_lauf.total_seconds())}s",
             )
         if not zustand.ein and gehalten < schwellen.min_pause:
-            return Entscheidung(
-                Schaltbefehl.UNVERAENDERT,
-                f"min_pause_{int(schwellen.min_pause.total_seconds())}s",
+            # **Die Pause entfaellt nach einem langen Lauf** (15.11.2026).
+            #
+            # Sie schuetzt vor schnellem Takten: EIN, AUS, EIN innerhalb
+            # weniger Minuten belastet Kontakte und Geraet. Nach einer
+            # Laufzeit von mindestens ``min_lauf`` gibt es nichts zu
+            # schuetzen — ein Wechsel je halbe Stunde ist kein Takten.
+            #
+            # **Der Anlass, gemessen am 14./15.11.2026.** Das Relais wird
+            # nie dauerhaft EIN gesetzt; EIN laeuft ueber einen Timer, und
+            # der lief ab, waehrend der Raum zwei bis drei Grad zu kalt
+            # war. Danach hielt die Pause das Panel weitere zehn Minuten
+            # aus — gerechnet ab dem **gemeldeten** AUS, das selbst schon
+            # neun Minuten alt war. Von den zwanzig Minuten Totzeit je
+            # Zyklus war das die Haelfte, und keine Minute davon hat der
+            # Regler gewollt.
+            #
+            # Die Pause bremst hier also nicht den Regler, sondern den
+            # Waechter — und damit etwas, das niemand entschieden hat.
+            # Dass sie dabei greift, war kein Fehler im Code, sondern eine
+            # Regel ohne den Fall, fuer den sie gilt.
+            langer_lauf = (
+                zustand.vorige_dauer is not None and zustand.vorige_dauer >= schwellen.min_lauf
             )
+            if not langer_lauf:
+                return Entscheidung(
+                    Schaltbefehl.UNVERAENDERT,
+                    f"min_pause_{int(schwellen.min_pause.total_seconds())}s",
+                )
 
     # 3. Schwellen.
     ein_schwelle = soll - schwellen.ein_delta_k
