@@ -94,6 +94,12 @@ const STAND_NEU = {
   gehaeusetemperatur_alarm: false,
   reading_time: null,
   change_reason: null,
+  // Seit Migration 0041 verlangt zod die zwei Schluessel. `null` ist hier
+  // die richtige Vorgabe: ein Relais ohne Meldung hat keine
+  // Empfangsdaten, und 0 waere eine Behauptung ueber einen Funk, den
+  // niemand gemessen hat.
+  rssi_dbm: null,
+  snr_db: null,
   offener_befehl: null,
 };
 
