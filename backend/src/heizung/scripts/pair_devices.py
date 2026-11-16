@@ -460,6 +460,20 @@ async def _cmd_test(args: argparse.Namespace) -> int:
             )
             return 1
 
+        # Beim Einzeltest ist das Geraet ausdruecklich genannt, also wird
+        # nicht stillschweigend uebersprungen, sondern abgebrochen. Ein
+        # Lauf, der nichts tut und 0 zurueckgibt, sieht wie ein bestandener
+        # Test aus (Paragraph 5.55).
+        if device.kind == DeviceKind.RELAY:
+            print(
+                f"[FAIL] {device.label or device.dev_eui} ist ein Relais. Der "
+                "Eingangstest setzt Sollwerte und prueft das Ventil; ein Relais "
+                "hat beides nicht. Die Pruefung fuer Relais steht in RUNBOOK "
+                "Paragraph 10aj (Provisionierung, zwei Ruecklesungen, Taster).",
+                file=sys.stderr,
+            )
+            return 1
+
         user_id: int | None = None
         if args.user_email:
             user_id, reason = await _lookup_user_id(session, args.user_email)
@@ -519,6 +533,46 @@ async def _cmd_inbound_test(args: argparse.Namespace) -> int:
                 )
                 return 1
             print(f"Auswahl: {len(devices)} von {pool_total} Pool-Geraeten.")
+
+        # **Relais gehoeren nicht in diesen Lauf** (15.11.2026).
+        #
+        # **Nach der Auswahl und nicht davor.** Wer ein Relais in
+        # ``--devices`` nennt, soll hoeren, dass es uebersprungen wird --
+        # nicht "nicht im Pool gefunden". Das Relais *ist* im Pool; es ist
+        # nur nicht eingangspruefbar, und eine Meldung, die etwas anderes
+        # behauptet, schickt jemanden auf die falsche Suche.
+        #
+        # Der Eingangstest setzt Sollwerte (``0x51``) und beurteilt das
+        # Geraet daran, ob es sie meldet und ob sich das Ventil bewegt.
+        # Ein Relais hat **kein Sollwert-Register und kein Ventil**: der
+        # Befehl geht ins Leere, die Bestaetigung bleibt aus, und das
+        # Geraet faellt durch eine Pruefung, die es nicht betrifft.
+        #
+        # **Gefunden als latenter Fehler, nicht als Vorfall.** Heute liegt
+        # kein Relais im Pool; die Relais im Haus sind zugeordnet und in
+        # Betrieb. Beim naechsten Relais, das eingangsgeprueft werden
+        # soll, waere es einer — und zwar derselbe, den #410 im
+        # Engine-Pfad beseitigt hat: 51 sinnlose ``0x51`` an Geraete ohne
+        # Sollwert.
+        #
+        # **Gefiltert wird hier und nicht in ``get_pool_devices``.** Die
+        # Pool-Liste soll das Relais **zeigen** — wer ein Reserve-Relais
+        # einlagert, will es dort sehen. Ein Filter in der Leseschicht
+        # wuerde es unsichtbar machen und damit ein zweites Problem
+        # schaffen, um das erste zu loesen.
+        relais = [d for d in devices if d.kind == DeviceKind.RELAY]
+        if relais:
+            devices = [d for d in devices if d.kind != DeviceKind.RELAY]
+            namen = ", ".join(d.label or d.dev_eui for d in relais)
+            print(
+                f"Uebersprungen: {len(relais)} Relais im Pool ({namen}). "
+                "Der Eingangstest setzt Sollwerte und prueft das Ventil; "
+                "ein Relais hat beides nicht. Die Pruefung fuer Relais "
+                "steht in RUNBOOK Paragraph 10aj."
+            )
+        if not devices:
+            print("Nach dem Filter bleibt kein Geraet zu pruefen.")
+            return 0
 
         user_id: int | None = None
         if args.user_email:
@@ -625,10 +679,16 @@ async def _cmd_list_pool(args: argparse.Namespace) -> int:
         print("Pool ist leer (keine Reserve-Devices).")
         return 0
     print(f"Reserve-Pool ({len(pool_devices)} Devices, heating_zone_id IS NULL):")
-    print(f"  {'ID':<6} {'dev_eui':<18} {'model':<10} {'created_at':<20} label")
+    # Die **Art** gehoert in die Liste (15.11.2026): der Eingangstest
+    # ueberspringt Relais, und wer das aus der Liste nicht sieht, sucht den
+    # Grund im Lauf statt im Geraet.
+    print(f"  {'ID':<6} {'dev_eui':<18} {'art':<11} {'model':<10} {'created_at':<20} label")
     for dev in pool_devices:
         ts = dev.created_at.strftime("%Y-%m-%d %H:%M:%S") if dev.created_at else "-"
-        print(f"  {dev.id:<6} {dev.dev_eui:<18} {dev.model:<10} {ts:<20} {dev.label or '-'}")
+        print(
+            f"  {dev.id:<6} {dev.dev_eui:<18} {dev.kind.value:<11} {dev.model:<10} "
+            f"{ts:<20} {dev.label or '-'}"
+        )
     return 0
 
 
