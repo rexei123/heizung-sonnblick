@@ -12155,3 +12155,122 @@ niedriger Anteil richtig.
 **Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
 hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
 `docs/status/2026-11-15-relais-auswertung.md`.
+
+
+## 10bg. Festgenagelte Images bewusst nachziehen (quartalsweise)
+
+**Wofür.** Die fremden Images in `docker-compose.prod.yml` hängen seit
+16.11.2026 an Tag **plus** Digest. Das macht den Stand
+wiederherstellbar — und es friert ihn ein. Ohne diesen Abschnitt ist der
+eingefrorene Stand in einem Jahr kein Entschluss mehr, sondern ein
+Versehen, das niemandem auffällt.
+
+**Anlass, zwei:**
+
+1. **Einmal je Quartal** — Januar, April, Juli, Oktober, im
+   Wartungstermin.
+2. **Ein CVE, der zählt**: eine Lücke in `postgres`, `caddy`, `redis`,
+   `mosquitto` oder `chirpstack`, die aus dem Netz erreichbar ist. Dann
+   nicht auf das Quartal warten.
+
+**Was dieser Handgriff kostet, und warum er nicht ins Merge-Fenster
+gehört.** Ein Merge dieser Datei ändert die Zeilen von `db`, `redis`,
+`mosquitto`, `chirpstack-postgres`, `chirpstack`,
+`chirpstack-gateway-bridge`, `caddy` und den zwei Init-Behältern. Der
+Timer zieht `origin/develop` alle fünf Minuten und ruft
+`docker compose up -d` — **jeder Dienst mit geänderter Zeile wird
+innerhalb von fünf Minuten neu erstellt**, auch `mosquitto` und die
+Bridge. Das ist der Weg, auf dem am 04.11. das Gateway abgerissen ist
+(§10ay). Dieser PR gehört deshalb in einen Wartungstermin mit dem
+Betreiber **am Gateway**, nicht in das Fenster 10–12.
+
+### Schritt 1 — ablesen, was gerade läuft
+
+**SSH (Server):**
+
+```bash
+for i in timescale/timescaledb:latest-pg16 redis:7-alpine eclipse-mosquitto:2 postgres:16-alpine alpine:3.20 chirpstack/chirpstack-gateway-bridge:4 chirpstack/chirpstack:4 caddy:2-alpine; do printf '%s\n  ' "$i"; docker image inspect "$i" --format '{{index .RepoDigests 0}}  {{index .Config.Labels "org.opencontainers.image.version"}}'; done
+```
+
+*Erwartet:* je Zeile ein `name@sha256:…` und, wo das Image ein Label
+trägt, die Klartext-Version.
+
+> **Achtung, der Digest-Typ.** Der Server läuft mit dem
+> containerd-Image-Store (`docker info` → `Storage Driver: overlayfs`,
+> `driver-type: io.containerd.snapshotter.v1`). Dort ist `.Id`
+> **derselbe Wert** wie `.RepoDigests` — nämlich der Manifest-Digest.
+> Auf einem Host mit `overlay2` ist `.Id` dagegen der Config-Digest und
+> **nicht ziehbar**. Deshalb immer `.RepoDigests` lesen, nie `.Id`,
+> auch wenn beide gleich aussehen (§5.91).
+
+Die Klartext-Version steht nicht in jedem Image. Wo das Label fehlt,
+kommt sie aus dem laufenden Dienst:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -tAc "SELECT 'postgres '||current_setting('server_version')||', timescaledb '||extversion FROM pg_extension WHERE extname='timescaledb';"
+docker exec deploy-redis-1 redis-server --version
+docker logs deploy-mosquitto-1 2>&1 | grep -oiE 'mosquitto version [0-9.]+' | head -1
+docker exec deploy-caddy-1 caddy version
+docker exec deploy-chirpstack-1 chirpstack --version
+```
+
+**Die Bridge nennt ihre Version nicht.** `chirpstack-gateway-bridge`
+protokolliert beim Start `version=` leer und kennt kein
+`--version`-Flag. Ihre Version steht nur im Image-Label
+(`org.opencontainers.image.version`), aus Schritt 1.
+
+### Schritt 2 — entscheiden, nicht nur nachziehen
+
+Für jedes Image die Frage: **gibt es einen Grund?** Ein neuer
+Patch-Stand ist kein Grund. Gründe sind ein CVE, ein Fehler, den wir
+haben, oder eine Funktion, die wir brauchen.
+
+**Was ausdrücklich nicht nachgezogen wird, ohne eigenen Plan:**
+
+| Image | warum nicht nebenbei |
+|---|---|
+| `chirpstack/chirpstack:4` | 4.18 kann das ADR-Plugin-Format geändert haben (§10bb, der Ausfall vom 15.11.). Eigener PR, eigener Termin. |
+| `timescale/timescaledb:latest-pg16` | ein Hauptversionssprung von PostgreSQL braucht `pg_upgrade`, nicht einen neuen Digest. Prüfen, dass `pg16` im Tag bleibt. |
+| `eclipse-mosquitto:2` | jede Neuerstellung ist eine Gateway-Gefahr (§10ay). |
+
+### Schritt 3 — den PR bauen
+
+Je geänderte Zeile **beides** anfassen: den Digest und die
+Kommentarzeile mit der Klartext-Version darüber. Der Test
+`backend/tests/test_infrastruktur_images_festgenagelt.py` fällt, wenn der
+Kommentar fehlt oder der Digest die Form verliert — er prüft die **Form**,
+nicht die Werte, und kann einen falschen Digest deshalb nicht erkennen.
+
+Das Datum in der Kommentarzeile mitführen: `(festgenagelt TT.MM.JJJJ, …)`.
+Daran sieht man beim nächsten Quartal, was alt ist.
+
+### Schritt 4 — ausrollen, im Wartungstermin
+
+1. Betreiber **am Gateway**, Vorher-Wert der Kachel Funk-Empfang
+   ablesen **und Screenshot**.
+2. PR mergen. Der Timer erstellt die betroffenen Dienste innerhalb von
+   fünf Minuten neu.
+3. **Prüfliste §10ay** abarbeiten — Gateway, Bridge, Mosquitto, dann
+   zehn Minuten die Kachel ansehen.
+4. Messwerte, der eigentliche Nachweis:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+*Erwartet:* 40–55 Messwerte von ebenso vielen Geräten, jüngste unter zwei
+Minuten alt.
+
+**STOPP, wenn** ein Dienst nicht hochkommt: der Rückweg ist der Digest,
+der vorher dort stand — er steht in der Vorgängerversion der Datei im
+`git log`, und das Image liegt noch lokal. `git revert` des Merges, der
+Timer stellt innerhalb von fünf Minuten zurück. **Das ist der Grund für
+diesen ganzen Abschnitt:** ohne Digest wäre der Rückweg „irgendetwas
+unter dem Tag", mit Digest ist er eindeutig.
+
+**Querverweise:** §10ay (Prüfliste nach einer Neuerstellung, 04.11.),
+§10bb (ChirpStack 4.17 und das Plugin — warum ein Sprung auf 4.18 kein
+Nebenbei ist), §10be (die Log-Grenzen, die beim Neuerstellen mitkommen),
+H-6 und `test_deploy_pull_pinning.py` (unsere eigenen Images, je Commit),
+§5.91 (`.Id` ist nicht immer der Manifest-Digest),
+`docs/status/2026-11-16-image-digests.md`.

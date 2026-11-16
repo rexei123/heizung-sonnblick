@@ -3875,6 +3875,55 @@ der Downlink-Weg laeuft ueber MQTT (§5.28).
 §10bb (die Notreparatur, aus der es kam), §5.3 (Encoding — die andere
 Familie von Fehlern, die man erst am Ausgabestrom sieht).
 
+### 5.91 Ein Digest kann die richtige Form und die falsche Bedeutung haben (16.11.2026)
+
+Beim Festnageln der acht fremden Images habe ich die Digests aus einer
+Uebergabe uebernommen und vor dem Einbauen nachgelesen. Dabei stand bei
+**allen acht** derselbe Wert zweimal da:
+
+```
+redis:7-alpine
+  RepoDigests: ["redis@sha256:7aec734b2bb2…"]
+  Id:          sha256:7aec734b2bb2…
+```
+
+Das sieht nach einem Fehler aus — normalerweise ist `.Id` der
+**Config**-Digest und `.RepoDigests[0]` der **Manifest**-Digest, und die
+beiden sind verschieden. Hinter `image: name@sha256:…` gehoert der
+Manifest-Digest; ein Config-Digest laesst sich nicht ziehen.
+
+**Die Erklaerung war keine Verwechslung, sondern der Image-Store.** Der
+Server laeuft mit Docker 29.4.0 und dem containerd-Store
+(`docker info` → `Storage Driver: overlayfs`, `driver-type:
+io.containerd.snapshotter.v1`). Dort liefert `.Id` den Manifest-Digest,
+und die Gleichheit ist richtig. Bestaetigt am `Descriptor`:
+`application/vnd.oci.image.index.v1+json` — der Digest des Multi-Arch-Index,
+genau der ziehbare Wert.
+
+**Warum das eine Lehre ist und nicht eine Fussnote.** Haette ich die
+Gleichheit als Tippfehler abgetan und „den anderen" Wert genommen, waere
+nichts aufgefallen: das Image liegt lokal, Compose zieht per Vorgabe
+`missing`, und kein Neustart haette es gemerkt. Der falsche Digest waere
+erst in dem Moment aufgeschlagen, fuer den das Festnageln gebaut ist —
+wenn das Image **fehlt** und wirklich gezogen werden muss, also
+mitten im Stoerfall. Ein Fehler, der genau dann zuschlaegt, wenn die
+Absicherung greifen soll, ist schlimmer als keine Absicherung.
+
+**Regel:** Bei einem Digest, einer ID oder einem Hash, der aus einem
+Werkzeug kommt, nicht nur den Wert pruefen, sondern **welche Art von Wert
+es ist**. Konkret fuer Images: immer `.RepoDigests` lesen, nie `.Id` —
+auch wenn beide gleich aussehen, denn auf einem Host mit `overlay2`
+tun sie das nicht.
+
+**Das Muster dahinter** ist §5.51 (ein Feld, zwei Bedeutungen) eine Ebene
+tiefer: hier hat **ein Wert** zwei Bedeutungen, je nach Umgebung, aus der
+er kommt. Und es ist §5.68: die Uebergabe nannte „Digest", und das war ein
+Anspruch, kein Befund — der Befund brauchte `docker info`.
+
+**Querverweise:** §5.51 (ein Feld, zwei Bedeutungen), §5.68 (Anspruch
+gegen Befund), RUNBOOK §10bg (das Nachzieh-Ritual, in dem der Hinweis als
+Warnkasten steht), `docs/status/2026-11-16-image-digests.md`.
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
