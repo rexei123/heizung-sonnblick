@@ -228,6 +228,11 @@ WEGE = [
     ("post", "/api/v1/devices/{id}/relay/commission", None),
     ("delete", "/api/v1/devices/{id}/relay/commission", None),
     ("post", "/api/v1/devices/{id}/relay/release-protection", None),
+    (
+        "patch",
+        "/api/v1/devices/{id}/relay/watchdog-strategy",
+        {"strategie": "refresh"},
+    ),
 ]
 
 
@@ -781,3 +786,165 @@ async def _setze_offen(
             {"z": ziel_ein, "s": seit, "v": versuche, "d": device_id},
         )
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Waechter-Strategie umschalten (15.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_strategie_umschalten_schreibt_audit(
+    admin_client: httpx.AsyncClient, aufbau: Aufbau, setup_engine: AsyncEngine
+) -> None:
+    """Umschalten auf ``refresh``, mit Audit und ohne Downlink.
+
+    **Kein Downlink in diesem Aufruf** ist Absicht: die Umschaltung wirkt
+    beim naechsten Durchlauf des Orchestrators, also innerhalb einer
+    Minute. Ein sofortiger Befehl waere Sendezeit fuer eine Aenderung,
+    die der naechste Takt ohnehin bringt (S4).
+    """
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.relais_id}/relay/watchdog-strategy",
+        json={"strategie": "refresh"},
+    )
+    assert antwort.status_code == 200, antwort.text
+    rumpf = antwort.json()
+    assert rumpf["strategie"] == "refresh"
+    assert rumpf["timer_sekunden"] == 900, "die kuerzere Laufzeit, aus den Settings"
+
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        geraet = await session.get(Device, aufbau.relais_id)
+        assert geraet is not None
+        assert geraet.watchdog_strategy == "refresh"
+        zeile = (
+            await session.execute(
+                text(
+                    "SELECT action, old_value, new_value FROM business_audit "
+                    "WHERE target_type = 'device' AND target_id = :d "
+                    "ORDER BY ts DESC, id DESC LIMIT 1"
+                ),
+                {"d": aufbau.relais_id},
+            )
+        ).first()
+    assert zeile is not None
+    assert zeile.action == "RELAY_WATCHDOG_STRATEGY_SET"
+    assert zeile.old_value["watchdog_strategy"] == "expire_and_resend"
+    assert zeile.new_value["watchdog_strategy"] == "refresh"
+
+
+async def test_strategie_umschalten_loescht_den_letzten_ein_befehl(
+    admin_client: httpx.AsyncClient, aufbau: Aufbau, setup_engine: AsyncEngine
+) -> None:
+    """Der Zeitpunkt des letzten EIN gehoert zur alten Strategie.
+
+    Bliebe er stehen, rechnete der erste Durchlauf nach dem Umschalten
+    den Abstand gegen einen Zeitpunkt, den niemand mehr meint — und
+    setzte womoeglich erst in fuenf Minuten nach, obwohl das Panel gerade
+    laeuft und der Timer in dreissig Minuten ablaeuft.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        geraet = await session.get(Device, aufbau.relais_id)
+        assert geraet is not None
+        geraet.relais_ein_gesendet_at = datetime.now(tz=UTC)
+        await session.commit()
+
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.relais_id}/relay/watchdog-strategy",
+        json={"strategie": "refresh"},
+    )
+    assert antwort.status_code == 200, antwort.text
+
+    async with maker() as session:
+        geraet = await session.get(Device, aufbau.relais_id)
+        assert geraet is not None
+        assert geraet.relais_ein_gesendet_at is None
+
+
+async def test_strategie_unveraendert_schreibt_kein_audit(
+    admin_client: httpx.AsyncClient, aufbau: Aufbau, setup_engine: AsyncEngine
+) -> None:
+    """Idempotenz (S2): derselbe Wert zweimal ist eine Zeile, nicht zwei.
+
+    Ohne diese Bedingung fuellte jeder Klick das Audit mit Zeilen, in
+    denen ``old_value`` und ``new_value`` gleich sind — und ein Audit,
+    in dem Aenderungen zwischen Nicht-Aenderungen stehen, liest niemand
+    mehr.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        vorher = (
+            await session.execute(
+                text(
+                    "SELECT count(*) AS n FROM business_audit "
+                    "WHERE action = 'RELAY_WATCHDOG_STRATEGY_SET' AND target_id = :d"
+                ),
+                {"d": aufbau.relais_id},
+            )
+        ).scalar_one()
+
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.relais_id}/relay/watchdog-strategy",
+        json={"strategie": "expire_and_resend"},
+    )
+    assert antwort.status_code == 200, antwort.text
+    assert "Unveraendert" in antwort.json()["hinweis"]
+    assert antwort.json()["timer_sekunden"] == 1800
+
+    async with maker() as session:
+        nachher = (
+            await session.execute(
+                text(
+                    "SELECT count(*) AS n FROM business_audit "
+                    "WHERE action = 'RELAY_WATCHDOG_STRATEGY_SET' AND target_id = :d"
+                ),
+                {"d": aufbau.relais_id},
+            )
+        ).scalar_one()
+    assert nachher == vorher, "kein Audit ohne Aenderung"
+
+
+async def test_unbekannte_strategie_wird_im_schema_abgewiesen(
+    admin_client: httpx.AsyncClient, aufbau: Aufbau
+) -> None:
+    """Ein Tippfehler darf kein Relais stilllegen — und zwar **vor** der DB.
+
+    Landete ein beliebiges Wort in der Spalte, wuerde
+    ``WatchdogStrategy(...)`` im Orchestrator beim naechsten Durchlauf
+    werfen, und zwar fuer **alle** Relais der Zone, nicht nur fuer dieses.
+
+    **Es gibt zwei Wachposten, und das ist beim Schreiben dieses Tests
+    aufgefallen.** Neben dem ``Literal`` im Schema steht seit Migration
+    0030 die Bedingung ``ck_device_watchdog_strategy`` in der Datenbank;
+    ihre Verletzung faengt der zentrale Fehler-Handler und macht daraus
+    ebenfalls 422. Die erste Fassung dieses Tests prueften nur den
+    Status-Code — und blieb gruen, als eine Mutationsprobe das ``Literal``
+    durch ``str`` ersetzte. Ein Test, der zwei Schichten nicht
+    unterscheiden kann, belegt keine von beiden (Paragraph 5.55).
+
+    Deshalb wird hier die **Schicht** geprueft: die Abweisung muss aus der
+    Schema-Pruefung kommen, nicht aus der Datenbank. Der Unterschied ist
+    nicht kosmetisch — der Weg ueber die Datenbank oeffnet eine
+    Transaktion, schreibt den Wert und verlaesst sich darauf, dass der
+    Handler aufraeumt.
+    """
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.relais_id}/relay/watchdog-strategy",
+        json={"strategie": "refrsh"},
+    )
+    assert antwort.status_code == 422
+    assert "Datenbank" not in antwort.text, (
+        "abgewiesen hat die Datenbank, nicht das Schema — das ``Literal`` fehlt"
+    )
+
+
+async def test_strategie_an_einem_thermostat_abgewiesen(
+    admin_client: httpx.AsyncClient, aufbau: Aufbau
+) -> None:
+    """Die Strategie gilt fuer Relais. Ein Thermostat hat keinen Timer."""
+    antwort = await admin_client.patch(
+        f"/api/v1/devices/{aufbau.thermostat_id}/relay/watchdog-strategy",
+        json={"strategie": "refresh"},
+    )
+    assert antwort.status_code == 422

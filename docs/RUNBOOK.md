@@ -10481,6 +10481,26 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 > Notreparatur steht in §10bb; der `adr_plugins`-Eintrag ist seither aus
 > `chirpstack.toml` heraus.
 >
+> **Prüfbefehl, dass er draußen ist** — SSH (Server):
+>
+> ```bash
+> docker run --rm -v deploy_chirpstack_config_rendered:/vol:ro alpine:3.20 grep -c '^[[:space:]]*adr_plugins' /vol/chirpstack.toml
+> ```
+>
+> *Erwartet:* **0**.
+>
+> **Das Muster `^[[:space:]]*adr_plugins` ist nicht Zierde.** Der
+> Abschnitt in `chirpstack.toml` **erklärt** den Verzicht und nennt dabei
+> `adr_plugins` mehrfach im Kommentar. Ein `grep -c adr_plugins` zählt
+> diese Zeilen mit und meldet eine Zahl größer null, obwohl die
+> Konfiguration richtig ist — ein Melder, der bei gesundem Zustand rot
+> zeigt, wird nach dem zweiten Mal ignoriert (§5.79). Gezählt werden
+> deshalb nur Zeilen, die mit dem Schlüssel **beginnen**.
+>
+> **Und: kein Zeilenfenster.** `sed -n '36,46p'` auf diese Datei zeigt das
+> `[api]`-Geheimnis mit, sobald sich die Zeilennummern verschieben — genau
+> das ist am 15.11. passiert (§5.89).
+>
 > **Was von dieser Liste gilt:** alles zur **Reserve**
 > (`installation_margin = 20.0`) — Schritt 0, 1, 2, 4, 4a, 4b, 5b, 6.
 > Sie ist eine Zahl in der Regionsdatei, lädt keinen Code und war an dem
@@ -11893,3 +11913,245 @@ ohne einen einzigen Merge. Eine Timescale-Verdichtung ist verfügbar
 **Querverweise:** §10u (Rückfall über `PIN_SHA`), §5.4 (zwei Tags je
 Image), §5.78 (`docker compose` ohne `-f`), §5.76 (Wirkung statt
 Mechanik), `docs/status/2026-11-14-platte-images.md`.
+
+
+## 10bb. ChirpStack startet in Schleife: das Plugin aus der gerenderten Konfiguration nehmen
+
+**Fehlerbild.** `docker compose … ps chirpstack` zeigt `Restarting`, und
+das Log endet auf:
+
+```
+Setting up ADR plugin file_path=/etc/chirpstack/adr-plugins/<datei>.js
+Error: Get id function: JS error: Error converting from js 'undefined' into type 'function'
+```
+
+**Was dann steht:** alles. Keine Uplinks, keine Downlinks, kein
+Regler-Eingriff — ChirpStack ist der einzige Weg zwischen Gateway und
+Anwendung. Am 15.11.2026 waren das sieben Minuten (08:53–09:00).
+
+**Warum der schnelle Weg über das Geräteprofil hier nicht geht:** die
+Oberfläche ist während der Schleife nicht erreichbar. Deshalb steht in
+§10av der Neustart (Schritt 2) **vor** der Zuweisung (Schritt 3).
+
+### Die vier Befehle
+
+Das Volume heißt `deploy_chirpstack_config_rendered` (Projektname
+`deploy`), und ChirpStack mountet es **nur lesend**. Der Eingriff geht
+deshalb über einen Wegwerf-Container.
+
+**SSH (Server) — 1. Eintrag leeren, mit Sicherungskopie:**
+
+```bash
+docker run --rm -v deploy_chirpstack_config_rendered:/vol alpine:3.20 sh -c "cp /vol/chirpstack.toml /vol/chirpstack.toml.vor-notfix && sed -i '/adr-plugins/d' /vol/chirpstack.toml && grep -c '^[[:space:]]*adr_plugins' /vol/chirpstack.toml"
+```
+
+*Erwartet:* `0`.
+
+**Kein Zeilenfenster zur Kontrolle** (`sed -n '36,46p'` o. ä.). Diese
+Datei enthält das `[api]`-Geheimnis, und ein Fenster verschiebt sich,
+sobald man eine Zeile löscht — genau dann, wenn man es benutzt (§5.89).
+
+**SSH (Server) — 2. nur ChirpStack neu erstellen:**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack
+```
+
+`--no-deps` ist **nicht optional**: ohne es läuft `chirpstack-init`
+mit, rendert die TOML neu und bringt den Eintrag sofort zurück. Und
+Mosquitto bleibt unberührt — daran hängt das Gateway.
+
+**SSH (Server) — 3. läuft er?**
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps chirpstack && docker logs deploy-chirpstack-1 --tail 15 2>&1 | grep -iE "starting|listening|error|adr"
+```
+
+*Erwartet:* `Up`, Startzeilen, **kein** `Setting up ADR plugin`.
+
+**SSH (Server) — 4. Wirkung, nicht Mechanik (§5.76), nach drei Minuten:**
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+*Erwartet:* 40–55 Messwerte von ebenso vielen Geräten. **`Up` allein ist
+kein Beleg** — der Dienst kann laufen und trotzdem nichts verarbeiten.
+
+### Die Reparatur hält nicht von selbst
+
+`deploy-pull.sh` ruft in Phase 3 bei **jedem** Timer-Lauf (alle fünf
+Minuten) `docker compose up -d` über alle Dienste. `chirpstack-init` ist
+ein einmaliger Sidecar mit `restart: "no"`; Compose startet ihn dabei
+erneut, er rendert die TOML neu und bringt den Eintrag zurück.
+`chirpstack` selbst wird nicht neu erstellt (unveränderte
+Compose-Konfiguration) und läuft mit der Konfiguration weiter, die es beim
+Start gelesen hat.
+
+**Die Reparatur hält also in der Wirkung, während die Datei wieder falsch
+ist.** Der nächste Neustart aus beliebigem Grund fährt wieder in die
+Schleife. Der Eintrag gehört deshalb **im Repo** entfernt (das war #415)
+— die Notreparatur kauft die Zeit dafür, nicht mehr.
+
+**Querverweise:** §10av (die Laufliste, aus der der Ausfall kam), §5.55
+(54 grüne Tests in der falschen Umgebung), §5.90 (Konfiguration mit
+Geheimnissen gezielt prüfen), §5.78 (`docker compose` ohne `-f`),
+`docs/status/2026-11-15-adr-plugin-zurueckgezogen.md`.
+
+
+## 10bc. Relais-Timer nachsetzen statt ablaufen lassen (Strategie `refresh`)
+
+**Wofür.** Ein Relais wird nie dauerhaft EIN gesetzt — EIN geht
+ausschließlich über den Timer `0x57`, und der läuft von selbst ab (S1).
+Mit der Vorgabe `expire_and_resend` läuft er **30 Minuten**, danach geht
+das Panel aus, meldet den Wechsel und wird neu gesetzt.
+
+**Was das kostet, gemessen am 14./15.11.2026 an 108 und 109:** jede
+EIN-Phase war 30 Minuten lang, keine einzige länger — in 41 Phasen. Die
+Pause danach dauerte 10 bis 20 Minuten, und keine davon hat der Regler
+gewollt: an der Rezeption war der Raum die ganze Zeit 2 bis 3 K zu kalt
+und der Regler meldete jede Minute `regler: ein`. Der Einschaltanteil lag
+damit bei **60 bis 67 Prozent**, und ein 1,5-kW-Panel liefert dann
+effektiv 0,9 kW.
+
+Mit `refresh` wird der Timer nachgesetzt, solange geheizt werden soll:
+Laufzeit **900 s**, nachgesetzt alle **300 s**. Das Panel geht nicht mehr
+zwischendurch aus.
+
+**Die Freigabe hängt an einer Messung, nicht an einer Meinung.** T3.0 vom
+01.11.2026 hat am Gerät ergeben, dass ein zweites `0x57` während eines
+laufenden Timers den Timer **ersetzt** und „previous state" dabei AUS
+bleibt (Bedeutung **(b)**, §10aw Schritt 4, AE-78 §4). Wäre es anders
+ausgegangen, bliebe `refresh` gesperrt.
+
+### Umschalten
+
+**SSH (heizung-test, root)** — für 108:
+
+```bash
+docker exec deploy-api-1 curl -sS -X PATCH http://localhost:8000/api/v1/devices/109/relay/watchdog-strategy -H 'Content-Type: application/json' -d '{"strategie":"refresh"}'
+```
+
+*Erwartet:* `"strategie":"refresh"`, `"timer_sekunden":900`.
+
+Für 109 Panel dasselbe mit `devices/110`. **Die Geräte-Ids sind 109 (=
+Etikett „108") und 110 (= Etikett „109 Panel")** — die Etiketten tragen
+die Hausnummern, die Ids nicht.
+
+Der Aufruf braucht eine Admin-Anmeldung; ohne Cookie antwortet er 401.
+Der Weg über die Oberfläche ist der kürzere, sobald die Geräteseite einen
+Schalter dafür hat — heute hat sie keinen.
+
+**Kein Downlink in diesem Aufruf.** Die Umschaltung wirkt beim nächsten
+Durchlauf des Orchestrators, also innerhalb einer Minute.
+
+### Wirkung prüfen, nicht Mechanik
+
+Nach zwanzig Minuten, **SSH (Server)**:
+
+```bash
+docker logs deploy-celery_worker-1 --since 20m 2>&1 | grep -c "relais ein dev_eui=70b3d52ddd001f23"
+```
+
+*Erwartet:* **4**, also eines alle fünf Minuten — nicht 20 und nicht 0.
+Bei 0 heizt die Zone gerade nicht (dann ist nichts nachzusetzen); bei
+deutlich mehr als 4 greift der Abstand nicht, und das gehört gemeldet.
+
+Und der eigentliche Nachweis, nach zwei Stunden:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "WITH rr AS (SELECT rr.device_id, d.label, rr.time, rr.relay_on, lead(rr.time) OVER (PARTITION BY rr.device_id ORDER BY rr.time) AS bis FROM relay_reading rr JOIN device d ON d.id = rr.device_id WHERE rr.time > now() - interval '2 hours' AND rr.relay_on IS NOT NULL) SELECT label, round(100.0 * sum(CASE WHEN relay_on THEN EXTRACT(EPOCH FROM (bis-time)) ELSE 0 END) / nullif(sum(EXTRACT(EPOCH FROM (bis-time))),0)) AS ein_proz FROM rr WHERE bis IS NOT NULL GROUP BY label ORDER BY label;"
+```
+
+*Erwartet:* der Einschaltanteil steigt über die 67 Prozent, die
+`expire_and_resend` als Obergrenze hatte — bei durchgehendem Heizwunsch
+Richtung 100.
+
+### Funklast
+
+Ein `0x57` sind 4 Byte Nutzlast, mit LoRaWAN-Rahmen 17 Byte auf Luft. Bei
+RX2 (DR0, SF12, 125 kHz) kostet das **1,32 s**. Zwölf je Stunde sind
+**15,8 s** je Relais, bei zwei Relais **31,7 s**. Das Band um
+869,525 MHz ist dasjenige mit der höheren Erlaubnis; die Zahl ist in
+jedem Fall unter einem Prozent. Ein Test nagelt die zwölf fest
+(`test_die_funklast_je_stunde_bleibt_bei_zwoelf`) — ändert sich die Zahl,
+ist das eine Entscheidung und keine Nebenwirkung.
+
+### Verlorene Nachsetzung
+
+Ein `0x57` wird unbestätigt gesendet, und das Gerät meldet keinen
+Zustandswechsel — es war ja schon EIN. Der Wächter erfährt also **nicht**,
+ob die Nachsetzung angekommen ist, und er muss es auch nicht: bei 900 s
+Laufzeit und 300 s Abstand gehen **drei** Nachsetzungen hinaus, bevor der
+Timer ablaufen könnte. Zwei dürfen verloren gehen. Gehen drei in Folge
+verloren, geht das Panel aus, meldet es, und der normale Weg setzt es neu
+— also derselbe Rückfall wie bei `expire_and_resend`, nur selten.
+
+### Rückweg
+
+```bash
+docker exec deploy-api-1 curl -sS -X PATCH http://localhost:8000/api/v1/devices/109/relay/watchdog-strategy -H 'Content-Type: application/json' -d '{"strategie":"expire_and_resend"}'
+```
+
+Wirkt beim nächsten Durchlauf. Der laufende Timer läuft noch bis zu 15
+Minuten weiter und wird dann nicht mehr nachgesetzt — es gibt also keinen
+Moment ohne Schutz.
+
+**Querverweise:** §10aw Schritt 4 (T3.0, die Messung, an der die Freigabe
+hängt), AE-78 §4, §5.76 (Wirkung statt Mechanik), §0 S1 (nie dauerhaft
+EIN), `docs/status/2026-11-15-relais-timer-nachsetzen.md`.
+
+
+## 10bd. Einschaltdauer und Ist/Soll je Relais-Zone ansehen
+
+**Wofür.** Die Frage „hält ein Panel die 23 Grad in der Rezeption". Sie
+braucht zwei Zahlen **nebeneinander**: wie lange das Panel läuft, und wie
+weit das Ist unter dem Soll bleibt.
+
+**SSH (Server):**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.relais_auswertung --stunden 24
+```
+
+Weitere Formen: `--stunden 72`, oder `--seit "2026-11-16 10:00"` in
+**Ortszeit**.
+
+**PowerShell (lokal)**, mit der `srv`-Funktion aus §4:
+
+```bash
+srv 'docker exec deploy-api-1 python -m heizung.scripts.relais_auswertung --stunden 48'
+```
+
+**Es wird nichts gesendet und nichts geschrieben.**
+
+### Wie die Ausgabe zu lesen ist
+
+| Einschaltanteil in den Stunden mit Heizwunsch | Ist unter Soll? | Schluss |
+|---|---|---|
+| nahe 100 % | ja | **das Panel ist zu schwach** |
+| nahe 100 % | nein | reicht |
+| unter ~80 % | ja | **die Steuerung bremst noch** — Frage nicht reif |
+
+Die dritte Zeile war die Lage am 14./15.11.2026: 60 bis 67 Prozent, weil
+der Timer nach 30 Minuten ablief und die Mindestpause weitere zehn
+Minuten hielt. **Eine Messung in diesem Zustand schreibt dem Gerät zu,
+was in der Steuerung liegt.**
+
+Nur Stunden mit Heizwunsch zählen. In einer warmen Stunde ist ein
+niedriger Anteil richtig.
+
+### Was die Zahlen nicht sagen
+
+* **Auflösung zehn Minuten.** Das Relais meldet in diesem Takt; die
+  Phasengrenzen liegen bis zu zehn Minuten neben der Wirklichkeit, die
+  Dauern stimmen im Mittel.
+* **Ein Strich ist keine Null.** Ein Fenster ohne Meldung erscheint als
+  `—`. Eine 0 wäre eine Behauptung über ein Gerät, von dem wir nichts
+  gehört haben.
+* **Das Ist ist das Zonen-Aggregat**, einschließlich der Fühler auf „nur
+  messen" — in Rezeption und Bar je ein Vicki (056 bzw. 027).
+
+**Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
+hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
+`docs/status/2026-11-15-relais-auswertung.md`.

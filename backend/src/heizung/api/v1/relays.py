@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
@@ -100,6 +101,25 @@ class MessrolleErgebnis(BaseModel):
     device_id: int
     measure_only: bool
     kindersicherung_gesendet: bool
+    hinweis: str
+
+
+class StrategieEingabe(BaseModel):
+    """Die Waechter-Strategie, als Wort und nicht als Zahl."""
+
+    strategie: Literal["expire_and_resend", "refresh"] = Field(
+        ...,
+        description=(
+            "expire_and_resend: der Timer laeuft ab, danach wird neu gesetzt. "
+            "refresh: der Timer wird nachgesetzt, solange geheizt werden soll."
+        ),
+    )
+
+
+class StrategieErgebnis(BaseModel):
+    device_id: int
+    strategie: str
+    timer_sekunden: int
     hinweis: str
 
 
@@ -575,6 +595,90 @@ async def setze_messrolle(
             else "Rolle unveraendert — kein Downlink gesendet."
         ),
     )
+
+
+@router.patch(
+    "/devices/{device_id}/relay/watchdog-strategy",
+    response_model=StrategieErgebnis,
+    summary="Waechter-Strategie des Relais umschalten (nur Admin)",
+)
+async def setze_waechter_strategie(
+    payload: StrategieEingabe,
+    device_id: int = DeviceIdPath,
+    user: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> StrategieErgebnis:
+    """Schaltet zwischen ``expire_and_resend`` und ``refresh`` um.
+
+    **Warum das ein Handgriff mit Audit ist und keine Einstellung.** Die
+    beiden Strategien unterscheiden sich darin, wie lange ein Panel nach
+    einem Ausfall des Servers weiterheizt — 30 Minuten gegen 15, und im
+    Gegenzug ein Downlink alle fuenf Minuten. Das ist eine Abwaegung je
+    Geraet und je Haus, kein Vorgabewert (AE-78 §4). Wer sie aendert,
+    soll im Audit stehen.
+
+    **Die Freigabe von ``refresh`` haengt an einer Messung**, nicht an
+    einer Meinung: T3.0 vom 01.11.2026 hat am Geraet ergeben, dass ein
+    zweites ``0x57`` waehrend eines laufenden Timers den Timer **ersetzt**
+    und „previous state" dabei AUS bleibt (Bedeutung (b), RUNBOOK §10aw
+    Schritt 4). Waere es anders ausgegangen, bliebe ``refresh`` gesperrt —
+    dann schriebe das Nachsetzen EIN als Rueckfallzustand fest, und der
+    Waechter erzeugte genau den Zustand, gegen den er gebaut ist.
+
+    **Kein Downlink in diesem Aufruf.** Die Umschaltung wirkt beim
+    naechsten Durchlauf des Orchestrators, also innerhalb einer Minute.
+    Ein sofortiger Befehl waere Sendezeit fuer eine Aenderung, die der
+    naechste Takt ohnehin bringt (S4).
+    """
+    geraet = await _relais_oder_404(session, device_id)
+    if geraet.watchdog_strategy == payload.strategie:
+        return StrategieErgebnis(
+            device_id=device_id,
+            strategie=payload.strategie,
+            timer_sekunden=_timer_sekunden(payload.strategie),
+            hinweis="Unveraendert — es war schon diese Strategie.",
+        )
+
+    alt_wert = geraet.watchdog_strategy
+    geraet.watchdog_strategy = payload.strategie
+    # Der Zeitpunkt des letzten EIN-Befehls gehoert zur alten Strategie.
+    # Beim Umschalten auf ``refresh`` soll der erste Durchlauf nachsetzen
+    # und nicht gegen einen Zeitpunkt rechnen, den niemand mehr meint.
+    geraet.relais_ein_gesendet_at = None
+
+    await record_business_action(
+        session,
+        user_id=user.id,
+        action="RELAY_WATCHDOG_STRATEGY_SET",
+        target_type="device",
+        target_id=device_id,
+        old_value={"watchdog_strategy": alt_wert},
+        new_value={"watchdog_strategy": payload.strategie},
+    )
+    await session.commit()
+
+    return StrategieErgebnis(
+        device_id=device_id,
+        strategie=payload.strategie,
+        timer_sekunden=_timer_sekunden(payload.strategie),
+        hinweis=(
+            "Wirkt beim naechsten Durchlauf des Orchestrators, also "
+            "innerhalb einer Minute. Kein Downlink in diesem Aufruf."
+        ),
+    )
+
+
+def _timer_sekunden(strategie: str) -> int:
+    """Die Laufzeit, die der Waechter mit dieser Strategie setzt.
+
+    Aus den Settings und nicht als Zahl in der Antwort: die Grenzen sind
+    pro Haus verstellbar, und eine zweite Kenntnis davon waere beim
+    ersten Nachjustieren falsch (Paragraph 5.77).
+    """
+    s = get_settings()
+    if strategie == "refresh":
+        return s.relay_timer_refresh_s
+    return s.relay_timer_expire_s
 
 
 def _inbetriebnahme_ergebnis(geraet: Device) -> InbetriebnahmeErgebnis:
