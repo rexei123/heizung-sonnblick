@@ -3808,6 +3808,73 @@ betroffen waren), §5.55 (der gruene Lauf, der nichts prueft — doppelt:
 beim alten Test und beim ersten neuen), §5.76 (Mechanik stimmt, Wirkung
 fehlt), §0 S3 (Auditierbarkeit), STATUS §2cm.
 
+### 5.88 Eine Pruefung auf Nutzzeilen, nicht auf die Datei (15.11.2026)
+
+Nach dem Zurueckziehen des ADR-Plugins (#415) steht in
+`chirpstack.toml` ein Abschnitt, der **erklaert**, warum der Eintrag
+`adr_plugins` fehlt — und der nennt ihn dabei mehrfach. Ein
+`grep -c adr_plugins` auf diese Datei zaehlt die Kommentarzeilen mit und
+meldet eine Zahl groesser null, obwohl die Konfiguration richtig ist.
+
+Dieselbe Falle war im Test schon einmal da, nur in der anderen Richtung:
+`test_die_datei_steht_in_der_plugin_liste` suchte urspruenglich den
+Dateinamen im ganzen TOML und blieb gruen, als eine Mutationsprobe die
+Zeile aus der **Liste** entfernte — der Name stand noch im Kommentar
+darueber.
+
+**Regel:** Eine Pruefung auf eine Konfigurationszeile prueft die
+**Zeile**, nicht das Vorkommen der Zeichenkette:
+`grep -c '^[[:space:]]*adr_plugins'`, im Test die Zeilen ohne `#`.
+Begruendung nicht Eleganz, sondern §5.79: ein Melder, der bei gesundem
+Zustand rot zeigt, wird nach dem zweiten Mal ignoriert — und dann
+ignoriert ihn auch, wer ihn braeuchte.
+
+**Querverweise:** §5.79 (ein Melder, dem niemand glaubt), §5.55 (ein
+gruener Lauf, der nichts geprueft hat — dieselbe Falle, andere Richtung),
+§5.89.
+
+### 5.89 Eine Konfiguration mit Geheimnissen wird gezielt geprueft, nie mit einem Zeilenfenster (15.11.2026)
+
+Beim Ausfall vom 15.11.2026 (ChirpStack in der Neustart-Schleife, sieben
+Minuten ohne Verarbeitung) lautete der Notfall-Befehl, den ich gegeben
+habe, am Ende:
+
+```bash
+... && sed -i '/relais-feste-datenrate.js/d' /vol/chirpstack.toml && sed -n '36,46p' /vol/chirpstack.toml
+```
+
+Das Fenster `36,46` sollte den geaenderten Block zeigen. Durch das
+Loeschen der Pfadzeile rutschte die Datei um **eine** Zeile nach oben, und
+damit lag Zeile 46 auf `secret = "..."` — dem aufgeloesten
+`CHIRPSTACK_API_SECRET`. Es stand auf dem Bildschirm und in der
+Terminal-Historie.
+
+**Der Fehler ist nicht der Zahlendreher, sondern das Mittel.** Ein
+Zeilenfenster ist eine Angabe ueber die Datei **vor** der Aenderung; es
+verschiebt sich genau in dem Moment, in dem man es benutzt, naemlich nach
+dem Loeschen oder Einfuegen. Und es weiss nichts darueber, was sonst in
+der Naehe steht.
+
+**Regel:** Eine Konfigurationsdatei, in der ein Geheimnis stehen kann,
+wird **gezielt** geprueft — `grep -n <schluessel>`, `grep -c
+'^[[:space:]]*<schluessel>'` — und nie mit `sed -n 'a,bp'`, `head`,
+`tail` oder `cat`. Das gilt fuer gerenderte Dateien in Volumes genauso
+wie fuer `.env`; die gerenderte Fassung ist die gefaehrlichere, weil in
+ihr die Platzhalter **aufgeloest** sind.
+
+Zwei Befehle statt einem sind der Preis. Beim naechsten Notfall ist das
+die billigere Haelfte.
+
+**Folge im konkreten Fall:** `CHIRPSTACK_API_SECRET` rotieren (Liste
+Mi 18.11.). Es signiert die API- und UI-Sitzungstoken von ChirpStack;
+nach dem Wechsel sind laufende Anmeldungen in der ChirpStack-Oberflaeche
+und ausgestellte API-Token ungueltig. Die Anwendung ist nicht betroffen,
+der Downlink-Weg laeuft ueber MQTT (§5.28).
+
+**Querverweise:** §5.88 (dieselbe Datei, die andere Pruefung), RUNBOOK
+§10bb (die Notreparatur, aus der es kam), §5.3 (Encoding — die andere
+Familie von Fehlern, die man erst am Ausgabestrom sieht).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)
