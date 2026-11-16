@@ -10371,10 +10371,30 @@ Dieselbe Zahl steht auf der **Geräteseite** in der Kachel
 
 ### Schritt 2 — RSSI, SNR und die Datenrate aus ChirpStack
 
-**Für Relais speichern wir diese drei nicht.** `sensor_reading` führt
-`rssi_dbm` und `snr_db`, `relay_reading` nicht, und die Datenrate
-speichern wir für **kein** Gerät. In der Ausgabe von Schritt 1 stehen
-dort deshalb Striche.
+> **Geändert am 16.11.2026: RSSI und SNR stehen jetzt auch für Relais bei
+> uns.** `relay_reading` hat die Spalten seit Migration 0041, der
+> Subscriber füllt sie aus dem `rxInfo`-Block, `funkqualitaet` liest sie,
+> und die Geräteseite zeigt sie in der Zeile „Funk (Empfang)". Hier stand
+> bis dahin, wir speicherten sie nicht — das war richtig und ist es nicht
+> mehr.
+>
+> **Für Relais erst ab dem 16.11.** Ein Fenster, das weiter zurückreicht,
+> zeigt in Schritt 1 Striche. Das ist keine Störung, sondern die Wahrheit
+> über die Daten.
+>
+> **Der Anlass war eine Frage, die niemand beantworten konnte.** An
+> diesem Tag hat ADR das Relais 108 auf DR5 hochgezogen — vier
+> `LinkADRReq acknowledged` bei Reserve 20 und voller Sendeleistung. Ob
+> der Link zu schwach ist oder die Pakete kollidieren, entscheidet, ob
+> DR1 überhaupt hilft. Die Messung dazu: über 48 Stunden verloren beide
+> Relais rund 6 %, in sechs Stunden verlor 108 **25,8 %** und 109 **0 %**
+> — der Verlust kommt in Schüben. Ohne RSSI und SNR ist nicht zu sagen,
+> ob das Reichweite war.
+
+**Die Datenrate speichern wir für kein Gerät.** Sie steht nur in
+ChirpStacks Geräte-Sitzung; der Weg dorthin liest ein internes,
+undokumentiertes Feld und war als #423 entworfen — bewusst geparkt. Für
+sie bleibt der Blick in die Oberfläche:
 
 *Oberfläche ChirpStack:* **Applications → heizung → Devices → 109 →
 Reiter mit den Metriken.** Dort stehen je Stunde:

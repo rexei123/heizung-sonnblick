@@ -37,7 +37,7 @@ import {
   provisioniereRelais,
   type RelaisStand,
 } from "@/lib/api/relays";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatRssi, formatSnr } from "@/lib/format";
 
 /** Warum ein Relais nicht schalten darf — in der Reihenfolge, in der es zählt. */
 function sperrgrund(stand: RelaisStand): string | null {
@@ -267,6 +267,29 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
           bezeichnung="Energiezähler (roh)"
           wert={
             data.energy_wh === null ? "keine Meldung" : `${data.energy_wh} Wh`
+          }
+        />
+        {/* **Funk, seit dem 16.11.2026.** Für ein Thermostat zeigt die
+            Geräteseite Empfang seit Sprint 20e; für ein Relais stand er
+            nirgends — `relay_reading` hatte die Spalten nicht.
+
+            Der Anlass: an diesem Tag hat ADR das Relais 108 auf DR5
+            hochgezogen, und die Frage "ist der Link zu schwach oder
+            kollidieren die Pakete" war nicht beantwortbar. Über 48
+            Stunden verloren beide Relais rund 6 Prozent; in sechs
+            Stunden verlor 108 ein Viertel und 109 nichts. Ohne RSSI und
+            SNR ist nicht zu unterscheiden, ob das Reichweite war.
+
+            "keine Meldung" und nicht "–": die Zeile steht neben
+            Leistung und Zustand, die dasselbe Wort benutzen. Zwei Wörter
+            für denselben Zustand in derselben Spalte wären eine
+            Unterscheidung, die es nicht gibt. */}
+        <Zeile
+          bezeichnung="Funk (Empfang)"
+          wert={
+            data.rssi_dbm === null && data.snr_db === null
+              ? "keine Meldung"
+              : `${formatRssi(data.rssi_dbm)} · ${formatSnr(data.snr_db)}`
           }
         />
         <Zeile

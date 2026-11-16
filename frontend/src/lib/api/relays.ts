@@ -65,6 +65,10 @@ export const relaisStandSchema = z.object({
   gehaeusetemperatur_alarm: z.boolean(),
   reading_time: z.string().nullable(),
   change_reason: z.string().nullable(),
+  // Empfangsdaten des jüngsten Uplinks (Migration 0041). `null` heißt
+  // "diese Meldung sagt nichts darüber", nicht "kein Empfang".
+  rssi_dbm: z.number().nullable(),
+  snr_db: z.number().nullable(),
 });
 
 export type RelaisStand = z.infer<typeof relaisStandSchema>;

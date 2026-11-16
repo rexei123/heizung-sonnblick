@@ -511,12 +511,22 @@ async def _persist_uplink(uplink: ChirpStackUplink) -> None:
         if await relay_uplink.ist_relais(session, device_id):
             obj_relais = uplink.object or {}
             seen_at_relais = uplink.time or datetime.now(tz=UTC)
+            # Die Empfangsdaten stehen im Ereignis, nicht in der Nutzlast —
+            # der Codec sieht sie nie. Gelesen wird mit **denselben**
+            # Helfern wie im Thermostat-Pfad (``_map_to_reading``), damit
+            # die 0-dB-Luecke von protojson nicht zweimal entschieden wird
+            # (§5.53). Bis Migration 0041 standen diese zwei Zahlen fuer
+            # Relais nirgends, und genau deshalb war am 16.11. nicht
+            # beantwortbar, warum ADR 108 auf DR5 hochgezogen hat.
+            rx_relais = uplink.rxInfo[0] if uplink.rxInfo else None
             protokoll = await relay_uplink.verarbeite_relais_uplink(
                 session,
                 device_id=device_id,
                 obj=obj_relais,
                 zeit=seen_at_relais,
                 fcnt=uplink.fCnt,
+                rssi_dbm=rx_relais.rssi if rx_relais else None,
+                snr_db=_snr_db(rx_relais),
             )
             await session.execute(
                 update(Device)
