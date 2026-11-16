@@ -46,6 +46,9 @@ const dashboardKpiSchema = z.object({
   // bewusst ab — die Zone heizt dann nicht mehr.
   relais_zonen_stumm: z.number(),
   relais_zonen_stille_min: z.number().nullable(),
+  platte_prozent: z.number(),
+  platte_frei_gb: z.number(),
+  platte_warnt: z.boolean(),
 });
 
 export const dashboardApi = {
