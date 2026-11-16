@@ -10785,16 +10785,39 @@ Zwei Zahlen, und beide brauchen den Vorher-Wert. **Vor dem Rollout
 notieren**, danach vergleichen.
 
 **a) Verteilung der Leistungsstufen über alle Geräte.** `tx_power_index`
-steht nicht in unserer Datenbank — er lebt in ChirpStacks
-Geräte-Sitzung. Lesbar ist er über den jeweils letzten `LinkADRReq`:
+steht seit dem 16.11.2026 in **unserer** Datenbank — ein stündlicher Task
+holt ihn aus ChirpStacks Geräte-Sitzung (Migration 0040, Einrichtung
+§10bf). Das ist die Quelle, die alle Geräte kennt:
 
 ```bash
-docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^.*dev_eui=//' | awk '{last[$1]=$2} END {for (e in last) print last[e]}' | sort | uniq -c | sort -k2
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT tx_power_index, count(*) AS geraete, max(tx_power_index_at) AS stand FROM device WHERE retired_at IS NULL GROUP BY tx_power_index ORDER BY tx_power_index NULLS LAST;"
 ```
 
 *Erwartet vorher:* rund 90 Geräte auf `tx_power_index=7`.
 *Erwartet nach 48 h:* kein Gerät mehr mit einer Stufe, die ADR weiter
 senken würde; rund ein Drittel auf einer kleineren Stufe als vorher.
+
+**Die Spalte `stand` zuerst lesen.** Sie sagt, wann der Wert geholt
+wurde, nicht wann er sich geändert hat. Liegt sie mehr als zwei Stunden
+zurück, steht der Task — dann ist die Zahl alt, und zwar ohne dass ihr
+das anzusehen wäre. `tx_power_index IS NULL` heißt „noch nie gelesen":
+entweder ist §10bf nicht eingerichtet, oder das Gerät hat keine Sitzung.
+
+**Rückfall, wenn der Task nicht läuft** — derselbe Wert aus dem
+Container-Protokoll, so wie es bis zum 16.11. die einzige Quelle war:
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^.*dev_eui=//' | awk '{last[$1]=$2} END {for (e in last) print last[e]}' | sort | uniq -c | sort -k2
+```
+
+**Diese Zeile antwortet unvollständig, und das sieht man ihr nicht an.**
+ADR protokolliert nur, wenn es etwas ändert; ein Gerät mit
+eingeschwungener Leistung kommt tagelang nicht vor. Am 16.11.2026,
+05:45 UTC gegengerechnet: das Protokoll kannte **55** Geräte, die
+Sitzung **109** — und die Lücke saß genau bei den eingeschwungenen auf
+Stufe 7 (Protokoll 10, Sitzung 59). Dazu reicht das Protokoll nur
+zurück, solange der Container läuft und die Grenze aus §10be das
+Fenster hält.
 
 **b) Paketverlust hausweit, vorher gegen nachher.**
 
@@ -12052,3 +12075,139 @@ niedriger Anteil richtig.
 **Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
 hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
 `docs/status/2026-11-15-relais-auswertung.md`.
+
+
+## 10bf. Zugang für die Leistungsstufen einrichten (vorbereitet 16.11.2026, Ausrollen offen)
+
+> **Status: gebaut, nicht eingerichtet.** Ohne diesen Abschnitt läuft der
+> stündliche Task leer, und `device.tx_power_index` bleibt `NULL`. Das ist
+> der Auslieferungszustand und kein Fehler — die Schritte hier sind
+> Server-Änderungen und gehören dem Betreiber (Pflicht-Stop 8).
+
+**Wozu.** §10av Schritt 6a braucht `tx_power_index` je Gerät. Der Wert
+steht in ChirpStacks Geräte-Sitzung; bis zum 16.11.2026 war die einzige
+lesbare Quelle das Container-Protokoll, und das kannte am 16.11. nur
+**55** der **109** Geräte (ADR protokolliert nur bei Änderung). Mit diesem
+Zugang holt `heizung.sync_leistungsstufen` den Wert stündlich für alle
+Geräte in unsere Datenbank.
+
+**Was dabei geöffnet wird, in einem Satz:** unser API-Image darf die
+Spalten `dev_eui` und `device_session` **einer** Tabelle in ChirpStacks
+Datenbank **lesen**. In `device_session` stehen auch die
+Sitzungsschlüssel; der Code fasst sie nie an (er liest ein Varint-Feld)
+und bringt sie in keine Meldung — `test_keine_bytes_in_der_fehlermeldung`
+hält das fest. Die **Wurzelschlüssel** (`device_keys`) bleiben außer
+Reichweite: diese Tabelle bekommt keine Berechtigung.
+
+### Schritt 1 — Passwort erzeugen
+
+```bash
+openssl rand -hex 32
+```
+
+### Schritt 2 — Nur-Lese-Rolle in ChirpStacks Postgres
+
+**Nicht** den `chirpstack`-Superuser verwenden. Eine eigene Rolle, zwei
+Spalten, eine Tabelle:
+
+```bash
+docker exec -i deploy-chirpstack-postgres-1 psql -U chirpstack -d chirpstack <<'SQL'
+CREATE ROLE heizung_ro LOGIN PASSWORD 'HIER-DAS-PASSWORT-AUS-SCHRITT-1';
+GRANT CONNECT ON DATABASE chirpstack TO heizung_ro;
+GRANT USAGE ON SCHEMA public TO heizung_ro;
+GRANT SELECT (dev_eui, device_session) ON TABLE device TO heizung_ro;
+SQL
+```
+
+**Gegenprobe, dass die Rolle nicht schreiben kann** — gefragt wird die
+Berechtigung, nicht versucht wird der Schreibvorgang:
+
+```bash
+docker exec deploy-chirpstack-postgres-1 psql -U chirpstack -d chirpstack -At -c "SELECT has_column_privilege('heizung_ro','device','device_session','select') AS lesen, has_column_privilege('heizung_ro','device','name','select') AS andere_spalte, has_table_privilege('heizung_ro','device','insert') AS schreiben, has_table_privilege('heizung_ro','device_keys','select') AS wurzelschluessel;"
+```
+
+*Erwartet:* `t|f|f|f`.
+
+**`has_column_privilege` und nicht `has_table_privilege` für das Lesen** —
+das ist am 16.11.2026 in einer Wegwerf-Datenbank ausprobiert worden, und
+es sah zuerst nach einem Fehler aus: eine Rolle mit
+`GRANT SELECT (spalte)` liefert bei `has_table_privilege(…,'select')` ein
+**`f`**, weil diese Funktion nur die Berechtigung auf der *Tabelle*
+prüft. Eine Gegenprobe, die bei richtig eingerichteter Rolle rot zeigt,
+wird nach dem zweiten Mal ignoriert (§5.79).
+
+**Zurücknehmen**, falls etwas schiefging — `DROP ROLE` allein scheitert
+an den vergebenen Berechtigungen (`cannot be dropped because some objects
+depend on it`), also erst widerrufen:
+
+```bash
+docker exec -i deploy-chirpstack-postgres-1 psql -U chirpstack -d chirpstack <<'SQL'
+REVOKE ALL ON TABLE device FROM heizung_ro;
+REVOKE ALL ON SCHEMA public FROM heizung_ro;
+REVOKE CONNECT ON DATABASE chirpstack FROM heizung_ro;
+DROP ROLE heizung_ro;
+SQL
+```
+
+### Schritt 3 — DSN in die `.env`
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+# Zeile anfuegen, Passwort aus Schritt 1 einsetzen:
+# CHIRPSTACK_SESSION_DB_URL=postgresql+asyncpg://heizung_ro:PASSWORT@chirpstack-postgres:5432/chirpstack
+```
+
+**Die `.env` wird nicht vom Timer überschrieben** (sie ist untracked,
+§10av-Nachbarschaft: `deploy-pull.sh` synct nur getrackte Inhalte). Die
+Zeile bleibt also liegen.
+
+### Schritt 4 — den Worker die Zeile lesen lassen
+
+`env_file` wird beim **Erstellen** des Containers gelesen, nicht beim
+Neustart. Zwei Wege, und der erste ist der ruhigere:
+
+* **Warten.** Der nächste Merge erstellt `celery_worker` ohnehin neu
+  (H-6, jeder Commit ein eigener Image-Tag). Nichts zu tun.
+* **Jetzt**, wenn es nicht warten soll — `-f` ist nicht optional (§5.78):
+
+  ```bash
+  docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d celery_worker
+  ```
+
+  Das trifft **nur** den Worker. Kein Eingriff an `mosquitto`,
+  `chirpstack` oder der Bridge (§10ay).
+
+### Schritt 5 — nachsehen, dass es greift
+
+Der Lauf liegt auf Minute **:10**. Danach:
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml logs --tail 50 celery_worker | grep Leistungsstufen
+```
+
+*Erwartet:* `Leistungsstufen: 109 gelesen, 109 zugeordnet, 0 unbekannt, 0
+unlesbar`. Steht dort `CHIRPSTACK_SESSION_DB_URL nicht gesetzt`, hat der
+Worker die Zeile aus Schritt 3 nicht (Schritt 4 fehlt).
+
+Und die Zahl selbst, dieselbe Abfrage wie in §10av Schritt 6a:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT tx_power_index, count(*) AS geraete, max(tx_power_index_at) AS stand FROM device WHERE retired_at IS NULL GROUP BY tx_power_index ORDER BY tx_power_index NULLS LAST;"
+```
+
+*Erwartet am 16.11.2026 gemessen* (mit dem ausgelieferten Dekoder gegen
+die echten Sitzungen gelaufen, 109 Geräte, 0 unlesbar): 0:16, 1:1, 2:5,
+3:7, 4:11, 5:6, 6:4, 7:59. **`unbekannt` größer als 0** heißt: ChirpStack
+kennt ein Gerät, das bei uns nicht aktiv ist — kein Fehler, aber ein
+Hinweis, dass die beiden Bestände auseinanderlaufen.
+
+### Was dieser Zugang nicht ist
+
+Kein zweiter Befehlsweg zur Hardware. AE-48 und §5.28 halten
+Downlinks auf dem MQTT-Pfad; hier wird gelesen, und zwar aus einer
+Tabelle, nicht über die gRPC-API (die den Wert ohnehin nicht herausgibt).
+Ein `SELECT` kann keinen Setpoint setzen und keine Queue füllen.
+
+**Querverweise:** §10av Schritt 6a (wofür der Wert gebraucht wird),
+§10be (die Grenze für das Protokoll, das bisher die Quelle war),
+§5.28/AE-48 (MQTT statt gRPC für Befehle), `docs/status/2026-11-16-tx-power-index.md`.
