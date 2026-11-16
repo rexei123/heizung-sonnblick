@@ -1,0 +1,20 @@
+# /etc/logrotate.d/heizung-deploy
+#
+# Geschrieben von infra/deploy/deploy-pull.sh (LOG=/var/log/heizung-deploy.log,
+# Zeile 52). Der systemd-Timer ruft das Skript alle fuenf Minuten.
+#
+# Gemessen am 16.11.2026: 94,7 MB seit dem 20.04.2026 (210 Tage) = 0,45 MB/Tag,
+# also 3,2 MB je Woche. Vorher gab es fuer diese Datei keine Regel.
+#
+# Begruendung der einzelnen Zeilen steht in infra/deploy/docker/README.md,
+# Abschnitt "Die logrotate-Regel".
+/var/log/heizung-deploy.log {
+    weekly
+    rotate 8
+    maxsize 50M
+    compress
+    delaycompress
+    notifempty
+    missingok
+    create 0644 root root
+}

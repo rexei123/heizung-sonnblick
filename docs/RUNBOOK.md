@@ -12155,3 +12155,232 @@ niedriger Anteil richtig.
 **Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
 hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
 `docs/status/2026-11-15-relais-auswertung.md`.
+
+
+## 10be. Grenzen für die zwei Protokolle einrichten (Teil von C6, Mi 18.11.2026)
+
+> **Diese Liste hängt an C6** — dem Wartungsschritt „apt-Updates und
+> Reboot, mit dem Gateway in Reichweite", §10aw Block 3, verschoben auf
+> **Mittwoch 18.11.2026**. Sie ist kein eigener Termin: die Schritte 1 und
+> 2 gehören **vor** den Neustart, Schritt 3 **ist** der Neustart, und die
+> Schritte 4 bis 6 kommen danach, wenn die Prüfliste von C6 grün ist.
+>
+> **Warum nicht nebenbei.** Was die Grenze wirksam macht, ist eine
+> Neuerstellung von Containern, und ein Neustart des Docker-Dienstes
+> startet **alle** Container neu. Beides gehört in das Fenster, in dem der
+> Betreiber beim Gateway steht und den Vorher-Wert der Kachel
+> **Funk-Empfang** notiert hat — C6 bringt diese Vorbereitung schon mit,
+> ein separater Termin müsste sie wiederholen.
+>
+> **Freigabe des Betreibers, 16.11.2026:** einverstanden; Installation in
+> C6 vor dem Neustart; für chirpstack **reicht die globale Vorgabe** aus
+> der `daemon.json` — kein `logging:`-Block in der Compose-Datei.
+
+**Einordnung in C6** (Zeiten aus §10aw Block 3):
+
+| C6-Zeitpunkt | Schritt hier |
+|---|---|
+| vor T−10, noch ohne Eile | **1** Dateien einrichten, **2** `daemon.json` prüfen |
+| T+7 (`reboot`) | **3** — der Dienst liest die Datei beim Start, nichts extra zu tun |
+| nach T+21, Kachel wieder bei ~100 | **4** Acks wegsichern, **5** chirpstack neu erstellen, **6** nachsehen |
+
+**Bricht C6 ab** — Gateway hängt, Prüfliste nicht grün —, dann enden die
+Schritte hier bei Nummer 3. Die `logrotate`-Regel wirkt trotzdem (sie
+braucht Docker nicht), und die Log-Grenze wartet auf den nächsten Anlass.
+Nichts davon ist zeitkritisch: die Platte steht bei 66 %.
+
+**Anlass.** Zwei Protokolle wuchsen ohne Grenze: `/var/log/heizung-deploy.log`
+(94,7 MB seit dem 20.04.2026, keine logrotate-Regel) und das
+Container-Protokoll von `deploy-chirpstack-1` (**79,3 MB/Tag**,
+`LogConfig.Config` war `map[]`). Bei 25 GB frei ist die Platte in rund
+**320 Tagen** voll — Folge: §10az, Postgres nimmt keine Schreibvorgänge mehr
+an. Die Rechnung zu allen Zahlen steht in `infra/deploy/docker/README.md`.
+
+**Die Falle, die diese Liste ernst nimmt.** §10av Schritt 6a liest
+`tx_power_index` je Gerät aus dem letzten `LinkADRReq acknowledged` in
+`docker logs deploy-chirpstack-1`. Dieser Wert steht in **keiner** Datenbank
+von uns, und ADR protokolliert nur bei Änderung. Zwei Dinge folgen daraus:
+
+1. Die Grenze muss groß sein — `max-size 100m`, `max-file 16` halten
+   garantiert **1572 MB**, bei gemessenen 79,3 MB/Tag also **19,8 Tage**.
+2. **Eine Neuerstellung des Containers legt ein leeres Protokoll an.** Das
+   gilt mit und ohne Grenze. Schritt 4 unten sichert deshalb die Acks weg,
+   *bevor* chirpstack neu erstellt wird. Wer das überspringt, hat Schritt 6a
+   stumm — der Befehl läuft weiter durch und meldet nur weniger Geräte.
+
+### Schritt 1 — Dateien einrichten (keine Nebenwirkung, vor dem Neustart)
+
+Nach dem Merge liegen beide Dateien am Server im Checkout. Prüfen und
+einrichten:
+
+```bash
+cd /opt/heizung-sonnblick && git log -1 --oneline
+bash infra/deploy/install-log-limits.sh
+```
+
+*Erwartet:* vier Zeilen `[install-log-limits]`, darunter
+„logrotate --debug: Regel ist lesbar." und der Hinweiskasten am Ende.
+
+Das Skript kopiert nur. Es startet **nichts** neu, es erstellt **keinen**
+Container neu, und es ruft weder `docker` noch `systemctl` auf — das ist in
+`backend/tests/test_log_limits.py` mit Attrappen geprüft, nicht nur
+beabsichtigt. Liegt am Server schon eine `/etc/docker/daemon.json` mit
+anderem Inhalt, bricht es ab und zeigt den Unterschied, statt sie zu
+überschreiben.
+
+**Ab hier wirkt die logrotate-Regel von selbst**, mit dem nächsten
+`logrotate.timer` (täglich 00:00). Dafür ist kein weiterer Schritt nötig.
+Die erste Rotation nimmt die heutigen 94,7 MB als Generation 1 mit; sie
+fällt nach acht Wochen heraus.
+
+### Schritt 2 — die daemon.json prüfen, bevor der Dienst sie liest
+
+**Eine fehlerhafte `/etc/docker/daemon.json` hindert `dockerd` am Starten**,
+und gemerkt wird das erst beim nächsten Neustart — also zum schlechtesten
+Zeitpunkt.
+
+```bash
+dockerd --validate --config-file=/etc/docker/daemon.json
+```
+
+*Erwartet:* `configuration OK`. Meldet es etwas anderes: Datei entfernen
+(`rm /etc/docker/daemon.json`) und melden. Ohne die Datei ist alles wie
+vorher.
+
+### Schritt 3 — der Neustart aus C6 liest die Datei (kein eigener Handgriff)
+
+Die Vorgabe wird beim **Start** des Dienstes gelesen. Ein
+`systemctl reload docker` ist dafür nicht verlässlich — die per SIGHUP
+übernommene Optionsliste ist eng und versionsabhängig.
+
+> **`systemctl restart docker` nicht von Hand.** Das startet **alle**
+> Container neu, Mosquitto eingeschlossen — also genau den Griff, den C6
+> vorbereitet (Betreiber beim Gateway, Vorher-Wert notiert, Stromlos-Plan
+> in der Hand). Der `reboot` in C6 bei T+7 erledigt es ohnehin; ein
+> zusätzlicher Docker-Neustart wäre eine zweite Gateway-Gefahr für
+> dieselbe Wirkung.
+
+Nach dem Neustart, als Teil der C6-Prüfliste bei T+10:
+
+```bash
+docker info --format '{{.LoggingDriver}}'
+```
+
+*Erwartet:* `json-file`. Die Vorgaben selbst (`max-size`, `max-file`,
+`compress`) zeigt `docker info` nicht — sie werden in Schritt 6 je Container
+geprüft, und dort zählen sie auch.
+
+**Was der Neustart NICHT tut:** er erstellt keine Container neu. Ein neu
+**gestarteter** Container behält seine alte Log-Vorgabe. Die Grenze greift
+erst mit Schritt 5.
+
+### Schritt 4 — vor einer Neuerstellung von chirpstack: die Acks wegsichern
+
+**Pflicht, und zwar vor Schritt 5.** Erst ab hier, also nach T+21 mit
+grüner Kachel — vorher ist die Lage nicht ruhig genug, um sie noch
+anzufassen.
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" \
+  > /var/log/heizung-adr-acks-$(date +%F).log
+wc -l /var/log/heizung-adr-acks-$(date +%F).log
+```
+
+*Erwartet:* mindestens **183** Zeilen (Stand 16.11.2026, 05:45 UTC — das
+Protokoll läuft seit der Notreparatur §10bb vom 15.11., 07:59 UTC). Weniger
+heißt: der Container wurde seither neu erstellt, und die Vorgeschichte ist
+schon weg.
+
+Die Datei fällt unter die neue logrotate-Regel **nicht** (die gilt nur für
+`heizung-deploy.log`) und bleibt liegen, bis jemand sie wegräumt. Das ist
+hier gewollt: sie ist der einzige Beleg für die Leistungsstufen vor der
+Neuerstellung.
+
+### Schritt 5 — chirpstack neu erstellen (nach grüner C6-Prüfliste)
+
+`-f` ist nicht optional (§5.78).
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack
+```
+
+**Eine Zeile, und zwar diese.** chirpstack schreibt **79,3 MB/Tag** —
+96 % des ganzen Problems. Danach hat der Dienst, der die Platte füllt,
+seinen Deckel, und das Fenster für §10av Schritt 6a steht bei 19,8 Tagen.
+
+Nach der Neuerstellung meldet sich chirpstack neu bei Mosquitto an. Die
+Kachel **Funk-Empfang** noch einmal ansehen (zehn Minuten), bevor der
+Termin als beendet gilt — es ist derselbe Datenpfad, nur ein anderes
+Glied.
+
+**Was ausdrücklich NICHT in dieser Liste steht, und warum:**
+
+| Dienst | Rate | Entscheidung |
+|---|---|---|
+| `mosquitto` | 1,74 MB/Tag | **nicht jetzt.** Jede Neuerstellung ist eine eigene Gateway-Gefahr (§10ay; am 04.11. hing das UG65 nach einem Mosquitto-Neustart). Bei dieser Rate dauert es **drei Jahre** bis zur ersten Rotation — der Deckel ist dort kein Gewinn, der eine zweite Gefahr im selben Termin wert wäre |
+| `chirpstack-gateway-bridge` | 0,0003 MB/Tag | **nicht jetzt**, gleicher Datenpfad, 7 KB in 27 Tagen |
+| `caddy`, `db`, `redis`, `chirpstack-postgres` | zusammen 1,4 MB/Tag | **nicht jetzt.** Vier Neuerstellungen für zusammen 0,5 GB im Jahr; sie bekommen die Vorgabe, wenn sie das nächste Mal aus einem anderen Grund neu erstellt werden |
+| `api`, `web`, `celery_worker`, `celery_beat` | selbstbegrenzend | **nicht nötig.** H-6 gibt jedem Commit einen eigenen Image-Tag, **jeder Merge** erstellt diese vier neu — sie bekommen die Vorgabe beim nächsten Merge von selbst |
+
+Wer die sechs Infrastruktur-Container doch im selben Termin erledigen
+will: dieselbe Zeile mit `caddy db redis chirpstack-postgres`, dann
+`mosquitto chirpstack-gateway-bridge` **zuletzt** und danach §10ay — in
+dieser Reihenfolge, damit der riskanteste Griff auf einen bereits
+verifizierten Stand trifft.
+
+### Schritt 6 — nachsehen, dass die Grenze steht
+
+```bash
+for c in $(docker ps --format '{{.Names}}'); do
+  printf '%-34s %s\n' "$c" "$(docker inspect "$c" --format '{{.HostConfig.LogConfig.Config}}')"
+done
+```
+
+*Erwartet:* `map[compress:true max-file:16 max-size:100m]` bei
+`deploy-chirpstack-1`. Bei den übrigen zehn steht weiter `map[]`, und das
+ist nach Schritt 5 **richtig so** — sie wurden nicht neu erstellt.
+
+`map[]` **bei chirpstack** heißt dagegen: die Neuerstellung hat nicht
+gegriffen, oder der Dienst hatte die Datei noch nicht gelesen (Schritt 3
+— dann fehlt der Neustart, und `docker info --format '{{.LoggingDriver}}'`
+hilft nicht weiter, weil es die Opts nicht zeigt).
+
+Und die Gegenprobe, dass Schritt 6a aus §10av weiter antwortet:
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep -c "LinkADRReq acknowledged"
+```
+
+*Erwartet direkt nach der Neuerstellung:* **0 bis wenige** — das Protokoll
+ist neu. Der Vorher-Stand steht in der Datei aus Schritt 4. Nach rund einem
+Tag sind es wieder etwa 200, nach 14 Tagen deckt das Fenster alle Geräte ab.
+
+### Was offen bleibt
+
+**Das Protokoll bleibt die Quelle für §10av Schritt 6a, und das ist eine
+Entscheidung, kein Versehen.** Der Weg, `tx_power_index` in unsere
+Datenbank zu holen, ist gebaut und am 16.11.2026 **geparkt** worden
+(PR #423, Entwurf): er liest ein internes, undokumentiertes Feld der
+ChirpStack-Geräte­sitzung über eine eigene DB-Rolle und bricht potentiell
+mit jedem ChirpStack-Update — gemessen am Nutzen zu viel, weil für die
+48-Stunden-Kontrolle der **Paketverlust** (§10av Schritt 6b) die
+eigentliche Wirkungsmessung ist und eine einmalige Momentaufnahme der
+Sendestufen genügt.
+
+Daraus folgt für diese Liste: **die Grenze hier ist die Zusicherung, von
+der Schritt 6a abhängt.** Sie darf nicht kleiner werden, ohne dass die
+Rechnung in `infra/deploy/docker/README.md` neu aufgemacht wird —
+`backend/tests/test_log_limits.py` hält sie fest.
+
+Die zweite Grenze bleibt ebenfalls: eine Neuerstellung des Containers
+legt ein leeres Protokoll an. Wer chirpstack neu erstellt, sichert vorher
+die Acks (Schritt 4).
+
+**Querverweise:** §10aw Block 3 (C6 — der Termin, an dem diese Liste
+hängt), §10av (Schritt 6a, die Quelle, die hier geschützt wird), §10ay
+(nach Mosquitto, Caddy oder Bridge: Gateway prüfen), §10az (Platte voll —
+was bei 100 % passiert), §10bb (Notreparatur vom 15.11., seit der das
+chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
+`infra/deploy/docker/README.md` (die Rechnung),
+`docs/status/2026-11-16-log-grenzen.md`.
