@@ -55,13 +55,36 @@ neu, Phase 2d) und #425 (Plugin — Phase 3). Alles andere geht in **einer**
 *wo:* PowerShell (lokal)
 
 ```
-merge-paket 426
+merge-paket 427 426 428 429
 ```
 
-> **Diese Zeile wächst.** Sobald der Anzeige-PR und die Relais-PRs 4/4
-> grün und CLEAN sind, trage ich sie hier ein und melde die endgültige
-> Zeile. Steht hier nur 426, war der Rest heute nicht fertig — dann ist
-> das die ganze Phase 1.
+| PR | Thema | besonders |
+|---|---|---|
+| [#427](https://github.com/rexei123/heizung-sonnblick/pull/427) | **diese Laufliste** | reine Doku |
+| [#426](https://github.com/rexei123/heizung-sonnblick/pull/426) | Drei Korrekturen, Lehre §5.92 | reine Doku + zwei Tests |
+| [#428](https://github.com/rexei123/heizung-sonnblick/pull/428) | Relais-Signal (RSSI/SNR) | **Migration 0041**, additiv |
+| [#429](https://github.com/rexei123/heizung-sonnblick/pull/429) | Anzeige-PR | nur Oberfläche und Fehlertexte |
+
+**Warum diese Reihenfolge.** Die zwei Doku-PRs zuerst, damit bei einem
+Abbruch der Rest noch nicht angefasst ist. #428 vor #429, weil #428 die
+Migration bringt.
+
+**Ein Konflikt ist absehbar:** #428 und #429 fassen beide
+`api/v1/relays.py` (das Schema `RelaisStand`) und `relay-card.tsx` an.
+Wer zuletzt kommt — also #429 — braucht ein develop-Einmergen.
+`merge-paket` stellt die Basis selbst um; bleibt es stehen, bitte melden.
+Kein Rebase, kein Force-Push.
+
+**Nicht in dieser Zeile:** #424 (Pinning, Phase 2d) und #425 (Plugin,
+Phase 3a). Beide erstellen Container neu und gehören in den
+Wartungsblock.
+
+> **Was heute nicht fertig geworden ist:** der **Relais-Verlauf**
+> (Ein/Aus mit Ist/Soll, Heizdauer, kWh mit Rücksprung, Tabelle je Tag,
+> CSV, 24 h / 7 Tage / 30 Tage). Das ist eine eigene Seite mit eigener
+> Abfrage-Schicht und gehört nicht halbfertig in einen Merge-Lauf. Der
+> Teil „Relais-Signal" daraus ist gebaut (#428) — er war die Messung,
+> die in der Frage nach DR5 gefehlt hat.
 
 *ERWARTET:* je PR „merged", danach `develop` CLEAN.
 
