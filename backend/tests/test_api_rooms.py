@@ -453,6 +453,19 @@ async def zimmer_mit_thermostat(setup_engine: AsyncEngine) -> AsyncIterator[tupl
                 text("DELETE FROM business_audit WHERE target_type='room' AND target_id=:r"),
                 {"r": rid},
             )
+            # **Das Geraet ausdruecklich loeschen** (15.11.2026). Die
+            # CASCADE vom Zimmer raeumt die Zone, aber
+            # ``device.heating_zone_id`` ist nullable und wird dabei nur
+            # auf ``NULL`` gesetzt: jeder Lauf hinterliess ein gesundes
+            # Thermostat ohne Label im Pool.
+            #
+            # In CI ist das unsichtbar (frische Datenbank je Lauf). Lokal
+            # kippte es einen **fremden** Test:
+            # ``test_funkempfang::test_lies_funkempfang_zaehlt_nur_das_fenster``
+            # zaehlte sechs Meldungen statt vier, weil die Reste frische
+            # Messwerte bekamen -- und die Suche begann im Funkempfang,
+            # also an der falschen Stelle (Paragraph 5.39).
+            await session.execute(text("DELETE FROM device WHERE dev_eui = :e"), {"e": eui})
             await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": rid})
             await session.execute(text("DELETE FROM room_type WHERE id = :r"), {"r": rt_id})
             await session.commit()
