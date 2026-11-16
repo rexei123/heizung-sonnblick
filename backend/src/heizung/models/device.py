@@ -168,6 +168,21 @@ class Device(Base):
         String(20), nullable=False, server_default="expire_and_resend"
     )
 
+    # Wann zuletzt ein ``0x57`` (EIN mit Timer) an dieses Relais ging
+    # (Migration 0040). **Nur** fuer die Strategie ``refresh``: sie setzt
+    # den Timer nach, und der Abstand rechnet gegen diesen Zeitpunkt.
+    #
+    # **Nicht ``pending_since``**, obwohl der naheliegt. Der traegt „ein
+    # Befehl wartet auf Bestaetigung" und verschwindet, sobald sie da ist
+    # — daran haengen Bestaetigungsfrist, Backoff und Alarm. Dieser
+    # Zeitpunkt muss **bleiben**, sonst sieht der Waechter nach jeder
+    # Bestaetigung „kein Vorbefehl" und setzt sofort nach: ein Downlink
+    # je Durchlauf, also je Minute (Paragraph 5.51 — ein Feld, zwei
+    # Bedeutungen).
+    #
+    # ``NULL`` heisst „kein EIN-Befehl bekannt", nicht „nie eingeschaltet".
+    relais_ein_gesendet_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # S4 (Nachtrag 23.10.): die **zwei** Ruecklesungen, ohne die ein
     # Relais nicht in Betrieb genommen werden darf. Beide tragen den
     # Zeitpunkt der **Bestaetigung durch das Geraet**, nicht den des

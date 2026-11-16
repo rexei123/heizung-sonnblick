@@ -124,6 +124,9 @@ const KPI = {
   befehle_nicht_angenommen: 0,
   relais_zonen_stumm: 0,
   relais_zonen_stille_min: null,
+  platte_prozent: 64,
+  platte_frei_gb: 27.0,
+  platte_warnt: false,
 };
 
 async function mockApi(page: Page): Promise<void> {

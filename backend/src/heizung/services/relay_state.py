@@ -36,7 +36,7 @@ Zustand und darf einen Wechsel nicht vortaeuschen.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +62,15 @@ class RelaisZustand:
     ein: bool | None
     seit: datetime | None
     gemeldet: datetime | None
+
+    #: Wie lange die **vorige** Phase gedauert hat (15.11.2026). ``None``
+    #: heisst „es gab keine vorige" — ein Geraet, das erst einmal etwas
+    #: gemeldet hat.
+    #:
+    #: Gebraucht wird das fuer die Mindestpause: sie schuetzt vor
+    #: schnellem Takten, und nach einer langen Laufzeit gibt es nichts zu
+    #: schuetzen. Mehr dazu in ``rules/zweipunkt.entscheide``.
+    vorige_dauer: timedelta | None = None
 
 
 async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZustand:
@@ -104,7 +113,7 @@ async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZ
 
     if letzter_wechsel is None:
         # Nie etwas anderes gemeldet: der Zustand gilt seit der ersten
-        # Zeile, die wir haben.
+        # Zeile, die wir haben. Eine vorige Phase gibt es dann nicht.
         erste = (
             await session.execute(
                 select(RelayReading.time)
@@ -128,4 +137,41 @@ async def bestaetigter_zustand(session: AsyncSession, device_id: int) -> RelaisZ
         )
     ).scalar()
 
-    return RelaisZustand(ein=ein, seit=beginn or zeit, gemeldet=zeit)
+    seit = beginn or zeit
+
+    # Die vorige Phase: sie endete bei ``letzter_wechsel`` und begann mit
+    # der ersten Zeile nach dem Wechsel **davor**. Eine dritte Abfrage,
+    # und zwar nur hier -- zwei Zeilen ueber denselben Index.
+    #
+    # **Warum nicht gerechnet aus ``seit`` und einem festen Timer.** Die
+    # Laufzeit haengt an der Strategie des Geraets und daran, ob
+    # nachgesetzt wurde; eine Rechnung daraus waere eine zweite Wahrheit
+    # neben den Meldungen des Geraets (Paragraph 5.53).
+    wechsel_davor = (
+        await session.execute(
+            select(RelayReading.time)
+            .where(RelayReading.device_id == device_id)
+            .where(RelayReading.relay_on.is_not(None))
+            .where(RelayReading.relay_on.is_(ein))
+            .where(RelayReading.time < letzter_wechsel)
+            .order_by(RelayReading.time.desc())
+            .limit(1)
+        )
+    ).scalar()
+
+    vorige_dauer: timedelta | None = None
+    if wechsel_davor is not None:
+        vorheriger_beginn = (
+            await session.execute(
+                select(RelayReading.time)
+                .where(RelayReading.device_id == device_id)
+                .where(RelayReading.relay_on.is_not(None))
+                .where(RelayReading.time > wechsel_davor)
+                .order_by(RelayReading.time.asc())
+                .limit(1)
+            )
+        ).scalar()
+        if vorheriger_beginn is not None:
+            vorige_dauer = letzter_wechsel - vorheriger_beginn
+
+    return RelaisZustand(ein=ein, seit=seit, gemeldet=zeit, vorige_dauer=vorige_dauer)
