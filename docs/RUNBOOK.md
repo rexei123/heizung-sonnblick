@@ -10796,6 +10796,38 @@ docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" | sed -e '
 *Erwartet nach 48 h:* kein Gerät mehr mit einer Stufe, die ADR weiter
 senken würde; rund ein Drittel auf einer kleineren Stufe als vorher.
 
+> **⚠ Diese Abfrage antwortet nur für etwa die Hälfte der Geräte.**
+> Gemessen am 16.11.2026:
+>
+> ```
+> Geraete im ADR-Protokoll: 55
+> Geraete in unserer DB:    109
+> davon mit Messwert in 24h: 103
+> ```
+>
+> **Warum.** ADR schreibt `LinkADRReq acknowledged` nur, wenn es etwas
+> **ändert**. Ein Gerät, dessen Stufe seit Tagen passt, steht nicht im
+> Protokoll — und ein Gerät, das nie eine Anpassung brauchte, nie.
+> Hinzu kommt: das Protokoll beginnt bei der letzten Neuerstellung des
+> chirpstack-Behälters (15.11., 07:59 UTC), nicht beim Rollout.
+>
+> **Was das für den Vergleich heißt.** Der Vorher-Wert „rund 90 Geräte
+> auf Stufe 7" stammt aus einem Protokoll, das viel länger lief. Die
+> Nachher-Zahl aus einem kürzeren. „Ein Drittel ist auf eine kleinere
+> Stufe gegangen" und „die Hälfte der Geräte steht nicht im Protokoll"
+> sehen in dieser Ausgabe **gleich** aus. Diese Abfrage ist deshalb eine
+> Momentaufnahme, **kein** Vorher-Nachher.
+>
+> **Belastbar ist Schritt 6b**, der Paketverlust: er liest unsere eigene
+> Datenbank, deckt alle 103 meldenden Geräte und hat für beide Zeiträume
+> dieselbe Grundlage. Wenn 6a und 6b auseinandergehen, gilt 6b.
+>
+> `tx_power_index` in unsere Datenbank zu holen war als #423 entworfen
+> und ist **bewusst geparkt**: der Weg liest ein internes,
+> undokumentiertes Feld der ChirpStack-Gerätesitzung und bricht
+> potentiell mit jedem Update. Für die Wirkungskontrolle genügen 6b plus
+> diese Momentaufnahme.
+
 **b) Paketverlust hausweit, vorher gegen nachher.**
 
 ```bash
@@ -11994,7 +12026,7 @@ Schleife. Der Eintrag gehört deshalb **im Repo** entfernt (das war #415)
 — die Notreparatur kauft die Zeit dafür, nicht mehr.
 
 **Querverweise:** §10av (die Laufliste, aus der der Ausfall kam), §5.55
-(54 grüne Tests in der falschen Umgebung), §5.90 (Konfiguration mit
+(54 grüne Tests in der falschen Umgebung), §5.89 (Konfiguration mit
 Geheimnissen gezielt prüfen), §5.78 (`docker compose` ohne `-f`),
 `docs/status/2026-11-15-adr-plugin-zurueckgezogen.md`.
 
