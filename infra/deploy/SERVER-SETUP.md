@@ -83,6 +83,29 @@ cd heizung-sonnblick
 git checkout develop   # oder: git checkout main
 ```
 
+## 5a. Log-Grenzen einrichten (vor dem ersten Deploy)
+
+```bash
+sudo bash infra/deploy/install-log-limits.sh
+sudo dockerd --validate --config-file=/etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+Das richtet zwei Grenzen ein, die auf dem bestehenden Server **gefehlt**
+haben (gefunden am 16.11.2026): eine logrotate-Regel für
+`/var/log/heizung-deploy.log` und die Vorgabe `max-size`/`max-file`/
+`compress` für den json-file-Treiber.
+
+**Hier ist die Stelle, an der es billig ist.** Die Vorgabe aus der
+`daemon.json` gilt je Container ab dessen **Neuerstellung** — vor dem ersten
+Deploy ist das jeder. Später kostet dasselbe ein Wartungsfenster
+(`docs/RUNBOOK.md` §10be), weil `mosquitto`, `chirpstack` und die Bridge
+dann laufen und ein Neustart Nebenwirkungen hat (§10ay).
+
+Die Zahlen und ihre Herleitung: `infra/deploy/docker/README.md`. Für
+chirpstack ist die Grenze bewusst groß — `docker logs` ist die **einzige**
+Quelle für `tx_power_index` (§10av Schritt 6a).
+
 ## 6. .env vorbereiten
 
 ```bash
