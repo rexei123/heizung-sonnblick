@@ -370,20 +370,18 @@ def pruefe_totalausfall(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=Tru
 AUDIT_ZONE_STUMM = "RELAIS_ZONE_STUMM"
 AUDIT_ZONE_STUMM_ENDE = "RELAIS_ZONE_STUMM_ENDE"
 
-#: Die Namen bis zum 14.11.2026, als der Melder nur den Fuehler kannte.
-#:
-#: **Sie werden mitgelesen, und zwar nur gelesen.** Eine Episode, die zum
-#: Zeitpunkt des Deploys offen ist, traegt noch die alte Marke; ohne sie
-#: hier haette der erste Durchlauf danach keine laufende Episode gesehen
-#: und eine zweite Alarm-Mail fuer denselben Vorgang geschickt. Ein
-#: Melder, der beim Umbenennen seiner eigenen Marken Fehlalarm gibt, ist
-#: die Sorte, die man nach einer Woche ueberliest (Paragraph 5.79).
-#:
-#: Entfernbar, sobald keine Episode aus der Zeit vor dem 14.11.2026 mehr
-#: offen sein kann — also nach dem ersten Durchlauf, in dem alle
-#: Relais-Zonen melden. Wer das aufraeumt, prueft es mit der Abfrage in
-#: ``docs/status/2026-11-14-melder-relais-stumm.md``.
-AUDIT_ALTE_NAMEN = ("RELAIS_ZONE_FUEHLER_STUMM", "RELAIS_ZONE_FUEHLER_STUMM_ENDE")
+# Die Uebergangslesung der alten Marken (``RELAIS_ZONE_FUEHLER_STUMM``
+# und ``..._ENDE``, die Namen bis zum 14.11.2026) ist am 15.11.2026
+# **entfernt**. Ihre Bedingung dafuer war „keine Episode aus der Zeit
+# davor mehr offen", und das ist am Server geprueft, nicht angenommen:
+#
+#     SELECT action, count(*) FROM business_audit
+#     WHERE action LIKE 'RELAIS_ZONE%' GROUP BY action;
+#
+# Ergebnis am 15.11.2026: ausschliesslich ``RELAIS_ZONE_STUMM`` (2) und
+# ``RELAIS_ZONE_STUMM_ENDE`` (2), keine Zeile unter einem alten Namen.
+# Die Uebergangslesung war damit toter Code -- und toter Code in einem
+# Melder ist nicht neutral: er sieht wie ein Fall aus, den es gibt.
 
 
 async def _letzter_zonen_stand(
@@ -401,7 +399,7 @@ async def _letzter_zonen_stand(
     stmt = (
         select(BusinessAudit.action, BusinessAudit.ts)
         .where(
-            BusinessAudit.action.in_([AUDIT_ZONE_STUMM, AUDIT_ZONE_STUMM_ENDE, *AUDIT_ALTE_NAMEN]),
+            BusinessAudit.action.in_([AUDIT_ZONE_STUMM, AUDIT_ZONE_STUMM_ENDE]),
             BusinessAudit.target_type == "heating_zone",
             BusinessAudit.target_id == zone_id,
         )
@@ -519,10 +517,7 @@ async def _run_relais_zone() -> dict[str, Any]:
         jetzt = datetime.now(tz=UTC)
         for befund in befunde:
             letzte_aktion, letzte_zeit = await _letzter_zonen_stand(session, zone_id=befund.zone_id)
-            # Der alte Alarm-Name zaehlt mit, der alte Entwarnungs-Name
-            # nicht: eine beendete Episode ist beendet, egal wie sie
-            # hiess.
-            episode_laeuft = letzte_aktion in (AUDIT_ZONE_STUMM, AUDIT_ALTE_NAMEN[0])
+            episode_laeuft = letzte_aktion == AUDIT_ZONE_STUMM
 
             if befund.stumm:
                 zu_frueh = (
