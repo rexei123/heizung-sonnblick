@@ -54,3 +54,7 @@ Caddyfile*  text eol=lf
 *.zip       binary
 *.gz        binary
 *.tar       binary
+
+# Server-Konfiguration ohne Dateiendung (install-log-limits.sh kopiert sie
+# nach /etc): logrotate liest sie unter Linux, CRLF waere ein Syntaxfehler.
+infra/deploy/logrotate/* text eol=lf

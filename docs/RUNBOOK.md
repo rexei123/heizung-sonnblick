@@ -12052,3 +12052,169 @@ niedriger Anteil richtig.
 **Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
 hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
 `docs/status/2026-11-15-relais-auswertung.md`.
+
+
+## 10be. Grenzen für die zwei Protokolle einrichten (vorbereitet 16.11.2026, Ausrollen offen)
+
+> **Status: gebaut, nicht ausgerollt.** Die Dateien liegen im Repo, der
+> Server ist unverändert. Jeder Schritt hier ist eine Server-Änderung und
+> gehört dem Betreiber (Pflicht-Stop 8).
+
+**Anlass.** Zwei Protokolle wuchsen ohne Grenze: `/var/log/heizung-deploy.log`
+(94,7 MB seit dem 20.04.2026, keine logrotate-Regel) und das
+Container-Protokoll von `deploy-chirpstack-1` (**79,3 MB/Tag**,
+`LogConfig.Config` war `map[]`). Bei 25 GB frei ist die Platte in rund
+**320 Tagen** voll — Folge: §10az, Postgres nimmt keine Schreibvorgänge mehr
+an. Die Rechnung zu allen Zahlen steht in `infra/deploy/docker/README.md`.
+
+**Die Falle, die diese Liste ernst nimmt.** §10av Schritt 6a liest
+`tx_power_index` je Gerät aus dem letzten `LinkADRReq acknowledged` in
+`docker logs deploy-chirpstack-1`. Dieser Wert steht in **keiner** Datenbank
+von uns, und ADR protokolliert nur bei Änderung. Zwei Dinge folgen daraus:
+
+1. Die Grenze muss groß sein — `max-size 100m`, `max-file 16` halten
+   garantiert **1572 MB**, bei gemessenen 79,3 MB/Tag also **19,8 Tage**.
+2. **Eine Neuerstellung des Containers legt ein leeres Protokoll an.** Das
+   gilt mit und ohne Grenze. Schritt 4 unten sichert deshalb die Acks weg,
+   *bevor* chirpstack neu erstellt wird. Wer das überspringt, hat Schritt 6a
+   stumm — der Befehl läuft weiter durch und meldet nur weniger Geräte.
+
+### Schritt 1 — Dateien einrichten (keine Nebenwirkung)
+
+Nach dem Merge liegen beide Dateien am Server im Checkout. Prüfen und
+einrichten:
+
+```bash
+cd /opt/heizung-sonnblick && git log -1 --oneline
+bash infra/deploy/install-log-limits.sh
+```
+
+*Erwartet:* vier Zeilen `[install-log-limits]`, darunter
+„logrotate --debug: Regel ist lesbar." und der Hinweiskasten am Ende.
+
+Das Skript kopiert nur. Es startet **nichts** neu, es erstellt **keinen**
+Container neu, und es ruft weder `docker` noch `systemctl` auf — das ist in
+`backend/tests/test_log_limits.py` mit Attrappen geprüft, nicht nur
+beabsichtigt. Liegt am Server schon eine `/etc/docker/daemon.json` mit
+anderem Inhalt, bricht es ab und zeigt den Unterschied, statt sie zu
+überschreiben.
+
+**Ab hier wirkt die logrotate-Regel von selbst**, mit dem nächsten
+`logrotate.timer` (täglich 00:00). Dafür ist kein weiterer Schritt nötig.
+Die erste Rotation nimmt die heutigen 94,7 MB als Generation 1 mit; sie
+fällt nach acht Wochen heraus.
+
+### Schritt 2 — die daemon.json prüfen, bevor der Dienst sie liest
+
+**Eine fehlerhafte `/etc/docker/daemon.json` hindert `dockerd` am Starten**,
+und gemerkt wird das erst beim nächsten Neustart — also zum schlechtesten
+Zeitpunkt.
+
+```bash
+dockerd --validate --config-file=/etc/docker/daemon.json
+```
+
+*Erwartet:* `configuration OK`. Meldet es etwas anderes: Datei entfernen
+(`rm /etc/docker/daemon.json`) und melden. Ohne die Datei ist alles wie
+vorher.
+
+### Schritt 3 — den Docker-Dienst die Datei lesen lassen
+
+Die Vorgabe wird beim **Start** des Dienstes gelesen. Ein
+`systemctl reload docker` ist dafür nicht verlässlich — die per SIGHUP
+übernommene Optionsliste ist eng und versionsabhängig.
+
+**Empfohlen: gar keinen eigenen Schritt daraus machen.** Der geplante
+Server-Neustart erledigt ihn. Danach:
+
+```bash
+docker info --format '{{.LoggingDriver}}'
+```
+
+*Erwartet:* `json-file`. Die Vorgaben selbst (`max-size`, `max-file`,
+`compress`) zeigt `docker info` nicht — sie werden in Schritt 6 je Container
+geprüft, und dort zählen sie auch.
+
+**Was der Neustart NICHT tut:** er erstellt keine Container neu. Ein neu
+**gestarteter** Container behält seine alte Log-Vorgabe. Die Grenze greift
+erst mit Schritt 5.
+
+### Schritt 4 — vor einer Neuerstellung von chirpstack: die Acks wegsichern
+
+**Pflicht, und zwar vor Schritt 5.**
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep "LinkADRReq acknowledged" \
+  > /var/log/heizung-adr-acks-$(date +%F).log
+wc -l /var/log/heizung-adr-acks-$(date +%F).log
+```
+
+*Erwartet:* mindestens **183** Zeilen (Stand 16.11.2026, 05:45 UTC — das
+Protokoll läuft seit der Notreparatur §10bb vom 15.11., 07:59 UTC). Weniger
+heißt: der Container wurde seither neu erstellt, und die Vorgeschichte ist
+schon weg.
+
+Die Datei fällt unter die neue logrotate-Regel **nicht** (die gilt nur für
+`heizung-deploy.log`) und bleibt liegen, bis jemand sie wegräumt. Das ist
+hier gewollt: sie ist der einzige Beleg für die Leistungsstufen vor der
+Neuerstellung.
+
+### Schritt 5 — die lang lebenden Container neu erstellen (Wartungsfenster)
+
+Nur im Wartungsfenster, nicht nebenbei. `-f` ist nicht optional (§5.78).
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy
+docker compose -f docker-compose.prod.yml up -d --force-recreate db redis chirpstack-postgres
+docker compose -f docker-compose.prod.yml up -d --force-recreate chirpstack
+docker compose -f docker-compose.prod.yml up -d --force-recreate caddy
+docker compose -f docker-compose.prod.yml up -d --force-recreate mosquitto chirpstack-gateway-bridge
+```
+
+**In dieser Reihenfolge, und die letzte Zeile zuletzt.** Ein
+Mosquitto-Neustart hat am 04.11. das Gateway (`gateway-ug65`) hängen lassen;
+**nach der letzten Zeile gilt §10ay** — Gateway prüfen, nicht annehmen.
+Bleibt dort etwas offen, ist der Rest schon erledigt und verifiziert.
+
+`api`, `web`, `celery_worker` und `celery_beat` stehen **nicht** in der
+Liste: H-6 gibt jedem Commit einen eigenen Image-Tag, jeder Merge erstellt
+diese vier ohnehin neu. Sie bekommen die Vorgabe beim nächsten Merge von
+selbst.
+
+### Schritt 6 — nachsehen, dass die Grenze steht
+
+```bash
+for c in $(docker ps --format '{{.Names}}'); do
+  printf '%-34s %s\n' "$c" "$(docker inspect "$c" --format '{{.HostConfig.LogConfig.Config}}')"
+done
+```
+
+*Erwartet:* `map[compress:true max-file:16 max-size:100m]` bei jedem
+Container, der in Schritt 5 neu erstellt wurde. `map[]` heißt: die
+Neuerstellung hat nicht gegriffen oder der Dienst hatte die Datei noch nicht
+gelesen (Schritt 3).
+
+Und die Gegenprobe, dass Schritt 6a aus §10av weiter antwortet:
+
+```bash
+docker logs deploy-chirpstack-1 2>&1 | grep -c "LinkADRReq acknowledged"
+```
+
+*Erwartet direkt nach der Neuerstellung:* **0 bis wenige** — das Protokoll
+ist neu. Der Vorher-Stand steht in der Datei aus Schritt 4. Nach rund einem
+Tag sind es wieder etwa 200, nach 14 Tagen deckt das Fenster alle Geräte ab.
+
+### Was offen bleibt
+
+`tx_power_index` gehört in unsere Datenbank, nicht in ein Container-
+Protokoll. Solange er dort steht, ist jede Antwort auf §10av Schritt 6a vom
+Alter eines Containers abhängig — 1572 MB Rohprotokoll für 163 KB Nutzinhalt
+am Tag (0,19 %). Das ist als eigene Aufgabe vermerkt und **nicht** Teil
+dieser Liste.
+
+**Querverweise:** §10av (Schritt 6a, die Quelle, die hier geschützt wird),
+§10ay (nach Mosquitto, Caddy oder Bridge: Gateway prüfen), §10az (Platte
+voll — was bei 100 % passiert), §10bb (Notreparatur vom 15.11., seit der das
+chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
+`infra/deploy/docker/README.md` (die Rechnung),
+`docs/status/2026-11-16-log-grenzen.md`.
