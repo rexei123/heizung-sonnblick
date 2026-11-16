@@ -558,15 +558,24 @@ async def _zonen_schaltzustand(session: AsyncSession, relais: list[Device]) -> Z
     """
     ein = False
     seit: datetime | None = None
+    # Die **kuerzeste** vorige Laufzeit unter den Relais der Zone: die
+    # Mindestpause entfaellt nur, wenn sie fuer jedes von ihnen entfallen
+    # darf. Bei einem Relais je Zone -- der Lage im Haus -- ist das
+    # dieselbe Zahl.
+    vorige_dauer: timedelta | None = None
     for geraet in relais:
         zustand = await relay_state.bestaetigter_zustand(session, geraet.id)
+        if zustand.vorige_dauer is not None and (
+            vorige_dauer is None or zustand.vorige_dauer < vorige_dauer
+        ):
+            vorige_dauer = zustand.vorige_dauer
         if zustand.ein:
             ein = True
             if zustand.seit is not None and (seit is None or zustand.seit < seit):
                 seit = zustand.seit
         elif not ein and zustand.seit is not None and (seit is None or zustand.seit < seit):
             seit = zustand.seit
-    return Zonenzustand(ein=ein, seit=seit)
+    return Zonenzustand(ein=ein, seit=seit, vorige_dauer=vorige_dauer)
 
 
 async def _ist_und_veraltung(
