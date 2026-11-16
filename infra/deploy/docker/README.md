@@ -9,7 +9,12 @@ Zwei Dateien liegen hier, beide werden **nicht** vom Deploy ausgerollt:
 
 Eingerichtet wird beides mit `infra/deploy/install-log-limits.sh`. Das Skript
 kopiert, prueft und erklaert — es startet **nichts** neu. Die Laufliste fuer den
-Betreiber steht in `docs/RUNBOOK.md` §10be.
+Betreiber steht in `docs/RUNBOOK.md` §10be; sie haengt an **C6** (§10aw
+Block 3, Mi 18.11.2026): Installation vor dem Neustart, Neuerstellung von
+chirpstack danach. Entscheidung des Betreibers vom 16.11.2026: fuer
+chirpstack reicht die globale Vorgabe, und neu erstellt wird **nur**
+chirpstack — `mosquitto` und die Bridge sind bei 1,74 bzw. 0,0003 MB/Tag
+keine Neuerstellung samt Gateway-Gefahr wert (§10ay).
 
 ## Der Befund (gemessen am 16.11.2026, 05:45 UTC)
 

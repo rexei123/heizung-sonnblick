@@ -100,6 +100,27 @@ Reihenfolge in §10be:
 jeder Merge neu erstellt** (`api`, `web`, `celery_worker`, `celery_beat`).
 Kein zusätzlicher Dienst, weil die Compose-Datei unberührt bleibt.
 
+## Entscheidung des Betreibers vom 16.11.2026
+
+Einverstanden, Merge vorab möglich (die Compose-Datei ist unberührt). Die
+**Installation am Server gehört in C6** — den Wartungsschritt „apt-Updates
+und Reboot, mit dem Gateway in Reichweite" (§10aw Block 3), verschoben auf
+**Mittwoch 18.11.2026** — und zwar **vor** den Neustart: der Neustart ist
+es, der den Docker-Dienst die Datei lesen lässt, und er startet alle
+Container neu, weshalb der Betreiber dabei ohnehin beim Gateway steht.
+§10be ist entsprechend umgeschrieben und nennt die Abhängigkeit zu C6 samt
+der Zeitpunkte (vor T−10, T+7, nach T+21).
+
+Für chirpstack **reicht die globale Vorgabe** aus der `daemon.json` — kein
+`logging:`-Block in der Compose-Datei.
+
+Neu entschieden ist dabei auch der Umfang der Neuerstellung: **nur
+chirpstack**. Er schreibt 79,3 MB/Tag und damit 96 % des Problems;
+`mosquitto` (1,74 MB/Tag) und die Bridge (0,0003 MB/Tag) brauchen Jahre
+bis zur ersten Rotation, und jede Neuerstellung dort ist eine eigene
+Gateway-Gefahr (§10ay). Sie bekommen die Vorgabe, wenn sie das nächste Mal
+aus einem anderen Grund neu erstellt werden.
+
 ## Die Falle, die in der Laufliste steht
 
 Eine Neuerstellung von chirpstack legt ein **leeres** Protokoll an — mit und
@@ -118,11 +139,18 @@ der Notreparatur vom 15.11.).
 
 ## Offen
 
-**`tx_power_index` gehört in unsere Datenbank.** 1572 MB Rohprotokoll für
-163 KB Nutzinhalt am Tag (0,19 %) sind der Preis dafür, dass der Wert nur im
-Container-Protokoll steht. Solange das so ist, hängt jede Antwort auf
-§10av Schritt 6a am Alter eines Containers. Das Sieben der Ack-Zeilen in
-eine eigene Datei wäre sparsamer, aber ein neues bewegliches Teil, das
-stillstehen kann, ohne dass es auffällt — und es verschiebt die Quelle für
-Schritt 6a. Beides ist als eigene Aufgabe vermerkt, nicht in diesem PR
-(S6: ein Thema je PR, und die einfache Variante liegt im Budget).
+**Das Protokoll bleibt die Quelle für §10av Schritt 6a.** Der Weg,
+`tx_power_index` in unsere Datenbank zu holen, ist gebaut und am
+16.11.2026 **geparkt** worden (PR #423, Entwurf): er liest ein internes,
+undokumentiertes Feld der ChirpStack-Gerätesitzung über eine eigene
+DB-Rolle und bricht potentiell mit jedem ChirpStack-Update. Gemessen am
+Nutzen zu viel — die Wirkungsmessung in §10av ist der **Paketverlust**
+(Schritt 6b), und für die Sendestufen genügt eine einmalige
+Momentaufnahme.
+
+Damit ist die Grenze hier nicht Übergang, sondern Dauerzustand: 1572 MB
+Rohprotokoll für 163 KB Nutzinhalt am Tag (0,19 %) sind der Preis dafür,
+dass der Wert nur im Container-Protokoll steht — und die Rechnung in
+`infra/deploy/docker/README.md` ist die Zusicherung, von der Schritt 6a
+abhängt. Kleiner darf sie nur werden, wenn diese Rechnung neu aufgemacht
+wird; `backend/tests/test_log_limits.py` hält sie fest.
