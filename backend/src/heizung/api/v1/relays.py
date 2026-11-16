@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -209,6 +210,18 @@ class RelaisStand(BaseModel):
     reading_time: datetime | None
     change_reason: str | None
 
+    #: Empfangsdaten des jüngsten Uplinks (Migration 0041). ``None`` heisst
+    #: „diese Meldung sagt nichts darueber" — fuer jede Zeile vor dem
+    #: 16.11.2026, und dauerhaft fuer Uplinks ohne ``rxInfo``.
+    #:
+    #: **Warum sie hier stehen.** Am 16.11. hat ADR Relais 108 auf DR5
+    #: hochgezogen, und die Frage „ist der Link zu schwach oder kollidieren
+    #: die Pakete" war nicht beantwortbar: die Zahlen standen nirgends. Fuer
+    #: ein Thermostat zeigt die Geraeteseite sie seit Sprint 20e, fuer ein
+    #: Relais ab jetzt.
+    rssi_dbm: int | None
+    snr_db: Decimal | None
+
 
 def _offener_befehl(geraet: Device) -> OffenerBefehl | None:
     """Liest den offenen Stand vom Geraet und sagt, ob er gemeldet ist.
@@ -281,6 +294,8 @@ async def lies_relais(
         internal_temperature_raw=temperatur,
         gehaeusetemperatur_alarm=temperatur is not None and temperatur >= schwelle,
         reading_time=zeile.time if zeile is not None else None,
+        rssi_dbm=zeile.rssi_dbm if zeile is not None else None,
+        snr_db=zeile.snr_db if zeile is not None else None,
         change_reason=zeile.change_reason if zeile is not None else None,
     )
 

@@ -24,19 +24,22 @@ keinen ``--ausfuehren``-Schalter.
 Was es NICHT liefert
 --------------------
 
-**RSSI und SNR gibt es nur fuer Vickis, DR fuer niemanden.** Die
-Empfangsdaten stehen in ``sensor_reading`` (``rssi_dbm``, ``snr_db``);
-``relay_reading`` hat diese Spalten nicht, und die Datenrate speichern
-wir gar nicht. Fuer ein Relais stehen in den Spalten deshalb Striche und
-kein Wert — eine Null waere eine Behauptung ueber einen Funk, den wir
-nicht gemessen haben.
+**Die Datenrate speichern wir nicht.** Sie steht nur in ChirpStacks
+Geraete-Sitzung, und der Weg dorthin liest ein internes, undokumentiertes
+Feld — das war als #423 entworfen und ist bewusst geparkt. Wer sie
+braucht: **ChirpStack → Device → der Metrik-Reiter** fuehrt die
+Verteilung der Datenraten je Stunde (RUNBOOK Paragraph 10au).
 
-Beide Zahlen liegen fuer 109 trotzdem vor, nur nicht bei uns:
-**ChirpStack → Device 109 → der Metrik-Reiter** fuehrt RSSI, SNR und die
-Verteilung der Datenraten je Stunde. Der Weg steht in RUNBOOK
-Paragraph 10au. Die Spalten in ``relay_reading`` nachzuziehen ist eine
-additive Migration und ein eigener PR — sie wuerde erst ab dem Einbau
-Daten sammeln und kommt fuer diese Messung zu spaet.
+**RSSI und SNR gibt es seit dem 16.11.2026 fuer beide Gerätearten.** Die
+Empfangsdaten stehen in ``sensor_reading`` und, seit Migration 0041, in
+``relay_reading`` — gleiche Spaltennamen, gleiche Typen. Der Satz an
+dieser Stelle lautete bis dahin „nur fuer Vickis", und der Nachtrag
+daneben sagte, das Nachziehen sei ein eigener PR, der „fuer diese Messung
+zu spaet" komme. Beides war richtig; der PR ist jetzt gebaut.
+
+**Fuer Relais liefert die Spalte erst ab dem Einbau Werte.** Ein Fenster,
+das weiter zurueckreicht, zeigt Striche — eine Null waere eine
+Behauptung ueber einen Funk, den wir nicht gemessen haben.
 """
 
 from __future__ import annotations
@@ -65,6 +68,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from heizung.db import SessionLocal  # noqa: E402
 from heizung.models.device import Device  # noqa: E402
 from heizung.models.enums import DeviceKind  # noqa: E402
+from heizung.models.relay_reading import RelayReading  # noqa: E402
 from heizung.models.sensor_reading import SensorReading  # noqa: E402
 from heizung.services import paketverlust  # noqa: E402
 
@@ -108,7 +112,7 @@ def _parse_seit(text: str) -> datetime:
 
 
 async def _empfangsdaten(
-    session: AsyncSession, device_id: int, ab: datetime
+    session: AsyncSession, device_id: int, ab: datetime, *, art: DeviceKind
 ) -> tuple[int | None, int | None, Decimal | None, Decimal | None]:
     """RSSI und SNR, kleinster Wert und Mittelwert der Reihe.
 
@@ -116,12 +120,25 @@ async def _empfangsdaten(
     nach unten — ein Frame, den ein zweites Gateway schwach mitgehoert
     hat — soll das Bild nicht verschieben. Dieselbe Wahl wie bei der
     Batterie (AE-72).
+
+    **Zwei Tabellen, eine Rechnung.** Ein Relais schreibt nach
+    ``relay_reading``, ein Thermostat nach ``sensor_reading``; die Spalten
+    heissen in beiden gleich und tragen dieselben Typen (Migration 0041).
+    Die Auswahl der Tabelle ist deshalb eine Zeile, nicht ein zweiter
+    Auswertungsweg — ein zweiter waere ein Feld mit zwei Bedeutungen
+    (Paragraph 5.51).
+
+    Vor dem 16.11.2026 gab dieses Werkzeug fuer Relais ``None`` zurueck,
+    weil die Spalten fehlten. Deshalb liefern Relais-Zeilen erst **ab dem
+    Einbau** Werte: fuer ein Fenster, das weiter zurueckreicht, stehen dort
+    Striche, und das ist richtig so.
     """
+    quelle = RelayReading if art == DeviceKind.RELAY else SensorReading
     zeilen = (
         await session.execute(
-            select(SensorReading.rssi_dbm, SensorReading.snr_db)
-            .where(SensorReading.device_id == device_id)
-            .where(SensorReading.time >= ab)
+            select(quelle.rssi_dbm, quelle.snr_db)
+            .where(quelle.device_id == device_id)
+            .where(quelle.time >= ab)
         )
     ).all()
 
@@ -163,11 +180,11 @@ async def _lade(args: argparse.Namespace) -> int:
         zeilen: list[Zeile] = []
         for geraet in geraete:
             verlust = await paketverlust.fuer_geraet(session, geraet, stunden=stunden, ab=ab)
-            if geraet.kind == DeviceKind.RELAY:
-                rssi_min = rssi_med = None
-                snr_min = snr_med = None
-            else:
-                rssi_min, rssi_med, snr_min, snr_med = await _empfangsdaten(session, geraet.id, ab)
+            # Seit Migration 0041 gilt der Pfad fuer **beide** Gerätearten;
+            # vorher stand hier ein Zweig, der Relais auf None setzte.
+            rssi_min, rssi_med, snr_min, snr_med = await _empfangsdaten(
+                session, geraet.id, ab, art=geraet.kind
+            )
             zeilen.append(Zeile(geraet, verlust, rssi_min, rssi_med, snr_min, snr_med))
 
     _zeige(zeilen, ab=ab)
