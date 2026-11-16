@@ -46,6 +46,7 @@ app: Celery = Celery(
         "heizung.tasks.pin_reminder_tasks",
         "heizung.tasks.relay_tasks",
         "heizung.tasks.funk_tasks",
+        "heizung.tasks.leistungsstufen_tasks",
     ],
 )
 
@@ -204,6 +205,23 @@ app.conf.update(
         "relais-zone-every-5min": {
             "task": "heizung.pruefe_relais_zone",
             "schedule": 300.0,
+            "options": {"queue": "heizung_default"},
+        },
+        # 16.11.2026: ``tx_power_index`` je Geraet aus ChirpStacks
+        # Geraetesitzung in unsere Datenbank. Stuendlich, weil ADR die
+        # Stufe nur bei einer Empfangsaenderung bewegt — zwischen dem 15.
+        # und 16.11. waren das rund acht Aenderungen je Stunde im ganzen
+        # Haus. Ein schnellerer Takt liest dieselben 109 Zeilen oefter.
+        #
+        # Versetzt auf :10, damit die vier stuendlichen Laeufe
+        # (Leistungsstufen :10, Import :20, Pin :40, Funk :50) nicht
+        # dieselbe Minute belegen — kein Lastproblem, nur lesbarere Logs.
+        #
+        # Ohne ``CHIRPSTACK_SESSION_DB_URL`` endet der Lauf nach einer
+        # Log-Zeile, ohne etwas zu lesen oder zu schreiben.
+        "leistungsstufen-hourly": {
+            "task": "heizung.sync_leistungsstufen",
+            "schedule": crontab(minute=10),
             "options": {"queue": "heizung_default"},
         },
     },

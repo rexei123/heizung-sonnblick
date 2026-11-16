@@ -131,3 +131,13 @@ Dazu unter Settings → Environments:
 curl -s https://test.heizung.hotel-sonnblick.at/health
 # {"status":"ok","version":"...","environment":"production"}
 ```
+
+## 10. Nach dem ersten Deploy: Zugang für die Leistungsstufen
+
+`docs/RUNBOOK.md` §10bf — eine Nur-Lese-Rolle in ChirpStacks Postgres,
+damit `tx_power_index` je Gerät in unserer Datenbank landet (§10av
+Schritt 6a). **Erst nach dem ersten Deploy**, weil die Tabelle `device`
+dort bis dahin nicht existiert: ChirpStack legt sie beim ersten Start an.
+
+Optional. Ohne den Zugang läuft der stündliche Task leer, und
+`device.tx_power_index` bleibt `NULL`.

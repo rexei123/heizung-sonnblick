@@ -18,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    SmallInteger,
     String,
     func,
 )
@@ -242,6 +243,37 @@ class Device(Base):
     # vorhanden, und eine Kopie waere eine zweite Wahrheit (§5.53). Hier
     # steht nur, was sonst nirgends steht — **seit wann**.
     abgleich_erschoepft_seit: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- 16.11.2026 (Migration 0040): die Sendeleistung des Geraets ---
+    #
+    # ``tx_power_index`` ist die Leistungsstufe, die ADR dem Geraet
+    # befohlen hat: 0 = volle Leistung, in EU868 bis 7 (je Stufe rund
+    # 2 dB weniger). Bis hierher stand der Wert in **keiner** Datenbank
+    # von uns, sondern nur in ChirpStacks Geraetesitzung und — als
+    # Nebenprodukt — in den ``LinkADRReq acknowledged``-Zeilen des
+    # Container-Protokolls, aus denen RUNBOOK §10av Schritt 6a ihn liest.
+    #
+    # Das Protokoll ist dafuer die schlechtere Quelle, gemessen am
+    # 16.11.2026: ADR schreibt nur bei Aenderung, also standen dort nach
+    # 21,8 Stunden Acks von **55** Geraeten, waehrend die Sitzung **109**
+    # kennt. Und eine Neuerstellung des Containers legt das Protokoll leer
+    # an.
+    #
+    # Gepflegt von ``tasks.leistungsstufen_tasks`` (stuendlich, liest
+    # ChirpStacks Postgres lesend). **Nicht** vom Uplink: das
+    # ``UplinkEvent`` von ChirpStack 4.17 traegt die Sendeleistung nicht,
+    # und kann es nicht — das Gateway kann sie nicht messen.
+    #
+    # ``NULL`` heisst „noch nie gelesen" (kein Backfill, §5.61): ein
+    # Geraet ohne Sitzung hat keine Stufe, und eine 0 waere hier eine
+    # Behauptung. Die Stufe 0 selbst ist dagegen ein echter Wert.
+    tx_power_index: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+
+    # Wann die Stufe gelesen wurde — nicht, wann sie sich geaendert hat.
+    # Ohne diese Zeit ist ein Wert aus einem stehengebliebenen Task nicht
+    # von einem frischen zu unterscheiden (§0 S5: letzter bekannter guter
+    # Stand **mit Zeitstempel**).
+    tx_power_index_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

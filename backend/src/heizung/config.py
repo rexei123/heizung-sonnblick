@@ -139,6 +139,22 @@ class Settings(BaseSettings):
     healthcheck_deploy_url: str = ""
     healthcheck_backup_url: str = ""
 
+    # --- Leistungsstufen aus ChirpStacks Geraetesitzung (16.11.2026) -------
+    # DSN auf ChirpStacks **eigene** Postgres-Instanz, nur lesend. Daraus
+    # holt ``tasks.leistungsstufen_tasks`` stuendlich ``tx_power_index`` je
+    # Geraet; die Begruendung steht in ``services/chirpstack_session``.
+    #
+    # **Leer ist der Auslieferungszustand, nicht ein Versehen.** Der Zugang
+    # verlangt eine Nur-Lese-Rolle in einer Datenbank, die einem anderen
+    # Dienst gehoert — eine Server-Aenderung, die der Betreiber entscheidet
+    # (RUNBOOK §10bf). Bis dahin laeuft der Task leer, und die Spalten
+    # bleiben ``NULL``: sichtbar leer statt falsch gefuellt.
+    #
+    # Der Wert enthaelt ein Passwort und gehoert in die .env, nicht ins
+    # Repo. Form: ``postgresql+asyncpg://nutzer:pass@chirpstack-postgres:
+    # 5432/chirpstack``.
+    chirpstack_session_db_url: str = ""
+
     # --- Batterie-Schwellen (Sprint 20b, AE-73) ---------------------------
     # Die zwei Grenzen der Batterie-Stufen, in Volt, auf dem 24-h-Median der
     # Geraete-Spannung. ``ok`` ab ``battery_ok_min_v``, ``kritisch`` bis
