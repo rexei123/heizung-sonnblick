@@ -318,11 +318,23 @@ function RoomTable({ list, loading, error }: TableProps) {
                   <span className="ml-2 text-xs text-warning">· Automatik angehalten</span>
                 ) : null}
               </td>
-              {/* Ist der Referenzzone. `formatTemperature` liefert „–" bei
-                  `null` — kein Gerät, kein Messwert oder kein Schlafzimmer
-                  sehen in der Zeile gleich aus, und das ist richtig: die
-                  Spalte sagt „kein Wert", nicht warum. Das Warum steht im
-                  Zimmer. */}
+              {/* Ist der Referenzzone, und darunter die Geräteanzahl.
+
+                  **Beides seit dem 16.11.2026 nach einem Befund des
+                  Betreibers.** Bei Bar und Rezeption stand hier „–", und
+                  die nächste Frage war jedes Mal „hängt da überhaupt
+                  etwas?". Zwei Dinge haben dazu beigetragen:
+
+                  1. Die Referenzzone wird über den Namen „Schlafzimmer"
+                     gewählt — Allgemeinbereiche haben keinen. Seit heute
+                     vertritt sich eine **einzige** Zone selbst, und der
+                     Wert steht da.
+                  2. Die Zahl der Geräte stand nur auf der Zimmerseite,
+                     einen Klick entfernt.
+
+                  Hier stand: „die Spalte sagt ,kein Wert', nicht warum.
+                  Das Warum steht im Zimmer." Für den häufigsten Fall —
+                  es hängt nichts — steht das Warum jetzt hier. */}
               <td className="px-3 py-2">
                 <span
                   className={
@@ -334,6 +346,18 @@ function RoomTable({ list, loading, error }: TableProps) {
                 >
                   {formatTemperature(r.mean_temperature_c)}
                 </span>
+                {r.geraete_anzahl !== null && (
+                  <span
+                    className="block text-[11px] leading-tight text-text-tertiary"
+                    data-testid={`geraete-${r.number}`}
+                  >
+                    {r.geraete_anzahl === 0
+                      ? "kein Gerät"
+                      : r.geraete_anzahl === 1
+                        ? "1 Gerät"
+                        : `${r.geraete_anzahl} Geräte`}
+                  </span>
+                )}
               </td>
               <td className="px-3 py-2 text-text-secondary" data-testid={`soll-${r.number}`}>
                 {formatTemperature(r.engine_setpoint_c)}

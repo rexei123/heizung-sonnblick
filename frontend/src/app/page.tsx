@@ -136,11 +136,46 @@ const FUNK_TEXT: Record<DashboardKpi["funkempfang_stufe"], string> = {
 };
 
 const FUNK_TON: Record<DashboardKpi["funkempfang_stufe"], KpiTone> = {
-  online: "neutral",
+  // Seit dem 16.11.2026 gruen: „online" ist ein **belegter** Ok-Zustand —
+  // es gibt frische Meldungen, und die Kachel liest das Ende der Kette.
+  online: "success-soft",
   verzoegert: "warning-soft",
   keine_meldungen: "danger-soft",
   unbekannt: "neutral",
 };
+
+/**
+ * Der Ton einer Kachel, die einen Zustand **beurteilt** — in drei Stufen.
+ *
+ * **Vorgabe des Betreibers, 16.11.2026:** grün nur, wenn der Zustand
+ * **belegt** in Ordnung ist. Unbekannt oder inaktiv bleibt grau. Ein
+ * Problem bleibt orange oder rot wie bisher.
+ *
+ * Deshalb drei Werte und nicht zwei:
+ *
+ * * `true`  → `success-soft` — wir haben gemessen, und es ist gut.
+ * * `false` → der Ton des Problems, den die Kachel mitgibt.
+ * * `null`  → `neutral` — **wir wissen es nicht.**
+ *
+ * **Der dritte Fall ist der Grund für diese Funktion.** „Fenster offen"
+ * zeigt 0, wenn die Erkennung im Gerät ausgeschaltet ist — und 0 sieht
+ * aus wie ein Befund, ist aber keiner (§5.77, der Fall vom 07.11.2026:
+ * hausweit keine einzige Zeile `open_window = true` bei 49 belegten
+ * Temperatureinbrüchen in einem Zimmer). Diese Kachel grün zu färben
+ * hieße, eine ausgeschaltete Messung als Entwarnung zu zeigen. Ein
+ * boolescher Schalter hätte genau diesen Fehler gemacht, weil er
+ * „niemand hat gemessen" und „nichts gefunden" nicht unterscheiden kann.
+ *
+ * **Welche Kachel hier hineingeht, ist eine Entscheidung und steht an
+ * einer Stelle.** Kacheln ohne Ok-/Fehler-Bedeutung rufen die Funktion
+ * nicht — „Belegte Zimmer", „Ø Raumtemperatur" und „Aktive
+ * Übersteuerungen" sind Zahlen, nicht Urteile. 47 belegte Zimmer sind
+ * nicht besser als 0.
+ */
+function ton(ok: boolean | null, problem: KpiTone): KpiTone {
+  if (ok === null) return "neutral";
+  return ok ? "success-soft" : problem;
+}
 
 function buildCards(data: DashboardKpi): CardConfig[] {
   const tick = data.last_engine_tick;
@@ -175,10 +210,10 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       subValue: `von ${data.devices_assigned}`,
       note: data.devices_pool > 0 ? `${data.devices_pool} im Lager` : undefined,
       icon: "device_thermostat",
-      tone:
-        data.devices_online < data.devices_assigned
-          ? "warning-soft"
-          : "neutral",
+      // Grün heisst: **alle zugeordneten** Geräte sind online. Das Lager
+      // zählt hier nicht mit — ein Ersatzteil ohne Batterie ist korrekt
+      // nicht online und darf die Kachel nicht aus dem Grünen holen.
+      tone: ton(data.devices_online >= data.devices_assigned, "warning-soft"),
       // Das Gegenteil dessen, was diese Kachel zaehlt: zugeordnet und
       // nicht healthy/degraded. Die Auswahl dort heisst entsprechend.
       href: "/devices?zeige=nicht-online",
@@ -213,10 +248,13 @@ function buildCards(data: DashboardKpi): CardConfig[] {
         ? undefined
         : "Erkennung im Gerät ausgeschaltet",
       icon: "sensor_window",
-      tone:
-        data.fenstererkennung_aktiv && data.zones_window_open > 0
-          ? "warning-soft"
-          : "neutral",
+      // **Bleibt grau, solange die Erkennung aus ist** — ausdrückliche
+      // Vorgabe des Betreibers. Eine ausgeschaltete Messung ist kein
+      // Ok-Zustand, und 0 ist hier die gefährlichere Zahl.
+      tone: ton(
+        data.fenstererkennung_aktiv ? data.zones_window_open === 0 : null,
+        "warning-soft",
+      ),
     },
     {
       // Sprint 25 T8: die Kachel, die den Ausfall vom 07.11.2026 gezeigt
@@ -243,7 +281,10 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       value: tick ? formatRelative(tick) : "—",
       subValue: tick ? formatDateTime(tick) : undefined,
       icon: "history",
-      tone: tickStale ? "warning-soft" : "neutral",
+      // Grün, solange der Lauf jünger als die Schwelle ist. Ohne jeden
+      // Lauf (`tick === null`) bleibt es orange: das ist kein „unbekannt",
+      // sondern „hat nie gelaufen".
+      tone: ton(!tickStale, "warning-soft"),
     },
     {
       // Sprint 15d (AE-65): aktive Geräte mit schwacher Batterie (warn∪kritisch),
@@ -251,7 +292,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Schwache Batterie",
       value: data.battery_low_count,
       icon: "battery_alert",
-      tone: data.battery_low_count > 0 ? "warning-soft" : "neutral",
+      tone: ton(data.battery_low_count === 0, "warning-soft"),
       href: "/devices?zeige=batterie",
     },
     {
@@ -259,7 +300,17 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Ventil prüfen",
       value: data.valve_check_count,
       icon: "build",
-      tone: data.valve_check_count > 0 ? "warning-soft" : "neutral",
+      // **Nicht in der Liste des Betreibers, trotzdem gruen** — und das
+      // ist eine Entscheidung, keine Nachlaessigkeit. Die Vorgabe nannte
+      // „Schwache Batterie, Befehle nicht angenommen, Relais-Zone stumm:
+      // gruen bei 0"; diese Kachel ist dieselbe Familie, nur nicht
+      // aufgezaehlt.
+      //
+      // Das Bild entscheidet: drei Kacheln nebeneinander, alle mit einer
+      // 0, zwei grau und eine gruen — das liest sich als Fehler in der
+      // Anzeige, nicht als Unterschied in der Sache. Wer es anders will,
+      // aendert diese Zeile und die darunter auf `"neutral"`.
+      tone: ton(data.valve_check_count === 0, "warning-soft"),
       href: "/devices?zeige=ventil",
     },
     {
@@ -270,7 +321,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Zimmer zu warm",
       value: data.room_too_warm_count,
       icon: "local_fire_department",
-      tone: data.room_too_warm_count > 0 ? "danger-soft" : "neutral",
+      tone: ton(data.room_too_warm_count === 0, "danger-soft"),
       href: "/devices?zeige=zu-warm",
     },
     {
@@ -289,7 +340,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Befehle nicht angenommen",
       value: data.befehle_nicht_angenommen,
       icon: "sync_problem",
-      tone: data.befehle_nicht_angenommen > 0 ? "warning-soft" : "neutral",
+      tone: ton(data.befehle_nicht_angenommen === 0, "warning-soft"),
       href: "/devices?zeige=befehle-abgelehnt",
     },
     {
@@ -316,7 +367,7 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Relais-Zone stumm",
       value: data.relais_zonen_stumm,
       icon: "sensors_off",
-      tone: data.relais_zonen_stumm > 0 ? "danger-soft" : "neutral",
+      tone: ton(data.relais_zonen_stumm === 0, "danger-soft"),
       // Die Zusatzzeile nennt die **längste** Stille, nicht die
       // Gesamtzahl der Minuten: bei mehreren Zonen ist die schlimmste die
       // handlungsrelevante. `null` heißt hier „kein Alter vorhanden" —
@@ -353,7 +404,10 @@ function buildCards(data: DashboardKpi): CardConfig[] {
       label: "Plattenplatz",
       value: `${data.platte_prozent} %`,
       icon: "storage",
-      tone: data.platte_warnt ? "danger-soft" : "neutral",
+      // Die Schwelle (`platte_warn_prozent`) steht in den Settings, und
+      // `platte_warnt` ist das Urteil des Backends dazu. Hier noch einmal
+      // gegen 85 zu vergleichen wäre eine zweite Wahrheit (§5.73).
+      tone: ton(!data.platte_warnt, "danger-soft"),
       // Prozent allein sagt nicht, wie dringend es ist: 85 % von 75 GB
       // sind 11 GB frei, 85 % von 500 GB wären 75 GB. Die Zusatzzeile
       // nennt deshalb immer die Gigabyte.

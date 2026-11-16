@@ -18,10 +18,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
+from heizung.models.heating_zone import HeatingZone
 from heizung.models.sensor_reading import SensorReading
 from heizung.rules.aggregation import ReadingForAggregate, aggregate_zone_readings
 
@@ -208,3 +209,44 @@ async def geraete_luecke_per_zone(
         else:
             ergebnis[zone_id] = "beides"
     return ergebnis
+
+
+async def geraete_anzahl_pro_zimmer(
+    session: AsyncSession, room_ids: Iterable[int]
+) -> dict[int, int]:
+    """Wie viele **aktive** Geraete in den Zonen eines Zimmers haengen.
+
+    **Vorgabe des Betreibers, 16.11.2026.** In der Zimmerliste stand bei
+    Bar und Rezeption kein Ist — und die naechste Frage war jedes Mal
+    „haengt da ueberhaupt etwas?". Die Antwort stand nur auf der
+    Zimmerseite, einen Klick entfernt.
+
+    **Gezaehlt wird, was zaehlt:** Geraete mit ``retired_at IS NULL``, denn
+    ein Kopf im Lager heizt nicht und misst nicht (§5.58). Ein Fuehler mit
+    der Rolle „nur messen" zaehlt **mit** — er ist ein Geraet in diesem
+    Zimmer, und genau er ist in den Allgemeinbereichen der einzige. Wer
+    wissen will, ob auch ein Stellglied dabei ist, liest
+    :func:`geraete_luecke_per_zone`; diese Zahl beantwortet eine andere
+    Frage.
+
+    Eine Abfrage fuer alle Zimmer (R-D, kein N+1). Zimmer **ohne** Geraet
+    kommen mit ``0`` zurueck und nicht gar nicht: in der Oberflaeche ist
+    „0 Geraete" eine Aussage, ein fehlender Wert nicht.
+    """
+    ids = list(room_ids)
+    if not ids:
+        return {}
+
+    zeilen = (
+        await session.execute(
+            select(HeatingZone.room_id, func.count(Device.id))
+            .join(Device, Device.heating_zone_id == HeatingZone.id)
+            .where(HeatingZone.room_id.in_(ids))
+            .where(Device.retired_at.is_(None))
+            .group_by(HeatingZone.room_id)
+        )
+    ).all()
+    gezaehlt = dict.fromkeys(ids, 0)
+    for room_id, anzahl in zeilen:
+        gezaehlt[room_id] = anzahl
+    return gezaehlt

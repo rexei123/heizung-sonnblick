@@ -94,6 +94,10 @@ const STAND_NEU = {
   gehaeusetemperatur_alarm: false,
   reading_time: null,
   change_reason: null,
+  // Seit dem 16.11.2026 verlangt zod diesen Schluessel. `false` ist die
+  // richtige Vorgabe: dieses Relais hat ueberhaupt keine Meldung
+  // (`reading_time: null`), und „veraltet" setzt eine voraus.
+  zustand_veraltet: false,
   offener_befehl: null,
 };
 
@@ -111,6 +115,21 @@ const STAND_LAEUFT = {
   switch_cycles: 4,
   reading_time: "2026-10-24T07:55:00Z",
   change_reason: "radio_timer",
+};
+
+/**
+ * Dasselbe Relais, aber die Meldung ist zu alt (Vorgabe 16.11.2026).
+ *
+ * `zustand_veraltet` entscheidet das Backend — 25 Minuten, aus
+ * `relay_meldeintervall_s` mal 2,5. Der Mock setzt das Urteil, nicht die
+ * Zeitdifferenz: eine Uhrzeit im Mock und eine Schwelle im Backend waeren
+ * zwei Wahrheiten, und der Test wuerde beim ersten Nachjustieren der
+ * Schwelle falsch.
+ */
+const STAND_VERALTET = {
+  ...STAND_LAEUFT,
+  zustand_veraltet: true,
+  reading_time: "2026-10-24T06:40:00Z",
 };
 
 /** Mit einem EIN, das seit vier Versuchen nicht bestaetigt ist. */
@@ -200,6 +219,39 @@ test.describe("Relais-Karte", () => {
     await expect(page.getByTestId("relay-sperrgrund")).toContainText(
       "Lese- und Konfigurationsbefehle",
     );
+  });
+
+  test("ein Relais, das seit 25 Minuten schweigt, zeigt „unbekannt“ mit der Uhrzeit", async ({
+    page,
+  }) => {
+    // **Vorgabe des Betreibers, 16.11.2026.** „ein" und „aus" sagen etwas
+    // ueber jetzt; eine Meldung von vor vierzehn Stunden sagt nichts,
+    // stand aber genauso da — genau diese Lage bestand am 12./13.11.
+    // vierzehn Stunden lang, ohne irgendwo aufzufallen.
+    //
+    // Die Uhrzeit ist der Teil, der handeln laesst: man sieht, ob es
+    // Minuten oder Stunden sind.
+    await mock(page, { stand: STAND_VERALTET, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toContainText("unbekannt — letzte Meldung");
+    // Und **nicht** der gemeldete Zustand, obwohl er im Stand steht.
+    // `relay_on: true` ist in STAND_VERALTET gesetzt; die Karte darf ihn
+    // nicht als aktuell zeigen.
+    await expect(karte.getByText(/^ein$/)).toHaveCount(0);
+  });
+
+  test("ein frisch gemeldetes Relais zeigt den Zustand, nicht „unbekannt“", async ({
+    page,
+  }) => {
+    // Die Gegenprobe. Ohne sie koennte die Karte dauerhaft „unbekannt"
+    // zeigen und der Test darueber waere trotzdem gruen.
+    await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).not.toContainText("unbekannt — letzte Meldung");
   });
 
   test("nicht bestätigte Rücklesungen stehen als solche da, nicht als Fehler", async ({

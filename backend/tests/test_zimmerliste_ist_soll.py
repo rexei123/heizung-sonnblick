@@ -3,7 +3,8 @@
 Prueft den Datenbank-Pfad und die Antwortform:
 
 - ``referenzzonen_pro_zimmer`` ueber mehrere Zimmer in **einer** Abfrage
-  (normal / zwei Schlafzimmer / Kinderzimmer / ohne Schlafzimmer).
+  (normal / zwei Schlafzimmer / Kinderzimmer / eine einzige Zone /
+  mehrere Zonen ohne Namenstreffer).
 - ``GET /api/v1/rooms`` liefert ``reference_zone_id``,
   ``mean_temperature_c`` und ``engine_setpoint_c`` **ohne** Abfrage je
   Zimmer.
@@ -296,19 +297,36 @@ async def test_referenzzonen_pro_zimmer_deckt_die_vier_faelle(
         kz = await _mk_zone(sm, kind, "Kinderzimmer")
         await _mk_zone(sm, kind, "Bad")
 
-        # 4. Ohne Schlafzimmer (kommt in der Seed-Liste nicht vor)
-        ohne = await _mk_room(sm, f"{s}d")
-        await _mk_zone(sm, ohne, "Bad")
+        # 4. **Genau eine Zone, kein Namenstreffer** — der Fall der
+        #    Allgemeinbereiche. „Barbereich" und „Eingang" heissen nicht
+        #    „Schlafzimmer", und bis zum 16.11.2026 stand in der
+        #    Zimmerliste bei Bar und Rezeption deshalb kein Ist.
+        bar = await _mk_room(sm, f"{s}d")
+        barbereich = await _mk_zone(sm, bar, "Barbereich")
+
+        # 5. **Mehrere Zonen, kein Namenstreffer** — hier bleibt es bei
+        #    „keine Referenz". Jede Wahl waere geraten (§0 S6).
+        mehrdeutig = await _mk_room(sm, f"{s}e")
+        await _mk_zone(sm, mehrdeutig, "Bad")
+        await _mk_zone(sm, mehrdeutig, "Flur")
 
         async with sm() as session:
-            ergebnis = await referenzzonen_pro_zimmer(session, [normal, suite, kind, ohne])
+            ergebnis = await referenzzonen_pro_zimmer(
+                session, [normal, suite, kind, bar, mehrdeutig]
+            )
 
         assert ergebnis[normal] == sz_normal
         assert ergebnis[suite] == sz_links, "L vertritt die Suite, nicht R"
         assert ergebnis[suite] != sz_rechts
         assert ergebnis[kind] == sz_kind, "Schlafzimmer, nicht Kinderzimmer"
         assert ergebnis[kind] != kz
-        assert ohne not in ergebnis, "ohne Schlafzimmer -> kein Eintrag"
+        assert ergebnis[bar] == barbereich, (
+            "eine einzige Zone vertritt sich selbst — sonst steht bei Bar "
+            "und Rezeption dauerhaft kein Ist"
+        )
+        assert mehrdeutig not in ergebnis, (
+            "mehrere Zonen ohne Namenstreffer -> kein Eintrag, nicht geraten"
+        )
     finally:
         await _cleanup(sm)
 
@@ -411,9 +429,20 @@ async def test_ohne_messwert_und_ohne_zone_bleibt_null(
         sz_b = await _mk_zone(sm, ohne_wert, "Schlafzimmer")
         await _mk_device_mit_messwert(sm, sz_b, uuid.uuid4().hex[:8], None)
 
-        # c) kein Schlafzimmer -> keine Referenzzone, Ist null
+        # c) **Mehrere** Zonen ohne Namenstreffer -> keine Referenzzone.
+        #    Bis zum 16.11.2026 stand hier eine einzige Zone „Bad"; seit
+        #    dem Rueckfall vertritt die sich selbst, und der Fall waere
+        #    nicht mehr der gemeinte. Zwei Zonen halten ihn offen.
         ohne_sz = await _mk_room(sm, f"{s}c")
         await _mk_zone(sm, ohne_sz, "Bad")
+        await _mk_zone(sm, ohne_sz, "Flur")
+
+        # c2) **Eine einzige** Zone ohne Namenstreffer -> sie vertritt sich
+        #     selbst, und mit Messwert steht das Ist auch in der Liste.
+        #     Das ist der Fall von Bar und Rezeption.
+        einzelzone = await _mk_room(sm, f"{s}e")
+        sz_e = await _mk_zone(sm, einzelzone, "Barbereich")
+        await _mk_device_mit_messwert(sm, sz_e, uuid.uuid4().hex[:8], Decimal("21.8"))
 
         # d) keine Engine-Zeile -> Soll null, kein Fehler
         ohne_engine = await _mk_room(sm, f"{s}d")
@@ -434,8 +463,107 @@ async def test_ohne_messwert_und_ohne_zone_bleibt_null(
         assert nach_id[ohne_sz]["reference_zone_id"] is None
         assert nach_id[ohne_sz]["mean_temperature_c"] is None
 
+        assert nach_id[einzelzone]["reference_zone_id"] == sz_e
+        assert nach_id[einzelzone]["mean_temperature_c"] == 21.8, (
+            "eine einzige Zone vertritt sich selbst — genau das fehlte bei Bar und Rezeption"
+        )
+
         assert nach_id[ohne_engine]["mean_temperature_c"] == 17.0
         assert nach_id[ohne_engine]["engine_setpoint_c"] is None
+    finally:
+        await _cleanup(sm)
+
+
+async def test_der_zaehler_gibt_null_fuer_ein_zimmer_ohne_geraet(
+    setup_engine: AsyncEngine,
+) -> None:
+    """**Der Helfer selbst**, nicht der Endpunkt.
+
+    Eine Mutationsprobe am 16.11.2026 hat gezeigt, dass dafuer kein Test
+    existierte: ``geraete_anzahl_pro_zimmer`` durfte ein Zimmer ohne
+    Geraet weglassen, und der Lauf blieb gruen — weil der Endpunkt mit
+    ``geraete.get(room.id, 0)`` nachhilft. Damit entscheiden **zwei**
+    Stellen dieselbe Frage, und die Zusicherung des Helfers („0, nicht
+    gar nicht") war eine Behauptung im Docstring.
+
+    Geprueft wird deshalb hier, direkt: der Helfer liefert fuer **jedes**
+    uebergebene Zimmer einen Eintrag.
+    """
+    from heizung.services.zone_aggregates import geraete_anzahl_pro_zimmer
+
+    sm = async_sessionmaker(setup_engine, expire_on_commit=False)
+    s = uuid.uuid4().hex[:8]
+    try:
+        leer = await _mk_room(sm, f"{s}a")
+        await _mk_zone(sm, leer, "Schlafzimmer")
+        mit = await _mk_room(sm, f"{s}b")
+        z = await _mk_zone(sm, mit, "Schlafzimmer")
+        await _mk_device_mit_messwert(sm, z, uuid.uuid4().hex[:8], Decimal("21.0"))
+
+        async with sm() as session:
+            ergebnis = await geraete_anzahl_pro_zimmer(session, [leer, mit])
+
+        assert leer in ergebnis, "ein Zimmer ohne Geraet muss im Ergebnis stehen"
+        assert ergebnis[leer] == 0
+        assert ergebnis[mit] == 1
+    finally:
+        await _cleanup(sm)
+
+
+async def test_die_liste_nennt_die_zahl_der_geraete(
+    http_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """**Vorgabe des Betreibers, 16.11.2026.**
+
+    Bei Bar und Rezeption stand kein Ist, und die naechste Frage war jedes
+    Mal „haengt da ueberhaupt etwas?". Die Antwort stand nur auf der
+    Zimmerseite, einen Klick entfernt.
+
+    Geprueft werden drei Dinge, und das dritte ist das wichtigste:
+
+    1. Geraete aus **mehreren Zonen** eines Zimmers werden zusammengezaehlt.
+    2. Ein Zimmer ohne Geraet bekommt **0** und nicht ``null`` — „kein
+       Geraet" ist eine Aussage, ein fehlender Wert nicht.
+    3. Ein **stillgelegtes** Geraet zaehlt nicht mit. Ein Kopf im Lager
+       heizt nicht und misst nicht (§5.58); wuerde er mitgezaehlt, waere
+       die Zahl beim naechsten Tausch dauerhaft zu hoch — und niemand
+       wuerde es merken.
+    """
+    sm = async_sessionmaker(setup_engine, expire_on_commit=False)
+    s = uuid.uuid4().hex[:8]
+    try:
+        await _login_admin(http_client, sm)
+
+        # Zwei Zonen, zwei Geraete -> 2
+        zwei = await _mk_room(sm, f"{s}a")
+        z1 = await _mk_zone(sm, zwei, "Schlafzimmer")
+        z2 = await _mk_zone(sm, zwei, "Bad")
+        await _mk_device_mit_messwert(sm, z1, uuid.uuid4().hex[:8], Decimal("21.0"))
+        await _mk_device_mit_messwert(sm, z2, uuid.uuid4().hex[:8], Decimal("23.0"))
+
+        # Eine Zone, kein Geraet -> 0
+        leer = await _mk_room(sm, f"{s}b")
+        await _mk_zone(sm, leer, "Schlafzimmer")
+
+        # Eine Zone, ein Geraet, danach stillgelegt -> 0
+        stillgelegt = await _mk_room(sm, f"{s}c")
+        z3 = await _mk_zone(sm, stillgelegt, "Schlafzimmer")
+        dev_id = await _mk_device_mit_messwert(sm, z3, uuid.uuid4().hex[:8], Decimal("20.0"))
+        async with sm() as session:
+            geraet = await session.get(Device, dev_id)
+            assert geraet is not None
+            geraet.retired_at = datetime.now(tz=UTC)
+            await session.commit()
+
+        resp = await http_client.get("/api/v1/rooms", params={"limit": 1000})
+        assert resp.status_code == 200, resp.text
+        nach_id = {r["id"]: r for r in resp.json()}
+
+        assert nach_id[zwei]["geraete_anzahl"] == 2, "Geraete aus beiden Zonen"
+        assert nach_id[leer]["geraete_anzahl"] == 0, "0, nicht null"
+        assert nach_id[stillgelegt]["geraete_anzahl"] == 0, (
+            "ein stillgelegtes Geraet zaehlt nicht mit"
+        )
     finally:
         await _cleanup(sm)
 

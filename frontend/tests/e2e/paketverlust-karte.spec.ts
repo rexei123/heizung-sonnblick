@@ -3,10 +3,15 @@ import { test, expect, type Page, type Route } from "./fixtures";
 /**
  * Paketverlust auf der Geräteseite (02.11.2026).
  *
- * Geprüft wird die Unterscheidung, die die ganze Kachel trägt: **„—" ist
- * nicht 0 %.** Unter zwei Frames im Fenster gibt es keine Lücke, die man
- * sehen könnte; eine Null wäre eine Behauptung über einen Funk, der nicht
- * gemessen wurde.
+ * Geprüft wird die Unterscheidung, die die ganze Kachel trägt: **„zu
+ * wenige Meldungen" ist nicht 0 %.** Unter zwei Frames im Fenster gibt es
+ * keine Lücke, die man sehen könnte; eine Null wäre eine Behauptung über
+ * einen Funk, der nicht gemessen wurde.
+ *
+ * **Der Wert hieß bis zum 16.11.2026 „—".** Vorgabe des Betreibers: ein
+ * Strich liest sich als „kaputt" oder „nicht geladen", und der
+ * Unterschied zu 0 % stand nur in der Zusatzzeile — also unter der
+ * Zeile, die man zuerst liest.
  *
  * Dazu der Fall vom Relais 109 mit seinen gemessenen 40 % und der
  * Hinweis, dass eine Rücksetzung des Zählers kein Verlust ist.
@@ -142,11 +147,11 @@ test.describe("Paketverlust auf der Geräteseite", () => {
     );
   });
 
-  test("zu wenige Frames: ein Strich, und der Text sagt warum", async ({ page }) => {
+  test("zu wenige Frames: der Wert sagt es, und der Text sagt warum", async ({ page }) => {
     await mockSeite(page, LEER);
     await page.goto("/devices/9");
 
-    await expect(page.getByTestId("paketverlust-anteil")).toHaveText("—");
+    await expect(page.getByTestId("paketverlust-anteil")).toHaveText("zu wenige Meldungen");
     // **Der Kern der Kachel.** Ein Strich, der für 0 % gelesen wird,
     // wäre schlimmer als keine Kachel.
     await expect(page.getByTestId("paketverlust-hinweis")).toContainText(
@@ -172,7 +177,7 @@ test.describe("Paketverlust auf der Geräteseite", () => {
     );
     await page.goto("/devices/9");
 
-    await expect(page.getByTestId("paketverlust-anteil")).toHaveText("—");
+    await expect(page.getByTestId("paketverlust-anteil")).toHaveText("zu wenige Meldungen");
     // Und der Rest der Seite steht: das ist die eigentliche Prüfung.
     await expect(page.getByTestId("relay-card")).toBeVisible();
   });

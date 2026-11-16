@@ -169,6 +169,20 @@ class RoomRead(BaseModel):
     #: Ansichten nicht auseinanderlaufen (§5.53).
     engine_setpoint_c: Decimal | None = None
 
+    #: Wie viele **aktive** Geraete in den Zonen dieses Zimmers haengen.
+    #:
+    #: **Vorgabe des Betreibers, 16.11.2026.** Bei Bar und Rezeption stand
+    #: kein Ist, und die naechste Frage war jedes Mal „haengt da ueberhaupt
+    #: etwas?". Die Antwort stand nur auf der Zimmerseite.
+    #:
+    #: Wie ``mean_temperature_c`` befuellt **nur** der Listen-Endpoint das
+    #: Feld, per Batch-Aggregat. Einzel- und Write-Responses lassen es auf
+    #: ``None`` — dort liest es niemand.
+    #:
+    #: ``None`` heisst „nicht ermittelt" (Einzel-Response), ``0`` heisst
+    #: „kein Geraet". Das sind zwei Dinge, und 0 ist die Aussage.
+    geraete_anzahl: int | None = None
+
     @field_serializer("mean_temperature_c", "engine_setpoint_c")
     def _decimal_temp_to_float(self, v: Decimal | None) -> float | None:
         # §5.63: Decimal -> JSON-Zahl, nicht String. Symmetrisch zu

@@ -53,7 +53,7 @@ const LAYER_LABEL: Record<EventLogLayer, string> = {
   manual_override_blocked: "Übersteuerung blockiert",
   guest_override: "Gast-Drehring",
   window_safety: "Fenster-Sicherheit",
-  device_detached: "Geraet-Sicherheit",
+  device_detached: "Gerät-Sicherheit",
   hard_clamp: "Sicherheits-Limit",
 };
 
@@ -109,16 +109,16 @@ const REASON_LABEL: Record<CommandReason, string> = {
   preheat_checkin: "Vorheizen vor Check-in",
   checkout_setback: "Absenken nach Check-out",
   window_open: "Fenster offen",
-  device_detached: "Geraet abgenommen",
+  device_detached: "Gerät abgenommen",
   guest_override: "Gast-Override",
   long_vacant: "Langzeit unbelegt",
   frost_protection: "Frostschutz",
   summer_mode: "Sommermodus",
   manual: "Manuell",
   manual_event: "Manueller Event",
-  device_blocked_vacant: "Geraet blockiert (Zimmer nicht belegt)",
-  device_blocked_window: "Geraet blockiert (Fenster offen)",
-  device_blocked_room_blocked: "Geraet blockiert (Zimmer Übersteuerung gesperrt)",
+  device_blocked_vacant: "Gerät blockiert (Zimmer nicht belegt)",
+  device_blocked_window: "Gerät blockiert (Fenster offen)",
+  device_blocked_room_blocked: "Gerät blockiert (Zimmer-Übersteuerung gesperrt)",
 };
 
 interface Props {

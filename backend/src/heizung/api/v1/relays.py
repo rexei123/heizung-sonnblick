@@ -51,7 +51,7 @@ from heizung.models.user import User
 from heizung.services import downlink_adapter, provision_lauf, relay_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.child_lock import gast_sperren_je_geraet, soll_kindersicherung
-from heizung.tasks.relay_tasks import provisioniere_relais
+from heizung.tasks.relay_tasks import provisioniere_relais, zustand_veraltungs_fenster
 
 logger = logging.getLogger(__name__)
 
@@ -123,16 +123,46 @@ class StrategieErgebnis(BaseModel):
     hinweis: str
 
 
+#: Deutsche Namen der Geraetearten fuer Fehlermeldungen. Der Enum-Wert
+#: (``thermostat``) ist ein Datenbankwert und kein Satzbaustein.
+ART_NAME: dict[DeviceKind, str] = {
+    DeviceKind.THERMOSTAT: "Thermostat",
+    DeviceKind.RELAY: "Relais",
+}
+
+
+def benenne(geraet: Device) -> str:
+    """Wie ein Gerät in einer Fehlermeldung heisst: **Etikett und Art**.
+
+    **Vorgabe des Betreibers, 16.11.2026: nie die ``device_id``.** Der
+    Grund ist nicht Geschmack, sondern eine Verwechslung, die hier schon
+    mehrfach Zeit gekostet hat: Geraet **109** traegt das Etikett **„108"**
+    und Geraet **110** das Etikett **„109 Panel"**. Eine Meldung
+    ``device_id=109 ist kein Relais`` liest sich wie eine Aussage ueber
+    das Panel 109 — und ist eine ueber ein anderes Geraet.
+
+    Ohne Etikett bleibt die DevEUI. Sie ist eindeutig und steht auf dem
+    Geraet; die Id steht nirgends, wo jemand nachsehen koennte.
+    """
+    name = geraet.label or geraet.dev_eui
+    art = ART_NAME.get(geraet.kind, geraet.kind.value)
+    return f"„{name}“ ({art})"
+
+
 async def _relais_oder_404(session: AsyncSession, device_id: int) -> Device:
     geraet = await session.get(Device, device_id)
     if geraet is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"device_id={device_id} existiert nicht"
+            status_code=status.HTTP_404_NOT_FOUND,
+            # Hier **muss** die Nummer stehen: ein Geraet, das es nicht
+            # gibt, hat kein Etikett. „Nummer" statt „device_id", damit
+            # niemand sie fuer eine Hausnummer haelt.
+            detail=f"Es gibt kein Gerät mit der Nummer {device_id}.",
         )
     if geraet.kind != DeviceKind.RELAY:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"device_id={device_id} ist kein Relais (kind={geraet.kind})",
+            detail=f"Gerät {benenne(geraet)} ist kein Relais.",
         )
     return geraet
 
@@ -209,6 +239,23 @@ class RelaisStand(BaseModel):
     reading_time: datetime | None
     change_reason: str | None
 
+    #: Ist die jüngste Zustandsmeldung zu alt, um ihr zu glauben?
+    #:
+    #: **Vorgabe des Betreibers, 16.11.2026:** ab 25 Minuten Stille zeigt
+    #: die Oberfläche „unbekannt — letzte Meldung HH:MM" statt „ein" oder
+    #: „aus". Ein alter Zustand, der wie ein aktueller dasteht, ist die
+    #: Klasse von Anzeige, der man beim zweiten Mal nicht mehr glaubt
+    #: (§5.79).
+    #:
+    #: **Die 25 Minuten stehen nicht hier und nicht im Frontend.** Sie sind
+    #: ``relay_meldeintervall_s`` mal ``VERALTUNGS_FAKTOR`` und kommen aus
+    #: ``tasks.relay_tasks.zustand_veraltungs_fenster()`` — derselben
+    #: Funktion, an der der Wächter entscheidet, ob er dem Zustand glaubt,
+    #: und an der die Abfrage-Drosselung ihren Abstand nimmt. Die
+    #: Oberfläche ist damit der **dritte** Verbraucher einer Zahl, nicht
+    #: der zweite Ort, an dem sie steht (§5.73).
+    zustand_veraltet: bool
+
 
 def _offener_befehl(geraet: Device) -> OffenerBefehl | None:
     """Liest den offenen Stand vom Geraet und sagt, ob er gemeldet ist.
@@ -282,6 +329,12 @@ async def lies_relais(
         gehaeusetemperatur_alarm=temperatur is not None and temperatur >= schwelle,
         reading_time=zeile.time if zeile is not None else None,
         change_reason=zeile.change_reason if zeile is not None else None,
+        # Keine Meldung ist **nicht** „veraltet": dann gibt es nichts, was
+        # alt sein koennte, und die Oberflaeche sagt „keine Meldung".
+        # Veraltet heisst: es gab eine, und sie ist zu alt.
+        zustand_veraltet=(
+            zeile is not None and datetime.now(tz=UTC) - zeile.time > zustand_veraltungs_fenster()
+        ),
     )
 
 
@@ -464,7 +517,7 @@ async def hebe_sperre_auf(
     if geraet.protection_tripped_at is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"device_id={device_id} hat keine stehende Schutz-Sperre",
+            detail=f"Gerät {benenne(geraet)} hat keine stehende Schutz-Sperre.",
         )
 
     alt = {
@@ -531,7 +584,11 @@ async def setze_messrolle(
     geraet = await session.get(Device, device_id)
     if geraet is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"device_id={device_id} existiert nicht"
+            status_code=status.HTTP_404_NOT_FOUND,
+            # Hier **muss** die Nummer stehen: ein Geraet, das es nicht
+            # gibt, hat kein Etikett. „Nummer" statt „device_id", damit
+            # niemand sie fuer eine Hausnummer haelt.
+            detail=f"Es gibt kein Gerät mit der Nummer {device_id}.",
         )
     if geraet.kind == DeviceKind.RELAY:
         raise HTTPException(
