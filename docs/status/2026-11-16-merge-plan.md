@@ -109,8 +109,13 @@ Produktionsdaten belegt, das Programm nicht. Ausgabe an mich.
 **Zehn Minuten nach dem Deploy**, SSH (Server):
 
 ```bash
-grep Aufraeumen /var/log/heizung-deploy-pull.log | tail -8
+grep Aufraeumen /var/log/heizung-deploy.log | tail -8
 ```
+
+Der Dateiname kam vom Dienstnamen (`heizung-deploy-pull.service`); das
+Protokoll heisst `heizung-deploy.log` (`deploy-pull.sh` Zeile 52).
+Korrigiert am 16.11.2026, nachdem der Befehl am Server
+`No such file or directory` gemeldet hat.
 
 *Erwartet:* Zeilen `Aufraeumen: Grenze …`, `… Tag(s) werden geloescht …`
 oder `Aufraeumen: nichts aelter als 7 Tage …`, und `Aufraeumen fertig.
