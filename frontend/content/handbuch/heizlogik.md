@@ -150,6 +150,16 @@ Was dabei gilt:
 - Das Relais meldet seinen Zustand selbst. Bleibt diese Meldung aus,
   gilt der Zustand als unbekannt, und die Steuerung **fragt nach**
   statt zu raten.
+- **Das Panel geht von selbst aus, auch wenn weiter geheizt werden
+  soll.** Eingeschaltet wird nur auf Zeit — nie dauerhaft —, damit ein
+  ausgefallener Server kein heizendes Panel hinterlässt. Nach Ablauf der
+  Zeit meldet das Gerät den Wechsel, und die Steuerung schaltet wieder
+  ein. Dazwischen liegen einige Minuten, in denen der Raum nicht geheizt
+  wird.
+
+  Je Relais ist einstellbar, dass die Zeit **nachgesetzt** wird, solange
+  geheizt werden soll. Dann läuft das Panel durch; dafür geht es nach
+  einem Serverausfall schon nach 15 Minuten aus statt nach 30.
 
 Die Ist-Temperatur dieser Räume kommt von einem Vicki, der unmontiert im
 Raum liegt und auf „nur messen" steht — das Relais selbst misst keine
