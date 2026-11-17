@@ -10542,6 +10542,50 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 > — die 54 bestehenden Tests laden sie unter **Node** und waren grün,
 > während der Dienst nicht startete (§5.55).
 
+> **Nachtrag 17.11.2026: die Form ist geklärt, und das Plugin kommt
+> trotzdem vorerst nicht.** Der Test gegen `chirpstack/chirpstack:4.17.0`
+> liegt fertig (PR #425, 4/4 grün, **nicht gemergt**). Den Ausschlag gibt
+> eine Messung vom 16.11.: nach einer Stromtrennung an 108 um 08:39 läuft
+> das Relais auf **DR0** (SF12) — eine Stufe **robuster** als die DR1,
+> die das Plugin festnageln würde.
+>
+> ```
+> Verlust 108 seit dem Rejoin:            16 Frames, 0 fehlend  ->  0,0 %
+> Verlust 108 die sechs Stunden davor:                              25,8 %
+> SNR je Frame: -8,5 dB   RSSI: -105 dBm   (Datenrate DR0)
+> 109 Panel zum Vergleich: SNR +4,6 dB, RSSI -99 dBm, DR5
+> ```
+>
+> Dreizehn Dezibel Unterschied im selben Haus: **der Link von 108 ist zu
+> schwach, die Pakete kollidieren nicht.** Und ADR klettert nicht zurück
+> — bei DR0 bräuchte es für eine Stufe nach oben ein SNR von **+3 dB**,
+> gemessen sind −8,5. Die Reserve von 20 dB hält es unten.
+>
+> ### Die Regel, wenn 108 wieder stumm wird
+>
+> **1. Stromkreis aus und wieder ein.** Das Relais joint neu und landet
+> dabei auf **DR0**. Es startet **AUS** — das Stromrückkehr-Verhalten ist
+> rückgelesen und am 16.11. im Betrieb beobachtet; der Regler schaltet es
+> innerhalb einer Minute wieder ein, sofern die Zone heizen will.
+>
+> **2. Prüfen, dass es gegriffen hat** — der Frame-Zähler beginnt neu:
+>
+> ```bash
+> docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT (time AT TIME ZONE 'Europe/Vienna')::timestamp(0) AS zeit, fcnt, relay_on, power_w FROM relay_reading WHERE device_id = 109 ORDER BY time DESC LIMIT 5;"
+> ```
+>
+> *Erwartet:* ein kleiner `fcnt` (1, 2, 3 …) statt eines dreistelligen.
+> **Geräte-Id 109 trägt das Etikett „108".**
+>
+> **3. Tritt das öfter als EINMAL IM MONAT auf, wird das Plugin
+> aktiviert.** Dann ist der Handgriff kein Einzelfall mehr, sondern
+> Wartungsaufwand. Dafür gilt: **`ZIEL_DR = 0`, nicht 1.** Das Gerät hält
+> DR0 nachweislich fehlerfrei, und DR1 wäre 2,5 dB weniger Reserve für
+> einen Duty-Cycle-Vorteil, den bei 0,25 % niemand braucht.
+>
+> Das ist ein **eigener PR** mit der Duty-Cycle-Rechnung im Dateikopf,
+> und er gehört in einen Wartungstermin — nicht ins Merge-Fenster.
+
 > **Das Kriterium aus §10au ist erfüllt.** Es lautete „Verlust über 5 % am
 > Relais **und** deutlich niedriger bei den Vickis". Gemessen am
 > 12.11.2026:
@@ -11497,16 +11541,54 @@ nähert sich dem Wert von vorher.
 **Und beim Warten mitlesen, ob das Gateway überhaupt klopft:**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -f /var/log/caddy/cs-test.access.log' | grep --line-buffered router
+docker logs deploy-mosquitto-1 --since 5m 2>&1 | grep -c "u'gateway-ug65'"
 ```
 
-Das ist der Zugangsweg des Gateways: Caddy nimmt `/router*` auf dem
-ChirpStack-Hostnamen an und reicht es an `chirpstack-gateway-bridge:3001`
-weiter (`infra/caddy/Caddyfile.test`, Abschnitt
-`{$CHIRPSTACK_HOSTNAME}`). **Kommt in zwei Minuten keine Zeile, versucht
-das Gerät es nicht** — dann ist Warten sinnlos und Schritt 5 fällig.
-Kommen Zeilen mit Fehlerstatus, liegt es am Weg und nicht am Gerät. Mit
-Strg-C beenden.
+> **Korrigiert am 17.11.2026. Hier stand bis dahin ein `tail -f` auf das
+> Caddy-Protokoll mit `grep router`** — der **Basic-Station**-Weg. Das
+> UG65 spricht **kein** Basic Station; es publiziert per **MQTT auf
+> 1883** und meldet sich bei Mosquitto als Benutzer `gateway-ug65` an.
+> Das steht seit dem 07.11.2026 an drei anderen Stellen im RUNBOOK
+> (C4, §10az, die Tabelle in §12) — **nur dieser Abschnitt wurde nicht
+> nachgezogen.**
+>
+> Die alte Zeile war nicht bloß wirkungslos, sie war **irreführend**: sie
+> zeigt bei gesundem Gateway dauerhaft nichts, und der Text darunter
+> sagte, genau das heiße „das Gerät versucht es nicht". Wer ihr folgte,
+> zog den Stecker, ohne dass etwas kaputt war. Am 16.11.2026 habe ich
+> daraus zweimal eine falsche Prüfung in eine Laufliste geschrieben.
+
+**Die Zahl ist nur nach einer Unterbrechung aussagekräftig.** Im
+Normalbetrieb steht dort **0**, und das ist gesund: die MQTT-Sitzung wird
+**einmal** aufgebaut und bleibt. Gemessen am 16.11.2026 — die letzte
+Verbindung stammte vom **10.11.**, sechs Tage durchgehend. Eine 0 im
+laufenden Betrieb als Störung zu lesen wäre der Melder, dem nach dem
+zweiten Mal niemand mehr glaubt (§5.79).
+
+**Wann sie größer als 0 sein MUSS:** immer dann, wenn `mosquitto` neu
+**erstellt** oder neu **gestartet** wurde — ein Neustart des Servers, ein
+`up -d` mit geänderter mosquitto-Zeile, ein Docker-Upgrade. Dann bricht
+die Sitzung des Gateways ab, und es muss sich neu anmelden.
+
+**Die zweite Prüfung, und sie ist die belastbarere** — sie misst das Ende
+der Kette statt eine Anmeldung:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
+```
+
+**Schritt 5 (Stromtrennung) ist fällig, wenn nach zwei bis drei Minuten
+BEIDES leer bleibt** — keine Neuanmeldung **und** keine Messwerte. Kommt
+eines von beiden, ist der Weg in Ordnung und Warten richtig.
+
+**Wer alle Clients sehen will:**
+
+```bash
+docker logs deploy-mosquitto-1 --since 30m 2>&1 | grep -oE "u'[^']+'" | sort | uniq -c
+```
+
+Erwartet nach einem Neustart: `gateway-ug65`, `chirpstack-integration`,
+`chirpstack-gw-eu868`, `heizung-api*`.
 
 **5. Die Behebung: das Gateway stromlos machen.** Stecker ziehen, zehn
 Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
@@ -12044,6 +12126,10 @@ Start gelesen hat.
 ist.** Der nächste Neustart aus beliebigem Grund fährt wieder in die
 Schleife. Der Eintrag gehört deshalb **im Repo** entfernt (das war #415)
 — die Notreparatur kauft die Zeit dafür, nicht mehr.
+
+**Wenn 108 stumm wird, ist die Antwort nicht das Plugin**, sondern ein
+Stromstoß am Relais — die Regel samt Schwelle („öfter als einmal im
+Monat") steht im Nachtrag vom 17.11. in §10av.
 
 **Querverweise:** §10av (die Laufliste, aus der der Ausfall kam), §5.55
 (54 grüne Tests in der falschen Umgebung), §5.89 (Konfiguration mit
