@@ -15,10 +15,27 @@
 #   MQTT_HEIZUNG_PASSWORD        -> Mosquitto-User heizung-api (subscribe)
 #
 # Aktualisierung: deploy-pull.sh (siehe Nachbardatei).
+#
+# Fremde Images sind auf Tag PLUS Digest festgenagelt. Der Tag bleibt
+# lesbar, der Digest entscheidet. Grund: ein gleitender Tag wie ":4" oder
+# "latest-pg16" ist unauffaellig, solange das Image lokal liegt -- fehlt es
+# aber, holt die naechste Neuerstellung, was gerade darunter liegt. Am
+# 15.11.2026 wurde chirpstack mitten im Stoerfall neu erstellt; waere das
+# Image zuvor weggeraeumt gewesen, haette der Befehl 4.18 gezogen statt
+# 4.17.0. Festnageln ist Wiederherstellbarkeit, nicht Schutz vor einem
+# geplanten Termin.
+#
+# Der Preis: Sicherheitspatches kommen nicht mehr von selbst mit. Dagegen
+# hilft nur das Nachzieh-Ritual in RUNBOOK 10bg -- einmal je Quartal oder
+# bei einem CVE, der zaehlt, bewusst in einem eigenen PR mit Termin.
+#
+# Unsere eigenen Images (api, web, celery_*) tragen keinen Digest: sie
+# haengen an ${IMAGE_TAG}, und deploy-pull.sh setzt den je Commit (H-6).
 
 services:
   db:
-    image: timescale/timescaledb:latest-pg16
+    # PostgreSQL 16.13, timescaledb 2.26.3 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: timescale/timescaledb:latest-pg16@sha256:95a7997408e3295935e4afe8af8c09aae22bd51732131d1e7351c63d6198a71c
     restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -33,7 +50,8 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    # Redis 7.4.8 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: redis:7-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -42,7 +60,8 @@ services:
       retries: 5
 
   mosquitto:
-    image: eclipse-mosquitto:2
+    # Mosquitto 2.1.2 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1
     restart: always
     # Sprint 6.6.4: Production-Konfig mit Auth (passwd + ACL) statt
     # anonymous. Drei User: chirpstack, gateway-ug65, heizung-api.
@@ -65,7 +84,8 @@ services:
       retries: 3
 
   chirpstack-postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 16.13 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: postgres:16-alpine@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
     restart: always
     environment:
       POSTGRES_DB: chirpstack
@@ -83,7 +103,8 @@ services:
   # Init-Sidecar: rendert chirpstack.toml mit envsubst (expandiert ${VAR}-Platzhalter)
   # in ein gemeinsames Named Volume. Laeuft einmalig vor chirpstack.
   chirpstack-init:
-    image: alpine:3.20
+    # Alpine 3.20.10 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     restart: "no"
     user: "0:0"
     environment:
@@ -117,7 +138,8 @@ services:
 
   # Init-Sidecar fuer chirpstack-gateway-bridge: rendert dessen TOML.
   chirpstack-gateway-bridge-init:
-    image: alpine:3.20
+    # Alpine 3.20.10 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     restart: "no"
     user: "0:0"
     environment:
@@ -139,7 +161,8 @@ services:
   # Basic-Station-Endpoint fuer das UG65-Gateway. Caddy macht WSS-Termination
   # davor (cs-test.hoteltec.at /router-*), Bridge selbst spricht WS intern.
   chirpstack-gateway-bridge:
-    image: chirpstack/chirpstack-gateway-bridge:4
+    # Gateway Bridge 4.1.1 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: chirpstack/chirpstack-gateway-bridge:4@sha256:14a1b367a33b349d3e0a7375e221588def43374cd7ea312e2eb8f4b7c23481b1
     restart: always
     user: "0:0"
     command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml
@@ -154,7 +177,8 @@ services:
       - "3001"
 
   chirpstack:
-    image: chirpstack/chirpstack:4
+    # ChirpStack 4.17.0 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: chirpstack/chirpstack:4@sha256:72cabb115c67be01878a3489ad28cb10a529b441e92ec6942fe038ca6a569752
     restart: always
     # Container nur internes Docker-Netz, kein Public-Port; Caddy davor.
     user: "0:0"
@@ -329,7 +353,8 @@ services:
       - "3000"
 
   caddy:
-    image: caddy:2-alpine
+    # Caddy v2.11.2 (festgenagelt 16.11.2026, Nachziehen siehe RUNBOOK 10bg)
+    image: caddy:2-alpine@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d
     restart: always
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}

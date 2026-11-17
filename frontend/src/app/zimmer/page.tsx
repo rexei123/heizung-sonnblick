@@ -318,23 +318,24 @@ function RoomTable({ list, loading, error }: TableProps) {
                   <span className="ml-2 text-xs text-warning">· Automatik angehalten</span>
                 ) : null}
               </td>
-              {/* Ist der Referenzzone, und darunter die Geräteanzahl.
+              {/* Ist der Referenzzone — **eine** Zeile, nichts darunter.
 
-                  **Beides seit dem 16.11.2026 nach einem Befund des
-                  Betreibers.** Bei Bar und Rezeption stand hier „–", und
-                  die nächste Frage war jedes Mal „hängt da überhaupt
-                  etwas?". Zwei Dinge haben dazu beigetragen:
+                  Seit dem 16.11.2026 steht hier auch für **Bar** und
+                  **Rezeption** ein Wert: die Referenzzone wird über den
+                  Namen „Schlafzimmer" gewählt, und Allgemeinbereiche
+                  haben keinen — seither vertritt sich eine **einzige**
+                  Zone selbst.
 
-                  1. Die Referenzzone wird über den Namen „Schlafzimmer"
-                     gewählt — Allgemeinbereiche haben keinen. Seit heute
-                     vertritt sich eine **einzige** Zone selbst, und der
-                     Wert steht da.
-                  2. Die Zahl der Geräte stand nur auf der Zimmerseite,
-                     einen Klick entfernt.
+                  **Die Unterzeile „N Geräte" ist am 17.11.2026 wieder
+                  entfallen**, auf Entscheidung des Betreibers. Sie war
+                  als Antwort auf „hängt da überhaupt etwas?" gedacht und
+                  hat die Zeilenhöhe aller 47 Zeilen für eine Frage
+                  erhöht, die sich bei zweien stellt. Die Zahl steht auf
+                  der Zimmerseite.
 
-                  Hier stand: „die Spalte sagt ,kein Wert', nicht warum.
-                  Das Warum steht im Zimmer." Für den häufigsten Fall —
-                  es hängt nichts — steht das Warum jetzt hier. */}
+                  Es bleibt dabei: `formatTemperature` liefert „–" bei
+                  `null`. Die Spalte sagt „kein Wert", nicht warum — das
+                  Warum steht im Zimmer. */}
               <td className="px-3 py-2">
                 <span
                   className={
@@ -346,18 +347,6 @@ function RoomTable({ list, loading, error }: TableProps) {
                 >
                   {formatTemperature(r.mean_temperature_c)}
                 </span>
-                {r.geraete_anzahl !== null && (
-                  <span
-                    className="block text-[11px] leading-tight text-text-tertiary"
-                    data-testid={`geraete-${r.number}`}
-                  >
-                    {r.geraete_anzahl === 0
-                      ? "kein Gerät"
-                      : r.geraete_anzahl === 1
-                        ? "1 Gerät"
-                        : `${r.geraete_anzahl} Geräte`}
-                  </span>
-                )}
               </td>
               <td className="px-3 py-2 text-text-secondary" data-testid={`soll-${r.number}`}>
                 {formatTemperature(r.engine_setpoint_c)}
