@@ -106,6 +106,25 @@ const messrolleSchema = z.object({
 
 export type Messrolle = z.infer<typeof messrolleSchema>;
 
+/**
+ * Die zwei Wächter-Strategien, als Wort und nicht als Zahl.
+ *
+ * Die Liste spiegelt das `Literal` im Backend
+ * (`api/v1/relays.StrategieEingabe`). Ein dritter Wert hier wäre eine
+ * Behauptung über einen Endpunkt, der ihn ablehnt.
+ */
+export const WAECHTER_STRATEGIEN = ["expire_and_resend", "refresh"] as const;
+export type WaechterStrategie = (typeof WAECHTER_STRATEGIEN)[number];
+
+const strategieSchema = z.object({
+  device_id: z.number(),
+  strategie: z.enum(WAECHTER_STRATEGIEN),
+  timer_sekunden: z.number(),
+  hinweis: z.string(),
+});
+
+export type StrategieErgebnis = z.infer<typeof strategieSchema>;
+
 export async function fetchRelaisStand(deviceId: number): Promise<RelaisStand> {
   const data = await apiClient.get<unknown>(
     `/api/v1/devices/${deviceId}/relay`,
@@ -147,6 +166,25 @@ export async function hebeSchutzSperreAuf(deviceId: number): Promise<void> {
     `/api/v1/devices/${deviceId}/relay/release-protection`,
     {},
   );
+}
+
+/**
+ * Schaltet die Wächter-Strategie um. **Nur Admin**, und ohne Funkbefehl.
+ *
+ * Der Handgriff schreibt Audit und setzt `relais_ein_gesendet_at`
+ * zurück; gesendet wird erst beim nächsten regulären Lauf des
+ * Orchestrators. Das ist der Grund, warum die Karte danach keinen
+ * Funkverkehr meldet — sie hat keinen ausgelöst.
+ */
+export async function setzeWaechterStrategie(
+  deviceId: number,
+  strategie: WaechterStrategie,
+): Promise<StrategieErgebnis> {
+  const data = await apiClient.patch<unknown>(
+    `/api/v1/devices/${deviceId}/relay/watchdog-strategy`,
+    { strategie },
+  );
+  return strategieSchema.parse(data);
 }
 
 export async function setzeMessrolle(

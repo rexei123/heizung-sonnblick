@@ -86,6 +86,76 @@ def test_schritt_6a_nennt_seine_deckung(runbook: str) -> None:
     )
 
 
+def test_die_gateway_pruefung_nennt_den_mqtt_weg_und_nicht_basic_station(
+    runbook: str,
+) -> None:
+    """**Der Abschnitt, der mich zweimal in dieselbe Falle geführt hat.**
+
+    §10ay beschrieb den Weg des UG65 als Basic Station: ein ``tail -f``
+    auf das Caddy-Protokoll mit ``grep router``. Das UG65 spricht aber
+    **MQTT auf 1883** und meldet sich bei Mosquitto als ``gateway-ug65``
+    an. Die Korrektur steht seit dem 07.11.2026 an drei anderen Stellen
+    im RUNBOOK — **nur dieser Abschnitt wurde nicht nachgezogen.**
+
+    Die alte Zeile war nicht wirkungslos, sondern **irreführend**: sie
+    zeigt bei gesundem Gateway dauerhaft nichts, und der Text darunter
+    sagte, genau das heiße „das Gerät versucht es nicht". Wer ihr folgte,
+    zog den Stecker ohne Anlass. Am 16.11.2026 habe ich daraus zweimal
+    eine falsche Prüfung in eine Laufliste geschrieben.
+
+    **Was dieser Test leistet:** er hält den Abschnitt auf dem MQTT-Weg
+    fest. Eine Rückkehr der Caddy-Zeile wäre damit rot statt still.
+    """
+    ay = _abschnitt(runbook, "10ay")
+    assert "gateway-ug65" in ay, (
+        "10ay nennt den MQTT-Benutzer des Gateways nicht — ohne ihn ist "
+        "die Prüfung nicht durchführbar"
+    )
+    # **Nicht auf „sensor_reading" prüfen.** Das steht auch in Schritt 1
+    # des Abschnitts (Uplinks zählen), und eine Mutationsprobe blieb
+    # deshalb grün. Geprüft wird der Block **neben** der Gateway-Prüfung,
+    # erkennbar am eigenen Fenster von drei Minuten — Schritt 1 nimmt
+    # fünf (§5.88, dieselbe Familie).
+    nach_gateway = ay.split("gateway-ug65", 1)[1]
+    assert "interval '3 minutes'" in nach_gateway, (
+        "neben der Gateway-Prüfung fehlt die Messwert-Prüfung — ohne sie "
+        "hängt die Entscheidung an einer einzigen Logzeile"
+    )
+    assert "BEIDES leer" in nach_gateway or "beides leer" in nach_gateway, (
+        "die STOPP-Regel sagt nicht, dass BEIDE Prüfungen leer sein "
+        "müssen — eine einzelne Null ist kein Grund für den Stecker"
+    )
+    assert "--line-buffered router" not in ay, (
+        "die Basic-Station-Prüfung ist zurück — das UG65 spricht MQTT auf "
+        "1883, und diese Zeile zeigt bei gesundem Gateway nie etwas"
+    )
+
+
+def test_die_regel_fuer_ein_stummes_relais_nennt_schwelle_und_zieldatenrate(
+    runbook: str,
+) -> None:
+    """Eine Regel ohne Schwelle ist ein Ratschlag.
+
+    **Vorgabe des Betreibers, 16.11.2026:** wird 108 stumm, hilft ein
+    Stromstoß (Rejoin auf DR0). Erst wenn das **öfter als einmal im
+    Monat** nötig ist, wird das Plugin aktiviert — und dann mit
+    ``ZIEL_DR = 0``, nicht 1.
+
+    Beide Zahlen gehören in den Text: ohne die Schwelle weiß niemand,
+    wann der Handgriff vom Einzelfall zum Wartungsaufwand wird, und ohne
+    die Zieldatenrate würde der nächste PR die DR1 von damals übernehmen
+    — gegen die Messung, die zu dieser Regel geführt hat.
+    """
+    av = _abschnitt(runbook, "10av")
+    assert "EINMAL IM MONAT" in av or "einmal im Monat" in av, (
+        "die Regel nennt keine Schwelle, ab der das Plugin fällig wird"
+    )
+    assert "ZIEL_DR = 0" in av, (
+        "die Regel nennt die Zieldatenrate nicht — DR1 wäre 2,5 dB "
+        "weniger Reserve, und genau das war der Befund"
+    )
+
+
 def test_die_geheimnis_lehre_wird_mit_der_richtigen_nummer_zitiert(runbook: str) -> None:
     """**Ein Verweis, der ins Leere zeigte -- aus meinem eigenen #420.**
 
