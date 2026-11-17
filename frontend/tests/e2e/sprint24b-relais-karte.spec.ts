@@ -98,6 +98,12 @@ const STAND_NEU = {
   // richtige Vorgabe: dieses Relais hat ueberhaupt keine Meldung
   // (`reading_time: null`), und „veraltet" setzt eine voraus.
   zustand_veraltet: false,
+  // Seit Migration 0041 verlangt zod die zwei Schluessel. `null` ist hier
+  // die richtige Vorgabe: ein Relais ohne Meldung hat keine
+  // Empfangsdaten, und 0 waere eine Behauptung ueber einen Funk, den
+  // niemand gemessen hat.
+  rssi_dbm: null,
+  snr_db: null,
   offener_befehl: null,
 };
 

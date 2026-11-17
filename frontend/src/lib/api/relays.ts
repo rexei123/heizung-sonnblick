@@ -69,6 +69,10 @@ export const relaisStandSchema = z.object({
   // Schwelle entscheidet das Backend (relay_meldeintervall_s x 2,5) --
   // hier noch einmal zu rechnen waere eine zweite Wahrheit.
   zustand_veraltet: z.boolean(),
+  // Empfangsdaten des jüngsten Uplinks (Migration 0041). `null` heißt
+  // "diese Meldung sagt nichts darüber", nicht "kein Empfang".
+  rssi_dbm: z.number().nullable(),
+  snr_db: z.number().nullable(),
 });
 
 export type RelaisStand = z.infer<typeof relaisStandSchema>;

@@ -21,6 +21,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path as FsPath
 from typing import Any
 from unittest.mock import MagicMock
@@ -696,6 +697,80 @@ async def test_die_geraeteseite_sieht_den_laufenden_auftrag(
 
     assert antwort.status_code == 200, antwort.text
     assert antwort.json()["provisionierung_laeuft"] is True
+
+
+# ---------------------------------------------------------------------------
+# Empfangsdaten auf der Geraeteseite (16.11.2026, Migration 0041)
+# ---------------------------------------------------------------------------
+
+
+async def test_die_geraeteseite_zeigt_die_juengsten_empfangsdaten(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: AsyncEngine,
+) -> None:
+    """RSSI und SNR kommen aus der **jüngsten** Zeile, nicht aus irgendeiner.
+
+    **Der Anlass.** Am 16.11.2026 hat ADR das Relais 108 auf DR5
+    hochgezogen, und die Frage „ist der Link zu schwach oder kollidieren
+    die Pakete" war nicht beantwortbar: fuer Relais standen die zwei
+    Zahlen nirgends. Fuer ein Thermostat zeigt die Geraeteseite sie seit
+    Sprint 20e.
+
+    **Warum zwei Zeilen und nicht eine.** Eine aeltere Zeile mit besserem
+    Empfang zu zeigen waere die freundlichere und die falsche Antwort —
+    dieselbe Regel, die hier schon fuer Leistung und Zustand gilt. Mit nur
+    einer Zeile im Test waere „nimmt die jüngste" nicht von „nimmt die
+    erste, die kommt" zu unterscheiden.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    basis = datetime.now(tz=UTC) - timedelta(minutes=20)
+    async with maker() as session:
+        session.add(
+            RelayReading(
+                time=basis,
+                device_id=aufbau.relais_id,
+                fcnt=9200,
+                relay_on=True,
+                rssi_dbm=-90,
+                snr_db=Decimal("9.0"),
+            )
+        )
+        session.add(
+            RelayReading(
+                time=basis + timedelta(minutes=10),
+                device_id=aufbau.relais_id,
+                fcnt=9201,
+                relay_on=True,
+                rssi_dbm=-115,
+                snr_db=Decimal("-6.0"),
+            )
+        )
+        await session.commit()
+
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+
+    assert antwort.status_code == 200, antwort.text
+    koerper = antwort.json()
+    assert koerper["rssi_dbm"] == -115, "die aeltere, bessere Zeile darf nicht gewinnen"
+    assert Decimal(str(koerper["snr_db"])) == Decimal("-6.0")
+
+
+async def test_ohne_meldung_sind_die_empfangsdaten_leer_und_nicht_null(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    """``null`` heisst „sagt nichts darueber", nicht „kein Empfang".
+
+    Eine 0 waere eine Behauptung ueber einen Funk, den wir nicht gemessen
+    haben — und die Oberflaeche koennte „genau 0 dB" nicht mehr von
+    „keine Meldung" unterscheiden.
+    """
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.status_code == 200, antwort.text
+    koerper = antwort.json()
+    assert koerper["rssi_dbm"] is None
+    assert koerper["snr_db"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -55,13 +56,31 @@ FELD_ERHOLUNG = "protectionRecovered"
 
 
 def werte_aus_codec(
-    obj: dict[str, Any], *, device_id: int, zeit: datetime, fcnt: int | None
+    obj: dict[str, Any],
+    *,
+    device_id: int,
+    zeit: datetime,
+    fcnt: int | None,
+    rssi_dbm: int | None = None,
+    snr_db: Decimal | None = None,
 ) -> dict[str, Any]:
     """Projiziert den Codec-Ausgang auf eine ``relay_reading``-Zeile.
 
     ``None`` bleibt ``None``: ein Uplink, der nur eine Befehlsantwort
     traegt (ohne Keepalive-Schwanz), sagt nichts ueber Leistung oder
     Energie, und eine 0 waere dort eine Behauptung.
+
+    **``rssi_dbm`` und ``snr_db`` kommen ausdruecklich nicht aus ``obj``.**
+    Sie stehen im ``rxInfo``-Block des ChirpStack-Ereignisses, nicht in der
+    Nutzlast — der Codec sieht sie nie. Der Aufrufer liest sie mit
+    denselben Helfern, die der Thermostat-Pfad benutzt; die 0-dB-Luecke von
+    protojson entscheidet dort **einmal** fuer beide Gerätearten
+    (``services/mqtt_subscriber._snr_db``, Paragraph 5.53).
+
+    Die Vorgabe ``None`` ist kein Komfort, sondern die richtige Antwort fuer
+    jeden Aufrufer, der keine Empfangsdaten hat — etwa einen Test, der nur
+    den Schaltzustand prueft. Sie bedeutet „diese Zeile sagt nichts
+    darueber", nicht „kein Empfang".
     """
     zustand = obj.get("relayState")
     return {
@@ -92,6 +111,8 @@ def werte_aus_codec(
         "ac_voltage_v": obj.get("acVoltage_V"),
         "ac_current_ma": obj.get("acCurrent_mA"),
         "internal_temperature_raw": obj.get("internalTemperature"),
+        "rssi_dbm": rssi_dbm,
+        "snr_db": snr_db,
     }
 
 
@@ -222,12 +243,21 @@ async def verarbeite_relais_uplink(
     obj: dict[str, Any],
     zeit: datetime,
     fcnt: int | None,
+    rssi_dbm: int | None = None,
+    snr_db: Decimal | None = None,
 ) -> dict[str, Any]:
     """Schreibt die Zeitreihe und setzt bei Bedarf die Schutz-Sperre.
 
     Returns ein kleines Protokoll fuer den Aufrufer-Log.
     """
-    werte = werte_aus_codec(obj, device_id=device_id, zeit=zeit, fcnt=fcnt)
+    werte = werte_aus_codec(
+        obj,
+        device_id=device_id,
+        zeit=zeit,
+        fcnt=fcnt,
+        rssi_dbm=rssi_dbm,
+        snr_db=snr_db,
+    )
 
     # **Der Schaltzyklus wird hier gezaehlt, vor dem Einfuegen** (Befund
     # des Betreibers, 12.11.2026). Vorher zaehlte ihn der Waechter, wenn

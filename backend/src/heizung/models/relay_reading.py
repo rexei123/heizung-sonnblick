@@ -40,8 +40,19 @@ Deutung gehört in die Anzeige, sobald sie am Gerät geprüft ist.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from heizung.db import Base
@@ -95,5 +106,22 @@ class RelayReading(Base):
 
     # Rohwert, Einheit unbelegt — siehe Modul-Docstring.
     internal_temperature_raw: Mapped[int | None] = mapped_column(Integer)
+
+    # Empfangsdaten des Uplinks, aus ``rxInfo`` des ChirpStack-Ereignisses
+    # (Migration 0041). Gleiche Typen wie in ``sensor_reading``, damit die
+    # Auswertung nicht zwei Formen derselben Zahl kennen muss (§5.51).
+    #
+    # **NULL heisst nicht „kein Empfang", sondern „diese Zeile sagt nichts
+    # darueber".** Fuer jede Zeile vor der Migration, und dauerhaft fuer
+    # jeden Uplink ohne ``rxInfo``-Block. Eine 0 waere eine Behauptung
+    # ueber einen Funk, den wir nicht gemessen haben.
+    #
+    # Bei ``snr_db`` gilt zusaetzlich die 0-dB-Luecke von protojson:
+    # ``"snr": 0.0`` fehlt im JSON, weil protojson Default-Werte weglaesst.
+    # Die Entscheidung „Block da, Feld weg -> genau 0" trifft
+    # ``services/mqtt_subscriber._snr_db`` fuer **beide** Gerätearten, nicht
+    # dieser Pfad noch einmal (§5.53).
+    rssi_dbm: Mapped[int | None] = mapped_column(SmallInteger)
+    snr_db: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
 
     __table_args__ = (Index("ix_relay_reading_device_time", "device_id", "time"),)
