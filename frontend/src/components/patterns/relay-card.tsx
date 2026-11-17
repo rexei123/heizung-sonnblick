@@ -35,6 +35,8 @@ import {
   nimmRelaisAusserBetrieb,
   nimmRelaisInBetrieb,
   provisioniereRelais,
+  setzeWaechterStrategie,
+  type WaechterStrategie,
   type RelaisStand,
 } from "@/lib/api/relays";
 import { formatDateTime, formatRssi, formatSnr, formatTime } from "@/lib/format";
@@ -127,6 +129,37 @@ function Pruefzeile({
   );
 }
 
+/**
+ * Was die zwei Wächter-Strategien bedeuten, in einem Satz.
+ *
+ * `expire_and_resend` lässt den Timer im Relais ablaufen und setzt ihn
+ * danach neu — zwischen Ablauf und nächstem Lauf des Orchestrators ist
+ * das Panel aus. `refresh` setzt ihn nach, solange die Zone heizen will;
+ * das Panel bleibt durchgehend an.
+ *
+ * **Keine Zahlen hier.** Timer und Abstand stehen in den Settings und
+ * sind pro Haus verstellbar; die Meldung nach dem Umschalten nennt sie
+ * aus dem Backend (§5.73).
+ */
+const STRATEGIE_TEXT: Record<string, string> = {
+  expire_and_resend: "Timer läuft ab, dann neu",
+  refresh: "Timer wird nachgesetzt",
+};
+
+/**
+ * Die Beschriftung des Knopfes nennt die **Handlung**, nicht den
+ * Zustand (§5.85). Der Zustand steht eine Zeile darüber.
+ */
+const STRATEGIE_HANDLUNG: Record<string, string> = {
+  expire_and_resend: "Timer nachsetzen lassen",
+  refresh: "Timer ablaufen lassen",
+};
+
+/** Das jeweils andere Verfahren. */
+function andereStrategie(jetzt: string): WaechterStrategie {
+  return jetzt === "refresh" ? "expire_and_resend" : "refresh";
+}
+
 export function RelayCard({ deviceId }: { deviceId: number }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -180,6 +213,27 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
     onError: (fehler: unknown) => setMeldung(fehlerText(fehler)),
   });
 
+  /**
+   * **Der Handgriff aus §10bc, jetzt ohne Kommandozeile.**
+   *
+   * Bis zum 17.11.2026 ging das Umschalten nur per `curl` oder
+   * `Invoke-RestMethod` mit Sitzungs-Cookie — der Wert stand auf der
+   * Karte, der Weg dorthin nicht. Ein Zustand, den man sieht und nicht
+   * ändern kann, schickt jeden zur Kommandozeile.
+   *
+   * **Die Meldung kommt aus dem Backend** (`hinweis`), nicht von hier.
+   * Sie nennt den Timer in Sekunden, und diese Zahl steht in den
+   * Settings — sie hier zu wiederholen wäre eine zweite Wahrheit
+   * (§5.73).
+   */
+  const strategie = useMutation({
+    mutationFn: (ziel: WaechterStrategie) =>
+      setzeWaechterStrategie(deviceId, ziel),
+    onSuccess: (ergebnis) => nachAktion(ergebnis.hinweis),
+    onError: (fehler: unknown) =>
+      setMeldung(`Umschalten fehlgeschlagen: ${fehlerText(fehler)}`),
+  });
+
   if (isLoading) {
     return (
       <div
@@ -211,7 +265,8 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
     provision.isPending ||
     inBetrieb.isPending ||
     ausserBetrieb.isPending ||
-    freigabe.isPending;
+    freigabe.isPending ||
+    strategie.isPending;
 
   return (
     <div
@@ -334,7 +389,16 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
           bezeichnung="Einschaltungen (gemeldet)"
           wert={String(data.switch_cycles)}
         />
-        <Zeile bezeichnung="Wächter" wert={data.watchdog_strategy} />
+        {/* **Nicht der Rohwert.** Hier stand `expire_and_resend` —
+            ein Datenbankwert, kein Satz. Was die zwei Strategien
+            unterscheiden, ist eine Frage, die der Betreiber nachts
+            beantworten können muss: läuft der Timer ab und wird dann
+            neu gesetzt, oder wird er nachgesetzt, solange geheizt
+            werden soll. */}
+        <Zeile
+          bezeichnung="Wächter"
+          wert={STRATEGIE_TEXT[data.watchdog_strategy] ?? data.watchdog_strategy}
+        />
         {data.offener_befehl !== null && (
           <Zeile
             bezeichnung="Unbestätigter Befehl"
@@ -425,6 +489,24 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
               className="bg-surface-alt text-text-primary rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
             >
               Zurücknehmen
+            </button>
+          )}
+          {/* **Nur bei einem Relais in Betrieb.** Vorher hat der
+              Wächter nichts zu tun — `darf_schalten` ist falsch, und ein
+              Knopf, der eine Strategie für einen Wächter umstellt, der
+              nicht läuft, verspricht eine Wirkung, die es nicht gibt. */}
+          {data.commissioned_at !== null && (
+            <button
+              type="button"
+              onClick={() =>
+                strategie.mutate(andereStrategie(data.watchdog_strategy))
+              }
+              disabled={laeuft}
+              data-testid="relay-strategie"
+              className="bg-surface-alt text-text-primary rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+            >
+              {STRATEGIE_HANDLUNG[data.watchdog_strategy] ??
+                "Wächter umstellen"}
             </button>
           )}
           {data.protection_tripped_at !== null && (

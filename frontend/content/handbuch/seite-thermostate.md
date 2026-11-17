@@ -1,9 +1,9 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Paketverlust, Funk, montiert, Fühler
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Wächter, Timer, Paketverlust, Funk, montiert, Fühler
 rollen: alle
-stand: 2026-11-13
+stand: 2026-11-17
 route: /devices
 ---
 
@@ -140,10 +140,13 @@ Hinweis unter dem Schalter sagt es.
 
 ## Relais
 
-Für die Infrarot-Heizkörper gibt es den Relais-Pfad im Programm. **Das
-erste Gerät ist angelegt und geprüft** (109, Eingang, seit 01.11.2026) —
-es hängt an der Zuleitung, ein Panel ist noch nicht angeschlossen, und
-geschaltet wird noch nichts.
+Für die Infrarot-Heizkörper gibt es den Relais-Pfad im Programm. **Zwei
+Relais sind in Betrieb** und schalten echte Panels: „108" an der
+Rezeption und „109 Panel" an der Bar.
+
+Hier stand bis zum 17.11.2026, es sei „ein Panel noch nicht
+angeschlossen, und geschaltet wird noch nichts". Das galt bis Anfang
+November.
 
 Die Messung, von der das abhing, ist durch: der Relais-Test **T3.0** hat
 am 01.11.2026 ergeben, dass ein abgelaufener Timer das Relais abfallen
@@ -170,6 +173,35 @@ ist:
 Knopf das Einschalten zurück — noch einmal zweimal kurz drücken. Im
 Betrieb braucht es den Knopf nicht; wer ein Panel warm haben will,
 nimmt die Übersteuerung im Programm, weil die ein Ende hat.
+
+### Der Wächter: zwei Verfahren, ein Knopf
+
+Ein Relais wird **nie dauerhaft eingeschaltet**, sondern immer nur auf
+Zeit. Wer dafür sorgt, dass es nicht zwischendurch ausgeht, ist der
+**Wächter** — und für ihn gibt es zwei Verfahren. Die Zeile „Wächter"
+auf der Relais-Karte sagt, welches gerade läuft:
+
+| Zeile | Was passiert |
+|---|---|
+| **Timer läuft ab, dann neu** | Das Panel geht aus, wenn die Zeit um ist, und die Steuerung schaltet es im nächsten Lauf wieder ein. Dazwischen ist es kalt. |
+| **Timer wird nachgesetzt** | Die Steuerung verlängert die Zeit, solange geheizt werden soll. Das Panel bleibt durchgehend an. |
+
+**Umgestellt wird mit dem Knopf darunter** — er heißt nach dem, was er
+tut: „Timer nachsetzen lassen" oder „Timer ablaufen lassen". Nur ein
+Verwalter sieht ihn, und nur bei einem Relais, das **in Betrieb
+genommen** ist; vorher hat der Wächter nichts zu tun.
+
+**Der Knopf sendet keinen Funkbefehl.** Er stellt das Verfahren um; zu
+spüren ist es beim nächsten Lauf der Steuerung, also binnen einer
+Minute. Die Meldung danach nennt die Zeiten in Sekunden.
+
+**Wann man umstellt.** „Timer läuft ab, dann neu" ist die Vorgabe und
+für die meisten Fälle richtig. Erreicht ein Raum sein Soll trotz
+laufender Heizung **nie**, lohnt der Blick auf die Einschaltdauer: liegt
+sie deutlich unter 100 Prozent, während es zu kalt ist, bremst nicht das
+Panel, sondern die Totzeit nach jedem Ablauf. Dann ist „Timer wird
+nachgesetzt" das passende Verfahren — zum Preis von mehr Funkverkehr zu
+diesem einen Gerät.
 
 ### Zwei Zeilen auf der Relais-Karte, die leicht falsch gelesen werden
 
