@@ -10542,6 +10542,50 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 > — die 54 bestehenden Tests laden sie unter **Node** und waren grün,
 > während der Dienst nicht startete (§5.55).
 
+> **Nachtrag 17.11.2026: die Form ist geklärt, und das Plugin kommt
+> trotzdem vorerst nicht.** Der Test gegen `chirpstack/chirpstack:4.17.0`
+> liegt fertig (PR #425, 4/4 grün, **nicht gemergt**). Den Ausschlag gibt
+> eine Messung vom 16.11.: nach einer Stromtrennung an 108 um 08:39 läuft
+> das Relais auf **DR0** (SF12) — eine Stufe **robuster** als die DR1,
+> die das Plugin festnageln würde.
+>
+> ```
+> Verlust 108 seit dem Rejoin:            16 Frames, 0 fehlend  ->  0,0 %
+> Verlust 108 die sechs Stunden davor:                              25,8 %
+> SNR je Frame: -8,5 dB   RSSI: -105 dBm   (Datenrate DR0)
+> 109 Panel zum Vergleich: SNR +4,6 dB, RSSI -99 dBm, DR5
+> ```
+>
+> Dreizehn Dezibel Unterschied im selben Haus: **der Link von 108 ist zu
+> schwach, die Pakete kollidieren nicht.** Und ADR klettert nicht zurück
+> — bei DR0 bräuchte es für eine Stufe nach oben ein SNR von **+3 dB**,
+> gemessen sind −8,5. Die Reserve von 20 dB hält es unten.
+>
+> ### Die Regel, wenn 108 wieder stumm wird
+>
+> **1. Stromkreis aus und wieder ein.** Das Relais joint neu und landet
+> dabei auf **DR0**. Es startet **AUS** — das Stromrückkehr-Verhalten ist
+> rückgelesen und am 16.11. im Betrieb beobachtet; der Regler schaltet es
+> innerhalb einer Minute wieder ein, sofern die Zone heizen will.
+>
+> **2. Prüfen, dass es gegriffen hat** — der Frame-Zähler beginnt neu:
+>
+> ```bash
+> docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT (time AT TIME ZONE 'Europe/Vienna')::timestamp(0) AS zeit, fcnt, relay_on, power_w FROM relay_reading WHERE device_id = 109 ORDER BY time DESC LIMIT 5;"
+> ```
+>
+> *Erwartet:* ein kleiner `fcnt` (1, 2, 3 …) statt eines dreistelligen.
+> **Geräte-Id 109 trägt das Etikett „108".**
+>
+> **3. Tritt das öfter als EINMAL IM MONAT auf, wird das Plugin
+> aktiviert.** Dann ist der Handgriff kein Einzelfall mehr, sondern
+> Wartungsaufwand. Dafür gilt: **`ZIEL_DR = 0`, nicht 1.** Das Gerät hält
+> DR0 nachweislich fehlerfrei, und DR1 wäre 2,5 dB weniger Reserve für
+> einen Duty-Cycle-Vorteil, den bei 0,25 % niemand braucht.
+>
+> Das ist ein **eigener PR** mit der Duty-Cycle-Rechnung im Dateikopf,
+> und er gehört in einen Wartungstermin — nicht ins Merge-Fenster.
+
 > **Das Kriterium aus §10au ist erfüllt.** Es lautete „Verlust über 5 % am
 > Relais **und** deutlich niedriger bei den Vickis". Gemessen am
 > 12.11.2026:
@@ -11497,16 +11541,54 @@ nähert sich dem Wert von vorher.
 **Und beim Warten mitlesen, ob das Gateway überhaupt klopft:**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -f /var/log/caddy/cs-test.access.log' | grep --line-buffered router
+docker logs deploy-mosquitto-1 --since 5m 2>&1 | grep -c "u'gateway-ug65'"
 ```
 
-Das ist der Zugangsweg des Gateways: Caddy nimmt `/router*` auf dem
-ChirpStack-Hostnamen an und reicht es an `chirpstack-gateway-bridge:3001`
-weiter (`infra/caddy/Caddyfile.test`, Abschnitt
-`{$CHIRPSTACK_HOSTNAME}`). **Kommt in zwei Minuten keine Zeile, versucht
-das Gerät es nicht** — dann ist Warten sinnlos und Schritt 5 fällig.
-Kommen Zeilen mit Fehlerstatus, liegt es am Weg und nicht am Gerät. Mit
-Strg-C beenden.
+> **Korrigiert am 17.11.2026. Hier stand bis dahin ein `tail -f` auf das
+> Caddy-Protokoll mit `grep router`** — der **Basic-Station**-Weg. Das
+> UG65 spricht **kein** Basic Station; es publiziert per **MQTT auf
+> 1883** und meldet sich bei Mosquitto als Benutzer `gateway-ug65` an.
+> Das steht seit dem 07.11.2026 an drei anderen Stellen im RUNBOOK
+> (C4, §10az, die Tabelle in §12) — **nur dieser Abschnitt wurde nicht
+> nachgezogen.**
+>
+> Die alte Zeile war nicht bloß wirkungslos, sie war **irreführend**: sie
+> zeigt bei gesundem Gateway dauerhaft nichts, und der Text darunter
+> sagte, genau das heiße „das Gerät versucht es nicht". Wer ihr folgte,
+> zog den Stecker, ohne dass etwas kaputt war. Am 16.11.2026 habe ich
+> daraus zweimal eine falsche Prüfung in eine Laufliste geschrieben.
+
+**Die Zahl ist nur nach einer Unterbrechung aussagekräftig.** Im
+Normalbetrieb steht dort **0**, und das ist gesund: die MQTT-Sitzung wird
+**einmal** aufgebaut und bleibt. Gemessen am 16.11.2026 — die letzte
+Verbindung stammte vom **10.11.**, sechs Tage durchgehend. Eine 0 im
+laufenden Betrieb als Störung zu lesen wäre der Melder, dem nach dem
+zweiten Mal niemand mehr glaubt (§5.79).
+
+**Wann sie größer als 0 sein MUSS:** immer dann, wenn `mosquitto` neu
+**erstellt** oder neu **gestartet** wurde — ein Neustart des Servers, ein
+`up -d` mit geänderter mosquitto-Zeile, ein Docker-Upgrade. Dann bricht
+die Sitzung des Gateways ab, und es muss sich neu anmelden.
+
+**Die zweite Prüfung, und sie ist die belastbarere** — sie misst das Ende
+der Kette statt eine Anmeldung:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
+```
+
+**Schritt 5 (Stromtrennung) ist fällig, wenn nach zwei bis drei Minuten
+BEIDES leer bleibt** — keine Neuanmeldung **und** keine Messwerte. Kommt
+eines von beiden, ist der Weg in Ordnung und Warten richtig.
+
+**Wer alle Clients sehen will:**
+
+```bash
+docker logs deploy-mosquitto-1 --since 30m 2>&1 | grep -oE "u'[^']+'" | sort | uniq -c
+```
+
+Erwartet nach einem Neustart: `gateway-ug65`, `chirpstack-integration`,
+`chirpstack-gw-eu868`, `heizung-api*`.
 
 **5. Die Behebung: das Gateway stromlos machen.** Stecker ziehen, zehn
 Sekunden warten, wieder einstecken. Danach dauert es einige Minuten.
@@ -12045,6 +12127,10 @@ ist.** Der nächste Neustart aus beliebigem Grund fährt wieder in die
 Schleife. Der Eintrag gehört deshalb **im Repo** entfernt (das war #415)
 — die Notreparatur kauft die Zeit dafür, nicht mehr.
 
+**Wenn 108 stumm wird, ist die Antwort nicht das Plugin**, sondern ein
+Stromstoß am Relais — die Regel samt Schwelle („öfter als einmal im
+Monat") steht im Nachtrag vom 17.11. in §10av.
+
 **Querverweise:** §10av (die Laufliste, aus der der Ausfall kam), §5.55
 (54 grüne Tests in der falschen Umgebung), §5.89 (Konfiguration mit
 Geheimnissen gezielt prüfen), §5.78 (`docker compose` ohne `-f`),
@@ -12436,3 +12522,122 @@ was bei 100 % passiert), §10bb (Notreparatur vom 15.11., seit der das
 chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
 `infra/deploy/docker/README.md` (die Rechnung),
 `docs/status/2026-11-16-log-grenzen.md`.
+
+
+## 10bg. Festgenagelte Images bewusst nachziehen (quartalsweise)
+
+**Wofür.** Die fremden Images in `docker-compose.prod.yml` hängen seit
+16.11.2026 an Tag **plus** Digest. Das macht den Stand
+wiederherstellbar — und es friert ihn ein. Ohne diesen Abschnitt ist der
+eingefrorene Stand in einem Jahr kein Entschluss mehr, sondern ein
+Versehen, das niemandem auffällt.
+
+**Anlass, zwei:**
+
+1. **Einmal je Quartal** — Januar, April, Juli, Oktober, im
+   Wartungstermin.
+2. **Ein CVE, der zählt**: eine Lücke in `postgres`, `caddy`, `redis`,
+   `mosquitto` oder `chirpstack`, die aus dem Netz erreichbar ist. Dann
+   nicht auf das Quartal warten.
+
+**Was dieser Handgriff kostet, und warum er nicht ins Merge-Fenster
+gehört.** Ein Merge dieser Datei ändert die Zeilen von `db`, `redis`,
+`mosquitto`, `chirpstack-postgres`, `chirpstack`,
+`chirpstack-gateway-bridge`, `caddy` und den zwei Init-Behältern. Der
+Timer zieht `origin/develop` alle fünf Minuten und ruft
+`docker compose up -d` — **jeder Dienst mit geänderter Zeile wird
+innerhalb von fünf Minuten neu erstellt**, auch `mosquitto` und die
+Bridge. Das ist der Weg, auf dem am 04.11. das Gateway abgerissen ist
+(§10ay). Dieser PR gehört deshalb in einen Wartungstermin mit dem
+Betreiber **am Gateway**, nicht in das Fenster 10–12.
+
+### Schritt 1 — ablesen, was gerade läuft
+
+**SSH (Server):**
+
+```bash
+for i in timescale/timescaledb:latest-pg16 redis:7-alpine eclipse-mosquitto:2 postgres:16-alpine alpine:3.20 chirpstack/chirpstack-gateway-bridge:4 chirpstack/chirpstack:4 caddy:2-alpine; do printf '%s\n  ' "$i"; docker image inspect "$i" --format '{{index .RepoDigests 0}}  {{index .Config.Labels "org.opencontainers.image.version"}}'; done
+```
+
+*Erwartet:* je Zeile ein `name@sha256:…` und, wo das Image ein Label
+trägt, die Klartext-Version.
+
+> **Achtung, der Digest-Typ.** Der Server läuft mit dem
+> containerd-Image-Store (`docker info` → `Storage Driver: overlayfs`,
+> `driver-type: io.containerd.snapshotter.v1`). Dort ist `.Id`
+> **derselbe Wert** wie `.RepoDigests` — nämlich der Manifest-Digest.
+> Auf einem Host mit `overlay2` ist `.Id` dagegen der Config-Digest und
+> **nicht ziehbar**. Deshalb immer `.RepoDigests` lesen, nie `.Id`,
+> auch wenn beide gleich aussehen (§5.91).
+
+Die Klartext-Version steht nicht in jedem Image. Wo das Label fehlt,
+kommt sie aus dem laufenden Dienst:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -tAc "SELECT 'postgres '||current_setting('server_version')||', timescaledb '||extversion FROM pg_extension WHERE extname='timescaledb';"
+docker exec deploy-redis-1 redis-server --version
+docker logs deploy-mosquitto-1 2>&1 | grep -oiE 'mosquitto version [0-9.]+' | head -1
+docker exec deploy-caddy-1 caddy version
+docker exec deploy-chirpstack-1 chirpstack --version
+```
+
+**Die Bridge nennt ihre Version nicht.** `chirpstack-gateway-bridge`
+protokolliert beim Start `version=` leer und kennt kein
+`--version`-Flag. Ihre Version steht nur im Image-Label
+(`org.opencontainers.image.version`), aus Schritt 1.
+
+### Schritt 2 — entscheiden, nicht nur nachziehen
+
+Für jedes Image die Frage: **gibt es einen Grund?** Ein neuer
+Patch-Stand ist kein Grund. Gründe sind ein CVE, ein Fehler, den wir
+haben, oder eine Funktion, die wir brauchen.
+
+**Was ausdrücklich nicht nachgezogen wird, ohne eigenen Plan:**
+
+| Image | warum nicht nebenbei |
+|---|---|
+| `chirpstack/chirpstack:4` | 4.18 kann das ADR-Plugin-Format geändert haben (§10bb, der Ausfall vom 15.11.). Eigener PR, eigener Termin. |
+| `timescale/timescaledb:latest-pg16` | ein Hauptversionssprung von PostgreSQL braucht `pg_upgrade`, nicht einen neuen Digest. Prüfen, dass `pg16` im Tag bleibt. |
+| `eclipse-mosquitto:2` | jede Neuerstellung ist eine Gateway-Gefahr (§10ay). |
+
+### Schritt 3 — den PR bauen
+
+Je geänderte Zeile **beides** anfassen: den Digest und die
+Kommentarzeile mit der Klartext-Version darüber. Der Test
+`backend/tests/test_infrastruktur_images_festgenagelt.py` fällt, wenn der
+Kommentar fehlt oder der Digest die Form verliert — er prüft die **Form**,
+nicht die Werte, und kann einen falschen Digest deshalb nicht erkennen.
+
+Das Datum in der Kommentarzeile mitführen: `(festgenagelt TT.MM.JJJJ, …)`.
+Daran sieht man beim nächsten Quartal, was alt ist.
+
+### Schritt 4 — ausrollen, im Wartungstermin
+
+1. Betreiber **am Gateway**, Vorher-Wert der Kachel Funk-Empfang
+   ablesen **und Screenshot**.
+2. PR mergen. Der Timer erstellt die betroffenen Dienste innerhalb von
+   fünf Minuten neu.
+3. **Prüfliste §10ay** abarbeiten — Gateway, Bridge, Mosquitto, dann
+   zehn Minuten die Kachel ansehen.
+4. Messwerte, der eigentliche Nachweis:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+```
+
+*Erwartet:* 40–55 Messwerte von ebenso vielen Geräten, jüngste unter zwei
+Minuten alt.
+
+**STOPP, wenn** ein Dienst nicht hochkommt: der Rückweg ist der Digest,
+der vorher dort stand — er steht in der Vorgängerversion der Datei im
+`git log`, und das Image liegt noch lokal. `git revert` des Merges, der
+Timer stellt innerhalb von fünf Minuten zurück. **Das ist der Grund für
+diesen ganzen Abschnitt:** ohne Digest wäre der Rückweg „irgendetwas
+unter dem Tag", mit Digest ist er eindeutig.
+
+**Querverweise:** §10ay (Prüfliste nach einer Neuerstellung, 04.11.),
+§10bb (ChirpStack 4.17 und das Plugin — warum ein Sprung auf 4.18 kein
+Nebenbei ist), §10be (die Log-Grenzen, die beim Neuerstellen mitkommen),
+H-6 und `test_deploy_pull_pinning.py` (unsere eigenen Images, je Commit),
+§5.91 (`.Id` ist nicht immer der Manifest-Digest),
+`docs/status/2026-11-16-image-digests.md`.
