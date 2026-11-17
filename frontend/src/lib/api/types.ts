@@ -576,12 +576,28 @@ export interface Room {
   // Welche Zone ein Zimmer vertritt, entscheidet das Backend
   // (`services/referenzzone`: Schlafzimmer, bei zwei das linke, nie das
   // Kinderzimmer) — hier wird nichts geraten, auch nicht aus den Namen.
-  /** Zone, aus der `mean_temperature_c` stammt; `null` = kein Schlafzimmer. */
+  /**
+   * Zone, aus der `mean_temperature_c` stammt.
+   *
+   * `null` heißt seit dem 16.11.2026 nicht mehr „kein Schlafzimmer",
+   * sondern „mehrere Zonen und keine davon eindeutig": bei **genau einer**
+   * Zone vertritt sie sich selbst. Vorher stand bei Bar und Rezeption
+   * kein Ist, weil ihre Zonen „Barbereich" und „Eingang" heißen.
+   */
   reference_zone_id: number | null;
   /** Ist: Zonen-Mittelwert über die gesunden Vickis der Referenzzone. */
   mean_temperature_c: number | null;
   /** Soll: jüngster HARD_CLAMP-Setpoint des Zimmers (1-h-Fenster). */
   engine_setpoint_c: number | null;
+  /**
+   * Aktive Geräte in den Zonen dieses Zimmers (16.11.2026).
+   *
+   * `0` heißt „kein Gerät", `null` heißt „nicht ermittelt" — nur der
+   * Listen-Endpoint füllt das Feld. Die Unterscheidung ist der Punkt: bei
+   * einem leeren Ist war die nächste Frage jedes Mal „hängt da überhaupt
+   * etwas?", und die Antwort stand nur auf der Zimmerseite.
+   */
+  geraete_anzahl: number | null;
 
   /**
    * Sprint 24d (§5.63): Zimmer mit **nicht buchbarem** Raumtyp — Bar,

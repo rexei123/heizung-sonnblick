@@ -464,9 +464,9 @@ def betreff_alarm(befund: ZonenBefund) -> str:
     if befund.relais_stumm:
         return (
             f"Heizung Sonnblick: {ort} ohne Meldung seit {befund.alter_min} "
-            f"Minuten (Fuehler und Relais)"
+            f"Minuten (Fühler und Relais)"
         )
-    return f"Heizung Sonnblick: {ort} ohne Fuehlerwert seit {befund.alter_min} Minuten"
+    return f"Heizung Sonnblick: {ort} ohne Fühlerwert seit {befund.alter_min} Minuten"
 
 
 def betreff_entwarnung(befund: ZonenBefund) -> str:
@@ -496,9 +496,9 @@ def _relais_block(befund: ZonenBefund, *, zeitzone: str) -> str:
         f" (vor {befund.relais_alter_min} Minuten)\n"
         f"Damit ist auch der Schaltzustand unbekannt. Die Steuerung fragt "
         f"ihn von selbst nach und schaltet bis zur Antwort nicht ein.\n\n"
-        f"Dass **beide** Geraete der Zone gleichzeitig schweigen, spricht "
-        f"eher fuer den Weg als fuer die Geraete: Gateway, Netz oder "
-        f"Strom. RUNBOOK Paragraph 10ay nennt die Pruefung am Gateway.\n"
+        f"Dass **beide** Geräte der Zone gleichzeitig schweigen, spricht "
+        f"eher für den Weg als für die Geräte: Gateway, Netz oder "
+        f"Strom. RUNBOOK Paragraph 10ay nennt die Prüfung am Gateway.\n"
     )
 
 
@@ -521,14 +521,14 @@ def nachricht_alarm(befund: ZonenBefund, *, zeitzone: str) -> str:
     if befund.grund == GRUND_RELAIS_STUMM:
         return (
             f"Das Relais in {ort} meldet sich nicht mehr.\n\n"
-            f"Der Fuehler dieser Zone liefert Werte, die Steuerung regelt "
+            f"Der Fühler dieser Zone liefert Werte, die Steuerung regelt "
             f"also weiter. Unbekannt ist der **Schaltzustand**: ob das "
             f"Panel gerade heizt, sagt uns niemand mehr.\n\n"
             f"DER STAND\n"
             f"Relais: {_liste(befund.relais)}\n"
             f"Letzte Meldung: {_zeit(befund.relais_letzte_meldung, zeitzone=zeitzone)}"
             f" (vor {befund.relais_alter_min} Minuten)\n"
-            f"Fuehler: {_liste(befund.fuehler)} - meldet "
+            f"Fühler: {_liste(befund.fuehler)} - meldet "
             f"({_zeit(befund.letzte_meldung, zeitzone=zeitzone)})\n\n"
             f"WAS DIE STEUERUNG TUT\n"
             f"Sie fragt den Zustand von selbst nach und schaltet bis zur "
@@ -537,18 +537,18 @@ def nachricht_alarm(befund: ZonenBefund, *, zeitzone: str) -> str:
             f"immer nur mit Zeitbegrenzung.\n\n"
             f"WAS ZU TUN IST - in dieser Reihenfolge\n"
             f"1. Hat das Panel Strom? Ein ausgestecktes oder "
-            f"abgeschaltetes Relais ist der haeufigste Fall und von hier "
+            f"abgeschaltetes Relais ist der häufigste Fall und von hier "
             f"nicht von einem Funkproblem zu unterscheiden.\n"
             f"2. Kommen hausweit Meldungen an? Wenn nein, ist es nicht "
             f"dieses Relais.\n"
-            f"3. Der Handschalter am Gehaeuse: steht er auf AUS, schaltet "
+            f"3. Der Handschalter am Gehäuse: steht er auf AUS, schaltet "
             f"die Steuerung ins Leere.\n"
         )
 
     kopf = (
         f"{ort} wird gerade nicht geheizt.\n\n"
         f"Das Relais dieser Zone ({befund.relais_in_betrieb} in Betrieb) "
-        f"hat keinen eigenen Fuehler. Ohne aktuellen Zonenwert schaltet "
+        f"hat keinen eigenen Fühler. Ohne aktuellen Zonenwert schaltet "
         f"die Steuerung bewusst AUS - das ist der sichere Zustand und "
         f"kein Fehler, aber die Zone bleibt damit kalt, solange der Wert "
         f"fehlt.\n\n"
@@ -558,8 +558,8 @@ def nachricht_alarm(befund: ZonenBefund, *, zeitzone: str) -> str:
         return (
             kopf + "DER GRUND\n"
             "Dieser Zone ist **kein Thermostat** zugeordnet. Das ist "
-            "keine Funkstoerung, sondern eine fehlende Zuordnung - und "
-            "sie laesst sich nicht aussitzen: ohne Fuehler heizt die "
+            "keine Funkstörung, sondern eine fehlende Zuordnung - und "
+            "sie lässt sich nicht aussitzen: ohne Fühler heizt die "
             "Zone nie.\n\n"
             "WAS ZU TUN IST\n"
             "Ein Thermostat dieser Zone zuordnen (Seite Zimmer, "
@@ -569,21 +569,21 @@ def nachricht_alarm(befund: ZonenBefund, *, zeitzone: str) -> str:
 
     return (
         kopf + f"DER STAND\n"
-        f"Fuehler: {_liste(befund.fuehler)}\n"
+        f"Fühler: {_liste(befund.fuehler)}\n"
         f"Letzte Meldung: {_zeit(befund.letzte_meldung, zeitzone=zeitzone)}"
         f" (vor {befund.alter_min} Minuten)\n\n"
         f"WAS ZU TUN IST - in dieser Reihenfolge\n"
         f"1. Kommen hausweit Meldungen an? Wenn nein, ist es nicht dieser "
-        f"Fuehler, und die Totalausfall-Mail sagt mehr. RUNBOOK "
+        f"Fühler, und die Totalausfall-Mail sagt mehr. RUNBOOK "
         f"Paragraph 5.0a nennt den Befehl.\n"
-        f"2. Steht der Fuehler noch da, wo er hingehoert, und ist nichts "
+        f"2. Steht der Fühler noch da, wo er hingehört, und ist nichts "
         f"davorgestellt worden?\n"
         f"3. Am 12.11.2026 lag es an keinem von beidem: ChirpStack hatte "
-        f"dem Fuehler die Sendeleistung auf das Minimum gestellt (etwa 2 "
+        f"dem Fühler die Sendeleistung auf das Minimum gestellt (etwa 2 "
         f"statt 16 dBm), und damit kam 14 Stunden lang nichts an. Das "
         f"steht in RUNBOOK Paragraph 10av.\n\n"
         f"WAS DIESE MELDUNG NICHT IST\n"
-        f"Kein Geraetefehler. Der Fuehler kann senden und gehoert werden "
+        f"Kein Gerätefehler. Der Fühler kann senden und gehört werden "
         f"und trotzdem hier auftauchen - gemessen wird, was **ankommt**.\n"
         + _relais_block(befund, zeitzone=zeitzone)
     )
@@ -594,8 +594,8 @@ def nachricht_entwarnung(befund: ZonenBefund, *, zeitzone: str) -> str:
     jetzt = datetime.now(tz=ZoneInfo(zeitzone)).strftime("%d.%m.%Y %H:%M")
     return (
         f"{_ortsname(befund)} meldet wieder ({jetzt}).\n\n"
-        f"Fuehler und Relais der Zone sind beide zu hoeren, die Zone wird "
+        f"Fühler und Relais der Zone sind beide zu hören, die Zone wird "
         f"damit wieder geregelt und ihr Schaltzustand ist bekannt. Ob sie "
-        f"in der Zwischenzeit ausgekuehlt ist, sagt diese Meldung nicht - "
+        f"in der Zwischenzeit ausgekühlt ist, sagt diese Meldung nicht - "
         f"der Verlauf steht auf der Seite Temperaturverlauf.\n"
     )

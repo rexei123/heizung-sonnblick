@@ -65,6 +65,10 @@ export const relaisStandSchema = z.object({
   gehaeusetemperatur_alarm: z.boolean(),
   reading_time: z.string().nullable(),
   change_reason: z.string().nullable(),
+  // Ab 25 Minuten Stille gilt der gemeldete Zustand als unbekannt. Die
+  // Schwelle entscheidet das Backend (relay_meldeintervall_s x 2,5) --
+  // hier noch einmal zu rechnen waere eine zweite Wahrheit.
+  zustand_veraltet: z.boolean(),
   // Empfangsdaten des jüngsten Uplinks (Migration 0041). `null` heißt
   // "diese Meldung sagt nichts darüber", nicht "kein Empfang".
   rssi_dbm: z.number().nullable(),

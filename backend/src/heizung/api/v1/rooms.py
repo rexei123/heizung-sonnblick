@@ -48,7 +48,10 @@ from heizung.services.event_log import (
 )
 from heizung.services.referenzzone import referenzzonen_pro_zimmer
 from heizung.services.room_history import lade_verlauf
-from heizung.services.zone_aggregates import latest_mean_temp_per_zone
+from heizung.services.zone_aggregates import (
+    geraete_anzahl_pro_zimmer,
+    latest_mean_temp_per_zone,
+)
 
 INT4_MAX = 2_147_483_647
 
@@ -206,6 +209,7 @@ async def list_rooms(
     # Befund des Betreibers, 31.10.2026: der Soll der **Referenzzone**, nicht
     # der des Zimmers. Begruendung in ``_mit_ist_und_soll``.
     soll_stand = await lies_soll_stand(session, room_ids)
+    geraete = await geraete_anzahl_pro_zimmer(session, room_ids)
 
     def _mit_ist_und_soll(room: Room) -> RoomRead:
         zone_id = referenzzonen.get(room.id)
@@ -250,6 +254,7 @@ async def list_rooms(
                 "mean_temperature_c": ist,
                 "engine_setpoint_c": soll,
                 "ist_allgemeinbereich": room.room_type_id in bereich_typen,
+                "geraete_anzahl": geraete.get(room.id, 0),
             }
         )
 

@@ -42,7 +42,7 @@ class Befund:
 def betreff(befund: Befund) -> str:
     wo = befund.hardware_nummer or befund.dev_eui
     ort = f" in {befund.zimmer}" if befund.zimmer else ""
-    return f"Heizung Sonnblick: Geraet {wo}{ort} nimmt keine Befehle an"
+    return f"Heizung Sonnblick: Gerät {wo}{ort} nimmt keine Befehle an"
 
 
 def nachricht(befund: Befund, *, zeitzone: str) -> str:
@@ -61,27 +61,27 @@ def nachricht(befund: Befund, *, zeitzone: str) -> str:
     )
 
     return (
-        f"Das Geraet {wo} ({ort}) uebernimmt den gesendeten Sollwert nicht. "
+        f"Das Gerät {wo} ({ort}) übernimmt den gesendeten Sollwert nicht. "
         f"Nach {befund.versuche} Versuchen wird nicht weiter gesendet.\n\n"
         f"WAS ZU TUN IST\n"
-        f"Am Geraet nachsehen: sitzt der Kopf fest auf dem Ventil, ist die "
-        f"Batterie frisch, blinkt es. Danach Funk pruefen (RUNBOOK "
-        f"Paragraph 10ay). Ein Eingriff an der Heizung ist nicht noetig — "
+        f"Am Gerät nachsehen: sitzt der Kopf fest auf dem Ventil, ist die "
+        f"Batterie frisch, blinkt es. Danach Funk prüfen (RUNBOOK "
+        f"Paragraph 10ay). Ein Eingriff an der Heizung ist nicht nötig — "
         f"nach der Behebung regelt der Abgleich von selbst nach, es muss "
         f"nichts von Hand gesetzt werden.\n\n"
         f"DIE ZAHLEN (Stand {jetzt_txt})\n"
-        f"Geraet meldet:           {befund.gemeldet_c} C\n"
+        f"Gerät meldet:            {befund.gemeldet_c} C\n"
         f"Zuletzt gesendet:        {befund.gesendet_c} C\n"
         f"{wunsch_zeile}"
         f"Erfolglose Versuche:     {befund.versuche}\n"
         f"Lage besteht seit:       {seit_txt}\n\n"
         f"WARUM DIESE MELDUNG NUR EINMAL KOMMT\n"
         f"Sie kommt einmal je Episode. Eine neue Episode beginnt erst, wenn "
-        f"das Geraet einen gesendeten Sollwert **bestaetigt** hat, also einen "
+        f"das Gerät einen gesendeten Sollwert **bestätigt** hat, also einen "
         f"Uplink mit genau diesem Wert meldet. Dass die Engine inzwischen "
         f"etwas anderes will, beendet die Lage nicht.\n\n"
         f"WAS DIESE MELDUNG NICHT SAGT\n"
-        f"Sie sagt nicht, dass das Zimmer kalt ist. Das Geraet heizt — nur "
+        f"Sie sagt nicht, dass das Zimmer kalt ist. Das Gerät heizt — nur "
         f"nach seinem eigenen Wert, nicht nach dem der Steuerung. Liegt "
-        f"dieser Wert hoeher, ist das Zimmer zu warm statt zu kalt.\n"
+        f"dieser Wert höher, ist das Zimmer zu warm statt zu kalt.\n"
     )

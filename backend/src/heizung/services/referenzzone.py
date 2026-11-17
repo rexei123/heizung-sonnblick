@@ -81,6 +81,23 @@ def waehle_referenzzone(zonen: Sequence[tuple[int, str]]) -> int | None:
         treffer = [zid for zid, zname in zonen if zname == name]
         if treffer:
             return min(treffer)
+
+    # **Rueckfall seit dem 16.11.2026: genau eine Zone vertritt sich
+    # selbst.** Vorgabe des Betreibers — in der Zimmerliste stand bei
+    # **Bar** und **Rezeption** kein Ist und kein Soll, nur Striche.
+    #
+    # Der Grund war diese Funktion: die Regel oben sucht ein
+    # „Schlafzimmer", und ein Allgemeinbereich hat keines. Die Zone heisst
+    # „Barbereich" bzw. „Eingang". Beide Zimmer haben **genau eine** Zone,
+    # und bei genau einer gibt es nichts zu entscheiden — „keine Referenz"
+    # war dort kein fehlendes Merkmal, sondern eine Regel, die fuer
+    # Gastzimmer geschrieben ist.
+    #
+    # **Bei mehreren Zonen ohne Namenstreffer bleibt es None**, und das ist
+    # Absicht: dann waere jede Wahl geraten, und ein geratener Ist-Wert in
+    # der Uebersicht ist schlechter als ein Strich (§0 S6).
+    if len(zonen) == 1:
+        return zonen[0][0]
     return None
 
 
@@ -94,18 +111,28 @@ async def referenzzonen_pro_zimmer(
     ``override_service.stand_je_zimmer``). Zimmer ohne
     Referenzzone fehlen im Ergebnis — der Konsument leitet auf ``None``.
 
-    Gefiltert wird bereits in SQL auf :data:`REFERENZ_NAMEN`; die
-    Auswahl zwischen ``Schlafzimmer`` und ``Schlafzimmer L`` trifft
-    danach :func:`waehle_referenzzone`, damit die Prioritaet an **einer**
-    Stelle steht und nicht halb im SQL.
+    **Die Auswahl trifft vollstaendig** :func:`waehle_referenzzone`. Bis
+    zum 16.11.2026 filterte diese Abfrage schon in SQL auf
+    :data:`REFERENZ_NAMEN` — halb im SQL, halb in Python. Das hat den
+    Rueckfall „genau eine Zone" unmoeglich gemacht, bevor er geschrieben
+    war: ein Zimmer ohne „Schlafzimmer" kam in der Abfrage nicht vor.
     """
     ids = list(room_ids)
     if not ids:
         return {}
 
+    # **Kein Namensfilter mehr in SQL** (16.11.2026). Vorher stand hier
+    # ``HeatingZone.name.in_(REFERENZ_NAMEN)``, und damit kam ein Zimmer
+    # ohne „Schlafzimmer" in dieser Abfrage gar nicht vor —
+    # :func:`waehle_referenzzone` hat es nie zu sehen bekommen, und ihr
+    # Rueckfall „genau eine Zone" waere wirkungslos geblieben.
+    #
+    # Das ist der Grund, warum der Filter weg ist und nicht nur die
+    # Funktion erweitert wurde: eine Regel, die in SQL schon vorsortiert
+    # ist, kann in Python nicht mehr vollstaendig entscheiden. Die Kosten
+    # sind gering — 103 Zonen statt 45 Zeilen, eine Abfrage wie vorher.
     stmt = select(HeatingZone.room_id, HeatingZone.id, HeatingZone.name).where(
         HeatingZone.room_id.in_(ids),
-        HeatingZone.name.in_(REFERENZ_NAMEN),
     )
     rows = (await session.execute(stmt)).all()
 
