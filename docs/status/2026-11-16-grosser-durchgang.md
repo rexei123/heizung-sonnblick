@@ -300,21 +300,86 @@ hier also nicht stehen.
 *STOPP, wenn:* **1**. Dann ist das Plugin schon scharf, und der Neustart
 wäre zwei Änderungen auf einmal — Ausgabe an mich.
 
-### 2c.2 Updates
+### 2c.2a Zeigen, was ansteht — **ab hier am Gateway**
 
 ```bash
-apt-get update && apt-get dist-upgrade -y
+apt-get update -qq && apt list --upgradable 2>/dev/null | grep -iE 'docker|containerd' || echo '(keine Docker-Pakete im Update)'
 ```
 
-*ERWARTET:* durchläuft ohne Fehler.
+*ERWARTET* (am 16.11.2026 gemessen): sechs Zeilen — `containerd.io`
+2.2.3 → 2.4.2, `docker-ce` 29.4.0 → 29.9.3, dazu cli, rootless-extras,
+buildx, compose-plugin.
 
-*Wartezeit:* abwarten, bis es fertig ist. Danach:
+```bash
+apt list --upgradable 2>/dev/null | grep -c '^[^ ]*/' ; apt list --upgradable 2>/dev/null | grep -ci security
+```
+
+*ERWARTET:* **59** Updates, davon **0** Sicherheits-Updates.
+
+### 2c.2b Die Docker-Pakete für heute zurückhalten
+
+> **Befund des Betreibers, 16.11.2026.** `dist-upgrade` nimmt `docker-ce`
+> und `containerd.io` mit. Beide starten beim Einspielen ihren Dienst neu
+> — und damit **alle Container inklusive Mosquitto**, also die
+> Gateway-Gefahr aus §10ay, **vor** dem geplanten Reboot und vor den
+> T+10-Prüfungen. Zwei Störungen statt einer, und die erste ungeplant.
+
+Bei **null** Sicherheits-Updates gibt es dafür heute keinen Grund:
+
+```bash
+apt-mark hold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+*ERWARTET:* sechs Zeilen `… auf Halten gesetzt.`
+
+```bash
+apt-mark showhold
+```
+
+*ERWARTET:* genau diese sechs Namen.
+
+### 2c.2c Der Rest
+
+```bash
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade
+```
+
+**Was die zwei `Dpkg::Options` tun:** `--force-confold` behält
+**vorhandene** Konfigurationsdateien; `--force-confdef` nimmt die
+Paket-Vorgabe nur dort, wo **nichts** von Hand geändert wurde. Zusammen:
+keine Rückfrage, nichts Selbstgeschriebenes überschrieben. Ohne sie
+bliebe `apt` an einer Dialogbox stehen, während jemand am Gateway wartet.
+
+```bash
+find /etc -name '*.dpkg-dist' -newermt '-1 hour' 2>/dev/null | head
+```
+
+*ERWARTET:* leer oder eine Handvoll Pfade — **heute nichts tun**, nur
+melden.
 
 ```bash
 docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}'
 ```
 
-*ERWARTET:* unverändert elf Dienste `Up`.
+*ERWARTET:* elf Dienste `Up`, **Laufzeiten unverändert**. Genau das
+belegt, dass Docker nicht angefasst wurde.
+
+*STOPP, wenn:* ein Dienst eine Laufzeit unter fünf Minuten zeigt → der
+Docker-Dienst ist doch neu gestartet. **Sofort zu den zwei
+Gateway-Prüfungen aus 2c.4 springen.**
+
+### 2c.2d Danach: das Halten wieder aufheben
+
+**Nicht heute, aber nicht vergessen** — ein gehaltenes Paket ist still
+und fällt monatelang nicht auf:
+
+```bash
+apt-mark unhold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Das Docker-Upgrade gehört in einen **eigenen** Termin mit
+Gateway-Prüfung: es startet beim Einspielen alle Container neu, genau wie
+ein Reboot.
 
 ### 2c.3 T+7 — der Neustart
 
@@ -343,25 +408,47 @@ docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps
 
 *ERWARTET:* elf Dienste `Up`.
 
-**Gateway-Status in ChirpStack** — *wo:* ChirpStack-Oberfläche → Tenants →
-Hotel Sonnblick → Gateways.
+> **Korrigiert am 17.11.2026.** Hier stand ein `tail -f` auf das
+> Caddy-Protokoll mit `grep router` — der **Basic-Station**-Weg. Das UG65
+> spricht kein Basic Station; es publiziert per **MQTT auf 1883** und
+> meldet sich bei Mosquitto als `gateway-ug65` an. Die Quelle des Fehlers
+> war §10ay, das seit dem 07.11. nicht nachgezogen war; dort ist es jetzt
+> ebenfalls richtig.
 
-*ERWARTET:* das UG65 **online**, „Last seen" unter **30 Sekunden**. Die
-Bridge schickt Statistik alle 30 Sekunden; zwei Minuten sind kein
-Ausreißer, sondern ein Befund.
-
-*STOPP, wenn:* offline oder „Last seen" über zwei Minuten → **Stromtrennung
-am UG65** (§10ay). Das ist der Griff, für den Sie dort stehen.
-
-**Und beim Warten mitlesen, ob das Gateway klopft:**
+**Erste Prüfung: hat sich das Gateway neu verbunden?**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -f /var/log/caddy/cs-test.access.log' | grep --line-buffered router
+docker logs deploy-mosquitto-1 --since 5m 2>&1 | grep -c "u'gateway-ug65'" || true
 ```
 
-*ERWARTET:* Zeilen innerhalb von **zwei Minuten**. Kommt keine, versucht
-das Gerät es nicht — dann ist Warten sinnlos und die Stromtrennung fällig.
-Mit Strg-C beenden.
+*ERWARTET:* **mindestens 1** — der Reboot hat die MQTT-Sitzung beendet,
+das Gateway muss sich neu anmelden.
+
+> Im **Normalbetrieb** steht dort 0, und das ist gesund: die Sitzung wird
+> einmal aufgebaut und bleibt. Am 16.11. gemessen — die letzte Verbindung
+> stammte vom 10.11. Eine 0 ohne vorangegangene Unterbrechung ist kein
+> Befund.
+
+**Zweite Prüfung: kommen Messwerte?** Das misst das Ende der Kette.
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
+```
+
+*ERWARTET:* zweistellige Gerätezahl, `juengste` unter zwei Minuten.
+
+*STOPP und Stromtrennung am UG65 nur, wenn **beides** leer bleibt* —
+keine Neuanmeldung **und** keine Messwerte. Kommt eines von beiden, ist
+der Weg in Ordnung.
+
+**Wer alle Clients sehen will:**
+
+```bash
+docker logs deploy-mosquitto-1 --since 30m 2>&1 | grep -oE "u'[^']+'" | sort | uniq -c
+```
+
+*ERWARTET nach einem Neustart:* `gateway-ug65`, `chirpstack-integration`,
+`chirpstack-gw-eu868`, `heizung-api*`.
 
 ### 2c.5 T+21 — Prüfliste, zweiter Teil
 
@@ -421,20 +508,40 @@ docker inspect $(docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-co
 zwei Minuten liegt — dann wurde er nicht neu erstellt, und das ist zu
 klären, bevor es weitergeht.
 
-### 2d.3 Die Uplink-Prüfung, zwei Minuten (§5.0a)
+### 2d.3 Die Gateway-Prüfung nach der Neuerstellung
+
+> **Zweimal korrigiert, und die zweite Korrektur ist die wichtigere.**
+> Hier stand erst die Caddy-`router`-Prüfung (falscher Weg), danach der
+> Satz „`gateway-ug65` muss nicht dabei sein — das Gateway wurde nicht
+> angefasst". **Auch das war falsch, und zwar gefährlich falsch:** #424
+> ändert die `image:`-Zeile von **`mosquitto`**. Der Broker wird neu
+> erstellt, und damit bricht **jede** MQTT-Sitzung ab — auch die des
+> UG65.
+
+**Nach 2d MUSS sich das Gateway neu anmelden:**
 
 ```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml exec -T caddy sh -c 'tail -f /var/log/caddy/cs-test.access.log' | grep --line-buffered router
+docker logs deploy-mosquitto-1 --since 5m 2>&1 | grep -c "u'gateway-ug65'" || true
 ```
 
-*ERWARTET:* Zeilen innerhalb von **zwei Minuten**.
-
-*STOPP, wenn:* keine → Stromtrennung am UG65 (§10ay), danach die Dienste
-in dieser Reihenfolge neu erzeugen:
+*ERWARTET:* **mindestens 1**, innerhalb von zwei bis drei Minuten.
 
 ```bash
-cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack chirpstack-gateway-bridge api
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
 ```
+
+*ERWARTET:* zweistellige Gerätezahl, `juengste` unter zwei Minuten.
+
+*STOPP, wenn:* nach **zwei bis drei Minuten** weder eine Neuanmeldung
+noch Messwerte da sind → **Stromtrennung am UG65** (§10ay Schritt 5).
+Stecker ziehen, zehn Sekunden warten, wieder einstecken; danach dauert es
+einige Minuten.
+
+> **Ein `--force-recreate` von `chirpstack` und `api` hilft hier nicht.**
+> Das Gateway ist das, was sich neu anmelden muss; die beiden Dienste
+> stehen nicht in seinem Weg. Sie neu zu erstellen wäre eine weitere
+> MQTT-Unterbrechung ohne Gegenwert. Diese Zeile stand hier und ist
+> **heraus**.
 
 ### 2d.4 Messwerte
 
@@ -510,203 +617,29 @@ zwei Minuten.
 
 ---
 
-# Phase 3 — Das Plugin, getrennt und am Ende
+# Phase 3 — entfällt
 
-**Warum am Ende und allein:** damit ein Fehler **zuordenbar** bleibt. Am
-15.11. lief das Plugin zusammen mit der Reserve, und die sieben Minuten
-Ausfall waren erst nach einiger Suche dem Plugin zuzuschreiben.
+**Entscheidung des Betreibers vom 16.11.2026: das Plugin kommt heute
+nicht.** #425 bleibt fertig liegen und wird **nicht** gemergt.
 
-**Was sich seit dem 15.11. geändert hat:** die Datei trägt
-`export function id/name/handle`, und ein Test lässt
-`chirpstack/chirpstack:4.17.0` — dasselbe Image wie hier — gegen eine
-Wegwerf-Datenbank laufen. Er prüft beides: dass diese Fassung lädt, **und
-dass die Fassung vom 15.11. ohne `export` mit genau der damaligen Meldung
-abbricht**. Das ist gemessen, nicht gelesen.
-
-## 3a — #425 mergen und chirpstack neu erstellen
-
-*wo:* PowerShell (lokal)
+**Der Grund ist eine Messung, nicht ein Zögern.** Nach der Stromtrennung
+am 16.11. um 08:39 läuft Relais 108 auf **DR0** (SF12) — eine Stufe
+**robuster** als die DR1, die das Plugin festnageln würde. Seither:
 
 ```
-merge-paket 425
+Verlust 108 seit dem Rejoin:  16 Frames angekommen, 0 fehlend  ->  0,0 %
+Verlust 108 die sechs Stunden davor (DR5):                        25,8 %
+SNR je Frame:  -8,5 dB      RSSI: -105 dBm
+zum Vergleich 109 Panel:  SNR +4,6 dB, RSSI -99 dBm, DR5
 ```
 
-*Wartezeit:* **6 Minuten**, damit der Timer die neue Fassung gezogen und
-der Sidecar die TOML gerendert hat.
+Dreizehn Dezibel Unterschied im selben Haus: **der Link von 108 ist zu
+schwach, die Pakete kollidieren nicht.** Und er klettert auch nicht
+zurück — bei DR0 bräuchte ADR für eine Stufe nach oben ein SNR von
+**+3 dB**, gemessen sind −8,5. Die Reserve von 20 dB hält ihn unten.
 
-*wo:* SSH (Server)
-
-```bash
-docker run --rm -v deploy_chirpstack_config_rendered:/vol:ro alpine:3.20 grep -c '^[[:space:]]*adr_plugins' /vol/chirpstack.toml || true
-```
-
-*ERWARTET:* **1**.
-
-*STOPP, wenn:* 0 → der Sidecar hat noch nicht gerendert. **Eine Runde
-warten, nicht nachhelfen**, dann erneut. Bleibt es 0: melden.
-
-```bash
-cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack-init chirpstack
-```
-
-*Wartezeit:* **30 Sekunden.**
-
-## 3b — Die Prüfung, die alles entscheidet
-
-*wo:* SSH (Server)
-
-```bash
-docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}' | grep chirpstack
-```
-
-*ERWARTET:* `chirpstack=Up …` — **nicht** `Restarting`.
-
-```bash
-docker logs deploy-chirpstack-1 --since 3m 2>&1 | grep -E 'Setting up ADR plugin|Get id function|Read ADR plugin'
-```
-
-*ERWARTET:* **eine** Zeile `Setting up ADR plugin file_path=…`, und
-**keine** mit `Get id function` oder `Read ADR plugin`.
-
-### STOPP — und dann sofort die Notreparatur
-
-**Erkennungszeichen:** `Restarting` in der Statuszeile, oder eine Zeile
-`Get id function` im Protokoll. Dann verarbeitet die Anlage **nichts**,
-und die drei Befehle unten sind die Reihenfolge. Nicht erst melden —
-erst reparieren, dann melden.
-
-**N1 — den Eintrag aus der gerenderten Konfiguration nehmen**
-
-```bash
-docker run --rm -v deploy_chirpstack_config_rendered:/vol alpine:3.20 sh -c "cp /vol/chirpstack.toml /vol/chirpstack.toml.vor-notfix && sed -i '/^[[:space:]]*adr_plugins/d' /vol/chirpstack.toml && grep -c '^[[:space:]]*adr_plugins' /vol/chirpstack.toml || true"
-```
-
-*ERWARTET:* **0**. Es wird **nichts** aus der Datei angezeigt — kein
-Zeilenfenster, kein `cat` (§5.89).
-
-**N2 — nur chirpstack neu erstellen**
-
-```bash
-cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack
-```
-
-*ERWARTET:* nach 30 Sekunden `chirpstack=Up`, und:
-
-```bash
-docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '5 minutes';"
-```
-
-*ERWARTET:* die Messwerte kommen wieder (15.11.: 34 von 34 innerhalb von
-zwei Minuten).
-
-**N3 — den Timer anhalten, sonst hält die Reparatur fünf Minuten**
-
-Der Deploy-Timer rendert die TOML aus dem Repo neu, und der Eintrag wäre
-zurück. **Deshalb gehört N3 dazu, nicht hinterher:**
-
-```bash
-systemctl stop heizung-deploy-pull.timer && systemctl is-active heizung-deploy-pull.timer || true
-```
-
-*ERWARTET:* `inactive`.
-
-> **Und er muss wieder an.** Solange der Timer steht, kommt **kein**
-> Deploy mehr durch — auch kein Revert. Nach meiner Rückmeldung:
-> `systemctl start heizung-deploy-pull.timer`. Das bitte nicht vergessen;
-> ein angehaltener Timer ist still und fällt tagelang nicht auf.
-
-Danach Ausgabe an mich: Statuszeile, die drei gegrepten Protokollzeilen,
-Messwerte. Ich lege einen Revert-PR an.
-
-## 3c — Das Profil auf das Plugin stellen
-
-**Erst wenn 3b sauber ist.**
-
-*wo:* ChirpStack-Oberfläche
-
-1. **Device profiles** öffnen.
-2. **„Relais 16ASPM"** anklicken.
-3. Feld **ADR algorithm** aufklappen.
-
-*ERWARTET:* in der Auswahl steht **„Relais 16ASPM: feste Datenrate DR1,
-zwei Wiederholungen"**.
-
-*STOPP, wenn:* der Eintrag **nicht** in der Liste steht. Dann hat
-ChirpStack die Datei nicht geladen, und das ist der **einzige**
-verlässliche Hinweis darauf — eine Fehlermeldung gibt es nicht. Nichts
-auswählen, Ausgabe an mich.
-
-4. Auswählen, **speichern**.
-
-Das Profil gilt für **108 und 109 zugleich** — das Plugin hängt am Profil,
-nicht am Gerät. **Die rund hundert Vickis bleiben auf „Default ADR
-algorithm"**; für sie wirkt die Reserve von 20 dB.
-
-## 3d — Wirkungsnachweis
-
-*Wartezeit:* bis zu **30 Minuten**. Das Relais meldet sich alle acht bis
-zehn Minuten, und ADR braucht einen Uplink.
-
-*wo:* SSH (Server)
-
-```bash
-docker logs deploy-chirpstack-1 --since 40m 2>&1 | grep -E "LinkADRReq acknowledged.*dd001(f23|e69)"
-```
-
-*ERWARTET:* `dr=1 nb_trans=2 tx_power_index=0` für **beide** Relais
-(`dd001f23` = Etikett „108", `dd001e69` = „109 Panel").
-
-*STOPP, wenn:* nach 40 Minuten keine Zeile kommt → Ausgabe an mich.
-Kommt `dr=5`, wirkt das Profil nicht.
-
-> **Eine Zahl für den Vergleich, von heute:** 108 stand vor Phase 3 auf
-> **DR5**, gesetzt vom Standard-Algorithmus — vier `LinkADRReq
-> acknowledged` am 15./16.11., bei Reserve 20 und voller Sendeleistung.
-> Heute um 08:39 hat 108 von selbst neu gejoint und dabei die ADR-Historie
-> geleert; seither hat ADR es **noch nicht** wieder hochgezogen. Je später
-> Phase 3 kommt, desto wahrscheinlicher steht es wieder auf DR5, wenn das
-> Plugin greift — der Nachweis gilt dann vom höheren Stand aus.
-
-### Und danach: der Verlustvergleich am Relais
-
-**Gegen `relay_reading`, nicht `sensor_reading`.** Relais schreiben in
-eine eigene Tabelle; gegen `sensor_reading` kommen **0 Zeilen** heraus.
-Das war der erste Entwurf dieses Befehls, und er hätte nur ratlos
-gemacht.
-
-*wo:* SSH (Server). Beide Fenster, der Unterschied ist die Aussage:
-
-```bash
-docker exec deploy-db-1 psql -U heizung -d heizung -c "WITH f AS (SELECT rr.device_id, rr.fcnt, rr.time, lag(rr.fcnt) OVER (PARTITION BY rr.device_id ORDER BY rr.time) AS vorher FROM relay_reading rr WHERE rr.time > now() - interval '6 hours') SELECT d.label, count(*) AS angekommen, coalesce(sum(CASE WHEN f.vorher IS NOT NULL AND f.fcnt > f.vorher THEN f.fcnt - f.vorher - 1 ELSE 0 END), 0) AS fehlend, round(100.0 * coalesce(sum(CASE WHEN f.vorher IS NOT NULL AND f.fcnt > f.vorher THEN f.fcnt - f.vorher - 1 ELSE 0 END), 0) / nullif(count(*), 0), 1) AS verlust_proz FROM f JOIN device d ON d.id = f.device_id GROUP BY d.label ORDER BY d.label;"
-```
-
-Dasselbe mit `interval '48 hours'` für den langen Blick.
-
-**Die Ausgangswerte, gemessen heute 16.11. gegen 09:30:**
-
-| Fenster | 108 | 109 Panel |
-|---|---|---|
-| 6 Stunden | **25,8 %** (31 an, 8 fehlend) | **0,0 %** (36 an) |
-| 48 Stunden | **6,2 %** (274 an, 17 fehlend) | **5,1 %** (275 an, 14 fehlend) |
-
-**Das ist die wichtigere Erkenntnis dieser Messung: der Verlust bei 108
-ist nicht gleichmäßig, er kommt in Schüben.** Über 48 Stunden liegen
-beide Relais bei 5 bis 6 Prozent und sind kaum zu unterscheiden; in den
-letzten sechs Stunden verlor 108 ein Viertel seiner Meldungen und 109
-nichts. Der Schub deckt sich mit der Funkstille von 07:57 bis 08:28 und
-dem Rejoin um 08:39.
-
-*ERWARTET nach dem Plugin:* **die Schübe verschwinden.** Am Mittelwert
-über 48 Stunden wird man zuerst **nichts** sehen — er lag auch vorher bei
-6 Prozent. Wer die Wirkung am Mittelwert sucht, wird sie nicht finden und
-das Plugin für wirkungslos halten.
-
-*STOPP, wenn:* das 6-Stunden-Fenster an einem ruhigen Tag weiter über
-15 Prozent liegt. Dann ist der Link nicht das Problem, sondern die Dose,
-das Panel oder das Haus — und das Plugin gehört zurückgenommen, weil es
-dann nur Sendezeit kostet.
-
----
+Das Plugin würde heute also einen Zustand verschlechtern, der
+fehlerfrei läuft. **Die Regel für später steht in §10av.**
 
 # Phase 4 — `refresh` für 108 einschalten
 
@@ -716,33 +649,49 @@ Soll, die Rezeption nicht — deshalb wird dort umgeschaltet.
 
 ## 4a — Der Handgriff
 
-*wo:* Bash (lokal, Git Bash). **Das Passwort tippen Sie, es steht in
-keiner Datei und erscheint nicht am Schirm.**
+**Anmeldung als `verwaltung@hotel-sonnblick.at`.** (Hier stand bis zum
+17.11. `kaprun@` — falscher Benutzer.)
 
-```bash
-read -rsp "Passwort kaprun@hotel-sonnblick.at: " P; echo; curl -s -c /tmp/h.jar -o /dev/null -w "login=%{http_code}\n" -X POST https://heizung.hoteltec.at/api/v1/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"kaprun@hotel-sonnblick.at\",\"password\":\"$P\"}"; unset P
+*wo:* PowerShell (lokal). **Das Passwort tippen Sie; es steht in keiner
+Datei und erscheint nicht am Schirm.**
+
+```powershell
+$sicher = Read-Host "Passwort verwaltung@hotel-sonnblick.at" -AsSecureString
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sicher)
+try { $klar = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+$body = @{ email = 'verwaltung@hotel-sonnblick.at'; password = $klar } | ConvertTo-Json -Compress
+Remove-Variable klar
+Invoke-RestMethod -Uri 'https://heizung.hoteltec.at/api/v1/auth/login' -Method Post -ContentType 'application/json' -Body $body -SessionVariable sitzung | Out-Null
+Remove-Variable body, sicher
+"angemeldet: $($sitzung.Cookies.Count) Cookie(s)"
 ```
 
-*ERWARTET:* `login=200`.
+*ERWARTET:* `angemeldet: 1 Cookie(s)`, keine rote Fehlermeldung.
+*STOPP, wenn:* `401` → Anmeldung prüfen. Bei `500` Ausgabe an mich.
 
-*STOPP, wenn:* 401 → Anmeldung prüfen. Bei 500 Ausgabe an mich.
+```powershell
+Invoke-RestMethod -Uri 'https://heizung.hoteltec.at/api/v1/devices/109/relay/watchdog-strategy' -Method Patch -ContentType 'application/json' -Body '{"strategie":"refresh"}' -WebSession $sitzung
+```
+
+*ERWARTET:* `strategie : refresh`, `timer_sekunden : 900`.
+
+**Die Geräte-Id ist 109, das Etikett „108".** 110 wäre „109 Panel" — und
+das wollen wir hier gerade nicht.
+
+```powershell
+Remove-Variable sitzung
+```
+
+### Dieselben Schritte in Bash (Git Bash)
+
+```bash
+read -rsp "Passwort verwaltung@hotel-sonnblick.at: " P; echo; curl -s -c /tmp/h.jar -o /dev/null -w "login=%{http_code}\n" -X POST https://heizung.hoteltec.at/api/v1/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"verwaltung@hotel-sonnblick.at\",\"password\":\"$P\"}"; unset P
+```
 
 ```bash
 curl -s -b /tmp/h.jar -X PATCH https://heizung.hoteltec.at/api/v1/devices/109/relay/watchdog-strategy -H 'Content-Type: application/json' -d '{"strategie":"refresh"}'; echo
-```
-
-*ERWARTET:* `"strategie":"refresh"`, `"timer_sekunden":900`.
-
-**Die Geräte-Id ist 109 und das Etikett „108"** — die Etiketten tragen die
-Hausnummern, die Ids nicht. 110 wäre „109 Panel", und das wollen wir hier
-gerade **nicht**.
-
-```bash
 rm -f /tmp/h.jar
 ```
-
-*ERWARTET:* keine Ausgabe. Die Datei ist ein Sitzungsausweis und hat nach
-dem Handgriff keinen Grund mehr zu existieren.
 
 ## 4b — Dass es gewirkt hat
 
@@ -778,6 +727,12 @@ Will sie nicht, sind es null, und das ist kein Mangel.
 > 3". Das war aus dem Timer-Wert geraten statt aus dem Abstand gelesen —
 > und hätte beim ersten Blick falschen Alarm gegeben. Ein Melder, der im
 > gesunden Zustand rot zeigt, wird nach dem zweiten Mal ignoriert (§5.79).
+
+**Die Sendezeit auf DR0, gerechnet** (Betreiber, 16.11.2026): 12 × 1,32 s
+= **16 s/h** auf 869,525 MHz — Teilband **g3**, dort sind 10 % erlaubt,
+also 360 s/h. Das sind **4,4 % des Budgets**. Unkritisch, und damit ist
+der letzte Vorbehalt gegen `refresh` auf der niedrigen Datenrate
+ausgeräumt.
 
 *ERWARTET als Lastverhältnis:* 108 bekommt etwa **sechsmal** so viele
 Einschaltbefehle wie vorher (vorher: alle 30 Minuten einer, also einer
