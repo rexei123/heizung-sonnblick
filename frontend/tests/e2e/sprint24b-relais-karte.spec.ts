@@ -138,6 +138,12 @@ const STAND_VERALTET = {
   reading_time: "2026-10-24T06:40:00Z",
 };
 
+/** Dasselbe Relais, aber der Waechter setzt den Timer nach. */
+const STAND_REFRESH = {
+  ...STAND_LAEUFT,
+  watchdog_strategy: "refresh",
+};
+
 /** Mit einem EIN, das seit vier Versuchen nicht bestaetigt ist. */
 const STAND_UNBESTAETIGT = {
   ...STAND_LAEUFT,
@@ -379,6 +385,133 @@ test.describe("Relais-Karte", () => {
     await expect(page.getByTestId("relay-release")).toHaveCount(0);
   });
 
+  test("die Waechter-Zeile nennt das Verfahren, nicht den Datenbankwert", async ({
+    page,
+  }) => {
+    // Hier stand `expire_and_resend`. Was die zwei Strategien
+    // unterscheiden, ist eine Frage, die der Betreiber nachts
+    // beantworten koennen muss.
+    await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toContainText("Timer läuft ab, dann neu");
+    await expect(karte).not.toContainText("expire_and_resend");
+  });
+
+  test("der Knopf nennt die Handlung, nicht den Zustand", async ({ page }) => {
+    // §5.85: die Beschriftung eines Knopfes nennt die Handlung. Der
+    // Zustand steht eine Zeile darueber. Die Probe ist, sie laut zu
+    // lesen — „Timer nachsetzen lassen" ist eine Aufforderung,
+    // „Waechter: expire_and_resend" waere eine Behauptung.
+    await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    await expect(page.getByTestId("relay-strategie")).toHaveText(
+      "Timer nachsetzen lassen",
+    );
+  });
+
+  test("steht der Waechter auf refresh, bietet der Knopf den Rueckweg", async ({
+    page,
+  }) => {
+    // Die Gegenprobe. Ohne sie koennte der Knopf dauerhaft dasselbe
+    // anbieten und der Test darueber waere trotzdem gruen.
+    await mock(page, { stand: STAND_REFRESH, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    await expect(page.getByTestId("relay-card")).toContainText(
+      "Timer wird nachgesetzt",
+    );
+    await expect(page.getByTestId("relay-strategie")).toHaveText(
+      "Timer ablaufen lassen",
+    );
+  });
+
+  test("der Klick schickt PATCH mit der anderen Strategie", async ({
+    page,
+  }) => {
+    await mock(page, { stand: STAND_LAEUFT, nutzer: ADMIN });
+
+    let gesendet: { methode: string; rumpf: unknown } | null = null;
+    await page.route(
+      "**/api/v1/devices/77/relay/watchdog-strategy",
+      (r: Route) => {
+        gesendet = {
+          methode: r.request().method(),
+          rumpf: r.request().postDataJSON(),
+        };
+        return json(r, {
+          device_id: 77,
+          strategie: "refresh",
+          timer_sekunden: 900,
+          hinweis:
+            "Umgestellt auf refresh. Der Timer wird alle 300 Sekunden " +
+            "nachgesetzt, mit 900 Sekunden Laufzeit.",
+        });
+      },
+    );
+
+    await page.goto("/devices/77");
+    await page.getByTestId("relay-strategie").click();
+
+    // **Die Meldung kommt aus dem Backend**, nicht aus der Karte. Die
+    // Zahlen darin stehen in den Settings; sie im Frontend zu
+    // wiederholen waere eine zweite Wahrheit.
+    await expect(page.getByTestId("relay-card")).toContainText(
+      "Umgestellt auf refresh",
+    );
+    expect(gesendet).not.toBeNull();
+    expect(gesendet!.methode).toBe("PATCH");
+    expect(gesendet!.rumpf).toEqual({ strategie: "refresh" });
+  });
+
+  test("von refresh aus schickt der Klick expire_and_resend", async ({
+    page,
+  }) => {
+    // **Die Gegenprobe zum Rumpf.** Eine Mutationsprobe am 17.11.2026
+    // hat gezeigt, dass sie fehlte: ein fest verdrahtetes
+    // `mutate("refresh")` blieb gruen, weil der Test darueber nur vom
+    // Zustand `expire_and_resend` aus klickte — dort ist „das andere
+    // Verfahren" zufaellig dasselbe wie „immer refresh".
+    await mock(page, { stand: STAND_REFRESH, nutzer: ADMIN });
+
+    let rumpf: unknown = null;
+    await page.route(
+      "**/api/v1/devices/77/relay/watchdog-strategy",
+      (r: Route) => {
+        rumpf = r.request().postDataJSON();
+        return json(r, {
+          device_id: 77,
+          strategie: "expire_and_resend",
+          timer_sekunden: 1800,
+          hinweis:
+            "Umgestellt auf expire_and_resend. Der Timer laeuft ab und " +
+            "wird danach neu gesetzt.",
+        });
+      },
+    );
+
+    await page.goto("/devices/77");
+    await page.getByTestId("relay-strategie").click();
+
+    await expect(page.getByTestId("relay-card")).toContainText(
+      "Umgestellt auf expire_and_resend",
+    );
+    expect(rumpf).toEqual({ strategie: "expire_and_resend" });
+  });
+
+  test("ohne Inbetriebnahme gibt es den Knopf nicht", async ({ page }) => {
+    // Vorher hat der Waechter nichts zu tun. Ein Knopf, der eine
+    // Strategie fuer einen Waechter umstellt, der nicht laeuft,
+    // verspricht eine Wirkung, die es nicht gibt.
+    await mock(page, { stand: STAND_NEU, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    await expect(page.getByTestId("relay-card")).toBeVisible();
+    await expect(page.getByTestId("relay-strategie")).toHaveCount(0);
+  });
+
   test("ein Mitarbeiter sieht keinen einzigen Handgriff", async ({ page }) => {
     await mock(page, { stand: STAND_GESPERRT, nutzer: MITARBEITER });
     await page.goto("/devices/77");
@@ -392,6 +525,7 @@ test.describe("Relais-Karte", () => {
     await expect(page.getByTestId("relay-commission")).toHaveCount(0);
     await expect(page.getByTestId("relay-decommission")).toHaveCount(0);
     await expect(page.getByTestId("relay-release")).toHaveCount(0);
+    await expect(page.getByTestId("relay-strategie")).toHaveCount(0);
   });
 
   test("der Provisionierungs-Hinweis behauptet kein Ergebnis", async ({
