@@ -1,7 +1,7 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Wächter, Timer, Paketverlust, Funk, montiert, Fühler
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Wächter, Timer, Paketverlust, Funk, montiert, Fühler, Verlauf, Heizdauer, Einschaltanteil, kWh, Energie, CSV
 rollen: alle
 stand: 2026-11-17
 route: /devices
@@ -251,6 +251,68 @@ für ein Relais, das seit einer Minute aus war.
 Die Kehrseite: der Hinweis „gemeldet" kommt jetzt nach rund **einer
 Stunde** statt nach sieben Minuten. Schneller lässt sich nicht
 unterscheiden, ob ein Relais schweigt oder nur noch nicht gefunkt hat.
+
+### Der Verlauf der Heizzone
+
+Auf der Seite eines Relais steht seit dem 17.11.2026 ein eigener
+Abschnitt: **wie lange hat das Panel geheizt, und ist der Raum dabei warm
+geworden?** Umschaltbar auf 24 Stunden, 7 Tage und 30 Tage.
+
+Oben vier Zahlen über den gewählten Zeitraum:
+
+| Zahl | Was sie sagt |
+|---|---|
+| **Heizdauer** | wie lange das Relais eingeschaltet war, in Stunden und Minuten |
+| **Einschaltanteil** | derselbe Wert in Prozent der Zeit, über die Meldungen vorliegen |
+| **Einschaltungen** | wie oft das Panel angelaufen ist — gemeldet, also einschließlich Knopf und Stromrückkehr |
+| **Energie** | Verbrauch in kWh aus dem Zähler im Relais |
+
+Darunter das Diagramm: **Balken** sind der Einschaltanteil je Stunde
+(linke Achse, Prozent), die **Linien** sind Ist und Soll (rechte Achse,
+Grad). Der Sollwert ist eine Treppe, weil er genau das ist — er gilt bis
+zur nächsten Änderung.
+
+**Dieses Nebeneinander ist der Zweck des Abschnitts.** Läuft das Panel
+nahe 100 Prozent und bleibt der Raum trotzdem unter dem Soll, ist es zu
+schwach — das ist die Zahl, an der die Frage nach einem zweiten Panel
+hängt. Bleibt der Anteil deutlich darunter, sagt das nichts über das
+Panel, sondern über die Steuerung: dann bremst sie, und die Frage ist
+noch nicht reif.
+
+Ganz unten **eine Zeile je Tag** mit Heizdauer, Anteil, Einschaltungen,
+kWh, Ist-Mittel samt Spanne und Soll. Der Tag ist der Kalendertag nach
+unserer Uhr, nicht nach der des Servers.
+
+**Was die Zahlen nicht sagen:**
+
+- Das Relais meldet **alle zehn Minuten**. Ein Wechsel wird frühestens
+  zehn Minuten später sichtbar; die Dauern stimmen im Mittel, die
+  Phasengrenzen liegen bis zu zehn Minuten daneben.
+- Eine Stunde **ohne jede Meldung** ist eine Lücke im Diagramm und keine
+  Null. Eine Null wäre eine Behauptung über ein Gerät, von dem nichts
+  angekommen ist — und sie würde den Anteil nach unten ziehen, also genau
+  in die Richtung, die eine Fehlentscheidung begründen würde.
+- Das **Ist** ist der Mittelwert der Fühler **dieser Zone**, nicht der des
+  ganzen Zimmers. In der Rezeption und in der Bar ist das je ein Vicki;
+  fällt er aus, steht ein Strich, und die Steuerung schaltet in dieser
+  Lage ohnehin ab.
+- Die Zahlen gelten für die **Zone**, nicht für ein Gerät. Hängen zwei
+  Panels in einem Raum, heizen sie gemeinsam, und zwei Prozentwerte
+  nebeneinander würden zum Addieren verleiten.
+
+**Steht dort „1 Zählerrücksprung — Verbrauch davor fehlt"**, hat der
+Zähler im Gerät neu angefangen: er läuft nach etwa 4,3 Millionen
+Kilowattstunden über, ein Werksbefehl setzt ihn auf null, und ein
+Gerätetausch beginnt bei null. Die kWh-Zahl ist dann **zu klein**, und
+zwar um den Verbrauch vor dem Rücksprung. Nachgezählt wird nichts — der
+Hinweis steht da, damit die zu kleine Zahl erklärbar ist. In diesem Haus
+ist das bisher nie vorgekommen; der Zähler hat am 17.11.2026 sogar den
+Stromstoß beim Neustart von 108 unverändert überlebt.
+
+**CSV (Stundenzeilen)** lädt den Zeitraum als Datei herunter — eine Zeile
+je Stunde, mit Ortszeit **und** UTC, Semikolon und Dezimalkomma. Excel
+öffnet sie ohne Nachfrage. Die Datei enthält die Stunden und nicht die
+Tage: Tage lassen sich daraus bilden, umgekehrt nicht.
 
 ## Bezeichnung ändern
 

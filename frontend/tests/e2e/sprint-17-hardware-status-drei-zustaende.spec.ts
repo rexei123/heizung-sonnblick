@@ -251,6 +251,13 @@ test.describe("Sprint 17 C9 / Sprint 20 — vier Montage-Zustände", () => {
     await page.route(/.*\/api\/v1\/devices\/\d+\/relay(\?.*)?$/, (route) =>
       route.fulfill({ status: 404, contentType: "application/json", body: "{}" }),
     );
+    // Seit dem 17.11.2026 holt die Geräteseite für ein Relais auch den
+    // Verlauf der Heizzone. Derselbe Grund wie eine Zeile höher: ohne
+    // Mock ginge die Anfrage über den Rewrite nach draußen, und der
+    // Rückhalt aus `fixtures.ts` lässt den Test zu Recht umfallen.
+    await page.route(/.*\/api\/v1\/devices\/\d+\/relay\/history.*/, (route) =>
+      route.fulfill({ status: 404, contentType: "application/json", body: "{}" }),
+    );
     await page.goto(`/devices/${DEVICE_ID}`);
 
     const badge = page.getByTestId("hardware-status").first();

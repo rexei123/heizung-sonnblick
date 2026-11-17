@@ -12242,6 +12242,19 @@ EIN), `docs/status/2026-11-15-relais-timer-nachsetzen.md`.
 
 ## 10bd. Einschaltdauer und Ist/Soll je Relais-Zone ansehen
 
+> **Seit dem 17.11.2026 stehen diese Zahlen auch in der Oberfläche**, auf
+> der Seite des Relais: Einschaltdauer, Einschaltanteil, Ist und Soll,
+> Energie, eine Zeile je Tag, CSV, Fenster 24 h / 7 Tage / 30 Tage.
+> **Für den Alltag ist das der Weg** — kein SSH, und die Tageszeilen sind
+> in Ortszeit gebündelt.
+>
+> Das Werkzeug unten bleibt, und es rechnet **nicht** anders: beide lesen
+> `services/relais_verlauf`, es gibt also nur eine Rechnung (§5.53). Es
+> hat zwei Dinge, die die Ansicht nicht hat — **alle** Relais-Zonen in
+> einem Durchlauf und die Auswertung „Stunden mit Heizwunsch" samt
+> Schluss-Tabelle unten. Für die Panel-Frage ist es weiter das richtige
+> Werkzeug.
+
 **Wofür.** Die Frage „hält ein Panel die 23 Grad in der Rezeption". Sie
 braucht zwei Zahlen **nebeneinander**: wie lange das Panel läuft, und wie
 weit das Ist unter dem Soll bleibt.
@@ -12292,7 +12305,9 @@ niedriger Anteil richtig.
 
 **Querverweise:** §10bc (Timer nachsetzen — die Änderung, deren Wirkung
 hier gemessen wird), §10au (`funkqualitaet`, dasselbe Muster),
-`docs/status/2026-11-15-relais-auswertung.md`.
+`docs/status/2026-11-15-relais-auswertung.md`,
+`docs/status/2026-11-17-relais-verlauf.md` (die Ansicht, und warum die
+Rechnung nur einmal existiert).
 
 
 ## 10be. Grenzen für die zwei Protokolle einrichten (Teil von C6, Mi 18.11.2026)
