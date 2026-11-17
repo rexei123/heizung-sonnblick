@@ -16,6 +16,7 @@ import { PaketverlustKarte } from "@/components/patterns/paketverlust-karte";
 import { Geraetetyp } from "@/components/patterns/geraetetyp";
 import { MeasureOnlyToggle } from "@/components/patterns/measure-only-toggle";
 import { RelayCard } from "@/components/patterns/relay-card";
+import { RelayHistory } from "@/components/patterns/relay-history";
 import { useAuth } from "@/contexts/auth-context";
 import { darfGeraeteVerwalten } from "@/lib/auth/rechte";
 import { useDevice, useSensorReadings, useUpdateDevice } from "@/lib/api/hooks";
@@ -198,8 +199,34 @@ export default function DeviceDetailPage() {
             </InfoCard>
           </section>
 
-          {/* Sieben Diagnose-Kacheln: 4 bestehende + 3 neue (D5) */}
+          {/* Sieben Diagnose-Kacheln: 4 bestehende + 3 neue (D5).
+
+              **Bei einem Relais bleibt davon eine** (Vorgabe des
+              Betreibers, 16.11.2026: „leere Kacheln beim Relais
+              ausblenden").
+
+              Der Grund ist nicht Platz, sondern dass die Kacheln dort
+              nichts sagen *und* so aussehen, als sagten sie etwas: Ist,
+              Soll, Ventil, Fenster und Backplate lesen `sensor_reading`
+              — ein 16ASPM schreibt in `relay_reading` und hat in dieser
+              Tabelle überhaupt keine Zeile. Die Kacheln standen also
+              dauerhaft auf „—", und ein Strich liest sich wie „gerade
+              kein Wert" und nicht wie „diese Frage gibt es hier nicht".
+              Batterie: das Relais hängt am Netz. Gerätegrenzen: eine
+              Vicki-Rücklesung (`0x15`). Override: ein Drehring, den ein
+              Relais nicht hat.
+
+              **Funk ist kein Verlust, sondern ein Umzug:** RSSI und SNR
+              des Relais stehen seit dem 16.11. in der Relais-Karte, aus
+              `relay_reading`. Dieselbe Kachel hier hätte aus der
+              falschen Tabelle gelesen — zwei Quellen für denselben
+              Empfang (§5.53).
+
+              Der Paketverlust bleibt: er zählt Lücken im Frame-Zähler
+              und gilt für beide Gerätearten. */}
           <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {device.kind !== "relay" && (
+            <>
             <KpiCard
               icon="thermostat"
               label="Temperatur"
@@ -255,6 +282,8 @@ export default function DeviceDetailPage() {
               tone="default"
               testId="kpi-ventilstellung"
             />
+            </>
+            )}
             {/* 02.11.2026: Verlust aus Luecken im Frame-Zaehler. Steht
                 im Kachel-Raster, weil es eine Zahl ist und kein
                 Bedienelement -- und direkt neben „Signal", weil beide
@@ -262,11 +291,15 @@ export default function DeviceDetailPage() {
                 Geraet ankommt, der Verlust sagt, wie viel ueberhaupt
                 ankommt. Fuer Relais und Vickis gleich. */}
             <PaketverlustKarte deviceId={device.id} />
+            {device.kind !== "relay" && (
+            <>
             <WindowBackplateCard reading={snapshot} />
             {/* Sprint 23 T1.5: was am Geraet steht — aus der Antwort auf
                 0x15, nicht aus dem, was wir gesendet haben. */}
             <GeraetegrenzenKarte device={device} />
             <OverrideCard override={device.active_override} />
+            </>
+            )}
           </section>
 
           {/* **Diese zwei Karten gehören nicht ins Kachel-Raster**
@@ -307,6 +340,25 @@ export default function DeviceDetailPage() {
               Stunden gesetzt wurde, ist die Antwort auf einen Knick. */}
           <DeviceAuditList deviceId={device.id} />
 
+          {/* **Zwei Verlaufs-Abschnitte, und nur einer passt je Geraet.**
+              (17.11.2026)
+
+              Das Diagramm darunter und die Einzelmessungen lesen
+              `sensor_reading`. Ein Relais schreibt dorthin nichts: der
+              Abschnitt hiesse „Verlauf der letzten 24 Stunden", waere
+              leer, und darunter stuende „Noch keine Messwerte fuer
+              dieses Geraet vorhanden" — eine Aussage ueber ein Geraet,
+              das alle zehn Minuten meldet, nur in eine andere Tabelle.
+
+              Fuer ein Relais steht hier deshalb der Relais-Verlauf:
+              Einschaltdauer, Ist und Soll der **Zone**, Energie, eine
+              Zeile je Tag, CSV. Zwei Abschnitte mit „Verlauf" in der
+              Ueberschrift auf einer Seite waeren ausserdem die Frage,
+              welcher der richtige ist. */}
+          {device.kind === "relay" ? (
+            <RelayHistory deviceId={device.id} />
+          ) : (
+            <>
           <section className="bg-surface rounded-lg border border-border p-6">
             <header className="flex items-center justify-between mb-4">
               <div>
@@ -373,6 +425,8 @@ export default function DeviceDetailPage() {
               </table>
             )}
           </section>
+            </>
+          )}
         </>
       ) : null}
     </div>

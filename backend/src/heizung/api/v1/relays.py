@@ -33,11 +33,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +50,8 @@ from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
 from heizung.models.relay_reading import RelayReading
 from heizung.models.user import User
-from heizung.services import downlink_adapter, provision_lauf, relay_service
+from heizung.rules.config_resolve import lade_zeitzone
+from heizung.services import downlink_adapter, provision_lauf, relais_verlauf, relay_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.child_lock import gast_sperren_je_geraet, soll_kindersicherung
 from heizung.tasks.relay_tasks import provisioniere_relais, zustand_veraltungs_fenster
@@ -759,4 +761,275 @@ def _inbetriebnahme_ergebnis(geraet: Device) -> InbetriebnahmeErgebnis:
         commissioned_at=geraet.commissioned_at.isoformat() if geraet.commissioned_at else None,
         power_return_verified=geraet.power_return_verified_at is not None,
         overheating_recovery_verified=geraet.overheating_recovery_verified_at is not None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Verlauf (17.11.2026)
+#
+# **Warum die Zahlen hier gerechnet werden und nicht im Diagramm.** Ein
+# Dreissig-Tage-Fenster sind bei zwei Relais rund 8600 Meldungen; die
+# Zusammenfassung in Stunden macht der Server, wie beim Zimmer-Verlauf
+# (``rooms/{id}/history``). Die Oberflaeche rechnet nichts nach — auch
+# nicht die Tageszeilen: der Kalendertag haengt an der **Ortszeit** des
+# Hotels, und die Umrechnung samt Sommerzeit steht dort, wo die Engine sie
+# auch macht (§5.65).
+# ---------------------------------------------------------------------------
+
+
+class VerlaufStunde(BaseModel):
+    """Eine Stunde. ``null`` heisst durchgehend „dazu wissen wir nichts"."""
+
+    t: datetime
+    #: Einschaltanteil in Prozent. ``null`` = keine Meldung in dieser
+    #: Stunde; eine 0 waere eine Aussage ueber ein stummes Geraet.
+    ein_prozent: int | None
+    #: Heizdauer in Minuten.
+    ein_minuten: int | None
+    #: Wie viel der Stunde ueberhaupt durch Meldungen belegt ist. Die
+    #: Zahl macht den Unterschied zwischen „60 Minuten zu 100 Prozent"
+    #: und „zehn Minuten zu 100 Prozent" sichtbar.
+    erfasste_minuten: int
+    einschaltungen: int
+    #: Verbrauch in Wh aus den positiven Spruengen des Geraetezaehlers.
+    energie_wh: int | None
+    ist_mittel: Decimal | None
+    ist_min: Decimal | None
+    ist_max: Decimal | None
+    soll: Decimal | None
+
+
+class VerlaufTag(BaseModel):
+    """Ein Ortszeit-Kalendertag, aus den Stunden desselben Tages."""
+
+    tag: date
+    ein_minuten: int
+    ein_prozent: int | None
+    erfasste_minuten: int
+    einschaltungen: int
+    energie_wh: int | None
+    ist_mittel: Decimal | None
+    ist_min: Decimal | None
+    ist_max: Decimal | None
+    soll_mittel: Decimal | None
+
+
+class RelaisVerlaufRead(BaseModel):
+    """Der Verlauf **einer Zone**, nicht eines Geraets.
+
+    Zwei Panels in einem Raum heizen gemeinsam; ein Einschaltanteil je
+    Geraet wuerde zu einer Summe verleiten, die 200 Prozent ergibt.
+    ``relais`` nennt deshalb die Etiketten aller Relais der Zone.
+    """
+
+    device_id: int
+    zone_id: int
+    zone_name: str
+    zimmer: str
+    relais: list[str]
+    range: Literal["24h", "7d", "30d"]
+    range_from: datetime
+    range_to: datetime
+    timezone: str
+    stunden: list[VerlaufStunde]
+    tage: list[VerlaufTag]
+    ein_minuten_gesamt: int
+    anteil_gesamt: int | None
+    einschaltungen_gesamt: int
+    energie_wh_gesamt: int | None
+    #: Ruecksprunge des Energiezaehlers im Fenster (Ueberlauf, ``0x26``,
+    #: Geraetetausch). **Nicht** vom Verbrauch abgezogen, sondern
+    #: gezaehlt — sonst waere eine zu kleine kWh-Zahl nicht erklaerbar.
+    #: In diesem Haus bisher immer 0 (gemessen am 17.11.2026).
+    ruecksprunge: int
+
+
+async def _verlauf_oder_422(
+    session: AsyncSession, device_id: int, bereich: relais_verlauf.Bereich
+) -> relais_verlauf.RelaisVerlauf:
+    geraet = await _relais_oder_404(session, device_id)
+    verlauf = await relais_verlauf.lade_relais_verlauf(
+        session,
+        geraet=geraet,
+        bereich=bereich,
+        tz_name=await lade_zeitzone(session),
+    )
+    if verlauf is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Gerät {benenne(geraet)} hängt in keiner Heizzone — "
+                "ohne Zone gibt es keinen Soll- und keinen Istwert."
+            ),
+        )
+    return verlauf
+
+
+@router.get(
+    "/devices/{device_id}/relay/history",
+    response_model=RelaisVerlaufRead,
+    summary="Verlauf eines Relais: Einschaltdauer, Ist/Soll, Energie",
+)
+async def lies_relais_verlauf(
+    device_id: int = DeviceIdPath,
+    bereich: Literal["24h", "7d", "30d"] = Query(default="24h", alias="range"),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> RelaisVerlaufRead:
+    """Stunden- und Tageszeilen der Zone, in der dieses Relais haengt.
+
+    **Die Eimer sind immer Stunden**, auch im 24-Stunden-Fenster. Das
+    Relais meldet alle zehn Minuten; ein Zehn-Minuten-Eimer waere also
+    ein Zustand und keine Dauer, und 144 davon sind keine Ansicht.
+
+    Die Rechnung ist dieselbe wie im Werkzeug
+    ``scripts/relais_auswertung`` — buchstaeblich dieselbe, beide lesen
+    ``services/relais_verlauf`` (§5.53).
+    """
+    v = await _verlauf_oder_422(session, device_id, bereich)
+    return RelaisVerlaufRead(
+        device_id=v.device_id,
+        zone_id=v.zone_id,
+        zone_name=v.zone_name,
+        zimmer=v.zimmer,
+        relais=v.relais,
+        range=v.bereich,
+        range_from=v.von,
+        range_to=v.bis,
+        timezone=v.timezone,
+        stunden=[
+            VerlaufStunde(
+                t=s.stunde,
+                ein_prozent=s.ein_prozent,
+                ein_minuten=s.ein_minuten,
+                erfasste_minuten=s.erfasste_minuten,
+                einschaltungen=s.einschaltungen,
+                energie_wh=s.energie_wh,
+                ist_mittel=s.ist_mittel,
+                ist_min=s.ist_min,
+                ist_max=s.ist_max,
+                soll=s.soll,
+            )
+            for s in v.stunden
+        ],
+        tage=[
+            VerlaufTag(
+                tag=t.tag,
+                ein_minuten=t.ein_minuten,
+                ein_prozent=t.ein_prozent,
+                erfasste_minuten=t.erfasste_minuten,
+                einschaltungen=t.einschaltungen,
+                energie_wh=t.energie_wh,
+                ist_mittel=t.ist_mittel,
+                ist_min=t.ist_min,
+                ist_max=t.ist_max,
+                soll_mittel=t.soll_mittel,
+            )
+            for t in v.tage
+        ],
+        ein_minuten_gesamt=v.ein_minuten_gesamt,
+        anteil_gesamt=v.anteil_gesamt,
+        einschaltungen_gesamt=v.einschaltungen_gesamt,
+        energie_wh_gesamt=v.energie_wh_gesamt,
+        ruecksprunge=v.ruecksprunge_gesamt,
+    )
+
+
+#: Trennzeichen und Dezimalkomma — fuer **Excel in deutscher
+#: Einstellung**, in dem diese Datei geoeffnet wird. Mit Punkt als
+#: Dezimaltrennung wird dort aus „20.5" Text und keine Zahl, mit der
+#: sich rechnen laesst.
+#:
+#: Die Seed-Liste im Repo (``Zimmerliste_seed.csv``) nutzt Komma und
+#: Punkt — sie wird von einem Programm gelesen und nicht von einem
+#: Menschen geoeffnet. Zwei Formen, zwei Leser.
+_CSV_TRENNER = ";"
+
+
+def _csv_zahl(wert: Decimal | int | None) -> str:
+    """Zahl mit Dezimalkomma, ``None`` als leere Zelle.
+
+    Leer und nicht 0: eine Stunde ohne Meldung ist in der Tabelle
+    dasselbe Nichts wie in der Ansicht.
+    """
+    if wert is None:
+        return ""
+    return str(wert).replace(".", ",")
+
+
+@router.get(
+    "/devices/{device_id}/relay/history.csv",
+    summary="Verlauf eines Relais als CSV (Stundenzeilen)",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}, "description": "CSV mit Stundenzeilen"}},
+)
+async def lies_relais_verlauf_csv(
+    device_id: int = DeviceIdPath,
+    bereich: Literal["24h", "7d", "30d"] = Query(default="24h", alias="range"),  # noqa: B008
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> Response:
+    """Dieselben Zahlen als Datei zum Weitergeben.
+
+    **Die Stundenzeilen und nicht die Tageszeilen.** Die Tage stehen auf
+    dem Bildschirm und lassen sich aus den Stunden bilden; umgekehrt
+    nicht. Wer die Datei bekommt, soll nachsehen koennen, *wann* das
+    Panel lief.
+
+    Die Zeitstempel stehen in **Ortszeit** und tragen sie als eigene
+    Spalte — eine Uhrzeit ohne ihre Zone neben einer anderen ist die
+    Falle aus §5.79. Die UTC-Zeit steht daneben, weil genau deren Fehlen
+    am 16./17.11. zweimal eine falsche Meldung erzeugt hat (§5.92).
+    """
+    v = await _verlauf_oder_422(session, device_id, bereich)
+    tz = ZoneInfo(v.timezone)
+
+    kopf = [
+        "Stunde (Ortszeit)",
+        "Zeitzone",
+        "Stunde (UTC)",
+        "ein %",
+        "Heizdauer min",
+        "erfasste min",
+        "Einschaltungen",
+        "Energie Wh",
+        "Ist Mittel",
+        "Ist min",
+        "Ist max",
+        "Soll",
+    ]
+    zeilen = [_CSV_TRENNER.join(kopf)]
+    for s in v.stunden:
+        lokal = s.stunde.astimezone(tz)
+        zeilen.append(
+            _CSV_TRENNER.join(
+                [
+                    lokal.strftime("%Y-%m-%d %H:%M"),
+                    v.timezone,
+                    s.stunde.strftime("%Y-%m-%d %H:%M"),
+                    _csv_zahl(s.ein_prozent),
+                    _csv_zahl(s.ein_minuten),
+                    _csv_zahl(s.erfasste_minuten),
+                    _csv_zahl(s.einschaltungen),
+                    _csv_zahl(s.energie_wh),
+                    _csv_zahl(s.ist_mittel),
+                    _csv_zahl(s.ist_min),
+                    _csv_zahl(s.ist_max),
+                    _csv_zahl(s.soll),
+                ]
+            )
+        )
+
+    # CRLF und ein BOM: diese Datei wird in Excel geoeffnet, und ohne BOM
+    # liest Excel sie als Windows-1252 — aus einem Zonennamen mit Umlaut
+    # wird dann Kauderwelsch.
+    inhalt = "﻿" + "\r\n".join(zeilen) + "\r\n"
+    name = f"relais-{v.zimmer or v.zone_id}-{v.bereich}.csv".replace(" ", "_")
+    return Response(
+        content=inhalt.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        # ``attachment``: der Browser laedt die Datei herunter statt sie
+        # anzuzeigen. Der Name traegt Zimmer und Fenster, damit drei
+        # Abrufe nicht dreimal ``history.csv`` heissen.
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )

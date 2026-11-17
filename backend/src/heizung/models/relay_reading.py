@@ -25,10 +25,14 @@ Meldung. Er
 
 Wer ihn wie eine Temperatur differenziert, bekommt bei jedem dieser drei
 Ereignisse einen **negativen** Verbrauch. Ein Verbrauch über eine Spanne
-ist deshalb nur mit ausdrücklicher Behandlung des Rücksprungs zu bilden —
-und Energiereports sind in Sprint 24 ausdrücklich nicht im Umfang. Die
-Spalte wird gespeichert, damit sie später vorhanden ist, und sonst nicht
-gelesen.
+ist deshalb nur mit ausdrücklicher Behandlung des Rücksprungs zu bilden.
+
+**Seit dem 17.11.2026 wird die Spalte gelesen** — vom Relais-Verlauf
+(``services/relais_verlauf``), und genau mit dieser Behandlung: summiert
+werden die **positiven** Sprünge, ein negativer wird gezählt und in der
+Antwort ausgewiesen (``ruecksprunge``) statt stillschweigend den
+Verbrauch zu verkleinern. Hier stand bis dahin „Energiereports sind in
+Sprint 24 nicht im Umfang"; der Satz war richtig und ist es nicht mehr.
 
 **Die Einheit der Gehäusetemperatur ist nicht belegt.** Der
 Hersteller-Dekoder liest ein Byte und nennt keine Einheit; die Doku
