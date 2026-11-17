@@ -117,6 +117,12 @@ export function KpiCard({
     // mit drei, nicht in der Mitte des freien Platzes schweben.
     <div
       data-testid="kpi-card"
+      /* **Der Ton als Attribut, nicht nur als Klasse** (16.11.2026).
+         Die Ok-Regeln des Betreibers sind pruefbar, und zwar hier: ein
+         e2e-Test, der Tailwind-Klassen liest, prueft die Umsetzung des
+         Tons; einer, der `data-tone` liest, prueft die **Entscheidung**.
+         Die Entscheidung ist das, was der Betreiber vorgegeben hat. */
+      data-tone={tone}
       className="flex h-full items-start gap-3 rounded-lg border border-border bg-surface p-4 shadow-sm"
     >
       <span

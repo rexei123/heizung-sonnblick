@@ -90,15 +90,24 @@ export function PaketverlustKarte({ deviceId }: { deviceId: number }) {
           className={`text-base font-medium ${ton(anteil)}`}
           data-testid="paketverlust-anteil"
         >
-          {abfrage.isLoading ? "…" : anteil === null ? "—" : `${anteil.toFixed(1)} %`}
+          {/* **„zu wenige Meldungen" statt „—"** (Vorgabe des Betreibers,
+              16.11.2026). Ein Strich liest sich als „kaputt" oder „nicht
+              geladen"; hier ist aber alles in Ordnung — es liegen nur zu
+              wenige Frames im Fenster, um eine Lücke sehen zu können.
+              Der Unterschied zu 0 % stand schon in der Zusatzzeile; er
+              gehört an die Stelle, die man zuerst liest. */}
+          {abfrage.isLoading
+            ? "…"
+            : anteil === null
+              ? "zu wenige Meldungen"
+              : `${anteil.toFixed(1)} %`}
         </p>
 
         {zahlenDa && v !== undefined && (
           <p className="text-text-tertiary text-xs mt-1" data-testid="paketverlust-hinweis">
             {anteil === null ? (
               <>
-                Unter zwei Frames in {v.stunden} h — noch keine Lücke zu sehen.
-                Das ist nicht 0 %.
+                Unter zwei Frames in {v.stunden} h. Das ist nicht 0 %.
               </>
             ) : (
               <>

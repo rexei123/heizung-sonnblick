@@ -37,7 +37,7 @@ import {
   provisioniereRelais,
   type RelaisStand,
 } from "@/lib/api/relays";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatRssi, formatSnr, formatTime } from "@/lib/format";
 
 /** Warum ein Relais nicht schalten darf — in der Reihenfolge, in der es zählt. */
 function sperrgrund(stand: RelaisStand): string | null {
@@ -249,14 +249,28 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
       </div>
 
       <div className="mt-3 border-t border-border pt-2">
+        {/* **Drei Zustaende, nicht zwei** (Vorgabe des Betreibers,
+            16.11.2026). „ein" und „aus" sagen etwas ueber jetzt; eine
+            Meldung von vor vierzehn Stunden sagt nichts, steht aber
+            genauso da. Genau diese Lage bestand am 12./13.11. vierzehn
+            Stunden lang.
+
+            Ab 25 Minuten Stille heisst es deshalb „unbekannt" **mit der
+            Uhrzeit der letzten Meldung** — die Uhrzeit ist der Teil, der
+            handeln laesst: man sieht, ob es Minuten oder Stunden sind.
+
+            Die Schwelle kommt aus dem Backend (`zustand_veraltet`), nicht
+            aus einer Rechnung hier. */}
         <Zeile
           bezeichnung="Zustand"
           wert={
             data.relay_on === null
               ? "unbekannt — keine Meldung"
-              : data.relay_on
-                ? "ein"
-                : "aus"
+              : data.zustand_veraltet
+                ? `unbekannt — letzte Meldung ${formatTime(data.reading_time)}`
+                : data.relay_on
+                  ? "ein"
+                  : "aus"
           }
         />
         <Zeile
@@ -267,6 +281,29 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
           bezeichnung="Energiezähler (roh)"
           wert={
             data.energy_wh === null ? "keine Meldung" : `${data.energy_wh} Wh`
+          }
+        />
+        {/* **Funk, seit dem 16.11.2026.** Für ein Thermostat zeigt die
+            Geräteseite Empfang seit Sprint 20e; für ein Relais stand er
+            nirgends — `relay_reading` hatte die Spalten nicht.
+
+            Der Anlass: an diesem Tag hat ADR das Relais 108 auf DR5
+            hochgezogen, und die Frage "ist der Link zu schwach oder
+            kollidieren die Pakete" war nicht beantwortbar. Über 48
+            Stunden verloren beide Relais rund 6 Prozent; in sechs
+            Stunden verlor 108 ein Viertel und 109 nichts. Ohne RSSI und
+            SNR ist nicht zu unterscheiden, ob das Reichweite war.
+
+            "keine Meldung" und nicht "–": die Zeile steht neben
+            Leistung und Zustand, die dasselbe Wort benutzen. Zwei Wörter
+            für denselben Zustand in derselben Spalte wären eine
+            Unterscheidung, die es nicht gibt. */}
+        <Zeile
+          bezeichnung="Funk (Empfang)"
+          wert={
+            data.rssi_dbm === null && data.snr_db === null
+              ? "keine Meldung"
+              : `${formatRssi(data.rssi_dbm)} · ${formatSnr(data.snr_db)}`
           }
         />
         <Zeile
@@ -304,10 +341,19 @@ export function RelayCard({ deviceId }: { deviceId: number }) {
             wert={unbestaetigt(data.offener_befehl)}
           />
         )}
-        <Zeile
-          bezeichnung="Firmware"
-          wert={data.firmware_version ?? "unbekannt"}
-        />
+        {/* **Firmware steht hier nicht mehr** (Vorgabe des Betreibers,
+            16.11.2026: „Firmware aus einer Quelle").
+
+            Sie stand zweimal auf derselben Seite: hier und oben in den
+            Gerätedaten. Beide lesen dieselbe Spalte `device.firmware_version`
+            — es war also keine zweite Wahrheit in den Daten, aber eine in
+            der Anzeige: zwei Abfragen mit eigenen Aktualisierungszeiten,
+            und nach einem Firmware-Bericht stand eine Weile links der neue
+            und rechts der alte Wert. Wer zwei Zahlen sieht, sucht den
+            Unterschied.
+
+            Die Zeile oben bleibt, weil sie für **alle** Gerätearten gilt;
+            diese galt nur für Relais. */}
         <Zeile
           bezeichnung="Letzter Kontakt"
           wert={

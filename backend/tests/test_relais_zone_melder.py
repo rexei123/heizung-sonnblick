@@ -837,7 +837,8 @@ def test_der_betreff_nennt_die_geraeteart() -> None:
     assert "Relais" in nur_relais
 
     beide = relais_zone_melder.betreff_alarm(_beurteile(alter_min=40, relais_alter_min=40))
-    assert "Fuehler und Relais" in beide
+    # Seit dem 16.11.2026 mit Umlaut: die Mail liest ein Mensch.
+    assert "Fühler und Relais" in beide
 
 
 def test_der_text_zum_stummen_relais_behauptet_nicht_die_zone_sei_kalt() -> None:

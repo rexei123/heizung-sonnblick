@@ -21,6 +21,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path as FsPath
 from typing import Any
 from unittest.mock import MagicMock
@@ -46,9 +47,11 @@ from heizung.models.business_audit import BusinessAudit
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind, DeviceVendor, HeatingZoneKind, UserRole
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.relay_reading import RelayReading
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.user import User
+from heizung.tasks.relay_tasks import zustand_veraltungs_fenster
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SKIP_REASON = "DATABASE_URL nicht gesetzt - API-Tests brauchen Test-DB"
@@ -694,6 +697,237 @@ async def test_die_geraeteseite_sieht_den_laufenden_auftrag(
 
     assert antwort.status_code == 200, antwort.text
     assert antwort.json()["provisionierung_laeuft"] is True
+
+
+# ---------------------------------------------------------------------------
+# Empfangsdaten auf der Geraeteseite (16.11.2026, Migration 0041)
+# ---------------------------------------------------------------------------
+
+
+async def test_die_geraeteseite_zeigt_die_juengsten_empfangsdaten(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: AsyncEngine,
+) -> None:
+    """RSSI und SNR kommen aus der **jüngsten** Zeile, nicht aus irgendeiner.
+
+    **Der Anlass.** Am 16.11.2026 hat ADR das Relais 108 auf DR5
+    hochgezogen, und die Frage „ist der Link zu schwach oder kollidieren
+    die Pakete" war nicht beantwortbar: fuer Relais standen die zwei
+    Zahlen nirgends. Fuer ein Thermostat zeigt die Geraeteseite sie seit
+    Sprint 20e.
+
+    **Warum zwei Zeilen und nicht eine.** Eine aeltere Zeile mit besserem
+    Empfang zu zeigen waere die freundlichere und die falsche Antwort —
+    dieselbe Regel, die hier schon fuer Leistung und Zustand gilt. Mit nur
+    einer Zeile im Test waere „nimmt die jüngste" nicht von „nimmt die
+    erste, die kommt" zu unterscheiden.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    basis = datetime.now(tz=UTC) - timedelta(minutes=20)
+    async with maker() as session:
+        session.add(
+            RelayReading(
+                time=basis,
+                device_id=aufbau.relais_id,
+                fcnt=9200,
+                relay_on=True,
+                rssi_dbm=-90,
+                snr_db=Decimal("9.0"),
+            )
+        )
+        session.add(
+            RelayReading(
+                time=basis + timedelta(minutes=10),
+                device_id=aufbau.relais_id,
+                fcnt=9201,
+                relay_on=True,
+                rssi_dbm=-115,
+                snr_db=Decimal("-6.0"),
+            )
+        )
+        await session.commit()
+
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+
+    assert antwort.status_code == 200, antwort.text
+    koerper = antwort.json()
+    assert koerper["rssi_dbm"] == -115, "die aeltere, bessere Zeile darf nicht gewinnen"
+    assert Decimal(str(koerper["snr_db"])) == Decimal("-6.0")
+
+
+async def test_ohne_meldung_sind_die_empfangsdaten_leer_und_nicht_null(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    """``null`` heisst „sagt nichts darueber", nicht „kein Empfang".
+
+    Eine 0 waere eine Behauptung ueber einen Funk, den wir nicht gemessen
+    haben — und die Oberflaeche koennte „genau 0 dB" nicht mehr von
+    „keine Meldung" unterscheiden.
+    """
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.status_code == 200, antwort.text
+    koerper = antwort.json()
+    assert koerper["rssi_dbm"] is None
+    assert koerper["snr_db"] is None
+
+
+# ---------------------------------------------------------------------------
+# Ein zu alter Zustand gilt als unbekannt (16.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_eine_alte_meldung_gilt_als_veraltet(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+    setup_engine: AsyncEngine,
+) -> None:
+    """**Die Schwelle wird hier gerechnet, nicht in der Oberflaeche.**
+
+    Eine Mutationsprobe hat gezeigt, dass dafuer kein Test existierte: der
+    e2e-Test der Karte **setzt** ``zustand_veraltet`` im Mock, prueft also
+    die Anzeige des Urteils und nicht das Urteil. ``zustand_veraltet=False``
+    fest zu verdrahten waere gruen geblieben — und auf der Karte stuende
+    dann wieder ein vierzehn Stunden alter Zustand als „ein".
+
+    Die Schwelle kommt aus ``zustand_veraltungs_fenster()``: Vorgabe 25
+    Minuten. Der Test rechnet sie **nicht nach**, sondern setzt die Meldung
+    deutlich davor und deutlich danach — sonst stuende die Zahl an zwei
+    Stellen (§5.73).
+    """
+    fenster = zustand_veraltungs_fenster()
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+
+    async with maker() as session:
+        session.add(
+            RelayReading(
+                time=datetime.now(tz=UTC) - fenster * 3,
+                device_id=aufbau.relais_id,
+                fcnt=9300,
+                relay_on=True,
+            )
+        )
+        await session.commit()
+
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.status_code == 200, antwort.text
+    assert antwort.json()["zustand_veraltet"] is True, (
+        "eine Meldung vom dreifachen Fenster ist veraltet"
+    )
+
+    # Und die Gegenprobe: eine frische Meldung ist es nicht. Ohne sie
+    # koennte das Feld dauerhaft True sein und der Test darueber waere
+    # trotzdem gruen.
+    async with maker() as session:
+        session.add(
+            RelayReading(
+                time=datetime.now(tz=UTC),
+                device_id=aufbau.relais_id,
+                fcnt=9301,
+                relay_on=True,
+            )
+        )
+        await session.commit()
+
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.json()["zustand_veraltet"] is False
+
+
+async def test_ohne_jede_meldung_ist_der_zustand_nicht_veraltet(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    """Keine Meldung ist **nicht** „veraltet", sondern „keine Meldung".
+
+    Dann gibt es nichts, was alt sein koennte. Die Karte sagt
+    entsprechend „unbekannt — keine Meldung" und nennt keine Uhrzeit, die
+    es nicht gibt.
+    """
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.relais_id}/relay")
+    assert antwort.status_code == 200, antwort.text
+    koerper = antwort.json()
+    assert koerper["reading_time"] is None
+    assert koerper["zustand_veraltet"] is False
+
+
+# ---------------------------------------------------------------------------
+# Fehlermeldungen nennen Etikett und Art, nicht die Id (16.11.2026)
+# ---------------------------------------------------------------------------
+
+
+def test_benenne_nennt_etikett_und_art() -> None:
+    """**Vorgabe des Betreibers: nie die ``device_id``.**
+
+    Der Grund ist nicht Geschmack, sondern eine Verwechslung, die hier
+    mehrfach Zeit gekostet hat: Geraet **109** traegt das Etikett **„108"**
+    und Geraet **110** das Etikett **„109 Panel"**. Eine Meldung
+    ``device_id=109 ist kein Relais`` liest sich wie eine Aussage ueber das
+    Panel 109 und ist eine ueber ein anderes Geraet.
+    """
+    geraet = Device(
+        dev_eui="70b3d52ddd001f23",
+        kind=DeviceKind.THERMOSTAT,
+        vendor=DeviceVendor.MCLIMATE,
+        model="vicki",
+        label="108",
+    )
+    assert relays_api.benenne(geraet) == "„108“ (Thermostat)"
+
+
+def test_benenne_faellt_auf_die_dev_eui_zurueck_und_nie_auf_die_id() -> None:
+    """Ohne Etikett bleibt die DevEUI — sie steht auf dem Geraet.
+
+    Die Id steht nirgends, wo jemand nachsehen koennte. Ein Geraet ohne
+    Etikett ist in der Montage normal; eine Meldung mit seiner Id waere
+    dort am wenigsten hilfreich.
+    """
+    geraet = Device(
+        dev_eui="70b3d52ddd001e69",
+        kind=DeviceKind.RELAY,
+        vendor=DeviceVendor.MCLIMATE,
+        model="16ASPM",
+        label=None,
+    )
+    assert relays_api.benenne(geraet) == "„70b3d52ddd001e69“ (Relais)"
+
+
+async def test_ein_thermostat_am_relais_weg_wird_mit_etikett_abgewiesen(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    """Die Meldung nennt Etikett und Art — und **nicht** die Id.
+
+    Geprueft wird beides: dass der Name drinsteht und dass die
+    Zeichenfolge ``device_id`` **nicht** mehr vorkommt. Nur auf den Namen
+    zu pruefen waere gruen geblieben, wenn die Id daneben stehen bliebe.
+    """
+    antwort = await admin_client.get(f"/api/v1/devices/{aufbau.thermostat_id}/relay")
+
+    assert antwort.status_code == 422, antwort.text
+    detail = antwort.json()["detail"]
+    assert "Thermostat" in detail, detail
+    assert "ist kein Relais" in detail, detail
+    assert "device_id" not in detail, detail
+    assert str(aufbau.thermostat_id) not in detail, detail
+
+
+async def test_ein_geraet_das_es_nicht_gibt_nennt_die_nummer_als_nummer(
+    admin_client: httpx.AsyncClient,
+    aufbau: Aufbau,
+) -> None:
+    """Hier **muss** die Nummer stehen: ohne Geraet gibt es kein Etikett.
+
+    „Nummer" statt ``device_id``, damit niemand sie fuer eine Hausnummer
+    haelt — genau die Verwechslung, gegen die der Rest dieser Aenderung
+    gebaut ist.
+    """
+    antwort = await admin_client.get("/api/v1/devices/987654/relay")
+
+    assert antwort.status_code == 404, antwort.text
+    detail = antwort.json()["detail"]
+    assert "987654" in detail, detail
+    assert "device_id" not in detail, detail
 
 
 # ---------------------------------------------------------------------------

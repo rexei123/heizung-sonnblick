@@ -3923,6 +3923,56 @@ Anspruch, kein Befund — der Befund brauchte `docker info`.
 **Querverweise:** §5.51 (ein Feld, zwei Bedeutungen), §5.68 (Anspruch
 gegen Befund), RUNBOOK §10bg (das Nachzieh-Ritual, in dem der Hinweis als
 Warnkasten steht), `docs/status/2026-11-16-image-digests.md`.
+### 5.92 Ein Protokoll in UTC neben einer Uhr in Ortszeit (16.11.2026)
+
+Am 16.11.2026 habe ich dem Betreiber gemeldet, der Regler stehe seit
+einer Stunde. Die Begruendung sah zwingend aus:
+
+```
+Serverzeit: 2026-11-16 08:52:01 CET
+letzte Worker-Zeile: [2026-11-16 07:52:00] Task ... received
+```
+
+Eine Aufgabe angenommen, keine Abschlusszeile, eine Stunde Stille. Ich
+habe daraufhin nach Sperren, OOM-Kills und Warteschlangen gesucht --
+alles leer -- und das Ganze als dringend eskaliert.
+
+**Es war nichts.** Die Container protokollieren in **UTC**, die Shell
+antwortet in **CET**. „07:52" war 08:52 Ortszeit, also eine Minute vor
+meinem Blick. Der Beweis lag die ganze Zeit daneben: juengste
+``event_log``-Zeile 08:53:23, **1078 Zeilen in fuenf Minuten**.
+
+**Zum zweiten Mal in zwei Tagen.** Am 15.11. hatte dieselbe
+Verwechslung mich eine Downlink-Verzoegerung vermuten lassen, die es
+nicht gab -- Class C liefert in einer Sekunde. Beim zweiten Mal war der
+Schaden groesser, weil ich die Fehldiagnose nicht nur gedacht, sondern
+als dringenden Befund gemeldet habe.
+
+**Die Regel, und sie ist mechanisch:** Ein Zeitstempel aus
+``docker logs`` wird **nie** mit einer Wallclock-Erwartung verglichen.
+Entweder beide Zeiten in einem Befehl holen und umrechnen, oder -- besser
+-- die Frage an die Datenbank stellen, wo ``AT TIME ZONE
+'Europe/Vienna'`` die Zone erzwingt:
+
+```sql
+SELECT max(time) AT TIME ZONE 'Europe/Vienna' FROM event_log;
+```
+
+**Und die Gegenprobe vor der Meldung:** „Laeuft der Dienst?" wird an
+**Daten** gemessen, nicht an Protokollzeilen. Eine fehlende Logzeile hat
+viele harmlose Ursachen (Zone, Puffer, Loglevel, Rotation); eine fehlende
+``event_log``-Zeile hat keine. Wer eine Stoerung melden will, holt
+vorher den Zaehler.
+
+**Das Muster dahinter** ist §5.68 mit einem Zeitstempel: zwei Zahlen
+nebeneinanderzulegen ist noch kein Befund, solange nicht geprueft ist,
+ob sie dieselbe Einheit haben. Und es ist §5.79 von der anderen Seite --
+diesmal war nicht der Melder unglaubwuerdig, sondern der Leser.
+
+**Querverweise:** §5.65 (dieselbe Verwechslung im Code, nicht in der
+Diagnose), §5.68 (Anspruch gegen Befund), §5.79 (ein Melder, dem niemand
+glaubt), RUNBOOK §10bd (``relais_auswertung`` rechnet deshalb in
+Ortszeit und sagt es in der Kopfzeile).
 
 ---
 

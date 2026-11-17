@@ -49,8 +49,32 @@ def test_nur_kinderzimmer_und_bad_ergibt_keine_referenz() -> None:
     assert waehle_referenzzone([(41, "Kinderzimmer"), (42, "Bad")]) is None
 
 
-def test_zimmer_ohne_schlafzimmer_ergibt_keine_referenz() -> None:
-    assert waehle_referenzzone([(51, "Bad")]) is None
+def test_eine_einzige_zone_vertritt_sich_selbst() -> None:
+    """**Umgedreht am 16.11.2026.** Hier stand das Gegenteil.
+
+    Der Test lautete: ``[(51, "Bad")]`` ergibt ``None``. Richtig, solange
+    die Regel nur fuer Gastzimmer gedacht war — und falsch fuer die
+    Allgemeinbereiche. In der Zimmerliste stand bei **Bar** und
+    **Rezeption** kein Ist und kein Soll, nur Striche: die Zonen heissen
+    „Barbereich" und „Eingang", und die Regel sucht ein „Schlafzimmer".
+
+    Bei **genau einer** Zone gibt es nichts zu entscheiden. „Keine
+    Referenz" war dort kein fehlendes Merkmal, sondern eine Regel am
+    falschen Ort.
+    """
+    assert waehle_referenzzone([(51, "Bad")]) == 51
+    assert waehle_referenzzone([(302, "Barbereich")]) == 302
+    assert waehle_referenzzone([(299, "Eingang")]) == 299
+
+
+def test_mehrere_zonen_ohne_namenstreffer_bleiben_ohne_referenz() -> None:
+    """Die Grenze des Rueckfalls, und sie ist Absicht.
+
+    Zwei Zonen ohne Namenstreffer: jede Wahl waere geraten, und ein
+    geratener Ist-Wert in der Uebersicht ist schlechter als ein Strich
+    (§0 S6). Der Rueckfall greift **nur** bei genau einer Zone.
+    """
+    assert waehle_referenzzone([(51, "Bad"), (52, "Flur")]) is None
 
 
 def test_zimmer_ohne_zonen_ergibt_keine_referenz() -> None:
@@ -58,10 +82,18 @@ def test_zimmer_ohne_zonen_ergibt_keine_referenz() -> None:
 
 
 def test_namen_sind_exakt_und_nicht_als_praefix_gemeint() -> None:
-    # „Schlafzimmer Nord" ist kein Treffer. Begruendung: ein
-    # Praefix-Vergleich wuerde auch ``Schlafzimmer R`` greifen lassen, und
-    # damit haenge die Auswahl an der Reihenfolge der Zeilen.
-    assert waehle_referenzzone([(61, "Schlafzimmer Nord")]) is None
+    """„Schlafzimmer Nord" ist kein Treffer.
+
+    Begruendung: ein Praefix-Vergleich wuerde auch ``Schlafzimmer R``
+    greifen lassen, und damit haenge die Auswahl an der Reihenfolge der
+    Zeilen.
+
+    **Zwei Zonen, nicht eine** — seit dem 16.11.2026 noetig: mit nur einer
+    Zone greift der Rueckfall „eine Zone vertritt sich selbst", und der
+    Test wuerde dann die Praefix-Frage gar nicht mehr stellen. Er waere
+    gruen und wertlos (§5.55).
+    """
+    assert waehle_referenzzone([(61, "Schlafzimmer Nord"), (62, "Bad")]) is None
 
 
 def test_gleicher_name_zweimal_waehlt_deterministisch_die_kleinere_id() -> None:
