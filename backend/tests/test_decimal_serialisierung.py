@@ -35,12 +35,15 @@ unterblieben.
 
 from __future__ import annotations
 
+import inspect
 import typing
 from decimal import Decimal
 
 import pytest
 from pydantic import BaseModel
 
+from heizung.api.v1 import relays as relais_modul
+from heizung.api.v1.relays import RelaisStand, VerlaufStunde, VerlaufTag
 from heizung.schemas.dashboard import DashboardKpiRead
 from heizung.schemas.device import (
     DeviceActiveOverrideRead,
@@ -60,6 +63,11 @@ MODELLE: list[type[BaseModel]] = [
     SensorReadingRead,
     DashboardKpiRead,
     PaketverlustAntwort,
+    # Die Relais-API, nachgetragen am 18.11.2026 (siehe
+    # ``test_jedes_decimal_modell_der_relais_api_ist_eingetragen``).
+    RelaisStand,
+    VerlaufStunde,
+    VerlaufTag,
 ]
 
 
@@ -88,6 +96,57 @@ def test_mindestens_ein_decimal_feld_wird_gefunden() -> None:
     assert gefunden["DeviceRead"], gefunden
     assert "valve_delta_k" in gefunden["DeviceRead"], (
         "Das Feld aus dem Vorfall vom 07.10. muss von der Pruefung erfasst sein."
+    )
+
+
+def _modelle_des_moduls(modul: object) -> list[type[BaseModel]]:
+    """Alle im Modul **definierten** Modelle mit ``Decimal``-Feldern.
+
+    ``__module__`` filtert die importierten mit heraus — sonst zaehlte
+    jedes ``from heizung.schemas...`` am Dateikopf mit, und der Test
+    verlangte Eintraege fuer Modelle, die ganz anderswo leben.
+    """
+    return [
+        obj
+        for obj in vars(modul).values()
+        if inspect.isclass(obj)
+        and issubclass(obj, BaseModel)
+        and obj is not BaseModel
+        and obj.__module__ == getattr(modul, "__name__", "")
+        and _decimal_felder(obj)
+    ]
+
+
+def test_jedes_decimal_modell_der_relais_api_ist_eingetragen() -> None:
+    """**Die Falle eine Ebene hoeher, und sie hat zugeschnappt.**
+
+    Der Wachposten unten prueft die Felder der Modelle in ``MODELLE`` —
+    ueber die Annotationen, damit ein neues Feld nicht vergessen werden
+    kann. Die **Modell-Liste selbst** war handgepflegt, und genau das ist
+    am 16.11.2026 passiert: ``RelaisStand.snr_db`` kam dazu, der Eintrag
+    hier nicht. Zwei Tage spaeter meldeten die Relais ihren ersten echten
+    SNR, und die Relais-Karte war weg (§5.93).
+
+    Dieser Test schliesst die Luecke fuer die **Relais-API**: er liest die
+    Modelle aus dem Modul und verlangt, dass jedes mit ``Decimal``-Feldern
+    in ``MODELLE`` steht. Ein viertes Modell mit einer Temperatur darin
+    macht ihn rot, bevor es die Oberflaeche erreicht.
+
+    **Warum nur dieses Modul und nicht die ganze App.** Gemessen am
+    18.11.2026 schicken sechs weitere Antwort-Modelle ihre ``Decimal``-
+    Felder als String hinaus (``EventLogRead``, ``ManualOverrideResponse``,
+    ``RoomTypeRead``, ``SollwertUebernahme``, ``WirksamkeitFeld``,
+    ``RuleConfigGlobalRead``) — ihre Leser im Frontend kommen damit
+    offenbar zurecht, aber keiner von ihnen ist geprueft. Sie
+    umzustellen heisst, sechs Spiegel nachzulesen; das ist ein eigener
+    PR und steht auf der Liste. Ein Test, der sie heute mitzieht, waere
+    rot ohne einen Fehler zu zeigen.
+    """
+    fehlend = sorted(m.__name__ for m in _modelle_des_moduls(relais_modul) if m not in MODELLE)
+    assert not fehlend, (
+        f"Modelle der Relais-API mit Decimal-Feldern, die nicht in MODELLE "
+        f"stehen: {fehlend}. Eintragen — sonst geht das Feld als JSON-String "
+        f"hinaus und der Zod-Spiegel im Frontend wirft."
     )
 
 

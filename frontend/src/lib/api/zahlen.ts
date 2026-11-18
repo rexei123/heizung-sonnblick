@@ -35,6 +35,8 @@
  * ein eigener Schnitt (Backlog), kein Hotfix.
  */
 
+import { z } from "zod";
+
 /**
  * Macht aus einem Zahlenfeld der API zuverlässig `number | null`.
  *
@@ -60,6 +62,30 @@ export function zahlOderNull(wert: unknown): number | null {
   }
   return null;
 }
+
+/**
+ * Ein `Decimal` der API als Zod-Feld: `number | string | null` hinein,
+ * `number | null` heraus.
+ *
+ * **Warum das kein zu laxer Spiegel ist.** Pydantic schreibt ein `Decimal`
+ * als JSON-**String**, solange das Feld nicht im `field_serializer` des
+ * Modells steht. Ob ein Feld dort steht, ist am Namen nicht zu erkennen —
+ * und ein Spiegel, der nur `z.number()` sagt, wirft dann beim `parse`. Für
+ * eine ganze Karte heißt das: nicht ein Wert fehlt, sondern alles ist weg.
+ *
+ * Genau so ist am 18.11.2026 die Relais-Karte verschwunden, mitsamt
+ * Schaltzustand, Sperrgrund und allen vier Handgriffen — wegen `snr_db`,
+ * einer Zierzahl am Fuß der Karte (§5.93). Die Ursache ist im Backend
+ * behoben; **dies ist die zweite Linie**, aus demselben Grund, aus dem es
+ * diese Datei überhaupt gibt.
+ *
+ * Für ein Feld, dessen Zahl die Oberfläche *braucht*, ist Strenge richtig —
+ * hier geht es um die, die sie nur anzeigt.
+ */
+export const dezimalFeld = z
+  .union([z.number(), z.string()])
+  .nullable()
+  .transform(zahlOderNull);
 
 /**
  * Normalisiert die genannten Felder eines API-Objekts an seiner Grenze.

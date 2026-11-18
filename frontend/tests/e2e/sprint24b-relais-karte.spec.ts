@@ -124,6 +124,30 @@ const STAND_LAEUFT = {
 };
 
 /**
+ * Dasselbe Relais mit **echten Empfangsdaten** — und zwar in der Gestalt,
+ * die der Server wirklich schickt (18.11.2026).
+ *
+ * **Der Anlass.** Alle Staende hier trugen `snr_db: null`, weil zod den
+ * Schluessel seit Migration 0041 verlangt. `null` war bequem und hat die
+ * Luecke zugedeckt: das Feld ist im Backend ein `Decimal`, und ein
+ * `Decimal` ohne `field_serializer` geht als **String** hinaus. Gemessen
+ * an der Produktion am 18.11. um 07:20:
+ *
+ *     /api/v1/devices/109/relay  ->  200,  "snr_db": "-8.0"
+ *
+ * Der Spiegel verlangte `z.number()`, `parse` warf, und die Karte zeigte
+ * „Der Stand des Relais ist nicht abrufbar." — ohne Schaltzustand, ohne
+ * Sperrgrund, ohne die vier Handgriffe. Ein Mock mit meiner Annahme
+ * darueber, was das Backend sendet, kann das nicht finden (§5.79 Teil
+ * zwei, wortgleich im Kopf von `test_decimal_serialisierung.py`).
+ */
+const STAND_MIT_FUNK = {
+  ...STAND_LAEUFT,
+  rssi_dbm: -105,
+  snr_db: -8,
+};
+
+/**
  * Dasselbe Relais, aber die Meldung ist zu alt (Vorgabe 16.11.2026).
  *
  * `zustand_veraltet` entscheidet das Backend — 25 Minuten, aus
@@ -607,5 +631,46 @@ test.describe("Relais-Karte", () => {
     const knopf = page.getByTestId("relay-provision");
     await expect(knopf).toBeEnabled();
     await expect(knopf).toContainText("Provisionieren");
+  });
+
+  // -------------------------------------------------------------------
+  // Empfangsdaten in der Gestalt, die der Server schickt (18.11.2026)
+  // -------------------------------------------------------------------
+
+  test("mit echten Empfangsdaten zeigt die Karte RSSI und SNR", async ({
+    page,
+  }) => {
+    // Die Form, die der Server **nach** der Korrektur schickt: eine Zahl.
+    await mock(page, { stand: STAND_MIT_FUNK, nutzer: ADMIN });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toContainText("-105 dBm · -8.0 dB");
+    // Und die Gegenprobe zum Fehlerbild: der Rest der Karte ist da.
+    await expect(karte).not.toContainText("nicht abrufbar");
+    await expect(page.getByTestId("relay-darf-schalten")).toBeVisible();
+  });
+
+  test("ein SNR als Zeichenkette lässt die Karte stehen", async ({ page }) => {
+    // **Das Fehlerbild vom 18.11.2026, nachgestellt.** Genau diese Antwort
+    // kam aus der Produktion (`"snr_db": "-8.0"`, Status 200), und der
+    // Spiegel mit `z.number()` hat die ganze Karte dafür geschlossen.
+    //
+    // Der Test bleibt, obwohl das Backend jetzt eine Zahl schickt: er
+    // prüft die **zweite Linie** (`dezimalFeld` in `lib/api/zahlen.ts`),
+    // und die wirkt auch dann, wenn ein künftiges Feld den Serializer
+    // wieder nicht erreicht. Ohne sie ist er rot — das ist die
+    // Mutationsprobe.
+    await mock(page, {
+      stand: { ...STAND_MIT_FUNK, snr_db: "-8.0" },
+      nutzer: ADMIN,
+    });
+    await page.goto("/devices/77");
+
+    const karte = page.getByTestId("relay-card");
+    await expect(karte).toBeVisible();
+    await expect(karte).not.toContainText("nicht abrufbar");
+    await expect(karte).toContainText("-105 dBm · -8.0 dB");
+    await expect(page.getByTestId("relay-darf-schalten")).toBeVisible();
   });
 });

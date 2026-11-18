@@ -3974,6 +3974,75 @@ Diagnose), §5.68 (Anspruch gegen Befund), §5.79 (ein Melder, dem niemand
 glaubt), RUNBOOK §10bd (``relais_auswertung`` rechnet deshalb in
 Ortszeit und sagt es in der Kopfzeile).
 
+### 5.93 Ein Fehler, der auf seinen ersten echten Wert wartet (18.11.2026)
+
+Am 18.11.2026 stand auf beiden Relais-Seiten in Rot: **„Der Stand des
+Relais ist nicht abrufbar."** Nicht ein Wert fehlte — die **ganze Karte**
+war weg: Schaltzustand, Sperrgrund, Wächter-Zeile und alle vier
+Handgriffe.
+
+Der Weg dorthin war nicht der naheliegende. Gemessen im Browser:
+
+```
+GET /api/v1/devices/109/relay   ->  200
+"snr_db": "-8.0"        (String)
+"rssi_dbm": -105        (Zahl)
+```
+
+**200, richtige Daten, kein Auth-Problem, keine Route kaputt.** Der
+Spiegel verlangte ``snr_db: z.number()``, Pydantic schreibt ein
+``Decimal`` ohne ``field_serializer`` aber als **String** — ``parse``
+warf, und TanStack Query zeigte den Fehler-Zustand der Karte.
+
+**Warum es zwei Tage nach dem Einbau losging.** Das Feld kam am
+16.11. dazu (Migration 0041). Solange die Relais keine ``rxInfo``
+schickten, war es ``null`` — und ``null`` passt in jeden Spiegel. Der
+Fehler lag fertig da und wartete auf den ersten echten Wert. Das ist die
+Sorte Defekt, die **nicht** mit dem Deploy auffällt, sondern mit dem
+ersten Datensatz, der das Feld füllt: ein neues optionales Feld ist erst
+dann geprüft, wenn es nicht ``null`` war.
+
+**Drei Wachposten haben nebeneinander geschwiegen:**
+
+1. ``test_decimal_serialisierung.py`` prüft genau das — aber über eine
+   **handgepflegte Modell-Liste**, und ``RelaisStand`` stand nicht darin.
+   Der Kopf der Datei warnt vor dieser Falle **für Felder** („eine
+   handgepflegte Liste waere dieselbe Falle eine Ebene hoeher") und ist
+   ihr auf der Ebene der **Modelle** selbst erlegen.
+2. Der Backend-Test sagte ``assert Decimal(str(koerper["snr_db"])) ==
+   Decimal("-6.0")``. Das ``str()`` nimmt Zahl **und** String entgegen:
+   **eine Zusicherung, die den Typ erst wegkonvertiert, prüft ihn
+   nicht.** Sie war grün, während die Produktion rot war.
+3. Der Playwright-Mock trug ``snr_db: null`` — meine Annahme darüber,
+   was das Backend sendet, statt dessen Ausgabe (§5.79 Teil zwei).
+
+**Dasselbe Muster, zum zweiten Mal.** Am 07.10.2026 hat ``Decimal``
+ohne Serializer die Geräteliste abgeschossen
+(``a.toFixed is not a function``, ``lib/api/zahlen.ts``). Damals war die
+Lehre „Feld in den Serializer". Sie war zu klein: die Lehre ist **„die
+Liste, die das sichert, darf nicht von Hand gepflegt sein"**.
+
+**Die Regeln daraus:**
+
+- Ein ``Decimal`` an einer API-Grenze ist ohne ``field_serializer`` ein
+  **String**. Das gilt auch für Modelle, die direkt in
+  ``api/v1/*.py`` stehen und nicht in ``schemas/``.
+- Eine Typ-Zusicherung wird **auf den Typ** geschrieben
+  (``isinstance(wert, int | float)``), nicht auf den Wert nach einer
+  Umrechnung.
+- Ein neues optionales Feld braucht einen Test mit einem **Wert**, nicht
+  nur mit ``null`` — sonst verschiebt sich der erste Lauf in die
+  Produktion.
+- Eine Karte, deren Spiegel streng ist, fällt **vollständig** aus. Für
+  eine Zierzahl am Fuß ist das die falsche Härte; die zweite Linie
+  (``dezimalFeld``) nimmt ihr diese Macht.
+
+**Querverweise:** §5.63 (Zod als Spiegel der Pydantic-Schemata), §5.79
+(ein Erwartungswert, der nicht aus der Spezifikation kommt), §5.88 (eine
+Zusicherung auf die ganze Datei ist keine auf die Stelle), §5.89
+(Konfiguration mit Geheimnissen gezielt prüfen — dieselbe Familie:
+gezielt statt pauschal).
+
 ---
 
 ## 6. Pre-Push-Backend (Win-Host, PowerShell)

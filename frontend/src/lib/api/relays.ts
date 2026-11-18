@@ -15,6 +15,7 @@
 import { z } from "zod";
 
 import { apiClient } from "./client";
+import { dezimalFeld } from "./zahlen";
 
 /** Der Stand eines Relais. Messwerte sind ``null``, nicht ``0``, wenn
  * es keine Meldung gibt — eine 0 bei der Leistung waere eine Behauptung
@@ -72,7 +73,17 @@ export const relaisStandSchema = z.object({
   // Empfangsdaten des jüngsten Uplinks (Migration 0041). `null` heißt
   // "diese Meldung sagt nichts darüber", nicht "kein Empfang".
   rssi_dbm: z.number().nullable(),
-  snr_db: z.number().nullable(),
+  // **Der Fehler vom 18.11.2026.** Hier stand ``z.number().nullable()``,
+  // und das Backend schickte ``"-8.0"`` — ein ``Decimal`` ohne
+  // ``field_serializer``. ``parse`` warf, und die Karte zeigte „Der Stand
+  // des Relais ist nicht abrufbar.": kein Schaltzustand, kein Sperrgrund,
+  // keiner der vier Handgriffe, wegen der Zahl am Fuß der Karte.
+  //
+  // Sichtbar wurde es erst, als die Relais ihren ersten echten SNR
+  // meldeten — bis dahin war das Feld ``null``, und ``null`` passt in
+  // jeden Spiegel (§5.93). Das Backend serialisiert jetzt als Zahl;
+  // ``dezimalFeld`` nimmt weiterhin beides und ist die zweite Linie.
+  snr_db: dezimalFeld,
 });
 
 export type RelaisStand = z.infer<typeof relaisStandSchema>;
