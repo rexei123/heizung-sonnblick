@@ -39,7 +39,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -270,6 +270,23 @@ class RelaisStand(BaseModel):
     #: Relais ab jetzt.
     rssi_dbm: int | None
     snr_db: Decimal | None
+
+    #: **Der Fehler vom 18.11.2026.** Ohne diesen Eintrag schreibt Pydantic
+    #: ein ``Decimal`` als JSON-**String** (``"-8.0"``), der Zod-Spiegel im
+    #: Frontend verlangt aber eine Zahl — ``parse`` wirft, und die Karte
+    #: zeigt „Der Stand des Relais ist nicht abrufbar.". Nicht ein Feld
+    #: falsch, sondern die **ganze** Karte weg: Schaltzustand, Sperrgrund
+    #: und alle vier Handgriffe, wegen einer Zierzahl.
+    #:
+    #: Sichtbar wurde es erst, als die Relais wirklich SNR meldeten. Bis
+    #: dahin war ``snr_db`` ``None``, und ``None`` passt in jeden Spiegel —
+    #: ein Fehler, der auf seinen ersten echten Wert wartet (§5.93).
+    #:
+    #: Dieselbe Mechanik wie ``schemas/sensor_reading.py``, wo dasselbe Feld
+    #: seit dem 07.10.2026 im Serializer steht.
+    @field_serializer("snr_db")
+    def _snr_als_zahl(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 def _offener_befehl(geraet: Device) -> OffenerBefehl | None:
@@ -798,6 +815,15 @@ class VerlaufStunde(BaseModel):
     ist_max: Decimal | None
     soll: Decimal | None
 
+    #: Dieselbe Begruendung wie bei ``RelaisStand.snr_db``: ein ``Decimal``
+    #: ohne Serializer geht als String hinaus. Das Diagramm hat es
+    #: ueberlebt, weil sein Spiegel beides annimmt — aber zwei Modelle
+    #: derselben Datei mit zwei JSON-Typen fuer dieselbe Art Zahl sind die
+    #: Falle, die am 18.11. zugeschnappt ist. Hier geht sie zu.
+    @field_serializer("ist_mittel", "ist_min", "ist_max", "soll")
+    def _stunden_zahlen(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
+
 
 class VerlaufTag(BaseModel):
     """Ein Ortszeit-Kalendertag, aus den Stunden desselben Tages."""
@@ -812,6 +838,11 @@ class VerlaufTag(BaseModel):
     ist_min: Decimal | None
     ist_max: Decimal | None
     soll_mittel: Decimal | None
+
+    #: Siehe ``VerlaufStunde``.
+    @field_serializer("ist_mittel", "ist_min", "ist_max", "soll_mittel")
+    def _tages_zahlen(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 class RelaisVerlaufRead(BaseModel):

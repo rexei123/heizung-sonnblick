@@ -753,7 +753,19 @@ async def test_die_geraeteseite_zeigt_die_juengsten_empfangsdaten(
     assert antwort.status_code == 200, antwort.text
     koerper = antwort.json()
     assert koerper["rssi_dbm"] == -115, "die aeltere, bessere Zeile darf nicht gewinnen"
-    assert Decimal(str(koerper["snr_db"])) == Decimal("-6.0")
+
+    # **Hier stand ``Decimal(str(koerper["snr_db"]))``, und dieses ``str()``
+    # hat den Fehler vom 18.11.2026 durchgelassen.** Es nimmt beides
+    # entgegen — die Zahl und den String — und rechnet damit genau die
+    # Unterscheidung weg, auf die es ankommt: das Frontend verlangt eine
+    # Zahl. Eine Zusicherung, die den Typ erst wegkonvertiert, prueft ihn
+    # nicht (§5.93).
+    assert isinstance(koerper["snr_db"], int | float), (
+        f"snr_db kommt als {type(koerper['snr_db']).__name__} "
+        f"({koerper['snr_db']!r}) — der Zod-Spiegel im Frontend wirft darauf, "
+        f"und die Relais-Karte zeigt dann gar nichts mehr."
+    )
+    assert koerper["snr_db"] == pytest.approx(-6.0)
 
 
 async def test_ohne_meldung_sind_die_empfangsdaten_leer_und_nicht_null(

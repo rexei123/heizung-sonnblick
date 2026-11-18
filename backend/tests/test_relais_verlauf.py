@@ -546,8 +546,17 @@ async def test_der_endpunkt_liefert_stunden_und_tage(
     assert daten["energie_wh_gesamt"] == 43 * 11
     # Ist und Soll stehen nebeneinander — der Grund, aus dem es diese
     # Ansicht gibt.
-    assert mit_anteil[0]["ist_mittel"] == "20.00"
-    assert mit_anteil[0]["soll"] == "23"
+    #
+    # **Zahlen, nicht Strings** (18.11.2026). Hier stand ``== "20.00"``, und
+    # die Zeile war richtig: ein ``Decimal`` ohne ``field_serializer`` geht
+    # als String hinaus. Nur hat genau dieser String am 18.11. die
+    # Relais-Karte abgeschossen — am Nachbarmodell desselben Moduls. Das
+    # Diagramm hat es ueberlebt, weil sein Zod-Spiegel beides annimmt; die
+    # Karte nicht. Seither serialisiert die ganze Relais-API ihre Decimals
+    # als Zahl, und diese Zeile hält das fest (§5.93).
+    assert mit_anteil[0]["ist_mittel"] == pytest.approx(20.0)
+    assert isinstance(mit_anteil[0]["ist_mittel"], int | float)
+    assert mit_anteil[0]["soll"] == pytest.approx(23.0)
     assert daten["tage"], "mindestens eine Tageszeile"
     assert sum(t["ein_minuten"] for t in daten["tage"]) == 90
 

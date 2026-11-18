@@ -17,7 +17,7 @@
 import { z } from "zod";
 
 import { apiClient } from "./client";
-import { zahlOderNull } from "./zahlen";
+import { dezimalFeld as dezimal } from "./zahlen";
 
 /** Die drei Fenster. Die Reihenfolge ist die der Knöpfe. */
 export const RELAIS_BEREICHE = ["24h", "7d", "30d"] as const;
@@ -30,19 +30,11 @@ export const BEREICH_TEXT: Record<RelaisBereich, string> = {
   "30d": "30 Tage",
 };
 
-/**
- * Ein `Decimal` der API — es kommt als **String** (`"20.00"`), wenn das
- * Feld keinen `field_serializer` hat.
- *
- * Das ist nicht Vorsicht ohne Anlass: genau diese Lücke hat am
- * 07.10.2026 die Geräteliste abgeschossen (`a.toFixed is not a
- * function`, siehe `zahlen.ts`). Hier wird daraus eine Zahl, bevor sie
- * jemand formatiert.
- */
-const dezimal = z
-  .union([z.number(), z.string()])
-  .nullable()
-  .transform(zahlOderNull);
+// Der Helfer stand bis zum 18.11.2026 hier, als lokale Konstante. Am
+// selben Tag ist die Relais-Karte an genau dieser Lücke verschwunden —
+// dasselbe Modul im Backend, ein Feld ohne `field_serializer`, ein Spiegel
+// mit `z.number()`. Zwei Dateien mit demselben Schutz und nur eine davon
+// benutzt: seither steht er in `zahlen.ts`, wo die Begründung schon stand.
 
 export const verlaufStundeSchema = z.object({
   /** Beginn der Stunde, UTC-ISO. */
