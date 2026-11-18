@@ -3337,6 +3337,18 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 | **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
+| **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_ALARM` (Vorgabe **40**). Dazu eine **Entwarnung**, wenn drei Meldungen wieder darunter liegen. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
+
+> **Diese Tabelle ist älter als zwei weitere Melder.** Nicht aufgeführt
+> sind der **Zonen-Melder** (Fühler einer Relais-Zone schweigt länger als
+> `RELAIS_ZONE_STUMM_MIN`, Vorgabe 30 min —
+> `docs/status/2026-11-13-warnung-fuehler-relais-zone.md`) und der
+> **Platten-Wächter** (Platte voller als `PLATTE_WARN_PROZENT`, Vorgabe
+> 85 % — `docs/status/2026-11-14-platten-warnung-und-aufraeumen.md`).
+> Beide verschicken Mail an
+> dieselbe Adresse. Die Zeilen nachzutragen ist ein eigener Doku-PR;
+> hier steht der Hinweis, damit die Tabelle nicht als vollständig
+> gelesen wird (§5.77).
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
@@ -10264,6 +10276,18 @@ nur beim ersten Einschalten: ohne Last liegt 109 bei 35–37 °C, also schon
 im oberen Drittel des zulässigen Bereichs. Was eine Last daraus macht,
 ist die eigentliche Frage. Die Oberfläche warnt ab dem Wert aus den
 Settings (`relay_gehaeusetemperatur_alarm`, Vorgabe 40).
+
+**Seit dem 18.11.2026 kommt dazu eine Mail**, und zwar erst, wenn
+**drei** Meldungen in Folge auf oder über der Schwelle liegen — bei
+Zehn-Minuten-Takt also nach mindestens zwanzig Minuten. Einmal je
+Ereignis, dazu eine Entwarnung, wenn drei Meldungen wieder darunter
+liegen. Anlass war Relais „109 Panel" mit **45** gegen **37** bei „108"
+unter nahezu gleicher Last; gesehen hat das der Betreiber, nicht die
+Steuerung (`docs/status/2026-11-18-gehaeusetemperatur-melder.md`).
+
+Die **Schutzauslösung selbst** verschickt weiterhin keine Mail — sie
+schreibt einen Logeintrag und setzt die Sperre. Diese Warnung kommt
+deshalb vorher.
 
 Löst der Überhitzungsschutz aus, **sperrt das System das Relais** und nur
 ein Admin hebt die Sperre auf (S4). Das ist Absicht: das Gerät erholt

@@ -47,6 +47,7 @@ app: Celery = Celery(
         "heizung.tasks.relay_tasks",
         "heizung.tasks.funk_tasks",
         "heizung.tasks.platten_tasks",
+        "heizung.tasks.gehaeuse_tasks",
     ],
 )
 
@@ -218,6 +219,24 @@ app.conf.update(
         "platte-hourly": {
             "task": "heizung.pruefe_plattenplatz",
             "schedule": crontab(minute=10),
+            "options": {"queue": "heizung_default"},
+        },
+        # 18.11.2026: die Gehaeusetemperatur der Relais. Zehn Minuten, weil
+        # ein Relais in diesem Takt von selbst meldet
+        # (``relay_meldeintervall_s``, gemessen 588-612 s) — zwischen zwei
+        # Uplinks gibt es keinen neuen Wert, und das Urteil braucht drei
+        # Meldungen (``gehaeuse_melder.MIN_MELDUNGEN``).
+        #
+        # **Aus der Einstellung gerechnet und nicht als 600 hingeschrieben**:
+        # der Melder soll dem Meldetakt folgen, nicht der Uhr. Zieht jemand
+        # das Intervall hoch, laeuft dieser Takt mit — eine zweite 600
+        # daneben waere beim ersten Nachjustieren falsch (Paragraph 5.53).
+        # Der Wert wird beim Start von ``celery_beat`` gelesen; eine
+        # Aenderung wirkt also mit dem naechsten Neustart, wie bei jeder
+        # anderen Einstellung aus der ``.env``.
+        "gehaeusetemperatur-im-meldetakt": {
+            "task": "heizung.pruefe_gehaeusetemperatur",
+            "schedule": float(_settings.relay_meldeintervall_s),
             "options": {"queue": "heizung_default"},
         },
     },

@@ -3,7 +3,7 @@ titel: Hotel-Stammdaten
 kategorie: Die Seiten
 stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline
 rollen: admin
-stand: 2026-11-07
+stand: 2026-11-18
 route: /einstellungen/hotel
 ---
 
@@ -30,9 +30,11 @@ Check-In" zählt von hier zurück.
 
 ## Warnungen
 
-**E-Mail für Warnungen** ist die Adresse, an die die Melder schreiben —
-die fehlende Belegungsliste und die Engine-Alarme. Steht hier keine
-Adresse, laufen die Melder weiter und schreiben ins Protokoll, aber
+**E-Mail für Warnungen** ist die Adresse, an die **alle** Melder dieser
+Steuerung schreiben: die fehlende Belegungsliste, die Engine-Alarme, ein
+Gerät das schweigt, eine Zone ohne Messwert, die volle Festplatte und —
+seit dem 18.11.2026 — ein Relais, dessen Gehäuse warm wird. Steht hier
+keine Adresse, laufen die Melder weiter und schreiben ins Protokoll, aber
 niemand erfährt davon.
 
 > **Das Feld „Gerät offline nach (Min)" ist am 07.11.2026 entfernt
