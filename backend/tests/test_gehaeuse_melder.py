@@ -203,14 +203,17 @@ def test_der_alarmtext_sagt_zuerst_die_folge_und_nicht_die_diagnose() -> None:
 
 
 def test_der_alarmtext_nennt_die_offene_einheit() -> None:
-    """Die Einheit des Bytes ist nicht belegt, und das darf nicht verschwinden.
+    """Die Doku spricht die Einheit dieses Feldes nicht aus — das bleibt im Text.
 
-    Sonst liest der Empfaenger „45 Grad" als Messwert, wo eine Annahme
-    steht (AE-78).
+    Sonst liest der Empfaenger „45 Grad" als belegten Messwert. Belegt
+    sind die Aufloesung des Fuehlers und die Schutz-Temperaturen, nicht
+    dieses Byte (AE-78).
     """
     text_ = gehaeuse_melder.nachricht_alarm(_beurteile((45, 44, 43)))
-    assert "nicht" in text_ and "belegt" in text_
-    assert "85" in text_, "der Ueberhitzungsschutz des Geraets gehoert dazu"
+    assert "nicht aus" in text_, "der Vorbehalt zur Einheit fehlt"
+    assert "1 Grad Aufloesung" in text_
+    assert "85 Grad" in text_, "der Ueberhitzungsschutz des Geraets gehoert dazu"
+    assert "Firmware 1.4" in text_, "die Vorgabe haengt an der Firmware"
 
 
 def test_der_alarmtext_unterscheidet_last_von_keiner_last() -> None:

@@ -388,6 +388,24 @@ class Settings(BaseSettings):
     # Schwelle hier warnt **vorher**, damit niemand erst durch das
     # Abschalten erfaehrt, dass es heiss wird.
     #
+    # Belegt, Abschnitt „Protections" der Hersteller-Doku, abgerufen
+    # 18.11.2026: Vorgabe **ab FW 1.4** 0x55 = 85 °C Ausloesung und
+    # 0x46 = 70 °C Erholung, **bis FW 1.3** dagegen 0x5F = **95** °C
+    # Ausloesung bei derselben Erholung. Zulaessiger Bereich 30…100 °C,
+    # Aufloesung 1 °C. Beide Relais des Hauses laufen auf FW 1.5, fuer
+    # sie gilt also 85 — wer die Zahl bei einem aelteren Geraet
+    # weiterverwendet, nennt die falsche.
+    #
+    # **Die Einheit ist besser gestuetzt als dieser Kommentar bisher
+    # sagte** (18.11.2026): die Geraeteseite fuehrt „Internal temperature
+    # sensor — Resolution: 1°C, Accuracy: ±1°C", und die
+    # Schutz-Temperaturen stehen ausdruecklich in Grad Celsius. Nicht
+    # ausgesprochen ist die Einheit nur fuer dieses eine Keepalive-Feld.
+    # **Eine Obergrenze der Umgebungstemperatur nennt die Online-Doku
+    # dagegen nirgends** — die 0…40 °C stehen in der Anleitung, die
+    # unten genannten 60 °C habe ich in keiner Quelle wiedergefunden.
+    # Wer sie braucht, belegt sie neu (§5.68).
+    #
     # **Die Einheit des Keepalive-Bytes ist nicht dokumentiert.** Dafuer
     # spricht, dass die Doku beim Ueberhitzungs-Ereignis (0x60 Byte 2)
     # und bei den Erholungs-Meldungen (0x72/0x73) ausdruecklich °C nennt.

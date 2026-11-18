@@ -79,11 +79,35 @@ Den gibt es hier nicht. Dass ein Versand scheiterte, steht trotzdem fest
 Audit-Eintrag ist ohnehin geschrieben. Die Wiederholung kostet eine
 Einstellung und drei Zeilen, falls sie doch gewünscht ist.
 
-**Die Einheit bleibt offen und wird nicht weggerechnet.**
-`internal_temperature_raw` ist das Byte aus dem Keepalive, und seine
-Einheit ist in der Hersteller-Doku **nicht belegt** (AE-78,
-Pflicht-Prüfung in der Inbetriebnahme). Die Mail nennt die Zahl als Zahl
-und die Annahme in einem Satz daneben.
+**Die Einheit wird nicht weggerechnet.** `internal_temperature_raw` ist
+das Byte aus dem Keepalive. Die Mail nennt die Zahl als Zahl und den
+Vorbehalt in einem Satz daneben — siehe den Abschnitt zur Quellenlage
+unten.
+
+## Die Hersteller-Angaben, nachgelesen am 18.11.2026
+
+Quelle: `docs.mclimate.eu`, Gerätehandbuch **16ASPM**, Abschnitte
+*Sensors*, *Placement Guidelines* und *Protections*.
+
+| Angabe | Wert | Abschnitt |
+|---|---|---|
+| Interner Fühler | „Resolution: 1°C, Accuracy: ±1°C" | Sensors |
+| Überhitzungsschutz, **ab FW 1.4** | Auslösung `0x55` = **85 °C**, Erholung `0x46` = **70 °C** | Protections |
+| Überhitzungsschutz, **bis FW 1.3** | Auslösung `0x5F` = **95 °C**, Erholung 70 °C | Protections |
+| Einstellbarer Bereich | 30…100 °C, Auflösung 1 °C | Protections |
+| Einbau | „must be installed in a place that ensures good cooling. **Install vertically** for improved cooling!" | Placement Guidelines |
+| Obergrenze der Umgebungstemperatur | **steht dort nicht** | — |
+
+Beide Relais des Hauses melden **FW 1.5**, für sie gilt also 85/70.
+
+**Zwei Korrekturen am Bestand** (`config.py`, Kommentar über der
+Schwelle): Die Einheit war dort als „nicht dokumentiert" geführt — sie
+ist besser gestützt als das, nur für dieses eine Keepalive-Feld nicht
+ausgesprochen. Und die dort genannten **60 °C** zulässiger
+Umgebungstemperatur habe ich in keiner Quelle wiedergefunden; die Doku
+nennt überhaupt keine Obergrenze, die Anleitung 0–40 °C. Der Kommentar
+sagt das jetzt, statt einen Widerspruch zwischen zwei Datenblättern zu
+behaupten, von denen eines nicht auffindbar ist (§5.68).
 
 ## Mutationsproben
 

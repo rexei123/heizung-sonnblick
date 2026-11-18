@@ -60,13 +60,23 @@ ausgemustert.
 Die Einheit
 -----------
 
-``internal_temperature_raw`` ist das Byte aus dem Keepalive, und seine
-**Einheit ist in der Hersteller-Doku nicht belegt** (AE-78,
-Pflicht-Pruefung in der Inbetriebnahme). Dafuer spricht, dass dieselbe
-Doku beim Ueberhitzungs-Ereignis ausdruecklich Grad Celsius nennt. Dieses
-Modul rechnet deshalb **nicht** um und nennt die Zahl in der Mail als
-Zahl — die Annahme steht in einem Satz daneben, statt in der Rechnung zu
-verschwinden.
+``internal_temperature_raw`` ist das Byte aus dem Keepalive. Die
+Hersteller-Doku nennt die Einheit **dieses Feldes** nicht ausdruecklich —
+sie nennt sie aber ueberall sonst, und zwar belegt (abgerufen
+18.11.2026):
+
+* Geraeteseite, Abschnitt „Sensors": „Internal temperature sensor —
+  Resolution: 1 Grad C, Accuracy: +/- 1 Grad C".
+* Abschnitt „Protections": die Ausloese- und Erholungsschwellen stehen in
+  Grad Celsius, zulaessiger Bereich 30 bis 100 bei 1 Grad Aufloesung, und
+  das Ueberhitzungs-Ereignis (``0x60``) meldet „Temperature in Celsius".
+
+Damit ist Grad Celsius **gestuetzt** und nicht geraten. Dieses Modul
+rechnet trotzdem **nicht** um und nennt die Zahl in der Mail als Zahl:
+umrechnen waere hier ohnehin die Identitaet, und eine Einheit, die die
+Doku fuer dieses eine Feld nicht ausspricht, soll im Text als Hinweis
+stehen statt in einer Formel zu verschwinden (AE-78,
+Pflicht-Pruefung am Geraet).
 """
 
 from __future__ import annotations
@@ -384,10 +394,11 @@ def nachricht_alarm(befund: GehaeuseBefund) -> str:
         f"WAS DAS BEDEUTET\n"
         f"Die Hersteller-Anleitung nennt eine Betriebstemperatur von "
         f"0-40 Grad. Der eigene Ueberhitzungsschutz des Geraets loest erst "
-        f"bei 85 aus und schaltet dann selbst ab; danach sperrt die "
-        f"Steuerung das Relais, bis ein Administrator die Sperre aufhebt. "
-        f"Diese Mail kommt **vorher** — damit niemand erst durch das "
-        f"Abschalten erfaehrt, dass es heiss wird.\n\n"
+        f"bei 85 Grad aus (Vorgabe ab Firmware 1.4) und schaltet dann "
+        f"selbst ab; danach sperrt die Steuerung das Relais, bis ein "
+        f"Administrator die Sperre aufhebt. Diese Mail kommt VORHER — "
+        f"damit niemand erst durch das Abschalten erfaehrt, dass es heiss "
+        f"wird.\n\n"
         f"DER STAND\n"
         f"Letzte drei Meldungen (juengste zuerst): {reihe}\n"
         f"Zuletzt gemeldet: vor {befund.alter_min} Minuten\n"
@@ -404,9 +415,10 @@ def nachricht_alarm(befund: GehaeuseBefund) -> str:
         f"4. Loest der Schutz aus, steht der Rueckweg im RUNBOOK "
         f"Paragraph 10aj Schritt d.\n\n"
         f"ZUR ZAHL SELBST\n"
-        f"Die Einheit dieses Bytes ist in der Hersteller-Doku nicht "
-        f"belegt; gelesen wird sie als Grad Celsius (AE-78). Die Schwelle "
-        f"ist deshalb bewusst niedrig gewaehlt.\n\n"
+        f"Der Hersteller gibt fuer den internen Fuehler 1 Grad Aufloesung "
+        f"an und nennt alle Schutz-Temperaturen in Grad Celsius; fuer "
+        f"genau dieses Keepalive-Feld spricht er die Einheit nicht aus "
+        f"(AE-78). Gelesen wird sie als Grad Celsius.\n\n"
         f"WAS DIESE MELDUNG NICHT IST\n"
         f"Keine Abschaltung. Die Steuerung hat nichts veraendert, das "
         f"Relais schaltet weiter nach dem Regler.\n"
