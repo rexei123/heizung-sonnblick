@@ -105,6 +105,7 @@ from heizung.rules.config_resolve import (
     lade_zeitzone,
     resolve_rule_field,
 )
+from heizung.rules.tagesplan import lade_fenster, luecken
 
 # Fenster und Eimer je Bereich. Die Punktzahl je Zone steht daneben, weil
 # sie die eigentliche Zusage ist: 144 bzw. 168 Punkte sind eine Linie, die
@@ -223,6 +224,54 @@ def nacht_baender(
             baender.append(NachtBand(start=a, end=b))
         tag += timedelta(days=1)
     return baender
+
+
+def tagesplan_baender(
+    *,
+    von: datetime,
+    bis: datetime,
+    tz_name: str,
+    luecken_minuten: list[tuple[int, int]],
+) -> list[NachtBand]:
+    """Die Absenk-Phasen eines **Tagesplans**: seine Luecken (21.11.2026).
+
+    **Warum das ueberhaupt noetig ist.** Mit einem Tagesplan ist die
+    Absenkung nicht mehr ein Fenster, sondern alles, was kein Fenster
+    abdeckt — bei 06:00–08:00 und 08:00–21:00 also 00:00–06:00 und
+    21:00–24:00. Das alte Band aus ``night_start`` / ``night_end`` zeichnete
+    dort weiter die Betriebszeit, nach der die Engine gar nicht mehr regelt.
+    Genau diese Sorte Abweichung war der Grund, die Kette nach
+    ``rules/config_resolve`` auszulagern (§5.53): eine Anzeige, die ein Band
+    malt, dem die Steuerung nicht folgt, erzeugt Diskussionen ueber die
+    falsche Frage.
+
+    Gerechnet wird wie in ``nacht_baender`` — ueber die lokalen
+    Kalendertage, einen Tag vor dem Fenster beginnend, mit
+    ``datetime.combine`` in **Wanduhrzeit**, damit die Sommerzeit so
+    ausfaellt wie bei der Engine. Eine Luecke laeuft nie ueber Mitternacht
+    (die Fenster duerfen es nicht, also die Luecken auch nicht), ``1440``
+    ist deshalb der 00:00 des Folgetags.
+    """
+    if not luecken_minuten:
+        return []
+    tz = ZoneInfo(tz_name)
+    erster: date = von.astimezone(tz).date() - timedelta(days=1)
+    letzter: date = bis.astimezone(tz).date()
+
+    def lokal(tag: date, minute: int) -> datetime:
+        tage, rest = divmod(minute, 24 * 60)
+        return datetime.combine(tag + timedelta(days=tage), time(rest // 60, rest % 60), tzinfo=tz)
+
+    baender: list[NachtBand] = []
+    tag = erster
+    while tag <= letzter:
+        for von_minute, bis_minute in luecken_minuten:
+            a = max(lokal(tag, von_minute).astimezone(UTC), von)
+            b = min(lokal(tag, bis_minute).astimezone(UTC), bis)
+            if a < b:
+                baender.append(NachtBand(start=a, end=b))
+        tag += timedelta(days=1)
+    return sorted(baender, key=lambda b: b.start)
 
 
 async def _engine_sollwerte(
@@ -431,6 +480,29 @@ async def lade_verlauf(
 
     tz_name = await lade_zeitzone(session)
 
+    # Der Tagesplan verdraengt das Nachtfenster, in der Anzeige genau wie
+    # in der Engine (``layer_temporal``). ``night_start`` / ``night_end``
+    # fallen damit weg — es gibt dann **kein** einzelnes Fenster, und die
+    # Unterschrift des Diagramms wuerde sonst eine Zeit nennen, nach der
+    # nicht geregelt wird. Die Baender kommen aus den Luecken.
+    plan = await lade_fenster(session, room.id)
+    if plan:
+        night_start = night_end = None
+        baender = tagesplan_baender(
+            von=von,
+            bis=bis,
+            tz_name=tz_name,
+            luecken_minuten=luecken(plan),
+        )
+    else:
+        baender = nacht_baender(
+            von=von,
+            bis=bis,
+            tz_name=tz_name,
+            night_start=night_start,
+            night_end=night_end,
+        )
+
     return Verlauf(
         room_id=room.id,
         bereich=bereich,
@@ -440,13 +512,7 @@ async def lade_verlauf(
         timezone=tz_name,
         night_start=night_start,
         night_end=night_end,
-        night_bands=nacht_baender(
-            von=von,
-            bis=bis,
-            tz_name=tz_name,
-            night_start=night_start,
-            night_end=night_end,
-        ),
+        night_bands=baender,
         zones=[
             VerlaufZone(
                 zone_id=z.id,

@@ -48,6 +48,12 @@ from heizung.rules.constants import (
     WINDOW_STALE_THRESHOLD_MIN,
 )
 from heizung.rules.scenarios import is_summer_mode_active
+from heizung.rules.tagesplan import (
+    TagesFenster,
+    fenster_bei,
+    lade_fenster,
+    minute_des_tages,
+)
 from heizung.rules.window_state import detect_open_window_zones
 from heizung.services import override_service
 
@@ -185,6 +191,10 @@ class _RoomContext:
     # Schedule-Profile). Default ``Europe/Vienna``, ueberschreibbar via
     # ``global_config.timezone``.
     timezone: str = DEFAULT_HOTEL_TIMEZONE
+    #: Die Zeitfenster des Tagesplans dieses Zimmers (21.11.2026), nach
+    #: Beginn geordnet. **Leer heisst „kein Tagesplan"** — und dann
+    #: entscheidet Schicht 2 wie vor dem 21.11.2026 am Nachtfenster.
+    tagesplan_fenster: list[TagesFenster] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +294,12 @@ QUELLE_ZIMMER = "zimmer"
 QUELLE_RAUMTYP = "raumtyp"
 QUELLE_GLOBAL = "global"
 QUELLE_RAUMTYP_VORGABE = "raumtyp_vorgabe"
+#: Der Wert kommt aus einem Fenster des Tagesplans (21.11.2026) und damit
+#: aus keiner ``rule_config``-Ebene. Eigene Marke, weil die Frage „woher
+#: kommt diese Zahl" sonst mit „Zimmer" beantwortet wuerde — richtig in
+#: der Ebene und falsch im Ort, denn auf der Zimmerseite steht sie unter
+#: „Tagesplan" und nicht bei den Sollwerten.
+QUELLE_TAGESPLAN = "tagesplan"
 
 _SCOPE_MARKE: dict[RuleConfigScope, str] = {
     RuleConfigScope.ROOM: QUELLE_ZIMMER,
@@ -420,13 +436,42 @@ def _is_in_night_window(now_local_time: time, night_start: time, night_end: time
     return now_local_time >= night_start or now_local_time < night_end
 
 
+def _absenk_schritt(ctx: _RoomContext, *, detail: str) -> LayerStep:
+    """Der Absenk-Schritt der Schicht 2 — **eine** Stelle fuer zwei Wege.
+
+    Zwei Wege fuehren hierher: das Nachtfenster (``night_start`` /
+    ``night_end``, seit Sprint 9.8) und die **Luecke** zwischen zwei
+    Fenstern eines Tagesplans (21.11.2026). Beide sagen dasselbe — „jetzt
+    gilt der Absenkwert" —, und sie muessen denselben Wert aus derselben
+    Kette nehmen. Zwei Kopien dieser vier Zeilen waeren §5.53 mit
+    Steuerwirkung: beim ersten Umbau senkte der eine Weg auf etwas anderes
+    ab als der andere.
+
+    ``reason`` bleibt ``NIGHT_SETBACK`` auch fuer die Luecke. Das ist
+    Absicht und folgt §5.45: der Enum traegt einen DB-CHECK auf zwei
+    Tabellen, ein neuer Wert waere eine Migration fuer eine Beschriftung.
+    Die Oberflaeche nennt den Grund bei einem Bereich ohnehin „Absenkung"
+    und nicht „Nachtabsenkung" (``engine-decision-panel.grundText``) —
+    unterschieden wird im ``detail``.
+    """
+    aufgeloest, quelle = _resolve_t_mit_quelle("t_night", ctx)
+    t_night = aufgeloest or ctx.room_type.default_t_night
+    return LayerStep(
+        layer=EventLogLayer.TEMPORAL_OVERRIDE,
+        setpoint_c=_quantize(t_night),
+        reason=CommandReason.NIGHT_SETBACK,
+        detail=detail,
+        extras=_sollwert_extras(ctx, quelle or QUELLE_RAUMTYP_VORGABE),
+    )
+
+
 def layer_temporal(
     base_step: LayerStep,
     ctx: _RoomContext,
     *,
     now: datetime,
 ) -> LayerStep:
-    """Layer 2: Zeitsteuerung — Vorheizen + Nachtabsenkung.
+    """Layer 2: Zeitsteuerung — Vorheizen + Tagesplan + Nachtabsenkung.
 
     **Vorheizen (gewinnt bei Konflikt):**
     Wenn Status=RESERVED und naechste Belegung beginnt in [now, now+preheat_min]
@@ -453,6 +498,27 @@ def layer_temporal(
     Engine konvertiert ``now`` (UTC) ueber ``ZoneInfo(ctx.timezone)`` zu
     Lokal-Zeit vor dem ``.time()``-Vergleich. ``ctx.timezone`` kommt aus
     ``global_config.timezone`` (Default ``Europe/Vienna``).
+
+    **Tagesplan (21.11.2026).** Hat das Zimmer Fenster
+    (``ctx.tagesplan_fenster``), entscheiden **sie** — und das Nachtfenster
+    wird nicht mehr gelesen:
+
+    1. Ortszeit liegt in einem Fenster -> dessen Sollwert.
+    2. Ortszeit liegt in keinem (Luecke) -> ``t_night``, derselbe
+       Absenkwert wie bisher, ueber ``_absenk_schritt``.
+    3. **Keine Fenster -> alles wie vorher.** Das ist der wichtige Punkt:
+       47 Gaestezimmer und jeder Bereich ohne Plan laufen unveraendert
+       weiter, bis jemand ein Fenster anlegt.
+
+    **Warum der Plan das Nachtfenster verdraengt und nicht ergaenzt.** Bei
+    einem Bereich **ist** das Nachtfenster die Betriebszeit (Sprint 24d,
+    ``services/betriebszeit``) — also ein einziges Fenster derselben Art.
+    Beide gleichzeitig wirksam zu lassen hiesse, zwei Zeitpläne
+    uebereinander zu legen; welcher bei einer Ueberschneidung gewinnt,
+    waere eine Regel, die niemand sehen kann. Deshalb: wer einen Plan
+    anlegt, hat die Zeiten im Plan. Die Oberflaeche sagt das am
+    Betriebszeit-Formular ausdruecklich, sonst stuende dort eine Zeit ohne
+    Wirkung (§5.77).
     """
     detail_token: str | None = None
 
@@ -480,6 +546,37 @@ def layer_temporal(
                         ),
                     )
                 detail_token = "outside_preheat_window"
+
+    # --- TAGESPLAN (21.11.2026) ---
+    # Steht ein Plan, ist die Frage „welcher Wert gilt zu dieser Uhrzeit"
+    # hier beantwortet — mit dem Fenster oder mit der Absenkung. Beides
+    # kehrt zurueck; das Nachtfenster unten wird dann nicht mehr gelesen.
+    if ctx.tagesplan_fenster:
+        local_now = now.astimezone(ZoneInfo(ctx.timezone))
+        treffer = fenster_bei(ctx.tagesplan_fenster, minute_des_tages(local_now))
+        if treffer is not None:
+            return LayerStep(
+                layer=EventLogLayer.TEMPORAL_OVERRIDE,
+                setpoint_c=_quantize(treffer.temperatur),
+                reason=CommandReason.VACANT_SETPOINT,
+                detail=(
+                    f"tagesplan_fenster: id={treffer.id} "
+                    f"fenster=[{treffer.von_text},{treffer.bis_text}) "
+                    f"now_local={local_now.time().isoformat()} tz={ctx.timezone}"
+                ),
+                extras={
+                    **_sollwert_extras(ctx, QUELLE_TAGESPLAN),
+                    "tagesplan_fenster_id": treffer.id,
+                    "tagesplan_fenster": treffer.spanne_text,
+                },
+            )
+        return _absenk_schritt(
+            ctx,
+            detail=(
+                f"tagesplan_luecke: now_local={local_now.time().isoformat()} "
+                f"tz={ctx.timezone} fenster={len(ctx.tagesplan_fenster)}"
+            ),
+        )
 
     # --- NACHTABSENKUNG ---
     # B-10-4-Fix (AE-60): UTC-now zu Lokal-Zeit konvertieren, damit der
@@ -511,18 +608,13 @@ def layer_temporal(
             local_now = now.astimezone(ZoneInfo(ctx.timezone))
             now_t = local_now.time()
             if _is_in_night_window(now_t, night_start, night_end):
-                aufgeloest, quelle = _resolve_t_mit_quelle("t_night", ctx)
-                t_night = aufgeloest or ctx.room_type.default_t_night
-                return LayerStep(
-                    layer=EventLogLayer.TEMPORAL_OVERRIDE,
-                    setpoint_c=_quantize(t_night),
-                    reason=CommandReason.NIGHT_SETBACK,
+                return _absenk_schritt(
+                    ctx,
                     detail=(
                         f"night_setback: now_local={now_t.isoformat()} "
                         f"tz={ctx.timezone} "
                         f"window=[{night_start.isoformat()},{night_end.isoformat()}]"
                     ),
-                    extras=_sollwert_extras(ctx, quelle or QUELLE_RAUMTYP_VORGABE),
                 )
             detail_token = "outside_night_setback"
 
@@ -1186,6 +1278,14 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
     # mit defensivem Fallback. Seit Sprint 21 A1 in ``rules/config_resolve``.
     tz_name = await lade_zeitzone(session)
 
+    # Der Tagesplan (21.11.2026). **Immer gelesen, nicht nur fuer
+    # Bereiche:** ob ein Zimmer einen Plan haben darf, entscheidet der
+    # Endpunkt (nur nicht buchbare Raumtypen), und eine zweite Schranke
+    # hier koennte ihm widersprechen (§5.53). Fuer die 47 Gaestezimmer ist
+    # die Abfrage leer und folgenlos; sie geht ueber
+    # ``ix_tagesplan_fenster_room_id``.
+    plan = await lade_fenster(session, room_id)
+
     return _RoomContext(
         room=room,
         room_type=room.room_type,
@@ -1193,6 +1293,7 @@ async def _load_room_context(session: AsyncSession, room_id: int) -> _RoomContex
         summer_mode_active=summer_active,
         next_occupancy=next_occ,
         timezone=tz_name,
+        tagesplan_fenster=plan,
     )
 
 

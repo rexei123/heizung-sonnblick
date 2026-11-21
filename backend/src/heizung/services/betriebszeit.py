@@ -39,7 +39,6 @@ dasselbe und bekommt dasselbe.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import time
 
@@ -48,13 +47,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.models.enums import RuleConfigScope
 from heizung.models.rule_config import RuleConfig
-
-#: ``HH:MM`` mit 24:00 als erlaubtem Sonderfall.
-_MUSTER = re.compile(r"^(?:([01]\d|2[0-3]):([0-5]\d)|24:00)$")
+from heizung.uhrzeit import UhrzeitError, parse_minuten
 
 
-class BetriebszeitError(ValueError):
-    """Eingabe, die keine Uhrzeit ist."""
+class BetriebszeitError(UhrzeitError):
+    """Eingabe, die keine Uhrzeit ist — oder eine halbe Betriebszeit."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,16 +68,19 @@ def parse_uhrzeit(wert: str) -> time:
     ``24:00`` wird auf ``00:00`` abgebildet — dieselbe Minute, andere
     Schreibweise. Die Engine unterscheidet sie nicht, und ein Mensch, der
     „bis 24:00" eingibt, meint Mitternacht.
+
+    **Die Schreibweise selbst steht seit dem 21.11.2026 in
+    ``heizung.uhrzeit``** und nicht mehr hier: der Tagesplan nimmt
+    dieselbe Eingabe an, und zwei Muster waeren zwei Meinungen darueber,
+    was eine Uhrzeit ist (Paragraph 5.53). Die Abbildung auf ``time``
+    bleibt hier, weil nur die Betriebszeit sie braucht — ihre Werte stehen
+    in einer ``Time``-Spalte, die des Tagesplans in Minuten.
     """
-    treffer = _MUSTER.match(wert.strip())
-    if treffer is None:
-        raise BetriebszeitError(
-            f"'{wert}' ist keine Uhrzeit. Erwartet HH:MM, zum Beispiel 15:00 "
-            "(24:00 ist erlaubt und bedeutet Mitternacht)."
-        )
-    if treffer.group(1) is None:
-        return time(0, 0)
-    return time(int(treffer.group(1)), int(treffer.group(2)))
+    try:
+        minuten = parse_minuten(wert)
+    except UhrzeitError as e:
+        raise BetriebszeitError(str(e)) from e
+    return time(hour=(minuten // 60) % 24, minute=minuten % 60)
 
 
 async def lade_zimmer_zeile(session: AsyncSession, room_id: int) -> RuleConfig | None:

@@ -1,9 +1,9 @@
 ---
 titel: Glossar
 kategorie: Grundlagen
-stichworte: Begriffe, Sollwert, Zone, Raumtyp, Vicki, Listen-Wächter, Relais-Test, Übersteuerung, Hysterese
+stichworte: Begriffe, Sollwert, Zone, Raumtyp, Vicki, Listen-Wächter, Relais-Test, Übersteuerung, Hysterese, Tagesplan
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-21
 ---
 
 Die Wörter, die in der Software und in diesem Handbuch vorkommen — in
@@ -26,7 +26,8 @@ Mail schickt. Daraus kommen Anreise, Abreise und damit der Zustand
 
 **Betriebszeit.** Beginn und Ende der Nutzung eines Allgemeinbereichs,
 eingetragen beim Zimmer. „24:00" ist als Ende erlaubt und heißt
-Mitternacht.
+Mitternacht. Nicht zu verwechseln mit dem **Tagesplan**: der hat mehrere
+Fenster und verdrängt die Betriebszeit, solange er steht.
 
 **Downlink.** Ein Funkbefehl von der Steuerung an ein Thermostat. Kostet
 Batterie — deshalb der Versandfilter.
@@ -79,8 +80,14 @@ Abgrenzung beim Listen-Wächter.
 **Sollwert.** Die Temperatur, die ein Zimmer haben soll. Das Ergebnis der
 sechs Schichten.
 
+**Tagesplan.** Mehrere Zeitfenster am Tag für einen Allgemeinbereich,
+jedes mit eigenem Sollwert; eingetragen beim Zimmer. Was kein Fenster
+abdeckt, ist Absenkung. Solange ein Plan steht, wirkt die **Betriebszeit**
+dieses Bereichs nicht.
+
 **Übersteuerung.** Ein Wert, der die Automatik für eine bestimmte Zeit
-schlägt — von der Rezeption gesetzt oder am Thermostat gedreht.
+schlägt — von der Rezeption gesetzt oder am Thermostat gedreht. Sie
+schlägt auch den Tagesplan, und nach ihrem Ablauf gilt er wieder.
 
 **Übersteuerungs-Sperre.** Der Schalter, der eine Drehung am Thermostat
 nicht mehr übernimmt. Zwei Formen: **bis Check-out** (endet mit der

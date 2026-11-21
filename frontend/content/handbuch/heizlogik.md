@@ -1,9 +1,9 @@
 ---
 titel: Wie das Haus heizt
 kategorie: Grundlagen
-stichworte: Sollwert, Schichten, Sommer, Absenkung, Vorheizen, Fenster, Kappung, Allgemeinbereich, nur messen, Relais
+stichworte: Sollwert, Schichten, Sommer, Absenkung, Vorheizen, Fenster, Kappung, Allgemeinbereich, Tagesplan, nur messen, Relais
 rollen: alle
-stand: 2026-11-15
+stand: 2026-11-21
 ---
 
 Jedes Zimmer bekommt alle fünf Minuten einen Sollwert errechnet. Das
@@ -25,8 +25,10 @@ im Verlauf steht, was ohne Sommerbetrieb gegolten hätte.
 oder — bei einem Allgemeinbereich — in Betrieb. Woher der Wert kommt,
 steht im Abschnitt „Vorrang der Werte".
 
-**2 — Zeit.** Vorheizen vor der Anreise, Absenkung in der Nacht. Die
-Zeiten sind Ortszeit; die Umstellung auf Winterzeit ist mitgedacht.
+**2 — Zeit.** Vorheizen vor der Anreise, Absenkung in der Nacht — und
+bei einem Allgemeinbereich entweder seine Betriebszeit oder, wenn einer
+angelegt ist, sein **Tagesplan** mit mehreren Fenstern am Tag. Die Zeiten
+sind Ortszeit; die Umstellung auf Winterzeit ist mitgedacht.
 
 **3 — Übersteuerung.** Eine Wunschtemperatur von der Rezeption oder eine
 Drehung am Thermostat durch den Gast. Sie gilt bis zu ihrem Ablauf und

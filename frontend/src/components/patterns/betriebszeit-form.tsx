@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
 import { fehlerText } from "@/lib/api/fehler";
 import { setzeBetriebszeit } from "@/lib/api/betriebszeit";
+import { useTagesplan } from "@/lib/api/tagesplan";
 import { darfStammdatenAendern } from "@/lib/auth/rechte";
 import type { Room } from "@/lib/api/types";
 
@@ -56,6 +57,19 @@ export function BetriebszeitForm({ room }: { room: Room }) {
 
   const darfAendern = darfStammdatenAendern(user);
   const gesetzt = room.betriebszeit_von !== null && room.betriebszeit_bis !== null;
+
+  /**
+   * Steht ein Tagesplan, wirkt diese Betriebszeit **nicht** (21.11.2026).
+   *
+   * `layer_temporal` liest bei vorhandenen Fenstern nur noch den Plan; das
+   * Nachtfenster, das hier bearbeitet wird, kommt dann nicht mehr vor. Ohne
+   * diesen Hinweis stünden hier zwei Uhrzeiten, die nichts tun — und ein
+   * Schalter ohne Wirkung, der wie einer mit Wirkung aussieht, ist §5.77 in
+   * seiner teuersten Form: man stellt ihn, nichts passiert, und man sucht
+   * den Fehler woanders.
+   */
+  const plan = useTagesplan(room.id);
+  const planWirkt = (plan.data?.fenster.length ?? 0) > 0;
 
   const mut = useMutation({
     mutationFn: (werte: { von: string | null; bis: string | null }) =>
@@ -104,6 +118,23 @@ export function BetriebszeitForm({ room }: { room: Room }) {
           Raumtyps gefahren. Leer = es gilt, was Raumtyp oder Haus vorgeben.
         </p>
       </header>
+
+      {planWirkt ? (
+        <p
+          className="border-border bg-surface-alt text-text-secondary mb-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+          role="status"
+          data-testid="betriebszeit-tagesplan-hinweis"
+        >
+          <span className="material-symbols-outlined shrink-0" aria-hidden style={{ fontSize: 18 }}>
+            info
+          </span>
+          <span>
+            Für diesen Bereich steht ein <strong>Tagesplan</strong>. Solange er
+            Fenster hat, bestimmt er die Zeiten — diese Betriebszeit wirkt dann
+            nicht. Sie gilt wieder, sobald der Plan gelöscht ist.
+          </span>
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">

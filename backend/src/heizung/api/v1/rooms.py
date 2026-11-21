@@ -25,6 +25,7 @@ from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.user import User
+from heizung.rules.tagesplan import TagesFenster, lade_fenster
 from heizung.schemas.event_log import EventLogRead
 from heizung.schemas.room import (
     BetriebszeitUpdate,
@@ -40,8 +41,19 @@ from heizung.schemas.room_history import (
     NachtFenster,
     RoomHistoryRead,
 )
-from heizung.services import betriebszeit, child_lock, override_service, raumtyp_regel
+from heizung.schemas.tagesplan import (
+    TagesplanFensterRead,
+    TagesplanRead,
+    TagesplanUpdate,
+)
+from heizung.services import (
+    betriebszeit,
+    child_lock,
+    override_service,
+    raumtyp_regel,
+)
 from heizung.services import boost as boost_service
+from heizung.services import tagesplan as tagesplan_service
 from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
     lies_soll_stand,
@@ -356,18 +368,15 @@ async def set_betriebszeit(
     spiegelt das als ``darfStammdatenAendern``).
     """
     room = await _get_or_404(session, room_id)
-    buchbar = await session.scalar(
-        select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+    await _verlange_allgemeinbereich(
+        session,
+        room,
+        hinweis=(
+            "Betriebszeiten gibt es nur fuer Allgemeinbereiche "
+            "(Raumtyp nicht buchbar). Ein Gaestezimmer folgt dem "
+            "Nachtfenster seines Raumtyps."
+        ),
     )
-    if buchbar is not False:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Betriebszeiten gibt es nur fuer Allgemeinbereiche "
-                "(Raumtyp nicht buchbar). Ein Gaestezimmer folgt dem "
-                "Nachtfenster seines Raumtyps."
-            ),
-        )
 
     try:
         von = betriebszeit.parse_uhrzeit(payload.von) if payload.von is not None else None
@@ -395,6 +404,148 @@ async def set_betriebszeit(
     await session.commit()
     await session.refresh(room)
     return await _als_read(session, room)
+
+
+# ---------------------------------------------------------------------------
+# Tagesplan (21.11.2026)
+# ---------------------------------------------------------------------------
+
+
+async def _verlange_allgemeinbereich(session: AsyncSession, room: Room, *, hinweis: str) -> None:
+    """422, wenn das Zimmer ein Gaestezimmer ist.
+
+    **Eine Stelle entscheidet, was ein Bereich ist** (§5.53): die Spalte
+    ``room_type.is_bookable``. Zwei Endpunkte haengen daran, und sie sollen
+    nicht eines Tages verschiedener Meinung sein — nur der **Hinweis**
+    unterscheidet sich, weil er sagt, was gerade abgelehnt wurde.
+
+    ``is not False`` und nicht ``is True``, wortgleich mit dem
+    Betriebszeit-Endpunkt: ``scalar`` liefert ``None``, wenn die Abfrage
+    keine Zeile findet. Heute ist dieser Fall **nicht erreichbar** —
+    ``room.room_type_id`` ist ``NOT NULL`` und zeigt per Fremdschluessel auf
+    eine vorhandene Zeile. Die Form bleibt trotzdem, weil sie im Zweifel
+    **ablehnt**; ``is True`` wuerde bei einem fehlenden Raumtyp durchlassen.
+    """
+    buchbar = await session.scalar(
+        select(RoomType.is_bookable).where(RoomType.id == room.room_type_id)
+    )
+    if buchbar is not False:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=hinweis)
+
+
+def _als_tagesplan(room_id: int, fenster: list[TagesFenster]) -> TagesplanRead:
+    """Die Fenster in der Form der Antwort — Uhrzeiten als ``HH:MM``."""
+    return TagesplanRead(
+        room_id=room_id,
+        fenster=[
+            TagesplanFensterRead(
+                id=f.id,
+                von=f.von_text,
+                bis=f.bis_text,
+                temperatur=f.temperatur,
+            )
+            for f in fenster
+        ],
+    )
+
+
+@router.get(
+    "/{room_id}/tagesplan",
+    response_model=TagesplanRead,
+    summary="Tagesplan eines Allgemeinbereichs lesen (21.11.2026)",
+)
+async def get_tagesplan(
+    room_id: int = RoomIdPath,
+    _user: User = Depends(require_user),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> TagesplanRead:
+    """Die Zeitfenster dieses Zimmers, nach Beginn geordnet.
+
+    **Ein Gaestezimmer wird hier nicht abgewiesen**, anders als beim
+    Schreiben: es hat keinen Plan, und „keiner" ist eine Antwort und kein
+    Fehler. Die Oberflaeche fragt den Plan auf jeder Zimmerseite ab; eine
+    422 waere dort ein roter Kasten fuer einen Normalfall.
+    """
+    await _get_or_404(session, room_id)
+    return _als_tagesplan(room_id, await lade_fenster(session, room_id))
+
+
+@router.put(
+    "/{room_id}/tagesplan",
+    response_model=TagesplanRead,
+    summary="Tagesplan eines Allgemeinbereichs setzen (Admin, mit Audit)",
+)
+async def set_tagesplan(
+    payload: TagesplanUpdate,
+    room_id: int = RoomIdPath,
+    admin: User = Depends(require_admin),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> TagesplanRead:
+    """Ersetzt den Plan durch die geschickte Liste. Leere Liste = kein Plan.
+
+    **Nur fuer Allgemeinbereiche.** Technisch koennte die Tabelle an jedem
+    Zimmer haengen, und die Engine liest sie auch dort (``layer_temporal``).
+    Die Schranke steht hier, weil ein Tagesplan an einem Gaestezimmer eine
+    Aussage ueber den Gast waere: dort bestimmt nicht die Uhr, sondern die
+    Belegung und das Rad an der Wand. Wer es doch braucht, braucht vorher
+    eine Entscheidung und keinen Endpunkt, der es stillschweigend zulaesst.
+
+    **``require_admin``** wie bei der Betriebszeit: der Plan setzt den
+    Sollwert eines ganzen Bereichs und gehoert damit zu den Stammdaten.
+
+    Die Ueberschneidungspruefung hat Pydantic schon gemacht
+    (``TagesplanUpdate``). Die ``EXCLUDE``-Bedingung der Tabelle faengt,
+    was zwei gleichzeitige Anfragen daraus machen koennten — deshalb der
+    ``IntegrityError``-Zweig: er ist kein toter Code, sondern der Fall, in
+    dem zwei Admins im selben Augenblick speichern.
+    """
+    room = await _get_or_404(session, room_id)
+    await _verlange_allgemeinbereich(
+        session,
+        room,
+        hinweis=(
+            "Einen Tagesplan gibt es nur fuer Allgemeinbereiche (Raumtyp "
+            "nicht buchbar). Ein Gaestezimmer folgt seiner Belegung und "
+            "dem Nachtfenster seines Raumtyps."
+        ),
+    )
+
+    vorher = await lade_fenster(session, room_id)
+    try:
+        neu = await tagesplan_service.ersetze(
+            session,
+            room_id,
+            [
+                tagesplan_service.NeuesFenster(
+                    von_minute=f.von_minute,
+                    bis_minute=f.bis_minute,
+                    temperatur=f.temperatur,
+                )
+                for f in payload.fenster
+            ],
+        )
+    except IntegrityError as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Der Plan konnte nicht gespeichert werden — zwei Fenster "
+                "ueberschneiden sich. Laden Sie die Seite neu: vermutlich "
+                "hat jemand anderes gerade gespeichert."
+            ),
+        ) from e
+
+    await record_business_action(
+        session,
+        user_id=admin.id,
+        action="ROOM_DAY_PLAN_SET",
+        target_type="room",
+        target_id=room_id,
+        old_value={"fenster": tagesplan_service.als_audit_wert(vorher)},
+        new_value={"fenster": tagesplan_service.als_audit_wert(neu)},
+    )
+    await session.commit()
+    return _als_tagesplan(room_id, neu)
 
 
 @router.patch(
