@@ -2,7 +2,7 @@
 
 import pytest
 
-from heizung.config import Settings
+from heizung.config import GEHAEUSE_TOTBAND_K, Settings
 
 
 def test_default_secret_blocked_in_any_environment(
@@ -57,3 +57,44 @@ def test_environment_rejects_invalid_value(
     monkeypatch.setenv("ALLOW_DEFAULT_SECRETS", "1")
     with pytest.raises(ValueError):
         Settings(environment="prod")
+
+
+def test_gehaeuse_vorgaben_stehen_wie_vereinbart() -> None:
+    """Die Karte faerbt ab 40, die Mail kommt ab 50, entwarnt wird unter 45.
+
+    Die Zahlen stehen hier, damit eine Aenderung an den Vorgaben eine
+    bewusste ist — der Abstand zwischen Mail und Entwarnung ist das
+    Totband und entscheidet, ob ein Geraet im Normalbetrieb taeglich
+    meldet (Entscheidung vom 21.11.2026).
+    """
+    s = Settings(environment="test", secret_key="b" * 32)
+    assert s.relay_gehaeusetemperatur_alarm == 40
+    assert s.relay_gehaeusetemperatur_mail == 50
+    assert s.relay_gehaeusetemperatur_mail - GEHAEUSE_TOTBAND_K == 45
+
+
+def test_mail_schwelle_unter_der_karten_schwelle_wird_abgewiesen() -> None:
+    """Sonst kaeme die Mail, bevor die Oberflaeche etwas zeigt."""
+    with pytest.raises(ValueError, match="RELAY_GEHAEUSETEMPERATUR_MAIL"):
+        Settings(
+            environment="test",
+            secret_key="b" * 32,
+            relay_gehaeusetemperatur_alarm=40,
+            relay_gehaeusetemperatur_mail=39,
+        )
+
+
+def test_mail_schwelle_im_totband_wird_abgewiesen() -> None:
+    """Eine Episode, die nicht enden kann, ist schlimmer als keine.
+
+    Bei einer Mail-Schwelle von 5 oder weniger liegt die Entwarnung bei
+    null oder darunter — sie wird nie erreicht, und das Geraet bekommt
+    nie einen zweiten Alarm.
+    """
+    with pytest.raises(ValueError, match="Totband"):
+        Settings(
+            environment="test",
+            secret_key="b" * 32,
+            relay_gehaeusetemperatur_alarm=1,
+            relay_gehaeusetemperatur_mail=GEHAEUSE_TOTBAND_K,
+        )

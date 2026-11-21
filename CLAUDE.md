@@ -1982,6 +1982,28 @@ Eine Suche über alle Dateien auf einmal findet die Klasse nicht, weil das
 Muster nicht im Test steht, sondern in der **Beziehung** zwischen Test und
 abgefragtem Fenster.
 
+**Dritter Fall, 21.11.2026 — und er zeigt, wann „Uhr einfrieren" keine
+Option ist.** `test_deploy_pull_aufraeumen.py` ist über Nacht rot
+geworden, in einem PR, der weder den Test noch das geprüfte Skript
+anfasst. Die Fixture-Liste trug die Erstellungsdaten, mit denen sie am
+14.11. geschrieben wurde; `develop-aaaaaaa` stand auf dem 13.11. und war
+damals „gestern, bleibt also". Das Skript löscht, was älter als sieben
+Tage ist — am 21.11. war derselbe Wert acht Tage alt, und die Zusicherung
+„der junge Tag bleibt" fiel. Erster roter Tag war mit
+`date -d "7 days ago"` **auf den Tag berechenbar**: der 21.11.
+
+**Der Unterschied zum Nachtrag oben:** dort wäre `freeze_time` die Lösung
+gewesen. Hier nicht — die Grenze entsteht **in einem anderen Prozess**
+(`deploy-pull.sh` ruft `date -d`), und eine eingefrorene Python-Uhr
+erreicht ihn nicht. Dann bleibt nur die Umkehrung: der Test rechnet seine
+Daten aus **derselben echten Uhr** und sagt **Alter statt Datum**
+(`_vor(1)`, `_vor(45)`, `_vor(90)`).
+
+**Regel:** Wer prüft, wie ein Fremdprozess ein Alter beurteilt, schreibt
+kein Datum in die Fixture. Und die Abstände zur Grenze gehören mit
+Luft gewählt — ein Wert genau auf der Grenze prüft, wie der Vergleich
+rundet, nicht, was der Mechanismus tut.
+
 **Querverweise:** B-FlakyTime-1 (Hygiene-Sprint `d2d5311`), B-FlakyTime-2
 (Folge-Hot-Fix), §5.58 (Device-Lifecycle-Filter, andere Lesson aus
 demselben Sprint-Block), §5.55 (ein grüner Lauf, der nichts geprüft hat —

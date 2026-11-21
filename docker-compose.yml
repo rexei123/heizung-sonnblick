@@ -142,7 +142,14 @@ services:
       - "8080:8080"  # Web-UI
       - "8081:8081"  # Monitoring/Metrics
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:8081/metrics > /dev/null || exit 1"]
+      # 127.0.0.1 und nicht localhost (18.11.2026, Freigabe des Betreibers):
+      # die hosts-Datei im Container bildet localhost auf 127.0.0.1 **und**
+      # ::1 ab, wget nimmt ::1 zuerst, und ChirpStack lauscht nur auf IPv4
+      # (0.0.0.0:8081). Der Healthcheck konnte damit nie bestehen —
+      # gemessen 11517 Fehlversuche bei voll gesundem Dienst. Nur die
+      # Entwicklungs-Datei; im produktiven Stack hat der Dienst keinen
+      # Healthcheck (infra/deploy/docker-compose.prod.yml).
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8081/metrics > /dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

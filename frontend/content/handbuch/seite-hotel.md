@@ -3,7 +3,7 @@ titel: Hotel-Stammdaten
 kategorie: Die Seiten
 stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline
 rollen: admin
-stand: 2026-11-07
+stand: 2026-11-21
 route: /einstellungen/hotel
 ---
 
@@ -30,10 +30,19 @@ Check-In" zählt von hier zurück.
 
 ## Warnungen
 
-**E-Mail für Warnungen** ist die Adresse, an die die Melder schreiben —
-die fehlende Belegungsliste und die Engine-Alarme. Steht hier keine
-Adresse, laufen die Melder weiter und schreiben ins Protokoll, aber
-niemand erfährt davon.
+**E-Mail für Warnungen** ist die Adresse, an die **alle** Melder dieser
+Steuerung schreiben: die fehlende Belegungsliste, die Engine-Alarme, ein
+Gerät das schweigt, eine Zone ohne Messwert, die volle Festplatte und —
+seit dem 18.11.2026 — ein Relais, dessen Gehäuse warm wird oder das sich
+selbst abgeschaltet hat. Steht hier keine Adresse, laufen die Melder
+weiter und schreiben ins Protokoll, aber niemand erfährt davon.
+
+> **Ein abgeschaltetes Relais ist der dringendste dieser Fälle.** Das
+> Gerät schaltet sich bei Überhitzung, Überspannung, Überstrom oder
+> Überlast selbst ab, und die Steuerung sperrt es danach, bis ein
+> Administrator die Sperre auf der Geräteseite aufhebt. So lange heizt
+> dieser Bereich nicht. In der Mail steht, was zuerst zu tun ist: die
+> Ursache suchen, nicht die Sperre aufheben.
 
 > **Das Feld „Gerät offline nach (Min)" ist am 07.11.2026 entfernt
 > worden, weil es nichts getan hat.** Hier stand, es steuere die Anzeige

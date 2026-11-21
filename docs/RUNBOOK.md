@@ -3337,6 +3337,19 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 | **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
+| **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
+| **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
+
+> **Diese Tabelle ist älter als zwei weitere Melder.** Nicht aufgeführt
+> sind der **Zonen-Melder** (Fühler einer Relais-Zone schweigt länger als
+> `RELAIS_ZONE_STUMM_MIN`, Vorgabe 30 min —
+> `docs/status/2026-11-13-warnung-fuehler-relais-zone.md`) und der
+> **Platten-Wächter** (Platte voller als `PLATTE_WARN_PROZENT`, Vorgabe
+> 85 % — `docs/status/2026-11-14-platten-warnung-und-aufraeumen.md`).
+> Beide verschicken Mail an
+> dieselbe Adresse. Die Zeilen nachzutragen ist ein eigener Doku-PR;
+> hier steht der Hinweis, damit die Tabelle nicht als vollständig
+> gelesen wird (§5.77).
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
@@ -10264,6 +10277,29 @@ nur beim ersten Einschalten: ohne Last liegt 109 bei 35–37 °C, also schon
 im oberen Drittel des zulässigen Bereichs. Was eine Last daraus macht,
 ist die eigentliche Frage. Die Oberfläche warnt ab dem Wert aus den
 Settings (`relay_gehaeusetemperatur_alarm`, Vorgabe 40).
+
+**Seit dem 18.11.2026 kommt dazu eine Mail** — aber ab einer **anderen,
+höheren Schwelle**: `RELAY_GEHAEUSETEMPERATUR_MAIL`, Vorgabe **50**, und
+erst wenn **drei** Meldungen in Folge dort liegen (bei Zehn-Minuten-Takt
+also nach mindestens zwanzig Minuten). Entwarnt wird unter **45**.
+
+**Die beiden Zahlen nicht verwechseln:** 40 färbt die Karte, 50 schickt
+die Mail. Der Grund steht in den Messwerten — Relais „109 Panel" meldete
+am 18.11. **45** gegen **37** bei „108" unter nahezu gleicher Last, und
+44–45 ist bei ihm der Normalbetrieb. Eine Mail ab 40 wäre damit täglich
+eine Mail gewesen. Die Ursache des Unterschieds liegt in Einbaulage und
+Klemme (der Hersteller verlangt senkrechten Einbau zur Kühlung), nicht
+in der Software.
+
+**Löst der Schutz aus, kommt seit dem 21.11.2026 eine eigene Mail** —
+einmal je Auslösung, mit Schutzart, Zeitpunkt und der jüngsten
+Gehäusetemperatur. Sie sagt ausdrücklich, dass die Sperre steht, bis
+jemand sie aufhebt. Die Reihenfolge der Handgriffe steht in der Mail und
+unten in Schritt d: **erst die Ursache, dann die Sperre** — wer zuerst
+entsperrt, schickt den Regler in dieselbe Lage zurück.
+
+Einzelheiten zu beiden:
+`docs/status/2026-11-18-gehaeusetemperatur-melder.md`.
 
 Löst der Überhitzungsschutz aus, **sperrt das System das Relais** und nur
 ein Admin hebt die Sperre auf (S4). Das ist Absicht: das Gerät erholt
