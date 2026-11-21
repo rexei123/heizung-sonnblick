@@ -81,18 +81,37 @@
  * Eintrag in chirpstack.toml zu entfernen ist der zweite Schritt und
  * verlangt einen Neustart von ChirpStack.
  *
- * ## Form
+ * ## Form: ES-Modul mit benannten Exporten
  *
- * ChirpStack fuehrt die Datei als **Skript** aus (rquickjs), nicht als
- * Modul: keine export-Anweisungen, keine Klassen, keine Rust-Typen.
- * Deshalb drei einfache Funktionen. Die Felder von req und der Antwort
- * stehen in der ChirpStack-Doku "Adaptive data-rate (ADR)" und im
- * Beispiel examples/adr_plugins/plugin_skeleton.js des Projekts
- * (abgerufen 02.11.2026).
+ * **Hier stand bis zum 16.11.2026 das Gegenteil**, und dieser Satz hat
+ * am 15.11. sieben Minuten Ausfall gekostet: "ChirpStack fuehrt die
+ * Datei als Skript aus, keine export-Anweisungen". Das ist falsch.
+ *
+ * ChirpStack 4.17 deklariert die Datei als **ES-Modul**
+ * (``rquickjs::Module::declare``) und holt die drei Funktionen am
+ * Modul-Objekt (``m.get("id")``). Ohne ``export`` liefert ``m.get``
+ * ``undefined``, und der Dienst bricht beim Start ab:
+ *
+ *   Error: Get id function: JS error: Error converting from js
+ *   'undefined' into type 'function'
+ *
+ * **Das ist am 16.11.2026 in der echten Engine gemessen**, nicht
+ * gelesen: ``test_die_fassung_ohne_export_bricht_in_der_echten_engine_ab``
+ * laesst chirpstack/chirpstack:4.17.0 gegen eine Wegwerf-Datenbank
+ * laufen und erwartet genau diese Zeile. Mit ``export`` meldet dasselbe
+ * Image "Setting up ADR plugin" und laeuft weiter.
+ *
+ * Die Dateiendung bleibt ``.js`` -- ChirpStack liest den Inhalt und
+ * interessiert sich nicht fuer die Endung.
+ *
+ * Die Felder von req und der Antwort stehen in der ChirpStack-Doku
+ * "Adaptive data-rate (ADR)" und im Beispiel
+ * examples/adr_plugins/plugin_skeleton.js des Projekts (abgerufen
+ * 02.11.2026).
  */
 
 /** Anzeigename im Geraeteprofil. */
-function name() {
+export function name() {
   return "Relais 16ASPM: feste Datenrate DR1, zwei Wiederholungen";
 }
 
@@ -102,7 +121,7 @@ function name() {
  * mit unbekannter Kennung faellt auf den Standard zurueck, und zwar
  * stillschweigend.
  */
-function id() {
+export function id() {
   return "relais_fest_dr1";
 }
 
@@ -112,7 +131,7 @@ var ZIEL_DR = 1;
 /** Jeden Uplink zweimal. Gegen Einzelverluste, nicht gegen schlechten Link. */
 var WIEDERHOLUNGEN = 2;
 
-function handle(req) {
+export function handle(req) {
   // Das Geraet hat ADR nicht angefordert: nichts aendern. ChirpStack
   // ruft den Algorithmus in diesem Fall gar nicht erst auf; die
   // Pruefung steht hier, damit das Plugin auch dann nichts behauptet,

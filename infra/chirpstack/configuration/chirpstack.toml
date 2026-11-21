@@ -21,41 +21,27 @@
   net_id = "000000"
   enabled_regions = ["eu868"]
 
-  # **KEIN adr_plugins-Eintrag. Zurueckgezogen am 15.11.2026, nach einem
-  # Ausfall von sieben Minuten.**
+  # **Wieder verdrahtet am 16.11.2026**, nachdem die Form belegt ist.
   #
-  # Der Eintrag stand hier ab #406 und zeigte auf
-  # adr-plugins/relais-feste-datenrate.js. ChirpStack 4.17 hat die Datei
-  # beim Start geladen und abgebrochen:
+  # Der Eintrag stand ab #406 hier und hat ChirpStack 4.17 beim Start
+  # abbrechen lassen (``Get id function: JS error``), weil die Datei
+  # Funktionen auf oberster Ebene hatte statt benannter ES-Exporte. Von
+  # 08:53 bis 09:00 hat die Anlage nichts verarbeitet, und 54 gruene
+  # Tests hatten die falsche Umgebung geprueft (Paragraph 5.55).
   #
-  #   Setting up ADR plugin file_path=/etc/chirpstack/adr-plugins/relais-feste-datenrate.js
-  #   Error: Get id function: JS error: Error converting from js 'undefined' into type 'function'
+  # Was sich seither geaendert hat, und nur deshalb steht der Eintrag
+  # wieder hier: die Datei traegt ``export function id/name/handle``,
+  # und ein Test laesst chirpstack/chirpstack:4.17.0 -- dasselbe Image
+  # wie am Server -- gegen eine Wegwerf-Datenbank laufen. Er prueft
+  # beides: dass diese Fassung laedt, und dass die Fassung vom 15.11.
+  # ohne ``export`` mit genau der damaligen Meldung abbricht.
+  # ``infra/chirpstack/tests/test_adr_plugins.py``.
   #
-  # Danach startete der Dienst in Schleife. Von 08:53 bis 09:00 hat die
-  # Anlage **nichts verarbeitet** -- keine Uplinks, keine Downlinks. Die
-  # Datei exportiert ``id()`` nicht in der Form, die ChirpStack erwartet;
-  # welche das ist, steht noch nicht fest (Befund kommt eigens).
-  #
-  # **Was bleibt und warum.** ``installation_margin = 20.0`` in
-  # region_eu868.toml ist unberuehrt -- sie ist eine Zahl in der
-  # Regionsdatei, laedt keinen Code und war an dem Ausfall nicht
-  # beteiligt. Sie loest ohnehin die Haelfte des Problems, die die
-  # **Vickis** betrifft (056 war vierzehn Stunden stumm, weil ADR ihm die
-  # Sendeleistung genommen hatte).
-  #
-  # Die Plugin-Datei bleibt im Repo, und die Kopierzeile im Init-Sidecar
-  # bleibt auch. Beide sind ohne diesen Eintrag wirkungslos: die Datei
-  # liegt dann im Container, und niemand laedt sie. Der zweite Versuch
-  # braucht sie, und der Weg dorthin ist ein Test, der die Datei in der
-  # **Engine von ChirpStack** laedt statt unter Node (Paragraph 5.55 --
-  # die 54 bestehenden Tests sind gruen und haben die falsche Umgebung
-  # geprueft).
-  #
-  # **Was offen bleibt, wenn dieser Eintrag fehlt:** 108 haengt auf DR3,
-  # und der Standard-Algorithmus senkt die Datenrate **nie** von selbst.
-  # Der Verlust von 16 Prozent an 108 bleibt also bis zum zweiten
-  # Versuch. Das ist die bewusste Wahl -- 16 Prozent Verlust an einem
-  # Relais gegen einen Dienst, der nicht startet.
+  # Der Pfad zeigt in das Verzeichnis, das der Init-Sidecar mit
+  # ``cp -r /template/adr-plugins /output/`` in das Volume legt. Ohne
+  # diese Zeile in docker-compose.prod.yml liegt die Datei nicht im
+  # Container, und ChirpStack meldet dazu nichts Aussagekraeftiges.
+  adr_plugins = ["/etc/chirpstack/adr-plugins/relais-feste-datenrate.js"]
 
 [api]
   bind = "0.0.0.0:8080"
