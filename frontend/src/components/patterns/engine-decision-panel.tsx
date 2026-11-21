@@ -72,6 +72,12 @@ const QUELLE_LABEL: Record<string, string> = {
   raumtyp: "Raumtyp",
   global: "hausweit",
   raumtyp_vorgabe: "Raumtyp (Vorgabe)",
+  // 21.11.2026: der Wert kommt aus einem Fenster des Tagesplans und damit
+  // aus keiner `rule_config`-Ebene. Ohne eigene Marke stünde hier
+  // „Zimmer" — richtig in der Ebene und irreführend im Ort, denn
+  // einstellen lässt sich die Zahl nicht bei den Sollwerten, sondern im
+  // Abschnitt „Tagesplan".
+  tagesplan: "Tagesplan",
 };
 
 /**

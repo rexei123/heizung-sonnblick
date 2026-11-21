@@ -36,6 +36,7 @@ from heizung.models.scenario import Scenario
 from heizung.models.scenario_assignment import ScenarioAssignment
 from heizung.models.season import Season
 from heizung.models.sensor_reading import SensorReading
+from heizung.models.tagesplan import TagesplanFenster
 from heizung.models.user import User
 
 __all__ = [
@@ -67,6 +68,7 @@ __all__ = [
     "ScenarioScope",
     "Season",
     "SensorReading",
+    "TagesplanFenster",
     "User",
     "UserRole",
     "WatchdogStrategy",

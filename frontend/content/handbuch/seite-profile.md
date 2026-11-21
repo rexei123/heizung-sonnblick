@@ -1,9 +1,9 @@
 ---
 titel: Profile
 kategorie: Die Seiten
-stichworte: Profile, Heizprofil, Tagprofil, Nachtprofil, Wochenende, in Vorbereitung
+stichworte: Profile, Heizprofil, Tagprofil, Nachtprofil, Wochenende, Tagesplan, in Vorbereitung
 rollen: alle
-stand: 2026-11-07
+stand: 2026-11-21
 route: /profile
 ---
 
@@ -32,9 +32,19 @@ und vollständig bedienbar:
 - **Nutzungszeiten einzelner Räume** regelt die Betriebszeit am Zimmer —
   für Allgemeinbereiche, siehe
   [Ein Zimmer im Detail](/handbuch/seite-zimmer-detail).
+- **Mehrere Zeitfenster am Tag** regelt seit dem 21.11.2026 der
+  **Tagesplan**, ebenfalls am Zimmer und ebenfalls nur für
+  Allgemeinbereiche: je Fenster ein eigener Sollwert, alles dazwischen
+  Absenkung.
 
 ## Was fehlt
 
-Ein Wochenend-Plan und mehrere Zeitfenster pro Tag. Wer heute am
-Wochenende anders heizen will, muss das von Hand über eine
-Übersteuerung machen.
+Ein Wochenend-Plan. Wer heute am Wochenende anders heizen will, muss das
+von Hand über eine Übersteuerung machen — oder den Tagesplan für diese
+Tage ändern und danach zurückstellen.
+
+Mehrere Zeitfenster pro Tag **fehlen nicht mehr**; sie stehen am Zimmer.
+Dass sie nicht hier stehen, hat einen Grund: die Zeit gehört zum Ort. Bar
+und Rezeption haben denselben Charakter und verschiedene Zeiten, und eine
+Seite, die beides bündelt, hätte für jede Zeile wieder die Frage „für
+welchen Raum" dabei.

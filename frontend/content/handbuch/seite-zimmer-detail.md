@@ -1,9 +1,9 @@
 ---
 titel: Ein Zimmer im Detail
 kategorie: Die Seiten
-stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Temperatur ändern
+stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Tagesplan, Zeitfenster, Temperatur ändern
 rollen: alle
-stand: 2026-10-30
+stand: 2026-11-21
 route: /zimmer/[id]
 ---
 
@@ -26,9 +26,30 @@ falsch geklickt — die Grenze des Raumtyps liegt bei 24.
 ## Die sechs Tabs
 
 **Stammdaten.** Nummer, Etage, Raumtyp, Orientierung. Bei einem
-Allgemeinbereich steht hier zusätzlich die **Betriebszeit**: Beginn und
-Ende der Nutzung. „24:00" als Ende ist erlaubt und heißt Mitternacht.
-Ein halbes Fenster — nur Beginn oder nur Ende — wird abgelehnt.
+Allgemeinbereich stehen hier zusätzlich zwei Zeitangaben:
+
+Die **Betriebszeit** — Beginn und Ende der Nutzung. „24:00" als Ende ist
+erlaubt und heißt Mitternacht. Ein halbes Fenster — nur Beginn oder nur
+Ende — wird abgelehnt. Innerhalb gilt der Wert „Betrieb" des Raumtyps,
+außerhalb „Absenkung".
+
+Der **Tagesplan** — mehrere Zeitfenster am Tag, jedes mit eigenem
+Sollwert. Für einen Bereich, der morgens wärmer sein soll als mittags.
+Was kein Fenster abdeckt, ist Absenkung; der Balken unter der Tabelle
+zeigt es: gefüllt ist Fenster, schraffiert ist Absenkung.
+
+> **Steht ein Tagesplan, gilt die Betriebszeit nicht.** Sie bleibt
+> stehen und wirkt wieder, sobald der Plan gelöscht ist — das Formular
+> sagt es, solange ein Plan steht. Beides gleichzeitig wäre zweimal
+> dieselbe Frage mit zwei Antworten.
+
+Ein Fenster über Mitternacht gibt es nicht. Wer die Nacht überbrücken
+will, trägt zwei Zeilen ein: eine bis 24:00 und eine ab 00:00.
+Überschneiden dürfen sich Fenster nicht — aneinander stoßen schon: endet
+eines um 08:00, darf das nächste dort beginnen, und 08:00 gehört dann
+zum nächsten.
+
+Beides dürfen nur Administratoren speichern.
 
 **Heizzonen.** Die Heizgruppen des Zimmers, etwa Schlafzimmer und Bad.
 Jede Zone bekommt ihren eigenen Sollwert. Die Zonenart sagt, was die

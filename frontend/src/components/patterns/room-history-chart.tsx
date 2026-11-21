@@ -140,9 +140,17 @@ function Zusammenfassung({ daten }: { daten: RoomHistory }) {
     daten.bucket_minutes >= 60
       ? `Alle ${daten.bucket_minutes / 60} Stunde${daten.bucket_minutes >= 120 ? "n" : ""}`
       : `Alle ${daten.bucket_minutes} Minuten`;
+  // Mit einem Tagesplan gibt es **kein** einzelnes Fenster mehr: das
+  // Backend lässt `night_window` dann weg und schickt als Bänder die
+  // Lücken des Plans (21.11.2026, `services/room_history`). Eine Uhrzeit
+  // hier zu nennen wäre eine Zeit, nach der nicht geregelt wird; „nach
+  // Tagesplan" ist die ehrliche Auskunft, und die Bänder im Diagramm
+  // zeigen, wann.
   const nacht = daten.night_window
     ? ` · Absenkung ${daten.night_window.start.slice(0, 5)}–${daten.night_window.end.slice(0, 5)} Ortszeit`
-    : null;
+    : daten.night_bands.length > 0
+      ? " · Absenkung nach Tagesplan"
+      : null;
   return (
     <span className="text-text-tertiary">
       {takt} zusammengefasst{nacht}
