@@ -21,6 +21,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Bei Aenderung hier auch die .env.example aktualisieren.
 _DEFAULT_SECRET_KEY: Final[str] = "change-me-in-production"
 
+#: Abstand zwischen Mail-Schwelle und Entwarnung bei der
+#: Gehaeusetemperatur, in Kelvin. Mit ``relay_gehaeusetemperatur_mail``
+#: = 50 wird also unter **45** entwarnt.
+#:
+#: **Konstante und keine zweite Einstellung** (21.11.2026): die
+#: Entwarnung ist kein eigener Betriebswert, sondern der Abstand, der ein
+#: Pendeln um die Schwelle verhindert. Zieht jemand die Mail-Schwelle
+#: hoch, wandert die Entwarnung mit — eine fest eingetragene 45 waere
+#: beim ersten Nachjustieren falsch (Paragraph 5.53).
+#:
+#: **Sie steht hier und nicht im Melder**, obwohl sie dort benutzt wird:
+#: der Startup-Validator unten braucht sie, und ``config`` darf den
+#: Melder nicht importieren (er haengt an den Modellen, die an ``db``
+#: haengen, das wieder an ``config`` — ein Ring).
+GEHAEUSE_TOTBAND_K: Final[int] = 5
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -373,46 +389,53 @@ class Settings(BaseSettings):
     relay_timer_refresh_s: int = 900
     relay_refresh_intervall_s: int = 300
 
-    # Alarmschwelle fuer die **Gehaeusetemperatur** des Relais, in der
-    # Einheit des Keepalive-Bytes.
+    # **Zwei Schwellen auf derselben Zahl, mit zwei verschiedenen
+    # Aufgaben** (21.11.2026, Entscheidung des Betreibers).
     #
-    # **Bewusst konservativ: 40.** Die Datenblaetter widersprechen sich
-    # (40 gegen 60 °C als zulaessige Umgebungs-/Gehaeusetemperatur), und
-    # bei einem Geraet, das 1600 W schaltet und in einem Hohlraum sitzt,
-    # ist die niedrigere Zahl die richtige Wahl: ein Alarm zu frueh
-    # kostet einen Blick, ein Alarm zu spaet kostet ein Panel.
+    # ``relay_gehaeusetemperatur_alarm`` (40) faerbt **nur** das
+    # Kennzeichen auf der Relais-Karte (``api/v1/relays.py``). Es meldet
+    # nichts, es zeigt — und darf deshalb frueh anschlagen.
     #
-    # **Das ist nicht der Ueberhitzungsschutz des Geraets.** Der liegt
-    # nach Hersteller-Vorgabe bei 85 °C Auslösung und 70 °C Erholung
-    # (FW >= 1.4, Befehl 0x1E) und schaltet das Relais selbst ab. Diese
-    # Schwelle hier warnt **vorher**, damit niemand erst durch das
-    # Abschalten erfaehrt, dass es heiss wird.
+    # ``relay_gehaeusetemperatur_mail`` (50) loest die **Mail** aus
+    # (``services/gehaeuse_melder``). Entwarnt wird unter
+    # ``mail - GEHAEUSE_TOTBAND_K``, mit den Vorgaben also unter 45.
     #
-    # Belegt, Abschnitt „Protections" der Hersteller-Doku, abgerufen
-    # 18.11.2026: Vorgabe **ab FW 1.4** 0x55 = 85 °C Ausloesung und
-    # 0x46 = 70 °C Erholung, **bis FW 1.3** dagegen 0x5F = **95** °C
-    # Ausloesung bei derselben Erholung. Zulaessiger Bereich 30…100 °C,
-    # Aufloesung 1 °C. Beide Relais des Hauses laufen auf FW 1.5, fuer
-    # sie gilt also 85 — wer die Zahl bei einem aelteren Geraet
-    # weiterverwendet, nennt die falsche.
+    # **Warum nicht eine Zahl fuer beides.** Gemessen am 18.11.2026 am
+    # laufenden Haus: Relais „109 Panel" (``device.id`` 110) steht bei
+    # **44-45**, sobald es heizt, waehrend „108" bei gleicher Last 37
+    # meldet — 7 K Unterschied, und die Ursache liegt in Einbaulage und
+    # Klemme (der Hersteller verlangt senkrechten Einbau zur Kuehlung;
+    # der Elektriker folgt). Eine Mail ab 40 waere damit **jeden Tag**
+    # eine Mail, und ein Melder, der taeglich meldet, wird abgeschaltet
+    # statt gelesen (Paragraph 5.79). Die Anzeige bei 40 bleibt richtig:
+    # sie kostet einen Blick, keine Aufmerksamkeit.
     #
-    # **Die Einheit ist besser gestuetzt als dieser Kommentar bisher
-    # sagte** (18.11.2026): die Geraeteseite fuehrt „Internal temperature
-    # sensor — Resolution: 1°C, Accuracy: ±1°C", und die
-    # Schutz-Temperaturen stehen ausdruecklich in Grad Celsius. Nicht
-    # ausgesprochen ist die Einheit nur fuer dieses eine Keepalive-Feld.
+    # **Das ist beides nicht der Ueberhitzungsschutz des Geraets.**
+    # Belegt, Abschnitt „Protections" der Hersteller-Doku
+    # (``docs.mclimate.eu``, 16ASPM, abgerufen 18.11.2026): Vorgabe **ab
+    # FW 1.4** ``0x55`` = 85 °C Ausloesung und ``0x46`` = 70 °C
+    # Erholung, **bis FW 1.3** dagegen ``0x5F`` = **95** °C bei
+    # derselben Erholung. Einstellbar 30…100 °C, Aufloesung 1 °C
+    # (Befehl ``0x1E``). Das Geraet schaltet dort **selbst** ab, danach
+    # sperrt die Steuerung. Beide Relais des Hauses laufen auf FW 1.5,
+    # fuer sie gilt 85 — wer die Zahl bei einem aelteren Geraet
+    # weiterverwendet, nennt die falsche. Die Mail-Schwelle liegt weit
+    # darunter, weil sie **vor** dem Abschalten warnen soll.
+    #
+    # **Die Einheit** ist gestuetzt und nicht geraten: die Geraeteseite
+    # fuehrt „Internal temperature sensor — Resolution: 1°C, Accuracy:
+    # ±1°C", und alle Schutz-Temperaturen stehen ausdruecklich in Grad
+    # Celsius. Nicht ausgesprochen ist die Einheit nur fuer dieses eine
+    # Keepalive-Feld; gelesen wird sie als °C (AE-78, Pflicht-Pruefung am
+    # Geraet).
+    #
     # **Eine Obergrenze der Umgebungstemperatur nennt die Online-Doku
-    # dagegen nirgends** — die 0…40 °C stehen in der Anleitung, die
-    # unten genannten 60 °C habe ich in keiner Quelle wiedergefunden.
-    # Wer sie braucht, belegt sie neu (§5.68).
-    #
-    # **Die Einheit des Keepalive-Bytes ist nicht dokumentiert.** Dafuer
-    # spricht, dass die Doku beim Ueberhitzungs-Ereignis (0x60 Byte 2)
-    # und bei den Erholungs-Meldungen (0x72/0x73) ausdruecklich °C nennt.
-    # Die Annahme ist also gestuetzt, aber nicht belegt — sie steht als
-    # Pflicht-Pruefung am Geraet in der Inbetriebnahme-Checkliste
-    # (AE-78).
+    # nirgends.** Die Anleitung nennt 0…40 °C Betriebstemperatur; die
+    # 60 °C, die hier bis zum 18.11.2026 als zweites, widersprechendes
+    # Datenblatt standen, sind in keiner Quelle wiederzufinden
+    # (Paragraph 5.68).
     relay_gehaeusetemperatur_alarm: int = 40
+    relay_gehaeusetemperatur_mail: int = 50
 
     # Wie oft ein Relais von selbst meldet, in Sekunden.
     #
@@ -950,6 +973,39 @@ class Settings(BaseSettings):
         if self.relais_zone_stumm_min < 1:
             raise ValueError(
                 f"RELAIS_ZONE_STUMM_MIN muss mindestens 1 sein (ist: {self.relais_zone_stumm_min})."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _gehaeuse_schwellen_sind_geordnet(self) -> "Settings":
+        """Die Mail darf nicht vor der Anzeige kommen, und sie braucht Luft nach unten.
+
+        Zwei Bedingungen, beide aus der Aufgabenteilung der zwei
+        Schwellen (siehe Kommentar dort):
+
+        1. ``mail >= alarm`` — die Karte faerbt frueh und kostet einen
+           Blick, die Mail kommt spaeter und kostet Aufmerksamkeit.
+           Umgekehrt waere die Mail da, bevor die Oberflaeche ueberhaupt
+           etwas zeigt, und der Empfaenger faende nichts vor.
+        2. ``mail > GEHAEUSE_TOTBAND_K`` — sonst liegt die Entwarnung
+           bei null oder darunter und wird nie erreicht. Eine Episode,
+           die nicht enden kann, ist schlimmer als keine: der zweite
+           Alarm desselben Geraets bliebe aus.
+        """
+        if self.relay_gehaeusetemperatur_mail < self.relay_gehaeusetemperatur_alarm:
+            raise ValueError(
+                "RELAY_GEHAEUSETEMPERATUR_MAIL darf nicht unter "
+                "RELAY_GEHAEUSETEMPERATUR_ALARM liegen (ist: "
+                f"{self.relay_gehaeusetemperatur_mail} < "
+                f"{self.relay_gehaeusetemperatur_alarm}). Sonst kaeme die "
+                "Mail, bevor die Karte etwas zeigt."
+            )
+        if self.relay_gehaeusetemperatur_mail <= GEHAEUSE_TOTBAND_K:
+            raise ValueError(
+                "RELAY_GEHAEUSETEMPERATUR_MAIL muss groesser sein als das "
+                f"Totband {GEHAEUSE_TOTBAND_K} (ist: "
+                f"{self.relay_gehaeusetemperatur_mail}). Sonst liegt die "
+                "Entwarnung bei null oder darunter und wird nie erreicht."
             )
         return self
 

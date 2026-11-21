@@ -48,6 +48,7 @@ app: Celery = Celery(
         "heizung.tasks.funk_tasks",
         "heizung.tasks.platten_tasks",
         "heizung.tasks.gehaeuse_tasks",
+        "heizung.tasks.schutz_tasks",
     ],
 )
 
@@ -237,6 +238,16 @@ app.conf.update(
         "gehaeusetemperatur-im-meldetakt": {
             "task": "heizung.pruefe_gehaeusetemperatur",
             "schedule": float(_settings.relay_meldeintervall_s),
+            "options": {"queue": "heizung_default"},
+        },
+        # 21.11.2026: die Schutz-Sperren. Fuenf Minuten, und der Takt
+        # haengt hier **nicht** am Meldeintervall: entscheidend ist nicht,
+        # wie oft ein Wert kommt, sondern dass ein gesperrtes Relais
+        # heisst, dass ein Bereich nicht mehr heizt. Das soll niemand erst
+        # am naechsten Morgen erfahren.
+        "schutzsperren-every-5min": {
+            "task": "heizung.pruefe_schutzsperren",
+            "schedule": 300.0,
             "options": {"queue": "heizung_default"},
         },
     },

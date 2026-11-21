@@ -6,6 +6,12 @@ im Takt, in dem ein Relais von selbst meldet
 beschleunigen: zwischen zwei Uplinks gibt es keinen neuen Wert, und das
 Urteil braucht drei (``gehaeuse_melder.MIN_MELDUNGEN``).
 
+**Gelesen wird ``relay_gehaeusetemperatur_mail`` (50), nicht
+``..._alarm`` (40).** Das sind seit dem 21.11.2026 zwei Einstellungen mit
+zwei Aufgaben: 40 faerbt die Karte, 50 schickt die Mail. Der Grund steht
+im Kommentar der beiden Felder in ``config`` — 110 erreicht 44-45 bei
+jedem normalen Heizvorgang, eine Mail ab 40 waere ein taeglicher Alarm.
+
 **Einmal je Ereignis, und zwar wirklich einmal.** Der Alarm kommt am
 Anfang der Episode, die Entwarnung an ihrem Ende; dazwischen wiederholt
 sich nichts, auch nicht nach Stunden. Das ist die Vorgabe des Betreibers
@@ -135,7 +141,8 @@ async def _mail_und_audit(
             # nachtraeglich nicht zu sehen, **wie warm** es war, sondern
             # nur, dass es warm war (Paragraph 5.68).
             "werte": list(befund.werte),
-            "schwelle": befund.schwelle,
+            "schwelle_mail": befund.schwelle_mail,
+            "schwelle_entwarnung": befund.schwelle_entwarnung,
             "letzte_meldung": (
                 befund.letzte_meldung.isoformat() if befund.letzte_meldung else None
             ),
@@ -182,7 +189,7 @@ async def _run_gehaeuse() -> dict[str, Any]:
     async with _task_session() as session:
         befunde = await gehaeuse_melder.lies_gehaeusetemperaturen(
             session,
-            schwelle=settings.relay_gehaeusetemperatur_alarm,
+            schwelle_mail=settings.relay_gehaeusetemperatur_mail,
             frische_fenster=zustand_veraltungs_fenster(),
         )
         ergebnis["relais_geprueft"] = len(befunde)
@@ -224,10 +231,10 @@ async def _run_gehaeuse() -> dict[str, Any]:
 
             if befund.heiss:
                 logger.info(
-                    "gehaeuse_episode_laeuft device_id=%s wert=%s schwelle=%s",
+                    "gehaeuse_episode_laeuft device_id=%s wert=%s schwelle_mail=%s",
                     befund.device_id,
                     befund.wert,
-                    befund.schwelle,
+                    befund.schwelle_mail,
                 )
 
         await session.commit()

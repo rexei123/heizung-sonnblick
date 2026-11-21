@@ -2,8 +2,7 @@
 
 **Der Anlass, 18.11.2026.** Relais „109 Panel" (``device.id`` 110) stand
 unter Last bei **45** in der Einheit des Keepalive-Bytes, waehrend „108"
-(``device.id`` 109) bei nahezu gleicher Last **37** meldete. Die Schwelle
-in den Settings liegt bei 40 (``relay_gehaeusetemperatur_alarm``).
+(``device.id`` 109) bei nahezu gleicher Last **37** meldete.
 
 **Gesehen hat das der Betreiber, nicht die Steuerung.** Die Zahl stand
 auf der Geraeteseite, und dort steht sie nur, solange jemand hinsieht:
@@ -14,12 +13,14 @@ einen Verbraucher, das Kennzeichen ``gehaeusetemperatur_alarm`` auf der
 Karte (``api/v1/relays.py``). Das ist Paragraph 5.76 woertlich: die
 Mechanik war gebaut, die **Mitteilung** fehlte.
 
-Dasselbe gilt eine Stufe hoeher, und das ist der eigentliche Befund: auch
-die **Schutzausloesung** schickt keine Mail.
-``health_alerts.emit_relay_protection_alert`` schreibt einen Logeintrag,
-die Sperre sitzt daneben in ``device.protection_tripped_at`` — mehr
-nicht. Wer also nicht hinsieht, erfaehrt vom Ueberhitzen erst daran, dass
-eine Zone nicht mehr heizt.
+Dasselbe galt eine Stufe hoeher, und das war der schwerere Befund: auch
+die **Schutzausloesung** schickte keine Mail —
+``health_alerts.emit_relay_protection_alert`` schrieb einen Logeintrag,
+die Sperre sass daneben in ``device.protection_tripped_at``, und wer
+nicht hinsah, erfuhr vom Ueberhitzen daran, dass eine Zone nicht mehr
+heizt. Das ist seit dem 21.11.2026 geschlossen, aber nicht hier:
+``services/schutz_melder`` und ``tasks/schutz_tasks`` sind ein eigener
+Melder fuer einen eigenen Vorgang.
 
 Warum drei Meldungen und nicht eine
 -----------------------------------
@@ -33,12 +34,32 @@ Ein Relais meldet alle zehn Minuten (gemessen,
 Entprellung, und sie ist eine Eigenschaft der Messung und keine
 Abwaegung — deshalb eine Konstante und keine Einstellung.
 
-**Keine zweite Schwelle, kein Totband.** Entwarnt wird nach derselben
-Regel in die andere Richtung: drei Meldungen in Folge **unter** der
-Schwelle. Wer genau auf der Grenze pendelt, braucht damit drei Meldungen
-auf der anderen Seite, bevor sich etwas aendert. Ein eigener
-Entwarnungs-Wert waere eine zweite Zahl mit derselben Herleitung
-(Paragraph 5.53).
+Zwei Schwellen, und warum die erste Fassung eine zu wenig hatte
+---------------------------------------------------------------
+
+**Korrektur vom 21.11.2026, Entscheidung des Betreibers.** Hier stand
+„keine zweite Schwelle, kein Totband", und die Begruendung war formal
+richtig und praktisch falsch: gemeldet wurde ab
+``relay_gehaeusetemperatur_alarm`` (40), und **110 erreicht 44-45 bei
+jedem normalen Heizvorgang**. Dieser Melder haette also taeglich
+geschrieben — und ein Melder, der taeglich schreibt, wird abgeschaltet
+statt gelesen (Paragraph 5.79). Die Schwelle, die sich als Grenze las,
+war in Wahrheit der Normalbetrieb eines der beiden Geraete.
+
+Seither gilt:
+
+* **Mail ab** ``relay_gehaeusetemperatur_mail`` (50). Das ist die
+  einzige Zahl, die dieser Melder liest.
+* **Entwarnung unter** ``mail - config.GEHAEUSE_TOTBAND_K``, mit den
+  Vorgaben also unter 45 — gerade unterhalb des Lastwerts von 110, damit
+  die Entwarnung nicht am naechsten Heizvorgang haengen bleibt.
+* ``relay_gehaeusetemperatur_alarm`` (40) bleibt, wofuer es gebaut war:
+  das Kennzeichen auf der Karte. Es zeigt, es meldet nicht.
+
+Das **Totband** ist damit echt und nicht nur die Entprellung: wer um 50
+pendelt, braucht erst drei Meldungen unter 45, bevor entwarnt wird. Die
+Entprellung allein haette das nicht getragen — drei Meldungen bei 49
+nach drei bei 50 sind ein Alltag, kein Ereignisende.
 
 **Der Zustand wird nicht gespeichert.** Die drei Werte kommen bei jedem
 Lauf aus ``relay_reading``; einen Zaehler, der mitlaeuft, gaebe es nur,
@@ -89,6 +110,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from heizung.config import GEHAEUSE_TOTBAND_K
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind
 from heizung.models.heating_zone import HeatingZone
@@ -128,12 +150,18 @@ class GehaeuseBefund:
     #: das zweite ist der schwerere Fall.
     relay_on: bool | None
     power_w: int | None
-    #: Die Schwelle, gegen die geurteilt wurde. **Mitgefuehrt**, nicht
-    #: nachgerechnet: sie kommt aus den Settings, und ein Befund ohne sie
-    #: waere nicht lesbar (dieselbe Entscheidung wie bei ``ZonenBefund``).
-    schwelle: int
+    #: Die Schwelle, gegen die geurteilt wurde — die **Mail**-Schwelle,
+    #: nicht die der Karte. **Mitgefuehrt**, nicht nachgerechnet: sie
+    #: kommt aus den Settings, und ein Befund ohne sie waere nicht lesbar
+    #: (dieselbe Entscheidung wie bei ``ZonenBefund``).
+    schwelle_mail: int
     #: Ob die juengste Meldung im Frischefenster liegt.
     frisch: bool
+
+    @property
+    def schwelle_entwarnung(self) -> int:
+        """Unter diesem Wert wird entwarnt: Mail-Schwelle minus Totband."""
+        return self.schwelle_mail - GEHAEUSE_TOTBAND_K
 
     @property
     def wert(self) -> int | None:
@@ -147,21 +175,25 @@ class GehaeuseBefund:
 
     @property
     def heiss(self) -> bool:
-        """Ob gemeldet werden muss: alle Werte **auf oder ueber** der Schwelle."""
-        return self.vollstaendig and all(w >= self.schwelle for w in self.werte)
+        """Ob gemeldet werden muss: alle Werte **auf oder ueber** der Mail-Schwelle."""
+        return self.vollstaendig and all(w >= self.schwelle_mail for w in self.werte)
 
     @property
     def kuehl(self) -> bool:
-        """Ob entwarnt werden darf: alle Werte **unter** der Schwelle.
+        """Ob entwarnt werden darf: alle Werte **unter** der Entwarnungs-Schwelle.
 
-        **Nicht das Gegenteil von** ``heiss``. Dazwischen liegt der Fall
-        „gemischt, zu wenige Werte oder nichts Frisches", und der ist
+        **Nicht das Gegenteil von** ``heiss``, und seit dem 21.11.2026
+        aus zwei Gruenden nicht. Zwischen beiden liegt das **Totband**
+        (``schwelle_entwarnung`` bis ``schwelle_mail``) und dazu der Fall
+        „gemischt, zu wenige Werte oder nichts Frisches". Beides ist
         weder Alarm noch Entwarnung: eine laufende Episode bleibt dann
-        stehen. Ein Relais, das waehrend eines Alarms verstummt, wird
-        dadurch **nicht** entwarnt — eine Entwarnung ohne Messwert waere
-        eine Behauptung (Paragraph 5.68).
+        stehen.
+
+        Ein Relais, das waehrend eines Alarms verstummt, wird dadurch
+        **nicht** entwarnt — eine Entwarnung ohne Messwert waere eine
+        Behauptung (Paragraph 5.68).
         """
-        return self.vollstaendig and all(w < self.schwelle for w in self.werte)
+        return self.vollstaendig and all(w < self.schwelle_entwarnung for w in self.werte)
 
     @property
     def name(self) -> str:
@@ -186,7 +218,7 @@ def beurteile(  # noqa: PLR0913 — jedes Argument ist eine eigene Beobachtung
     letzte_meldung: datetime | None,
     relay_on: bool | None,
     power_w: int | None,
-    schwelle: int,
+    schwelle_mail: int,
     frische_fenster: timedelta,
     now: datetime | None = None,
 ) -> GehaeuseBefund:
@@ -211,7 +243,7 @@ def beurteile(  # noqa: PLR0913 — jedes Argument ist eine eigene Beobachtung
         alter_min=_alter_min(letzte_meldung, jetzt),
         relay_on=relay_on,
         power_w=power_w,
-        schwelle=schwelle,
+        schwelle_mail=schwelle_mail,
         frisch=frisch,
     )
 
@@ -219,7 +251,7 @@ def beurteile(  # noqa: PLR0913 — jedes Argument ist eine eigene Beobachtung
 async def lies_gehaeusetemperaturen(
     session: AsyncSession,
     *,
-    schwelle: int,
+    schwelle_mail: int,
     frische_fenster: timedelta,
     now: datetime | None = None,
 ) -> list[GehaeuseBefund]:
@@ -345,7 +377,7 @@ async def lies_gehaeusetemperaturen(
             letzte_meldung=eintrag["letzte_meldung"],
             relay_on=eintrag["relay_on"],
             power_w=eintrag["power_w"],
-            schwelle=schwelle,
+            schwelle_mail=schwelle_mail,
             frische_fenster=frische_fenster,
             now=jetzt,
         )
@@ -376,7 +408,7 @@ def _last(befund: GehaeuseBefund) -> str:
 def betreff_alarm(befund: GehaeuseBefund) -> str:
     return (
         f"Heizung Sonnblick: Relais {befund.name} wird warm "
-        f"({befund.wert} ueber Schwelle {befund.schwelle})"
+        f"({befund.wert} ueber Schwelle {befund.schwelle_mail})"
     )
 
 
@@ -389,8 +421,8 @@ def nachricht_alarm(befund: GehaeuseBefund) -> str:
     reihe = " / ".join(str(w) for w in befund.werte)
     return (
         f"Das Relais {befund.name} ({_ortsname(befund)}) meldet eine "
-        f"Gehaeusetemperatur von {befund.wert}. Die Warnschwelle ist "
-        f"{befund.schwelle}.\n\n"
+        f"Gehaeusetemperatur von {befund.wert}. Die Schwelle fuer diese "
+        f"Mail ist {befund.schwelle_mail}.\n\n"
         f"WAS DAS BEDEUTET\n"
         f"Die Hersteller-Anleitung nennt eine Betriebstemperatur von "
         f"0-40 Grad. Der eigene Ueberhitzungsschutz des Geraets loest erst "
@@ -403,7 +435,10 @@ def nachricht_alarm(befund: GehaeuseBefund) -> str:
         f"Letzte drei Meldungen (juengste zuerst): {reihe}\n"
         f"Zuletzt gemeldet: vor {befund.alter_min} Minuten\n"
         f"Zustand:          {_last(befund)}\n"
-        f"Schwelle:         {befund.schwelle}\n\n"
+        f"Mail-Schwelle:    {befund.schwelle_mail}\n"
+        f"Entwarnung unter: {befund.schwelle_entwarnung}\n"
+        f"Anzeige-Schwelle: die Karte faerbt schon frueher; sie zeigt, "
+        f"sie meldet nicht.\n\n"
         f"WAS ZU TUN IST — in dieser Reihenfolge\n"
         f"1. Auf der Geraeteseite nachsehen, ob der Wert weiter steigt.\n"
         f"2. Den Einbauort pruefen: die Dose gehoert nicht direkt neben "
@@ -430,7 +465,8 @@ def nachricht_entwarnung(befund: GehaeuseBefund) -> str:
     reihe = " / ".join(str(w) for w in befund.werte)
     return (
         f"Das Relais {befund.name} ({_ortsname(befund)}) liegt wieder "
-        f"unter der Schwelle {befund.schwelle}.\n\n"
+        f"unter {befund.schwelle_entwarnung} — gemeldet hatte es ab "
+        f"{befund.schwelle_mail}.\n\n"
         f"Letzte drei Meldungen (juengste zuerst): {reihe}\n"
         f"Zustand: {_last(befund)}\n\n"
         f"Woran es liegt, sagt diese Meldung nicht — ein kuehleres "

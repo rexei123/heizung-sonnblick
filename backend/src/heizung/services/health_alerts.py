@@ -128,8 +128,18 @@ def emit_relay_protection_alert(nutzlast: dict[str, Any]) -> None:
     Vorfall ist etwas anderes: nicht ein Geraet, das nicht mehr meldet,
     sondern eines, das **selbst abgeschaltet hat**.
 
-    Wie dort gilt: nur ein Logeintrag, kein Versand. Der Logeintrag darf
-    nie ausfallen, weil eine Mail nicht zugestellt werden konnte.
+    Wie dort gilt: **hier** nur ein Logeintrag, kein Versand. Der
+    Logeintrag darf nie ausfallen, weil eine Mail nicht zugestellt werden
+    konnte — und ``mailer.send_mail`` ist synchron, es liefe im
+    Event-Loop des Subscribers, der die Uplinks des ganzen Hauses
+    annimmt.
+
+    **Seit dem 21.11.2026 geht trotzdem eine Mail hinaus**, nur an
+    anderer Stelle: ``tasks/schutz_tasks`` liest alle fuenf Minuten die
+    **Wirkung** (``device.protection_tripped_at``) und meldet einmal je
+    Ausloesung. Dieser Satz steht hier, weil „nur ein Logeintrag" sonst
+    gelesen wird wie „niemand erfaehrt es" — und das war bis zu diesem
+    Datum richtig (Paragraph 5.77).
 
     Der Alarm ist **nicht** die Sperre. Die sitzt in
     ``device.protection_tripped_at`` und haelt die Zone aus, bis ein
