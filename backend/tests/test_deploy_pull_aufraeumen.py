@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -45,21 +46,53 @@ pytestmark = pytest.mark.skipif(
 #: liefert ``deadbeefcafe``, und das Skript schneidet sieben Zeichen ab.
 LAUFENDER_TAG = "develop-deadbee"
 
+
+def _vor(tagen: int) -> str:
+    """Ein Erstellungsdatum, ``tagen`` Tage alt, in der Form von ``docker images``.
+
+    **Relativ und nicht als festes Datum** (Korrektur vom 21.11.2026).
+    Hier standen die Daten, mit denen diese Datei am 14.11.2026
+    geschrieben wurde — ``develop-aaaaaaa`` trug den 13.11. und war
+    damals „gestern". Am 21.11. ist derselbe Wert **acht Tage** alt, das
+    Skript loescht ihn, und ``test_alte_tags_werden_geloescht`` ist rot
+    geworden, ohne dass jemand eine Zeile geaendert hatte.
+
+    Das ist Paragraph 5.59 in seiner zweiten Richtung: absolute
+    Zeitwerte bei **laufender** Uhr. Und die laufende Uhr ist hier nicht
+    zu umgehen — die Grenze entsteht im Skript selbst
+    (``date -d "$AUFRAEUM_TAGE days ago"``, ``deploy-pull.sh``), in einem
+    eigenen Prozess. Ein eingefrorener Python-Zeitpunkt wuerde sie nicht
+    erreichen. Beide Seiten muessen also **dieselbe echte Uhr** lesen,
+    und deshalb sagt der Test Alter statt Datum.
+
+    Die Probe dazu: die Systemzeit um ein Jahr vorstellen und die Datei
+    noch einmal laufen lassen. Bleibt sie gruen, haengt sie nicht am
+    Kalender.
+    """
+    tag = (date.today() - timedelta(days=tagen)).isoformat()
+    return f"{tag} 06:00:00 +0100 CET"
+
+
 #: Zwei alte Tags (vor der Grenze) und ein junger. Das Datum steht vorn,
 #: wie ``docker images --format '{{.CreatedAt}}'`` es liefert.
+#:
+#: Das Wesentliche sind die **Abstaende** zur Grenze (sieben Tage): einer
+#: liegt einen Tag darunter, die alten liegen weit darueber. Ein Wert
+#: genau auf der Grenze wuerde pruefen, wie das ``<`` im Skript rundet,
+#: und nicht, was das Aufraeumen tut.
 IMAGES_API = [
-    f"ghcr.io/rexei123/heizung-api:{LAUFENDER_TAG}|2026-11-14 06:00:00 +0100 CET",
-    "ghcr.io/rexei123/heizung-api:develop-aaaaaaa|2026-11-13 06:00:00 +0100 CET",
-    "ghcr.io/rexei123/heizung-api:develop-bbbbbbb|2026-10-01 06:00:00 +0100 CET",
-    "ghcr.io/rexei123/heizung-api:develop-ccccccc|2026-09-15 06:00:00 +0100 CET",
+    f"ghcr.io/rexei123/heizung-api:{LAUFENDER_TAG}|{_vor(0)}",
+    f"ghcr.io/rexei123/heizung-api:develop-aaaaaaa|{_vor(1)}",
+    f"ghcr.io/rexei123/heizung-api:develop-bbbbbbb|{_vor(45)}",
+    f"ghcr.io/rexei123/heizung-api:develop-ccccccc|{_vor(60)}",
     # Alt, laeuft nicht, ist nicht gepinnt: der Tag, an dem sich zeigt,
     # dass ueberhaupt geloescht wird. Ohne ihn waere der Pin-Test auch
     # mit einer leeren Loeschliste zufrieden (Paragraph 5.55).
-    "ghcr.io/rexei123/heizung-api:develop-ddddddd|2026-08-01 06:00:00 +0100 CET",
+    f"ghcr.io/rexei123/heizung-api:develop-ddddddd|{_vor(90)}",
 ]
 IMAGES_WEB = [
-    f"ghcr.io/rexei123/heizung-web:{LAUFENDER_TAG}|2026-11-14 06:00:00 +0100 CET",
-    "ghcr.io/rexei123/heizung-web:develop-bbbbbbb|2026-10-01 06:00:00 +0100 CET",
+    f"ghcr.io/rexei123/heizung-web:{LAUFENDER_TAG}|{_vor(0)}",
+    f"ghcr.io/rexei123/heizung-web:develop-bbbbbbb|{_vor(45)}",
 ]
 
 #: Was laeuft.
