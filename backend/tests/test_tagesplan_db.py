@@ -1031,8 +1031,17 @@ async def test_ein_plan_ohne_luecke_senkt_nie_ab(db_session: AsyncSession) -> No
 
 
 async def test_ein_plan_hindert_den_verlauf_am_band(db_session: AsyncSession) -> None:
-    """Gegenprobe zum vorigen Test, in der Anzeige."""
+    """Gegenprobe zum vorigen Test, in der Anzeige.
+
+    **Die Betriebszeit steht hier ausdruecklich**, und zwar eine, die ein
+    Band erzeugen wuerde (15:00-24:00, also Absenkung von 00:00 bis
+    15:00). Ohne sie waere der Test auch gruen, wenn der Verlauf den Plan
+    gar nicht liest — dann faende er einfach kein Nachtfenster. Eine
+    leere Erwartung, die aus zwei Gruenden erfuellt sein kann, prueft den
+    falschen (Paragraph 5.55).
+    """
     room_id = await _bereich(db_session)
+    await _betriebszeit(db_session, room_id, von="15:00", bis="24:00")
     await _plan(db_session, room_id, ("00:00", "12:00", MORGENS), ("12:00", "24:00", TAGS))
     room = await db_session.get(Room, room_id)
     assert room is not None
