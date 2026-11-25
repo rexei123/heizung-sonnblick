@@ -32,7 +32,7 @@ import inspect
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -59,8 +59,9 @@ from heizung.auth.dependencies import require_admin
 from heizung.db import get_session
 from heizung.main import app
 from heizung.models.business_audit import BusinessAudit
-from heizung.models.enums import HeatingZoneKind
+from heizung.models.enums import HeatingZoneKind, OverrideSource
 from heizung.models.heating_zone import HeatingZone
+from heizung.models.manual_override import ManualOverride
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.tagesplan import TagesplanFenster
@@ -85,6 +86,18 @@ TAGS = 22
 #: Ein Tag in der Winterzeit (CET, UTC+1). Die Umstellung 2026 liegt am
 #: 25.10. und am 29.03.; dieser Tag liegt sicher dazwischen.
 TAG = "2026-11-10"
+
+#: Mitternacht dieses Tages, als Zeitpunkt. **Jede Frist in dieser Datei
+#: haengt hieran und nicht an ``datetime.now()``.**
+#:
+#: Der Grund ist ein roter Test vom 25.11.2026: die Uebersteuerung bekam
+#: ihre Frist aus der echten Uhr (damals der 25.11.), beurteilt wurde sie
+#: aber unter ``freeze_time`` am 10.11. — eine Frist zwei Wochen in der
+#: **Zukunft**, die auch nach dem „Vorziehen" noch lief. Der Test, der den
+#: Ablauf pruefen sollte, hat nie einen gesehen. Das ist §5.82: eine halb
+#: gefaelschte Zeitquelle ist schlimmer als keine. Wer eine Frist gegen
+#: eine eingefrorene Uhr prueft, rechnet sie aus **derselben** Uhr.
+TAG_BEGINN = datetime.fromisoformat(f"{TAG}T00:00:00+01:00")
 
 
 @pytest_asyncio.fixture(scope="module", autouse=True)
@@ -535,6 +548,170 @@ async def test_die_uebersprungene_stunde_verschiebt_das_fenster_nicht(
 
     assert ergebnis is not None
     assert ergebnis.setpoint_c == MORGENS
+
+
+# ---------------------------------------------------------------------------
+# Naht 2c: die Uebersteuerung
+# ---------------------------------------------------------------------------
+#
+# **Nachgezogen am 25.11.2026 auf Nachfrage des Betreibers.** Der Auftrag
+# nannte „Uebersteuerung schlaegt Tagesplan wie bisher" als Punkt, und
+# #421 sogar ausdruecklich als „zu pruefen beim Bauen": dass eine
+# Uebersteuerung den Plan nicht **dauerhaft** gewinnt — derselbe Fehler,
+# den #414 im Relais-Pfad behoben hat, nur in der anderen Richtung.
+#
+# Gebaut war die Reihenfolge richtig (Schicht 3 kommt nach Schicht 2, und
+# daran hat dieser PR nichts angefasst), geprueft war sie fuer den Plan
+# **nicht**. Eine Reihenfolge, die nur deshalb haelt, weil niemand sie
+# umgestellt hat, ist eine Annahme und kein Befund.
+
+
+async def _zone_id(session: AsyncSession, room_id: int) -> int:
+    zone = (
+        await session.execute(select(HeatingZone.id).where(HeatingZone.room_id == room_id))
+    ).scalar_one()
+    return int(zone)
+
+
+async def _uebersteuerung(
+    session: AsyncSession,
+    room_id: int,
+    *,
+    wert: int,
+    zone_id: int | None = None,
+    laeuft_bis: datetime | None = None,
+) -> int:
+    """Eine laufende Uebersteuerung, wie die Rezeption sie anlegt.
+
+    ``frontend_bereich`` mit Frist — die Quelle, die ein Allgemeinbereich
+    ueberhaupt annimmt (Sprint 24d, S6). Angelegt wird sie hier direkt in
+    der Sitzung und nicht ueber den Endpunkt: geprueft wird die **Engine**,
+    und der Weg durch die API hat seine eigenen Tests
+    (``test_api_allgemeinbereiche``).
+
+    Die Frist liegt ohne Angabe am **Ende des eingefrorenen Tages** und
+    deckt damit jede Uhrzeit, die hier geprueft wird. Warum nicht
+    ``datetime.now()``: siehe ``TAG_BEGINN``.
+    """
+    eintrag = ManualOverride(
+        room_id=room_id,
+        heating_zone_id=zone_id,
+        setpoint=Decimal(wert),
+        source=OverrideSource.FRONTEND_BEREICH,
+        expires_at=laeuft_bis if laeuft_bis is not None else TAG_BEGINN + timedelta(days=1),
+    )
+    session.add(eintrag)
+    await session.flush()
+    return eintrag.id
+
+
+async def test_eine_uebersteuerung_schlaegt_das_fenster(db_session: AsyncSession) -> None:
+    """**Schicht 3 schlaegt Schicht 2** — auch wenn Schicht 2 ein Fenster ist.
+
+    Um 07:00 gilt das Fenster mit 25 °C. Eine laufende Uebersteuerung auf
+    19 °C gewinnt trotzdem: wer die Bar auf 19 stellt, will 19, auch wenn
+    der Plan 25 sagt.
+
+    Geprueft wird **beides** — der Sollwert und der Trace. Dass Schicht 2
+    weiterhin das Fenster liefert, ist der Teil, der den Plan nach dem
+    Ablauf wieder wirksam macht; eine Schicht 2, die bei laufender
+    Uebersteuerung nichts mehr tut, waere nach dem Ablauf stumm.
+    """
+    room_id = await _bereich(db_session)
+    await _plan(db_session, room_id, ("06:00", "08:00", MORGENS))
+    await _uebersteuerung(db_session, room_id, wert=19)
+
+    with freeze_time(f"{TAG}T07:00:00+01:00"):
+        ergebnis = await evaluate_room(db_session, room_id)
+
+    assert ergebnis is not None
+    assert ergebnis.setpoint_c == 19, "die Uebersteuerung gilt"
+    schritt = _temporal(ergebnis)
+    assert schritt.setpoint_c == MORGENS, (  # type: ignore[attr-defined]
+        "Schicht 2 liefert weiter das Fenster — sie wird nur ueberstimmt"
+    )
+    manuell = next(s for s in ergebnis.layers if s.layer.value == "manual_override")
+    assert manuell.setpoint_c == 19
+
+
+async def test_nach_dem_ablauf_gilt_wieder_das_fenster(db_session: AsyncSession) -> None:
+    """**Der Punkt aus #421: der Plan darf nicht dauerhaft verlieren.**
+
+    Setzen → 19. Ablauf → wieder 25, aus dem Fenster. Der Ablauf wird
+    **vorgezogen** statt abgewartet: zwei Stunden Wartezeit in einem Test
+    waeren keine Pruefung, sondern eine Zeitreise mit Risiko (§5.59).
+
+    **Beide Uhren muessen dieselbe sein.** Beim ersten Lauf stand hier
+    ``datetime.now() - 1 min``, also der 25.11.2026 — beurteilt wird aber
+    unter ``freeze_time`` am 10.11., und damit lag die „vorgezogene" Frist
+    zwei Wochen in der Zukunft. Der Test war rot und hatte recht: so haette
+    er nie einen Ablauf gesehen (§5.82). Die Frist kommt deshalb aus
+    ``TAG_BEGINN``, derselben Uhr, gegen die die Engine vergleicht.
+    """
+    room_id = await _bereich(db_session)
+    await _plan(db_session, room_id, ("06:00", "08:00", MORGENS))
+    override_id = await _uebersteuerung(db_session, room_id, wert=19)
+
+    with freeze_time(f"{TAG}T07:00:00+01:00"):
+        waehrend = await evaluate_room(db_session, room_id)
+    assert waehrend is not None
+    assert waehrend.setpoint_c == 19
+
+    eintrag = await db_session.get(ManualOverride, override_id)
+    assert eintrag is not None
+    # 06:00 Ortszeit — eine Stunde vor dem Zeitpunkt, der beurteilt wird.
+    eintrag.expires_at = TAG_BEGINN + timedelta(hours=6)
+    await db_session.flush()
+
+    with freeze_time(f"{TAG}T07:00:00+01:00"):
+        danach = await evaluate_room(db_session, room_id)
+
+    assert danach is not None
+    assert danach.setpoint_c == MORGENS, "nach dem Ablauf gilt wieder das Fenster"
+    assert danach.zone_overrides == {}
+
+
+async def test_eine_zonen_uebersteuerung_laesst_das_zimmer_beim_fenster(
+    db_session: AsyncSession,
+) -> None:
+    """Eine **Zonen**-Uebersteuerung wirkt nur auf ihre Zone (AE-58 Option G).
+
+    Der Zimmerwert bleibt der des Fensters, der Zonenwert steht in
+    ``zone_overrides``. Das ist der Fall, den die Oberflaeche anlegt, und
+    der Dispatch liest ihn je Geraet — faellt er auf den Zimmerwert
+    zusammen, heizt die ganze Bar auf den Wunsch fuer eine Ecke.
+    """
+    room_id = await _bereich(db_session)
+    zone_id = await _zone_id(db_session, room_id)
+    await _plan(db_session, room_id, ("06:00", "08:00", MORGENS))
+    await _uebersteuerung(db_session, room_id, wert=19, zone_id=zone_id)
+
+    with freeze_time(f"{TAG}T07:00:00+01:00"):
+        ergebnis = await evaluate_room(db_session, room_id)
+
+    assert ergebnis is not None
+    assert ergebnis.zone_overrides.get(zone_id) == 19
+    assert ergebnis.setpoint_c == MORGENS, "das Zimmer folgt weiter dem Fenster, nur die Zone nicht"
+
+
+async def test_die_uebersteuerung_schlaegt_auch_die_luecke(db_session: AsyncSession) -> None:
+    """Die Gegenprobe in der Luecke: 12:00, Absenkung 17 → Uebersteuerung 22.
+
+    Ohne diese Haelfte waere der Test auch gruen, wenn die Uebersteuerung
+    nur gegen **hoehere** Werte gewinnt. Sie gewinnt gegen beide Zweige
+    der Schicht 2, und das ist der Punkt.
+    """
+    room_id = await _bereich(db_session)
+    await _plan(db_session, room_id, ("06:00", "08:00", MORGENS))
+    await _uebersteuerung(db_session, room_id, wert=22)
+
+    with freeze_time(f"{TAG}T12:00:00+01:00"):
+        ergebnis = await evaluate_room(db_session, room_id)
+
+    assert ergebnis is not None
+    assert ergebnis.setpoint_c == 22
+    schritt = _temporal(ergebnis)
+    assert schritt.setpoint_c == ABSENKUNG  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

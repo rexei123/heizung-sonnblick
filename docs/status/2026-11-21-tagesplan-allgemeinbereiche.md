@@ -153,6 +153,8 @@ Zehn, jede einzeln gesetzt und zurückgenommen:
 | 8 | Der Verlauf zeichnet weiter die Betriebszeit | 4 |
 | 9 | Die Schranke gegen Gästezimmer entfernt | 1 |
 | 10 | Die Zod-Prüfung im Formular abgeschaltet | 3 (Playwright) |
+| 11 | Schicht 3 setzt den Wert der Übersteuerung nicht durch | 4 |
+| 12 | Eine abgelaufene Übersteuerung wirkt weiter | 1 |
 
 **Probe 8 hat einen schwachen Test gefunden.** Beim ersten Lauf blieb
 `test_ein_plan_hindert_den_verlauf_am_band` grün: das Zimmer hatte keine
@@ -162,9 +164,46 @@ Gründen erfüllt sein kann, prüft den falschen (§5.55). Der Test setzt
 jetzt ausdrücklich eine Betriebszeit, die ein Band erzeugen **würde** —
 danach ist er rot.
 
+## Nachgezogen am 25.11.2026: die Übersteuerung
+
+Der Betreiber hat vor dem Merge drei Punkte zur Bestätigung verlangt. Zwei
+waren geprüft, **einer nicht**:
+
+| Frage | Stand vor dem 25.11. |
+|---|---|
+| Übersteuerung schlägt Tagesplan | **kein Test** |
+| Sommer-/Winterzeitwechsel | drei Tests (`test_das_fenster_ist_wanduhrzeit` mit vier Tagen, `test_die_uebersprungene_stunde_verschiebt_das_fenster_nicht`, `test_die_baender_folgen_der_sommerzeit`) |
+| Mitternacht | abgelehnt, mit Meldung im Formular |
+
+Die **Reihenfolge** war richtig gebaut — Schicht 3 kommt nach Schicht 2,
+und dieser PR hat daran nichts angefasst. Geprüft war sie für den Plan
+nicht. #421 nennt genau das als „zu prüfen beim Bauen": dass eine
+Übersteuerung den Plan nicht **dauerhaft** gewinnt, derselbe Fehler, den
+#414 im Relais-Pfad behoben hat, nur in der anderen Richtung. Eine
+Reihenfolge, die nur deshalb hält, weil niemand sie umgestellt hat, ist
+eine Annahme und kein Befund.
+
+Vier Tests nachgezogen (`test_tagesplan_db.py`, Abschnitt „Naht 2c"):
+
+* `test_eine_uebersteuerung_schlaegt_das_fenster` — 19 statt 25, und
+  Schicht 2 liefert weiter das Fenster (sie wird nur überstimmt).
+* `test_nach_dem_ablauf_gilt_wieder_das_fenster` — der Punkt aus #421.
+* `test_eine_zonen_uebersteuerung_laesst_das_zimmer_beim_fenster` — die
+  Zone weicht ab, das Zimmer folgt dem Plan (AE-58 Option G).
+* `test_die_uebersteuerung_schlaegt_auch_die_luecke` — die Gegenprobe
+  nach unten; ohne sie wäre der Test auch grün, wenn die Übersteuerung
+  nur gegen höhere Werte gewinnt.
+
+**Und ein §5.82 in eigener Sache.** Der Ablauf-Test war beim ersten Lauf
+rot, zu Recht: die Frist kam aus `datetime.now()` (dem 25.11.), beurteilt
+wird aber unter `freeze_time` am 10.11. Die „vorgezogene" Frist lag damit
+zwei Wochen in der **Zukunft** — der Test hätte nie einen Ablauf gesehen.
+Jede Frist in der Datei hängt seither an `TAG_BEGINN`, derselben Uhr, gegen
+die die Engine vergleicht.
+
 ## Zahlen
 
-* **2320 Tests** lokal grün (vorher 2201), 60 übersprungen.
+* **2324 Tests** lokal grün (vorher 2201), 60 übersprungen.
 * **438 Playwright-Tests** grün, davon 15 neu.
 * `ruff check`, `ruff format --check`, `mypy src` ohne Befund.
 * Migration lokal gegen `timescale/timescaledb:latest-pg16` gefahren —
