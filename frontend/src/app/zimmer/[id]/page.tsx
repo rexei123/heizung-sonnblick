@@ -13,6 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { BetriebszeitForm } from "@/components/patterns/betriebszeit-form";
+import { TagesplanForm } from "@/components/patterns/tagesplan-form";
 import { EngineDecisionPanel } from "@/components/patterns/engine-decision-panel";
 import { HardwareStatusBadge } from "@/components/patterns/hardware-status-badge";
 import { HeatingZoneList } from "@/components/patterns/heating-zone-list";
@@ -295,6 +296,14 @@ export default function ZimmerDetailPage() {
               {istBereich ? (
                 <BetriebszeitForm key={room.data.id} room={room.data} />
               ) : null}
+              {/* Der Tagesplan (21.11.2026) steht **unter** der
+                  Betriebszeit und nicht an ihrer Stelle: ohne Fenster gilt
+                  die Betriebszeit weiter, mit Fenstern gilt der Plan. Die
+                  Reihenfolge erzählt diese Staffelung — und beide
+                  Formulare sagen sie ausdrücklich, weil ein Feld, dessen
+                  Zahl gerade nicht wirkt, sonst wie eine Einstellung
+                  aussieht (§5.77). */}
+              {istBereich ? <TagesplanForm key={room.data.id} roomId={room.data.id} /> : null}
               {/* Sprint 14e T5b: Inline-Edit room_type mit Confirm + Audit
                   (Engine-Wirkungs-Warnung, R5-Gating). Steht vor dem Form,
                   weil room_type heizverhalten-relevant ist. RoomForm

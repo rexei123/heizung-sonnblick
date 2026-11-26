@@ -8019,6 +8019,62 @@ Pilot nie (10 °C), mit ihr bekommt das Gerät keine Sollwerte mehr — und
 dann wäre ein drehbares Rad ohne Sperre eine Einladung zu einer
 Verstellung, die niemand umsetzt.
 
+### Schritt 6c — Tagesplan, wenn eine Zeit nicht reicht (21.11.2026)
+
+**Wann statt 6b.** Die Betriebszeit ist **ein** Fenster mit **einem**
+Wert. Soll ein Bereich zu verschiedenen Zeiten verschieden warm sein —
+morgens zum Fruehstueck waermer als ueber den Tag —, ist das ein
+**Tagesplan**: beliebig viele Fenster am Tag, je Fenster ein eigener
+Sollwert, alles dazwischen Absenkung.
+
+Je Zimmer: **Zimmerseite → Reiter Stammdaten → Tagesplan**. Eine Zeile je
+Fenster (von, bis, Soll °C), darunter ein Balken fuer den ganzen Tag —
+gefuellt ist Fenster, schraffiert ist Absenkung.
+
+| von | bis | Soll | gemeint |
+|---|---|---|---|
+| `06:00` | `08:00` | 25 | Fruehstueck |
+| `08:00` | `21:00` | 22 | Tagbetrieb |
+| — | — | Absenkung des Raumtyps | 21:00 bis 06:00 |
+
+> **Steht ein Tagesplan, wirkt die Betriebszeit dieses Zimmers NICHT.**
+> Sie bleibt eingetragen und gilt wieder, sobald der Plan geloescht ist
+> (leere Liste speichern). Das Betriebszeit-Formular sagt es, solange ein
+> Plan steht — ohne diesen Satz stuenden dort zwei Uhrzeiten ohne
+> Wirkung. **Nicht beide pflegen**: zwei Zeitplaene uebereinander waeren
+> zwei Antworten auf eine Frage, und welche gewinnt, koennte niemand
+> sehen.
+
+**Die Regeln der Eingabe**, alle drei abgewiesen statt stillschweigend
+zurechtgebogen:
+
+* **Kein Fenster ueber Mitternacht.** 23:00-01:00 wird abgelehnt; dafuer
+  zwei Zeilen, `23:00`-`24:00` und `00:00`-`01:00`. `24:00` ist wie bei
+  der Betriebszeit erlaubt und heisst Mitternacht.
+* **Keine Ueberschneidung.** Aneinander **stossen** duerfen die Fenster:
+  endet eines um `08:00`, darf das naechste dort beginnen, und `08:00`
+  gehoert dann zum naechsten. Geprueft wird dreifach — im Formular (beim
+  Tippen), im Endpunkt (bei der Anfrage) und als `EXCLUDE`-Bedingung in
+  der Datenbank (bei zwei Admins gleichzeitig).
+* **Sollwert 10 bis 30 °C**, die Grenzen der Vicki. Die Kappung in
+  Schicht 5 biegt ohnehin zurecht; eine Zahl zu speichern, die nie
+  ankommt, waere ein Feld ohne Wirkung.
+
+**Pruefen, nicht glauben:** nach dem Speichern den Schicht-Trace des
+Zimmers oeffnen. Schicht 2 nennt dann **das Fenster** (`tagesplan_fenster:
+id=… fenster=[06:00,08:00)`) und als Herkunft „Tagesplan"; in einer
+Luecke steht `tagesplan_luecke` und als Grund „Absenkung". Zur Grenze hin
+pruefen — eine Minute vor und eine nach `08:00`.
+
+**Im Verlauf** zeichnet das Diagramm die Luecken des Plans als
+Absenk-Band und schreibt „Absenkung nach Tagesplan" in die Unterschrift.
+Steht dort weiter eine einzelne Uhrzeit, ist der Plan nicht angekommen.
+
+**Nur Administratoren.** `PUT /api/v1/rooms/{id}/tagesplan`, mit
+Audit-Eintrag `ROOM_DAY_PLAN_SET` (alter und neuer Stand, in Uhrzeiten).
+Ein **Gaestezimmer** weist der Endpunkt mit 422 ab: dort bestimmt die
+Belegung und das Rad an der Wand, nicht die Uhr.
+
 ### Schritt 7 — erst jetzt: Relais mit Last
 
 Reihenfolge: Last anschließen → **Provisionieren** (die Einstellungen
