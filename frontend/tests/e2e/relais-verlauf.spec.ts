@@ -45,7 +45,11 @@ const DEVICE = {
     id: 9,
     name: "Eingang",
     health_state: "healthy",
-    room: { id: 3, number: "Rezeption", room_type: { id: 5, name: "Raum intern" } },
+    room: {
+      id: 3,
+      number: "Rezeption",
+      room_type: { id: 5, name: "Raum intern" },
+    },
   },
   active_override: null,
   latest_reading: null,
@@ -79,7 +83,12 @@ const STAND = {
   offener_befehl: null,
 };
 
-function stunde(t: string, ein: number | null, ist: string | null, soll: string | null) {
+function stunde(
+  t: string,
+  ein: number | null,
+  ist: string | null,
+  soll: string | null,
+) {
   return {
     t,
     ein_prozent: ein,
@@ -125,6 +134,15 @@ const VERLAUF = {
       ist_min: "20.0",
       ist_max: "21.5",
       soll_mittel: "23.0",
+      // **Als String**, nicht als Zahl: genau so kommt ein `Decimal`
+      // ohne `field_serializer` aus dem Backend, und daran ist am
+      // 18.11.2026 die Relais-Karte verschwunden (§5.93). Der Spiegel
+      // nimmt beides an; dass er es tut, steht hier und nicht nur im
+      // Backend-Test.
+      gehaeuse_max: 45,
+      gehaeuse_mittel: "37.5",
+      gehaeuse_max_ein: 44,
+      gehaeuse_mittel_ein: "41.0",
     },
   ],
   ein_minuten_gesamt: 155,
@@ -180,7 +198,9 @@ async function mock(page: Page, verlauf: unknown): Promise<string[]> {
       window_minutes: 30,
     }),
   );
-  await page.route("**/api/v1/devices/77/sensor-readings*", (r: Route) => json(r, []));
+  await page.route("**/api/v1/devices/77/sensor-readings*", (r: Route) =>
+    json(r, []),
+  );
   await page.route("**/api/v1/devices/77", (r: Route) => {
     if (r.request().method() !== "GET") return r.fallback();
     return json(r, DEVICE);
@@ -202,9 +222,13 @@ test.describe("Relais-Verlauf", () => {
     await expect(abschnitt).toBeVisible();
 
     // Heizdauer als Stunden und Minuten — 155 Minuten sind 2 h 35 min.
-    await expect(page.getByTestId("relay-history-heizdauer")).toContainText("2 h 35 min");
+    await expect(page.getByTestId("relay-history-heizdauer")).toContainText(
+      "2 h 35 min",
+    );
     // kWh mit einer Stelle, nicht 4030 Wh.
-    await expect(page.getByTestId("relay-history-energie")).toContainText("4.0 kWh");
+    await expect(page.getByTestId("relay-history-energie")).toContainText(
+      "4.0 kWh",
+    );
     await expect(abschnitt).toContainText("86 %");
     // Wofuer die Zahlen gelten: die Zone, nicht das Geraet.
     await expect(abschnitt).toContainText("Eingang");
@@ -216,7 +240,9 @@ test.describe("Relais-Verlauf", () => {
     // `svg[role=application]` und nicht `svg`: die Legende bringt drei
     // eigene kleine SVGs mit, und ein nackter `svg`-Treffer wären vier.
     await expect(
-      page.getByTestId("relay-history-chart").locator("svg[role='application']"),
+      page
+        .getByTestId("relay-history-chart")
+        .locator("svg[role='application']"),
     ).toBeVisible();
 
     const tabelle = page.getByTestId("relay-history-tabelle");
@@ -226,7 +252,61 @@ test.describe("Relais-Verlauf", () => {
     await expect(tabelle).toContainText("23.0 °C");
   });
 
-  test("ohne Rücksprung steht die Herkunft, mit Rücksprung die Warnung", async ({ page }) => {
+  test("die Gehäusetemperatur steht zweimal da — gesamt und nur eingeschaltet", async ({
+    page,
+  }) => {
+    await mock(page, VERLAUF);
+    await page.goto("/devices/77");
+
+    // Mittel und in Klammern der größte Wert — und **ohne** Einheit: der
+    // Wert ist ein Rohwert, der Hersteller nennt keine (AE-78).
+    await expect(
+      page.getByTestId("relay-history-gehaeuse-2026-11-16"),
+    ).toHaveText("37.5 (45)");
+    await expect(
+      page.getByTestId("relay-history-gehaeuse-ein-2026-11-16"),
+    ).toHaveText("41.0 (44)");
+
+    const tabelle = page.getByTestId("relay-history-tabelle");
+    await expect(tabelle).toContainText("Gehäuse Ø (max)");
+    await expect(tabelle).toContainText("Gehäuse ein Ø (max)");
+    // Kein „°C" an der Gehäusezahl — sonst steht eine Einheit da, die
+    // niemand geprüft hat.
+    await expect(
+      page.getByTestId("relay-history-gehaeuse-2026-11-16"),
+    ).not.toContainText("°C");
+  });
+
+  test("ein Tag ohne Gehäusewert zeigt einen Strich und keine Null", async ({
+    page,
+  }) => {
+    await mock(page, {
+      ...VERLAUF,
+      tage: [
+        {
+          ...VERLAUF.tage[0],
+          gehaeuse_max: null,
+          gehaeuse_mittel: null,
+          gehaeuse_max_ein: null,
+          gehaeuse_mittel_ein: null,
+        },
+      ],
+    });
+    await page.goto("/devices/77");
+
+    // Eine 0 wäre eine Aussage über ein Gehäuse, von dem nichts
+    // gemeldet wurde — dieselbe Regel wie beim Einschaltanteil.
+    await expect(
+      page.getByTestId("relay-history-gehaeuse-2026-11-16"),
+    ).toHaveText("–");
+    await expect(
+      page.getByTestId("relay-history-gehaeuse-ein-2026-11-16"),
+    ).toHaveText("–");
+  });
+
+  test("ohne Rücksprung steht die Herkunft, mit Rücksprung die Warnung", async ({
+    page,
+  }) => {
     await mock(page, VERLAUF);
     await page.goto("/devices/77");
     await expect(page.getByTestId("relay-history-energie")).toContainText(
@@ -247,7 +327,9 @@ test.describe("Relais-Verlauf", () => {
     );
   });
 
-  test("der Zeitraum-Umschalter holt neu und zieht die CSV mit", async ({ page }) => {
+  test("der Zeitraum-Umschalter holt neu und zieht die CSV mit", async ({
+    page,
+  }) => {
     const gesehen = await mock(page, VERLAUF);
     await page.goto("/devices/77");
     await expect(page.getByTestId("relay-history")).toBeVisible();
@@ -276,7 +358,9 @@ test.describe("Relais-Verlauf", () => {
     expect(gesehen).toContain("30d");
   });
 
-  test("ein leerer Zeitraum sagt „keine Meldungen“ und nicht 0 Prozent", async ({ page }) => {
+  test("ein leerer Zeitraum sagt „keine Meldungen“ und nicht 0 Prozent", async ({
+    page,
+  }) => {
     await mock(page, LEER);
     await page.goto("/devices/77");
 
@@ -306,7 +390,11 @@ test.describe("Relais-Verlauf", () => {
     await expect(page.getByTestId("paketverlust-karte")).toBeVisible();
 
     // Und der Abschnitt, der aus der falschen Tabelle gelesen hätte.
-    await expect(page.getByText("Verlauf der letzten 24 Stunden")).toHaveCount(0);
-    await expect(page.getByText("Noch keine Messwerte für dieses Gerät")).toHaveCount(0);
+    await expect(page.getByText("Verlauf der letzten 24 Stunden")).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByText("Noch keine Messwerte für dieses Gerät"),
+    ).toHaveCount(0);
   });
 });

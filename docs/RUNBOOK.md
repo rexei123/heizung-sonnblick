@@ -3339,17 +3339,11 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 | **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
 | **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
-
-> **Diese Tabelle ist älter als zwei weitere Melder.** Nicht aufgeführt
-> sind der **Zonen-Melder** (Fühler einer Relais-Zone schweigt länger als
-> `RELAIS_ZONE_STUMM_MIN`, Vorgabe 30 min —
-> `docs/status/2026-11-13-warnung-fuehler-relais-zone.md`) und der
-> **Platten-Wächter** (Platte voller als `PLATTE_WARN_PROZENT`, Vorgabe
-> 85 % — `docs/status/2026-11-14-platten-warnung-und-aufraeumen.md`).
-> Beide verschicken Mail an
-> dieselbe Adresse. Die Zeilen nachzutragen ist ein eigener Doku-PR;
-> hier steht der Hinweis, damit die Tabelle nicht als vollständig
-> gelesen wird (§5.77).
+| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt. Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
+| **Gerät nimmt den Sollwert nicht an** | Ein Thermostat meldet nach `MAX_VERSUCHE` (**3**) Befehlen im 30-Minuten-Abstand weiter einen anderen Wert als den gesendeten. Die Lage steht als Merker am Gerät (`device.abgleich_erschoepft_seit`) und endet erst, wenn das Gerät den gesendeten Wert **übernimmt**. | **einmal je Episode**, mit 24 h als Boden |
+| **Belegungsliste überfällig** | Eine Liste ist gekommen, die **nächste** fehlt zu lange. Eigener Text neben „Keine Belegungsliste": dort kam gar keine, hier fehlt die Folgeliste — und zu tun ist jeweils etwas anderes. | am nächsten Tag |
+| **Stand festgesetzt** | Der Server läuft seit `REMINDER_AFTER_DAYS` (**7 Tagen**) auf einem festgenagelten Abbild (`PIN_SHA`, §10u) statt auf dem gleitenden Stand. Kein Fehler, sondern eine Erinnerung: ein vergessener Pin bekommt keine Fehlerbehebung mehr. | nach 7 Tagen |
+| **Platte läuft voll** | Die Festplatte des Servers ist voller als `PLATTE_WARN_PROZENT` (Vorgabe **85 %**). Dazu eine **Entwarnung**, wenn sie wieder darunter liegt. Geprüft stündlich. **Betrifft keine Zone und kein Gerät** — läuft die Platte voll, hört die Datenbank auf zu schreiben, und dann endet die Steuerung ohne eine einzige rote Kachel. | nach `PLATTE_WIEDERHOLUNG_H` (Vorgabe **24 h**) |
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
@@ -3358,9 +3352,21 @@ ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
 
 **Was ausdrücklich keine Mail auslöst:** implausible Messwerte (ein Gerät
 sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
-Oberfläche sichtbar, aber nicht als Mail — die Batterie-Schwelle unter
-*Einstellungen / Hotel* färbt Anzeige und Kachel, verschickt aber nichts
-(B-15b-1).
+Oberfläche sichtbar, aber nicht als Mail.
+
+> **Korrektur vom 27.11.2026.** Hier stand, die Batterie-Schwelle unter
+> *Einstellungen / Hotel* färbe Anzeige und Kachel. **Diesen Schalter gibt
+> es dort nicht mehr** — mit Sprint 20 (AE-72) ist
+> `alert_battery_warn_percent` aus Schema und Oberfläche entfallen, die
+> Spalte steht nur noch ungelesen in `global_config`. Die Batterie-Stufe
+> rechnet seither auf der **Spannung**, und ihre Grenzen stehen in den
+> Backend-Settings (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`), nicht
+> in der Oberfläche. Wer dem alten Satz folgte, suchte ein Feld, das es
+> nicht gibt (§5.77).
+>
+> **B-15b-1 ist damit anders zu lesen**, als der Eintrag sagt: der offene
+> Rest ist nicht „Mail an der konfigurierten Prozent-Schwelle", sondern
+> „Mail an der Batterie-Stufe". Das ist eine andere Aufgabe.
 
 ### Der Funk-Alarm — was er sagt und was zu tun ist
 
@@ -12630,6 +12636,119 @@ chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
 `infra/deploy/docker/README.md` (die Rechnung),
 `docs/status/2026-11-16-log-grenzen.md`.
 
+
+## 10bh. `event_log` verdichten (Sicherung zuerst)
+
+**Wofür.** `event_log` wächst um rund **4,8 GB im Monat** (gemessen
+14.11.2026). Am 13.11. war die Platte zu 94 % belegt, und gefunden wurde
+das beim Nachsehen nach etwas anderem. Bei 100 % nimmt Postgres keine
+Schreibvorgänge mehr an — keine Messwerte, keine Engine-Auswertung, keine
+Relais-Bestätigungen.
+
+**Verdichten, nicht löschen.** TimescaleDB legt alte Chunks spaltenweise
+ab. **Keine Zeile geht verloren**, Abfragen lesen weiter. Alte Zeilen
+wegzuwerfen wäre der andere Weg und ein S3-Verstoß: der Engine-Trace ist
+das Protokoll jeder Sollwert-Entscheidung, und ein Protokoll mit Löchern
+beantwortet „warum war das Zimmer kalt" nicht mehr.
+
+**Was es bringt.** In der Vorprüfung vom 27.11.2026 (eigene Datenbank,
+dasselbe Image, 6 Mio. Zeilen in der Form des Betriebs): **148 MB je
+Chunk vorher, 2,6 MB nachher — Faktor 57**. Das ist eine Messung an
+nachgebauten Daten; der Trockenlauf unten nennt den Faktor, den **diese**
+Datenbank erreicht hat, sobald der erste echte Lauf gelaufen ist.
+
+**Es läuft nicht von selbst.** Kein Timer, keine Policy, kein Aufruf aus
+einer Migration. Jeder Lauf ist ein Handgriff in einem Wartungsfenster.
+
+### Schritt 1 — nachsehen, ohne etwas zu ändern
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten
+```
+
+Der Trockenlauf ist der Standard — **ohne** `--ausfuehren` wird nichts
+angefasst. Er nennt: Anzahl der Chunks jenseits der Grenze, wie viele
+davon schon verdichtet sind, den Platz der offenen und den bisher
+erreichten Faktor.
+
+Steht dort „Nichts zu tun", ist der Schritt fertig.
+
+### Schritt 2 — Sicherung
+
+Die Verdichtung schreibt die Chunks neu. Vorher gehört eine Sicherung
+dazu — nicht weil der Vorgang als unsicher gilt, sondern weil er die
+Tabelle anfasst, in der das Protokoll der Steuerung steht.
+
+**SSH (Server, root):**
+
+**Derselbe Befehl wie in §10ab** (Secrets-Rotation, Schritt 0.2) — zwei
+Formen derselben Sicherung wären zwei Wahrheiten darüber, was „gesichert"
+heißt:
+
+```bash
+/opt/heizung-sonnblick/infra/deploy/backup.sh && ls -lt /var/backups/heizung | head -3
+```
+
+**Prüfung:** die jüngste Datei muss von heute sein und größer als 0 Byte.
+Ist sie es nicht, **hier abbrechen** und §10l (Dead-Man-Checks)
+nachgehen — nicht verdichten.
+
+### Schritt 3 — der echte Lauf
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --ausfuehren
+```
+
+Das Werkzeug verdichtet Chunk für Chunk und schreibt je Chunk die Größe
+vorher und nachher. Jeder Chunk ist eine eigene Transaktion: bricht einer
+ab, bleiben die vorherigen verdichtet, und ein zweiter Aufruf macht
+weiter.
+
+**Prüfung** — der Platz und die Zeilen:
+
+```
+df -h / | tail -1
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) FROM event_log;"
+```
+
+Die Zeilenzahl muss **dieselbe** sein wie vorher. Sie ist die eigentliche
+Abnahme: Verdichten ohne Verlust.
+
+Und die Oberfläche: eine Zimmer-Detailseite öffnen, Reiter
+**Entscheidung** — der Engine-Trace muss die Einträge der vergangenen
+Tage weiter zeigen.
+
+### Schritt 4 — der Rückweg
+
+Wenn etwas nicht stimmt:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --zuruecknehmen
+```
+
+**Der Rückweg braucht den Platz zurück.** Ausgepackt belegt die Tabelle
+wieder ihre volle Größe; vorher `df -h /` ansehen. Genau deshalb gehört
+dieser Schritt in ein Fenster, in dem jemand am Rechner sitzt.
+
+### Was dieser Handgriff nicht löst
+
+**Er wiederholt sich nicht von selbst.** Nach dem Lauf wächst
+`event_log` weiter, und in einigen Wochen stehen neue Chunks jenseits der
+Grenze. Die dauerhafte Antwort wäre eine Verdichtungs-Policy
+(`add_compression_policy`), die TimescaleDB selbst anwendet — das ist
+eine eigene Entscheidung und ein eigener PR, weil sie etwas automatisch
+tut, was heute ausdrücklich von Hand geschieht.
+
+**Ein gelöschtes Zimmer nimmt seinen Trace trotzdem mit.** Verdichtung
+schützt ihn nicht; die Vorprüfung vom 27.11.2026 hat gezeigt, dass
+`ON DELETE CASCADE` auch durch verdichtete Chunks durchläuft. Seit dem
+27.11.2026 hält eine Audit-Zeile (`ROOM_DELETED`) fest, wie viele Zeilen
+je Tabelle dabei verloren gehen. Ob ein Zimmer mit Trace überhaupt
+löschbar bleiben soll, ist offen.
 
 ## 10bg. Festgenagelte Images bewusst nachziehen (quartalsweise)
 

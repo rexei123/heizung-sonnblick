@@ -87,6 +87,11 @@ _EXPECTED_KEYS = {
     "platte_prozent",
     "platte_frei_gb",
     "platte_warnt",
+    # 27.11.2026: Zimmer mit verstrichener Abreise. **Keine Kachel**,
+    # sondern ein Hinweis ueber dem Raster — eine Zahl waere hier nicht
+    # handlungsfaehig. Und auch diese Zeile steht hier, weil der Test rot
+    # war: genau dafuer ist er da.
+    "abreise_zimmer",
 }
 
 

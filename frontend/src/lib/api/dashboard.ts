@@ -33,7 +33,12 @@ const dashboardKpiSchema = z.object({
   // Sprint 25 T8: dieselbe Falle zum dritten Mal, und diesmal hat der
   // Typecheck sie sofort gemeldet. Ohne diese Keys strippt Zod sie, und
   // die Kachel zeigte stumm "undefined" (Paragraph 5.64).
-  funkempfang_stufe: z.enum(["online", "verzoegert", "keine_meldungen", "unbekannt"]),
+  funkempfang_stufe: z.enum([
+    "online",
+    "verzoegert",
+    "keine_meldungen",
+    "unbekannt",
+  ]),
   funkempfang_letzte_meldung: z.string().nullable(),
   funkempfang_alter_min: z.number().nullable(),
   funkempfang_meldungen_10min: z.number(),
@@ -49,6 +54,30 @@ const dashboardKpiSchema = z.object({
   platte_prozent: z.number(),
   platte_frei_gb: z.number(),
   platte_warnt: z.boolean(),
+  /**
+   * Zimmer, deren Abreise in den letzten 24 Stunden verstrichen ist und
+   * für die keine neue Belegung läuft (27.11.2026).
+   *
+   * **Leere Liste ist der Normalfall** — abends hat niemand mehr eine
+   * verstrichene Abreise offen. Der Hinweis erscheint dann gar nicht.
+   *
+   * `zeichen` ist eine Spur, kein Urteil: `keines` heißt „wir haben
+   * nichts gesehen", nicht „das Zimmer ist leer".
+   *
+   * `.default([])`, damit ein Server, der das Feld noch nicht kennt, die
+   * ganze Seite nicht leer lässt — die Kacheln hängen an derselben
+   * Antwort.
+   */
+  abreise_zimmer: z
+    .array(
+      z.object({
+        room_id: z.number(),
+        zimmer: z.string(),
+        stunden_her: z.number(),
+        zeichen: z.enum(["drehrad", "uebersteuerung", "keines"]),
+      }),
+    )
+    .default([]),
 });
 
 export const dashboardApi = {
