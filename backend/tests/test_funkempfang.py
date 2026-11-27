@@ -262,10 +262,36 @@ async def test_lies_funkempfang_zaehlt_nur_das_fenster(db_session: AsyncSession)
     Sie beantwortet eine andere Frage als die erste: eine **schleichende**
     Verschlechterung, bei der die juengste Meldung frisch ist und die
     Menge trotzdem einbricht.
+
+    **Geprueft wird der Zuwachs, nicht der Stand** (Paragraph 5.39,
+    nachgetragen am 27.11.2026). ``lies_funkempfang`` beantwortet eine
+    **hausweite** Frage -- „kommt ueberhaupt etwas an" -- und hat deshalb
+    bewusst keinen Geraete-Filter. Einen fuer diesen Test einzubauen
+    waere ein Argument, das nur Tests benutzen, und damit eine zweite
+    Wahrheit im Lesepfad (Paragraph 5.53).
+
+    Die Folge war ein Test, der an seinen Nachbarn hing: am 27.11.2026
+    ist er zweimal rot geworden, weil Reste aus anderen Dateien in der
+    lokalen Test-Datenbank lagen -- erwartet 4, gezaehlt 6. In CI blieb
+    er gruen, dort ist die Datenbank frisch. Ein Fehlerbild, das nur auf
+    dem Rechner des Entwicklers auftritt, kostet dort doppelt: beim
+    Suchen und beim Nicht-Glauben.
+
+    Der Zuwachs loest es ohne Filter: **vier neue Meldungen im Fenster,
+    drei ausserhalb, und die drei duerfen den Zuwachs nicht veraendern.**
+    Die Zusicherung ist dieselbe, haengt aber an nichts, was dieser Test
+    nicht selbst angelegt hat. Die **Ursache** ist getrennt behoben --
+    ``purge_test_data_by_prefix`` loescht die Geraete jetzt selbst.
     """
     geraet = await _geraet(db_session)
     jetzt = datetime.now(tz=UTC)
     try:
+        vorher = (
+            await funkempfang.lies_funkempfang(
+                db_session, gruen_max_min=GRUEN, gelb_max_min=GELB, now=jetzt
+            )
+        ).meldungen_zaehlfenster
+
         for minuten in (1, 3, 5, 9):
             db_session.add(
                 SensorReading(
@@ -290,8 +316,9 @@ async def test_lies_funkempfang_zaehlt_nur_das_fenster(db_session: AsyncSession)
         )
 
         assert befund.stufe == "online"
-        assert befund.meldungen_zaehlfenster == 4, (
-            f"das Fenster hat mehr gezaehlt als zehn Minuten: {befund.meldungen_zaehlfenster}"
+        assert befund.meldungen_zaehlfenster - vorher == 4, (
+            "das Fenster hat mehr oder weniger gezaehlt als die vier neuen Meldungen "
+            f"im Fenster: {vorher} -> {befund.meldungen_zaehlfenster}"
         )
     finally:
         await _raeum_auf(db_session, geraet.id)

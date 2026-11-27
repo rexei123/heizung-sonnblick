@@ -141,11 +141,16 @@ async def purge_test_data_by_prefix(
     """Cleanup-Helper fuer DB-Tests gegen globale Compute-Tasks (§5.39).
 
     Loescht in dieser Reihenfolge:
-    1. ``SensorReading`` mit ``device_id`` aus Devices matching
-       ``dev_eui_pattern`` (LIKE, z.B. ``"deadbeef%"``). Nur wenn
-       ``dev_eui_pattern`` gesetzt ist.
-    2. ``Room`` mit ``number LIKE f"{prefix}-%"`` — CASCADE raeumt
-       ``HeatingZone`` und ``Device``.
+    1. Die Messwerte, Schaltmeldungen und Befehle der Geraete, die auf
+       ``dev_eui_pattern`` passen (LIKE, z.B. ``"deadbeef%"``), danach
+       **die Geraete selbst**. Nur wenn ``dev_eui_pattern`` gesetzt ist.
+    2. ``Room`` mit ``number LIKE f"{prefix}-%"`` — der Cascade raeumt
+       die ``HeatingZone``. **Nicht die Geraete:**
+       ``fk_device_heating_zone`` ist ``ON DELETE SET NULL``, die Geraete
+       verlieren also nur ihre Zuordnung und bleiben stehen (gemessen am
+       27.11.2026; hier stand bis dahin „CASCADE raeumt HeatingZone und
+       Device", und das war die Haelfte falsch — Paragraph 5.68). Deshalb
+       Schritt 1.
     3. ``RoomType`` mit ``name LIKE f"{prefix}-%"``.
 
     Im Anschluss ``session.commit()``. Sicher gegen Reihenfolge-
@@ -153,11 +158,34 @@ async def purge_test_data_by_prefix(
     haben echte MAC-Adressen, keine ``deadbeef``-Pattern; produktive
     Room-Numbers nutzen keine Test-Prefixes).
 
+    **Schritt 1 loescht die Geraete seit dem 27.11.2026 selbst, und das
+    ist der Punkt dieser Aenderung.** Vorher nahm er nur ihre Messwerte
+    mit und verliess sich auf einen Cascade, den es nicht gibt. Jedes
+    Test-Geraet hat seine Zimmer-Loeschung ueberlebt — ohne Zone, aber mit
+    Zeile.
+
+    Gemessen am 27.11.2026 in der lokalen Test-Datenbank: **50 Geraete
+    ohne Etikett, davon 49 ohne Heizzone**, aus drei Gesamtlaeufen. Die
+    groesste Gruppe kam aus ``test_sperre_resync`` (16), das diesen
+    Helfer korrekt aufruft — der Helfer hat nicht geliefert, nicht der
+    Aufrufer. Die Zusicherungen stehen jetzt in
+    ``test_aufraeumen.py``, samt der Gegenprobe gegen fremde Geraete.
+
+    **Was es gekostet hat:** ``test_funkempfang`` fragt eine **hausweite**
+    Zahl ab (``lies_funkempfang`` zaehlt alle Meldungen im Fenster) und
+    ist dadurch zweimal rot geworden, in einer anderen Datei als der
+    Verursacher. In CI war nichts zu sehen, dort ist die Datenbank frisch
+    — ein Fehlerbild, das nur auf dem Rechner des Entwicklers auftritt
+    und dort doppelt kostet: beim Suchen und beim Nicht-Glauben
+    (Paragraph 5.39).
+
     Beispiel-Aufruf (analog ``_purge_t11t5`` aus
     ``test_health_compute.py``):
         await purge_test_data_by_prefix(session, "t12t4", dev_eui_pattern="deadbeef%")
     """
+    from heizung.models.control_command import ControlCommand
     from heizung.models.device import Device
+    from heizung.models.relay_reading import RelayReading
     from heizung.models.room import Room
     from heizung.models.room_type import RoomType
     from heizung.models.sensor_reading import SensorReading
@@ -169,9 +197,14 @@ async def purge_test_data_by_prefix(
             .all()
         )
         if devices_to_purge:
-            await session.execute(
-                sa_delete(SensorReading).where(SensorReading.device_id.in_(devices_to_purge))
-            )
+            # Die Kinder zuerst, dann das Geraet. Auf einen Cascade zu
+            # bauen waere eine Annahme ueber das Schema — und genau die
+            # Annahme hat hier drei Monate lang Reste liegen lassen.
+            for tabelle in (SensorReading, RelayReading, ControlCommand):
+                await session.execute(
+                    sa_delete(tabelle).where(tabelle.device_id.in_(devices_to_purge))
+                )
+            await session.execute(sa_delete(Device).where(Device.id.in_(devices_to_purge)))
     rooms = list(
         (await session.execute(select(Room).where(Room.number.like(f"{prefix}-%")))).scalars().all()
     )
