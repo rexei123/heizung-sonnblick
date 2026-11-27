@@ -1,9 +1,9 @@
 ---
 titel: Abreise verschiebt sich
 kategorie: Abläufe an der Rezeption
-stichworte: Abreise, späte Abreise, früher ab, Check-out, Belegung, Übersteuerung
+stichworte: Abreise, späte Abreise, früher ab, Check-out, Belegung, Übersteuerung, Abreise überschritten
 rollen: alle
-stand: 2026-10-25
+stand: 2026-11-27
 ---
 
 Ein Gast bleibt länger oder reist früher ab. Beides gehört in die
@@ -18,6 +18,12 @@ Belegung — nicht in eine Übersteuerung.
 Ohne diesen Schritt setzt die Steuerung das Zimmer am ursprünglichen
 Abreisetag auf „frei" — der Gast kommt abends in ein kühles Zimmer
 zurück, obwohl niemand etwas falsch gemacht hat.
+
+**Seit dem 27.11.2026 erinnert das Dashboard daran.** Ganz oben stehen die
+Zimmer, deren Abreise in den letzten 24 Stunden vorbei ist und für die
+keine neue Belegung steht — mit dem Vermerk, wenn dort nach der Abreise
+noch jemand am Thermostat gedreht hat. Das ist die Gelegenheit, dieses
+Datum nachzuziehen, bevor der Gast abends im kühlen Zimmer steht.
 
 **Späte Abreise am selben Tag** (Gast geht erst um 16 Uhr) braucht
 nichts: Check-out heißt für die Steuerung nur, dass ab dann der

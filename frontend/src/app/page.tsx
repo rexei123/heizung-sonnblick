@@ -16,6 +16,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 
+import { AbreiseHinweis } from "@/components/patterns/abreise-hinweis";
 import { KpiCard, type KpiTone } from "@/components/patterns/kpi-card";
 import { useAuth } from "@/contexts/auth-context";
 import { useDashboardKpi } from "@/lib/api/hooks-dashboard";
@@ -434,6 +435,12 @@ export default function Home() {
           Hier ist die Übersicht für Ihre Heizung.
         </p>
       </header>
+
+      {/* **Oben und nicht als Kachel.** Eine Zahl „3" wäre hier nicht
+          handlungsfähig; der Hinweis nennt die Zimmer. Er erscheint nur,
+          wenn es welche gibt — an einem normalen Abend steht hier
+          nichts. */}
+      {kpiQ.data ? <AbreiseHinweis zimmer={kpiQ.data.abreise_zimmer} /> : null}
 
       {/* `auto-rows-fr` macht **alle** Zeilen gleich hoch, nicht nur die
           Karten innerhalb einer Zeile: `1fr` verteilt die Höhe gleich,

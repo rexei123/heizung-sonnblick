@@ -13,6 +13,8 @@ Read-only, ``require_user`` (Admin + Mitarbeiter). Die Aggregate leben in
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +22,9 @@ from heizung.auth.dependencies import require_user
 from heizung.config import get_settings
 from heizung.db import get_session
 from heizung.models.user import User
-from heizung.schemas.dashboard import DashboardKpiRead
+from heizung.schemas.dashboard import AbreiseZimmerRead, DashboardKpiRead
+from heizung.services import abreise_hinweis, funkempfang, plattenplatz, relais_zone_melder
 from heizung.services import dashboard_aggregates as agg
-from heizung.services import funkempfang, plattenplatz, relais_zone_melder
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -60,6 +62,11 @@ async def get_dashboard_kpi(
     # als in der Mail (Paragraph 5.53).
     platte = plattenplatz.lies_plattenstand(grenze_prozent=settings.platte_warn_prozent)
 
+    # Dieselbe Uhr fuer Fenster und Alter — zwei Aufrufe von ``now()``
+    # koennten eine Abreise an der Fenstergrenze aufnehmen und ihr dann
+    # ein Alter von 24 Stunden und einer Sekunde geben (Paragraph 5.59).
+    abreisen = await abreise_hinweis.lies_abreisen(session, jetzt=datetime.now(tz=UTC))
+
     rooms_occupied, rooms_total = await agg.count_rooms_occupied(session)
     devices_online, devices_assigned = await agg.count_devices_online(session)
     valve_check, room_too_warm = await agg.count_valve_alerts(session)
@@ -87,4 +94,13 @@ async def get_dashboard_kpi(
         platte_prozent=platte.prozent,
         platte_frei_gb=platte.frei_gb,
         platte_warnt=platte.warnt,
+        abreise_zimmer=[
+            AbreiseZimmerRead(
+                room_id=b.room_id,
+                zimmer=b.zimmer,
+                stunden_her=b.stunden_her,
+                zeichen=b.zeichen,
+            )
+            for b in abreisen
+        ],
     )

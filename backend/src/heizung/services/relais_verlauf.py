@@ -49,13 +49,49 @@ ergibt: ein Ruecksprung ohne Behandlung macht aus einem Tagesverbrauch
 eine negative Zahl oder — bei ``sum`` ueber gemischte Vorzeichen — eine
 zu kleine, und niemand sieht, warum.
 
-**Wo die Energie innerhalb einer Luecke liegt, wissen wir nicht.** Der
-Sprung zwischen zwei Meldungen wird der Stunde der **ersten** zugerechnet
-(dieselbe Richtung wie beim Einschaltanteil, der mit ``lead`` nach vorne
-blickt). Ueber das Fenster ist die Summe damit richtig; innerhalb einer
-Meldungsluecke ist die Verteilung eine Annahme. Die Luecke selbst ist in
+**Spannen werden an der Stundengrenze geteilt** (27.11.2026). Bis dahin
+wurde eine Spanne ganz der Stunde ihrer **ersten** Meldung zugerechnet —
+Dauer und Energie. Das erzeugte den Fall, der am 18.11. aufgefallen ist:
+eine Stunde mit **0 Prozent Einschaltanteil und 193 Wh**. Die Spanne von
+10:57 bis 11:07 traegt den Zustand AUS (so stand das Relais um 10:57) und
+den Zaehlersprung von 193 Wh (so viel lief zwischen den beiden Meldungen,
+naemlich in Stunde 11). Beides landete in Stunde 10, und die Zeile sagte
+damit zwei Dinge, die sich widersprechen.
+
+Seither ergibt dieselbe Spanne zwei Stuecke: drei Minuten in Stunde 10,
+sieben in Stunde 11. Die Energie geht **zeitproportional** mit, also 58
+und 135 Wh. Die Einschaltdauer kommt aus dem Zustand am **Anfang des
+Stuecks** — und der ist fuer alle Stuecke einer Spanne derselbe, weil
+zwischen zwei Meldungen keine Zustandsaenderung bekannt ist. Einschaltung
+und Ruecksprung sind dagegen **Ereignisse** und bleiben beim Stueck, das
+den Spannenanfang enthaelt; sonst wuerde ein Einschalten um 10:57 in zwei
+Stunden gezaehlt.
+
+**Was der Fix nicht kann.** Wo die Energie *innerhalb* der Spanne liegt,
+wissen wir weiterhin nicht — im Beispiel lief das Panel wahrscheinlich
+erst ab 11:00, die 58 Wh in Stunde 10 sind also noch zu viel. Die
+Aufteilung nach Zeit ist die Annahme mit der geringsten Behauptung; das
+Gegenteil (alles der spaeteren Stunde) waere eine Aussage ueber den
+Zeitpunkt des Schaltens, die die Meldungen nicht hergeben. Ueber das
+Fenster ist die Summe in beiden Faellen dieselbe. Die Luecke selbst ist in
 derselben Zeile sichtbar: ``erfasste_minuten`` sagt, wie viel der Stunde
 ueberhaupt belegt ist.
+
+**Je Stunde wird gerundet**, und die Tagessumme ist die Summe der
+gerundeten Stunden. Bei geteilten Spannen kann sie damit um ein Wh von
+der Differenz der Zaehlerstaende abweichen. Das ist der Preis dafuer, dass
+die angezeigte Summe die Summe der angezeigten Zeilen ist — und nicht
+eine Zahl, die zu keiner Zeile passt.
+
+Die Gehaeusetemperatur
+----------------------
+
+``internal_temperature_raw`` ist ein **Rohwert ohne belegte Einheit**
+(AE-78, Kopf von ``models/relay_reading``). Je Stunde und je Tag stehen
+der groesste und der mittlere Wert da, einmal ueber **alle** Meldungen und
+einmal nur ueber die mit ``relay_on``. Der Unterschied ist die Antwort auf
+die Frage vom 18.11.: wird das Gehaeuse warm, **weil** geschaltet wird,
+oder ist es ohnehin warm.
 
 Was die Zahlen nicht sagen
 --------------------------
@@ -123,6 +159,21 @@ class Stunde:
     #: Negative Spruenge des Zaehlers in dieser Stunde. Nicht addiert,
     #: sondern gezaehlt — siehe Modulkopf.
     ruecksprunge: int = 0
+    #: Groesste und mittlere Gehaeusetemperatur (Rohwert, Einheit
+    #: unbelegt) aus den Meldungen dieser Stunde. ``None`` heisst „keine
+    #: Meldung mit einem Gehaeusewert" — alte Zeilen haben die Spalte
+    #: nicht.
+    gehaeuse_max: int | None = None
+    gehaeuse_mittel: Decimal | None = None
+    #: Dasselbe, aber nur aus Meldungen mit ``relay_on``.
+    gehaeuse_max_ein: int | None = None
+    gehaeuse_mittel_ein: Decimal | None = None
+    #: Wie viele Meldungen hinter den beiden Mittelwerten stehen. Steht
+    #: in der Zeile, weil die **Tageszeile** damit wiegt: eine Stunde mit
+    #: einer eingeschalteten Meldung darf dort nicht so schwer zaehlen wie
+    #: eine mit sechs.
+    gehaeuse_anzahl: int = 0
+    gehaeuse_anzahl_ein: int = 0
 
     @property
     def abstand(self) -> Decimal | None:
@@ -161,6 +212,21 @@ class Tag:
     ist_min: Decimal | None
     ist_max: Decimal | None
     soll_mittel: Decimal | None
+    #: Gehaeusetemperatur des Tages (Rohwert, Einheit unbelegt): der
+    #: groesste Wert und das Mittel, einmal ueber alle Meldungen und
+    #: einmal nur ueber die eingeschalteten.
+    #:
+    #: **Das Mittel wiegt nach der Zahl der Meldungen** und nicht wie
+    #: ``ist_mittel`` gleichmaessig ueber die Stunden. Der Unterschied ist
+    #: Absicht: die Zahl der *eingeschalteten* Meldungen schwankt je
+    #: Stunde zwischen null und sechs, und ein ungewogenes Mittel waere
+    #: dann der Mittelwert ueber „Stunden, in denen zufaellig einmal
+    #: geschaltet war". Bei ``ist_mittel`` liegen die Messungen
+    #: gleichmaessig, dort kostet die Gewichtung nichts und bringt nichts.
+    gehaeuse_max: int | None = None
+    gehaeuse_mittel: Decimal | None = None
+    gehaeuse_max_ein: int | None = None
+    gehaeuse_mittel_ein: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +318,8 @@ def tage_aus_stunden(stunden: list[Stunde], tz_name: str) -> list[Tag]:
         max_werte = [s.ist_max for s in gruppe if s.ist_max is not None]
         soll = [s.soll for s in gruppe if s.soll is not None]
         energie = [s.energie_wh for s in gruppe if s.energie_wh is not None]
+        g_max = [s.gehaeuse_max for s in gruppe if s.gehaeuse_max is not None]
+        g_max_ein = [s.gehaeuse_max_ein for s in gruppe if s.gehaeuse_max_ein is not None]
         zeilen.append(
             Tag(
                 tag=tag,
@@ -265,9 +333,46 @@ def tage_aus_stunden(stunden: list[Stunde], tz_name: str) -> list[Tag]:
                 ist_min=min(min_werte) if min_werte else None,
                 ist_max=max(max_werte) if max_werte else None,
                 soll_mittel=(_mittel(soll) if soll else None),
+                gehaeuse_max=max(g_max) if g_max else None,
+                gehaeuse_mittel=_gewogen([(s.gehaeuse_mittel, s.gehaeuse_anzahl) for s in gruppe]),
+                gehaeuse_max_ein=max(g_max_ein) if g_max_ein else None,
+                gehaeuse_mittel_ein=_gewogen(
+                    [(s.gehaeuse_mittel_ein, s.gehaeuse_anzahl_ein) for s in gruppe]
+                ),
             )
         )
     return zeilen
+
+
+def _gewogen(paare: list[tuple[Decimal | None, int]]) -> Decimal | None:
+    """Mittel aus Stundenmitteln, gewogen mit der Zahl ihrer Meldungen.
+
+    ``None`` heisst „keine Stunde dieses Tages sagt etwas" — eine 0 waere
+    eine Behauptung ueber ein Gehaeuse, von dem wir nichts gehoert haben.
+
+    Gewogen wird mit den **gerundeten** Stundenmitteln; der Fehler bleibt
+    damit unter einem halben Zehntel. Die ungerundeten Summen durch alle
+    Zeilen zu tragen waere genauer und waere ein zweiter Wert je Stunde,
+    der nirgends steht und niemandem auffaellt, wenn er falsch ist.
+    """
+    gueltig = [(w, n) for w, n in paare if w is not None and n > 0]
+    if not gueltig:
+        return None
+    gewicht = sum(n for _, n in gueltig)
+    summe = sum((w * n for w, n in gueltig), Decimal(0))
+    return (summe / gewicht).quantize(Decimal("0.1"))
+
+
+def _quantize_roh(wert: object) -> Decimal | None:
+    """``avg`` der Datenbank auf eine Stelle — oder ``None``.
+
+    ``avg`` ueber eine Spalte, in der nur NULL steht (etwa weil in der
+    Stunde nie geschaltet war), liefert NULL. Das ist kein Fehler,
+    sondern „dazu sagt die Stunde nichts".
+    """
+    if wert is None:
+        return None
+    return Decimal(str(wert)).quantize(Decimal("0.1"))
 
 
 def _mittel(werte: list[Decimal]) -> Decimal:
@@ -312,20 +417,94 @@ _ANTEIL_SQL = text("""
         WHERE rr.device_id = ANY(:device_ids)
           AND rr.time >= :ab AND rr.time < :bis_fenster
           AND rr.relay_on IS NOT NULL
+    ),
+    spanne AS (
+        SELECT time AS von,
+               least(bis, time + :deckel) AS nach,
+               relay_on,
+               -- Nur **positive** Spruenge; ein Ruecksprung wird gezaehlt
+               -- und nicht addiert (Modulkopf).
+               CASE WHEN energie_bis > energy_wh THEN energie_bis - energy_wh END AS energie,
+               (relay_on AND vorher IS false) AS einschaltung,
+               (energie_bis < energy_wh) AS ruecksprung
+        FROM roh
+        WHERE bis IS NOT NULL
+    ),
+    -- Jede Spanne wird an den Stundengrenzen **geteilt**. Eine Spanne
+    -- von 10:57 bis 11:07 ergibt zwei Stuecke: drei Minuten in Stunde
+    -- 10, sieben in Stunde 11. Der Grund steht im Modulkopf.
+    stueck AS (
+        SELECT g.stunde,
+               s.relay_on,
+               s.energie,
+               s.einschaltung,
+               s.ruecksprung,
+               greatest(s.von, g.stunde) AS von,
+               least(s.nach, g.stunde + interval '1 hour') AS nach,
+               s.von AS spanne_von,
+               s.nach AS spanne_nach
+        FROM spanne s
+        CROSS JOIN LATERAL generate_series(
+            date_trunc('hour', s.von),
+            -- Die Mikrosekunde macht die Spanne halboffen: eine Spanne,
+            -- die **auf** 11:00 endet, erzeugt kein Stueck in Stunde 11.
+            date_trunc('hour', greatest(s.nach - interval '1 microsecond', s.von)),
+            interval '1 hour'
+        ) AS g(stunde)
     )
-    SELECT date_trunc('hour', time) AS stunde,
-           sum(CASE WHEN relay_on THEN
-                 EXTRACT(EPOCH FROM (least(bis, time + :deckel) - time))
-               ELSE 0 END) AS ein_s,
-           sum(EXTRACT(EPOCH FROM (least(bis, time + :deckel) - time))) AS gesamt_s,
-           count(*) FILTER (WHERE relay_on AND vorher IS false) AS einschaltungen,
-           -- Nur **positive** Spruenge; ein Ruecksprung wird gezaehlt
-           -- und nicht addiert (Modulkopf). ``sum`` ohne passende Zeile
-           -- ist NULL und damit „der Zaehler sagt dazu nichts" — nicht 0.
-           sum(CASE WHEN energie_bis > energy_wh THEN energie_bis - energy_wh END) AS energie_wh,
-           count(*) FILTER (WHERE energie_bis < energy_wh) AS ruecksprunge
-    FROM roh
-    WHERE bis IS NOT NULL
+    SELECT stunde,
+           sum(CASE WHEN relay_on THEN EXTRACT(EPOCH FROM (nach - von)) ELSE 0 END) AS ein_s,
+           sum(EXTRACT(EPOCH FROM (nach - von))) AS gesamt_s,
+           -- Einschaltung und Ruecksprung sind **Ereignisse** am Anfang
+           -- der Spanne und gehoeren genau einem Stueck. Ohne
+           -- ``von = spanne_von`` wuerde ein Einschalten um 10:57 in
+           -- beiden Stunden gezaehlt.
+           count(*) FILTER (WHERE einschaltung AND von = spanne_von) AS einschaltungen,
+           -- Energie **zeitproportional** auf die Stuecke. ``sum`` ohne
+           -- passende Zeile ist NULL und damit „der Zaehler sagt dazu
+           -- nichts" — nicht 0.
+           sum(
+               CASE WHEN energie IS NOT NULL AND spanne_nach > spanne_von THEN
+                   energie * EXTRACT(EPOCH FROM (nach - von))
+                           / EXTRACT(EPOCH FROM (spanne_nach - spanne_von))
+               END
+           ) AS energie_wh,
+           count(*) FILTER (WHERE ruecksprung AND von = spanne_von) AS ruecksprunge
+    FROM stueck
+    GROUP BY 1
+    ORDER BY 1
+""")
+
+#: Die Gehaeusetemperatur je Stunde — **eigene Abfrage**, nicht in
+#: ``_ANTEIL_SQL`` eingehaengt.
+#:
+#: Der Grund ist der Unterschied zwischen einer Dauer und einem Messwert.
+#: ``_ANTEIL_SQL`` teilt Spannen an Stundengrenzen und vervielfacht dabei
+#: Zeilen; ein Mittelwert ueber diese Stuecke wuerde dieselbe Meldung
+#: zweimal wiegen. Eine Gehaeusetemperatur ist ein **Punkt** und gehoert
+#: der Stunde ihres Zeitstempels — ungeteilt.
+#:
+#: ``FILTER (WHERE rr.relay_on)`` ist die zweite Haelfte der Frage: wie
+#: warm wird das Gehaeuse, **waehrend** geschaltet ist. Der Unterschied
+#: zwischen beiden Zahlen trennt „warm vom Schalten" von „warm ohnehin" —
+#: und das ist die Frage, die am 18.11. offen geblieben ist.
+#:
+#: Die Zahlen gelten fuer die **Zone**, wie alle anderen in dieser
+#: Ansicht: haengen zwei Relais in einem Raum, ist ``groesst`` das
+#: waermste Gehaeuse von beiden. Eine Zahl je Geraet waere eine zweite
+#: Gliederung in derselben Zeile.
+_GEHAEUSE_SQL = text("""
+    SELECT date_trunc('hour', rr.time) AS stunde,
+           max(rr.internal_temperature_raw) AS groesst,
+           avg(rr.internal_temperature_raw) AS mittel,
+           count(*) AS anzahl,
+           max(rr.internal_temperature_raw) FILTER (WHERE rr.relay_on) AS groesst_ein,
+           avg(rr.internal_temperature_raw) FILTER (WHERE rr.relay_on) AS mittel_ein,
+           count(*) FILTER (WHERE rr.relay_on) AS anzahl_ein
+    FROM relay_reading rr
+    WHERE rr.device_id = ANY(:device_ids)
+      AND rr.time >= :ab AND rr.time < :bis_fenster
+      AND rr.internal_temperature_raw IS NOT NULL
     GROUP BY 1
     ORDER BY 1
 """)
@@ -450,12 +629,19 @@ async def bericht(
             )
         ).all()
     }
+    gehaeuse = {
+        r.stunde: r
+        for r in (
+            await session.execute(_GEHAEUSE_SQL, {"device_ids": ids, "ab": ab, "bis_fenster": bis})
+        ).all()
+    }
 
     stunden: list[Stunde] = []
-    for h in sorted(set(anteil) | set(ist) | set(soll)):
+    for h in sorted(set(anteil) | set(ist) | set(soll) | set(gehaeuse)):
         a = anteil.get(h)
         i = ist.get(h)
         s = soll.get(h)
+        g = gehaeuse.get(h)
         gesamt = float(a.gesamt_s or 0) if a else 0.0
         stunden.append(
             Stunde(
@@ -472,8 +658,18 @@ async def bericht(
                 # ist schon gerundet, und zwei Rundungen uebereinander
                 # ergeben bei kurzen Stunden Minuten, die es nicht gab.
                 ein_minuten=(round(float(a.ein_s or 0) / 60) if a and gesamt else None),
-                energie_wh=(int(a.energie_wh) if a and a.energie_wh is not None else None),
+                # ``round`` und nicht ``int``: die zeitproportionale
+                # Aufteilung ergibt Brueche, und ``int`` wuerde sie
+                # abschneiden — bei 24 Stunden also bis zu 24 Wh zu
+                # wenig, immer in dieselbe Richtung.
+                energie_wh=(round(a.energie_wh) if a and a.energie_wh is not None else None),
                 ruecksprunge=int(a.ruecksprunge or 0) if a else 0,
+                gehaeuse_max=(int(g.groesst) if g and g.groesst is not None else None),
+                gehaeuse_mittel=(_quantize_roh(g.mittel) if g else None),
+                gehaeuse_max_ein=(int(g.groesst_ein) if g and g.groesst_ein is not None else None),
+                gehaeuse_mittel_ein=(_quantize_roh(g.mittel_ein) if g else None),
+                gehaeuse_anzahl=(int(g.anzahl or 0) if g else 0),
+                gehaeuse_anzahl_ein=(int(g.anzahl_ein or 0) if g else 0),
             )
         )
 

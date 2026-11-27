@@ -3339,17 +3339,11 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 | **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
 | **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
-
-> **Diese Tabelle ist älter als zwei weitere Melder.** Nicht aufgeführt
-> sind der **Zonen-Melder** (Fühler einer Relais-Zone schweigt länger als
-> `RELAIS_ZONE_STUMM_MIN`, Vorgabe 30 min —
-> `docs/status/2026-11-13-warnung-fuehler-relais-zone.md`) und der
-> **Platten-Wächter** (Platte voller als `PLATTE_WARN_PROZENT`, Vorgabe
-> 85 % — `docs/status/2026-11-14-platten-warnung-und-aufraeumen.md`).
-> Beide verschicken Mail an
-> dieselbe Adresse. Die Zeilen nachzutragen ist ein eigener Doku-PR;
-> hier steht der Hinweis, damit die Tabelle nicht als vollständig
-> gelesen wird (§5.77).
+| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt. Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
+| **Gerät nimmt den Sollwert nicht an** | Ein Thermostat meldet nach `MAX_VERSUCHE` (**3**) Befehlen im 30-Minuten-Abstand weiter einen anderen Wert als den gesendeten. Die Lage steht als Merker am Gerät (`device.abgleich_erschoepft_seit`) und endet erst, wenn das Gerät den gesendeten Wert **übernimmt**. | **einmal je Episode**, mit 24 h als Boden |
+| **Belegungsliste überfällig** | Eine Liste ist gekommen, die **nächste** fehlt zu lange. Eigener Text neben „Keine Belegungsliste": dort kam gar keine, hier fehlt die Folgeliste — und zu tun ist jeweils etwas anderes. | am nächsten Tag |
+| **Stand festgesetzt** | Der Server läuft seit `REMINDER_AFTER_DAYS` (**7 Tagen**) auf einem festgenagelten Abbild (`PIN_SHA`, §10u) statt auf dem gleitenden Stand. Kein Fehler, sondern eine Erinnerung: ein vergessener Pin bekommt keine Fehlerbehebung mehr. | nach 7 Tagen |
+| **Platte läuft voll** | Die Festplatte des Servers ist voller als `PLATTE_WARN_PROZENT` (Vorgabe **85 %**). Dazu eine **Entwarnung**, wenn sie wieder darunter liegt. Geprüft stündlich. **Betrifft keine Zone und kein Gerät** — läuft die Platte voll, hört die Datenbank auf zu schreiben, und dann endet die Steuerung ohne eine einzige rote Kachel. | nach `PLATTE_WIEDERHOLUNG_H` (Vorgabe **24 h**) |
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
@@ -3358,9 +3352,21 @@ ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
 
 **Was ausdrücklich keine Mail auslöst:** implausible Messwerte (ein Gerät
 sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
-Oberfläche sichtbar, aber nicht als Mail — die Batterie-Schwelle unter
-*Einstellungen / Hotel* färbt Anzeige und Kachel, verschickt aber nichts
-(B-15b-1).
+Oberfläche sichtbar, aber nicht als Mail.
+
+> **Korrektur vom 27.11.2026.** Hier stand, die Batterie-Schwelle unter
+> *Einstellungen / Hotel* färbe Anzeige und Kachel. **Diesen Schalter gibt
+> es dort nicht mehr** — mit Sprint 20 (AE-72) ist
+> `alert_battery_warn_percent` aus Schema und Oberfläche entfallen, die
+> Spalte steht nur noch ungelesen in `global_config`. Die Batterie-Stufe
+> rechnet seither auf der **Spannung**, und ihre Grenzen stehen in den
+> Backend-Settings (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`), nicht
+> in der Oberfläche. Wer dem alten Satz folgte, suchte ein Feld, das es
+> nicht gibt (§5.77).
+>
+> **B-15b-1 ist damit anders zu lesen**, als der Eintrag sagt: der offene
+> Rest ist nicht „Mail an der konfigurierten Prozent-Schwelle", sondern
+> „Mail an der Batterie-Stufe". Das ist eine andere Aufgabe.
 
 ### Der Funk-Alarm — was er sagt und was zu tun ist
 
@@ -12631,6 +12637,119 @@ chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
 `docs/status/2026-11-16-log-grenzen.md`.
 
 
+## 10bh. `event_log` verdichten (Sicherung zuerst)
+
+**Wofür.** `event_log` wächst um rund **4,8 GB im Monat** (gemessen
+14.11.2026). Am 13.11. war die Platte zu 94 % belegt, und gefunden wurde
+das beim Nachsehen nach etwas anderem. Bei 100 % nimmt Postgres keine
+Schreibvorgänge mehr an — keine Messwerte, keine Engine-Auswertung, keine
+Relais-Bestätigungen.
+
+**Verdichten, nicht löschen.** TimescaleDB legt alte Chunks spaltenweise
+ab. **Keine Zeile geht verloren**, Abfragen lesen weiter. Alte Zeilen
+wegzuwerfen wäre der andere Weg und ein S3-Verstoß: der Engine-Trace ist
+das Protokoll jeder Sollwert-Entscheidung, und ein Protokoll mit Löchern
+beantwortet „warum war das Zimmer kalt" nicht mehr.
+
+**Was es bringt.** In der Vorprüfung vom 27.11.2026 (eigene Datenbank,
+dasselbe Image, 6 Mio. Zeilen in der Form des Betriebs): **148 MB je
+Chunk vorher, 2,6 MB nachher — Faktor 57**. Das ist eine Messung an
+nachgebauten Daten; der Trockenlauf unten nennt den Faktor, den **diese**
+Datenbank erreicht hat, sobald der erste echte Lauf gelaufen ist.
+
+**Es läuft nicht von selbst.** Kein Timer, keine Policy, kein Aufruf aus
+einer Migration. Jeder Lauf ist ein Handgriff in einem Wartungsfenster.
+
+### Schritt 1 — nachsehen, ohne etwas zu ändern
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten
+```
+
+Der Trockenlauf ist der Standard — **ohne** `--ausfuehren` wird nichts
+angefasst. Er nennt: Anzahl der Chunks jenseits der Grenze, wie viele
+davon schon verdichtet sind, den Platz der offenen und den bisher
+erreichten Faktor.
+
+Steht dort „Nichts zu tun", ist der Schritt fertig.
+
+### Schritt 2 — Sicherung
+
+Die Verdichtung schreibt die Chunks neu. Vorher gehört eine Sicherung
+dazu — nicht weil der Vorgang als unsicher gilt, sondern weil er die
+Tabelle anfasst, in der das Protokoll der Steuerung steht.
+
+**SSH (Server, root):**
+
+**Derselbe Befehl wie in §10ab** (Secrets-Rotation, Schritt 0.2) — zwei
+Formen derselben Sicherung wären zwei Wahrheiten darüber, was „gesichert"
+heißt:
+
+```bash
+/opt/heizung-sonnblick/infra/deploy/backup.sh && ls -lt /var/backups/heizung | head -3
+```
+
+**Prüfung:** die jüngste Datei muss von heute sein und größer als 0 Byte.
+Ist sie es nicht, **hier abbrechen** und §10l (Dead-Man-Checks)
+nachgehen — nicht verdichten.
+
+### Schritt 3 — der echte Lauf
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --ausfuehren
+```
+
+Das Werkzeug verdichtet Chunk für Chunk und schreibt je Chunk die Größe
+vorher und nachher. Jeder Chunk ist eine eigene Transaktion: bricht einer
+ab, bleiben die vorherigen verdichtet, und ein zweiter Aufruf macht
+weiter.
+
+**Prüfung** — der Platz und die Zeilen:
+
+```
+df -h / | tail -1
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) FROM event_log;"
+```
+
+Die Zeilenzahl muss **dieselbe** sein wie vorher. Sie ist die eigentliche
+Abnahme: Verdichten ohne Verlust.
+
+Und die Oberfläche: eine Zimmer-Detailseite öffnen, Reiter
+**Entscheidung** — der Engine-Trace muss die Einträge der vergangenen
+Tage weiter zeigen.
+
+### Schritt 4 — der Rückweg
+
+Wenn etwas nicht stimmt:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --zuruecknehmen
+```
+
+**Der Rückweg braucht den Platz zurück.** Ausgepackt belegt die Tabelle
+wieder ihre volle Größe; vorher `df -h /` ansehen. Genau deshalb gehört
+dieser Schritt in ein Fenster, in dem jemand am Rechner sitzt.
+
+### Was dieser Handgriff nicht löst
+
+**Er wiederholt sich nicht von selbst.** Nach dem Lauf wächst
+`event_log` weiter, und in einigen Wochen stehen neue Chunks jenseits der
+Grenze. Die dauerhafte Antwort wäre eine Verdichtungs-Policy
+(`add_compression_policy`), die TimescaleDB selbst anwendet — das ist
+eine eigene Entscheidung und ein eigener PR, weil sie etwas automatisch
+tut, was heute ausdrücklich von Hand geschieht.
+
+**Ein gelöschtes Zimmer nimmt seinen Trace trotzdem mit.** Verdichtung
+schützt ihn nicht; die Vorprüfung vom 27.11.2026 hat gezeigt, dass
+`ON DELETE CASCADE` auch durch verdichtete Chunks durchläuft. Seit dem
+27.11.2026 hält eine Audit-Zeile (`ROOM_DELETED`) fest, wie viele Zeilen
+je Tabelle dabei verloren gehen. Ob ein Zimmer mit Trace überhaupt
+löschbar bleiben soll, ist offen.
+
 ## 10bg. Festgenagelte Images bewusst nachziehen (quartalsweise)
 
 **Wofür.** Die fremden Images in `docker-compose.prod.yml` hängen seit
@@ -12748,3 +12867,419 @@ Nebenbei ist), §10be (die Log-Grenzen, die beim Neuerstellen mitkommen),
 H-6 und `test_deploy_pull_pinning.py` (unsere eigenen Images, je Commit),
 §5.91 (`.Id` ist nicht immer der Manifest-Digest),
 `docs/status/2026-11-16-image-digests.md`.
+## 10bi. Ein Wartungsfenster: Docker-Update, Tailscale stilllegen, `event_log` verdichten
+
+**Was das ist.** Die Laufliste **eines** Termins, in der Reihenfolge, in
+der sie abgearbeitet wird. Drei Handgriffe, die bisher einzeln notiert
+waren und jeder für sich einen Container-Neustart oder einen Zugangsweg
+berühren. Zusammen in einem Fenster, weil der teure Teil nicht der
+Handgriff ist, sondern die **Gateway-Prüfung danach** — und die gilt für
+alle drei zugleich.
+
+**Port 1883 ist nicht enthalten.** Die Sperre von außen braucht die
+externe IT (#385 bleibt blockiert); hier wird daran nichts gedreht.
+
+> **Zu den Befehlen, die auch anderswo stehen.** Diese Liste wiederholt
+> Befehle aus §10ay (Gateway-Prüfung), §10ab (Sicherung), §10aw Block 2
+> (Tailscale) und §10bh (Verdichtung). Das ist eine bewusste Doppelung:
+> eine Laufliste, die bei jedem Schritt „siehe §10ay" sagt, ist um 10 Uhr
+> mit einem Gateway in der Hand nicht benutzbar. **Der Preis ist, dass
+> eine Änderung dort auch hier nachzuziehen ist** — jeder Schritt nennt
+> deshalb seine Quelle.
+
+**Dauer:** rund 90 Minuten, davon 40 Minuten Warten. Fenster werktags
+10–12 Uhr (§0.3 Merge-Fenster, dieselbe Begründung: die Zimmer sind am
+leersten, und es bleibt ein Arbeitstag für einen Fix).
+
+**Wer dabei sein muss:** jemand am Rechner **und** jemand, der im Notfall
+an das UG65 kommt (Schritt 1d).
+
+---
+
+### Schritt 0 — Vorbereitung. Ohne diese vier Antworten fängt der Termin nicht an
+
+**0a. Läuft ein Montage- oder Eingangstest?** (§0.3, Pflicht-Frage)
+
+```bash
+docker exec deploy-redis-1 redis-cli --scan --pattern 'deploy:lock*'
+```
+
+*ERWARTET:* leer. *STOPP, wenn* ein Schlüssel steht → der Termin wird
+verschoben; ein Eingangstest stirbt beim Container-Neustart mitten in der
+Bestätigungskette (§0.3, S4).
+
+**0b. Ist der Notzugang geprüft?** Das ist die harte Vorbedingung für
+Schritt 2: **Tailscale war der zweite Weg auf diese Maschine.** Wer ihn
+zumacht, braucht den dritten vorher in der Hand.
+
+* Hetzner-Konsole erreichbar (`https://console.hetzner.cloud` → Projekt →
+  Server → **Console**), und
+* das **Root-Passwort** liegt im Passwortspeicher.
+
+```bash
+passwd -S root
+systemctl is-enabled getty@tty1
+```
+
+*ERWARTET:* `root P …` (Passwort gesetzt) und `enabled`. *STOPP, wenn*
+eines fehlt → **Schritt 2 entfällt**, Schritt 1 und 3 laufen trotzdem.
+Die technische Seite allein genügt nicht: ohne das Passwort im Speicher
+ist die Konsole im Notfall wertlos.
+
+**0c. Die Sicherung.** Derselbe Befehl wie §10ab Schritt 0.2:
+
+```bash
+/opt/heizung-sonnblick/infra/deploy/backup.sh && ls -lt /var/backups/heizung | head -3
+```
+
+*ERWARTET:* die jüngste Datei ist von heute und größer als 0 Byte.
+*STOPP, wenn* nicht → §10l (Dead-Man-Checks) nachgehen, **nicht**
+weitermachen. Schritt 3 schreibt die Chunks von `event_log` neu.
+
+**0d. Der Ausgangsstand, gegen den später verglichen wird.**
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}'
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT count(*), count(DISTINCT device_id), max(time) FROM sensor_reading WHERE time > now() - interval '10 minutes';"
+df -h / | tail -1
+ufw status numbered
+```
+
+*ERWARTET:* elf Dienste `Up`; zweistellige Gerätezahl; die Platte unter
+der Warnschwelle. **Diese Ausgabe aufschreiben** — sie ist der Vergleich
+für jede Prüfung danach (§5.0a).
+
+---
+
+### Schritt 1 — Docker-Update
+
+**Warum eigener Termin.** `docker-ce` und `containerd.io` starten beim
+Einspielen ihren Dienst neu und damit **alle Container inklusive
+Mosquitto** — also die Gateway-Gefahr aus §10ay. Am 16.11.2026 wurden die
+sechs Pakete deshalb zurückgehalten; heute ist der Termin, an dem sie
+nachgezogen werden.
+
+**1a. Nachsehen, was gehalten wird und was anstünde**
+
+```bash
+apt-mark showhold
+apt-get update -qq && apt list --upgradable 2>/dev/null | grep -iE 'docker|containerd' || echo '(keine Docker-Pakete im Update)'
+apt list --upgradable 2>/dev/null | grep -ci security
+```
+
+*ERWARTET:* genau die sechs Namen `docker-ce`, `docker-ce-cli`,
+`docker-ce-rootless-extras`, `containerd.io`, `docker-buildx-plugin`,
+`docker-compose-plugin`; dazu die Zeilen, die anstehen.
+
+*STOPP, wenn* `apt-mark showhold` **leer** ist → dann ist das Halten
+schon aufgehoben und Docker womöglich bei einem früheren
+`dist-upgrade` mitgelaufen. Dann ist dieser Schritt erledigt; weiter mit
+der Prüfung 1c, um den Stand zu belegen.
+
+**1b. Halten aufheben und nur die Docker-Pakete einspielen**
+
+```bash
+apt-mark unhold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+*ERWARTET:* sechs Zeilen `… wurde von »Halten« gelöst.`
+
+```bash
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+**`install` und nicht `dist-upgrade`:** heute soll genau das eine Thema
+durchgehen. Die zwei `Dpkg::Options` behalten vorhandene
+Konfigurationsdateien und nehmen die Paket-Vorgabe nur dort, wo nichts
+von Hand geändert wurde — ohne sie bleibt `apt` an einer Dialogbox
+stehen, während jemand am Gateway wartet.
+
+```bash
+find /etc -name '*.dpkg-dist' -newermt '-1 hour' 2>/dev/null | head
+```
+
+*ERWARTET:* leer oder eine Handvoll Pfade — **heute nichts tun**, nur
+aufschreiben.
+
+**1c. Prüfung: sind die Container wieder da?**
+
+*Wartezeit:* **drei Minuten.**
+
+```bash
+docker version --format '{{.Server.Version}}'
+docker info --format '{{.LoggingDriver}}'
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}'
+```
+
+*ERWARTET:* die neue Server-Version, `json-file`, und **elf Dienste
+`Up`** — diesmal mit **kurzen** Laufzeiten, denn der Docker-Dienst ist
+neu gestartet. Genau umgekehrt wie am 16.11., wo unveränderte Laufzeiten
+der Beleg waren, dass Docker *nicht* angefasst wurde.
+
+*STOPP, wenn* ein Dienst nicht hochkommt → **Rückweg 1** unten.
+
+**1d. Die zwei Gateway-Prüfungen. Nicht Caddy.**
+
+> **Das UG65 spricht kein Basic Station.** Es publiziert per **MQTT auf
+> 1883** und meldet sich bei Mosquitto als `gateway-ug65` an. Ein `grep`
+> im Caddy-Protokoll beantwortet die Frage **nicht** — das stand bis zum
+> 17.11.2026 falsch in §10ay und ist dort korrigiert.
+
+**Erste Prüfung — hat sich das Gateway neu verbunden?**
+
+```bash
+docker logs deploy-mosquitto-1 --since 5m 2>&1 | grep -c "u'gateway-ug65'"
+```
+
+*ERWARTET:* **mindestens 1.** Der Neustart hat die MQTT-Sitzung beendet,
+das Gateway muss sich neu anmelden.
+
+> **Wortgleich mit §10ay** — auch ohne `|| true`. `grep -c` endet bei
+> **null** Treffern mit Rückgabewert 1; das ist hier **kein Fehler**,
+> sondern die Antwort „keine Neuanmeldung". Zwei Formen desselben Befehls
+> wären zwei Wahrheiten darüber, was geprüft wird.
+
+**Zweite Prüfung — kommen Messwerte?** Das misst das **Ende** der Kette.
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
+```
+
+*ERWARTET:* zweistellige Gerätezahl, `juengste` unter zwei Minuten.
+
+**Kommt eines von beidem, ist der Weg in Ordnung** — weiter mit Schritt 2.
+
+*Bleibt **beides** leer:* **zehn Minuten warten** und beide Befehle noch
+einmal. Erst wenn **nach diesen zehn Minuten weiterhin beides leer ist**,
+wird das UG65 **vom Strom getrennt** (Netzteil ziehen, 10 Sekunden
+warten, wieder stecken) und die zwei Prüfungen nach drei Minuten erneut
+gefahren. Das ist der einzige Anlass für die Stromtrennung; eine von
+beiden Zahlen genügt, um sie zu lassen.
+
+**Rückweg 1** (Container kommen nicht hoch):
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml up -d
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}'
+```
+
+Hilft das nicht, die Docker-Version zurückdrehen — die vorige steht in
+der Ausgabe von 1a:
+
+```bash
+apt-get -y install docker-ce=<VORIGE> docker-ce-cli=<VORIGE> containerd.io=<VORIGE>
+apt-mark hold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Danach **wieder 1c und 1d**. Ein Rückweg ohne Prüfung ist kein Rückweg.
+
+---
+
+### Schritt 2 — Tailscale stilllegen
+
+**Nur wenn 0b grün war.** Ohne geprüften Notzugang entfällt dieser
+Schritt — es gibt dann keinen zweiten Weg auf die Maschine.
+
+**Was weg soll und warum.** Der Knoten ist seit dem 07.11.2026
+**abgemeldet**; über `root@heizung-test` kommt niemand mehr hin, der
+Zugang läuft über die öffentliche IP. Der Dienst **läuft** aber weiter
+(als Snap), das Interface `tailscale0` existiert, und in der Firewall
+steht eine Regel, die alles darauf hereinlässt.
+
+Die Regel ist kein Risiko, solange kein Verkehr darauf kommt. Sie ist
+etwas anderes: **ein Eintrag, der beim nächsten Lesen für einen
+Zugangsweg gehalten wird.** Am 04.11. war es ein Mosquitto-Benutzer, den
+eine Liste als verwaist führte und der der Datenpfad war; am 07.11. ein
+Port, von dem jemand annahm, von außen käme dort nichts. Beide Male war
+der Fehler nicht die Handlung, sondern der Eintrag, auf den sie sich
+berief.
+
+**2a. Vorher belegen** (§5.0a, §10aw Block 2)
+
+```bash
+ip -brief link show tailscale0 2>&1
+snap services tailscale 2>&1
+systemctl is-active snap.tailscale.tailscaled.service 2>&1
+timeout 10 tailscale status 2>&1 | head -3
+ufw status numbered | grep -i tailscale
+```
+
+*ERWARTET* (Stand 10.11.2026): das Interface **existiert**, der Dienst
+ist `enabled`/`active`, `tailscale status` sagt **„Logged out"**, und die
+Firewall führt eine Regel auf `tailscale0`.
+
+> **Die Unit heißt `snap.tailscale.tailscaled.service`, nicht
+> `tailscaled`.** `systemctl is-active tailscaled` antwortet immer
+> `inactive`, weil es diese Unit nicht gibt — daraus entstand am
+> 07.11.2026 die falsche Aussage, Tailscale sei abgeschaltet (§5.68).
+
+*STOPP, wenn* `tailscale status` **angemeldet** meldet → dann ist
+Tailscale ein lebender Zugangsweg, und das Stilllegen ist eine andere
+Entscheidung. Schritt 2 abbrechen, Ausgabe aufschreiben.
+
+**2b. Firewall-Regel entfernen**
+
+```bash
+ufw delete <NUMMER>
+```
+
+`<NUMMER>` ist die Zahl aus 2a. **Nur diese eine Regel**, und danach
+sofort:
+
+```bash
+ufw status verbose
+```
+
+*ERWARTET:* 22, 80, 443 und 1883 unverändert offen, die
+`tailscale0`-Zeile weg. *STOPP, wenn* eine andere Regel fehlt → **Rückweg
+2** unten, und zwar vor jedem weiteren Befehl: ohne 1883 steht die Anlage
+(`docs/status/2026-11-07-vorfall-1883-sperre.md`).
+
+**2c. Snap entfernen**
+
+```bash
+snap remove --purge tailscale
+```
+
+*ERWARTET:* `tailscale removed`.
+
+**2d. Prüfung: Dienst weg, Interface weg, Anlage unberührt**
+
+```bash
+snap list | grep -i tailscale || echo '(kein Snap tailscale)'
+systemctl is-active snap.tailscale.tailscaled.service 2>&1
+ip -brief link show tailscale0 2>&1
+ss -lntup | grep -i tailscale || echo '(kein Tailscale-Port offen)'
+```
+
+*ERWARTET:* kein Snap, `inactive` **oder** „Unit … not loaded",
+`Device "tailscale0" does not exist.`, kein offener Port.
+
+Und die Anlage — dieselbe Zahl wie in 0d:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '3 minutes';"
+ssh -o BatchMode=yes -o ConnectTimeout=5 root@157.90.17.150 'echo zugang-ok'
+```
+
+Der zweite Befehl läuft **vom Arbeitsrechner**, nicht auf dem Server: er
+belegt, dass der Weg über die öffentliche IP noch steht. *STOPP, wenn* er
+scheitert → Hetzner-Konsole aus 0b benutzen und **Rückweg 2**.
+
+**Rückweg 2** (Zugang oder Anlage gestört):
+
+```bash
+ufw allow in on tailscale0
+snap install tailscale
+tailscale login
+```
+
+Die Firewall-Regel zuerst — sie ist der billige Teil. Das Snap
+wiederherzustellen braucht eine Anmeldung und damit jemanden mit dem
+Tailscale-Konto; das ist der Grund, warum 0b die Hetzner-Konsole als
+dritten Weg verlangt und nicht Tailscale als zweiten.
+
+---
+
+### Schritt 3 — `event_log` verdichten (echter Lauf)
+
+**Voraussetzung:** die Sicherung aus 0c ist frisch, und das Werkzeug ist
+auf dem Server (kommt mit dem PR „event_log verdichten"; ohne ihn
+antwortet der Befehl `No module named …` und der Schritt entfällt).
+
+Die ausführliche Begründung samt Rückweg steht in **§10bh**.
+
+> **§10bh kommt mit demselben PR wie das Werkzeug.** Steht der Abschnitt
+> noch nicht in dieser Datei, ist der PR „event_log verdichten" noch nicht
+> gemergt — dann entfällt Schritt 3, und die Reihenfolge des Termins ist
+> 0, 1, 2, 4. Ein Verweis auf einen Abschnitt, den es noch nicht gibt, hat
+> am 15.11.2026 schon einmal Zeit gekostet; deshalb steht er hier mit
+> seiner Bedingung.
+
+Hier die Reihenfolge:
+
+**3a. Trockenlauf — zählt, ändert nichts**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten
+```
+
+*ERWARTET:* Anzahl der Chunks jenseits von 14 Tagen, ihr Platz, und
+„Faktor dieser Datenbank: unbekannt" beim ersten Mal. *Steht dort
+„Nichts zu tun"*, ist Schritt 3 fertig.
+
+**3b. Der echte Lauf**
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --ausfuehren
+```
+
+**3c. Prüfung: Platz frei, Zeilen vollständig**
+
+```bash
+df -h / | tail -1
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) FROM event_log;"
+```
+
+*ERWARTET:* mehr freier Platz als in 0d — und **dieselbe Zeilenzahl**.
+Die Zeilenzahl ist die eigentliche Abnahme: verdichten ohne Verlust. Wer
+sie vorher nicht aufgeschrieben hat, kann sie hinterher nicht prüfen —
+deshalb steht sie in 0d nicht, sondern hier als Aufgabe für 3a:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -A -c "SELECT count(*) FROM event_log;"
+```
+
+**vor** 3b laufen lassen und aufschreiben.
+
+Dazu die Oberfläche: eine Zimmer-Detailseite öffnen, Reiter
+**Entscheidung** — der Trace der vergangenen Tage muss weiter da sein.
+
+**Rückweg 3:**
+
+```bash
+df -h / | tail -1
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --zuruecknehmen
+```
+
+**Der Platz muss vorher da sein** — ausgepackt belegt die Tabelle wieder
+ihre volle Größe. Deshalb `df` zuerst.
+
+---
+
+### Schritt 4 — gemeinsamer Abschluss
+
+```bash
+docker compose -f /opt/heizung-sonnblick/infra/deploy/docker-compose.prod.yml ps --format '{{.Service}}={{.Status}}'
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS messwerte, count(DISTINCT device_id) AS geraete, max(time) AT TIME ZONE 'Europe/Vienna' AS juengste FROM sensor_reading WHERE time > now() - interval '5 minutes';"
+ufw status verbose
+df -h / | tail -1
+systemctl list-timers --no-pager | grep heizung
+```
+
+*ERWARTET:* elf Dienste `Up`; 40–55 Messwerte in fünf Minuten,
+`juengste` unter zwei Minuten; 22/80/443/1883 offen; mehr Platz als in
+0d; die Timer `heizung-deploy-pull` und `heizung-backup` mit einer
+nächsten Fälligkeit.
+
+Dazu **zehn Minuten die Kachel Funk-Empfang** auf dem Dashboard ansehen.
+Steht sie schlechter als vor dem Termin, ist der Verdacht **zuerst beim
+Gateway** (§10ay Schritt 6) — nicht bei den Geräten.
+
+**Aufschreiben**, was gelaufen ist und was nicht: welche Docker-Version
+jetzt steht, ob Schritt 2 gelaufen oder entfallen ist, und welcher Faktor
+bei der Verdichtung herauskam. Der nächste Termin liest das.
+
+**Was dieser Termin nicht erledigt:** Port 1883 von außen (braucht
+externe IT, #385), und eine Verdichtungs-Policy, die den Handgriff aus
+Schritt 3 überflüssig macht (eigene Entscheidung, §10bh „Was dieser
+Handgriff nicht löst").
+
+**Querverweise:** §0.3 (Pflicht-Frage und Merge-Fenster), §10ab
+(Sicherung, Schritt 0.2), §10ay (Gateway-Prüfung nach einem Neustart),
+§10aw Block 2 (Tailscale, Ausgangsbefund vom 10.11.), §10bh
+(Verdichtung), §10l (Dead-Man-Checks), §5.68 (`is-active tailscaled` —
+die Antwort auf eine Unit, die es nicht gibt), §5.78 (`docker compose`
+ohne `-f`), `docs/status/2026-11-16-grosser-durchgang.md` (der Termin,
+an dem die sechs Pakete zurückgehalten wurden).

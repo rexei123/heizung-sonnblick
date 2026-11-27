@@ -69,6 +69,22 @@ export const verlaufTagSchema = z.object({
   ist_min: dezimal,
   ist_max: dezimal,
   soll_mittel: dezimal,
+  /**
+   * Gehäusetemperatur des Tages als **Rohwert ohne Einheit** (AE-78):
+   * der Hersteller-Dekoder liest ein Byte und nennt keine Einheit. Die
+   * Anzeige schreibt deshalb kein „°C" dahinter.
+   *
+   * `_ein` ist dieselbe Zahl, aber nur aus Meldungen mit eingeschaltetem
+   * Relais. Der Abstand zwischen beiden trennt „warm vom Schalten" von
+   * „warm ohnehin" — die Frage, die am 18.11.2026 offen geblieben ist.
+   *
+   * **Nur je Tag, nicht je Stunde.** Die Stundenwerte stehen in der
+   * CSV-Datei; hier wären sie ein Feld, das niemand liest.
+   */
+  gehaeuse_max: z.number().nullable(),
+  gehaeuse_mittel: dezimal,
+  gehaeuse_max_ein: z.number().nullable(),
+  gehaeuse_mittel_ein: dezimal,
 });
 
 export const relaisVerlaufSchema = z.object({
