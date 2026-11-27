@@ -126,7 +126,14 @@ async def _add_reading(
     temperature: Decimal | None = None,
     open_window: bool | None = None,
     attached_backplate: bool | None = None,
+    valve_position: int | None = None,
 ) -> None:
+    """Eine Meldung. ``valve_position`` ab 27.11.2026 (Schritt 2).
+
+    Der Inferenz-Detektor verlangt seither **zwei** Ventilstellungen im
+    Fenster, deren letzte „offen" bedeutet — ein Temperaturfall allein
+    ist kein Befund (Modulkopf von ``rules/inferred_window``).
+    """
     reading = SensorReading(
         time=datetime.now(tz=UTC) - timedelta(minutes=age_min),
         device_id=device_id,
@@ -134,6 +141,7 @@ async def _add_reading(
         temperature=temperature,
         open_window=open_window,
         attached_backplate=attached_backplate,
+        valve_position=valve_position,
     )
     session.add(reading)
     await session.flush()
@@ -216,30 +224,42 @@ async def test_engine_layer4_detached_synthetic(
 async def test_inferred_window_detects_falling_temp_steady_setpoint(
     db_session: AsyncSession, setup_room: dict[str, Any]
 ) -> None:
-    """3 SensorReadings 21.0 → 20.5 → 20.0 °C ueber 10 Min, stehender
-    Setpoint 20.0 → detector returnt Result mit delta_c=1.0,
-    devices_observed=[dev_eui], setpoint_c=20.
+    """3 SensorReadings 22.0 → 21.0 → 20.0 °C, stehender Setpoint 20.0,
+    **Ventil von 10 auf 80 Prozent** → Treffer mit delta_c=2.0.
 
-    Kein Setpoint-Effekt: Brief T3-Garantie, dass Inferred-Detector
-    rein observational ist. Hier wird das nur ueber den Result-Vergleich
-    geprueft — die Engine-Pipeline laeuft in T1/T2 separat ab und
-    schreibt ControlCommands, der Detector ist davon entkoppelt.
+    **Am 27.11.2026 nachgezogen** (Schritt 2). Vorher lief dieser Test
+    mit einem Fall von 1,0 Grad und ohne Ventilangabe. Beides traegt
+    seither nicht mehr: die Schwelle liegt bei 1,5 Grad, und ein Fall
+    ohne aufgehendes Ventil ist kein Befund. Das ist **keine**
+    Testanpassung an einen Bug, sondern an eine geaenderte Domaenen-
+    Wahrheit (Paragraph 5.51) — und der Grund steht im Modulkopf von
+    ``rules/inferred_window``.
+
+    Kein Setpoint-Effekt: der Detektor ist rein beobachtend.
     """
     dev_id = setup_room["device_id"]
     # Stehender Setpoint im Lookback: 2 CCs mit 20.0
     await _add_control_command(db_session, device_id=dev_id, setpoint_c=Decimal("20.0"), age_min=8)
     await _add_control_command(db_session, device_id=dev_id, setpoint_c=Decimal("20.0"), age_min=2)
-    # Falling temperature 21.0 → 20.5 → 20.0 ueber 10 Min
-    await _add_reading(db_session, device_id=dev_id, age_min=9, temperature=Decimal("21.0"))
-    await _add_reading(db_session, device_id=dev_id, age_min=5, temperature=Decimal("20.5"))
-    await _add_reading(db_session, device_id=dev_id, age_min=1, temperature=Decimal("20.0"))
+    # Fallende Temperatur **und** aufgehendes Ventil: das Geraet heizt
+    # gegen und kommt nicht nach.
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=9, temperature=Decimal("22.0"), valve_position=10
+    )
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=5, temperature=Decimal("21.0"), valve_position=45
+    )
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=1, temperature=Decimal("20.0"), valve_position=80
+    )
 
     now = datetime.now(tz=UTC)
     result = await detect_inferred_window(db_session, setup_room["room_id"], now)
     assert result is not None
-    assert result.delta_c == Decimal("1.0")
+    assert result.delta_c == Decimal("2.0")
     assert result.devices_observed == [setup_room["dev_eui"]]
     assert result.setpoint_c == 20
+    assert (result.ventil_von, result.ventil_bis) == (10, 80)
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +343,21 @@ async def test_inferred_window_pre_window_baseline_triggers(
 ) -> None:
     """ControlCommand-History: 30 Min zurueck setpoint 20.0, dann nichts mehr.
 
-    SensorReadings: 21.0 → 20.5 → 20.0 °C im Lookback (Δ-T=1.0).
+    SensorReadings: 22.0 → 21.0 → 20.0 °C im Lookback (Δ-T=2.0), Ventil
+    von 20 auf 70 Prozent.
 
     Inferred-Trigger feuert mit ``setpoint_c=20`` (= Pre-Window-Baseline,
     war waehrend des gesamten Lookback stehend bei 20.0). Wachposten
     gegen Bug "setpoint_c = juengster CC ueberhaupt" — juengster CC
     ist hier 30 Min alt und das ist der STEHENDE Wert, deshalb passt
     setpoint_c=20.
+
+    **Am 27.11.2026 nachgezogen** (Schritt 2): Fall und Ventilweg
+    angepasst, die Zusicherung ueber ``setpoint_c`` ist unveraendert —
+    sie ist der Gegenstand dieses Tests.
+
+    Der CC liegt 30 Minuten zurueck und damit **vor** dem Lookback von
+    25 Minuten; genau das ist der gepruefte Fall.
     """
     dev_id = setup_room["device_id"]
     # NUR ein CC, 30 Min alt (= Pre-Window-Baseline, kein CC im Lookback)
@@ -340,14 +368,20 @@ async def test_inferred_window_pre_window_baseline_triggers(
         age_min=30,
         reason=CommandReason.VACANT_SETPOINT,
     )
-    await _add_reading(db_session, device_id=dev_id, age_min=9, temperature=Decimal("21.0"))
-    await _add_reading(db_session, device_id=dev_id, age_min=5, temperature=Decimal("20.5"))
-    await _add_reading(db_session, device_id=dev_id, age_min=1, temperature=Decimal("20.0"))
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=9, temperature=Decimal("22.0"), valve_position=20
+    )
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=5, temperature=Decimal("21.0"), valve_position=50
+    )
+    await _add_reading(
+        db_session, device_id=dev_id, age_min=1, temperature=Decimal("20.0"), valve_position=70
+    )
 
     now = datetime.now(tz=UTC)
     result = await detect_inferred_window(db_session, setup_room["room_id"], now)
     assert result is not None
-    assert result.delta_c == Decimal("1.0")
+    assert result.delta_c == Decimal("2.0")
     assert result.setpoint_c == 20, (
         f"erwarte setpoint_c=20 (Pre-Window-Baseline), gefunden: {result.setpoint_c}"
     )
