@@ -96,6 +96,20 @@ function formatGrad(wert: number | null): string {
   return wert === null ? "–" : `${wert.toFixed(1)} °C`;
 }
 
+/**
+ * Gehäusetemperatur: Mittel und in Klammern der größte Wert.
+ *
+ * **Ohne Einheit.** Der Wert ist ein Rohwert; der Hersteller-Dekoder
+ * liest ein Byte und nennt keine Einheit (AE-78). Ein „°C" dahinter wäre
+ * eine Behauptung, die niemand geprüft hat — und die Zahl wird für die
+ * Frage „steigt sie über die Tage" auch ohne Einheit gelesen.
+ */
+function formatGehaeuse(mittel: number | null, max: number | null): string {
+  if (mittel === null && max === null) return "–";
+  const m = mittel === null ? "–" : mittel.toFixed(1);
+  return max === null ? m : `${m} (${max})`;
+}
+
 export function RelayHistory({ deviceId }: { deviceId: number }) {
   const [bereich, setBereich] = useState<RelaisBereich>("24h");
   const { data, isLoading, isError } = useQuery({
@@ -397,7 +411,9 @@ function Tagestabelle({ daten }: { daten: RelaisVerlauf }) {
             <th className="py-2 pr-3 font-medium">Einsch.</th>
             <th className="py-2 pr-3 font-medium">Energie</th>
             <th className="py-2 pr-3 font-medium">Ist Ø (min–max)</th>
-            <th className="py-2 font-medium">Soll Ø</th>
+            <th className="py-2 pr-3 font-medium">Soll Ø</th>
+            <th className="py-2 pr-3 font-medium">Gehäuse Ø (max)</th>
+            <th className="py-2 font-medium">Gehäuse ein Ø (max)</th>
           </tr>
         </thead>
         <tbody>
@@ -427,8 +443,20 @@ function Tagestabelle({ daten }: { daten: RelaisVerlauf }) {
                   </span>
                 ) : null}
               </td>
-              <td className="text-text-secondary py-2">
+              <td className="text-text-secondary py-2 pr-3">
                 {formatGrad(t.soll_mittel)}
+              </td>
+              <td
+                className="text-text-secondary py-2 pr-3"
+                data-testid={`relay-history-gehaeuse-${t.tag}`}
+              >
+                {formatGehaeuse(t.gehaeuse_mittel, t.gehaeuse_max)}
+              </td>
+              <td
+                className="text-text-secondary py-2"
+                data-testid={`relay-history-gehaeuse-ein-${t.tag}`}
+              >
+                {formatGehaeuse(t.gehaeuse_mittel_ein, t.gehaeuse_max_ein)}
               </td>
             </tr>
           ))}
@@ -442,6 +470,16 @@ function Tagestabelle({ daten }: { daten: RelaisVerlauf }) {
         „ein %" ist zeitgewichtet über die erfassten Minuten. Das Relais meldet
         alle zehn Minuten; Stunden ohne Meldung erscheinen als Lücke und nicht
         als 0 Prozent.
+      </p>
+      {/* **Die Einheit ist nicht belegt** (AE-78), und dieser Satz ist der
+          Grund, warum in der Spalte keine steht. „ein" meint: nur aus
+          Meldungen, in denen das Relais geschaltet war. */}
+      <p className="text-text-tertiary mt-1 text-xs">
+        Die Gehäusetemperatur ist ein{" "}
+        <strong>Rohwert ohne belegte Einheit</strong> — der Hersteller-Dekoder
+        liest ein Byte und nennt keine. „ein" sind nur die Meldungen mit
+        eingeschaltetem Relais; steht dort deutlich mehr als in der Spalte
+        daneben, kommt die Wärme vom Schalten.
       </p>
     </div>
   );
