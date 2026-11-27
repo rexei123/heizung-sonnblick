@@ -12867,6 +12867,113 @@ Nebenbei ist), §10be (die Log-Grenzen, die beim Neuerstellen mitkommen),
 H-6 und `test_deploy_pull_pinning.py` (unsere eigenen Images, je Commit),
 §5.91 (`.Id` ist nicht immer der Manifest-Digest),
 `docs/status/2026-11-16-image-digests.md`.
+## 10bk. Ein Zimmer löschen, das Verlaufsdaten hat
+
+> **Der Endpunkt weist das seit dem 27.11.2026 ab**, mit 409 und
+> `ROOM_HAS_HISTORY`. Das ist Absicht und keine Störung: am Zimmer hängen
+> der Engine-Trace, die Belegungen und die Übersteuerungen, und ein
+> `DELETE` nimmt sie mit — lautlos, für alle vergangenen Tage.
+>
+> **Die Meldung nennt die Zahlen.** Steht dort „12 Verlaufszeilen der
+> Steuerung", ist die Entscheidung leicht. Steht dort „14 212", ist sie
+> es nicht, und genau deshalb stehen sie da.
+
+**Wann dieser Handgriff richtig ist:** ein Zimmer wurde versehentlich
+angelegt, hat ein paar Stunden mitgelaufen und soll weg. **Wann er falsch
+ist:** ein Zimmer, das umgebaut, umbenannt oder zusammengelegt wird — dann
+bleibt das Zimmer und seine Zuordnung ändert sich. Ein gelöschter Verlauf
+kommt nicht zurück.
+
+### 0. Zuerst sichern
+
+```bash
+cd /opt/heizung-sonnblick && bash infra/deploy/backup.sh
+```
+
+**Ohne diesen Schritt nicht weiter.** Das ist derselbe Boden wie bei der
+Verdichtung (§10bh Schritt 0) und aus demselben Grund: der einzige
+Rückweg aus diesem Handgriff ist die Sicherung.
+
+### 1. Nachsehen, was daran hängt
+
+Die Zimmer-Kennung steht in der URL der Zimmer-Detailseite. Dann:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT (SELECT number FROM room WHERE id = 42) AS zimmer, (SELECT count(*) FROM event_log WHERE room_id = 42) AS verlaufszeilen, (SELECT count(*) FROM occupancy WHERE room_id = 42) AS belegungen, (SELECT count(*) FROM manual_override WHERE room_id = 42) AS uebersteuerungen;"
+```
+
+**Die `42` steht in diesem Befehl viermal** und muss viermal ersetzt
+werden. Das ist bewusst keine Variable: ein `$ZIMMER`, das in einer
+Zeile falsch gesetzt ist, löscht ein anderes Zimmer als das gemeinte.
+
+*Erwartet:* dieselben Zahlen, die die Oberfläche in der Fehlermeldung
+genannt hat. Weichen sie ab, ist die Kennung falsch — **nicht
+weitermachen**.
+
+### 2. Die Belegungen sichern, falls es welche gibt
+
+Belegungen sind Abrechnungsgrundlage. Steht in Schritt 1 eine Zahl
+größer null, gehört sie vorher aus dem Haus:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "\copy (SELECT * FROM occupancy WHERE room_id = 42) TO STDOUT WITH CSV HEADER" > /root/belegungen-zimmer-42.csv && wc -l /root/belegungen-zimmer-42.csv
+```
+
+*Erwartet:* Zeilenzahl = Belegungen + 1 (Kopfzeile).
+
+### 3. Den Verlauf löschen
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "BEGIN; DELETE FROM manual_override WHERE room_id = 42; DELETE FROM occupancy WHERE room_id = 42; DELETE FROM event_log WHERE room_id = 42; COMMIT;"
+```
+
+**In einer Transaktion**, damit nicht die Hälfte verschwindet, wenn die
+Verbindung abbricht. Die Reihenfolge ist die der Abhängigkeiten: der
+Trace verweist auf Übersteuerungen, nicht umgekehrt.
+
+**`event_log` ist eine Hypertable.** Ein `DELETE` darauf läuft über die
+Chunks und kann bei vielen Zeilen Minuten dauern. Er läuft auch durch
+**verdichtete** Chunks (gemessen am 27.11.2026) — die Verdichtung
+schützt den Trace nicht, sie macht ihn nur kleiner.
+
+### 4. Jetzt das Zimmer löschen
+
+In der Oberfläche, auf der Zimmer-Detailseite. Der Endpunkt lässt es nun
+zu, und er schreibt dabei die Audit-Zeile `ROOM_DELETED` mit den
+Zeilenzahlen der **Einrichtung**, die mitgeht (Zonen, Regelsätze,
+Tagesplan-Fenster).
+
+**Bleibt es bei 409**, hat Schritt 3 nicht alles erfasst. Dann Schritt 1
+erneut: die Meldung nennt, welche der drei Tabellen noch Zeilen hat.
+
+### 5. Prüfung
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) AS zimmer_noch_da FROM room WHERE id = 42;"
+```
+
+*Erwartet:* **0**. Und die Audit-Zeile:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT (ts AT TIME ZONE 'Europe/Vienna')::timestamp(0) AS zeit, old_value FROM business_audit WHERE action = 'ROOM_DELETED' ORDER BY ts DESC LIMIT 1;"
+```
+
+Sie überlebt das Zimmer — `business_audit` hängt nicht an `room`.
+
+### Rückweg
+
+**Es gibt keinen, außer der Sicherung aus Schritt 0.** Deshalb steht sie
+an Position null und nicht weiter unten. Ein zurückgespielter Dump setzt
+die ganze Datenbank auf den Stand vor dem Handgriff zurück, also auch
+alles, was seither geschrieben wurde — bei einer Steuerung, die jede
+Minute schreibt, ist das kein kleiner Schritt. §10ab nennt das Verfahren.
+
+**Querverweise:** §10bh (`event_log` verdichten — dieselbe Tabelle,
+anderes Ziel), §10ab (Sicherung und Rückspielen),
+`docs/status/2026-11-27-zimmer-loeschen-sperren.md` (warum die Sperre im
+Endpunkt sitzt und nicht als `ON DELETE RESTRICT` im Schema), §0 S3
+(Auditierbarkeit), AE-77 (additive Migrationen).
+
 ## 10bi. Ein Wartungsfenster: Docker-Update, Tailscale stilllegen, `event_log` verdichten
 
 **Was das ist.** Die Laufliste **eines** Termins, in der Reihenfolge, in

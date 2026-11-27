@@ -1,9 +1,9 @@
 ---
 titel: Ein Zimmer im Detail
 kategorie: Die Seiten
-stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Tagesplan, Zeitfenster, Temperatur ändern
+stichworte: Stammdaten, Heizzonen, Geräte, Verlauf, Engine, Übersteuerung, Betriebszeit, Tagesplan, Zeitfenster, Temperatur ändern, Zimmer löschen
 rollen: alle
-stand: 2026-11-21
+stand: 2026-11-27
 route: /zimmer/[id]
 ---
 
@@ -85,6 +85,27 @@ Und der Grund, warum eine Übersteuerung endete, steht dahinter:
 | abgelaufen | die Dauer war um |
 | manuell aufgehoben | über die Oberfläche beendet, ohne Grund |
 | irgendein anderer Text | genau das, was jemand beim Aufheben notiert hat |
+
+## Ein Zimmer löschen
+
+Der Knopf sitzt bei den Stammdaten. **Ein Zimmer, in dem schon geheizt
+wurde, lässt sich nicht löschen** — die Steuerung weist es ab und nennt,
+was daran hängt: die Verlaufszeilen der Steuerung, die Belegungen und die
+Übersteuerungen.
+
+**Warum das so ist.** Diese Daten hängen am Zimmer und würden mit ihm
+verschwinden, für alle vergangenen Tage. Danach ist die Frage „warum war
+das Zimmer im Februar kalt" nicht mehr beantwortbar, und eine Belegung,
+die nicht mehr da ist, fehlt auch in der Abrechnung.
+
+**Was stattdessen geht.** Ein Zimmer, das nicht mehr genutzt wird, bleibt
+stehen; ohne Belegung heizt es auf den Frostschutz-Wert und kostet nichts.
+Umbenennen, einem anderen Raumtyp zuordnen oder die Zonen ändern geht
+jederzeit — nur das Löschen nicht.
+
+**Ein versehentlich angelegtes Zimmer**, das ein paar Stunden mitgelaufen
+ist, kann Ihr Administrator mit einem Handgriff am Server freimachen. Der
+steht im RUNBOOK; er sichert vorher und löscht den Verlauf bewusst.
 
 ## Die Sperre für Übersteuerungen
 
