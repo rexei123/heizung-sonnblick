@@ -159,10 +159,16 @@ class SammelmailErgebnis:
     ``result is None`` heisst: es wurde **gar nicht** versucht — kein
     Empfaenger hinterlegt, nichts zu melden, oder alles gebremst. Das ist
     kein Fehlversuch und darf die Fehleranzeige nicht fuellen.
+
+    ``unterdrueckt`` sind die Uebergaenge, die wegen einer laufenden
+    Zonen-Episode nicht gemeldet wurden. Sie gehen an den Aufrufer
+    zurueck, weil sie ins Audit gehoeren: eine unterdrueckte Mail, die
+    niemand nachlesen kann, ist ein stiller Melder (Paragraph 5.79).
     """
 
     gemeldet: int
     result: mailer.MailResult | None = None
+    unterdrueckt: tuple[dict[str, Any], ...] = ()
 
 
 # Sentinel fuer "das Feld war nicht dabei". Siehe ``_ist_pool``.
@@ -183,7 +189,10 @@ def _ist_pool(t: dict[str, Any]) -> bool:
 
 
 def handle_silent_transitions(
-    transitions: list[dict[str, Any]], *, recipient: str | None
+    transitions: list[dict[str, Any]],
+    *,
+    recipient: str | None,
+    stumme_zonen: frozenset[int] = frozenset(),
 ) -> SammelmailErgebnis:
     """Logger je Uebergang, danach **eine** Sammelmail fuer Stufe 2.
 
@@ -197,9 +206,36 @@ def handle_silent_transitions(
     :param recipient: Alarm-Adresse aus ``global_config.alert_email``.
         ``None`` oder leer heisst "keine hinterlegt" — dann bleibt es bei
         den Logger-Eintraegen.
+    :param stumme_zonen: Zonen mit laufender Episode „Relais-Zone stumm"
+        (``services/zonen_episode.offene_zonen``). Geraete **dieser**
+        Zonen kommen nicht in die Mail.
     :return: ``SammelmailErgebnis`` mit der Anzahl gemeldeter Geraete und
         dem Versand-Ergebnis. Letzteres gehoert in ``mail_status``, damit
         ein fehlgeschlagener Versand nicht nur im Container-Log steht.
+
+    **Warum Geraete einer alarmierten Zone schweigen** (27.11.2026). In
+    der Nacht vom 26. auf den 27.11. kam um 01:10 die Zonen-Mail
+    „Barbereich wird gerade nicht geheizt" — mit beiden Geraeten und
+    ihrem letzten Kontakt im Text. Um 03:40 und 03:50 kamen dieselben
+    zwei Geraete noch einmal, einzeln, als „Geraet offline". Zwei
+    Weckrufe fuer eine Information, die zwei Stunden vorher vollstaendig
+    im Postfach lag.
+
+    Unterdrueckt wird nur, was die Zonen-Mail **schon sagt**: sie nennt
+    Fuehler und Relais der Zone samt letzter Meldung. Ein Geraet einer
+    Zone ohne laufende Episode wird unveraendert gemeldet, und der
+    **Logeintrag** entsteht ohnehin fuer jeden Uebergang — die Spur
+    bleibt also vollstaendig, nur der Weckruf nicht.
+
+    **Und zwar endgueltig fuer diesen Uebergang, nicht verschoben.** Ein
+    Geraet wechselt nur einmal nach ``silent``; wird dieser Wechsel
+    unterdrueckt, kommt er nicht wieder. Was danach weiter meldet, ist
+    die Zonen-Episode: ihre Wiederholung alle
+    ``relais_zone_wiederholung_h`` Stunden nennt dieselben Geraete. Der
+    Filter sitzt deshalb **vor** der Wiederholungsbremse — ein
+    unterdrueckter Uebergang verbraucht kein Zeitfenster, damit ein
+    Geraet, das nach dem Ende der Episode weiter schweigt, nicht
+    zusaetzlich sechs Stunden gebremst ist.
     """
     for t in transitions:
         emit_health_alert(
@@ -245,6 +281,19 @@ def handle_silent_transitions(
         )
     kandidaten = [t for t in transitions if t["reason"] != REASON_IMPLAUSIBLE and not _ist_pool(t)]
 
+    # Die Zonen-Mail hat es schon gesagt. Siehe Docstring.
+    unterdrueckt = tuple(t for t in kandidaten if t.get("heating_zone_id") in stumme_zonen)
+    if unterdrueckt:
+        logger.info(
+            "health_alert_zonen_episode_unterdrueckt",
+            extra={
+                "anzahl": len(unterdrueckt),
+                "dev_euis": [t["dev_eui"] for t in unterdrueckt],
+                "zonen": sorted({int(t["heating_zone_id"]) for t in unterdrueckt}),
+            },
+        )
+    kandidaten = [t for t in kandidaten if t.get("heating_zone_id") not in stumme_zonen]
+
     # Die Bremse wird fuer JEDES Geraet einzeln gefragt, auch wenn am Ende
     # eine gemeinsame Mail rausgeht. Sonst wuerde ein einziges frisches
     # Geraet die Sperre aller anderen aufheben und sie erneut auflisten.
@@ -264,7 +313,7 @@ def handle_silent_transitions(
                 "health_alert_sammelmail_entfaellt",
                 extra={"kandidaten": len(kandidaten), "grund": "alle gebremst"},
             )
-        return SammelmailErgebnis(0)
+        return SammelmailErgebnis(0, unterdrueckt=unterdrueckt)
 
     result = mailer.send_mail(
         recipient=recipient,
@@ -276,7 +325,7 @@ def handle_silent_transitions(
             "health_alert_sammelmail_nicht_zugestellt",
             extra={"anzahl": len(zu_melden), "grund": result.reason, "detail": result.detail},
         )
-    return SammelmailErgebnis(len(zu_melden), result)
+    return SammelmailErgebnis(len(zu_melden), result, unterdrueckt=unterdrueckt)
 
 
 # ---------------------------------------------------------------------------

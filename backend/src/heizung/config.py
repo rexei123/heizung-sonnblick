@@ -290,6 +290,26 @@ class Settings(BaseSettings):
     relais_zone_stumm_min: int = 30
     relais_zone_wiederholung_h: int = 6
 
+    # **Wie lange eine Rueckkehr halten muss, bevor die Entwarnung
+    # hinausgeht** (27.11.2026).
+    #
+    # In der Nacht vom 26. auf den 27.11. kam fuer die Zone Barbereich um
+    # 22:40 ein Alarm, um 23:00 eine Entwarnung und um 01:10 derselbe
+    # Alarm wieder. Eine Entwarnung, die zwei Stunden spaeter widerrufen
+    # wird, haette besser gewartet: wer sie liest, haelt den Vorgang fuer
+    # abgeschlossen.
+    #
+    # **Vorgabe 30 Minuten**, also drei Meldungen im Zehn-Minuten-Takt —
+    # dieselbe Begruendung wie bei ``relais_zone_stumm_min``, nur in der
+    # Gegenrichtung. Verzoegert wird damit ausschliesslich die
+    # **Entwarnung**; der Alarm geht unverzueglich, er ist die Nachricht,
+    # auf die jemand handeln muss.
+    #
+    # Die Zustandsmaschine steht in ``services/zonen_episode``. Wer diesen
+    # Wert erhoeht, fasst mehr Flackern zu einer Episode zusammen und
+    # erfaehrt die Rueckkehr spaeter.
+    relais_zone_rueckkehr_stabil_min: int = 30
+
     # --- Abstands-Waechter Belegungsliste (Sprint 23 T3) ------------------
     # Der heutige Waechter fragt "kam heute **eine** Liste?". Fallen die
     # Listen um 15:30 und 19:30 aus, bleibt die Ampel gruen (RUNBOOK 10ai) —

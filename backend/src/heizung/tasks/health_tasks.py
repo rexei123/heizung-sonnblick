@@ -43,7 +43,8 @@ from heizung.config import get_settings
 from heizung.models import Device, HeatingZone, RelayReading, Room, SensorReading
 from heizung.models.enums import DeviceKind
 from heizung.models.global_config import GlobalConfig
-from heizung.services import mail_status, redis_client
+from heizung.services import mail_status, redis_client, zonen_episode
+from heizung.services.business_audit_service import record_business_action
 from heizung.services.health_alerts import handle_silent_transitions
 from heizung.tasks.engine_tasks import _task_session
 
@@ -58,6 +59,13 @@ logger = logging.getLogger(__name__)
 OUTLIER_THRESHOLD_C: Decimal = Decimal("7.0")
 IMPLAUSIBLE_THRESHOLD = 10
 READING_FRESHNESS = timedelta(minutes=30)
+
+
+#: Audit-Marke fuer eine Geraete-Mail, die wegen einer laufenden
+#: Zonen-Episode unterblieb (27.11.2026). ``target_type`` ist die
+#: **Zone**, nicht das Geraet: der Vorgang ist die Zone, und die Zeile
+#: steht damit neben den ``RELAIS_ZONE_*``-Marken derselben Episode.
+AUDIT_GERAETEMAIL_UNTERDRUECKT = "GERAETEMAIL_UNTERDRUECKT_ZONE_STUMM"
 
 
 @app.task(name="heizung.tasks.health_tasks.compute_health_state")
@@ -390,6 +398,13 @@ async def _compute_health_state_async() -> dict[str, Any]:
         gc = await session.get(GlobalConfig, 1)
         alert_recipient = gc.alert_email if gc is not None else None
 
+        # Zonen mit laufender Episode „Relais-Zone stumm". Ihre Geraete
+        # stehen samt letztem Kontakt schon in der Zonen-Mail; eine
+        # zweite Nachricht darueber weckt nur noch einmal (27.11.2026,
+        # siehe ``services/zonen_episode``). Gelesen wird es hier, weil
+        # Phase 6 ausserhalb der Session laeuft.
+        stumme_zonen = await zonen_episode.offene_zonen(session)
+
         await session.commit()
 
     # Phase 6: Logger je Uebergang, danach EINE Sammelmail fuer Stufe 2.
@@ -403,7 +418,9 @@ async def _compute_health_state_async() -> dict[str, Any]:
     # kippen alle Geraete im selben Tick auf silent — 104 Einzelmails waeren
     # unlesbar, und die eigentliche Information ("alle auf einmal") ginge
     # darin unter. Einzelheiten in services/health_alerts.
-    ergebnis = handle_silent_transitions(silent_transitions, recipient=alert_recipient)
+    ergebnis = handle_silent_transitions(
+        silent_transitions, recipient=alert_recipient, stumme_zonen=stumme_zonen
+    )
     if ergebnis.gemeldet:
         logger.info("health_alert_sammelmail", extra={"geraete": ergebnis.gemeldet})
 
@@ -412,13 +429,51 @@ async def _compute_health_state_async() -> dict[str, Any]:
     # Protokollieren soll den Alarmpfad nicht an eine laengere Transaktion
     # binden. Nur wenn wirklich versendet wurde: "nichts zu melden" ist kein
     # Versandergebnis und darf die Anzeige nicht ueberschreiben.
-    if ergebnis.result is not None:
+    if ergebnis.result is not None or ergebnis.unterdrueckt:
         async with _task_session() as session:
-            await mail_status.record_attempt(session, ergebnis.result)
+            if ergebnis.result is not None:
+                await mail_status.record_attempt(session, ergebnis.result)
+            # **Eine unterdrueckte Mail muss nachlesbar sein.** Sonst ist
+            # dieser Filter genau der stille Melder, gegen den er gebaut
+            # ist: niemand koennte spaeter zeigen, dass die Meldung
+            # unterblieb, weil die Zonen-Mail sie schon enthielt
+            # (Paragraph 0 S3, Paragraph 5.79). Eine Zeile je Zone, nicht
+            # je Geraet — der Vorgang ist die Zone.
+            for zone_id in sorted({int(u["heating_zone_id"]) for u in ergebnis.unterdrueckt}):
+                betroffen = [u for u in ergebnis.unterdrueckt if u["heating_zone_id"] == zone_id]
+                await record_business_action(
+                    session,
+                    user_id=None,
+                    action=AUDIT_GERAETEMAIL_UNTERDRUECKT,
+                    target_type="heating_zone",
+                    target_id=zone_id,
+                    old_value=None,
+                    new_value={
+                        "grund": "zonen_episode_laeuft",
+                        "geraete": [
+                            {
+                                "dev_eui": u["dev_eui"],
+                                "etikett": u.get("device_name"),
+                                "zimmer": u.get("room_name"),
+                                "letzte_meldung": (
+                                    u["last_uplink_at"].isoformat()
+                                    if u.get("last_uplink_at") is not None
+                                    else None
+                                ),
+                            }
+                            for u in betroffen
+                        ],
+                    },
+                )
             await session.commit()
 
     return {
         "devices_processed": len(devices),
         "zones_processed": len(zones),
         "silent_transitions": silent_transitions,
+        # Was wegen einer laufenden Zonen-Episode nicht gemailt wurde.
+        # Im Rueckgabewert, weil der Task-Logeintrag ihn sonst nicht
+        # nennen koennte und „keine Mail" dann nach „nichts passiert"
+        # aussieht.
+        "unterdrueckt": [u["dev_eui"] for u in ergebnis.unterdrueckt],
     }
