@@ -1,9 +1,9 @@
 ---
 titel: Thermostate
 kategorie: Die Seiten
-stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Wächter, Timer, Paketverlust, Funk, montiert, Fühler, Verlauf, Heizdauer, Einschaltanteil, kWh, Energie, CSV
+stichworte: Geräte, Vicki, Batterie, Funkstille, nur messen, Reserve-Pool, Ventil prüfen, sortieren, Relais, Knopf am Relais, Wächter, Timer, Paketverlust, Funk, montiert, Fühler, Verlauf, Heizdauer, Einschaltanteil, kWh, Energie, CSV, Gehäusetemperatur
 rollen: alle
-stand: 2026-11-17
+stand: 2026-11-27
 route: /devices
 ---
 
@@ -280,8 +280,25 @@ Panel, sondern über die Steuerung: dann bremst sie, und die Frage ist
 noch nicht reif.
 
 Ganz unten **eine Zeile je Tag** mit Heizdauer, Anteil, Einschaltungen,
-kWh, Ist-Mittel samt Spanne und Soll. Der Tag ist der Kalendertag nach
+kWh, Ist-Mittel samt Spanne, Soll — und seit dem 27.11.2026 zwei Spalten
+zur **Gehäusetemperatur** des Relais. Der Tag ist der Kalendertag nach
 unserer Uhr, nicht nach der des Servers.
+
+**Die beiden Gehäuse-Spalten, und warum es zwei sind.** Die erste nennt
+Mittel und größten Wert über **alle** Meldungen des Tages, die zweite nur
+über die, in denen das Relais **eingeschaltet** war. Steht in der zweiten
+deutlich mehr als in der ersten, kommt die Wärme vom Schalten. Stehen
+beide gleich hoch, ist es im Schrank warm — und dann hilft kein
+Schaltverhalten, sondern Luft.
+
+Die Zahl hat **keine Einheit**. Der Hersteller-Dekoder liest ein Byte und
+nennt keine; ein „°C" dahinter wäre eine Behauptung, die niemand geprüft
+hat. Für die Frage, die sie beantworten soll — *wird das Gerät über die
+Tage wärmer* —, braucht man die Einheit nicht, sondern zwei Tage zum
+Vergleichen. Die Mail „Relais wird warm" hängt an derselben Zahl.
+
+Wer die Werte **je Stunde** braucht, nimmt die CSV-Datei: dort stehen die
+vier Spalten in jeder Stundenzeile.
 
 **Was die Zahlen nicht sagen:**
 
