@@ -255,9 +255,19 @@ async def log_inferred_window_event(
             setpoint_out=setpoint_decimal,
             reason=CommandReason.INFERRED_WINDOW,
             details={
-                "detail": f"delta_c={result.delta_c}",
+                # Die Ventilstellungen gehoeren in die Zeile, nicht nur
+                # in das Urteil: ohne sie steht dort „Fenster vermutet"
+                # ohne den Grund, und der Grund ist seit Schritt 2 (27.11.
+                # 2026) genau dieser Weg des Ventils. Eine Zeile, die ihr
+                # eigenes Kriterium nicht nennt, ist beim Nachsehen eine
+                # Behauptung (Paragraph 5.68).
+                "detail": (
+                    f"delta_c={result.delta_c} ventil={result.ventil_von}->{result.ventil_bis}"
+                ),
                 "delta_c": str(result.delta_c),
                 "devices_observed": list(result.devices_observed),
+                "ventil_von": result.ventil_von,
+                "ventil_bis": result.ventil_bis,
             },
         )
     )
