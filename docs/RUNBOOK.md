@@ -3339,17 +3339,11 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 | **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
 | **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
-
-> **Diese Tabelle ist älter als zwei weitere Melder.** Nicht aufgeführt
-> sind der **Zonen-Melder** (Fühler einer Relais-Zone schweigt länger als
-> `RELAIS_ZONE_STUMM_MIN`, Vorgabe 30 min —
-> `docs/status/2026-11-13-warnung-fuehler-relais-zone.md`) und der
-> **Platten-Wächter** (Platte voller als `PLATTE_WARN_PROZENT`, Vorgabe
-> 85 % — `docs/status/2026-11-14-platten-warnung-und-aufraeumen.md`).
-> Beide verschicken Mail an
-> dieselbe Adresse. Die Zeilen nachzutragen ist ein eigener Doku-PR;
-> hier steht der Hinweis, damit die Tabelle nicht als vollständig
-> gelesen wird (§5.77).
+| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt. Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
+| **Gerät nimmt den Sollwert nicht an** | Ein Thermostat meldet nach `MAX_VERSUCHE` (**3**) Befehlen im 30-Minuten-Abstand weiter einen anderen Wert als den gesendeten. Die Lage steht als Merker am Gerät (`device.abgleich_erschoepft_seit`) und endet erst, wenn das Gerät den gesendeten Wert **übernimmt**. | **einmal je Episode**, mit 24 h als Boden |
+| **Belegungsliste überfällig** | Eine Liste ist gekommen, die **nächste** fehlt zu lange. Eigener Text neben „Keine Belegungsliste": dort kam gar keine, hier fehlt die Folgeliste — und zu tun ist jeweils etwas anderes. | am nächsten Tag |
+| **Stand festgesetzt** | Der Server läuft seit `REMINDER_AFTER_DAYS` (**7 Tagen**) auf einem festgenagelten Abbild (`PIN_SHA`, §10u) statt auf dem gleitenden Stand. Kein Fehler, sondern eine Erinnerung: ein vergessener Pin bekommt keine Fehlerbehebung mehr. | nach 7 Tagen |
+| **Platte läuft voll** | Die Festplatte des Servers ist voller als `PLATTE_WARN_PROZENT` (Vorgabe **85 %**). Dazu eine **Entwarnung**, wenn sie wieder darunter liegt. Geprüft stündlich. **Betrifft keine Zone und kein Gerät** — läuft die Platte voll, hört die Datenbank auf zu schreiben, und dann endet die Steuerung ohne eine einzige rote Kachel. | nach `PLATTE_WIEDERHOLUNG_H` (Vorgabe **24 h**) |
 
 Alle gehen an dieselbe Adresse. Ab **zehn** stummen Geräten wechselt die
 Mail in eine Kurzform: Anzahl und Zimmerliste statt Einzelheiten, und als
@@ -3358,9 +3352,21 @@ ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
 
 **Was ausdrücklich keine Mail auslöst:** implausible Messwerte (ein Gerät
 sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
-Oberfläche sichtbar, aber nicht als Mail — die Batterie-Schwelle unter
-*Einstellungen / Hotel* färbt Anzeige und Kachel, verschickt aber nichts
-(B-15b-1).
+Oberfläche sichtbar, aber nicht als Mail.
+
+> **Korrektur vom 27.11.2026.** Hier stand, die Batterie-Schwelle unter
+> *Einstellungen / Hotel* färbe Anzeige und Kachel. **Diesen Schalter gibt
+> es dort nicht mehr** — mit Sprint 20 (AE-72) ist
+> `alert_battery_warn_percent` aus Schema und Oberfläche entfallen, die
+> Spalte steht nur noch ungelesen in `global_config`. Die Batterie-Stufe
+> rechnet seither auf der **Spannung**, und ihre Grenzen stehen in den
+> Backend-Settings (`BATTERY_OK_MIN_V` / `BATTERY_CRITICAL_MAX_V`), nicht
+> in der Oberfläche. Wer dem alten Satz folgte, suchte ein Feld, das es
+> nicht gibt (§5.77).
+>
+> **B-15b-1 ist damit anders zu lesen**, als der Eintrag sagt: der offene
+> Rest ist nicht „Mail an der konfigurierten Prozent-Schwelle", sondern
+> „Mail an der Batterie-Stufe". Das ist eine andere Aufgabe.
 
 ### Der Funk-Alarm — was er sagt und was zu tun ist
 

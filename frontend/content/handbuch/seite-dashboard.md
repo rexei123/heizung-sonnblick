@@ -1,14 +1,53 @@
 ---
 titel: Dashboard
 kategorie: Die Seiten
-stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais
+stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais, Abreise überschritten
 rollen: alle
-stand: 2026-11-14
+stand: 2026-11-27
 route: /
 ---
 
 Die Startseite. Sie beantwortet eine Frage: **muss ich jetzt etwas tun?**
 Alles andere steht auf den Seiten darunter.
+
+## Abreise überschritten — sind diese Zimmer noch belegt?
+
+Ganz oben, und nur wenn es etwas zu melden gibt: die Zimmer, deren
+**Abreise in den letzten 24 Stunden vorbei ist** und für die keine neue
+Belegung steht.
+
+Das ist der Fall aus dem Artikel „Abreise verschiebt sich": bleibt ein
+Gast länger und wird das Datum nicht nachgezogen, setzt die Steuerung das
+Zimmer am ursprünglichen Abreisetag auf **frei**. Der Gast kommt abends in
+ein kühles Zimmer zurück, und niemand hat etwas falsch gemacht.
+
+An einem normalen Tag stehen hier die Abreisen des Vormittags — eine
+Handvoll, nach dem Mittag meist nichts mehr. **Steht hier nichts, ist
+nichts offen.**
+
+Hinter manchen Zimmern steht ein Zusatz:
+
+| Zusatz | Was er heißt |
+|---|---|
+| **jemand hat am Thermostat gedreht** | Nach der Abreise hat jemand im Zimmer die Temperatur verstellt. Die Steuerung hat die Verstellung abgelehnt, weil das Zimmer als frei gilt — und genau das ist der stärkste Hinweis, den die Anlage auf einen anwesenden Gast hat. |
+| **Wunschtemperatur gesetzt** | Jemand von der Rezeption hat nach der Abreise eine Wunschtemperatur gesetzt. Dann ist der Gast bekannt — falsch steht die **Belegung**. |
+| *kein Zusatz* | Nichts beobachtet. Das heißt **nicht**, dass das Zimmer leer ist: die meisten Gäste drehen nicht am Thermostat. |
+
+Zimmer mit Zusatz stehen oben.
+
+**Erledigt wird es in der Belegung**, nicht mit einer Wunschtemperatur —
+der Link führt dorthin. Warum, steht im Artikel „Abreise verschiebt
+sich": das Datum zu ändern ist der dauerhafte Weg, eine Wunschtemperatur
+läuft nach Stunden ab und das Zimmer kühlt doch.
+
+Der Hinweis **verschwindet von selbst**, sobald die Belegung verlängert
+ist oder die Abreise länger als 24 Stunden her ist. Es gibt nichts
+wegzuklicken — ein Hinweis, den man schließen kann, ist am dritten Tag
+geschlossen.
+
+**Er verschickt keine Mail.** Eine Abreise ist ein Alltagsereignis; eine
+Mail je Abreise wäre nach drei Tagen ein Filter im Postfach, und dann ist
+auch der Alarm weg, der etwas bedeutet.
 
 ## Die Kacheln
 
