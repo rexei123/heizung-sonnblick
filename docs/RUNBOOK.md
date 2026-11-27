@@ -12637,6 +12637,119 @@ chirpstack-Protokoll läuft), §5.78 (`docker compose` ohne `-f`),
 `docs/status/2026-11-16-log-grenzen.md`.
 
 
+## 10bh. `event_log` verdichten (Sicherung zuerst)
+
+**Wofür.** `event_log` wächst um rund **4,8 GB im Monat** (gemessen
+14.11.2026). Am 13.11. war die Platte zu 94 % belegt, und gefunden wurde
+das beim Nachsehen nach etwas anderem. Bei 100 % nimmt Postgres keine
+Schreibvorgänge mehr an — keine Messwerte, keine Engine-Auswertung, keine
+Relais-Bestätigungen.
+
+**Verdichten, nicht löschen.** TimescaleDB legt alte Chunks spaltenweise
+ab. **Keine Zeile geht verloren**, Abfragen lesen weiter. Alte Zeilen
+wegzuwerfen wäre der andere Weg und ein S3-Verstoß: der Engine-Trace ist
+das Protokoll jeder Sollwert-Entscheidung, und ein Protokoll mit Löchern
+beantwortet „warum war das Zimmer kalt" nicht mehr.
+
+**Was es bringt.** In der Vorprüfung vom 27.11.2026 (eigene Datenbank,
+dasselbe Image, 6 Mio. Zeilen in der Form des Betriebs): **148 MB je
+Chunk vorher, 2,6 MB nachher — Faktor 57**. Das ist eine Messung an
+nachgebauten Daten; der Trockenlauf unten nennt den Faktor, den **diese**
+Datenbank erreicht hat, sobald der erste echte Lauf gelaufen ist.
+
+**Es läuft nicht von selbst.** Kein Timer, keine Policy, kein Aufruf aus
+einer Migration. Jeder Lauf ist ein Handgriff in einem Wartungsfenster.
+
+### Schritt 1 — nachsehen, ohne etwas zu ändern
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten
+```
+
+Der Trockenlauf ist der Standard — **ohne** `--ausfuehren` wird nichts
+angefasst. Er nennt: Anzahl der Chunks jenseits der Grenze, wie viele
+davon schon verdichtet sind, den Platz der offenen und den bisher
+erreichten Faktor.
+
+Steht dort „Nichts zu tun", ist der Schritt fertig.
+
+### Schritt 2 — Sicherung
+
+Die Verdichtung schreibt die Chunks neu. Vorher gehört eine Sicherung
+dazu — nicht weil der Vorgang als unsicher gilt, sondern weil er die
+Tabelle anfasst, in der das Protokoll der Steuerung steht.
+
+**SSH (Server, root):**
+
+**Derselbe Befehl wie in §10ab** (Secrets-Rotation, Schritt 0.2) — zwei
+Formen derselben Sicherung wären zwei Wahrheiten darüber, was „gesichert"
+heißt:
+
+```bash
+/opt/heizung-sonnblick/infra/deploy/backup.sh && ls -lt /var/backups/heizung | head -3
+```
+
+**Prüfung:** die jüngste Datei muss von heute sein und größer als 0 Byte.
+Ist sie es nicht, **hier abbrechen** und §10l (Dead-Man-Checks)
+nachgehen — nicht verdichten.
+
+### Schritt 3 — der echte Lauf
+
+**SSH (Server, root):**
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --ausfuehren
+```
+
+Das Werkzeug verdichtet Chunk für Chunk und schreibt je Chunk die Größe
+vorher und nachher. Jeder Chunk ist eine eigene Transaktion: bricht einer
+ab, bleiben die vorherigen verdichtet, und ein zweiter Aufruf macht
+weiter.
+
+**Prüfung** — der Platz und die Zeilen:
+
+```
+df -h / | tail -1
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT count(*) FROM event_log;"
+```
+
+Die Zeilenzahl muss **dieselbe** sein wie vorher. Sie ist die eigentliche
+Abnahme: Verdichten ohne Verlust.
+
+Und die Oberfläche: eine Zimmer-Detailseite öffnen, Reiter
+**Entscheidung** — der Engine-Trace muss die Einträge der vergangenen
+Tage weiter zeigen.
+
+### Schritt 4 — der Rückweg
+
+Wenn etwas nicht stimmt:
+
+```
+docker exec deploy-api-1 python -m heizung.scripts.event_log_verdichten --zuruecknehmen
+```
+
+**Der Rückweg braucht den Platz zurück.** Ausgepackt belegt die Tabelle
+wieder ihre volle Größe; vorher `df -h /` ansehen. Genau deshalb gehört
+dieser Schritt in ein Fenster, in dem jemand am Rechner sitzt.
+
+### Was dieser Handgriff nicht löst
+
+**Er wiederholt sich nicht von selbst.** Nach dem Lauf wächst
+`event_log` weiter, und in einigen Wochen stehen neue Chunks jenseits der
+Grenze. Die dauerhafte Antwort wäre eine Verdichtungs-Policy
+(`add_compression_policy`), die TimescaleDB selbst anwendet — das ist
+eine eigene Entscheidung und ein eigener PR, weil sie etwas automatisch
+tut, was heute ausdrücklich von Hand geschieht.
+
+**Ein gelöschtes Zimmer nimmt seinen Trace trotzdem mit.** Verdichtung
+schützt ihn nicht; die Vorprüfung vom 27.11.2026 hat gezeigt, dass
+`ON DELETE CASCADE` auch durch verdichtete Chunks durchläuft. Seit dem
+27.11.2026 hält eine Audit-Zeile (`ROOM_DELETED`) fest, wie viele Zeilen
+je Tabelle dabei verloren gehen. Ob ein Zimmer mit Trace überhaupt
+löschbar bleiben soll, ist offen.
+
 ## 10bg. Festgenagelte Images bewusst nachziehen (quartalsweise)
 
 **Wofür.** Die fremden Images in `docker-compose.prod.yml` hängen seit
