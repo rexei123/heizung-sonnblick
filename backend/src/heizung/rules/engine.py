@@ -145,6 +145,21 @@ class RuleResult:
     #: gesendet 25 — kein Downlink).
     clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C)
 
+    #: Quelle der wirksamen **Zimmer**-Uebersteuerung, oder ``None``.
+    #:
+    #: Der Dispatch braucht sie fuer genau eine Unterscheidung: ein
+    #: **Boost** umgeht das Entprellen (Sprint 25 T1). Er ist die eine
+    #: Sollwertaenderung, die der Gast sofort spueren soll.
+    #:
+    #: **Die Quelle und nicht der Wert.** Ein Vergleich „ist das ein
+    #: Boost-Sollwert" waere eine Vermutung ueber die Absicht; die Quelle
+    #: der Uebersteuerung ist der Befund (Brief vom 05.11.2026).
+    #:
+    #: Zimmer-Ebene, weil ein Boost zimmerweit angelegt wird
+    #: (``api/v1/overrides``, ohne ``heating_zone_id``). Eine
+    #: Zonen-Uebersteuerung erscheint hier nicht.
+    uebersteuerung_quelle: str | None = None
+
     #: Steht die Gast-Sperre fuer dieses Zimmer (Sprint 23 T4-A2b)?
     #:
     #: ``room.guest_override_blocked``, **beide** Formen — dauerhaft und
@@ -1661,8 +1676,13 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         )
         manual_extras = manual.extras or {}
 
+    # Dieselbe Quelle, zwei Leser: ``raumweit_eingegriffen`` fragt „hat
+    # jemand zimmerweit eingegriffen", der Dispatch fragt „war es ein
+    # Boost". Zweimal ``manual.extras`` zu lesen waere zweimal dieselbe
+    # Ableitung (Paragraph 5.53) — deshalb einmal in eine Variable.
+    uebersteuerung_quelle = manual_extras.get("source")
     raumweit_eingegriffen = (
-        manual_extras.get("source") is not None
+        uebersteuerung_quelle is not None
         or window.reason == CommandReason.WINDOW_OPEN
         or detached.reason == CommandReason.DEVICE_DETACHED
     )
@@ -1687,6 +1707,9 @@ async def evaluate_room(session: AsyncSession, room_id: int) -> RuleResult | Non
         bad_setpoint_c=bad_setpoint_c,
         clamp_grenzen_c=zimmer_grenzen,
         gast_sperre=bool(ctx.room.guest_override_blocked),
+        uebersteuerung_quelle=(
+            str(uebersteuerung_quelle) if uebersteuerung_quelle is not None else None
+        ),
     )
 
 
