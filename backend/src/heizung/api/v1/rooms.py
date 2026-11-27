@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
-from sqlalchemy import Integer, cast, func, select
+from sqlalchemy import Integer, cast, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -784,6 +784,59 @@ async def room_history(
     )
 
 
+#: Die Tabellen, die an ``room.id`` mit ``ON DELETE CASCADE`` haengen.
+#:
+#: **Diese Liste ist der S3-Punkt vom 27.11.2026.** Ein Zimmer zu loeschen
+#: nimmt seinen **ganzen Engine-Trace** mit — und zwar lautlos: die
+#: Datenbank fuehrt den Cascade aus, niemand schreibt etwas darueber, und
+#: hinterher ist die Frage „warum war das Zimmer kalt" fuer alle
+#: vergangenen Tage nicht mehr beantwortbar. Paragraph 0 S3 verlangt, dass
+#: jede Sollwert-Entscheidung im Trace steht; eine Loeschung, die den
+#: Trace entfernt, ohne sich selbst zu protokollieren, ist der Weg daran
+#: vorbei.
+#:
+#: Gegen den stillen Verlust steht seit dem 27.11.2026 die
+#: Audit-Zeile unten: **was** verloren geht, mit **Zahlen**, **vor** dem
+#: Loeschen und in derselben Transaktion. ``business_audit`` haengt
+#: ausdruecklich **nicht** an ``room`` — die Zeile ueberlebt also das
+#: Zimmer, dessen Loeschung sie beschreibt.
+#:
+#: **Was sie nicht ist: eine Sperre.** Ob ein Zimmer mit Trace ueberhaupt
+#: loeschbar bleiben soll, ist eine Entscheidung des Betreibers und keine
+#: Entscheidung dieses PR. Die beiden Wege dorthin — 409 im Endpunkt oder
+#: ``ON DELETE RESTRICT`` in einer Migration — stehen im Statuseintrag;
+#: der zweite waere eine **nicht additive** Migration (AE-77).
+CASCADE_TABELLEN: tuple[str, ...] = (
+    "event_log",
+    "heating_zone",
+    "manual_override",
+    "occupancy",
+    "rule_config",
+    "scenario_assignment",
+    "tagesplan_fenster",
+)
+
+
+async def _was_mitgeht(session: AsyncSession, room_id: int) -> dict[str, int]:
+    """Zaehlt je Tabelle die Zeilen, die der Cascade mitnimmt.
+
+    **Vor** dem Loeschen, denn danach gibt es nichts mehr zu zaehlen. Die
+    Namen stehen in ``CASCADE_TABELLEN`` und nicht in der Abfrage, damit
+    eine neue Tabelle mit ``room_id`` an **einer** Stelle nachzutragen
+    ist.
+    """
+    zahlen: dict[str, int] = {}
+    for tabelle in CASCADE_TABELLEN:
+        # Tabellennamen kommen aus der Modulkonstante, nicht aus der
+        # Anfrage — gebunden wird die Zimmer-Kennung.
+        anzahl = await session.scalar(
+            text(f"SELECT count(*) FROM {tabelle} WHERE room_id = :r"),  # noqa: S608
+            {"r": room_id},
+        )
+        zahlen[tabelle] = int(anzahl or 0)
+    return zahlen
+
+
 @router.delete(
     "/{room_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -794,6 +847,12 @@ async def delete_room(
     _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
+    """Loescht ein Zimmer — und haelt vorher fest, was dabei mitgeht.
+
+    Die einzige Schranke bleibt die aktive Belegung. **Neu seit dem
+    27.11.2026** ist die Audit-Zeile ``ROOM_DELETED`` mit den Zeilenzahlen
+    je mitgeloeschter Tabelle. Siehe ``CASCADE_TABELLEN``.
+    """
     room = await _get_or_404(session, room_id)
 
     active_occupancies = await session.scalar(
@@ -806,6 +865,23 @@ async def delete_room(
             status_code=status.HTTP_409_CONFLICT,
             detail=(f"Zimmer hat {active_occupancies} aktive Belegung(en). Zuerst stornieren."),
         )
+
+    await record_business_action(
+        session,
+        user_id=_admin.id,
+        action="ROOM_DELETED",
+        target_type="room",
+        target_id=room_id,
+        old_value={
+            "number": room.number,
+            "room_type_id": room.room_type_id,
+            # Die Zahlen sind der Punkt: ohne sie sagt die Zeile „ein
+            # Zimmer wurde geloescht" und nicht „14 212 Trace-Zeilen sind
+            # weg".
+            "mit_geloescht": await _was_mitgeht(session, room_id),
+        },
+        new_value=None,
+    )
 
     await session.delete(room)
     await session.commit()
