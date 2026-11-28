@@ -12,13 +12,22 @@ und dass es keine schnellen Pfade daran vorbei gibt. Eine Loeschung, die
 den Trace entfernt, **ohne sich selbst zu protokollieren**, ist genau
 dieser Pfad.
 
-Diese Datei **belegt** das Verhalten — sie aendert es nicht. Dass der
-Cascade laeuft, ist eine Eigenschaft des Schemas; ob ein Zimmer mit Trace
-ueberhaupt loeschbar bleiben soll, ist eine Entscheidung des Betreibers
-(Statuseintrag vom 27.11.2026). Was dieser PR hinzufuegt, ist die
-Audit-Zeile: **was** verloren geht, mit Zahlen, vor dem Loeschen, in
-derselben Transaktion — und in einer Tabelle, die **nicht** an ``room``
-haengt und das Zimmer daher ueberlebt.
+**Die offene Frage ist entschieden** (Betreiber, 27.11.2026, zweiter
+Sammelauftrag): ein Zimmer mit Verlaufsdaten wird **nicht** geloescht,
+sondern mit 409 und ``ROOM_HAS_HISTORY`` abgewiesen. Hier stand bis dahin
+„Diese Datei belegt das Verhalten — sie aendert es nicht"; das ist seit
+diesem PR falsch und darf nicht stehen bleiben (Paragraph 5.77).
+
+Dass der Cascade laeuft, bleibt eine Eigenschaft des Schemas, und sie
+wird weiter belegt — nur nicht mehr ueber den Endpunkt, denn der laesst
+es nicht mehr zu. Der Beleg geht jetzt direkt gegen die Datenbank.
+
+Die Audit-Zeile ``ROOM_DELETED`` bleibt. **Ihr schlimmster Fall ist durch
+die Sperre unerreichbar geworden**, und genau das war ihr Zweck: sie
+hielt fest, dass vierzehntausend Trace-Zeilen verschwinden, und jetzt
+verschwinden sie nicht mehr. Was sie weiter festhaelt, ist die
+Einrichtung — Zonen, Regeln, Zuordnungen — in einer Tabelle, die
+**nicht** an ``room`` haengt und das Zimmer daher ueberlebt.
 
 **Die Vorpruefung vom 27.11.2026 hat zusaetzlich gezeigt:** der Cascade
 laeuft auch durch **verdichtete** Chunks durch. Verdichtung schuetzt den
@@ -58,6 +67,7 @@ from heizung.models.enums import (
 from heizung.models.event_log import EventLog
 from heizung.models.heating_zone import HeatingZone
 from heizung.models.manual_override import ManualOverride
+from heizung.models.occupancy import Occupancy
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.tagesplan import TagesplanFenster
@@ -178,6 +188,53 @@ async def zimmer(setup_engine: AsyncEngine) -> AsyncIterator[Aufbau]:
 
 
 @pytest_asyncio.fixture
+async def zimmer_ohne_verlauf(setup_engine: AsyncEngine) -> AsyncIterator[Aufbau]:
+    """Ein Zimmer mit **Einrichtung**, aber ohne Verlauf — also loeschbar.
+
+    Zone und Tagesplan-Fenster haengen am Cascade und verschwinden mit dem
+    Zimmer; sie sind aber keine Verlaufsdaten, und deshalb greift die
+    Sperre nicht (siehe ``VERLAUF_TABELLEN``). Das ist der Fall, fuer den
+    die Loeschung ueberhaupt noch offen ist: ein Zimmer, das angelegt und
+    nie betrieben wurde.
+    """
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    short = uuid.uuid4().hex[:6]
+
+    async with maker() as session:
+        rt = RoomType(
+            name=f"{PREFIX}-nrt-{short}", is_bookable=False, default_t_occupied=Decimal("22.0")
+        )
+        session.add(rt)
+        await session.flush()
+        room = Room(number=f"{PREFIX}n-{short}", room_type_id=rt.id)
+        session.add(room)
+        await session.flush()
+        session.add(HeatingZone(room_id=room.id, kind=HeatingZoneKind.OTHER, name="Bar"))
+        session.add(
+            TagesplanFenster(
+                room_id=room.id,
+                von_minute=360,
+                bis_minute=480,
+                temperatur=Decimal("25.0"),
+            )
+        )
+        await session.commit()
+        ids = Aufbau(room.id, room.number, rt.id)
+
+    try:
+        yield ids
+    finally:
+        async with maker() as session:
+            await session.execute(
+                text("DELETE FROM business_audit WHERE target_type = 'room' AND target_id = :r"),
+                {"r": ids.room_id},
+            )
+            await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": ids.room_id})
+            await session.execute(text("DELETE FROM room_type WHERE id = :i"), {"i": ids.rt_id})
+            await session.commit()
+
+
+@pytest_asyncio.fixture
 async def admin_client(setup_engine: AsyncEngine) -> AsyncIterator[httpx.AsyncClient]:
     maker = async_sessionmaker(setup_engine, expire_on_commit=False)
 
@@ -206,21 +263,29 @@ async def _zaehle(engine: AsyncEngine, sql: str, werte: dict[str, Any]) -> int:
         return int(await session.scalar(text(sql), werte) or 0)
 
 
-async def test_der_cascade_nimmt_den_trace_mit(
-    zimmer: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
-) -> None:
-    """Der Beleg: nach dem Loeschen ist der Engine-Trace des Zimmers weg.
+async def test_der_cascade_nimmt_den_trace_mit(zimmer: Aufbau, setup_engine: AsyncEngine) -> None:
+    """Der Beleg: ein geloeschtes Zimmer nimmt seinen Engine-Trace mit.
 
     Das ist **kein** Fehler im Code, sondern das, was das Schema sagt —
-    und der Grund, warum es die Audit-Zeile braucht.
+    und der Grund fuer die Sperre im Endpunkt.
+
+    **Geloescht wird hier direkt in der Datenbank**, nicht ueber die
+    Schnittstelle. Seit dem 27.11.2026 weist die Schnittstelle genau
+    diesen Fall ab (Test darunter), und damit koennte sie die
+    Schema-Eigenschaft nicht mehr zeigen. Die Eigenschaft bleibt aber
+    wichtig: sie ist der Grund, warum es die Sperre gibt, und sie gilt
+    fuer **jeden** anderen Weg zum ``DELETE`` — eine Datenmigration, ein
+    Handgriff per ``psql``, ein kuenftiger Endpunkt.
     """
     vorher = await _zaehle(
         setup_engine, "SELECT count(*) FROM event_log WHERE room_id = :r", {"r": zimmer.room_id}
     )
     assert vorher == TRACE_ZEILEN
 
-    antwort = await admin_client.delete(f"/api/v1/rooms/{zimmer.room_id}")
-    assert antwort.status_code == 204
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    async with maker() as session:
+        await session.execute(text("DELETE FROM room WHERE id = :r"), {"r": zimmer.room_id})
+        await session.commit()
 
     nachher = await _zaehle(
         setup_engine, "SELECT count(*) FROM event_log WHERE room_id = :r", {"r": zimmer.room_id}
@@ -229,16 +294,22 @@ async def test_der_cascade_nimmt_den_trace_mit(
 
 
 async def test_die_audit_zeile_nennt_die_zahlen_und_ueberlebt(
-    zimmer: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
+    zimmer_ohne_verlauf: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
 ) -> None:
     """Was verloren geht, steht hinterher in Zahlen da.
 
     **Und die Zeile ueberlebt das Zimmer.** ``business_audit`` haengt
     nicht an ``room``; haette sie einen Cascade, wuerde die Zeile im
     selben Zug verschwinden, in dem sie von ihrem Verschwinden berichtet.
+
+    Geprueft wird am Zimmer **ohne** Verlauf — das andere laesst sich seit
+    dem 27.11.2026 nicht mehr loeschen. Was die Zeile hier nennt, ist die
+    Einrichtung: eine Zone, ein Tagesplan-Fenster, und drei Nullen fuer
+    die Tabellen, an denen die Sperre haengt.
     """
+    zimmer = zimmer_ohne_verlauf
     antwort = await admin_client.delete(f"/api/v1/rooms/{zimmer.room_id}")
-    assert antwort.status_code == 204
+    assert antwort.status_code == 204, antwort.text
 
     maker = async_sessionmaker(setup_engine, expire_on_commit=False)
     async with maker() as session:
@@ -260,12 +331,153 @@ async def test_die_audit_zeile_nennt_die_zahlen_und_ueberlebt(
     mit = alt["mit_geloescht"]
     assert isinstance(mit, dict)
     # Die Zahlen sind der Punkt der Zeile: ohne sie steht dort „ein
-    # Zimmer wurde geloescht" und nicht „zwoelf Trace-Zeilen sind weg".
-    assert mit["event_log"] == TRACE_ZEILEN
+    # Zimmer wurde geloescht" und nicht „eine Zone und ein Tagesplan sind
+    # weg".
     assert mit["heating_zone"] == 1
-    assert mit["manual_override"] == 1
     assert mit["tagesplan_fenster"] == 1
+    # Die drei Tabellen der Sperre muessen leer sein, sonst waere die
+    # Loeschung gar nicht durchgegangen — die Zeile belegt das mit.
+    assert mit["event_log"] == 0
+    assert mit["manual_override"] == 0
     assert mit["occupancy"] == 0
+
+
+async def test_ein_zimmer_mit_verlauf_wird_nicht_geloescht(
+    zimmer: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """**Die Entscheidung vom 27.11.2026, am Endpunkt.**
+
+    409, ``ROOM_HAS_HISTORY``, und die Meldung nennt die **Zahlen**. Ein
+    „Loeschen nicht moeglich" ohne Zahlen laesst offen, ob es um eine
+    Zeile oder um vierzehntausend geht — und das ist die Information, die
+    der Administrator braucht, um zu entscheiden, ob er den Weg aus dem
+    RUNBOOK geht.
+
+    Der Diskriminator steht als ``error_code`` neben ``detail`` und nicht
+    im Text: das Frontend soll nicht auf Zeichenketten vergleichen
+    muessen (Paragraph 5.64).
+    """
+    antwort = await admin_client.delete(f"/api/v1/rooms/{zimmer.room_id}")
+
+    assert antwort.status_code == 409, antwort.text
+    koerper = antwort.json()
+    assert koerper["error_code"] == "ROOM_HAS_HISTORY", koerper
+    detail = koerper["detail"]
+    assert zimmer.nummer in detail
+    assert f"{TRACE_ZEILEN} Verlaufszeilen der Steuerung" in detail, detail
+    assert "1 Uebersteuerungen" in detail, detail
+    # Die Einrichtung gehoert **nicht** in die Begruendung: sie ist kein
+    # Verlauf, und sie zu nennen wuerde den Eindruck erwecken, auch eine
+    # leere Zone verhindere das Loeschen.
+    assert "Zone" not in detail, detail
+
+    assert (
+        await _zaehle(
+            setup_engine, "SELECT count(*) FROM room WHERE id = :r", {"r": zimmer.room_id}
+        )
+        == 1
+    ), "das Zimmer ist trotz 409 weg"
+    assert (
+        await _zaehle(
+            setup_engine,
+            "SELECT count(*) FROM event_log WHERE room_id = :r",
+            {"r": zimmer.room_id},
+        )
+        == TRACE_ZEILEN
+    ), "der Trace ist trotz 409 angetastet"
+    assert (
+        await _zaehle(
+            setup_engine,
+            "SELECT count(*) FROM business_audit WHERE target_type = 'room' AND target_id = :r",
+            {"r": zimmer.room_id},
+        )
+        == 0
+    ), "eine abgewiesene Loeschung hat eine Audit-Zeile geschrieben"
+
+
+async def test_eine_einzige_belegung_in_der_vergangenheit_genuegt(
+    zimmer_ohne_verlauf: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """**Auch eine abgelaufene Belegung ist Verlauf.**
+
+    Die aeltere Schranke prueft ``is_active`` — sie fragt „wohnt da
+    gerade jemand". Diese fragt „hat da jemand gewohnt", und die Antwort
+    gehoert zur Abrechnung. Ohne diesen Test waere der Unterschied
+    zwischen den beiden Schranken nicht festgehalten, und eine spaetere
+    Vereinfachung wuerde ihn stillschweigend einziehen.
+    """
+    zimmer = zimmer_ohne_verlauf
+    maker = async_sessionmaker(setup_engine, expire_on_commit=False)
+    jetzt = datetime.now(tz=UTC)
+    async with maker() as session:
+        session.add(
+            Occupancy(
+                room_id=zimmer.room_id,
+                check_in=jetzt - timedelta(days=9),
+                check_out=jetzt - timedelta(days=7),
+                is_active=False,
+                guest_count=2,
+            )
+        )
+        await session.commit()
+    try:
+        antwort = await admin_client.delete(f"/api/v1/rooms/{zimmer.room_id}")
+        assert antwort.status_code == 409, antwort.text
+        assert antwort.json()["error_code"] == "ROOM_HAS_HISTORY"
+        assert "1 Belegungen" in antwort.json()["detail"]
+    finally:
+        async with maker() as session:
+            await session.execute(
+                text("DELETE FROM occupancy WHERE room_id = :r"), {"r": zimmer.room_id}
+            )
+            await session.commit()
+
+
+async def test_die_einrichtung_allein_verhindert_das_loeschen_nicht(
+    zimmer_ohne_verlauf: Aufbau, admin_client: httpx.AsyncClient, setup_engine: AsyncEngine
+) -> None:
+    """**Die Gegenprobe, und sie ist die wichtigere Haelfte.**
+
+    Eine Sperre, die alles abweist, braucht keine Liste. Dieses Zimmer hat
+    eine Zone und ein Tagesplan-Fenster — beides haengt am Cascade, beides
+    ist Einrichtung — und es laesst sich loeschen.
+
+    Ohne diesen Test waere ``VERLAUF_TABELLEN`` eine Liste, deren
+    Teilmengen-Eigenschaft niemand prueft: ``CASCADE_TABELLEN`` dort
+    einzusetzen waere gruen geblieben und haette jedes Zimmer des Hauses
+    unloeschbar gemacht.
+    """
+    zimmer = zimmer_ohne_verlauf
+    assert (
+        await _zaehle(
+            setup_engine,
+            "SELECT count(*) FROM heating_zone WHERE room_id = :r",
+            {"r": zimmer.room_id},
+        )
+        == 1
+    ), "der Aufbau hat keine Zone — dann prueft dieser Test nichts"
+
+    antwort = await admin_client.delete(f"/api/v1/rooms/{zimmer.room_id}")
+    assert antwort.status_code == 204, antwort.text
+
+
+async def test_der_verlauf_ist_eine_teilmenge_der_cascade_tabellen() -> None:
+    """Eine Tabelle sperren, die gar nicht am Zimmer haengt, waere wirkungslos.
+
+    ``_was_mitgeht`` zaehlt ueber ``CASCADE_TABELLEN``; ein Name in
+    ``VERLAUF_TABELLEN``, der dort fehlt, wuerde beim Nachschlagen einen
+    ``KeyError`` werfen — und zwar erst im Betrieb, beim ersten
+    Loeschversuch.
+    """
+    from heizung.api.v1.rooms import CASCADE_TABELLEN, VERLAUF_KLARTEXT, VERLAUF_TABELLEN
+
+    fehlen = set(VERLAUF_TABELLEN) - set(CASCADE_TABELLEN)
+    assert not fehlen, f"nicht am Cascade und trotzdem gesperrt: {sorted(fehlen)}"
+    ohne_text = set(VERLAUF_TABELLEN) - set(VERLAUF_KLARTEXT)
+    assert not ohne_text, (
+        f"ohne Klartext in der Meldung: {sorted(ohne_text)} — die Sperre wuerde "
+        "den Tabellennamen an den Administrator ausgeben"
+    )
 
 
 async def test_alle_cascade_tabellen_stehen_in_der_zeile(

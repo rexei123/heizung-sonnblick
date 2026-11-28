@@ -57,6 +57,7 @@ from heizung.services import (
     mail_status,
     mailer,
     relais_zone_melder,
+    zonen_episode,
 )
 from heizung.services.business_audit_service import record_business_action
 
@@ -364,11 +365,19 @@ def pruefe_totalausfall(self: Any) -> dict[str, Any]:  # noqa: ARG001 - bind=Tru
 # Fuehler einer Relais-Zone schweigt (13.11.2026)
 # ---------------------------------------------------------------------------
 
-#: Die beiden Audit-Marken. Wie beim Totalausfall sind sie **gleichzeitig
-#: der Zustand** — nur je Zone statt je Haus (``target_id`` ist die
-#: Zonen-Id). Siehe ``_letzter_zonen_stand``.
-AUDIT_ZONE_STUMM = "RELAIS_ZONE_STUMM"
-AUDIT_ZONE_STUMM_ENDE = "RELAIS_ZONE_STUMM_ENDE"
+#: Die Audit-Marken sind **gleichzeitig der Zustand** — wie beim
+#: Totalausfall, nur je Zone statt je Haus (``target_id`` ist die
+#: Zonen-Id).
+#:
+#: **Seit dem 27.11.2026 sind es vier statt zwei**, und sie leben in
+#: ``services/zonen_episode``: dort steht die Zustandsmaschine, die aus
+#: einem flackernden Link **eine** Episode macht. Hier stehen nur noch
+#: die Namen, die dieser Task schreibt — eine zweite Festlegung waere
+#: eine zweite Wahrheit (Paragraph 5.53).
+AUDIT_ZONE_STUMM = zonen_episode.AKTION_STUMM
+AUDIT_ZONE_STUMM_ERNEUT = zonen_episode.AKTION_STUMM_ERNEUT
+AUDIT_ZONE_RUECKKEHR = zonen_episode.AKTION_RUECKKEHR
+AUDIT_ZONE_STUMM_ENDE = zonen_episode.AKTION_ENDE
 
 # Die Uebergangslesung der alten Marken (``RELAIS_ZONE_FUEHLER_STUMM``
 # und ``..._ENDE``, die Namen bis zum 14.11.2026) ist am 15.11.2026
@@ -384,34 +393,6 @@ AUDIT_ZONE_STUMM_ENDE = "RELAIS_ZONE_STUMM_ENDE"
 # Melder ist nicht neutral: er sieht wie ein Fall aus, den es gibt.
 
 
-async def _letzter_zonen_stand(
-    session: AsyncSession, *, zone_id: int
-) -> tuple[str | None, datetime | None]:
-    """Die juengste der beiden Marken **dieser Zone** — Aktion und Zeit.
-
-    Derselbe Entwurf wie beim Totalausfall und aus demselben Grund: der
-    Zustand muss den Neustart ueberleben, und ``alert_throttle`` laesst
-    bei Redis-Ausfall alles durch. Was hier dazukommt, ist der Filter auf
-    ``target_id`` — zwei Zonen koennen unabhaengig voneinander stumm
-    werden, und eine gemeinsame Marke wuerde die Entwarnung der einen auf
-    die andere uebertragen.
-    """
-    stmt = (
-        select(BusinessAudit.action, BusinessAudit.ts)
-        .where(
-            BusinessAudit.action.in_([AUDIT_ZONE_STUMM, AUDIT_ZONE_STUMM_ENDE]),
-            BusinessAudit.target_type == "heating_zone",
-            BusinessAudit.target_id == zone_id,
-        )
-        .order_by(BusinessAudit.ts.desc())
-        .limit(1)
-    )
-    row = (await session.execute(stmt)).first()
-    if row is None:
-        return None, None
-    return row[0], row[1]
-
-
 async def _zonen_mail_und_audit(
     session: AsyncSession,
     *,
@@ -421,6 +402,44 @@ async def _zonen_mail_und_audit(
     text: str,
 ) -> bool:
     """Audit **bedingungslos**, Mail nur mit Adresse. Gibt zurueck, ob gemailt wurde."""
+    await _zonen_audit(session, action=action, befund=befund)
+
+    gc = await session.get(GlobalConfig, 1)
+    empfaenger = gc.alert_email if gc else None
+    if not empfaenger:
+        logger.info(
+            "relais_zone_keine_alarmadresse action=%s zone_id=%s",
+            action,
+            befund.zone_id,
+        )
+        return False
+
+    result = mailer.send_mail(recipient=empfaenger, subject=betreff, body=text)
+    # Pflicht fuer neue Alarmwege (``services/mail_status``).
+    await mail_status.record_attempt(session, result)
+    if not result.sent:
+        logger.warning(
+            "relais_zone_mail_nicht_zugestellt action=%s zone_id=%s grund=%s",
+            action,
+            befund.zone_id,
+            result.reason,
+        )
+    return bool(result.sent)
+
+
+async def _zonen_audit(
+    session: AsyncSession,
+    *,
+    action: str,
+    befund: relais_zone_melder.ZonenBefund,
+) -> None:
+    """Eine Zeile je Zustandswechsel — auch fuer die ohne Mail.
+
+    **Der Zustand der Episode lebt in diesen Zeilen** (siehe
+    ``services/zonen_episode``). Eine Zeile zu ueberspringen, weil keine
+    Nachricht hinausgeht, wuerde die Maschine blind machen: eine nicht
+    vermerkte Rueckkehr bliebe „stumm", und die Entwarnung kaeme nie.
+    """
     await record_business_action(
         session,
         user_id=None,
@@ -452,28 +471,6 @@ async def _zonen_mail_und_audit(
         },
     )
 
-    gc = await session.get(GlobalConfig, 1)
-    empfaenger = gc.alert_email if gc else None
-    if not empfaenger:
-        logger.info(
-            "relais_zone_keine_alarmadresse action=%s zone_id=%s",
-            action,
-            befund.zone_id,
-        )
-        return False
-
-    result = mailer.send_mail(recipient=empfaenger, subject=betreff, body=text)
-    # Pflicht fuer neue Alarmwege (``services/mail_status``).
-    await mail_status.record_attempt(session, result)
-    if not result.sent:
-        logger.warning(
-            "relais_zone_mail_nicht_zugestellt action=%s zone_id=%s grund=%s",
-            action,
-            befund.zone_id,
-            result.reason,
-        )
-    return bool(result.sent)
-
 
 async def _run_relais_zone() -> dict[str, Any]:
     """Async-Koerper des Tasks. Public fuer Tests."""
@@ -486,6 +483,10 @@ async def _run_relais_zone() -> dict[str, Any]:
             "zonen_stumm": 0,
             "gemailt": 0,
             "aktionen": [],
+            # Je Schritt der Zustandsmaschine, wie oft. Das ist die
+            # Zahl, an der im Protokoll zu sehen ist, ob eine Episode
+            # gehalten oder nur gebremst wurde.
+            "schritte": {},
         }
 
         # **Bei hausweitem Ausfall schweigt dieser Melder.** Dann kommt
@@ -516,50 +517,60 @@ async def _run_relais_zone() -> dict[str, Any]:
 
         jetzt = datetime.now(tz=UTC)
         for befund in befunde:
-            letzte_aktion, letzte_zeit = await _letzter_zonen_stand(session, zone_id=befund.zone_id)
-            episode_laeuft = letzte_aktion == AUDIT_ZONE_STUMM
+            stand = await zonen_episode.lies_stand(session, zone_id=befund.zone_id)
+            schritt = zonen_episode.naechster_schritt(
+                stand,
+                stumm=befund.stumm,
+                jetzt=jetzt,
+                wiederholung_h=settings.relais_zone_wiederholung_h,
+                stabil_min=settings.relais_zone_rueckkehr_stabil_min,
+            )
+            ergebnis["schritte"][schritt] = ergebnis["schritte"].get(schritt, 0) + 1
 
-            if befund.stumm:
-                zu_frueh = (
-                    episode_laeuft
-                    and letzte_zeit is not None
-                    and jetzt - letzte_zeit < timedelta(hours=settings.relais_zone_wiederholung_h)
-                )
-                if zu_frueh:
+            if schritt in ("gebremst", "warten", "nichts"):
+                # Zwei von drei sind einen Logeintrag wert: „gebremst"
+                # heisst, die Zone ist weiter stumm, und „warten" heisst,
+                # eine Entwarnung steht aus. Wer spaeter fragt, warum
+                # keine Mail kam, findet hier die Antwort.
+                if schritt != "nichts":
                     logger.info(
-                        "relais_zone_gebremst zone_id=%s grund=%s alter_min=%s relais_alter_min=%s",
+                        "relais_zone_%s zone_id=%s grund=%s alter_min=%s relais_alter_min=%s",
+                        schritt,
                         befund.zone_id,
                         befund.grund,
                         befund.alter_min,
                         befund.relais_alter_min,
                     )
-                    continue
-                gemailt = await _zonen_mail_und_audit(
-                    session,
-                    action=AUDIT_ZONE_STUMM,
-                    befund=befund,
-                    betreff=relais_zone_melder.betreff_alarm(befund),
-                    text=relais_zone_melder.nachricht_alarm(befund, zeitzone=zeitzone),
-                )
-                ergebnis["aktionen"].append({"zone_id": befund.zone_id, "aktion": AUDIT_ZONE_STUMM})
-                ergebnis["gemailt"] += int(gemailt)
                 continue
 
-            # Kein Befund. Lief eine Episode, folgt die Entwarnung — und
-            # nur dann. Eine Entwarnung ohne vorherigen Alarm waere eine
-            # Mail ueber nichts.
-            if episode_laeuft:
+            action = zonen_episode.TOKEN_JE_SCHRITT[schritt]
+            if schritt in zonen_episode.MIT_MAIL:
+                entwarnung = schritt == "entwarnung"
                 gemailt = await _zonen_mail_und_audit(
                     session,
-                    action=AUDIT_ZONE_STUMM_ENDE,
+                    action=action,
                     befund=befund,
-                    betreff=relais_zone_melder.betreff_entwarnung(befund),
-                    text=relais_zone_melder.nachricht_entwarnung(befund, zeitzone=zeitzone),
-                )
-                ergebnis["aktionen"].append(
-                    {"zone_id": befund.zone_id, "aktion": AUDIT_ZONE_STUMM_ENDE}
+                    betreff=(
+                        relais_zone_melder.betreff_entwarnung(befund)
+                        if entwarnung
+                        else relais_zone_melder.betreff_alarm(befund)
+                    ),
+                    text=(
+                        relais_zone_melder.nachricht_entwarnung(befund, zeitzone=zeitzone)
+                        if entwarnung
+                        else relais_zone_melder.nachricht_alarm(befund, zeitzone=zeitzone)
+                    ),
                 )
                 ergebnis["gemailt"] += int(gemailt)
+            else:
+                # ``erneut_stumm`` und ``rueckkehr_vermerken`` sind
+                # Zustandswechsel ohne Nachricht. Sie gehoeren trotzdem
+                # ins Audit: ohne sie waere spaeter nicht zu sehen, warum
+                # eine Episode sechs Stunden ohne zweite Mail lief
+                # (Paragraph 0 S3).
+                await _zonen_audit(session, action=action, befund=befund)
+
+            ergebnis["aktionen"].append({"zone_id": befund.zone_id, "aktion": action})
 
         await session.commit()
         return ergebnis

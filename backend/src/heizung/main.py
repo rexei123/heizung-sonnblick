@@ -79,10 +79,17 @@ async def _lifecycle_error_handler(_request: Request, exc: LifecycleError) -> JS
     Rendert ``{"detail": <message>, "error_code": <CODE>}``. ``DeviceNotFound``
     und ``ZoneNotFound`` -> 404, alle anderen Subklassen
     (``DeviceStateError`` / ``PoolDeviceUnavailable`` /
-    ``SelfReplacementError``) -> 409.
+    ``SelfReplacementError`` / ``RoomHasHistory``) -> 409.
 
-    Scope: Lifecycle-Pfade (replace, retire). Override-Pfade nutzen den
-    parallelen ``OverrideError``-Handler (B-Sprint13b2-7).
+    Scope: Lifecycle-Pfade. Das waren bis zum 27.11.2026 ``replace`` und
+    ``retire`` am Geraet; seither gehoert auch das **Loeschen eines
+    Zimmers** dazu (``RoomHasHistory``). Der Satz stand hier als
+    Aufzaehlung der Pfade und wurde damit falsch, sobald einer dazukam
+    (§5.77) — er nennt deshalb jetzt das Kriterium: ein Lebenszyklus-Ende,
+    das abgewiesen wird, weil daran Daten haengen.
+
+    Override-Pfade nutzen den parallelen ``OverrideError``-Handler
+    (B-Sprint13b2-7).
     """
     status_code = (
         status.HTTP_404_NOT_FOUND
