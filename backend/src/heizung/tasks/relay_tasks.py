@@ -86,6 +86,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from heizung.celery_app import app
+from heizung.config import VERALTUNGS_FAKTOR as _VERALTUNGS_FAKTOR
 from heizung.config import get_settings
 from heizung.models.device import Device
 from heizung.models.enums import DeviceKind, WatchdogStrategy
@@ -120,18 +121,11 @@ from heizung.tasks.engine_tasks import _task_session
 logger = logging.getLogger(__name__)
 
 #: Faktor auf das Meldeintervall, ab dem eine Meldung als veraltet gilt
-#: (S5). Zweieinhalb und nicht zwei: eine einzelne verlorene Meldung soll
-#: nichts aendern, zwei verlorene in Folge schon.
-#:
-#: **Er gilt fuer zwei Meldungen, und das ist Absicht.** Beim **Fuehler**
-#: der Zone (Keepalive eine Stunde) sind das 2,5 h, ab denen der Istwert
-#: als veraltet gilt und der Regler einen Zwangs-AUS entscheidet. Beim
-#: **Relais** selbst (Meldeintervall 10 min) sind das 25 min, ab denen der
-#: Waechter dem gemeldeten Schaltzustand nicht mehr glaubt (14.11.2026).
-#: Zwei verschiedene Intervalle, dieselbe Begruendung — und deshalb eine
-#: Zahl. Zwei Zahlen mit derselben Herleitung waeren zwei Wahrheiten
-#: (§5.53).
-VERALTUNGS_FAKTOR = Decimal("2.5")
+#: (S5). **Er steht seit dem 28.11.2026 in ``config``** — die Begruendung
+#: und die beiden Verbraucher sind dort beschrieben. Hier bleibt der Name
+#: stehen, weil zwei Module und zwei Doku-Stellen ihn unter dieser
+#: Adresse nennen; der Wert hat nur noch eine Quelle.
+VERALTUNGS_FAKTOR = _VERALTUNGS_FAKTOR
 
 
 def zustand_veraltungs_fenster() -> timedelta:

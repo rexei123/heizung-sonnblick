@@ -45,7 +45,13 @@ SKIP_REASON = "DATABASE_URL nicht gesetzt - die DB-Tests brauchen Test-DB"
 #: stillschweigend mitwandern (§5.77 in Testform).
 GRUEN = 5
 GELB = 15
-ALARM_AB = 15
+
+#: Die Wartezeit des Alarms. **Seit dem 28.11.2026 180 Minuten** statt
+#: 15: Entscheidung des Betreibers, alle drei Ausfall-Meldungen warten
+#: gleich lang. Die Kachel bleibt bei ``GELB`` — sie faerbt sich nur und
+#: weckt niemanden. Die Betriebsvorgabe selbst prueft
+#: ``test_ausfall_schwellen.py``.
+ALARM_AB = 180
 
 #: Die gemessenen Zeiten des Ausfalls vom 07.11.2026.
 LETZTE_MELDUNG = datetime(2026, 11, 7, 6, 21, 35, 770000, tzinfo=UTC)
@@ -128,7 +134,12 @@ def test_gegenprobe_07_11_der_ausfall_ist_rot() -> None:
     """Die gemessene Luecke vom 07.11.2026, zur Mitte des Ausfalls.
 
     Letzte Meldung ``06:21:35``, Stand ``06:40`` — also 18 Minuten. Das
-    ist ueber der gelben Grenze **und** ueber der Alarmschwelle.
+    ist ueber der gelben Grenze, die Kachel ist rot.
+
+    **Ueber der Alarmschwelle ist es seit dem 28.11.2026 nicht mehr**,
+    und das steht hier als Zusicherung und nicht als Nebenbemerkung:
+    derselbe Ausfall, der diesen Alarm ueberhaupt veranlasst hat, loest
+    ihn mit der neuen Wartezeit nicht aus.
     """
     stand = datetime(2026, 11, 7, 6, 40, 0, tzinfo=UTC)
     befund = funkempfang.beurteile(
@@ -141,19 +152,22 @@ def test_gegenprobe_07_11_der_ausfall_ist_rot() -> None:
     assert befund.stufe == "keine_meldungen", f"der Ausfall waere nicht rot: {befund}"
     assert befund.alter_min == 18
     assert befund.ist_totalausfall
-    assert befund.alter_min >= ALARM_AB, "der Alarm haette nicht gemailt"
+    assert befund.alter_min < ALARM_AB, (
+        "18 Minuten liegen unter der Wartezeit — die Kachel ist rot, die Mail bleibt aus"
+    )
 
 
-def test_gegenprobe_07_11_loest_nach_15_minuten_aus() -> None:
-    """**Die Anforderung des Betreibers: Alarm nach 15 Minuten.**
+def test_der_alarm_loest_erst_nach_der_wartezeit_aus() -> None:
+    """**Die Anforderung des Betreibers vom 28.11.2026: nach 180 Minuten.**
 
-    Bei einem Beat-Takt von fuenf Minuten faellt die erste Pruefung nach
-    der Schwelle auf ``06:21:35 + 15 min = 06:36:35``, also auf den Lauf
-    um etwa 06:40. Geprueft wird hier die Schwelle selbst: 14 Minuten
-    schweigen noch, 15 melden.
+    Geprueft wird die Schwelle selbst, eine Minute davor und eine
+    danach. Bei einem Beat-Takt von fuenf Minuten faellt die erste
+    Pruefung danach auf den Lauf um ``06:21:35 + 185 min``.
+
+    Bis zum 28.11.2026 standen hier 14 und 15 Minuten.
     """
-    knapp_davor = LETZTE_MELDUNG + timedelta(minutes=14)
-    knapp_danach = LETZTE_MELDUNG + timedelta(minutes=15)
+    knapp_davor = LETZTE_MELDUNG + timedelta(minutes=ALARM_AB - 1)
+    knapp_danach = LETZTE_MELDUNG + timedelta(minutes=ALARM_AB)
 
     vorher = funkempfang.beurteile(
         letzte_meldung=LETZTE_MELDUNG,
@@ -162,8 +176,9 @@ def test_gegenprobe_07_11_loest_nach_15_minuten_aus() -> None:
         gruen_max_min=GRUEN,
         gelb_max_min=GELB,
     )
-    assert vorher.alter_min == 14
-    assert vorher.alter_min < ALARM_AB, "14 Minuten duerfen noch nicht mailen"
+    assert vorher.alter_min == ALARM_AB - 1
+    assert vorher.ist_totalausfall, "die Kachel ist schon lange rot"
+    assert vorher.alter_min < ALARM_AB, "179 Minuten duerfen noch nicht mailen"
 
     nachher = funkempfang.beurteile(
         letzte_meldung=LETZTE_MELDUNG,
@@ -172,9 +187,34 @@ def test_gegenprobe_07_11_loest_nach_15_minuten_aus() -> None:
         gruen_max_min=GRUEN,
         gelb_max_min=GELB,
     )
-    assert nachher.alter_min == 15
+    assert nachher.alter_min == ALARM_AB
     assert nachher.ist_totalausfall
-    assert nachher.alter_min >= ALARM_AB, "15 Minuten muessen mailen"
+    assert nachher.alter_min >= ALARM_AB, "180 Minuten muessen mailen"
+
+
+def test_der_ausfall_vom_07_11_waere_heute_ohne_mail_geblieben() -> None:
+    """**Was die neue Wartezeit kostet, an der echten Luecke gemessen.**
+
+    Der Ausfall vom 07.11.2026 dauerte von ``06:21:35`` bis ``06:52:46``,
+    also **31 Minuten**. Er war der Anlass fuer diesen Alarm — die
+    Health-Stufe ``silent`` und der Funk-Waechter hatten beide
+    geschwiegen. Mit 180 Minuten Wartezeit schweigt jetzt auch er.
+
+    Dieser Test behauptet nicht, das sei richtig oder falsch. Er haelt
+    fest, dass es so **entschieden** wurde (Betreiber, 28.11.2026), damit
+    niemand spaeter einen Fehler sucht, wo eine Entscheidung steht.
+    """
+    letzter_lauf_im_ausfall = ERSTE_DANACH - timedelta(seconds=1)
+    befund = funkempfang.beurteile(
+        letzte_meldung=LETZTE_MELDUNG,
+        meldungen=0,
+        now=letzter_lauf_im_ausfall,
+        gruen_max_min=GRUEN,
+        gelb_max_min=GELB,
+    )
+    assert befund.alter_min == 31, f"die Luecke war {befund.alter_min} Minuten"
+    assert befund.stufe == "keine_meldungen", "die Kachel war die ganze Zeit rot"
+    assert befund.alter_min < ALARM_AB, "und keine Mail ist hinausgegangen"
 
 
 def test_nach_der_ruecknahme_ist_es_wieder_online() -> None:

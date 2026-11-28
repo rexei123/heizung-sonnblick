@@ -3,7 +3,7 @@ titel: Hotel-Stammdaten
 kategorie: Die Seiten
 stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline, Entwarnung
 rollen: admin
-stand: 2026-11-27
+stand: 2026-11-28
 route: /einstellungen/hotel
 ---
 
@@ -47,10 +47,25 @@ Kontakt schon in der ersten Mail.
 Zone, die sich nach einer halben Stunde Stille einmal meldet und gleich
 wieder ausfällt, ist nicht zurück. Die Steuerung wartet deshalb ab, ob die
 Meldungen bleiben, und schreibt erst dann „wieder in Ordnung". Nachts
-kommt dadurch weniger — aber nichts, was Sie bräuchten: **gedrosselt wird
-nur die Entwarnung, nie der Alarm.** Vier Meldungen gehen immer sofort
-hinaus: keine Messwerte im ganzen Haus, ein Relais das sich abgeschaltet
-hat, ein warmes Relais-Gehäuse und die volle Festplatte.
+kommt dadurch weniger — aber nichts, was Sie bräuchten.
+
+**Ausfälle werden drei Stunden lang nicht gemeldet** (seit 28.11.2026).
+Das gilt für alle drei Meldungen dieser Art, und zwar gleich lang: eine
+Zone ohne Messwert, ein Gerät das schweigt, und keine Messwerte im
+ganzen Haus. Der Grund ist der Alltag im Funkbetrieb — kürzere Lücken
+kommen vor und lösen sich von selbst, und eine Mail, die das jedes Mal
+meldet, wird nach einer Woche nicht mehr gelesen.
+
+**Drei Meldungen gehen weiterhin sofort hinaus**, weil sie kein Warten
+vertragen: ein Relais das sich abgeschaltet hat, ein warmes
+Relais-Gehäuse und die volle Festplatte. Das sind Ereignisse und keine
+Lücken — Warten macht die Aussage nicht sicherer, nur später.
+
+**Was Sie dafür in Kauf nehmen, steht hier und nicht im Kleingedruckten:**
+ein kurzer Funk-Ausfall erzeugt keine Mail mehr. Der Ausfall vom
+07.11.2026 dauerte 31 Minuten; heute käme dazu keine Nachricht. Auf dem
+Dashboard wäre er trotzdem zu sehen — die Kachel **Funk-Empfang** wird
+schon nach einer Viertelstunde rot.
 
 > **Ein abgeschaltetes Relais ist der dringendste dieser Fälle.** Das
 > Gerät schaltet sich bei Überhitzung, Überspannung, Überstrom oder

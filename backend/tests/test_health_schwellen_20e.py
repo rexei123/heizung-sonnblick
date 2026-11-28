@@ -108,6 +108,12 @@ async def test_schwellen_folgen_der_umgebung(monkeypatch: pytest.MonkeyPatch) ->
     """
     monkeypatch.setenv("HEALTH_HEALTHY_MAX_AGE_H", "1")
     monkeypatch.setenv("HEALTH_DEGRADED_MAX_AGE_H", "6")
+    # Seit dem 28.11.2026 haengt die Wartezeit der Zonen-Meldung an
+    # diesem Fenster: sie muss unter ``HEALTH_HEALTHY_MAX_AGE_H`` mal 2,5
+    # liegen, hier also unter 150 Minuten. Die Vorgabe (180) passt dazu
+    # nicht mehr, und der Startup-Validator sagt das auch — wer das
+    # Keepalive-Fenster kuerzt, nimmt die Wartezeit mit.
+    monkeypatch.setenv("RELAIS_ZONE_STUMM_MIN", "60")
     get_settings.cache_clear()
 
     s = health_schwellen()
@@ -163,6 +169,12 @@ async def test_gueltige_schwellen_werden_angenommen() -> None:
         environment="test",
         health_healthy_max_age_h=1,
         health_degraded_max_age_h=2,
+        # Mit einem Keepalive-Fenster von einer Stunde schaltet der
+        # Zweipunktregler nach 150 Minuten ab; die Wartezeit der
+        # Zonen-Meldung muss darunter bleiben (28.11.2026). Die Vorgabe
+        # 180 waere hier ein Start-Fehler, und das ist Absicht —
+        # ``test_ausfall_schwellen.py`` prueft genau diese Kopplung.
+        relais_zone_stumm_min=60,
     )
     assert s.health_healthy_max_age_h == 1
     assert s.health_degraded_max_age_h == 2
