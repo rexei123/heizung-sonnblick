@@ -119,6 +119,15 @@ rechnet beide Teile getrennt und weist den Neustart eigens aus.
 **Was die Kachel nicht beantwortet, ist die Richtung.** Eine verlorene
 Meldung kann am Funkweg, am Gateway oder am Netz dahinter liegen.
 
+**Seit dem 27.11.2026 senden die Geräte langsamer und dafür robuster.**
+Zwölf Geräte am Rand des Funkbereichs haben zuvor bis zu ein Viertel
+ihrer Meldungen verloren — sie sendeten so schnell, dass das Gateway sie
+kaum noch verstand. Die Umstellung gilt für das ganze Haus und kostet
+jedes Gerät ein paar Hundertstel Prozent Sendezeit; zu bemerken ist sie
+nur an dieser Kachel, deren Werte sinken sollten. **Ein Handgriff am
+Gerät war dafür nicht nötig** und ist auch künftig keiner — die Geräte
+haben die Umstellung über Funk bekommen.
+
 ## nur messen
 
 Der Schalter sitzt auf der Zimmer-Detailseite im Tab „Geräte". Ein Gerät
