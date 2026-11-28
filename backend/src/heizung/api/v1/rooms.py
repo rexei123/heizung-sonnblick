@@ -58,6 +58,7 @@ from heizung.services.business_audit_service import record_business_action
 from heizung.services.event_log import (
     lies_soll_stand,
 )
+from heizung.services.exceptions import RoomHasHistory
 from heizung.services.referenzzone import referenzzonen_pro_zimmer
 from heizung.services.room_history import lade_verlauf
 from heizung.services.zone_aggregates import (
@@ -816,6 +817,43 @@ CASCADE_TABELLEN: tuple[str, ...] = (
     "tagesplan_fenster",
 )
 
+#: Die Teilmenge, die **Verlauf** ist und nicht Einrichtung — und damit
+#: die Sperre ausloest (Entscheidung des Betreibers vom 27.11.2026).
+#:
+#: Die Trennung ist der ganze Punkt dieser Liste: ``heating_zone``,
+#: ``rule_config``, ``scenario_assignment`` und ``tagesplan_fenster``
+#: beschreiben, **wie** das Zimmer eingerichtet ist. Das darf mit dem
+#: Zimmer verschwinden; es ist wiederherstellbar, und jedes Zimmer hat
+#: davon etwas — eine Sperre darauf waere eine Sperre auf alles.
+#:
+#: Diese drei beschreiben, **was passiert ist**:
+#:
+#: * ``event_log`` — der Engine-Trace. Jede Sollwert-Entscheidung mit
+#:   Schicht, Grund und Zeitstempel (Paragraph 0 S3).
+#: * ``occupancy`` — wer wann im Zimmer war. Grundlage jeder
+#:   nachtraeglichen Frage zur Abrechnung.
+#: * ``manual_override`` — jeder Eingriff am Drehrad und aus der
+#:   Oberflaeche. Der Trace verweist darauf.
+#:
+#: **Folge, und sie ist gewollt:** ein Zimmer, das einen Tag im Betrieb
+#: war, ist ueber die Oberflaeche nicht mehr loeschbar — der Regler
+#: schreibt jede Minute eine Trace-Zeile. Der Weg fuer ein versehentlich
+#: angelegtes Zimmer steht im RUNBOOK (Paragraph 10bk): Verlauf sichern,
+#: Verlauf loeschen, dann das Zimmer.
+VERLAUF_TABELLEN: tuple[str, ...] = (
+    "event_log",
+    "occupancy",
+    "manual_override",
+)
+
+#: Lesbare Namen fuer die Meldung. Ein Administrator liest „event_log"
+#: nicht als „Verlauf der Steuerung".
+VERLAUF_KLARTEXT: dict[str, str] = {
+    "event_log": "Verlaufszeilen der Steuerung",
+    "occupancy": "Belegungen",
+    "manual_override": "Uebersteuerungen",
+}
+
 
 async def _was_mitgeht(session: AsyncSession, room_id: int) -> dict[str, int]:
     """Zaehlt je Tabelle die Zeilen, die der Cascade mitnimmt.
@@ -847,11 +885,19 @@ async def delete_room(
     _admin: User = Depends(require_admin),  # noqa: B008
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> None:
-    """Loescht ein Zimmer — und haelt vorher fest, was dabei mitgeht.
+    """Loescht ein Zimmer — und nur, wenn es keinen Verlauf hat.
 
-    Die einzige Schranke bleibt die aktive Belegung. **Neu seit dem
-    27.11.2026** ist die Audit-Zeile ``ROOM_DELETED`` mit den Zeilenzahlen
-    je mitgeloeschter Tabelle. Siehe ``CASCADE_TABELLEN``.
+    **Zwei Schranken.** Die aeltere ist die aktive Belegung. Die zweite,
+    seit dem 27.11.2026: ein Zimmer mit Verlaufsdaten wird **nicht**
+    geloescht, sondern mit 409 und ``ROOM_HAS_HISTORY`` abgewiesen. Was
+    als Verlauf gilt, steht in ``VERLAUF_TABELLEN`` — und warum die
+    Einrichtung nicht dazugehoert, steht dort auch.
+
+    Die Audit-Zeile ``ROOM_DELETED`` bleibt. **Ihr schlimmster Fall ist
+    damit unerreichbar geworden**, und das ist der Zweck der Sperre: sie
+    hielt fest, dass vierzehntausend Trace-Zeilen verschwinden, und jetzt
+    verschwinden sie nicht mehr. Was sie weiter festhaelt, ist die
+    Einrichtung — Zonen, Regeln, Zuordnungen.
     """
     room = await _get_or_404(session, room_id)
 
@@ -866,6 +912,24 @@ async def delete_room(
             detail=(f"Zimmer hat {active_occupancies} aktive Belegung(en). Zuerst stornieren."),
         )
 
+    # **Die Zahlen werden einmal geholt und zweimal benutzt** — fuer die
+    # Sperre und, falls sie nicht greift, fuer die Audit-Zeile. Zweimal
+    # zu zaehlen waere nicht nur teurer, sondern eine zweite Wahrheit:
+    # zwischen den beiden Abfragen koennte eine Zeile dazukommen, und
+    # dann sperrte die eine, waehrend die andere etwas anderes
+    # protokolliert (Paragraph 5.53).
+    mitgeht = await _was_mitgeht(session, room_id)
+    verlauf = {t: n for t in VERLAUF_TABELLEN if (n := mitgeht[t]) > 0}
+    if verlauf:
+        raise RoomHasHistory(
+            f"Zimmer {room.number} hat Verlaufsdaten und wird deshalb nicht geloescht: "
+            + ", ".join(
+                f"{anzahl} {VERLAUF_KLARTEXT[tabelle]}"
+                for tabelle, anzahl in sorted(verlauf.items())
+            )
+            + ". Diese Daten haengen am Zimmer und wuerden mit ihm verschwinden."
+        )
+
     await record_business_action(
         session,
         user_id=_admin.id,
@@ -876,9 +940,12 @@ async def delete_room(
             "number": room.number,
             "room_type_id": room.room_type_id,
             # Die Zahlen sind der Punkt: ohne sie sagt die Zeile „ein
-            # Zimmer wurde geloescht" und nicht „14 212 Trace-Zeilen sind
-            # weg".
-            "mit_geloescht": await _was_mitgeht(session, room_id),
+            # Zimmer wurde geloescht" und nicht „die Zonen und zwei
+            # Regelsaetze sind weg". Seit der Sperre oben koennen hier
+            # keine Verlaufszeilen mehr stehen — die Zeile bleibt
+            # trotzdem vollstaendig, damit sie auch dann noch stimmt,
+            # wenn die Sperre eines Tages anders gezogen wird.
+            "mit_geloescht": mitgeht,
         },
         new_value=None,
     )
