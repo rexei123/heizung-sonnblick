@@ -32,7 +32,13 @@ from heizung.celery_app import app
 from heizung.config import get_settings
 from heizung.models.control_command import ControlCommand
 from heizung.models.device import Device
-from heizung.models.enums import CommandReason, DeviceKind, EventLogLayer, HeatingZoneKind
+from heizung.models.enums import (
+    CommandReason,
+    DeviceKind,
+    EventLogLayer,
+    HeatingZoneKind,
+    OverrideSource,
+)
 from heizung.models.event_log import EventLog
 from heizung.models.global_config import GlobalConfig
 from heizung.models.heating_zone import HeatingZone
@@ -55,6 +61,7 @@ from heizung.services import (
     alert_throttle,
     engine_abgleich,
     engine_lock,
+    entprellen,
     mail_status,
     mailer,
     override_service,
@@ -265,6 +272,7 @@ async def _evaluate_room_async(room_id: int) -> dict[str, Any]:
                 bad_setpoint_c=result.bad_setpoint_c,
                 clamp_grenzen_c=result.clamp_grenzen_c,
                 gast_sperre=result.gast_sperre,
+                uebersteuerung_quelle=result.uebersteuerung_quelle,
             )
             sent_devices = per_device_results
 
@@ -752,6 +760,7 @@ async def _dispatch_downlinks_per_zone(
     bad_setpoint_c: int | None = None,
     clamp_grenzen_c: tuple[int, int] = (MIN_SETPOINT_C, MAX_SETPOINT_C),
     gast_sperre: bool = False,
+    uebersteuerung_quelle: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Sprint 12 T2 — Multi-Vicki Schreib-Pfad (STRATEGIE §4.2, AE-51 P3).
 
@@ -1166,6 +1175,13 @@ async def _dispatch_downlinks_per_zone(
 
             if not dev_decision.should_send:
                 skipped_count += 1
+                # **Der Merker muss weg** (Sprint 25 T1). Die Steuerung
+                # will nichts senden; bliebe der Merker stehen, waere das
+                # Fenster beim naechsten echten Wunsch schon abgelaufen
+                # und der ginge sofort hinaus. Genau hier liegt der
+                # Gewinn des Entprellens: 20, dann 25, dann wieder 20
+                # ergibt **keinen** Downlink.
+                await asyncio.to_thread(entprellen.verwirf, dev.dev_eui)
                 # Sprint 23 T1a: ``setpoint_c`` gehoert je Geraet dazu, nicht
                 # nur als Raumwert oben. Eine Bad-Zone fuehrt den Wert der
                 # Vorlage, und wer vom Raumwert auf "das hat dieses Geraet
@@ -1188,6 +1204,68 @@ async def _dispatch_downlinks_per_zone(
                     }
                 )
                 continue
+            # --- Entprellen (Sprint 25 T1, 27.11.2026) -------------------
+            #
+            # Letzte Station vor dem Befehl. Alles darueber hat entschieden,
+            # **dass** gesendet werden soll; hier wird entschieden, **wann**.
+            #
+            # Drei Wege gehen daran vorbei, und jeder hat seinen Grund:
+            #
+            # * **Boost** — die eine Sollwertaenderung, die der Gast sofort
+            #   spueren soll. Eine Minute Wartezeit waere genau dort teuer,
+            #   wo jemand auf Wirkung wartet und sonst noch einmal
+            #   drueckt. Der Merker wird dabei **geloescht**, nicht
+            #   ignoriert: sonst folgte dem Boost eine Minute spaeter der
+            #   gesammelte alte Wert und naehme ihn zurueck.
+            # * **Re-Sync nach Neustart** (``resync_forced``) — das Geraet
+            #   steht nach einem Stromausfall auf einem gedrifteten Wert
+            #   (Paragraph 5.71). Eine Minute auf dem falschen Wert ist
+            #   genau das, was der Re-Sync verhindern soll.
+            # * **Abgleich** (``abgleich_forced``) — er ist selbst schon auf
+            #   eine Nachsendung je 30 Minuten gedrosselt. Ihn zusaetzlich
+            #   zu entprellen hiesse, zwei Bremsen hintereinander zu
+            #   legen; die zweite verschiebt nur und bremst nichts.
+            ist_boost = uebersteuerung_quelle == OverrideSource.FRONTEND_BOOST.value
+            if ist_boost or resync_forced or abgleich_forced:
+                await asyncio.to_thread(entprellen.verwirf, dev.dev_eui)
+                if ist_boost:
+                    dev_decision = HysteresisDecision(
+                        should_send=True,
+                        reason=f"{dev_decision.reason} (Boost umgeht das Entprellen)",
+                    )
+            else:
+                urteil = await asyncio.to_thread(
+                    entprellen.pruefe,
+                    dev.dev_eui,
+                    zone_target_setpoint_c,
+                    fenster_s=get_settings().sollwert_entprell_s,
+                )
+                if not urteil.senden:
+                    skipped_count += 1
+                    # **Eigener Status, nicht ``skipped_hysteresis``.** Die
+                    # Hysterese sagt „der Wert steht schon", das Entprellen
+                    # sagt „der Wert kommt noch". Wer beides als dieselbe
+                    # Zeile liest, haelt eine Verzoegerung fuer eine
+                    # Nicht-Aenderung — und sucht den Fehler bei der
+                    # Hysterese (Paragraph 5.53).
+                    per_device_results.append(
+                        {
+                            "zone_id": zone.id,
+                            "device_id": dev.id,
+                            "dev_eui": dev.dev_eui,
+                            "status": "entprellt",
+                            "setpoint_c": zone_target_setpoint_c,
+                            "gesendet_c": None,
+                            "hysteresis_reason": (f"{dev_decision.reason} | {urteil.grund}"),
+                            "error": None,
+                        }
+                    )
+                    continue
+                dev_decision = HysteresisDecision(
+                    should_send=True,
+                    reason=f"{dev_decision.reason} | {urteil.grund}",
+                )
+
             # Sprint 23 T4-A2b: ``reboot_resync`` nur beim Neustart. Die
             # anderen Gruende senden denselben Wert aus demselben Anlass —
             # "das Geraet steht nicht auf dem Soll" —, aber keiner von ihnen

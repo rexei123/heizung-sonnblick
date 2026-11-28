@@ -467,6 +467,28 @@ class Settings(BaseSettings):
     # jedem Tick angefunkt, und jeder Downlink ist Sendezeit (§0 S4).
     relay_max_versuche: int = 3
 
+    # --- Entprellen der Sollwert-Befehle (Sprint 25 T1, 27.11.2026) ---
+    #
+    # Je Geraet wird die erste Sollwert-Aenderung **gesammelt** statt
+    # gesendet; erst der naechste Tick nach Ablauf dieses Fensters schickt
+    # den dann gueltigen Wert. Aus „20, dann 25 in hundert Sekunden" wird
+    # **ein** Publish mit 25 — und aus „20, 25, wieder 20" keiner.
+    #
+    # **60 und nicht 120**, obwohl der Brief die Spanne 60-120 s nennt:
+    # die Engine laeuft im Minutentakt, das Fenster wird also ohnehin erst
+    # beim naechsten Tick geprueft. Mit 60 liegt die tatsaechliche
+    # Wartezeit zwischen 60 und 120 Sekunden; mit 120 waere sie 120 bis
+    # 180, und eine Nachtabsenkung drei Minuten spaeter ist nichts, eine
+    # Korrektur nach einer Drehrad-Verstellung schon.
+    #
+    # **0 schaltet es ab.** Dann wird wie vor dem 27.11.2026 sofort
+    # gesendet, und es wird kein Zustand in Redis angelegt — ein
+    # abgeschalteter Mechanismus soll keine Spur hinterlassen.
+    #
+    # Der Boost umgeht das Fenster unabhaengig von diesem Wert
+    # (``services/entprellen``, Vorgabe des Betreibers vom 05.11.2026).
+    sollwert_entprell_s: int = 60
+
     # Obergrenze der Verdopplung der Bestaetigungsfrist.
     #
     # **Befund des Betreibers, 01.11.2026, 11:22 bis 11:28 an Relais
