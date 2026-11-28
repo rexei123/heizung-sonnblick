@@ -838,9 +838,24 @@ class VerlaufTag(BaseModel):
     ist_min: Decimal | None
     ist_max: Decimal | None
     soll_mittel: Decimal | None
+    #: Gehaeusetemperatur des Tages als **Rohwert ohne Einheit** (AE-78).
+    #: ``_ein`` ist dieselbe Zahl nur aus Meldungen mit eingeschaltetem
+    #: Relais; der Abstand zwischen beiden trennt „warm vom Schalten" von
+    #: „warm ohnehin".
+    gehaeuse_max: int | None = None
+    gehaeuse_mittel: Decimal | None = None
+    gehaeuse_max_ein: int | None = None
+    gehaeuse_mittel_ein: Decimal | None = None
 
     #: Siehe ``VerlaufStunde``.
-    @field_serializer("ist_mittel", "ist_min", "ist_max", "soll_mittel")
+    @field_serializer(
+        "ist_mittel",
+        "ist_min",
+        "ist_max",
+        "soll_mittel",
+        "gehaeuse_mittel",
+        "gehaeuse_mittel_ein",
+    )
     def _tages_zahlen(self, v: Decimal | None) -> float | None:
         return float(v) if v is not None else None
 
@@ -955,6 +970,10 @@ async def lies_relais_verlauf(
                 ist_min=t.ist_min,
                 ist_max=t.ist_max,
                 soll_mittel=t.soll_mittel,
+                gehaeuse_max=t.gehaeuse_max,
+                gehaeuse_mittel=t.gehaeuse_mittel,
+                gehaeuse_max_ein=t.gehaeuse_max_ein,
+                gehaeuse_mittel_ein=t.gehaeuse_mittel_ein,
             )
             for t in v.tage
         ],
@@ -1011,6 +1030,19 @@ async def lies_relais_verlauf_csv(
     Spalte — eine Uhrzeit ohne ihre Zone neben einer anderen ist die
     Falle aus §5.79. Die UTC-Zeit steht daneben, weil genau deren Fehlen
     am 16./17.11. zweimal eine falsche Meldung erzeugt hat (§5.92).
+
+    **Die Gehaeusetemperatur steht hier je Stunde, in der Antwort des
+    anderen Endpunkts nur je Tag.** Das ist Absicht und keine Luecke: auf
+    dem Bildschirm steht die Tageszeile, und die Frage „steigt das Geraet
+    ueber die Tage" wird dort beantwortet. Wer die Kurve zeichnen will,
+    braucht die Stunden — und tut es in dieser Datei. Ein Feld in der
+    JSON-Antwort, das niemand liest, ist die Sorte Gewicht, die §0 S6
+    meint.
+
+    **Was in der Datei nicht steht:** wie viele Meldungen hinter einem
+    Stundenmittel stehen. Die Tageszeile auf dem Bildschirm wiegt damit;
+    wer in der Tabellenkalkulation ueber die Stunden mittelt, bekommt
+    deshalb eine Zahl, die um ein Zehntel abweichen kann.
     """
     v = await _verlauf_oder_422(session, device_id, bereich)
     tz = ZoneInfo(v.timezone)
@@ -1028,6 +1060,10 @@ async def lies_relais_verlauf_csv(
         "Ist min",
         "Ist max",
         "Soll",
+        "Gehaeuse max",
+        "Gehaeuse Mittel",
+        "Gehaeuse max (ein)",
+        "Gehaeuse Mittel (ein)",
     ]
     zeilen = [_CSV_TRENNER.join(kopf)]
     for s in v.stunden:
@@ -1047,6 +1083,10 @@ async def lies_relais_verlauf_csv(
                     _csv_zahl(s.ist_min),
                     _csv_zahl(s.ist_max),
                     _csv_zahl(s.soll),
+                    _csv_zahl(s.gehaeuse_max),
+                    _csv_zahl(s.gehaeuse_mittel),
+                    _csv_zahl(s.gehaeuse_max_ein),
+                    _csv_zahl(s.gehaeuse_mittel_ein),
                 ]
             )
         )

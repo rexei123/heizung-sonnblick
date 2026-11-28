@@ -18,6 +18,27 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_serializer
 
 
+class AbreiseZimmerRead(BaseModel):
+    """Ein Zimmer, dessen Abreise verstrichen ist (27.11.2026).
+
+    ``zeichen`` ist eine **Spur**, kein Urteil: ``keines`` heisst „wir
+    haben nichts gesehen" und nicht „das Zimmer ist leer". Die meisten
+    Gaeste drehen nicht am Thermostat — wer die Liste auf Zimmer mit Spur
+    verkuerzt, verschweigt genau die stillen Faelle (Paragraph 5.55).
+    """
+
+    room_id: int
+    zimmer: str
+    #: Volle Stunden seit der Abreise, abgerundet. 0 heisst „in dieser
+    #: Stunde".
+    stunden_her: int
+    #: ``drehrad`` — eine abgelehnte Verstellung am Thermostat nach der
+    #: Abreise (das OCCUPIED-Tor aus AE-58 hat sie verworfen).
+    #: ``uebersteuerung`` — die Rezeption hat danach eine
+    #: Wunschtemperatur gesetzt. ``keines`` — keine Spur.
+    zeichen: Literal["drehrad", "uebersteuerung", "keines"]
+
+
 class DashboardKpiRead(BaseModel):
     """Aggregierte Hotel-KPIs fuer das Dashboard."""
 
@@ -126,6 +147,21 @@ class DashboardKpiRead(BaseModel):
     platte_prozent: int = 0
     platte_frei_gb: float = 0.0
     platte_warnt: bool = False
+
+    # --- Abreise ueberschritten (27.11.2026) ------------------------------
+    #
+    # **Keine Kachel, sondern ein Hinweis mit Zimmernummern.** Eine Zahl
+    # „3 Zimmer" waere auf dieser Seite nicht handlungsfaehig: die
+    # Rezeption muesste danach 47 Belegungen durchsehen, um die drei zu
+    # finden. Der Hinweis nennt sie.
+    #
+    # **Keine zusaetzliche Anzahl daneben.** Sie waere ``len`` dieser
+    # Liste und damit eine zweite Wahrheit, die beim ersten Filter
+    # auseinanderlaeuft (Paragraph 5.53).
+    #
+    # Leere Liste heisst „keine Abreise im Fenster" — der Hinweis
+    # erscheint dann gar nicht. Das ist der Normalfall am Abend.
+    abreise_zimmer: list[AbreiseZimmerRead] = []
 
     @field_serializer("avg_temperature_celsius")
     def _avg_to_float(self, v: Decimal | None) -> float | None:

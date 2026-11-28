@@ -27,7 +27,8 @@ export type DeviceKind = "thermostat" | "sensor" | "relay";
 export type DeviceVendor = "mclimate" | "milesight" | "manual";
 
 /** Device-Health (AE-53): aus Uplink-Latenz + Plausibilitaet abgeleitet. */
-export type DeviceHealthState = "healthy" | "degraded" | "silent" | "suspicious";
+export type DeviceHealthState =
+  "healthy" | "degraded" | "silent" | "suspicious";
 
 // Sprint 15d (AE-65): Batterie als orthogonale dritte Health-Achse neben
 // DeviceHealthState (offline/implausible). Seit Sprint 20 (AE-72) abgeleitet
@@ -502,22 +503,10 @@ export interface RoomTypeListQuery {
 // Zimmer (Sprint 8.4)
 // ---------------------------------------------------------------------------
 
-export type Orientation =
-  | "N"
-  | "NE"
-  | "E"
-  | "SE"
-  | "S"
-  | "SW"
-  | "W"
-  | "NW";
+export type Orientation = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
 
 export type RoomStatus =
-  | "vacant"
-  | "occupied"
-  | "reserved"
-  | "cleaning"
-  | "blocked";
+  "vacant" | "occupied" | "reserved" | "cleaning" | "blocked";
 
 export interface Room {
   id: number;
@@ -665,12 +654,7 @@ export interface RoomListQuery {
 // ---------------------------------------------------------------------------
 
 export type HeatingZoneKind =
-  | "bedroom"
-  | "bathroom"
-  | "living"
-  | "hallway"
-  | "common_area"
-  | "other";
+  "bedroom" | "bathroom" | "living" | "hallway" | "common_area" | "other";
 
 /**
  * Was einer Zone fehlt, falls ihr etwas fehlt (Sprint 24d, §5.63).
@@ -1108,9 +1092,7 @@ export type OverrideSource =
  * Uplinks erzeugt.
  */
 export type FrontendOverrideSource =
-  | "frontend_24h"
-  | "frontend_checkout"
-  | "frontend_bereich";
+  "frontend_24h" | "frontend_checkout" | "frontend_bereich";
 
 /**
  * Spiegelt ``ManualOverrideResponse`` aus
@@ -1275,6 +1257,39 @@ export interface DashboardKpi {
   platte_prozent: number;
   platte_frei_gb: number;
   platte_warnt: boolean;
+  /**
+   * 27.11.2026: Zimmer, deren **Abreise** in den letzten 24 Stunden
+   * verstrichen ist und für die keine neue Belegung läuft.
+   *
+   * Der Fall, den das Handbuch beschreibt: ein Gast bleibt länger,
+   * niemand ändert das Datum, und die Steuerung setzt das Zimmer am
+   * ursprünglichen Abreisetag auf frei. Der Gast kommt abends in ein
+   * kühles Zimmer zurück.
+   *
+   * **Leere Liste ist der Normalfall**; der Hinweis erscheint dann nicht.
+   */
+  abreise_zimmer: AbreiseZimmer[];
+}
+
+/** Ein Zimmer mit verstrichener Abreise (27.11.2026). */
+export interface AbreiseZimmer {
+  room_id: number;
+  zimmer: string;
+  /** Volle Stunden seit der Abreise. 0 heißt „in dieser Stunde". */
+  stunden_her: number;
+  /**
+   * Eine **Spur**, kein Urteil.
+   *
+   * `drehrad` — jemand hat am Thermostat gedreht, und die Steuerung hat
+   * die Verstellung abgelehnt, weil das Zimmer als frei gilt. Das ist
+   * der stärkste Hinweis, den die Anlage auf einen anwesenden Gast hat.
+   * `uebersteuerung` — die Rezeption hat nach der Abreise eine
+   * Wunschtemperatur gesetzt; dann weiß sie es schon, und falsch steht
+   * die **Belegung**.
+   * `keines` — nichts gesehen. Nicht „leer": die meisten Gäste drehen
+   * nicht am Thermostat.
+   */
+  zeichen: "drehrad" | "uebersteuerung" | "keines";
 }
 
 // ---------------------------------------------------------------------------
