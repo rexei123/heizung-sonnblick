@@ -18,6 +18,15 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RET"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Die zwei Laeufe gegen das echte chirpstack-Image dauern zusammen rund
+# eine Minute und ziehen beim ersten Mal drei Images. Sie laufen trotzdem
+# bei jedem PR mit: ohne sie stand der Ausfall vom 15.11.2026 sieben
+# Minuten lang hinter 54 gruenen Tests (Paragraph 5.55). Die Marke ist
+# da, um sie beim Entwickeln gezielt abzuwaehlen (`-m "not slow"`),
+# nicht um sie aus der CI herauszuhalten.
+markers = [
+  "slow: braucht Docker und laedt Images (ADR-Plugin in der echten Engine)",
+]
 
 [tool.mypy]
 python_version = "3.12"

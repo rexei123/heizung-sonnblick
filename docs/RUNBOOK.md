@@ -10584,7 +10584,7 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 
 ## 10av. Funk am Rand in Ordnung bringen: Reserve auf 20 dB, Relais auf DR1 (Rollout Mo 16.11.2026 nachmittags)
 
-> **Der Plugin-Teil ist zurückgezogen. Stand 15.11.2026, 09:00.**
+> **Der Plugin-Teil ist repariert und wieder scharf. Stand 16.11.2026.**
 >
 > Beim Rollout am 15.11. hat ChirpStack 4.17 die Plugin-Datei beim Start
 > geladen und abgebrochen:
@@ -10594,51 +10594,59 @@ Wächter funkt nicht mehr jede Minute), `docs/status/2026-11-02-paketverlust.md`
 > Error: Get id function: JS error: Error converting from js 'undefined' into type 'function'
 > ```
 >
-> Der Dienst lief daraufhin in Schleife. **Von 08:53 bis 09:00 hat die
-> Anlage nichts verarbeitet** — keine Uplinks, keine Downlinks. Die
-> Notreparatur steht in §10bb; der `adr_plugins`-Eintrag ist seither aus
-> `chirpstack.toml` heraus.
+> Der Dienst lief in Schleife, **von 08:53 bis 09:00 hat die Anlage
+> nichts verarbeitet**. Die Notreparatur steht in §10bb, der Rückzug war
+> #415.
 >
-> **Prüfbefehl, dass er draußen ist** — SSH (Server):
+> **Was sich am 16.11. geändert hat, und nur deshalb gilt diese Liste
+> wieder vollständig:**
+>
+> * Die Datei trägt `export function id/name/handle`. ChirpStack
+>   deklariert sie als **ES-Modul** und holt die Funktionen am
+>   Modul-Objekt; ohne `export` liefert das `undefined`.
+> * Die Bedingung aus #415 — *„wer den Eintrag zurückbringt, bringt einen
+>   Test, der die Datei so lädt wie ChirpStack"* — ist erfüllt.
+>   `infra/chirpstack/tests/test_adr_plugins.py` lässt **dasselbe Image
+>   wie der Server** (`chirpstack/chirpstack:4`, 4.17.0) gegen eine
+>   Wegwerf-Datenbank laufen und prüft beides: dass diese Fassung lädt und
+>   der Dienst weiterläuft, **und** dass die Fassung vom 15.11. ohne
+>   `export` mit genau der Meldung oben abbricht.
+> * Dabei gemessen, was vorher nur vermutet war: ChirpStack baut den
+>   Postgres-Pool auf und wandert das Schema **bevor** es die Plugins
+>   lädt. Ein Plugin-Test ohne Datenbank ist nicht möglich — deshalb
+>   bringt der Test seine eigene mit.
+>
+> **Prüfbefehl, dass der Eintrag drin ist** — SSH (Server), nach dem
+> Deploy:
 >
 > ```bash
 > docker run --rm -v deploy_chirpstack_config_rendered:/vol:ro alpine:3.20 grep -c '^[[:space:]]*adr_plugins' /vol/chirpstack.toml
 > ```
 >
-> *Erwartet:* **0**.
+> *Erwartet:* **1**. Steht dort 0, hat der Init-Sidecar die neue Fassung
+> noch nicht gerendert — eine Runde warten, nicht nachhelfen.
 >
 > **Das Muster `^[[:space:]]*adr_plugins` ist nicht Zierde.** Der
-> Abschnitt in `chirpstack.toml` **erklärt** den Verzicht und nennt dabei
-> `adr_plugins` mehrfach im Kommentar. Ein `grep -c adr_plugins` zählt
-> diese Zeilen mit und meldet eine Zahl größer null, obwohl die
-> Konfiguration richtig ist — ein Melder, der bei gesundem Zustand rot
-> zeigt, wird nach dem zweiten Mal ignoriert (§5.79). Gezählt werden
-> deshalb nur Zeilen, die mit dem Schlüssel **beginnen**.
+> Abschnitt in `chirpstack.toml` erklärt die Geschichte und nennt
+> `adr_plugins` dabei mehrfach im Kommentar. Ein `grep -c adr_plugins`
+> zählt die Kommentarzeilen mit; gezählt werden deshalb nur Zeilen, die
+> mit dem Schlüssel **beginnen** (§5.88).
 >
 > **Und: kein Zeilenfenster.** `sed -n '36,46p'` auf diese Datei zeigt das
 > `[api]`-Geheimnis mit, sobald sich die Zeilennummern verschieben — genau
 > das ist am 15.11. passiert (§5.89).
 >
-> **Was von dieser Liste gilt:** alles zur **Reserve**
-> (`installation_margin = 20.0`) — Schritt 0, 1, 2, 4, 4a, 4b, 5b, 6.
-> Sie ist eine Zahl in der Regionsdatei, lädt keinen Code und war an dem
-> Ausfall nicht beteiligt.
+> **Reihenfolge am 16.11.:** der Plugin-Teil (Schritt 3, 5a, 5c) läuft
+> **getrennt und am Ende**, als Phase 3 des großen Durchgangs, damit ein
+> Fehler zuordenbar bleibt. Die Laufliste dazu steht in
+> `docs/status/2026-11-16-grosser-durchgang.md` und bringt die fertigen
+> Notreparatur-Befehle mit.
 >
-> **Was nicht gilt:** Schritt 3 (Profil zuweisen), 5a und 5c — alles, was
-> das Plugin betrifft. **Schritt 3 nicht ausführen.** Ein Geräteprofil,
-> das auf ein nicht geladenes Plugin zeigt, läuft bei jedem Uplink des
-> Relais in einen Fehler.
->
-> **Folge, die bleibt:** 108 hängt auf DR3, und der Standard-Algorithmus
-> senkt die Datenrate **nie** von selbst. Die 16 Prozent Verlust an 108
-> bleiben bis zum zweiten Versuch. Das ist die bewusste Wahl — 16 Prozent
-> Verlust an einem Relais gegen einen Dienst, der nicht startet.
->
-> **Vor dem zweiten Versuch** ist zu klären, in welcher Form ChirpStack
-> 4.17 `id()` erwartet, und zwar **am Quelltext von ChirpStack**, nicht
-> an der Doku. Dazu gehört ein Test, der die Datei so lädt wie ChirpStack
-> — die 54 bestehenden Tests laden sie unter **Node** und waren grün,
-> während der Dienst nicht startete (§5.55).
+> **Was ohne das Plugin offen bliebe:** 108 wurde am 16.11. vom
+> Standard-Algorithmus auf **DR5** hochgezogen — vier `LinkADRReq
+> acknowledged`, bei Reserve 20 und voller Sendeleistung. Der
+> Standard-Algorithmus senkt die Datenrate **nie**; eine Zahl in der
+> Regionsdatei kann das nicht heilen.
 
 > **Nachtrag 17.11.2026: die Form ist geklärt, und das Plugin kommt
 > trotzdem vorerst nicht.** Der Test gegen `chirpstack/chirpstack:4.17.0`
