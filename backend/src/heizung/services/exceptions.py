@@ -86,3 +86,27 @@ class ZoneNotFound(LifecycleError):  # noqa: N818 — Konvention wie DeviceNotFo
     """
 
     error_code: ClassVar[str] = "HEATING_ZONE_NOT_FOUND"
+
+
+class RoomHasHistory(LifecycleError):  # noqa: N818 — Konvention wie DeviceNotFound
+    """Das Zimmer hat Verlaufsdaten und wird deshalb nicht geloescht. HTTP 409.
+
+    **Der S3-Punkt vom 27.11.2026.** ``event_log.room_id`` haengt mit
+    ``ON DELETE CASCADE`` an ``room.id``: ein geloeschtes Zimmer nimmt
+    seinen gesamten Engine-Trace mit, fuer alle vergangenen Tage, und
+    danach ist die Frage „warum war das Zimmer kalt" nicht mehr
+    beantwortbar. Dasselbe gilt fuer die Belegungen und die
+    Uebersteuerungen.
+
+    Die Entscheidung des Betreibers vom 27.11.2026 ist die Sperre im
+    Endpunkt und **nicht** ``ON DELETE RESTRICT``: der zweite Weg waere
+    eine nicht additive Migration (AE-77, Goldene Regel 10) und damit
+    gegen einen Rueckfall per ``PIN_SHA`` gerichtet.
+
+    Die Meldung nennt die Zahlen. Ein „Loeschen nicht moeglich" ohne
+    Zahlen laesst offen, ob es um eine Zeile oder um vierzehntausend
+    geht — und genau das ist die Information, die der Administrator
+    braucht.
+    """
+
+    error_code: ClassVar[str] = "ROOM_HAS_HISTORY"
