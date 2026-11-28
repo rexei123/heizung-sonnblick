@@ -13390,3 +13390,232 @@ Handgriff nicht löst").
 die Antwort auf eine Unit, die es nicht gibt), §5.78 (`docker compose`
 ohne `-f`), `docs/status/2026-11-16-grosser-durchgang.md` (der Termin,
 an dem die sechs Pakete zurückgehalten wurden).
+
+## 10bj. Datenrate hausweit begrenzen (`max_dr = 2`) — Rollout und Kontrolle
+
+**Was das ändert.** `infra/chirpstack/configuration/region_eu868.toml`
+setzt `max_dr` von 5 auf **2**. ChirpStack senkt daraufhin jedes Gerät,
+das über DR2 liegt, **aktiv** per `LinkADRReq` ab — beim nächsten
+eigenen Uplink, bei sechs Meldungen je Stunde also binnen zehn Minuten.
+Kein Handgriff am Gerät, kein Batteriewechsel, kein Funkbefehl von
+unserer Seite.
+
+**Warum.** Der Standard-Algorithmus senkt eine Datenrate von sich aus
+**nie** (`chirpstack/src/adr/default.rs`: bei negativen Schritten erhöht
+er nur die Sendeleistung). Diese eine Klammer ist der einzige Weg nach
+unten:
+
+```
+// Lower the DR only if it exceeds the max. allowed DR.
+if req.dr > max_dr { resp.dr = max_dr; }
+```
+
+Der Anlass ist der Lauf vom 27.11.2026: rund zwölf Geräte mit 4,8 bis
+25 % Verlust, SNR-Minima um −10 bis −13 dB. Die Schwelle für DR5 (SF7)
+liegt bei **−7,5 dB**, die für DR2 (SF10) bei **−15 dB** — das sind 7,5
+dB mehr Funkbudget. Begründung der Zahl, Sendezeit-Rechnung und die
+Quellenstellen stehen im Kopf der Regionsdatei und in
+`docs/status/2026-11-27-datenrate-begrenzen.md`.
+
+**Dauer:** zwei Minuten Rollout, danach zehn Minuten zusehen. Die
+Kontrolle nach 24 Stunden ist ein eigener Handgriff.
+
+> **Nicht im Merge-Fenster nebenbei.** Das ist eine Funk-Änderung für
+> **alle** Geräte gleichzeitig. Sie gehört an den Anfang eines
+> Zeitfensters, in dem jemand zehn Minuten hinsieht — nicht an sein
+> Ende.
+
+### 0. Vorbedingung
+
+**0.1** Der PR ist gemergt und der Pull ist durch:
+
+```bash
+cd /opt/heizung-sonnblick && git log --oneline -1 && git rev-parse --short HEAD
+```
+
+**0.2** Rückfallpunkt notieren (derselbe Befehl, Ausgabe aufschreiben).
+
+**0.3** Die Datei im Repo trägt die neue Zahl:
+
+```bash
+grep -n '^[[:space:]]*max_dr' /opt/heizung-sonnblick/infra/chirpstack/configuration/region_eu868.toml
+```
+
+*Erwartet:* genau eine Zeile, `max_dr = 2`.
+
+### 1. Konfiguration neu rendern (Sidecar, im Vordergrund)
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up --force-recreate --no-deps chirpstack-init
+```
+
+**Der Sidecar muss mit `exit 0` enden.** Steht in seiner Ausgabe ein
+Fehler, ist die gerenderte Konfiguration falsch — dann **nicht**
+weitergehen (§5.78-Familie: der nächste Schritt würde den Fehler
+festschreiben).
+
+### 2. ChirpStack neu starten
+
+```bash
+cd /opt/heizung-sonnblick/infra/deploy && docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps chirpstack
+```
+
+**Die zwei `up`-Aufrufe sind nicht austauschbar.** Die Konfiguration
+liegt in einem Named Volume und wird vom Sidecar mit `envsubst`
+gerendert; ohne den Sidecar-Lauf liest ChirpStack die **alte** Fassung,
+und der fehlende Effekt sieht aus wie ein falscher Wert.
+
+### 3. Prüfung: steht die Zahl im gerenderten Volume
+
+```bash
+docker run --rm -v deploy_chirpstack_config_rendered:/vol:ro alpine:3.20 grep -c '^[[:space:]]*max_dr' /vol/region_eu868.toml
+```
+
+*Erwartet:* **1**. Steht dort 0, hat der Sidecar nicht gerendert — eine
+Runde warten, nicht nachhelfen.
+
+Und der Wert selbst:
+
+```bash
+docker run --rm -v deploy_chirpstack_config_rendered:/vol:ro alpine:3.20 grep '^[[:space:]]*max_dr' /vol/region_eu868.toml
+```
+
+*Erwartet:* `max_dr = 2`.
+
+> **Kein Zeilenfenster auf diese Datei.** `sed -n '40,60p'` oder `cat`
+> auf `region_eu868.toml` zeigt den Block `[regions.gateway.backend.mqtt]`
+> mit, und darin stehen **MQTT-Benutzer und -Passwort** im Klartext —
+> der Sidecar hat sie beim Rendern eingesetzt. Gezielt greppen, nie
+> blättern (§5.89).
+
+> **Das Muster `^[[:space:]]*max_dr` ist nicht Zierde.** Der Kopf der
+> Datei erklärt die Entscheidung und nennt `max_dr` dabei mehrfach im
+> Kommentar. Ein `grep -c max_dr` zählt die Kommentarzeilen mit (§5.88).
+
+### 4. Kontrolle: läuft der Dienst, und greift die Grenze
+
+**4.1 Keine Neustart-Schleife** — der wichtigste Blick, und zwar
+**zweimal mit einer Minute Abstand**:
+
+```bash
+docker ps --filter name=deploy-chirpstack-1 --format '{{.Status}}'
+```
+
+*Erwartet:* `Up …`, und die Laufzeit wächst. Zählt sie wieder bei
+Sekunden an, startet der Dienst in Schleife — dann sofort Schritt 6.
+
+**4.2 Die Regionen wurden gelesen:**
+
+```bash
+docker logs deploy-chirpstack-1 --since 5m 2>&1 | grep -c 'Setting up regions'
+```
+
+*Erwartet:* **1**. Dazu darf **keine** Zeile mit `TOML parse error`
+oder `invalid type` auftauchen:
+
+```bash
+docker logs deploy-chirpstack-1 --since 5m 2>&1 | grep -c -iE 'TOML parse error|invalid type'
+```
+
+*Erwartet:* **0**.
+
+**4.3 Die Absenkung läuft** — nach zehn bis fünfzehn Minuten:
+
+```bash
+docker logs deploy-chirpstack-1 --since 15m 2>&1 | grep -c -i 'LinkADRReq'
+```
+
+*Erwartet:* zweistellig. Jedes Gerät über DR2 bekommt eine Anweisung,
+und die Bestätigung erscheint als `LinkADRReq acknowledged`.
+
+**4.4 Die Datenrate der Problemgeräte** — in der ChirpStack-Oberfläche:
+Application → Gerät → **Events**, `txInfo` der jüngsten Meldung. Für
+004, 001, 007, 027, 021, 026, 046, 056, 028, 002, 025 und das Panel 109
+muss dort **DR2** oder weniger stehen.
+
+Als Befehl, wenn die Oberfläche nicht erreichbar ist:
+
+```bash
+docker exec deploy-chirpstack-1 chirpstack -c /etc/chirpstack print-ds --dev-eui 70b3d52ddd00xxxx | grep -E '"(dr|txPowerIndex|nbTrans)"'
+```
+
+> **Niemals ohne das `grep`.** `print-ds` gibt die ganze
+> Geräte-Sitzung aus, und darin stehen die **Sitzungsschlüssel**
+> (`appSKey`, `nwkSEncKey`, `fNwkSIntKey`) im Klartext. Der Filter ist
+> hier kein Komfort, sondern die Bedingung, unter der der Befehl
+> überhaupt gelaufen werden darf.
+
+Die DevEUI zum Etikett holt man aus unserer Datenbank:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -t -c "SELECT label, dev_eui FROM device WHERE label IN ('001','004','027','046','056') ORDER BY label;"
+```
+
+**4.5 Bleibt ein Gerät auf DR5**, ist die erste Frage nicht die Grenze,
+sondern das **ADR-Bit**: die Klammer greift nur, wenn `adr` in der
+Anfrage gesetzt ist, und das Bit setzt das **Gerät**. In den Events
+steht es als `"adr": true` im Uplink. Ist es `false`, entscheidet das
+Gerät selbst über seine Datenrate, und diese Grenze erreicht es nicht.
+
+**4.6 Nach 24 Stunden** — die Wirkung, nicht die Mechanik (§5.76):
+
+```bash
+docker exec deploy-api-1 python -m heizung.scripts.funkqualitaet --stunden 24
+```
+
+*Erwartet:* die Verlustspalte der zwölf Problemgeräte deutlich unter
+ihren Ausgangswerten (004 von 25 %, 001 von 22 %). Der Vergleichswert
+ist der Lauf vom 27.11.2026 im Statuseintrag.
+
+**Dass die Sendezeit steigt, ist eingerechnet und kein Befund:** je
+Gerät 0,062 % statt 0,009 % (erlaubt sind 1 %), hausweit 2,2 %
+Kanalbelegung auf drei Kanälen. Was sinken sollte, ist `nbTrans` — ADR
+fordert Wiederholungen ab 5 % Verlust, und die fallen mit dem Verlust
+weg.
+
+### 5. Was dieser Handgriff nicht erledigt
+
+**Das Relais 108.** Es läuft seit der Stromtrennung am 16.11.2026 auf
+DR0 und ist damit **robuster** als die neue Grenze. Die Grenze schützt
+es künftig davor, wieder auf DR5 gezogen zu werden — mehr nicht. Die
+offene Frage „ADR-Plugin mit `ZIEL_DR = 0`?" steht unverändert in §10av,
+Nachtrag vom 17.11.2026.
+
+**Eine Grenze je Gerät.** ChirpStack kennt `max_dr` nur in der Region.
+Wer ein einzelnes Gerät anders behandeln will, braucht ein ADR-Plugin.
+
+**Die Datenrate steht nicht in unserer Datenbank.** `sensor_reading`
+führt `rssi_dbm` und `snr_db`, aber kein DR-Feld. Ein Verlauf der
+Datenrate ist deshalb nur in ChirpStack sichtbar, und nur so lange
+dessen Events reichen.
+
+### 6. Rückweg
+
+**Der Rückweg ist ein Revert-PR, kein Handgriff am Server.** Die
+Konfiguration wird aus dem Repo gerendert, und `deploy-pull.sh` macht
+`git reset --hard` — eine Änderung von Hand in
+`/opt/heizung-sonnblick` ist beim nächsten Pull wieder weg (§5.76, die
+Backup-Kette).
+
+```
+1. Revert-PR auf develop (eine Zeile: max_dr = 2 -> 5)
+2. Merge, Pull abwarten (bis 5 min)
+3. Schritt 1 und 2 von oben erneut
+4. Schritt 4.1 und 4.2 erneut
+```
+
+**Und er wirkt nicht symmetrisch.** Die Grenze zu senken ist sofort und
+für alle wirksam; sie zu heben ist es **nicht**. Nach oben klettert ein
+Gerät nur, wenn sein bestes SNR der letzten 20 Meldungen über
+`required_snr_for_dr + installation_margin` liegt — bei Reserve 20 dB
+sind das +5 dB für den Schritt von DR2 nach DR3. Ein Revert stellt also
+den Zustand von vorher **nicht** wieder her, sondern erlaubt ihn nur
+wieder. Wer schnell zurück muss, sollte das wissen, bevor er es braucht.
+
+**Querverweise:** §10av (Reserve 20 dB und das ADR-Plugin — dieselbe
+Familie, derselbe Anlass), §10bb (ChirpStack in der Neustart-Schleife:
+der Notgriff, wenn Schritt 4.1 fehlschlägt), §10bi (Wartungsfenster),
+§5.76 (Wirkung statt Mechanik — Schritt 4.6), §5.88 (`grep -c` ohne
+Anker), §5.89 (kein Zeilenfenster auf Konfigdateien),
+`infra/chirpstack/tests/test_datenrate_begrenzen.py` (die Zusicherungen
+im echten Abbild), `docs/status/2026-11-27-datenrate-begrenzen.md`.

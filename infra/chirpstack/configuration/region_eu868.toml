@@ -49,7 +49,60 @@
     downlink_tx_power = -1
     adr_disabled = false
     min_dr = 0
-    max_dr = 5
+
+    # **Die Obergrenze der Datenrate -- am 27.11.2026 von 5 auf 2 gesenkt.**
+    #
+    # Das ist die einzige Stelle, an der der Standard-Algorithmus eine
+    # Datenrate **senkt**. Woertlich, aus ``chirpstack/src/adr/default.rs``
+    # (v4.17.0, abgerufen am 27.11.2026):
+    #
+    #     // Lower the DR only if it exceeds the max. allowed DR.
+    #     if req.dr > max_dr {
+    #         resp.dr = max_dr;
+    #     }
+    #
+    # Die Klammer sitzt **vor** der Schrittrechnung und greift bei jedem
+    # Durchlauf, an dem ``adr`` gesetzt ist. Weicht die Antwort von der
+    # Anfrage ab, haengt ChirpStack einen ``LinkADRReq`` an
+    # (``downlink/data.rs``, ``_request_adr_change``), und eine anstehende
+    # MAC-Anweisung reicht allein, um einen Downlink zu schicken
+    # (``_something_to_send``). Die Geraete werden also **aktiv**
+    # abgesenkt, nicht nur kuenftig gedeckelt -- jedes beim naechsten
+    # eigenen Uplink, bei 6 Meldungen je Stunde also binnen zehn Minuten.
+    #
+    # **Warum 2 und nicht 3.** Die Grenze liegt bei der
+    # Demodulations-Schwelle: DR3 (SF9) braucht -12,5 dB, DR2 (SF10) -15
+    # dB. Der Lauf ``funkqualitaet --stunden 720`` vom 27.11.2026 zeigt
+    # bei 046 ein SNR-Minimum von **-13,2 dB** und bei 056 von **-15,8
+    # dB** -- beide liegen unter der DR3-Schwelle. Eine Grenze bei DR3
+    # haette genau die zwei Geraete nicht erreicht, um die es geht.
+    #
+    # Und das Minimum ist **beschnitten**: Meldungen unterhalb der
+    # Schwelle kommen nie an und stehen in keiner Statistik. Was wir
+    # sehen, ist die Untergrenze des Messbaren, nicht die des Funks.
+    #
+    # **Was es kostet** (22 Byte, 125 kHz, CR 4/5, gerechnet):
+    # Sendezeit je Meldung 57 ms bei DR5, 206 ms bei DR3, **371 ms bei
+    # DR2**. Je Geraet bei 6 Meldungen/h sind das 0,062 % statt 0,009 %
+    # -- die Vorschrift erlaubt 1 %. Hausweit auf drei Kanaelen
+    # (``enabled_uplink_channels = []`` und keine ``extra_channels``:
+    # 868,1/868,3/868,5) **2,2 % Kanalbelegung** fuer 109 Geraete, 4,5 %
+    # wenn ADR wegen Verlusten ``nbTrans = 2`` fordert. Die Sendezeit ist
+    # hier nicht die Grenze, das Funkbudget ist es.
+    #
+    # **Ein Tippfehler im Schluessel ist hier teuer, und zwar lautlos.**
+    # ``RegionNetwork`` traegt ``#[serde(default)]`` und
+    # ``impl Default`` setzt ``max_dr: 0`` (``config.rs``). Ein
+    # verschriebener Name wird stillschweigend uebergangen -- und die
+    # Grenze ist dann **DR0**, SF12, 1,5 s je Meldung. Dagegen steht
+    # ``test_ein_tippfehler_im_schluessel_faellt_in_der_echten_engine_auf``
+    # und der Pruefbefehl in RUNBOOK Paragraph 10bj.
+    #
+    # **Das Relais beruehrt diese Zahl nicht.** Sein Profil ruft das
+    # Plugin, und dessen Rueckgabe geht ungeklammert in den
+    # ``LinkADRReq`` -- DR1 bleibt DR1. Solange das Plugin nicht
+    # ausgerollt ist, gilt fuer 108 diese Grenze wie fuer alle anderen.
+    max_dr = 2
     uplink_max_eirp = 16.0
     enabled_uplink_channels = []
 
