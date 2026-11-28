@@ -3,7 +3,7 @@ titel: Wie das Haus heizt
 kategorie: Grundlagen
 stichworte: Sollwert, Schichten, Sommer, Absenkung, Vorheizen, Fenster, Kappung, Allgemeinbereich, Tagesplan, nur messen, Relais
 rollen: alle
-stand: 2026-11-21
+stand: 2026-11-27
 ---
 
 Jedes Zimmer bekommt alle fünf Minuten einen Sollwert errechnet. Das
@@ -177,6 +177,29 @@ jeder Funkbefehl kostet Batterie und Motorbewegung:
 - Geräte auf „nur messen" bekommen nichts.
 - Ein Relais bekommt gar keinen Sollwert, sondern einen Schaltbefehl —
   siehe oben.
+- **Seit dem 27.11.2026 wartet die Steuerung eine Runde**, bevor sie eine
+  Änderung hinausschickt: ein bis zwei Minuten.
+
+### Die Wartezeit, und warum sie da ist
+
+Ändert die Steuerung ihren Wunsch zweimal kurz hintereinander — erst 20,
+dann 25 —, gingen bisher **zwei** Befehle hinaus, und das Ventil machte
+**zwei** Bewegungen. Die erste war überflüssig.
+
+Seither wird die erste Änderung gesammelt und erst eine Runde später
+geschickt — dann aber mit dem Wert, der **dann** gilt. Aus „20, dann 25"
+wird ein Befehl mit 25. Und aus „20, dann 25, dann wieder 20" wird
+**keiner**.
+
+**Was das für die Rezeption heißt:** eine Wunschtemperatur wirkt bis zu
+zwei Minuten später am Gerät. Auf dem Bildschirm steht sie sofort; was
+wartet, ist der Funkbefehl.
+
+**Der Boost wartet nicht.** Er ist die eine Änderung, die der Gast sofort
+spüren soll — eine Minute Wartezeit wäre genau dort teuer, wo jemand auf
+Wirkung wartet und sonst noch einmal drückt. Ebenso wenig wartet die
+Steuerung, wenn ein Gerät nach einem Stromausfall auf einem falschen Wert
+zurückkommt.
 
 Dazu kommt der Funk selbst: ein Thermostat meldet sich im Regelfall alle
 paar Minuten, im ungünstigen Fall dauert eine Bestätigung bis zu sechs

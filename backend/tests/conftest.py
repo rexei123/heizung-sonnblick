@@ -47,6 +47,28 @@ def _ensure_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("ALLOW_DEFAULT_SECRETS", "1")
+    # --- Entprellen aus, suiteweit (Sprint 25 T1, 27.11.2026) -----------
+    #
+    # Im Betrieb sammelt die Steuerung die erste Sollwert-Aenderung je
+    # Geraet und schickt sie erst beim naechsten Tick nach Ablauf des
+    # Fensters (``SOLLWERT_ENTPRELL_S``, Vorgabe 60). Fuer einen Test
+    # heisst das: der erste Tick sendet **nicht** mehr.
+    #
+    # **Deshalb steht es hier auf 0 und nicht in acht Testdateien.** Die
+    # betroffenen Tests pruefen, **was** gesendet wird — Wert, Zone,
+    # Hysterese, Fenster, Uebersteuerung —, nicht **wann**. Sie in je zwei
+    # Ticks umzuschreiben haette ihr Thema verschoben, und ein neuer Test,
+    # der irgendwann einen Downlink erwartet, waere ohne diese Zeile aus
+    # einem Grund rot, der nichts mit ihm zu tun hat.
+    #
+    # **Der Preis, und er ist benannt:** damit prueft die Suite das
+    # Zusammenspiel von Entprellen und allem anderen **nicht** (die Falle
+    # aus Paragraph 5.55). Dagegen steht
+    # ``tests/test_sprint25_entprellen.py``: dort ist das Fenster **an**,
+    # und es laeuft durch denselben Dispatch wie im Betrieb, inklusive
+    # zweier Ticks. Wer eine neunte Datei findet, die am Entprellen haengt,
+    # gehoert dorthin und nicht hierher.
+    monkeypatch.setenv("SOLLWERT_ENTPRELL_S", "0")
     # Settings-Cache leeren, damit nachfolgende get_settings() die
     # frischen env-Vars lesen.
     get_settings.cache_clear()
