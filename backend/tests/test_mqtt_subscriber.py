@@ -30,6 +30,7 @@ from heizung.services.mqtt_subscriber import (
     _persist_uplink,
     _to_decimal,
 )
+from tests.conftest import purge_test_data_by_prefix
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
@@ -457,18 +458,52 @@ def test_map_to_reading_open_window_missing_is_none() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Die Praefixe, unter denen die Tests dieser Datei anlegen -- Zimmer
+#: und Raumtyp links, Geraete rechts. Sie stehen hier, damit Anlegen und
+#: Aufraeumen **eine** Liste teilen.
+AUFBAU_PRAEFIXE: tuple[tuple[str, str], ...] = (
+    ("t3", "deadbeef%"),
+    ("plausi", "fwtest00%"),
+)
+
+
 @pytest_asyncio.fixture
 async def db_session_for_persist() -> AsyncIterator[AsyncSession]:
+    """Eine Sitzung fuer die Persistenz-Tests -- und ein echtes Aufraeumen.
+
+    **Ein ``rollback`` reicht hier nicht**, und der Kommentar an den
+    Tests behauptete drei Monate lang das Gegenteil
+    („beim Test-Tear-down weggerollt"). Die Tests schieben dem Code
+    unter Pruefung ihre eigene Sitzung unter (``_FakeContext``), und
+    ``_persist_uplink`` ruft darauf ``commit()``. Damit ist die Zeile
+    geschrieben, bevor dieses Fixture zum Aufraeumen kommt -- der
+    ``rollback`` findet nichts mehr vor.
+
+    Weil der Kommentar es anders behauptete, hat niemand gesucht. Gelegen
+    hat es an einer **Zusicherung ueber fremdes Verhalten**: der Test
+    weiss, dass er die Sitzung verleiht, aber nicht, was der Entleiher
+    damit tut (Paragraph 5.68 in klein).
+
+    Aufgeraeumt wird mit ``purge_test_data_by_prefix`` und nicht mit
+    eigenem SQL -- derselbe Helfer, den zwoelf andere Dateien benutzen,
+    und seit dem 27.11.2026 loescht er die Geraete selbst statt auf den
+    Cascade von ``Room`` zu hoffen.
+    """
     if not TEST_DB_URL:
         pytest.skip(SKIP_REASON)
     engine = create_async_engine(TEST_DB_URL)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
-    async with sessionmaker() as session:
-        try:
-            yield session
-        finally:
-            await session.rollback()
-    await engine.dispose()
+    try:
+        async with sessionmaker() as session:
+            try:
+                yield session
+            finally:
+                await session.rollback()
+        async with sessionmaker() as putzen:
+            for prefix, geraete in AUFBAU_PRAEFIXE:
+                await purge_test_data_by_prefix(putzen, prefix, dev_eui_pattern=geraete)
+    finally:
+        await engine.dispose()
 
 
 async def test_persist_uplink_schedules_evaluate_room(
@@ -511,9 +546,12 @@ async def test_persist_uplink_schedules_evaluate_room(
     await db_session_for_persist.flush()
     expected_room_id = room.id
 
-    # SessionLocal so monkeypatchen, dass _persist_uplink unsere
-    # rollback-Session wiederverwendet (commit() wird auf der gleichen
-    # Verbindung gemacht und beim Test-Tear-down weggerollt).
+    # SessionLocal so monkeypatchen, dass _persist_uplink unsere Sitzung
+    # wiederverwendet. **Das commit() darin bleibt stehen** -- es laeuft
+    # auf derselben Verbindung, und hier stand bis zum 27.11.2026, es
+    # werde „beim Test-Tear-down weggerollt". Das war falsch, und es hat
+    # rund fuenfzig Geraete je Gesamtlauf in der Test-Datenbank
+    # hinterlassen. Aufgeraeumt wird im Fixture, nicht hier.
     class _FakeContext:
         async def __aenter__(self) -> AsyncSession:  # noqa: PLW0211 - Test-Fake
             return db_session_for_persist
