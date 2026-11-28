@@ -49,11 +49,34 @@ TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 SKIP_REASON = "TEST_DATABASE_URL nicht gesetzt - DB-Tests brauchen Postgres"
 PREFIX = "rfw"
 
-#: Die Betriebsvorgabe, hier als Pruefstand-Wert wiederholt. **Bewusst
-#: nicht importiert**: der Test soll festhalten, gegen welche Zahl er
-#: geprueft hat — zieht jemand die Vorgabe hoch, soll er nicht
-#: stillschweigend mitwandern (§5.77 in Testform).
+#: Ein **Pruefstand-Wert**, keine Betriebsvorgabe. ``beurteile`` nimmt
+#: die Grenze als Argument; die Tests unten pruefen damit, wie sich der
+#: Melder **an** seiner Grenze verhaelt — inklusiv oder exklusiv, welcher
+#: Grund vor welchem kommt. Das ist von der Zahl unabhaengig, und eine
+#: mitwandernde Zahl haette hier nichts zu sagen.
+#:
+#: **Bis zum 28.11.2026 war es beides**: dieselbe Zahl stand als Vorgabe
+#: in den Settings, und dieser Kommentar nannte sie so. Seit der
+#: Betreiber auf 180 Minuten gegangen ist, sind es zwei verschiedene
+#: Dinge. Die **Vorgabe** prueft ``test_ausfall_schwellen.py``, hier
+#: steht nur noch der Pruefstand.
 GRENZE_MIN = 30
+
+
+def _stumm_alter() -> int:
+    """Ein Alter, das der **Task** als stumm wertet.
+
+    Die Task-Tests weiter unten rufen den Beat-Task, und der liest die
+    Betriebsvorgabe (``relais_zone_stumm_min``) statt ``GRENZE_MIN``.
+    Gerechnet statt eingetragen: zieht der Betreiber die Vorgabe hoch,
+    wandert dieses Alter mit. Eine feste Zahl waere hier eines Tages zu
+    frisch — und dann waere ein Melder-Test gruen, der seinen Melder nie
+    erreicht (Paragraph 5.55). Genau das ist am 28.11.2026 passiert, als
+    die Vorgabe von 30 auf 180 ging und die eingetragenen 45 Minuten
+    stehen blieben.
+    """
+    return get_settings().relais_zone_stumm_min + 15
+
 
 #: Die gemessenen Zeiten der Luecke vom 12./13.11.2026 (Ortszeit +01:00).
 LETZTE_MELDUNG_056 = datetime(2026, 11, 12, 13, 41, 1, tzinfo=UTC)
@@ -153,13 +176,18 @@ def test_zone_ohne_fuehler_hat_einen_eigenen_grund() -> None:
     )
 
 
-def test_gegenprobe_056_waere_nach_30_minuten_gemeldet_worden() -> None:
+def test_gegenprobe_056_waere_nach_der_vorgabe_gemeldet_worden() -> None:
     """**Die Anforderung des Betreibers, an der echten Luecke geprueft.**
 
-    Letzte Meldung 14:41:01 Ortszeit. Bei einem Beat-Takt von fuenf
-    Minuten faellt die erste Pruefung nach der Schwelle auf den Lauf um
-    etwa 15:15. Geprueft wird die Schwelle selbst: 30 Minuten schweigen
-    noch, 31 melden.
+    Letzte Meldung 14:41:01 Ortszeit, die Luecke dauerte vierzehn
+    Stunden. Geprueft wird die Schwelle selbst, hier mit dem
+    Pruefstand-Wert: auf der Grenze schweigt der Melder noch, eine
+    Minute darueber meldet er.
+
+    **Die Betriebsvorgabe ist seit dem 28.11.2026 180 Minuten** und
+    nicht mehr die Zahl in diesem Test. An diesem Fall aendert das
+    nichts — 438 Minuten zur Mitte der Luecke liegen auch darueber, und
+    die Zusicherung unten sagt es.
     """
     noch_still = relais_zone_melder.beurteile(
         zone_id=299,
@@ -201,6 +229,9 @@ def test_gegenprobe_056_waere_nach_30_minuten_gemeldet_worden() -> None:
         grenze_min=GRENZE_MIN,
     )
     assert mitte.alter_min == 438, f"die Luecke war {mitte.alter_min} Minuten"
+    assert mitte.alter_min > get_settings().relais_zone_stumm_min, (
+        "auch mit der Vorgabe vom 28.11.2026 waere diese Luecke gemeldet worden"
+    )
 
 
 def test_nach_der_rueckkehr_ist_es_wieder_in_ordnung() -> None:
@@ -488,7 +519,7 @@ async def test_frischer_fuehler_erzeugt_keinen_befund(maker: Any) -> None:
 
 
 async def test_stummer_fuehler_wird_gefunden(maker: Any) -> None:
-    ids = await _baue(maker, fuehler_alter_min=45)
+    ids = await _baue(maker, fuehler_alter_min=_stumm_alter())
     try:
         async with maker() as session:
             befunde = await relais_zone_melder.lies_relais_zonen(session, grenze_min=GRENZE_MIN)
@@ -553,7 +584,7 @@ async def test_fuehler_ohne_etikett_gilt_als_fuehler(maker: Any) -> None:
     Geraet. Die Laenge der Liste **ist** die Zahl der Fuehler, deshalb
     ein Platzhalter statt eines Filters.
     """
-    ids = await _baue(maker, fuehler_alter_min=45)
+    ids = await _baue(maker, fuehler_alter_min=_stumm_alter())
     async with maker() as session:
         await session.execute(
             text("UPDATE device SET label = NULL WHERE id = :d"), {"d": ids.fuehler_id}
@@ -578,7 +609,7 @@ async def test_der_zustand_haengt_an_der_zone_und_nicht_am_haus(maker: Any) -> N
     andere uebertragen — und damit genau die Mail unterdruecken, die
     noch gebraucht wird.
     """
-    eins = await _baue(maker, fuehler_alter_min=45)
+    eins = await _baue(maker, fuehler_alter_min=_stumm_alter())
     zwei = await _baue(maker, fuehler_alter_min=5)
     try:
         async with maker() as session:
@@ -655,7 +686,7 @@ async def test_episode_meldet_einmal_und_bremst_dann(
     Stunde — und ein Melder, der so oft meldet, wird abgeschaltet statt
     gelesen (§5.79).
     """
-    ids = await _baue(maker, fuehler_alter_min=45)
+    ids = await _baue(maker, fuehler_alter_min=_stumm_alter())
     try:
         # Das Haus muss online sein, sonst ueberspringt der Waechter
         # (und genau das prueft der Test darunter).
@@ -715,7 +746,7 @@ async def test_rueckkehr_wird_vermerkt_und_die_entwarnung_wartet(
     der PR nicht verhaltensneutral ist (Paragraph 5.47) — er soll es auch
     nicht sein.
     """
-    ids = await _baue(maker, fuehler_alter_min=45)
+    ids = await _baue(maker, fuehler_alter_min=_stumm_alter())
     try:
         await funk_tasks._run_relais_zone()
 
@@ -771,7 +802,7 @@ async def test_eine_laufende_episode_ist_hausweit_abfragbar(
     Sortierung sind genau die Stelle, an der ein Nachbau in Python etwas
     anderes tun wuerde.
     """
-    ids = await _baue(maker, fuehler_alter_min=45)
+    ids = await _baue(maker, fuehler_alter_min=_stumm_alter())
     try:
         await funk_tasks._run_relais_zone()
         async with maker() as session:
@@ -1005,7 +1036,7 @@ def test_auch_die_zone_ohne_fuehler_nennt_ein_stummes_relais() -> None:
 
 async def test_stummes_relais_wird_in_der_datenbank_gefunden(maker: Any) -> None:
     """Ende zu Ende: Fuehler frisch, Relais seit 40 Minuten still."""
-    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=40)
+    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=_stumm_alter())
     try:
         async with maker() as session:
             befund = _eigene(
@@ -1030,7 +1061,7 @@ async def test_eine_meldung_ohne_schaltzustand_ist_trotzdem_ein_lebenszeichen(
     sehr wohl. Die Frage „welcher Zustand gilt" steht im Waechter und
     filtert dort sehr wohl auf ``relay_on``.
     """
-    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=40)
+    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=_stumm_alter())
     try:
         async with maker() as session:
             session.add(
@@ -1061,7 +1092,7 @@ async def test_das_audit_haelt_fest_wer_geschwiegen_hat(
     Wer spaeter nachliest, muss sehen, **welches** Geraet — sonst ist der
     Eintrag eine Behauptung ohne Zahlen (Paragraph 5.68).
     """
-    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=40)
+    ids = await _baue(maker, fuehler_alter_min=5, relais_alter_min=_stumm_alter())
     try:
         await funk_tasks._run_relais_zone()
         async with maker() as session:

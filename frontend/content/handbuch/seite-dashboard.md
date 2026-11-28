@@ -3,7 +3,7 @@ titel: Dashboard
 kategorie: Die Seiten
 stichworte: Übersicht, Kacheln, Melder, Algorithmen-Lauf, Belegungsliste, Relais, Abreise überschritten
 rollen: alle
-stand: 2026-11-27
+stand: 2026-11-28
 route: /
 ---
 
@@ -94,7 +94,15 @@ anderen Zahlen noch harmlos aussehen.
 |---|---|
 | **online** | die letzte Meldung ist höchstens fünf Minuten alt |
 | **verzögert** | fünf bis fünfzehn Minuten — einmal nachsehen |
-| **keine Meldungen** | über fünfzehn Minuten. **Es kommen keine Messwerte mehr an**, und ab dieser Stufe geht auch eine Mail hinaus |
+| **keine Meldungen** | über fünfzehn Minuten. **Es kommen keine Messwerte mehr an** |
+
+**Die Mail kommt später als die rote Kachel**, und das ist seit dem
+28.11.2026 ein deutlicher Abstand: rot wird die Kachel nach einer
+Viertelstunde, geschrieben wird nach **drei Stunden** — so lange wie bei
+den anderen Ausfall-Meldungen auch (Entscheidung des Betreibers). In der
+Zeit dazwischen zeigt diese Seite den Ausfall, und niemand wird geweckt.
+Wer morgens hier hereinschaut, sieht also eine Lücke, zu der kein Brief
+im Postfach liegt.
 
 Darunter stehen zwei Zeilen: wann die letzte Meldung kam, und wie viele
 in den letzten zehn Minuten eintrafen. Die zweite Zahl beantwortet eine

@@ -37,6 +37,38 @@ _DEFAULT_SECRET_KEY: Final[str] = "change-me-in-production"
 #: haengen, das wieder an ``config`` — ein Ring).
 GEHAEUSE_TOTBAND_K: Final[int] = 5
 
+#: Wie viele Keepalive-Fenster lang ein Messwert noch brauchbar ist.
+#: Zweieinhalb und nicht zwei: eine einzelne verlorene Meldung soll nichts
+#: aendern, zwei verlorene in Folge schon.
+#:
+#: **Er gilt fuer zwei Meldungen, und das ist Absicht.** Beim **Fuehler**
+#: der Zone sind das ``health_healthy_max_age_h`` mal 2,5 — mit der
+#: Vorgabe 2 h also **fuenf Stunden**, ab denen der Istwert als veraltet
+#: gilt und der Zweipunktregler einen Zwangs-AUS entscheidet. Beim
+#: **Relais** selbst (``relay_meldeintervall_s``, Vorgabe 10 min) sind das
+#: 25 min, ab denen der Waechter dem gemeldeten Schaltzustand nicht mehr
+#: glaubt (14.11.2026). Zwei verschiedene Intervalle, dieselbe
+#: Begruendung — und deshalb eine Zahl (Paragraph 5.53).
+#:
+#: **Am 28.11.2026 aus ``tasks/relay_tasks`` hierher gezogen.** Der Grund
+#: ist der Validator zu ``relais_zone_stumm_min`` weiter unten: er muss
+#: wissen, wann der Regler abschaltet, und ``config`` darf den Task nicht
+#: importieren (er haengt an den Modellen, die an ``db`` haengen, das
+#: wieder an ``config`` — derselbe Ring wie bei ``GEHAEUSE_TOTBAND_K``).
+#: Die Alternative waere der Faktor an zwei Stellen gewesen, und die
+#: zweite waere beim ersten Nachjustieren falsch. ``tasks/relay_tasks``
+#: liest ihn seither von hier.
+VERALTUNGS_FAKTOR: Final[Decimal] = Decimal("2.5")
+
+#: Untergrenze fuer die Wartezeit einer Ausfall-Meldung, in Minuten.
+#:
+#: **Vorgabe des Betreibers vom 28.11.2026.** Keine der drei Grenzen darf
+#: unter eine halbe Stunde: bei Zehn-Minuten-Takt sind 30 Minuten drei
+#: verpasste Meldungen, darunter meldet ein **einzelner** verlorener
+#: Uplink einen Ausfall. Die Grenze nach **oben** ist bei jeder der drei
+#: Meldungen eine andere und steht bei ihr; nur der Boden ist gemeinsam.
+AUSFALL_MELDUNG_MIN_MIN: Final[int] = 30
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -267,7 +299,20 @@ class Settings(BaseSettings):
     # Daten ``unbekannt`` — genau das, was ein Totalausfall erzeugt. Der
     # Ausfall vom 07.11. dauerte **31 Minuten** und hat **keinen** der
     # beiden ausgeloest. Diese Luecke schliesst der Alarm hier.
-    totalausfall_min: int = 15
+    #
+    # **180 statt 15 Minuten, Entscheidung des Betreibers vom
+    # 28.11.2026.** Alle drei Ausfall-Meldungen warten seither gleich
+    # lang — diese hier, die Zone (``relais_zone_stumm_min``) und das
+    # einzelne Geraet (``health_degraded_max_age_h``, 3 h).
+    #
+    # **Was das kostet, offen gesagt:** der Ausfall vom 07.11. dauerte 31
+    # Minuten und erzeugt mit dieser Vorgabe **keine** Mail mehr — genau
+    # die Luecke, die dieser Alarm schliessen sollte. Der Alarm meldet
+    # jetzt den langen Ausfall, nicht mehr den kurzen. Sichtbar bleibt
+    # der kurze in der Kachel „Funk-Empfang": sie wird unveraendert nach
+    # ``funkempfang_gelb_max_min`` (15 min) rot, weil sie nichts weckt
+    # und nur gilt, solange jemand hinsieht.
+    totalausfall_min: int = 180
     totalausfall_wiederholung_h: int = 2
 
     # --- Fuehler einer Relais-Zone schweigt (13.11.2026) ------------------
@@ -275,19 +320,32 @@ class Settings(BaseSettings):
     # Betrieb** keinen aktuellen Fuehlerwert mehr hat, und wie oft sich
     # die Mail wiederholt.
     #
-    # **Warum 30 Minuten.** Bei Zehn-Minuten-Takt sind das drei
-    # verpasste Meldungen — ein einzelner verlorener Uplink soll keine
-    # Mail erzeugen, drei in Folge schon. Der Anlass ist der 12./13.11.:
-    # Fuehler 056 schwieg **vierzehn Stunden**, die Zone Eingang wurde in
-    # dieser Zeit nicht geheizt, und kein vorhandener Melder hat
-    # angeschlagen (die Health-Stufe ``silent`` verlangt mehr als 24 h).
+    # **Warum 180 Minuten** (Entscheidung des Betreibers vom
+    # 28.11.2026). Alle drei Ausfall-Meldungen warten gleich lang. Bis
+    # dahin standen hier 30 Minuten, also drei verpasste Meldungen bei
+    # Zehn-Minuten-Takt. Der Anlass fuer den Melder ueberhaupt ist der
+    # 12./13.11.: Fuehler 056 schwieg **vierzehn Stunden**, die Zone
+    # Eingang wurde in dieser Zeit nicht geheizt, und kein vorhandener
+    # Melder hat angeschlagen (die Health-Stufe ``silent`` verlangte
+    # damals mehr als 24 h).
     #
-    # Diese Grenze entscheidet **nichts** an der Steuerung. Der
-    # Zwangs-AUS des Zweipunktreglers haengt unveraendert am
-    # Frischefenster des Zonen-Aggregats; siehe
+    # **Der Vorlauf bleibt, er wird nur kuerzer.** Der Zwangs-AUS des
+    # Zweipunktreglers greift nach ``health_healthy_max_age_h`` mal
+    # ``VERALTUNGS_FAKTOR``, mit den Vorgaben nach **300 Minuten**. Die
+    # Meldung kommt also 120 Minuten davor statt 270.
+    #
+    # Diese Grenze entscheidet **nichts** an der Steuerung. Sie
+    # entscheidet, wann jemand hinsieht; siehe
     # ``services/relais_zone_melder`` fuer die Begruendung, warum es zwei
     # Grenzen sind und welche vor welcher liegen muss.
-    relais_zone_stumm_min: int = 30
+    #
+    # **Sie faerbt zusaetzlich die Dashboard-Kachel** „Zonen ohne
+    # Fuehlerwert" (``api/v1/dashboard``). Eine stumme Zone erscheint dort
+    # seither erst nach drei Stunden. Zwei Grenzen fuer Kachel und Mail
+    # waeren zwei Wahrheiten ueber dieselbe Frage (Paragraph 5.53) — wer
+    # die Kachel frueher faerben will, braucht dafuer einen eigenen
+    # Grund und eine eigene Zahl.
+    relais_zone_stumm_min: int = 180
     relais_zone_wiederholung_h: int = 6
 
     # **Wie lange eine Rueckkehr halten muss, bevor die Entwarnung
@@ -928,6 +986,14 @@ class Settings(BaseSettings):
                 "Sonst mailt der Alarm, bevor die Kachel rot ist — und wer "
                 "nachsieht, findet eine gelbe Kachel zu einer roten Mail."
             )
+        if self.totalausfall_min < AUSFALL_MELDUNG_MIN_MIN:
+            raise ValueError(
+                "TOTALAUSFALL_MIN muss mindestens "
+                f"{AUSFALL_MELDUNG_MIN_MIN} sein (ist: "
+                f"{self.totalausfall_min}). Darunter weckt eine einzelne "
+                "Luecke im Funk das Haus, und die kommt auch im Betrieb "
+                "ohne Stoerung vor."
+            )
         return self
 
     @model_validator(mode="after")
@@ -968,31 +1034,40 @@ class Settings(BaseSettings):
         """Die Warnung muss **vor** dem Zwangs-AUS kommen, nicht danach.
 
         Der Zweipunktregler schaltet ab, sobald das Zonen-Aggregat keinen
-        frischen Messwert mehr findet; sein Fenster ist ein Vielfaches
-        von ``health_healthy_max_age_h``. Eine Warn-Grenze oberhalb davon
-        waere eine Meldung ueber etwas, das schon passiert ist — der
-        Vorlauf, der den ganzen Zweck ausmacht, waere weg.
+        frischen Messwert mehr findet; sein Fenster ist
+        ``health_healthy_max_age_h`` mal ``VERALTUNGS_FAKTOR``, mit den
+        Vorgaben 300 Minuten. Eine Warn-Grenze oberhalb davon waere eine
+        Meldung ueber etwas, das schon passiert ist — der Vorlauf, der
+        den ganzen Zweck ausmacht, waere weg.
 
-        Verglichen wird gegen das **einfache** Keepalive-Fenster und
-        nicht gegen das Vielfache: der Faktor steht in
-        ``tasks/relay_tasks.VERALTUNGS_FAKTOR``, und ihn hier zu
-        wiederholen waere eine zweite Wahrheit (Paragraph 5.53). Die
-        strengere Grenze kostet nichts — sie laesst jede sinnvolle
-        Einstellung zu und schliesst nur die aus, die den Vorlauf
-        aufgibt.
+        **Am 28.11.2026 geaendert: verglichen wird gegen das echte
+        Fenster.** Hier stand zuvor das **einfache** Keepalive-Fenster
+        (120 min) als bewusst strengere Marke, mit der Begruendung, sie
+        lasse „jede sinnvolle Einstellung zu". Das stimmte nicht mehr:
+        die Vorgabe des Betreibers (180 min) liegt zwischen den beiden
+        Zahlen und waere an der Proxy-Marke gescheitert — mit einer
+        Fehlermeldung, die auf eine Grenze zeigt, die der Regler nicht
+        hat. Der Faktor liegt seither in diesem Modul, damit die
+        Rechnung nicht an zwei Stellen steht (Paragraph 5.53).
+
+        Nach unten gilt der gemeinsame Boden ``AUSFALL_MELDUNG_MIN_MIN``.
         """
-        keepalive_min = self.health_healthy_max_age_h * 60
-        if self.relais_zone_stumm_min >= keepalive_min:
+        abschalt_min = int(Decimal(self.health_healthy_max_age_h) * VERALTUNGS_FAKTOR * 60)
+        if self.relais_zone_stumm_min >= abschalt_min:
             raise ValueError(
-                "RELAIS_ZONE_STUMM_MIN muss kleiner sein als "
-                "HEALTH_HEALTHY_MAX_AGE_H in Minuten (ist: "
-                f"{self.relais_zone_stumm_min} >= {keepalive_min}). "
+                "RELAIS_ZONE_STUMM_MIN muss kleiner sein als das "
+                "Frischefenster des Reglers, also HEALTH_HEALTHY_MAX_AGE_H "
+                f"mal {VERALTUNGS_FAKTOR} in Minuten (ist: "
+                f"{self.relais_zone_stumm_min} >= {abschalt_min}). "
                 "Sonst warnt die Meldung erst, wenn der Regler die Zone "
                 "schon abgeschaltet hat."
             )
-        if self.relais_zone_stumm_min < 1:
+        if self.relais_zone_stumm_min < AUSFALL_MELDUNG_MIN_MIN:
             raise ValueError(
-                f"RELAIS_ZONE_STUMM_MIN muss mindestens 1 sein (ist: {self.relais_zone_stumm_min})."
+                "RELAIS_ZONE_STUMM_MIN muss mindestens "
+                f"{AUSFALL_MELDUNG_MIN_MIN} sein (ist: "
+                f"{self.relais_zone_stumm_min}). Darunter meldet ein "
+                "einzelner verlorener Uplink eine Zone als stumm."
             )
         return self
 

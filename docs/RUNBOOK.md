@@ -3333,13 +3333,13 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 
 | Alarm | Auslöser | Frühestens wieder |
 |---|---|---|
-| **Thermostat meldet sich nicht** | Ein Gerät ist über `HEALTH_DEGRADED_MAX_AGE_H` stumm — **Vorgabe 3 h**, nicht 24. Mehrere im selben Takt → eine Sammelmail. **Seit 27.11.2026 unterdrückt**, wenn die Zone des Geräts gerade eine laufende Episode „Zone ohne Fühlerwert" hat: dort stehen Gerät und letzter Kontakt schon im Text. | nach 6 h je Gerät |
+| **Thermostat meldet sich nicht** | Ein Gerät ist über `HEALTH_DEGRADED_MAX_AGE_H` stumm — **Vorgabe 3 h**, nicht 24. Das sind dieselben 180 Minuten wie bei den beiden anderen Ausfall-Meldungen; diese Zeile hat sich am 28.11.2026 **nicht** geändert. Mehrere im selben Takt → eine Sammelmail. **Seit 27.11.2026 unterdrückt**, wenn die Zone des Geräts gerade eine laufende Episode „Zone ohne Fühlerwert" hat: dort stehen Gerät und letzter Kontakt schon im Text. | nach 6 h je Gerät |
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 | **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
-| **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
+| **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **180 min**, bis 28.11.2026: 15) kommt hausweit **keine einzige** Meldung an. Die Kachel „Funk-Empfang" wird unverändert nach 15 min rot — sie zeigt, sie weckt nicht. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 | **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
 | **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
-| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt — **aber erst, wenn er `RELAIS_ZONE_RUECKKEHR_STABIL_MIN` (Vorgabe 30 min) gehalten hat.** Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
+| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **180 min**, bis 28.11.2026: 30), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt — **aber erst, wenn er `RELAIS_ZONE_RUECKKEHR_STABIL_MIN` (Vorgabe 30 min) gehalten hat.** Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
 | **Gerät nimmt den Sollwert nicht an** | Ein Thermostat meldet nach `MAX_VERSUCHE` (**3**) Befehlen im 30-Minuten-Abstand weiter einen anderen Wert als den gesendeten. Die Lage steht als Merker am Gerät (`device.abgleich_erschoepft_seit`) und endet erst, wenn das Gerät den gesendeten Wert **übernimmt**. | **einmal je Episode**, mit 24 h als Boden |
 | **Belegungsliste überfällig** | Eine Liste ist gekommen, die **nächste** fehlt zu lange. Eigener Text neben „Keine Belegungsliste": dort kam gar keine, hier fehlt die Folgeliste — und zu tun ist jeweils etwas anderes. | am nächsten Tag |
 | **Stand festgesetzt** | Der Server läuft seit `REMINDER_AFTER_DAYS` (**7 Tagen**) auf einem festgenagelten Abbild (`PIN_SHA`, §10u) statt auf dem gleitenden Stand. Kein Fehler, sondern eine Erinnerung: ein vergessener Pin bekommt keine Fehlerbehebung mehr. | nach 7 Tagen |
@@ -3354,14 +3354,67 @@ ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
 sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
 Oberfläche sichtbar, aber nicht als Mail.
 
-**Vier Alarme sind von jeder Bündelung ausgenommen und gehen unverzüglich
-hinaus:** keine Messwerte (Totalausfall), Relais hat sich abgeschaltet,
-Relais wird warm und Platte läuft voll. Es gibt **keinen
-Ruhezeiten-Filter** — nachts unterdrückte Alarme hätte niemand bestellt,
-und eine Steuerung, die um drei Uhr schweigt, weil es Nacht ist, ist um
-sieben Uhr nicht mehr zu retten. Ein Test hält die Ausnahme fest
-(`test_mail_episoden.py`), damit sie nicht beim nächsten Bündeln
-mitgenommen wird.
+**Drei Alarme sind von jeder Bündelung und von jeder Wartezeit
+ausgenommen und gehen unverzüglich hinaus:** Relais hat sich
+abgeschaltet, Relais wird warm, Platte läuft voll. Sie melden ein
+**Ereignis** und keinen Ausfall über Zeit — ein Schutz, der ausgelöst
+hat, hat ausgelöst, und Warten macht die Aussage nicht sicherer, nur
+später. Es gibt **keinen Ruhezeiten-Filter** — nachts unterdrückte
+Alarme hätte niemand bestellt, und eine Steuerung, die um drei Uhr
+schweigt, weil es Nacht ist, ist um sieben Uhr nicht mehr zu retten.
+Zwei Tests halten die Ausnahme fest (`test_mail_episoden.py` für die
+Bündelung, `test_ausfall_schwellen.py` für die Wartezeit), damit sie
+nicht beim nächsten Nachjustieren mitgenommen wird.
+
+**Bis zum 28.11.2026 waren es vier** — „keine Messwerte" stand mit in
+dieser Liste, weil es nach 15 Minuten mailte. Es ist weiterhin von der
+Bündelung ausgenommen, wartet aber jetzt wie die beiden anderen
+Ausfall-Meldungen 180 Minuten.
+
+### Die drei Wartezeiten sind seit dem 28.11.2026 gleich
+
+**Entscheidung des Betreibers.** Drei Meldungen sagen „etwas ist
+ausgefallen", und sie warteten unterschiedlich lang. Jetzt warten alle
+drei **180 Minuten**:
+
+| Meldung | Einstellung | vorher | jetzt |
+|---|---|---|---|
+| Zone ohne Fühlerwert | `RELAIS_ZONE_STUMM_MIN` | 30 min | **180 min** |
+| Keine Messwerte | `TOTALAUSFALL_MIN` | 15 min | **180 min** |
+| Thermostat meldet sich nicht | `HEALTH_DEGRADED_MAX_AGE_H` | 3 h | **3 h** |
+
+Die dritte Zeile stand schon richtig — 3 Stunden sind 180 Minuten.
+
+**Zwei Startup-Validatoren halten die Werte ein.** Beide brechen den
+Start der API ab und nennen das Feld im Container-Log:
+
+* **nach unten mindestens 30 Minuten** (`AUSFALL_MELDUNG_MIN_MIN` in
+  `config.py`) — bei Zehn-Minuten-Takt sind das drei verpasste
+  Meldungen, darunter weckt ein einzelner verlorener Uplink das Haus;
+* **nach oben muss `RELAIS_ZONE_STUMM_MIN` unter dem Frischefenster des
+  Reglers bleiben**, also unter `HEALTH_HEALTHY_MAX_AGE_H` mal 2,5 in
+  Minuten (mit den Vorgaben unter 300). Ab dort schaltet der
+  Zweipunktregler die Zone ohnehin zwangsweise ab, und eine Meldung
+  danach wäre eine Meldung über etwas, das schon passiert ist. Mit 180
+  bleiben **120 Minuten Vorlauf** statt vorher 270.
+
+**Daraus folgt eine Kopplung, die man beim Nachjustieren kennen muss:**
+wer `HEALTH_HEALTHY_MAX_AGE_H` auf 1 senkt, muss
+`RELAIS_ZONE_STUMM_MIN` mitnehmen (dann sind höchstens 149 erlaubt),
+sonst startet die API nicht mehr.
+
+**Was das kostet, offen notiert.** Der Funk-Ausfall vom 07.11.2026
+dauerte 31 Minuten und war der Anlass für den Totalausfall-Alarm. Mit
+180 Minuten Wartezeit hätte er **keine Mail** erzeugt. Sichtbar wäre er
+geblieben: die Kachel „Funk-Empfang" wird nach 15 Minuten rot. Ein Test
+hält diesen Fall namentlich fest
+(`test_der_ausfall_vom_07_11_waere_heute_ohne_mail_geblieben`), damit
+niemand später einen Fehler sucht, wo eine Entscheidung steht.
+
+**Dieselbe Zahl färbt die Dashboard-Kachel** „Zonen ohne Fühlerwert"
+(`api/v1/dashboard`). Eine stumme Zone erscheint dort seither erst nach
+drei Stunden. Zwei Grenzen für Kachel und Mail wären zwei Wahrheiten
+über dieselbe Frage.
 
 ### Episoden: warum seit 27.11.2026 weniger Mails kommen
 
