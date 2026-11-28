@@ -3333,13 +3333,13 @@ das Passwort des Mailkontos abgelaufen oder das Konto gesperrt.
 
 | Alarm | Auslöser | Frühestens wieder |
 |---|---|---|
-| **Thermostat meldet sich nicht** | Ein Gerät ist über `HEALTH_DEGRADED_MAX_AGE_H` stumm — **Vorgabe 3 h**, nicht 24. Mehrere im selben Takt → eine Sammelmail. | nach 6 h je Gerät |
+| **Thermostat meldet sich nicht** | Ein Gerät ist über `HEALTH_DEGRADED_MAX_AGE_H` stumm — **Vorgabe 3 h**, nicht 24. Mehrere im selben Takt → eine Sammelmail. **Seit 27.11.2026 unterdrückt**, wenn die Zone des Geräts gerade eine laufende Episode „Zone ohne Fühlerwert" hat: dort stehen Gerät und letzter Kontakt schon im Text. | nach 6 h je Gerät |
 | **Keine Belegungsliste** | Bis zur erwarteten Uhrzeit ist keine Liste eingetroffen. Die Uhrzeit steht in der Oberfläche unter *Einstellungen / API & Webhooks* (Vorgabe **12:00 Ortszeit**) und ist dort änderbar. | am nächsten Tag |
 | **Funkqualität gefallen** | Der hausweite SNR-Mittelwert der letzten zwei Stunden liegt mehr als 2,0 dB unter dem Mittel der Vorwoche. Siehe unten. | nach 24 h |
 | **Keine Messwerte** | Seit `TOTALAUSFALL_MIN` (Vorgabe **15 min**) kommt hausweit **keine einzige** Meldung an. Dazu eine **Entwarnung**, wenn sie zurückkommen. Siehe unten. | nach 2 h |
 | **Relais wird warm** | Die **drei** jüngsten Gehäusetemperaturen eines Relais liegen alle auf oder über `RELAY_GEHAEUSETEMPERATUR_MAIL` (Vorgabe **50**). Dazu eine **Entwarnung**, wenn drei Meldungen unter 45 liegen. **Nicht** zu verwechseln mit `RELAY_GEHAEUSETEMPERATUR_ALARM` (40) — die färbt nur die Karte. Siehe §10aj Schritt d. | **gar nicht** — einmal je Ereignis |
 | **Relais hat sich abgeschaltet** | Der Schutz des Geräts (Überhitzung, Überspannung, Überstrom, Überlast) hat ausgelöst und die Steuerung das Relais gesperrt. **Der Bereich heizt nicht mehr**, bis ein Administrator die Sperre aufhebt. Siehe §10aj Schritt d. | **gar nicht** — einmal je Auslösung |
-| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt. Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
+| **Zone ohne Fühlerwert** | Eine Zone, in der ein Relais **in Betrieb** hängt, hat keinen aktuellen Istwert. Drei Anlässe, die die Mail unterscheidet: die Zone hat **gar keinen** Fühler, ihr Fühler schweigt länger als `RELAIS_ZONE_STUMM_MIN` (Vorgabe **30 min**), oder die **Relais selbst** schweigen. Dazu eine **Entwarnung**, wenn der Wert zurückkommt — **aber erst, wenn er `RELAIS_ZONE_RUECKKEHR_STABIL_MIN` (Vorgabe 30 min) gehalten hat.** Geprüft alle 5 min; bei laufendem Totalausfall übersprungen, damit nicht beide Melder dasselbe Ereignis schicken. | nach `RELAIS_ZONE_WIEDERHOLUNG_H` (Vorgabe **6 h**) je Zone |
 | **Gerät nimmt den Sollwert nicht an** | Ein Thermostat meldet nach `MAX_VERSUCHE` (**3**) Befehlen im 30-Minuten-Abstand weiter einen anderen Wert als den gesendeten. Die Lage steht als Merker am Gerät (`device.abgleich_erschoepft_seit`) und endet erst, wenn das Gerät den gesendeten Wert **übernimmt**. | **einmal je Episode**, mit 24 h als Boden |
 | **Belegungsliste überfällig** | Eine Liste ist gekommen, die **nächste** fehlt zu lange. Eigener Text neben „Keine Belegungsliste": dort kam gar keine, hier fehlt die Folgeliste — und zu tun ist jeweils etwas anderes. | am nächsten Tag |
 | **Stand festgesetzt** | Der Server läuft seit `REMINDER_AFTER_DAYS` (**7 Tagen**) auf einem festgenagelten Abbild (`PIN_SHA`, §10u) statt auf dem gleitenden Stand. Kein Fehler, sondern eine Erinnerung: ein vergessener Pin bekommt keine Fehlerbehebung mehr. | nach 7 Tagen |
@@ -3353,6 +3353,54 @@ ist die gemeinsame Ursache wahrscheinlicher als zehn einzelne.
 **Was ausdrücklich keine Mail auslöst:** implausible Messwerte (ein Gerät
 sendet, misst aber Unsinn) und eine schwache Batterie. Beides ist in der
 Oberfläche sichtbar, aber nicht als Mail.
+
+**Vier Alarme sind von jeder Bündelung ausgenommen und gehen unverzüglich
+hinaus:** keine Messwerte (Totalausfall), Relais hat sich abgeschaltet,
+Relais wird warm und Platte läuft voll. Es gibt **keinen
+Ruhezeiten-Filter** — nachts unterdrückte Alarme hätte niemand bestellt,
+und eine Steuerung, die um drei Uhr schweigt, weil es Nacht ist, ist um
+sieben Uhr nicht mehr zu retten. Ein Test hält die Ausnahme fest
+(`test_mail_episoden.py`), damit sie nicht beim nächsten Bündeln
+mitgenommen wird.
+
+### Episoden: warum seit 27.11.2026 weniger Mails kommen
+
+Anlass war die Nacht vom 26. auf den 27.11.2026: die Zone Barbereich hat
+**sechs** Mails für zwei Vorfälle erzeugt (Alarm 22:40, Entwarnung 23:00,
+Alarm 01:10, Gerät offline 109 Panel 03:40, Gerät offline 027 Bar 03:50,
+Entwarnung 06:30). Dieselbe Nacht ergibt heute **vier**.
+
+Eine **Episode** ist der Zeitraum von „die Zone schweigt" bis „sie meldet
+wieder, und zwar verlässlich". Darin gibt es einen Alarm, eine Entwarnung
+und — wenn sie länger als `RELAIS_ZONE_WIEDERHOLUNG_H` dauert — eine
+Erinnerung. Der Zustand steht im `business_audit` und übersteht einen
+Neustart; vier Marken, und nur zwei davon schicken eine Mail:
+
+| Marke | Bedeutung | Mail |
+|---|---|---|
+| `RELAIS_ZONE_STUMM` | Alarm oder Erinnerung | **ja** |
+| `RELAIS_ZONE_RUECKKEHR` | meldet wieder, Entwarnung steht aus | nein |
+| `RELAIS_ZONE_STUMM_ERNEUT` | schweigt wieder, bevor die Rückkehr stabil war | nein |
+| `RELAIS_ZONE_STUMM_ENDE` | Entwarnung | **ja** |
+| `GERAETEMAIL_UNTERDRUECKT_ZONE_STUMM` | eine Geräte-Mail entfiel, weil die Zonen-Mail sie enthält | nein |
+
+Nachzulesen ist eine Nacht damit so — **SSH (Server)**:
+
+```bash
+docker exec deploy-db-1 psql -U heizung -d heizung -c "SELECT (ts AT TIME ZONE 'Europe/Vienna')::timestamp(0) AS zeit, action, target_id AS zone FROM business_audit WHERE action LIKE 'RELAIS_ZONE%' OR action = 'GERAETEMAIL_UNTERDRUECKT_ZONE_STUMM' ORDER BY ts DESC LIMIT 30;"
+```
+
+**Wenn eine erwartete Mail ausblieb**, ist das die erste Abfrage: steht
+dort `RELAIS_ZONE_RUECKKEHR` ohne folgendes `..._ENDE`, läuft die
+Wartezeit noch oder die Zone ist wieder stumm geworden. Steht dort
+`GERAETEMAIL_UNTERDRUECKT_ZONE_STUMM`, nennt die Zonen-Mail derselben
+Episode das Gerät.
+
+**Die Wartezeit verzögert nur die Entwarnung, nie den Alarm.** Wer sie
+hochsetzt, fasst mehr Flackern zu einer Episode zusammen und erfährt die
+Rückkehr später; wer sie auf 0 setzt, bekommt das Verhalten von vor dem
+27.11.2026 zurück (`RELAIS_ZONE_RUECKKEHR_STABIL_MIN` in `.env`, dann
+`api`, `celery_worker` und `celery_beat` neu starten).
 
 > **Korrektur vom 27.11.2026.** Hier stand, die Batterie-Schwelle unter
 > *Einstellungen / Hotel* färbe Anzeige und Kachel. **Diesen Schalter gibt

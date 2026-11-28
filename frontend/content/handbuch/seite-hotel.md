@@ -1,9 +1,9 @@
 ---
 titel: Hotel-Stammdaten
 kategorie: Die Seiten
-stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline
+stichworte: Hotel, Zeitzone, Check-in, Check-out, Warnungen, E-Mail, offline, Entwarnung
 rollen: admin
-stand: 2026-11-21
+stand: 2026-11-27
 route: /einstellungen/hotel
 ---
 
@@ -36,6 +36,21 @@ Gerät das schweigt, eine Zone ohne Messwert, die volle Festplatte und —
 seit dem 18.11.2026 — ein Relais, dessen Gehäuse warm wird oder das sich
 selbst abgeschaltet hat. Steht hier keine Adresse, laufen die Melder
 weiter und schreiben ins Protokoll, aber niemand erfährt davon.
+
+**Eine Störung, zwei Mails — nicht mehr.** Schweigt eine Zone, kommt eine
+Mail beim Ausfall und eine bei der Rückkehr. Dazwischen meldet sich die
+Steuerung nur, wenn es lange dauert. Geräte, die zu dieser Zone gehören,
+werden dabei **nicht einzeln** gemeldet: sie stehen mit ihrem letzten
+Kontakt schon in der ersten Mail.
+
+**Die Entwarnung kommt mit etwas Verzögerung**, und das ist Absicht. Eine
+Zone, die sich nach einer halben Stunde Stille einmal meldet und gleich
+wieder ausfällt, ist nicht zurück. Die Steuerung wartet deshalb ab, ob die
+Meldungen bleiben, und schreibt erst dann „wieder in Ordnung". Nachts
+kommt dadurch weniger — aber nichts, was Sie bräuchten: **gedrosselt wird
+nur die Entwarnung, nie der Alarm.** Vier Meldungen gehen immer sofort
+hinaus: keine Messwerte im ganzen Haus, ein Relais das sich abgeschaltet
+hat, ein warmes Relais-Gehäuse und die volle Festplatte.
 
 > **Ein abgeschaltetes Relais ist der dringendste dieser Fälle.** Das
 > Gerät schaltet sich bei Überhitzung, Überspannung, Überstrom oder

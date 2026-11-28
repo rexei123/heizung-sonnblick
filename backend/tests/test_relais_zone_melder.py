@@ -42,7 +42,7 @@ from heizung.models.relay_reading import RelayReading
 from heizung.models.room import Room
 from heizung.models.room_type import RoomType
 from heizung.models.sensor_reading import SensorReading
-from heizung.services import relais_zone_melder
+from heizung.services import relais_zone_melder, zonen_episode
 from heizung.tasks import funk_tasks
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
@@ -595,14 +595,17 @@ async def test_der_zustand_haengt_an_der_zone_und_nicht_am_haus(maker: Any) -> N
             )
             await session.commit()
 
-            aktion_eins, zeit_eins = await funk_tasks._letzter_zonen_stand(
-                session, zone_id=eins.zone_id
-            )
-            aktion_zwei, _ = await funk_tasks._letzter_zonen_stand(session, zone_id=zwei.zone_id)
+            stand_eins = await zonen_episode.lies_stand(session, zone_id=eins.zone_id)
+            stand_zwei = await zonen_episode.lies_stand(session, zone_id=zwei.zone_id)
+            offen = await zonen_episode.offene_zonen(session)
 
-        assert aktion_eins == funk_tasks.AUDIT_ZONE_STUMM
-        assert zeit_eins is not None
-        assert aktion_zwei is None, "die Marke der einen Zone darf die andere nicht betreffen"
+        assert stand_eins.aktion == funk_tasks.AUDIT_ZONE_STUMM
+        assert stand_eins.seit is not None
+        assert stand_eins.letzter_alarm is not None
+        assert stand_zwei.aktion is None, "die Marke der einen Zone darf die andere nicht betreffen"
+        assert eins.zone_id in offen and zwei.zone_id not in offen, (
+            "die hausweite Abfrage mischt die Zonen"
+        )
     finally:
         await _raeum_auf(maker, eins)
         await _raeum_auf(maker, zwei)
@@ -675,8 +678,43 @@ async def test_episode_meldet_einmal_und_bremst_dann(
         await _raeum_auf(maker, ids)
 
 
-async def test_rueckkehr_erzeugt_die_entwarnung(maker: Any, kein_mailversand: list[str]) -> None:
-    """Ein Alarm ohne Entwarnung laesst den Empfaenger im Ungewissen."""
+async def _altere_audit(maker: Any, zone_id: int, *, minuten: int) -> None:
+    """Macht **alle** Audit-Zeilen dieser Zone um ``minuten`` aelter.
+
+    Verschoben wird gegen den **eigenen** Zeitstempel jeder Zeile, nicht
+    auf ein Datum — die Datei soll an keinem Kalender haengen
+    (Paragraph 5.59).
+
+    **Und zwar alle, nicht nur eine.** Beim ersten Schreiben alterte hier
+    nur die Rueckkehr-Zeile; damit rutschte sie **vor** den Alarm, und
+    ``lies_stand`` sah wieder „stumm". Der Zustand haengt an der
+    Reihenfolge, also muss eine Verschiebung sie erhalten.
+    """
+    async with maker() as session:
+        await session.execute(
+            text(
+                "UPDATE business_audit SET ts = ts - make_interval(mins => :m) "
+                "WHERE target_type = 'heating_zone' AND target_id = :z"
+            ),
+            {"m": minuten, "z": zone_id},
+        )
+        await session.commit()
+
+
+async def test_rueckkehr_wird_vermerkt_und_die_entwarnung_wartet(
+    maker: Any, kein_mailversand: list[str]
+) -> None:
+    """**Die Entwarnung kommt erst, wenn die Rueckkehr gehalten hat.**
+
+    Geaendert am 27.11.2026. Vorher stand hier, dass der erste saubere
+    Lauf die Entwarnung erzeugt — und genau das war der Fall vom
+    26./27.11.: Alarm 22:40, Entwarnung 23:00, derselbe Alarm 01:10. Wer
+    die Entwarnung liest, haelt den Vorgang fuer abgeschlossen.
+
+    Dass dieser Bestandstest angepasst werden musste, ist der Beleg, dass
+    der PR nicht verhaltensneutral ist (Paragraph 5.47) — er soll es auch
+    nicht sein.
+    """
     ids = await _baue(maker, fuehler_alter_min=45)
     try:
         await funk_tasks._run_relais_zone()
@@ -693,12 +731,79 @@ async def test_rueckkehr_erzeugt_die_entwarnung(maker: Any, kein_mailversand: li
             await session.commit()
 
         await funk_tasks._run_relais_zone()
+        assert await _audit_aktionen(maker, ids.zone_id) == [
+            funk_tasks.AUDIT_ZONE_STUMM,
+            funk_tasks.AUDIT_ZONE_RUECKKEHR,
+        ], "die Rueckkehr wurde nicht vermerkt, oder es ging schon eine Entwarnung hinaus"
+        assert len(kein_mailversand) == 1, f"die Entwarnung kam zu frueh: {kein_mailversand}"
+
+        # Noch ein Lauf, bevor die Wartezeit um ist: nichts passiert.
+        await funk_tasks._run_relais_zone()
+        assert len(await _audit_aktionen(maker, ids.zone_id)) == 2, (
+            "ein Lauf innerhalb der Wartezeit hat eine Zeile geschrieben"
+        )
+
+        # Die Rueckkehr haelt jetzt lange genug.
+        await _altere_audit(maker, ids.zone_id, minuten=31)
+        await funk_tasks._run_relais_zone()
 
         aktionen = await _audit_aktionen(maker, ids.zone_id)
         assert aktionen == [
             funk_tasks.AUDIT_ZONE_STUMM,
+            funk_tasks.AUDIT_ZONE_RUECKKEHR,
             funk_tasks.AUDIT_ZONE_STUMM_ENDE,
-        ], f"Alarm und Entwarnung fehlen oder stehen falsch: {aktionen}"
+        ], f"Alarm, Rueckkehr und Entwarnung fehlen oder stehen falsch: {aktionen}"
+        assert len(kein_mailversand) == 2, (
+            f"erwartet genau zwei Mails in der Episode: {kein_mailversand}"
+        )
+    finally:
+        await _raeum_auf(maker, ids)
+
+
+async def test_eine_laufende_episode_ist_hausweit_abfragbar(
+    maker: Any, kein_mailversand: list[str]
+) -> None:
+    """``offene_zonen`` ist die Abfrage, an der die Geraete-Mails haengen.
+
+    Eine Abfrage fuer alle Zonen, weil der Aufrufer der Health-Beat ist
+    und 109 Geraete in der Hand hat. Geprueft wird hier gegen die
+    Datenbank, nicht gegen einen Nachbau — ``DISTINCT ON`` und die
+    Sortierung sind genau die Stelle, an der ein Nachbau in Python etwas
+    anderes tun wuerde.
+    """
+    ids = await _baue(maker, fuehler_alter_min=45)
+    try:
+        await funk_tasks._run_relais_zone()
+        async with maker() as session:
+            offen = await zonen_episode.offene_zonen(session)
+        assert ids.zone_id in offen, "die laufende Episode ist nicht abfragbar"
+
+        async with maker() as session:
+            session.add(
+                SensorReading(
+                    device_id=ids.fuehler_id,
+                    time=datetime.now(tz=UTC),
+                    temperature=Decimal("21.5"),
+                )
+            )
+            await session.commit()
+        await funk_tasks._run_relais_zone()
+
+        async with maker() as session:
+            offen = await zonen_episode.offene_zonen(session)
+        assert ids.zone_id in offen, (
+            "eine Zone mit ausstehender Entwarnung gilt als offen -- sonst wuerden "
+            "die Geraete-Mails in der Wartezeit wieder durchkommen"
+        )
+
+        await _altere_audit(maker, ids.zone_id, minuten=31)
+        await funk_tasks._run_relais_zone()
+        async with maker() as session:
+            offen = await zonen_episode.offene_zonen(session)
+            stand = await zonen_episode.lies_stand(session, zone_id=ids.zone_id)
+        assert ids.zone_id not in offen, "die geschlossene Episode gilt weiter als offen"
+        assert stand.aktion == funk_tasks.AUDIT_ZONE_STUMM_ENDE
+        assert stand.letzter_alarm is not None, "der Anker der Wiederholungsbremse ist verloren"
     finally:
         await _raeum_auf(maker, ids)
 
